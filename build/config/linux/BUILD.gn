@@ -1,0 +1,186 @@
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/linux/pkg_config.gni")
+import("//build/config/features.gni")
+import("//build/config/sysroot.gni")
+import("//build/config/ui.gni")
+import("//tools/generate_library_loader/generate_library_loader.gni")
+
+config("sdk") {
+  if (sysroot != "") {
+    cflags = [ "--sysroot=" + sysroot ]
+    ldflags = [ "--sysroot=" + sysroot ]
+
+    # Need to get some linker flags out of the sysroot.
+    ldflags += [ exec_script("sysroot_ld_path.py",
+        [ rebase_path("//build/linux/sysroot_ld_path.sh", root_build_dir),
+          sysroot ],
+        "value") ]
+  }
+}
+
+config("fontconfig") {
+  libs = [ "fontconfig" ]
+}
+
+pkg_config("freetype2") {
+  packages = [ "freetype2" ]
+}
+
+pkg_config("glib") {
+  packages = [ "glib-2.0", "gmodule-2.0", "gobject-2.0", "gthread-2.0" ]
+}
+
+pkg_config("gtk") {
+  # Gtk requires gmodule, but it does not list it as a dependency in some
+  # misconfigured systems.
+  packages = [ "gmodule-2.0", "gtk+-2.0", "gthread-2.0" ]
+}
+
+pkg_config("pangocairo") {
+  packages = [ "pangocairo" ]
+}
+
+pkg_config("pangoft2") {
+  packages = [ "pangoft2" ]
+}
+
+pkg_config("udev") {
+  packages = [ "libudev" ]
+}
+
+# Note: if your target also depends on //dbus, you don't need to add this
+# config (it will get added automatically if you depend on //dbus).
+pkg_config("dbus") {
+  packages = [ "dbus-1" ]
+}
+
+pkg_config("gnome_keyring") {
+  packages = [ "gnome-keyring-1" ]
+}
+
+if (use_evdev_gestures) {
+  pkg_config("libevdev-cros") {
+    packages = [ "libevdev-cros" ]
+  }
+
+  pkg_config("libgestures") {
+    packages = [ "libgestures" ]
+  }
+}
+
+config("x11") {
+  # Don't bother running pkg-config for these X related libraries since it just
+  # returns the same libs, and forking pkg-config is slow.
+  libs = [
+    "X11",
+    "Xcomposite",
+    "Xcursor",
+    "Xdamage",
+    "Xext",
+    "Xfixes",
+    "Xi",
+    "Xrender",
+    "Xss",
+    "Xtst",
+  ]
+}
+
+config("xcomposite") {
+  libs = [ "Xcomposite" ]
+}
+
+config("xext") {
+  libs = [ "Xext" ]
+}
+
+config("xrandr") {
+  libs = [ "Xrandr" ]
+}
+
+config("xscrnsaver") {
+  libs = [ "Xss" ]
+}
+
+config("xfixes") {
+  libs = [ "Xfixes" ]
+}
+
+config("libcap") {
+  libs = [ "cap" ]
+}
+
+config("xi") {
+  libs = [ "Xi" ]
+}
+
+config("libresolv") {
+  libs = [ "resolv" ]
+}
+
+pkg_config("gconf") {
+  packages = [ "gconf-2.0" ]
+  defines = [ "USE_GCONF" ]
+}
+
+# If brlapi isn't needed, don't require it to be installed.
+if (use_brlapi) {
+  config("brlapi_config") {
+    defines = [ "USE_BRLAPI" ]
+  }
+
+  # TODO(GYP) linux_link_brlapi support. Is this needed?
+  generate_library_loader("libbrlapi") {
+    name = "LibBrlapiLoader"
+    output_h = "libbrlapi.h"
+    output_cc = "libbrlapi_loader.cc"
+    header = "<brlapi.h>"
+    config = ":brlapi_config"
+  }
+}
+
+pkg_config("gio_config") {
+  packages = [ "gio-2.0" ]
+  defines = [ "USE_GIO" ]
+  ignore_libs = true  # Loader generated below.
+}
+
+# This generates a target named "gio".
+generate_library_loader("gio") {
+  name = "LibGioLoader"
+  output_h = "libgio.h"
+  output_cc = "libgio_loader.cc"
+  header = "<gio/gio.h>"
+  config = ":gio_config"
+
+  functions = [
+    "g_settings_new",
+    "g_settings_get_child",
+    "g_settings_get_string",
+    "g_settings_get_boolean",
+    "g_settings_get_int",
+    "g_settings_get_strv",
+    "g_settings_list_schemas",
+  ]
+}
+
+# This generates a target named "libpci".
+generate_library_loader("libpci") {
+  name = "LibPciLoader"
+  output_h = "libpci.h"
+  output_cc = "libpci_loader.cc"
+  header = "<pci/pci.h>"
+
+  functions = [
+    "pci_alloc",
+    "pci_init",
+    "pci_cleanup",
+    "pci_scan_bus",
+    "pci_fill_info",
+    "pci_lookup_name",
+  ]
+}
+
+# Looking for libspeechd? Use //third_party/speech-dispatcher

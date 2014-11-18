@@ -1,0 +1,10 @@
+include_rules = [
+  "+chromeos",
+
+  "+content/public/browser",
+
+  "-net",
+  "+net/base",
+
+  "+third_party/libusb",
+]

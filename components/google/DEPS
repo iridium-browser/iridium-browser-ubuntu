@@ -1,0 +1,6 @@
+include_rules = [
+  "+components/url_fixer",
+  "+grit",
+  "+net",
+  "+ui",
+]

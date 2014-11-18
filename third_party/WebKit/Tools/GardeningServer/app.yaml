@@ -1,0 +1,57 @@
+application: sheriff-o-matic
+version: 1
+runtime: python27
+api_version: 1
+threadsafe: true
+
+handlers:
+- url: /
+  static_files: sheriff-o-matic.html
+  upload: sheriff-o-matic.html
+
+- url: /alerts
+  script: alerts.app
+
+- url: /favicon.ico
+  static_files: favicon.ico
+  upload: favicon.ico
+
+- url: /images
+  static_dir: images
+
+- url: /lib
+  static_dir: lib
+
+- url: /model
+  static_dir: model
+
+- url: /scripts
+  static_dir: scripts
+
+- url: /styles
+  static_dir: styles
+
+- url: /ui
+  static_dir: ui
+
+# FIXME: Write a script to do the appcfg update so that we can error out
+# if there is no bower_components, or, even better just run "bower update".
+- url: /bower_components
+  static_dir: bower_components
+
+skip_files:
+- ^(.*/)?#.*#$
+- ^(.*/)?.*~$
+- ^(.*/)?.*\.py[co]$
+- ^(.*/)?.*_test\.py$
+- ^(.*/)?tests\.py$
+- ^(.*/)?.*/RCS/.*$
+- ^(.*/)?\..*$
+- ^(.*/)?.*\.md$
+- ^(.*/)?LICENSE$
+- ^(.*/)?README$
+- ^(.*/)?Makefile$
+
+libraries:
+- name: webapp2
+  version: "latest"

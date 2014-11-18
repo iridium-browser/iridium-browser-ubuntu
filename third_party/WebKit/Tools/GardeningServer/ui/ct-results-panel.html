@@ -1,0 +1,77 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="../bower_components/core-menu/core-menu.html">
+<link rel="import" href="../bower_components/paper-item/paper-item.html">
+<link rel="import" href="ct-results-by-builder.html">
+<link rel="import" href="ct-embedded-flakiness-dashboard.html">
+
+<polymer-element name="ct-results-panel" attributes="failures tree">
+  <template>
+    <style>
+      :host {
+        display: flex;
+        flex-direction: column;
+      }
+
+      paper-item.core-selected {
+        font-weight: bold;
+      }
+
+      .message {
+        margin: 20px;
+        text-align: center;
+      }
+
+      core-menu {
+        box-shadow: 0 3px 3px #ccc;
+        flex: none;
+        /* Override /deep/ selector in core-menu.css. */
+        margin: 0 !important;
+        max-height: 20%;
+        overflow: auto;
+        /* So the box-shadow goes on top of the results. */
+        z-index: 1;
+      }
+
+      .results {
+        flex: 1;
+        overflow: auto;
+        /* Stay below the box shadow of the core-menu. */
+        padding-top: 6px;
+      }
+    </style>
+    <template if="{{ !failures.length }}">
+      <div class="message">No results to display.</div>
+    </template>
+    <template if="{{ failures.length }}">
+      <core-menu selected="{{ selected }}">
+        <template repeat="{{ failure in failures }}">
+          <template if="{{ failure.testName }}">
+            <paper-item label="{{ failure.testName }}"></paper-item>
+          </template>
+        </template>
+      </core-menu>
+      <div class="results">
+        <template if="{{ failures[selected].testName }}">
+          <ct-embedded-flakiness-dashboard test="{{ failures[selected] }}" tree="{{ tree }}"></ct-embedded-flakiness-dashboard>
+        </template>
+        <ct-results-by-builder failure="{{ failures[selected] }}"></ct-results-by-builder>
+      </div>
+    </template>
+  </template>
+  <script>
+    Polymer({
+      failures: [],
+      selected: 0,
+      tree: '',
+
+      failuresChanged: function() {
+        this.selected = 0;
+      },
+    });
+  </script>
+</polymer-element>

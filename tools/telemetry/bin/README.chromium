@@ -1,0 +1,14 @@
+This directory contains prebuilt binaries used by Telemetry which allow it to
+be run without requiring any compilation.
+
+For usage instructions, see:
+http://www.chromium.org/developers/telemetry/upload_to_cloud_storage
+
+avconv:
+   version 0.8.9-4:0.8.9-0ubuntu0.12.04.1
+
+IEDriverServer binary:
+  Both 32-bit and 64-bit are of version 2.35.2.
+
+ipfw and ipfw_mod.ko:
+  Version 20120812

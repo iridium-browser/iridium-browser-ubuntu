@@ -1,0 +1,18 @@
+include_rules = [
+  "+mojo/public/cpp/bindings",
+  "+mojo/public/cpp/environment",
+  "+mojo/public/interfaces/application",
+  "+mojo/public/interfaces/service_provider",
+]
+
+specific_include_rules = {
+  r"(mojo_main_chromium.cc|"
+  r"application_impl_chromium.cc)": [
+    "+base",
+    "+mojo/public/cpp"
+  ],
+  r"(mojo_main_standalone.cc|"
+  r"application_impl_standalone.cc)": [
+    "+mojo/public/cpp"
+  ],
+}

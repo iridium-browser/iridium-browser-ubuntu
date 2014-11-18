@@ -1,0 +1,21 @@
+{
+  "config_version": "googleads-g-doubleclick-net-v1",
+  "config_valid_until": 1425168000.0,
+  "monitored_domain": "googleads.g.doubleclick.net",
+  "collectors": [
+    {
+      "upload_url": "https://clients2.google.com/domainreliability/upload"
+    },
+    {
+      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
+    }
+  ],
+  "monitored_resources": [
+    {
+      "resource_name": "googleads-g-doubleclick-net-other",
+      "url_patterns": ["http*://googleads.g.doubleclick.net/*"],
+      "success_sample_rate": 0.05,
+      "failure_sample_rate": 1.00
+    }
+  ]
+}

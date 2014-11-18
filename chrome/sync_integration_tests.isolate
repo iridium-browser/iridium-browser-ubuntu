@@ -1,0 +1,86 @@
+# Copyright 2012 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+{
+  'conditions': [
+    ['OS=="linux"', {
+      'variables': {
+        'command': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)',
+          '<(PRODUCT_DIR)/sync_integration_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+        ],
+        'isolate_dependency_tracked': [
+          '../testing/test_env.py',
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)/libffmpegsumo.so',
+          '<(PRODUCT_DIR)/libosmesa.so',
+          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/chrome_100_percent.pak',
+          '<(PRODUCT_DIR)/locales/en-US.pak',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="mac" or OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/resources.pak',
+          '<(PRODUCT_DIR)/sync_integration_tests<(EXECUTABLE_SUFFIX)',
+        ],
+        'isolate_dependency_untracked': [
+          '../chrome/test/data/sync/',
+          '../net/tools/testserver/',
+          '../sync/tools/testserver/',
+          '../third_party/tlslite/',
+          '../third_party/pyftpdlib/',
+          '../third_party/pywebsocket/',
+          '<(PRODUCT_DIR)/pyproto/',
+        ],
+      },
+    }],
+    ['OS=="mac" or OS=="win"', {
+      'variables': {
+        'command': [
+          '<(PRODUCT_DIR)/sync_integration_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+        ],
+      },
+    }],
+    ['OS=="mac"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/ffmpegsumo.so',
+        ],
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/<(mac_product_name) Framework.framework/',
+          '<(PRODUCT_DIR)/<(mac_product_name).app/',
+        ],
+      },
+    }],
+    ['OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/chrome_elf.dll',
+          '<(PRODUCT_DIR)/ffmpegsumo.dll',
+        ],
+      },
+    }],
+    ['chromeos==1', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/libexif.so',
+        ],
+      },
+    }],
+  ],
+  'includes': [
+    '../third_party/icu/icu.isolate',
+  ],
+}
