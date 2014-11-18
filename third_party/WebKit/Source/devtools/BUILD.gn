@@ -1,0 +1,344 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+blink_devtools_output_dir = "$root_gen_dir/blink/devtools/"
+
+gypi_values = exec_script(
+    "//build/gypi_to_gn.py",
+    [ rebase_path("devtools.gypi") ],
+    "scope",
+    [ "devtools.gypi" ])
+
+# Some of the files in the .gypi use GYP variable expansions, go through and
+# fix them.
+devtools_core_base_files = gypi_values.devtools_core_base_files - [
+  "<@(devtools_main_js_files)",
+  "<@(devtools_standalone_files)",
+] + gypi_values.devtools_main_js_files + gypi_values.devtools_standalone_files
+
+devtools_core_js_files =
+  devtools_core_base_files +
+  gypi_values.devtools_common_js_files +
+  gypi_values.devtools_sdk_js_files +
+  gypi_values.devtools_ui_js_files +
+  gypi_values.devtools_components_js_files +
+  gypi_values.devtools_host_js_files +
+  gypi_values.devtools_screencast_js_files +
+  gypi_values.devtools_toolbox_js_files
+
+devtools_extensions_js_files = gypi_values.devtools_extensions_js_files -
+  [ "<@(devtools_extension_api_files)" ] +
+  gypi_values.devtools_extension_api_files
+
+#-------------------------------------------------------------------------------
+
+visibility = "//third_party/WebKit/*"
+
+# Probably need to parameterize this. If we set it to true, there will be some
+# further work in the scripts below.
+debug_devtools = false
+
+group("devtools_frontend_resources") {
+  deps = [
+    ":build_audits_module",
+    ":build_console_module",
+    ":build_core_module",
+    ":build_devices_module",
+    ":build_elements_module",
+    ":build_extensions_module",
+    ":build_heap_snapshot_worker_module",
+    ":build_layers_module",
+    ":build_network_module",
+    ":build_profiler_module",
+    ":build_resources_module",
+    ":build_script_formatter_worker_module",
+    ":build_settings_module",
+    ":build_source_frame_module",
+    ":build_sources_module",
+    ":build_temp_storage_shared_worker_module",
+    ":build_timeline_module",
+    ":copy_inspector_images",
+    ":devtools_html",
+    ":frontend_protocol_sources",
+    ":supported_css_properties",
+  ]
+
+  if (debug_devtools) {
+    deps += [ ":concatenated_devtools_css" ]
+  }
+}
+
+copy("copy_inspector_images") {
+  sources = gypi_values.devtools_image_files
+  outputs = [ "$root_out_dir/resources/inspector/Images/{{source_file_part}}" ]
+}
+
+# TODO(GYP) need debug_devtools support (this runs somewhat differently).
+action("generate_devtools_grd") {
+  script = "scripts/generate_devtools_grd.py"
+
+  input_pages = [
+    "$root_out_dir/resources/inspector/devtools.html",
+    "$root_out_dir/resources/inspector/inspector.css",
+    "$root_out_dir/resources/inspector/audits/_module.js",
+    "$root_out_dir/resources/inspector/console/_module.js",
+    "$root_out_dir/resources/inspector/devices/_module.js",
+    "$root_out_dir/resources/inspector/elements/_module.js",
+    "$root_out_dir/resources/inspector/extensions/_module.js",
+    "$root_out_dir/resources/inspector/heap_snapshot_worker/_module.js",
+    "$root_out_dir/resources/inspector/layers/_module.js",
+    "$root_out_dir/resources/inspector/main/Main.js",
+    "$root_out_dir/resources/inspector/network/_module.js",
+    "$root_out_dir/resources/inspector/profiler/_module.js",
+    "$root_out_dir/resources/inspector/resources/_module.js",
+    "$root_out_dir/resources/inspector/script_formatter_worker/_module.js",
+    "$root_out_dir/resources/inspector/source_frame/_module.js",
+    "$root_out_dir/resources/inspector/sources/_module.js",
+    "$root_out_dir/resources/inspector/temp_storage_shared_worker/_module.js",
+    "$root_out_dir/resources/inspector/timeline/_module.js",
+    "$root_out_dir/resources/inspector/devtools_extension_api.js",
+  ] + gypi_values.devtools_standalone_files + gypi_values.devtools_cm_css_files
+
+  images = gypi_values.devtools_image_files
+  images_path = "front_end/Images"
+
+  inputs = input_pages + images
+
+  outfile = "$root_gen_dir/devtools/devtools_resources.grd"
+  outputs = [ outfile ]
+
+  relative_path_dirs = [
+    "$root_out_dir/resources/inspector",
+    "frontend",
+  ]
+
+  args = rebase_path(input_pages, root_build_dir) + [
+    "--relative_path_dirs" ] +
+    rebase_path(relative_path_dirs, root_build_dir) + [
+    "--images", rebase_path(images_path, root_build_dir),
+    "--output", rebase_path(outfile, root_build_dir),
+  ]
+
+  deps = [
+    ":devtools_html",
+    ":devtools_extension_api",
+    ":devtools_frontend_resources",
+  ]
+}
+
+action("devtools_html") {
+  script = "scripts/generate_devtools_html.py"
+
+  inputs = [ "front_end/inspector.html"]
+  outputs = [ "$root_out_dir/resources/inspector/devtools.html"]
+
+  args = rebase_path(inputs, root_build_dir) +
+    rebase_path(outputs, root_build_dir)
+
+  if (debug_devtools) {
+    args += [ "1" ]
+  } else {
+    args += [ "0" ]
+  }
+}
+
+action("devtools_extension_api") {
+  script = "scripts/generate_devtools_extension_api.py"
+
+  inputs = gypi_values.devtools_extension_api_files
+  outputs = [ "$root_out_dir/resources/inspector/devtools_extension_api.js" ]
+
+  args = rebase_path(outputs, root_build_dir) +
+    rebase_path(gypi_values.devtools_extension_api_files, root_build_dir)
+}
+
+action("supported_css_properties") {
+  script = "scripts/generate_supported_css.py"
+
+  inputs = [
+    "../core/css/CSSProperties.in",
+  ]
+
+  outputs = [
+    blink_devtools_output_dir + "SupportedCSSProperties.js"
+  ]
+
+  args = rebase_path(inputs, root_build_dir) +
+    rebase_path(outputs, root_build_dir)
+}
+
+action("frontend_protocol_sources") {
+  script = "scripts/CodeGeneratorFrontend.py"
+
+  inputs = [ "protocol.json" ]
+  outputs = [ blink_devtools_output_dir + "InspectorBackendCommands.js" ]
+
+  args = rebase_path(inputs, root_build_dir) + [
+    "--output_js_dir", rebase_path(blink_devtools_output_dir, root_build_dir),
+  ]
+}
+
+# Runs the inline_js_imports script.
+#  module_name: (String) The JS module name to process.
+#  imported_files: (List of strings) The list of files the input depends on.
+template("inline_js_imports") {
+  assert(defined(invoker.module_name), target_name)
+  assert(defined(invoker.imported_files), target_name)
+
+  action(target_name) {
+    script = "scripts/inline_js_imports.py"
+    module_name = invoker.module_name
+
+    input = "front_end/" + module_name + "/_module.js"
+    inputs = [ input ] + invoker.imported_files
+
+    output = "$root_out_dir/resources/inspector/" + module_name + "/_module.js"
+    outputs = [ output ]
+
+    args = [
+      rebase_path(input, root_build_dir),
+      rebase_path(output, root_build_dir),
+    ]
+  }
+}
+
+inline_js_imports("build_audits_module") {
+  module_name = "audits"
+  imported_files = gypi_values.devtools_audits_js_files
+}
+
+inline_js_imports("build_console_module") {
+  module_name = "console"
+  imported_files = gypi_values.devtools_console_js_files
+}
+
+action("build_core_module") {
+  script = "scripts/concatenate_js_files.py"
+  input_page = "front_end/inspector.html"
+  inputs = [
+    input_page,
+    blink_devtools_output_dir + "InspectorBackendCommands.js",
+    blink_devtools_output_dir + "SupportedCSSProperties.js",
+    blink_devtools_output_dir + "common/modules.js",
+  ] + devtools_core_js_files
+
+  search_path = [
+    blink_devtools_output_dir,
+    "front_end",
+  ]
+  outputs = [
+    "$root_out_dir/resources/inspector/main/Main.js",
+  ]
+
+  args = [
+    rebase_path(input_page, root_build_dir),
+  ]
+  args += rebase_path(search_path, root_build_dir)
+  args += rebase_path(outputs, root_build_dir)
+
+  deps = [
+    ":devtools_html",
+    ":supported_css_properties",
+    ":frontend_protocol_sources",
+    ":concatenated_module_descriptors",
+  ]
+}
+
+inline_js_imports("build_devices_module") {
+  module_name = "devices"
+  imported_files = gypi_values.devtools_devices_js_files
+}
+
+inline_js_imports("build_documentation_module") {
+  module_name = "documentation"
+  imported_files = gypi_values.devtools_documentation_js_files
+}
+
+inline_js_imports("build_elements_module") {
+  module_name = "elements"
+  imported_files = gypi_values.devtools_elements_js_files
+}
+
+inline_js_imports("build_extensions_module") {
+  module_name = "extensions"
+  imported_files = devtools_extensions_js_files
+}
+
+inline_js_imports("build_heap_snapshot_worker_module") {
+  module_name = "heap_snapshot_worker"
+  imported_files = gypi_values.devtools_heap_snapshot_worker_js_files
+}
+
+inline_js_imports("build_layers_module") {
+  module_name = "layers"
+  imported_files = gypi_values.devtools_layers_js_files
+}
+
+inline_js_imports("build_network_module") {
+  module_name = "network"
+  imported_files = gypi_values.devtools_network_js_files
+}
+
+inline_js_imports("build_profiler_module") {
+  module_name = "profiler"
+  imported_files = gypi_values.devtools_profiler_js_files
+}
+
+inline_js_imports("build_resources_module") {
+  module_name = "resources"
+  imported_files = gypi_values.devtools_resources_js_files
+}
+
+inline_js_imports("build_script_formatter_worker_module") {
+  module_name = "script_formatter_worker"
+  imported_files = gypi_values.devtools_uglify_files
+}
+
+inline_js_imports("build_settings_module") {
+  module_name = "settings"
+  imported_files = gypi_values.devtools_settings_js_files
+}
+
+inline_js_imports("build_source_frame_module") {
+  module_name = "source_frame"
+  imported_files = gypi_values.devtools_source_frame_js_files +
+    gypi_values.devtools_cm_js_files
+}
+
+inline_js_imports("build_sources_module") {
+  module_name = "sources"
+  imported_files = gypi_values.devtools_sources_js_files
+}
+
+inline_js_imports("build_temp_storage_shared_worker_module") {
+  module_name = "temp_storage_shared_worker"
+  imported_files = gypi_values.devtools_temp_storage_shared_worker_js_files
+}
+
+inline_js_imports("build_timeline_module") {
+  module_name = "timeline"
+  imported_files = gypi_values.devtools_timeline_js_files
+}
+
+action("concatenated_module_descriptors") {
+  script = "scripts/concatenate_module_descriptors.py"
+
+  input = "front_end/common/modules.js"
+  inputs = [ input ] + gypi_values.devtools_module_json_files
+  outputs = [ blink_devtools_output_dir + "common/modules.js" ]
+
+  args = rebase_path([ input ] + outputs + gypi_values.devtools_module_json_files, root_build_dir)
+}
+
+action("concatenated_devtools_css") {
+  script = "scripts/concatenate_css_files.py"
+
+  input_stylesheet = "front_end/inspector.css"
+  inputs = [ input_stylesheet ] + devtools_core_base_files
+
+  outputs = [ "$root_out_dir/resources/inspector/inspector.css" ]
+
+  args = [ rebase_path(input_stylesheet, root_build_dir) ] +
+    rebase_path(outputs, root_build_dir)
+}

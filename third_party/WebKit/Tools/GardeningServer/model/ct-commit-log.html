@@ -1,0 +1,66 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="../lib/net.html">
+<link rel='import' href='ct-commit.html'>
+<link rel='import' href='ct-repositories.html'>
+
+<script>
+function CTCommitLog() {
+  this.commits = {};
+  this.firstRevision = {};
+  this.lastRevision = {};
+  this._repositories = new CTRepositories();
+}
+
+CTCommitLog.prototype.update = function() {
+  var requests = [];
+  Object.keys(this._repositories.repositories, (function(name, repository) {
+    var responseHandler = this._handleResponse.bind(this, repository.repositoryUrl, repository.name);
+    // FIXME: Turn net.js into net.html and import it at the top of this file.
+    requests.push(net.ajax({url: repository.dataUrl}).then(responseHandler));
+  }.bind(this)));
+  return Promise.all(requests);
+}
+
+CTCommitLog.prototype._handleResponse = function(repositoryUrl, repository, json) {
+  if (!this.commits[repository])
+    this.commits[repository] = {};
+
+  // FIXME: Fix googlesource to not do this outdated JSON XSS mitigation.
+  json = json.substring(')]}\n'.length);
+  JSON.parse(json).log.forEach(function(entry) {
+    var commit = CTCommit.create(entry.author.name, entry.message, repositoryUrl, repository);
+    this.commits[repository][commit.revision] = commit;
+  }.bind(this));
+
+  this._findFirstAndLastRevisions(repository);
+}
+
+CTCommitLog.prototype._findFirstAndLastRevisions = function(repository) {
+  var sortedCommits = Object.keys(this.commits[repository]).sort();
+  this.firstRevision[repository] = parseInt(sortedCommits.first());
+  this.lastRevision[repository] = parseInt(sortedCommits.last());
+}
+
+CTCommitLog.prototype.range = function(repository, first, last) {
+  var commits = [];
+  for (var revision = first; revision <= last; revision++) {
+    // Until we've seen a commit we have data for, fill in dummy data
+    // so that we show something. Assume that we have the correct data
+    // for all the commits after the first one we have data for.
+    if (revision >= this.firstRevision[repository]) {
+      var commit = this.commits[repository][revision];
+      if (commit)
+        commits.push(commit);
+    } else {
+      var url = this._repositories.repositories[repository].repositoryUrl;
+      commits.push(CTCommit.createIncomplete(url, revision, repository));
+    }
+  }
+  return commits;
+}
+</script>

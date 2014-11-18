@@ -1,0 +1,45 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="../ct-embedded-flakiness-dashboard.html">
+
+<script>
+(function () {
+
+var assert = chai.assert;
+
+describe('ct-embedded-flakiness-dashboard', function() {
+  it('should point the iframe to the dashboard', function(done) {
+    var failure = new CTFailure('foo_tests', 'foo/bar.html');
+    var tree = "blink";
+    var embeddedFlakinessDashboard = document.createElement('ct-embedded-flakiness-dashboard');
+    embeddedFlakinessDashboard.test = failure;
+    embeddedFlakinessDashboard.tree = tree;
+
+    setTimeout(function() {
+      var iframe = embeddedFlakinessDashboard.shadowRoot.querySelector('#iframe');
+      assert.equal(iframe.src, failure.embeddedFlakinessDashboardURL(tree));
+      done();
+    });
+  });
+
+  it('should respond to heightChanged', function(done) {
+    var embeddedFlakinessDashboard = document.createElement('ct-embedded-flakiness-dashboard');
+
+    var finishTest = function() {
+      window.removeEventListener('message', finishTest);
+      var iframe = embeddedFlakinessDashboard.shadowRoot.querySelector('#iframe');
+      assert.equal(iframe.style.height, '100px');
+      done();
+    };
+
+    window.addEventListener('message', finishTest);
+    window.postMessage({command: 'heightChanged', height: "100"}, '*');
+  });
+});
+
+})()
+</script>

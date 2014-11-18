@@ -1,0 +1,105 @@
+# Copyright 2013 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+{
+  'conditions': [
+    ['OS=="linux"', {
+      'variables': {
+        'command': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)',
+          '<(PRODUCT_DIR)/interactive_ui_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+        ],
+        'isolate_dependency_tracked': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)/libffmpegsumo.so',
+          '<(PRODUCT_DIR)/libosmesa.so',
+          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+        ],
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/pyproto/',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="mac" or OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '../testing/test_env.py',
+          '<(PRODUCT_DIR)/interactive_ui_tests<(EXECUTABLE_SUFFIX)',
+          '<(PRODUCT_DIR)/resources.pak',
+        ],
+        'isolate_dependency_untracked': [
+          '../net/data/ssl/certificates/',
+          '../net/tools/testserver/',
+          '../third_party/pyftpdlib/',
+          '../third_party/pywebsocket/',
+          '../third_party/tlslite/',
+          'test/data/',
+        ],
+        'read_only': 1,
+      },
+    }],
+    ['OS=="linux" or OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/chrome_100_percent.pak',
+          '<(PRODUCT_DIR)/locales/en-US.pak',
+          '<(PRODUCT_DIR)/locales/fr.pak',
+          '<(PRODUCT_DIR)/ui_test.pak',
+        ],
+      },
+    }],
+    ['OS=="mac"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/ffmpegsumo.so',
+          '<(PRODUCT_DIR)/osmesa.so',
+        ],
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/<(mac_product_name) Framework.framework/',
+          '<(PRODUCT_DIR)/<(mac_product_name).app/',
+        ],
+      },
+    }],
+    ['OS=="mac" or OS=="win"', {
+      'variables': {
+        'command': [
+          '../testing/test_env.py',
+          '<(PRODUCT_DIR)/interactive_ui_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+        ],
+      },
+    }],
+    ['OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/chrome_elf.dll',
+          '<(PRODUCT_DIR)/d3dcompiler_46.dll',
+          '<(PRODUCT_DIR)/ffmpegsumo.dll',
+          '<(PRODUCT_DIR)/libEGL.dll',
+          '<(PRODUCT_DIR)/libGLESv2.dll',
+          '<(PRODUCT_DIR)/osmesa.dll',
+        ],
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/plugins/npapi_test_plugin.dll',
+        ],
+      },
+    }],
+    ['chromeos==1', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/keyboard_resources.pak',
+          '<(PRODUCT_DIR)/libexif.so',
+        ],
+        'isolate_dependency_untracked': [
+          '../google_apis/test/',
+          '<(PRODUCT_DIR)/resources/chromeos/',
+        ],
+      },
+    }],
+  ],
+  'includes': [
+    '../third_party/icu/icu.isolate',
+  ],
+}

@@ -1,0 +1,196 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// Use the <code>chrome.gcdPrivate</code> API to discover GCD APIs and register
+// them.
+namespace gcdPrivate {
+
+  enum SetupType { mdns, wifi, cloud };
+
+  // Represents a GCD device discovered locally or registered to a given user.
+  dictionary GCDDevice {
+    // Opaque device identifier to be passed to API.
+    DOMString deviceId;
+
+    // How this device was discovered.
+    SetupType setupType;
+
+    // Cloud identifier string.
+    DOMString? cloudId;
+
+    // Device type (camera, printer, etc)
+    DOMString deviceType;
+
+    // Device human readable name.
+    DOMString deviceName;
+
+    // Device human readable description.
+    DOMString deviceDescription;
+  };
+
+  enum Status {
+    // populateWifiPassword was true and the password has not been prefetched.
+    wifiPasswordError,
+
+    // populateWifiPassword was true and the message cannot be parsed as a setup
+    // message.
+    setupParseError,
+
+    // Could not connect to the device.
+    connectionError,
+
+    // Error in establishing session.
+    sessionError,
+
+    // Unknown session.
+    unknownSessionError,
+
+    // Success.
+    success
+  };
+
+  enum ConfirmationType {
+    displayCode,
+    audio
+  };
+
+  callback CloudDeviceListCallback = void(GCDDevice[] devices);
+
+  // |commandDefinitions| : Is "commandDefs" value of device described at
+  // https://developers.google.com/cloud-devices/v1/reference/devices
+  // TODO(vitalybuka): consider to describe object in IDL.
+  callback CommandDefinitionsCallback = void(object commandDefinitions);
+
+  // |command| : Described at
+  // https://developers.google.com/cloud-devices/v1/reference/commands
+  // TODO(vitalybuka): consider to describe object in IDL.
+  callback CommandCallback = void(object command);
+
+  // |commands| : Array of commands described at
+  // https://developers.google.com/cloud-devices/v1/reference/commands
+  // TODO(vitalybuka): consider to describe object in IDL.
+  callback CommandListCallback = void(object[] commands);
+
+  // Called when the confirmation code is available or on error.
+  // |sessionId| is the session ID (identifies the session for future calls)
+  // |status| is the status (success or type of error)
+  // |code| is the confirmation code or empty on error
+  // |confirmationType| is the type of confirmation required
+  callback ConfirmationCodeCallback = void(long sessionId,
+                                           Status status,
+                                           DOMString code,
+                                           ConfirmationType type);
+
+  // Called to indicated the session is established.
+  // |status| is the status (success or type of error)
+  callback SessionEstablishedCallback = void(Status status);
+
+  // Called when the response to the message sent is available or on error.
+  // |status| is the status (success or type of error)
+  // |response| is the response object or null on error
+  callback MessageResponseCallback = void(Status status,
+                                          object response);
+
+  // Called as a response to |prefetchWifiPassword|
+  // |success| Denotes whether the password fetch has succeeded or failed.
+  callback SuccessCallback = void(boolean success);
+
+  // Called as a response to |getPrefetchedWifiNameList|
+  // |list| the list of ssids for which wifi passwords were prefetched.
+  callback SSIDListCallback = void(DOMString[] networks);
+
+  interface Functions {
+    // Returns the list of cloud devices visible locally or available in the
+    // cloud for user account.
+    static void getCloudDeviceList(CloudDeviceListCallback callback);
+
+    // Queries network for local devices. Triggers an onDeviceStateChanged and
+    // onDeviceRemoved events. Call this function *only* after registering for
+    // onDeviceStateChanged and onDeviceRemoved events, or it will do nothing.
+    static void queryForNewLocalDevices();
+
+    // Cache the WiFi password in the browser process for use during
+    // provisioning. This is done to allow the gathering of the wifi password to
+    // not be done while connected to the device's network. Callback is called
+    // with true if wifi password was cached and false if it was unavailable.
+    static void prefetchWifiPassword(DOMString ssid, SuccessCallback callback);
+
+    // Get the list of ssids with prefetched callbacks.
+    static void getPrefetchedWifiNameList(SSIDListCallback callback);
+
+    // Establish the session.
+    static void establishSession(DOMString ipAddress,
+                                 long port,
+                                 ConfirmationCodeCallback callback);
+
+    // Confirm that the code is correct. Device will still need to confirm.
+    static void confirmCode(long sessionId,
+                            SessionEstablishedCallback callback);
+
+    // Send an encrypted message to the device. |api| is the API path and
+    // |input| is the input object. If the message is a setup message with a
+    // wifi ssid specified but no password, the password cached from
+    // |prefetchWifiPassword| will be used and the call will fail if it's not
+    // available. For open networks use an empty string as the password.
+    static void sendMessage(long sessionId,
+                            DOMString api,
+                            object input,
+                            MessageResponseCallback callback);
+
+    // Terminate the session with the device.
+    static void terminateSession(long sessionId);
+
+    // Returns command definitions.
+    // |deviceId| : The device to get command definitions for.
+    // |callback| : The result callback.
+    static void getCommandDefinitions(DOMString deviceId,
+                                      CommandDefinitionsCallback callback);
+
+    // Creates and sends a new command.
+    // |deviceId| : The device to send the command to.
+    // |expireInMs| : The number of milliseconds since now before the command
+    // expires. Expired command should not be executed by device. Acceptable
+    // values are 10000 to 2592000000, inclusive. All values outside that range
+    // will be replaced by 2592000000.
+    // |command| : Described at
+    // https://developers.google.com/cloud-devices/v1/reference/commands
+    // |callback| : The result callback.
+    static void insertCommand(DOMString deviceId,
+                              long expireInMs,
+                              object command,
+                              CommandCallback callback);
+
+    // Returns a particular command.
+    // |commandId| : Unique command ID.
+    // |callback| : The result callback.
+    static void getCommand(DOMString commandId, CommandCallback callback);
+
+    // Cancels a command.
+    // |commandId| : Unique command ID.
+    // |callback| : The result callback.
+    static void cancelCommand(DOMString commandId, CommandCallback callback);
+
+    // Lists all commands in order of creation.
+    // |deviceId| : The device to get the commands for.
+    // |byUser| : List all the commands issued by the user. Special value 'me'
+    // can be used to list by the current user.
+    // |state| : Command state.
+    // |callback| : The result callback.
+    static void getCommandsList(DOMString deviceId,
+                                DOMString byUser,
+                                DOMString state,
+                                CommandListCallback callback);
+  };
+
+  interface Events {
+    // Subscribe to this event to start listening new or updated devices. New
+    // listeners will get called with all known devices on the network, and
+    // status updates for devices available through the cloud.
+    static void onDeviceStateChanged(GCDDevice device);
+
+    // Notifies that device has disappeared.
+    // |deviceId| : The device has disappeared.
+    static void onDeviceRemoved(DOMString deviceId);
+  };
+};

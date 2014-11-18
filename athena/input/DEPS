@@ -1,0 +1,9 @@
+include_rules = [
+  "+ui/aura",
+  "+ui/base",
+  "+ui/events",
+  "+ui/wm/core",
+  "+ui/wm/public",
+  "+ui/views",
+]
+

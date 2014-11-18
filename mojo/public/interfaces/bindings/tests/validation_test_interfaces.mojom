@@ -1,0 +1,61 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+
+[JavaPackage="org.chromium.mojo.bindings.test.mojom.mojo"]
+module mojo.test {
+
+struct StructA {
+  uint64 i;
+};
+
+struct StructB {
+  StructA struct_a;
+};
+
+struct StructC {
+  uint8[] array;
+};
+
+struct StructD {
+  handle<message_pipe>[] message_pipes;
+};
+
+struct StructE {
+  StructD struct_d;
+  handle<data_pipe_consumer> data_pipe_consumer;
+};
+
+struct StructF {
+  uint8[3] fixed_size_array;
+};
+
+interface ConformanceTestInterface {
+  Method0(float param0);
+  Method1(StructA param0);
+  Method2(StructB param0, StructA param1);
+  Method3(bool[] param0);
+  Method4(StructC param0, uint8[] param1);
+  Method5(StructE param0, handle<data_pipe_producer> param1);
+  Method6(uint8[][] param0);
+  Method7(StructF param0, uint8[5] param1);
+  Method8(string[]?[] param0);
+  Method9(handle?[][]? param0);
+};
+
+struct BasicStruct {
+  int32 a;
+};
+
+[Client=IntegrationTestInterface2]
+interface IntegrationTestInterface1 {
+  Method0(BasicStruct param0);
+};
+
+[Client=IntegrationTestInterface1]
+interface IntegrationTestInterface2 {
+  Method0() => (uint8[] param0);
+};
+
+}

@@ -1,0 +1,13 @@
+include_rules = [
+  "+components/keyed_service",
+  "+components/pref_registry",
+  "+content/public/browser",
+  "+grit/extensions_strings.h",
+  "+net",
+  "+skia/ext/image_operations.h",
+  "+sync",
+  "+third_party/leveldatabase",
+  "+third_party/skia/include",
+  "+third_party/WebKit/public/web/WebInputEvent.h",
+  "+webkit/browser/fileapi",
+]

@@ -1,0 +1,26 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//third_party/protobuf/proto_library.gni")
+
+# GYP version: media/cast/cast.gyp:cast_logging_proto
+source_set("proto") {
+  deps = [
+    ":cast_network_simulation_proto",
+  ]
+  direct_dependent_configs = [
+    "//third_party/protobuf:protobuf_config"
+  ]
+  forward_dependent_configs_from = [
+    ":cast_network_simulation_proto",
+  ]
+}
+
+proto_library("cast_network_simulation_proto") {
+  visibility = ":proto"
+  sources = [
+    "network_simulation_model.proto",
+  ]
+}
+

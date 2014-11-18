@@ -1,0 +1,7 @@
+include_rules = [
+  "+cc",
+  "+gpu/command_buffer/client/gles2_interface.h",
+  "+third_party/skia",
+  "+ui/gfx",
+  "+ui/gl",
+]

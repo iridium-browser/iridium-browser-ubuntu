@@ -1,0 +1,619 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/config.gni")
+import("//build/config/android/internal_rules.gni")
+import("//tools/grit/grit_rule.gni")
+
+assert(is_android)
+
+
+# Declare a jni target
+#
+# This target generates the native jni bindings for a set of .java files.
+#
+# See base/android/jni_generator/jni_generator.py for more info about the
+# format of generating JNI bindings.
+#
+# Variables
+#   sources: list of .java files to generate jni for
+#   jni_package: subdirectory path for generated bindings
+#
+# Example
+#   generate_jni("foo_jni") {
+#     sources = [
+#       "android/java/src/org/chromium/foo/Foo.java",
+#       "android/java/src/org/chromium/foo/FooUtil.java",
+#     ]
+#     jni_package = "foo"
+#   }
+template("generate_jni") {
+  assert(defined(invoker.sources))
+  assert(defined(invoker.jni_package))
+  jni_package = invoker.jni_package
+  base_output_dir = "${root_gen_dir}/${target_name}/${jni_package}"
+  jni_output_dir = "${base_output_dir}/jni"
+
+  jni_generator_include = "//base/android/jni_generator/jni_generator_helper.h"
+
+  foreach_target_name = "${target_name}__jni_gen"
+  action_foreach(foreach_target_name) {
+    script = "//base/android/jni_generator/jni_generator.py"
+    depfile = "$target_gen_dir/$target_name.{{source_name_part}}.d"
+    sources = invoker.sources
+    inputs = [ jni_generator_include ]
+    outputs = [
+      depfile,
+      "${jni_output_dir}/{{source_name_part}}_jni.h"
+    ]
+
+    args = [
+      "--depfile", rebase_path(depfile, root_build_dir),
+      "--input_file={{source}}",
+      "--optimize_generation=1",
+      "--ptr_type=long",
+      "--output_dir", rebase_path(jni_output_dir, root_build_dir),
+      "--includes", rebase_path(jni_generator_include, "//"),
+    ]
+    if (defined(invoker.jni_generator_jarjar_file)) {
+      args += [
+        "--jarjar", rebase_path(jni_generator_jarjar_file, root_build_dir),
+      ]
+    }
+  }
+
+  config("jni_includes_${target_name}") {
+    include_dirs = [ base_output_dir ]
+  }
+
+  group(target_name) {
+    deps = [ ":$foreach_target_name" ]
+    direct_dependent_configs = [ ":jni_includes_${target_name}" ]
+
+    if (defined(invoker.deps)) {
+      deps += invoker.deps
+    }
+    if (defined(invoker.forward_dependent_configs_from)) {
+      forward_dependent_configs_from = invoker.forward_dependent_configs_from
+    }
+  }
+}
+
+
+# Declare a jni target for a prebuilt jar
+#
+# This target generates the native jni bindings for a set of classes in a .jar.
+#
+# See base/android/jni_generator/jni_generator.py for more info about the
+# format of generating JNI bindings.
+#
+# Variables
+#   classes: list of .class files in the jar to generate jni for. These should
+#     include the full path to the .class file.
+#   jni_package: subdirectory path for generated bindings
+#   jar_file: the path to the .jar. If not provided, will default to the sdk's
+#     android.jar
+#
+#   deps, forward_dependent_configs_from: As normal
+#
+# Example
+#   generate_jar_jni("foo_jni") {
+#     classes = [
+#       "android/view/Foo.class",
+#     ]
+#     jni_package = "foo"
+#   }
+template("generate_jar_jni") {
+  assert(defined(invoker.classes))
+  assert(defined(invoker.jni_package))
+
+  if (defined(invoker.jar_file)) {
+    jar_file = invoker.jar_file
+  } else {
+    jar_file = android_sdk_jar
+  }
+
+  jni_package = invoker.jni_package
+  base_output_dir = "${root_gen_dir}/${target_name}/${jni_package}"
+  jni_output_dir = "${base_output_dir}/jni"
+
+  jni_generator_include =
+      rebase_path("//base/android/jni_generator/jni_generator_helper.h",
+          root_build_dir)
+
+  # TODO(cjhopman): make jni_generator.py support generating jni for multiple
+  # .class files from a .jar.
+  jni_actions = []
+  foreach(class, invoker.classes) {
+    classname_list = process_file_template(
+        [class], "{{source_name_part}}")
+    classname = classname_list[0]
+    jni_target_name = "${target_name}__jni_${classname}"
+    jni_actions += [ ":$jni_target_name" ]
+    action(jni_target_name) {
+      depfile = "$target_gen_dir/$target_name.d"
+      script = "//base/android/jni_generator/jni_generator.py"
+      sources = [
+        jni_generator_include,
+        jar_file,
+      ]
+      outputs = [
+        depfile,
+        "${jni_output_dir}/${classname}_jni.h"
+      ]
+
+      args = [
+        "--depfile", rebase_path(depfile, root_build_dir),
+        "--jar_file", rebase_path(jar_file, root_build_dir),
+        "--input_file", class,
+        "--optimize_generation=1",
+        "--ptr_type=long",
+        "--output_dir", rebase_path(jni_output_dir, root_build_dir),
+        "--includes", rebase_path(jni_generator_include, "//"),
+      ]
+    }
+  }
+
+  config("jni_includes_${target_name}") {
+    include_dirs = [ base_output_dir ]
+  }
+
+  group(target_name) {
+    deps = jni_actions
+    if (defined(invoker.deps)) {
+      deps += invoker.deps
+    }
+    if (defined(invoker.forward_dependent_configs_from)) {
+      forward_dependent_configs_from = invoker.forward_dependent_configs_from
+    }
+    direct_dependent_configs = [ ":jni_includes_${target_name}" ]
+  }
+}
+
+
+# Declare a target for c-preprocessor-generated java files
+#
+# This target generates java files using the host C pre-processor. Each file in
+# sources will be compiled using the C pre-processor. If include_path is
+# specified, it will be passed (with --I) to the pre-processor.
+#
+# This target will create a single .srcjar. Adding this target to an
+# android_library target's srcjar_deps will make the generated java files be
+# included in that library's final outputs.
+#
+# Variables
+#   sources: list of files to be processed by the C pre-processor. For each
+#     file in sources, there will be one .java file in the final .srcjar. For a
+#     file named FooBar.template, a java file will be created with name
+#     FooBar.java.
+#   inputs: additional compile-time dependencies. Any files
+#     `#include`-ed in the templates should be listed here.
+#   package_name: this will be the subdirectory for each .java file in the
+#     .srcjar.
+#
+# Example
+#   java_cpp_template("foo_generated_enum") {
+#     sources = [
+#       "android/java/templates/Foo.template",
+#     ]
+#     inputs = [
+#       "android/java/templates/native_foo_header.h",
+#     ]
+#
+#     package_name = "org/chromium/base/library_loader"
+#     include_path = "android/java/templates"
+#   }
+template("java_cpp_template") {
+  assert(defined(invoker.sources))
+  package_name = invoker.package_name + ""
+
+  if (defined(invoker.include_path)) {
+    include_path = invoker.include_path + ""
+  } else {
+    include_path = "//"
+  }
+
+  action_foreach("${target_name}__apply_gcc") {
+    script = "//build/android/gyp/gcc_preprocess.py"
+    if (defined(invoker.inputs)) {
+      inputs = invoker.inputs + []
+    }
+    depfile = "${target_gen_dir}/${target_name}.d"
+
+    sources = invoker.sources
+
+    gen_dir = "${target_gen_dir}/${target_name}/java_cpp_template/${package_name}"
+    gcc_template_output_pattern = "${gen_dir}/{{source_name_part}}.java"
+
+    outputs = [
+      depfile,
+      gcc_template_output_pattern
+    ]
+
+    args = [
+      "--depfile", rebase_path(depfile, root_build_dir),
+      "--include-path", rebase_path(include_path, root_build_dir),
+      "--output", rebase_path(gen_dir, root_build_dir) + "/{{source_name_part}}.java",
+      "--template={{source}}",
+    ]
+  }
+
+  apply_gcc_outputs = get_target_outputs(":${target_name}__apply_gcc")
+  base_gen_dir = get_label_info(":${target_name}__apply_gcc", "target_gen_dir")
+
+  srcjar_path = "${target_gen_dir}/${target_name}.srcjar"
+  zip("${target_name}__zip_srcjar") {
+    inputs = apply_gcc_outputs
+    output = srcjar_path
+    base_dir = base_gen_dir
+  }
+
+  group(target_name) {
+    deps = [
+      ":${target_name}__zip_srcjar"
+    ]
+  }
+}
+
+
+# Declare an Android resources target
+#
+# This creates a resources zip file that will be used when building an Android
+# library or apk and included into a final apk.
+#
+# To include these resources in a library/apk, this target should be listed in
+# the library's deps. A library/apk will also include any resources used by its
+# own dependencies.
+#
+# Variables
+#   deps: Specifies the dependencies of this target. Any Android resources
+#     listed in deps will be included by libraries/apks that depend on this
+#     target.
+#   resource_dirs: List of directories containing resources for this target.
+#   android_manifest: AndroidManifest.xml for this target. Defaults to
+#     //build/android/AndroidManifest.xml.
+#   custom_package: java package for generated .java files.
+#   v14_verify_only: If true, don't generate v14/v17 resources and just verify
+#     that the resources are v14-compliant (see
+#     build/android/gyp/generate_v14_compatible_resources.py). Defaults to
+#     false.
+#
+# Example
+#   android_resources("foo_resources") {
+#     deps = [":foo_strings_grd"]
+#     resource_dirs = ["res"]
+#     custom_package = "org.chromium.foo"
+#   }
+template("android_resources") {
+  assert(defined(invoker.resource_dirs))
+
+  base_path = "$target_gen_dir/$target_name"
+  zip_path = base_path + ".resources.zip"
+  srcjar_path = base_path + ".srcjar"
+  build_config = base_path + ".build_config"
+
+  write_build_config("${target_name}__build_config") {
+    type = "android_resources"
+    resources_zip = zip_path
+    srcjar = srcjar_path
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
+  }
+
+  android_manifest = "//build/android/AndroidManifest.xml"
+  if (defined(invoker.android_manifest)) {
+    android_manifest = invoker.android_manifest
+  }
+
+  process_resources("${target_name}__process_resources") {
+    resource_dirs = invoker.resource_dirs
+    if (defined(invoker.custom_package)) {
+      custom_package = invoker.custom_package
+    }
+
+    if (defined(invoker.v14_verify_only)) {
+      v14_verify_only = invoker.v14_verify_only
+    }
+  }
+
+  group(target_name) {
+    deps = [
+      ":${target_name}__build_config",
+      ":${target_name}__process_resources",
+    ]
+  }
+}
+
+
+# Declare a target that generates localized strings.xml from a .grd file.
+#
+# If this target is included in the deps of an android resources/library/apk,
+# the strings.xml will be included with that target.
+#
+# Variables
+#   deps: Specifies the dependencies of this target.
+#   grd_file: Path to the .grd file to generate strings.xml from.
+#   outputs: Expected grit outputs (see grit rule).
+#
+# Example
+#  java_strings_grd("foo_strings_grd") {
+#    grd_file = "foo_strings.grd"
+#  }
+template("java_strings_grd") {
+  base_path = "$target_gen_dir/$target_name"
+  resources_zip = base_path + ".resources.zip"
+  build_config = base_path + ".build_config"
+
+  write_build_config("${target_name}__build_config") {
+    type = "android_resources"
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
+  }
+
+  # Put grit files into this subdirectory of target_gen_dir.
+  extra_output_path = target_name + "_grit_output"
+
+  grit_target_name = "${target_name}__grit"
+  grit_output_dir = "$target_gen_dir/$extra_output_path"
+  grit(grit_target_name) {
+    grit_flags = [
+      "-E", "ANDROID_JAVA_TAGGED_ONLY=false",
+    ]
+    output_dir = grit_output_dir
+    resource_ids = ""
+    source = invoker.grd_file
+    outputs = invoker.outputs
+  }
+
+  # This needs to get outputs from grit's internal target, not the final
+  # source_set.
+  generate_strings_outputs = get_target_outputs(":${grit_target_name}_grit")
+
+  zip("${target_name}__zip") {
+    base_dir = grit_output_dir
+    inputs = generate_strings_outputs
+    output = resources_zip
+  }
+
+  group(target_name) {
+    deps = [
+      ":${target_name}__build_config",
+      ":${target_name}__zip",
+    ]
+  }
+}
+
+
+# Declare an Android library target
+#
+# This target creates an Android library containing java code and Android
+# resources.
+#
+# Variables
+#   deps: Specifies the dependencies of this target. Java targets in this list
+#     will be added to the javac classpath. Android resources in dependencies
+#     will be used when building this library.
+#   java_files: List of .java files included in this library.
+#   srcjar_deps: List of srcjar dependencies. The .java files in the srcjars
+#     will be added to java_files and be included in this library.
+#
+#   jar_excluded_patterns: List of patterns of .class files to exclude from the
+#     final jar.
+#
+# Example
+#   android_library("foo_java") {
+#     java_files = [
+#       "android/org/chromium/foo/Foo.java",
+#       "android/org/chromium/foo/FooInterface.java",
+#       "android/org/chromium/foo/FooService.java",
+#     ]
+#     deps = [
+#       ":bar_java"
+#     ]
+#     srcjar_deps = [
+#       ":foo_generated_enum"
+#     ]
+#     jar_excluded_patterns = [
+#       "*/FooService.class", "*/FooService##*.class"
+#     ]
+#   }
+template("android_library") {
+  assert(defined(invoker.java_files))
+  base_path = "$target_gen_dir/$target_name"
+  build_config = base_path + ".build_config"
+  jar_path = base_path + ".jar"
+  dex_path = base_path + ".dex.jar"
+
+  write_build_config("${target_name}__build_config") {
+    type = "android_library"
+
+    deps = []
+    if (defined(invoker.deps)) {
+      deps += invoker.deps
+    }
+
+    # base_path
+  }
+
+  android_java_library(target_name) {
+    java_files = invoker.java_files
+    build_config = build_config
+
+    if (defined(invoker.jar_excluded_patterns)) {
+      jar_excluded_patterns = invoker.jar_excluded_patterns
+    }
+
+    if (defined(invoker.srcjar_deps)) {
+      srcjar_deps = invoker.srcjar_deps
+    }
+  }
+}
+
+
+# Declare an Android apk target
+#
+# This target creates an Android APK containing java code, resources, assets,
+# and (possibly) native libraries.
+#
+# Variables
+#   android_manifest: Path to AndroidManifest.xml.
+#   deps: List of dependencies. All Android java resources and libraries in the
+#     "transitive closure" of these dependencies will be included in the apk.
+#     Note: this "transitive closure" actually only includes such targets if
+#     they are depended on through android_library or android_resources targets
+#     (and so not through builtin targets like 'action', 'group', etc).
+#   java_files: List of .java files to include in the apk.
+#   srcjar_deps: List of srcjar dependencies. The .java files in the srcjars
+#      will be added to java_files and be included in this apk.
+#   apk_name: Name for final apk.
+#   final_apk_path: Path to final built apk. Default is
+#     $root_out_dir/apks/$apk_name.apk. Setting this will override apk_name.
+#   native_libs: List paths of native libraries to include in this apk. If these
+#     libraries depend on other shared_library targets, those dependencies will
+#     also be included in the apk.
+#
+# Example
+#   android_apk("foo_apk") {
+#     android_manifest = "AndroidManifest.xml"
+#     java_files = [
+#       "android/org/chromium/foo/FooApplication.java",
+#       "android/org/chromium/foo/FooActivity.java",
+#     ]
+#     deps = [
+#       ":foo_support_java"
+#       ":foo_resources"
+#     ]
+#     srcjar_deps = [
+#       ":foo_generated_enum"
+#     ]
+#     native_libs = [
+#       native_lib_path
+#     ]
+#   }
+template("android_apk") {
+  gen_dir = "$target_gen_dir/$target_name"
+  base_path = "$gen_dir/$target_name"
+  build_config = "$base_path.build_config"
+  resources_zip_path = "$base_path.resources.zip"
+  all_resources_zip_path = "$base_path.resources.all.zip"
+  resource_srcjar_path = "$base_path.resources.srcjar"
+  jar_path = "$base_path.jar"
+  final_dex_path = "$gen_dir/classes.dex"
+
+  # Just mark these as used for now.
+  assert(!defined(invoker.native_libs)
+      || invoker.native_libs == [] || true)
+
+  _keystore_path = android_default_keystore_path
+  _keystore_name = android_default_keystore_name
+  _keystore_password = android_default_keystore_password
+
+  if (defined(invoker.keystore_path)) {
+    _keystore_path = invoker.keystore_path
+    _keystore_name = invoker.keystore_name
+    _keystore_password = invoker.keystore_password
+  }
+
+  # TODO(cjhopman): Remove this once we correctly generate the real
+  # NativeLibraries.java
+  srcjar_deps = [ "//base:base_native_libraries_gen" ]
+  if (defined(invoker.srcjar_deps)) {
+    srcjar_deps += invoker.srcjar_deps
+  }
+
+  write_build_config("${target_name}__build_config") {
+    type = "android_apk"
+    srcjar = resource_srcjar_path
+    dex_path = final_dex_path
+    resources_zip = resources_zip_path
+
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
+  }
+
+  final_deps = []
+
+  final_deps += [":${target_name}__process_resources"]
+  process_resources("${target_name}__process_resources") {
+    android_manifest = invoker.android_manifest
+
+    resource_dirs = ["//build/android/ant/empty/res"]
+    zip_path = resources_zip_path
+    srcjar_path = resource_srcjar_path
+
+    generate_constant_ids = true
+  }
+
+  rebased_build_config = rebase_path(build_config, root_build_dir)
+
+  final_deps += [":${target_name}__java"]
+  android_java_library("${target_name}__java") {
+    java_files = invoker.java_files
+    dex_path = base_path + ".dex.jar"
+  }
+
+  final_deps += [":${target_name}__final_dex"]
+  dex("${target_name}__final_dex") {
+    sources = [jar_path]
+    inputs = [build_config]
+    output = final_dex_path
+    dex_arg_key = "${rebased_build_config}:apk_dex:dependency_dex_files"
+    args = ["--inputs=@FileArg($dex_arg_key)"]
+  }
+
+  final_deps += [":${target_name}__create"]
+  create_apk("${target_name}__create") {
+    apk_path = invoker.final_apk_path
+    android_manifest = invoker.android_manifest
+    resources_zip = all_resources_zip_path
+    dex_path = final_dex_path
+
+    keystore_name = _keystore_name
+    keystore_path = _keystore_path
+    keystore_password = _keystore_password
+
+    # TODO: native libs
+  }
+
+  group(target_name) {
+    deps = final_deps
+  }
+}
+
+
+# Declare an Android gtest apk
+#
+# This target creates an Android apk for running gtest-based unittests.
+#
+# Variables
+#   deps: Specifies the dependencies of this target. These will be passed to
+#     the underlying android_apk invocation and should include the java and
+#     resource dependencies of the apk.
+#   unittests_dep: This should be the label of the gtest native target. This
+#     target must be defined previously in the same file.
+#
+# Example
+#   unittest_apk("foo_unittests_apk") {
+#     deps = [ ":foo_java", ":foo_resources" ]
+#     unittests_dep = ":foo_unittests"
+#   }
+template("unittest_apk") {
+  test_suite_name = get_label_info(invoker.unittests_dep, "name")
+  android_apk(target_name) {
+    apk_name = test_suite_name
+    final_apk_path = "$root_build_dir/${apk_name}_apk/${apk_name}-debug.apk"
+    java_files = [
+      "//testing/android/java/src/org/chromium/native_test/ChromeNativeTestActivity.java"
+    ]
+    android_manifest = "//testing/android/java/AndroidManifest.xml"
+    unittests_outputs = get_target_outputs(invoker.unittests_dep)
+    native_libs = [unittests_outputs[0]]
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
+  }
+}

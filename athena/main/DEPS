@@ -1,0 +1,50 @@
+include_rules = [
+  "+athena/activity/public",
+  "+athena/content/public",
+  "+athena/home/public",
+  "+athena/input/public",
+  "+athena/screen/public",
+  "+athena/system/public",
+  "+athena/task/public",
+  "+athena/virtual_keyboard/public",
+  "+athena/wm/public",
+  "+components/metrics/proto",
+  "+components/omnibox",
+  "+components/search_engines",
+  "+content/public",
+  "+grit",
+  "+net",
+  "+ui/aura",
+  "+ui/app_list",
+  "+ui/base",
+  "+ui/compositor",
+  "+ui/events",
+  "+ui/gl",
+  "+ui/keyboard",
+  "+ui/native_theme",
+  "+ui/views",
+  "+ui/wm/core",
+]
+
+specific_include_rules = {
+  "athena_main\.cc": [
+    "+content/public/app",
+    "+extensions/shell/app",
+    "+extensions/shell/browser",
+    "+extensions/shell/common",
+    "+extensions/shell/renderer",
+  ],
+  "athena_app_window_controller\.*": [
+    "+extensions/shell/browser",
+  ],
+  "athena_shell\.cc": [
+    "+athena/test",
+  ],
+# TODO(oshima): Remove this.
+  "placeholder\.*": [
+    "+third_party/skia",
+    "+ui/gfx",
+    "+ui/views",
+  ],
+}
+

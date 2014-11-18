@@ -1,0 +1,55 @@
+/* Copyright 2014 The Chromium Authors. All rights reserved.
+   Use of this source code is governed by a BSD-style license that can be
+   found in the LICENSE file.
+*/
+@font-face {
+  font-family: 'Roboto2';
+  font-weight: 400;
+  src: local('Roboto'), local('Roboto2-Regular'),
+      url(/roboto.woff2) format('woff2'), url(/roboto.woff) format('woff');
+}
+
+body {
+  font-family: 'Roboto2', sans-serif;
+  font-size: 1em;
+  margin: 0;
+}
+
+p {
+  margin: 1.5em;
+  text-align: justify;
+}
+
+a {
+  color: black;
+}
+
+.colored {
+  color: rgb(66, 133, 244);
+}
+
+.label {
+  display: inline-block;
+  padding: 1.5em;
+  white-space: nowrap;
+}
+
+.label a {
+  font-weight: bold;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+#button-container {
+  position: fixed;
+  text-align: right;
+  top: calc(70% - 76px /* action bar */ - 69px /* height of content */);
+  width: 100%;
+}
+
+#container.hide {
+  -webkit-transform: scale(0.95);
+  -webkit-transition-property: opacity, -webkit-transform;
+  -webkit-transition-duration: 218ms;
+  opacity: 0;
+}

@@ -1,0 +1,45 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="../model/ct-builder.html">
+<link rel="import" href="ct-builder.html">
+
+<polymer-element name="ct-builder-grid" attributes="failures">
+  <template>
+    <template repeat="{{ builder in _builders }}">
+      <ct-builder builder="{{ builder }}"></ct-builder>
+    </template>
+  </template>
+  <script>
+    Polymer({
+      failures: null,
+      _builders: null,
+
+      failuresChanged: function() {
+        var builderMap = {};
+        this.failures.forEach(function(failure) {
+          var results = failure.resultNodesByBuilder;
+          Object.keys(results, (function(builder, result) {
+            if (!builderMap[builder])
+              builderMap[builder] = {};
+            // This assumes that duplicate builder/master pairs all have the same
+            // earliestFailingBuild.
+            builderMap[builder][result.masterUrl] = result.earliestFailingBuild;
+          }).bind(this));
+        }, this);
+
+        this._builders = [];
+
+        Object.keys(builderMap).sort().forEach(function(builder) {
+          Object.keys(builderMap[builder]).sort().forEach(function(masterUrl) {
+            this._builders.push(new CTBuilder(masterUrl, builder,
+                builderMap[builder][masterUrl]));
+          }, this);
+        }, this);
+      },
+    });
+  </script>
+</polymer-element>

@@ -1,0 +1,53 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//mojo/public/tools/bindings/mojom.gni")
+import("//mojo/system.gni")
+
+config("mojo_use_gles2") {
+  defines = [ "MOJO_USE_GLES2_IMPL" ]
+}
+
+config("gles2_use_mojo") {
+  defines = [ "USE_MOJO_GLES2" ]
+}
+
+# GYP version: mojo/mojo_base.gyp:mojo_gles2_impl
+component("gles2") {
+  output_name = "mojo_gles2_impl"
+
+  deps = [
+    "//base",
+    "//base/third_party/dynamic_annotations",
+    "//gpu/command_buffer/client",
+    "//gpu/command_buffer/common",
+    "//gpu/command_buffer/client:gles2_implementation",
+    "//mojo/public/gles2",
+    "//mojo/services/gles2:bindings",
+    "//mojo/services/gles2:interfaces",
+    "//mojo/environment:chromium",
+  ]
+  deps += mojo_system_for_component
+
+  defines = [
+    "MOJO_GLES2_IMPL_IMPLEMENTATION",
+    "MOJO_GLES2_IMPLEMENTATION",
+  ]
+
+  configs += [
+    ":gles2_use_mojo",
+    ":mojo_use_gles2",
+  ]
+  direct_dependent_configs = [ ":gles2_use_mojo" ]
+  all_dependent_configs = [ ":mojo_use_gles2" ]
+
+  sources = [
+    "command_buffer_client_impl.cc",
+    "command_buffer_client_impl.h",
+    "gles2_impl_export.h",
+    "gles2_impl.cc",
+    "gles2_context.cc",
+    "gles2_context.h",
+  ]
+}

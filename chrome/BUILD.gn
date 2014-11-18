@@ -1,0 +1,62 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/features.gni")
+
+# GYP version: chrome/chrome_resources.gyp:chrome_resources
+group("resources") {
+  deps = [
+    # Note: GYP lists some dependencies in addition to these actions. However,
+    # these are just dependencies for the actions themselves, which our actions
+    # list individually when needed.
+    "//chrome/browser:resources",
+    "//chrome/common:resources",
+    "//chrome/renderer:resources",
+  ]
+
+  if (enable_extensions) {
+    deps += [ "//chrome/common:extensions_api_resources" ]
+  }
+}
+
+# GYP version: chrome/chrome_resources.gyp:chrome_extra_resources
+group("extra_resources") {
+  deps = [
+    "//chrome/browser/resources:invalidations_resources",
+    "//chrome/browser/resources:memory_internals_resources",
+    "//chrome/browser/resources:net_internals_resources",
+    "//chrome/browser/resources:password_manager_internals_resources",
+    "//chrome/browser/resources:signin_internals_resources",
+    "//chrome/browser/resources:sync_internals_resources",
+    "//chrome/browser/resources:translate_internals_resources",
+  ]
+  if (!is_ios) {
+    deps += [
+      "//chrome/browser/resources:component_extension_resources",
+      "//chrome/browser/resources:options_resources",
+      "//chrome/browser/resources:quota_internals_resources",
+      "//chrome/browser/resources:sync_file_system_internals_resources",
+    ]
+  }
+
+  if (enable_chromevox_next) {
+    deps += [
+      #'browser/resources/chromeos/chromevox2/chromevox.gyp:chromevox2',  TODO(GYP)
+    ]
+  } else {
+    deps += [
+      #'browser/resources/chromeos/chromevox/chromevox.gyp:chromevox',  TODO(GYP)
+    ]
+  }
+}
+
+# GYP version: chrome/chrome_resources.gyp:chrome_strings
+group("strings") {
+  deps = [
+    "//chrome/app:chromium_strings",
+    "//chrome/app:generated_resources",
+    "//chrome/app:google_chrome_strings",
+    "//chrome/app/resources:locale_settings",
+  ]
+}

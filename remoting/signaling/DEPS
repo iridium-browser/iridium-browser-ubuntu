@@ -1,0 +1,6 @@
+include_rules = [
+  "+net",
+  "+jingle",
+  "+third_party/libjingle",
+  "+third_party/webrtc/base",
+]

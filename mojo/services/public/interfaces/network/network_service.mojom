@@ -1,0 +1,18 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import "mojo/services/public/interfaces/network/cookie_store.mojom"
+import "mojo/services/public/interfaces/network/url_loader.mojom"
+
+module mojo {
+
+interface NetworkService {
+  CreateURLLoader(URLLoader& loader);
+
+  GetCookieStore(CookieStore& cookie_store);
+
+  // TODO(darin): Add other methods here.
+};
+
+}

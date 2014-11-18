@@ -1,0 +1,19 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+[
+    WillBeGarbageCollected,
+    NoInterfaceObject,
+    Exposed=ServiceWorker,
+    RuntimeEnabled=ServiceWorker,
+] interface CacheStorage {
+  [CallWith=ScriptState] Promise get(ScalarValueString cacheName);
+  [CallWith=ScriptState] Promise has(ScalarValueString cacheName);
+  [CallWith=ScriptState, ImplementedAs=createFunction] Promise create(ScalarValueString cacheName);
+  [CallWith=ScriptState, ImplementedAs=deleteFunction] Promise delete(ScalarValueString cacheName);
+  [CallWith=ScriptState] Promise keys();
+  // FIXME: From https://github.com/slightlyoff/ServiceWorker/issues/372 and the updated
+  // https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#cache-storage ,
+  // we have yet to implement match().
+};

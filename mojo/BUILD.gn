@@ -1,0 +1,27 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+group("mojo") {
+  deps = [
+    "//mojo/common",
+    "//mojo/public",
+    "//mojo/services",
+    "//mojo/shell:mojo_shell",
+    "//mojo/shell:mojo_shell_tests",
+  ]
+}
+
+if (is_android) {
+  import("//build/config/android/rules.gni")
+
+  generate_jni("jni_headers") {
+    sources = [
+      "android/javatests/src/org/chromium/mojo/MojoTestCase.java",
+      "android/system/src/org/chromium/mojo/system/impl/CoreImpl.java",
+      "services/native_viewport/android/src/org/chromium/mojo/PlatformViewportAndroid.java",
+    ]
+
+    jni_package = "mojo"
+  }
+}

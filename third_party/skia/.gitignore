@@ -1,0 +1,15 @@
+*.pyc
+*.swp
+.DS_Store
+.android_config
+.gclient*
+.gm-actuals
+TAGS
+common
+gyp/build
+out
+platform_tools/chromeos/third_party/externals
+platform_tools/chromeos/toolchain
+third_party/externals
+tools/bug_chomper/oauth_client_secret.json
+xcodebuild

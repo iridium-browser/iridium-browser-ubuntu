@@ -1,0 +1,35 @@
+/* Copyright 2014 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+.cast-menu {
+  border: 1px solid #7f7f7f;
+  border-radius: 1px;
+  min-width: 120px;
+  padding: 0;
+  position: absolute;
+  z-index: 1000;
+}
+
+.cast-menu.hidden {
+  display: none;
+}
+
+.cast-menu > :not(hr) {
+  -webkit-padding-end: 14px;
+  -webkit-padding-start: 19px;
+  background-color: #fff;
+  font-size: 12px;
+  padding-bottom: 5px;
+  padding-top: 5px;
+  text-overflow: ellipsis;
+}
+
+.cast-menu > [checked]:not(hr) {
+  /* A checkmark has 19 px width. */
+  -webkit-padding-start: 0;
+}
+
+.cast-menu > :not(hr):hover {
+  background-color: #eee;
+}
