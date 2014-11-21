@@ -1,3 +1,4 @@
 debian/iridium-browser.desktop usr/share/applications
 debian/iridium-browser.xml usr/share/gnome-control-center/default-apps
 debian/apport/iridium-browser.py usr/share/apport/package-hooks/
+debian/master_preferences usr/lib/iridium-browser

@@ -1,0 +1,29 @@
+{
+  "distribution": {
+     "skip_first_run_ui": true,
+     "import_bookmarks_from_file": "/etc/chromium/default_bookmarks.html",
+     "alternate_shortcut_text": false,
+     "oem_bubble": true,
+     "chrome_shortcut_icon_index": 0,
+     "create_all_shortcuts": true,
+     "show_welcome_page": true,
+     "make_chrome_default": false,
+     "make_chrome_default_for_user": false,
+     "system_level": false,
+     "verbose_logging": false
+  },
+  "browser": {
+     "show_home_button": true,
+     "check_default_browser": false
+  },
+  "bookmark_bar": {
+     "show_on_all_tabs": true
+  },
+/*
+  "first_run_tabs": [
+     "http://inai.de/iridium",
+  ],
+  "homepage": "about:blank",
+*/
+  "homepage_is_newtabpage": false
+}
