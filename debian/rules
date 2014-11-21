@@ -340,7 +340,7 @@ endif
 	cp -a debian/iridium-browser.default debian/iridium-browser/etc/iridium-browser/default
 
 	# Rename the binary from chrome to iridium-browser, this is required as
-	# iridium dereferences all symlinks before starting its children making
+	# Iridium dereferences all symlinks before starting its children making
 	# the Gnome System Monitor confused with icons
 	mv debian/iridium-browser/$(LIB_DIR)/chrome debian/iridium-browser/$(LIB_DIR)/iridium-browser
 

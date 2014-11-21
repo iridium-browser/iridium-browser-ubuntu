@@ -3,7 +3,7 @@
 <default-apps>
   <web-browsers>
     <web-browser>
-      <name>iridium browser</name>
+      <name>Iridium browser</name>
       <executable>iridium-browser</executable>
       <command>iridium-browser %s</command>
       <icon-name>iridium-browser</icon-name>

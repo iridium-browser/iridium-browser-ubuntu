@@ -52,8 +52,8 @@ Recommends: iridium-browser-l10n
 Provides: www-browser, iridium-browser-inspector
 Replaces: iridium-browser-inspector
 Conflicts: iridium-browser-inspector
-Description: iridium browser
- iridium is a free, open, and libre browser modification of the Chromium code
+Description: Iridium browser
+ Iridium is a free, open, and libre browser modification of the Chromium code
  base, with privacy being enhanced in several key areas. Automatic transmission
  of partial queries, keywords, metrics to central services inhibited and only
  occurs with consent.
@@ -61,7 +61,7 @@ Description: iridium browser
  In addition, all our builds are reproducible, and modifications are auditable,
  setting the project ahead of other secure browser providers.
  .
- This package contains the iridium browser
+ This package contains the Iridium browser
 
 Package: iridium-browser-dbg
 Architecture: armhf armel i386 amd64
@@ -70,7 +70,7 @@ Section: debug
 Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${misc:Depends}, iridium-browser (= ${binary:Version})
 Description: iridium-browser debug symbols
- Debug symbols for the iridium browser
+ Debug symbols for the Iridium browser
 
 Package: iridium-browser-l10n
 Architecture: all
@@ -79,7 +79,7 @@ Depends: ${misc:Depends}, iridium-browser (>= ${binary:Version}),
  iridium-browser (<< ${binary:Version}.1~)
 Replaces: iridium-browser
 Description: iridium-browser language packages
- iridium is a free, open, and libre browser modification of the Chromium code
+ Iridium is a free, open, and libre browser modification of the Chromium code
  base, with privacy being enhanced in several key areas. Automatic transmission
  of partial queries, keywords, metrics to central services inhibited and only
  occurs with consent.
@@ -96,8 +96,8 @@ Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Conflicts: iridium-codecs-ffmpeg-extra
 Replaces: iridium-codecs-ffmpeg-extra
-Description: Free ffmpeg codecs for the iridium Browser
- iridium is a free, open, and libre browser modification of the Chromium code
+Description: Free ffmpeg codecs for the Iridium Browser
+ Iridium is a free, open, and libre browser modification of the Chromium code
  base, with privacy being enhanced in several key areas. Automatic transmission
  of partial queries, keywords, metrics to central services inhibited and only
  occurs with consent.
@@ -123,8 +123,8 @@ Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Conflicts: iridium-codecs-ffmpeg
 Replaces: iridium-codecs-ffmpeg
-Description: Extra ffmpeg codecs for the iridium Browser
- iridium is a free, open, and libre browser modification of the Chromium code
+Description: Extra ffmpeg codecs for the Iridium Browser
+ Iridium is a free, open, and libre browser modification of the Chromium code
  base, with privacy being enhanced in several key areas. Automatic transmission
  of partial queries, keywords, metrics to central services inhibited and only
  occurs with consent.
@@ -149,8 +149,8 @@ Package: iridium-chromedriver
 Architecture: armhf armel i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (>= 4.0.203.0~)
-Description: WebDriver driver for the iridium Browser
- Chromedriver serves as a bridge between iridium Browser and Selenium 
+Description: WebDriver driver for the Iridium Browser
+ Chromedriver serves as a bridge between Iridium Browser and Selenium 
  WebDriver.
  .
  See http://code.google.com/p/selenium/wiki/ChromeDriver for details.
