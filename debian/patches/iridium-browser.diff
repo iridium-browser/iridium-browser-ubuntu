@@ -1,0 +1,2395 @@
+diff --git a/build/mac/tweak_info_plist.py b/build/mac/tweak_info_plist.py
+index 4a6c475..6707923 100755
+--- a/build/mac/tweak_info_plist.py
++++ b/build/mac/tweak_info_plist.py
+@@ -179,7 +179,7 @@ def _AddKeystoneKeys(plist, bundle_identifier):
+   also requires the |bundle_identifier| argument (com.example.product)."""
+   plist['KSVersion'] = plist['CFBundleShortVersionString']
+   plist['KSProductID'] = bundle_identifier
+-  plist['KSUpdateURL'] = 'https://tools.google.com/service/update2'
++  plist['KSUpdateURL'] = 'https://132.trk.iridiumbrowser.de/tools.google.com/service/update2'
+ 
+   _RemoveKeys(plist, 'KSChannelID')
+   for tag_suffix in _TagSuffixes():
+@@ -239,7 +239,7 @@ def Main(argv):
+       return 1
+     _AddBreakpadKeys(plist, options.branding)
+     if options.breakpad_uploads:
+-      plist['BreakpadURL'] = 'https://clients2.google.com/cr/report'
++      plist['BreakpadURL'] = 'https://133.trk.iridiumbrowser.de/clients2.google.com/cr/report'
+     else:
+       # This allows crash dumping to a file without uploading the
+       # dump, for testing purposes.  Breakpad does not recognise
+diff --git a/chrome/browser/background/background_mode_manager.cc b/chrome/browser/background/background_mode_manager.cc
+index d446626..6452a7c 100644
+--- a/chrome/browser/background/background_mode_manager.cc
++++ b/chrome/browser/background/background_mode_manager.cc
+@@ -278,7 +278,7 @@ void BackgroundModeManager::RegisterPrefs(PrefRegistrySimple* registry) {
+   registry->RegisterBooleanPref(prefs::kChromeCreatedLoginItem, false);
+   registry->RegisterBooleanPref(prefs::kMigratedLoginItemPref, false);
+ #endif
+-  registry->RegisterBooleanPref(prefs::kBackgroundModeEnabled, true);
++  registry->RegisterBooleanPref(prefs::kBackgroundModeEnabled, false);
+ }
+ 
+ 
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 5890400..b188f46 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -625,7 +625,7 @@ void ChromeContentBrowserClient::RegisterProfilePrefs(
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kEnableHyperlinkAuditing,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterListPref(
+       prefs::kEnableDeprecatedWebPlatformFeatures,
+diff --git a/chrome/browser/chrome_process_finder_win.cc b/chrome/browser/chrome_process_finder_win.cc
+index 1599dac..792122d 100644
+--- a/chrome/browser/chrome_process_finder_win.cc
++++ b/chrome/browser/chrome_process_finder_win.cc
+@@ -106,7 +106,7 @@ NotifyChromeResult AttemptToNotifyRunningChrome(HWND remote_window,
+                                                 bool fast_start) {
+   DCHECK(remote_window);
+   static const char kSearchUrl[] =
+-      "http://www.google.com/search?q=%s&sourceid=chrome&ie=UTF-8";
++      "http://134.trk.iridiumbrowser.de/www.google.com/search?q=%s&sourceid=chrome&ie=UTF-8";
+   DWORD process_id = 0;
+   DWORD thread_id = GetWindowThreadProcessId(remote_window, &process_id);
+   if (!thread_id || !process_id)
+diff --git a/chrome/browser/component_updater/component_updater_configurator.cc b/chrome/browser/component_updater/component_updater_configurator.cc
+index 3d403bb..3034ed0 100644
+--- a/chrome/browser/component_updater/component_updater_configurator.cc
++++ b/chrome/browser/component_updater/component_updater_configurator.cc
+@@ -44,7 +44,7 @@ extern const char kSwitchDisablePings[] = "disable-pings";
+ const char kSwitchUrlSource[] = "url-source";
+ 
+ #define COMPONENT_UPDATER_SERVICE_ENDPOINT \
+-  "//clients2.google.com/service/update2"
++  "//02.trk.iridiumbrowser.de/clients2.google.com/service/update2"
+ 
+ // The default url for the v3 protocol service endpoint. Can be
+ // overridden with --component-updater=url-source=someurl.
+diff --git a/chrome/browser/content_settings/content_settings_default_provider.cc b/chrome/browser/content_settings/content_settings_default_provider.cc
+index 143b2c5..b17776a 100644
+--- a/chrome/browser/content_settings/content_settings_default_provider.cc
++++ b/chrome/browser/content_settings/content_settings_default_provider.cc
+@@ -33,7 +33,7 @@ namespace {
+ 
+ // The default setting for each content type.
+ const ContentSetting kDefaultSettings[] = {
+-  CONTENT_SETTING_ALLOW,    // CONTENT_SETTINGS_TYPE_COOKIES
++  CONTENT_SETTING_SESSION_ONLY,// CONTENT_SETTINGS_TYPE_COOKIES
+   CONTENT_SETTING_ALLOW,    // CONTENT_SETTINGS_TYPE_IMAGES
+   CONTENT_SETTING_ALLOW,    // CONTENT_SETTINGS_TYPE_JAVASCRIPT
+   CONTENT_SETTING_ALLOW,    // CONTENT_SETTINGS_TYPE_PLUGINS
+diff --git a/chrome/browser/content_settings/cookie_settings.cc b/chrome/browser/content_settings/cookie_settings.cc
+index 2b162aa..cb98c4f 100644
+--- a/chrome/browser/content_settings/cookie_settings.cc
++++ b/chrome/browser/content_settings/cookie_settings.cc
+@@ -68,7 +68,7 @@ void CookieSettings::Factory::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kBlockThirdPartyCookies,
+-      false,
++      true,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ }
+ 
+diff --git a/chrome/browser/drive/drive_api_service.cc b/chrome/browser/drive/drive_api_service.cc
+index e2f42be..e0e27e1 100644
+--- a/chrome/browser/drive/drive_api_service.cc
++++ b/chrome/browser/drive/drive_api_service.cc
+@@ -79,7 +79,7 @@ const char kDriveScope[] = "https://www.googleapis.com/auth/drive";
+ const char kDriveAppsReadonlyScope[] =
+     "https://www.googleapis.com/auth/drive.apps.readonly";
+ const char kDriveAppsScope[] = "https://www.googleapis.com/auth/drive.apps";
+-const char kDocsListScope[] = "https://docs.google.com/feeds/";
++const char kDocsListScope[] = "https://135.trk.iridiumbrowser.de/docs.google.com/feeds/";
+ 
+ // Mime type to create a directory.
+ const char kFolderMimeType[] = "application/vnd.google-apps.folder";
+diff --git a/chrome/browser/extensions/extension_system_impl.cc b/chrome/browser/extensions/extension_system_impl.cc
+index 36f3894..2956270 100644
+--- a/chrome/browser/extensions/extension_system_impl.cc
++++ b/chrome/browser/extensions/extension_system_impl.cc
+@@ -313,6 +313,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
+   runtime_data_.reset(new RuntimeData(ExtensionRegistry::Get(profile_)));
+ 
+   bool autoupdate_enabled = !profile_->IsGuestSession();
++  if (autoupdate_enabled)
++    fprintf(stderr, "*** autoupdate was enabled, overriding with false\n");
++  autoupdate_enabled = false;
+ #if defined(OS_CHROMEOS)
+   if (!extensions_enabled)
+     autoupdate_enabled = false;
+diff --git a/chrome/browser/first_run/first_run_internal_posix.cc b/chrome/browser/first_run/first_run_internal_posix.cc
+index 2cd4b61..3c26a91 100644
+--- a/chrome/browser/first_run/first_run_internal_posix.cc
++++ b/chrome/browser/first_run/first_run_internal_posix.cc
+@@ -17,6 +17,7 @@
+ #include "chrome/installer/util/google_update_settings.h"
+ #include "chrome/installer/util/master_preferences.h"
+ #include "components/startup_metric_utils/startup_metric_utils.h"
++#include <cstdio>
+ 
+ namespace first_run {
+ namespace internal {
+@@ -37,6 +38,7 @@ void DoPostImportPlatformSpecificTasks(Profile* profile) {
+   // the pref (on Windows, the download is tagged with enable/disable stats so
+   // this is POSIX-specific).
+   if (GoogleUpdateSettings::GetCollectStatsConsent()) {
++    fprintf(stderr, "*** metrics_reporting = 1\n");
+     g_browser_process->local_state()->SetBoolean(
+         prefs::kMetricsReportingEnabled, true);
+   }
+diff --git a/chrome/browser/first_run/try_chrome_dialog_view.cc b/chrome/browser/first_run/try_chrome_dialog_view.cc
+index ff4bb0b..874a662 100644
+--- a/chrome/browser/first_run/try_chrome_dialog_view.cc
++++ b/chrome/browser/first_run/try_chrome_dialog_view.cc
+@@ -36,7 +36,7 @@
+ namespace {
+ 
+ const wchar_t kHelpCenterUrl[] =
+-    L"https://www.google.com/support/chrome/bin/answer.py?answer=150752";
++    L"https://136.trk.iridiumbrowser.de/www.google.com/support/chrome/bin/answer.py?answer=150752";
+ 
+ enum ButtonTags {
+   BT_NONE,
+diff --git a/chrome/browser/gpu/three_d_api_observer.cc b/chrome/browser/gpu/three_d_api_observer.cc
+index 4042257..8318b89 100644
+--- a/chrome/browser/gpu/three_d_api_observer.cc
++++ b/chrome/browser/gpu/three_d_api_observer.cc
+@@ -146,7 +146,7 @@ base::string16 ThreeDAPIInfoBarDelegate::GetLinkText() const {
+ bool ThreeDAPIInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
+   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+       content::OpenURLParams(
+-          GURL("https://support.google.com/chrome/?p=ib_webgl"),
++          GURL("https://137.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_webgl"),
+           content::Referrer(),
+           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+           content::PAGE_TRANSITION_LINK, false));
+diff --git a/chrome/browser/history/web_history_service.cc b/chrome/browser/history/web_history_service.cc
+index 7f0a806..e68621d 100644
+--- a/chrome/browser/history/web_history_service.cc
++++ b/chrome/browser/history/web_history_service.cc
+@@ -32,13 +32,13 @@ namespace history {
+ namespace {
+ 
+ const char kHistoryOAuthScope[] =
+-    "https://www.googleapis.com/auth/chromesync";
++    "https://138.trk.iridiumbrowser.de/www.googleapis.com/auth/chromesync";
+ 
+ const char kHistoryQueryHistoryUrl[] =
+-    "https://history.google.com/history/api/lookup?client=chrome";
++    "https://139.trk.iridiumbrowser.de/history.google.com/history/api/lookup?client=chrome";
+ 
+ const char kHistoryDeleteHistoryUrl[] =
+-    "https://history.google.com/history/api/delete?client=chrome";
++    "https://140.trk.iridiumbrowser.de/history.google.com/history/api/delete?client=chrome";
+ 
+ const char kPostDataMimeType[] = "text/plain";
+ 
+diff --git a/chrome/browser/infobars/insecure_content_infobar_delegate.cc b/chrome/browser/infobars/insecure_content_infobar_delegate.cc
+index b427c0c..198c180 100644
+--- a/chrome/browser/infobars/insecure_content_infobar_delegate.cc
++++ b/chrome/browser/infobars/insecure_content_infobar_delegate.cc
+@@ -111,7 +111,7 @@ bool InsecureContentInfoBarDelegate::LinkClicked(
+     WindowOpenDisposition disposition) {
+   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+       content::OpenURLParams(
+-          GURL("https://www.google.com/"
++          GURL("https://141.trk.iridiumbrowser.de/www.google.com/"
+                "support/chrome/bin/answer.py?answer=1342714"),
+           content::Referrer(),
+           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+diff --git a/chrome/browser/io_thread.cc b/chrome/browser/io_thread.cc
+index 3c462c7..7ce72ca 100644
+--- a/chrome/browser/io_thread.cc
++++ b/chrome/browser/io_thread.cc
+@@ -208,10 +208,9 @@ scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
+ #endif
+ 
+   // Determine if we should disable IPv6 support.
++  global_host_resolver->SetDefaultAddressFamily(
++      net::ADDRESS_FAMILY_UNSPECIFIED); /* disable probing: use both v6 and v4 by default */
+   if (command_line.HasSwitch(switches::kEnableIPv6)) {
+-    // Disable IPv6 probing.
+-    global_host_resolver->SetDefaultAddressFamily(
+-        net::ADDRESS_FAMILY_UNSPECIFIED);
+   } else if (command_line.HasSwitch(switches::kDisableIPv6)) {
+     global_host_resolver->SetDefaultAddressFamily(net::ADDRESS_FAMILY_IPV4);
+   }
+diff --git a/chrome/browser/media/webrtc_log_uploader.cc b/chrome/browser/media/webrtc_log_uploader.cc
+index 98b22c3..b2ae118 100644
+--- a/chrome/browser/media/webrtc_log_uploader.cc
++++ b/chrome/browser/media/webrtc_log_uploader.cc
+@@ -29,7 +29,7 @@ const int kLogCountLimit = 5;
+ const uint32 kIntermediateCompressionBufferBytes = 256 * 1024;  // 256 KB
+ const int kLogListLimitLines = 50;
+ 
+-const char kUploadURL[] = "https://clients2.google.com/cr/report";
++const char kUploadURL[] = "https://01.trk.iridiumbrowser.de/clients2.google.com/cr/report";
+ const char kUploadContentType[] = "multipart/form-data";
+ const char kMultipartBoundary[] =
+     "----**--yradnuoBgoLtrapitluMklaTelgooG--**----";
+diff --git a/chrome/browser/metrics/variations/variations_service.cc b/chrome/browser/metrics/variations/variations_service.cc
+index 8a56747..e714c458 100644
+--- a/chrome/browser/metrics/variations/variations_service.cc
++++ b/chrome/browser/metrics/variations/variations_service.cc
+@@ -54,7 +54,7 @@ namespace {
+ 
+ // Default server of Variations seed info.
+ const char kDefaultVariationsServerURL[] =
+-    "https://clients4.google.com/chrome-variations/seed";
++    "https://142.trk.iridiumbrowser.de/clients4.google.com/chrome-variations/seed";
+ const int kMaxRetrySeedFetch = 5;
+ 
+ // TODO(mad): To be removed when we stop updating the NetworkTimeTracker.
+diff --git a/chrome/browser/nacl_host/nacl_infobar_delegate.cc b/chrome/browser/nacl_host/nacl_infobar_delegate.cc
+index e488865..783411f 100644
+--- a/chrome/browser/nacl_host/nacl_infobar_delegate.cc
++++ b/chrome/browser/nacl_host/nacl_infobar_delegate.cc
+@@ -52,7 +52,7 @@ base::string16 NaClInfoBarDelegate::GetLinkText() const {
+ bool NaClInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
+   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+       content::OpenURLParams(
+-          GURL("https://support.google.com/chrome/?p=ib_nacl"),
++          GURL("https://143.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_nacl"),
+           content::Referrer(),
+           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+           content::PAGE_TRANSITION_LINK, false));
+diff --git a/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc b/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc
+index f666c87..001b5bf 100644
+--- a/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc
++++ b/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc
+@@ -24,7 +24,7 @@ namespace chrome_browser_net {
+ // TODO(palmer): Switch to HTTPS when the error handling delegate is more
+ // sophisticated. Ultimately we plan to attempt the report on many transports.
+ static const char kFraudulentCertificateUploadEndpoint[] =
+-    "http://clients3.google.com/log_cert_error";
++    "http://31.trk.iridiumbrowser.de/clients3.google.com/log_cert_error";
+ 
+ ChromeFraudulentCertificateReporter::ChromeFraudulentCertificateReporter(
+     net::URLRequestContext* request_context)
+diff --git a/chrome/browser/net/net_pref_observer.cc b/chrome/browser/net/net_pref_observer.cc
+index ad14084..8fbc781 100644
+--- a/chrome/browser/net/net_pref_observer.cc
++++ b/chrome/browser/net/net_pref_observer.cc
+@@ -51,7 +51,7 @@ void NetPrefObserver::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kNetworkPredictionEnabled,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kDisableSpdy,
+diff --git a/chrome/browser/plugins/plugin_infobar_delegates.cc b/chrome/browser/plugins/plugin_infobar_delegates.cc
+index d9c99be..c86e5b9 100644
+--- a/chrome/browser/plugins/plugin_infobar_delegates.cc
++++ b/chrome/browser/plugins/plugin_infobar_delegates.cc
+@@ -394,7 +394,7 @@ bool PluginInstallerInfoBarDelegate::LinkClicked(
+   GURL url(plugin_metadata_->help_url());
+   if (url.is_empty()) {
+     url = GURL(
+-        "https://www.google.com/support/chrome/bin/answer.py?answer=142064");
++        "https://145.trk.iridiumbrowser.de/www.google.com/support/chrome/bin/answer.py?answer=142064");
+   }
+   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+       content::OpenURLParams(
+@@ -523,8 +523,8 @@ bool PluginMetroModeInfoBarDelegate::LinkClicked(
+   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+       content::OpenURLParams(
+           GURL((mode_ == MISSING_PLUGIN) ?
+-              "https://support.google.com/chrome/?p=ib_display_in_desktop" :
+-              "https://support.google.com/chrome/?p=ib_redirect_to_desktop"),
++              "https://146.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_display_in_desktop" :
++              "https://147.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_redirect_to_desktop"),
+           content::Referrer(),
+           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+           content::PAGE_TRANSITION_LINK, false));
+diff --git a/chrome/browser/prerender/prerender_field_trial.cc b/chrome/browser/prerender/prerender_field_trial.cc
+index d89a31d..f6b5bea 100644
+--- a/chrome/browser/prerender/prerender_field_trial.cc
++++ b/chrome/browser/prerender/prerender_field_trial.cc
+@@ -69,7 +69,7 @@ const char kSkipDefaultNoPrerender[] = "SkipDefaultNoPrerender";
+ const char kPrerenderServiceURLPrefixParameterName[] =
+     "PrerenderServiceURLPrefix";
+ const char kDefaultPrerenderServiceURLPrefix[] =
+-    "https://clients4.google.com/prerenderservice/?q=";
++    "https://144.trk.iridiumbrowser.de/clients4.google.com/prerenderservice/?q=";
+ const int kMinPrerenderServiceTimeoutMs = 1;
+ const int kMaxPrerenderServiceTimeoutMs = 10000;
+ const int kDefaultPrerenderServiceTimeoutMs = 1000;
+diff --git a/chrome/browser/profiles/profile.cc b/chrome/browser/profiles/profile.cc
+index 5b6162d..1fec43e 100644
+--- a/chrome/browser/profiles/profile.cc
++++ b/chrome/browser/profiles/profile.cc
+@@ -70,7 +70,7 @@ const char Profile::kProfileKey[] = "__PROFILE__";
+ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kSearchSuggestEnabled,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ #if defined(OS_ANDROID)
+   registry->RegisterStringPref(
+diff --git a/chrome/browser/resources/default_apps/external_extensions.json b/chrome/browser/resources/default_apps/external_extensions.json
+index 52aa500..ddb9360 100644
+--- a/chrome/browser/resources/default_apps/external_extensions.json
++++ b/chrome/browser/resources/default_apps/external_extensions.json
+@@ -29,11 +29,11 @@
+   },
+   // Google Sheets
+   "aapocclcgogkmnckokdopfmhonfmgoek" : {
+-    "external_update_url": "https://clients2.google.com/service/update2/crx"
++    "external_update_url": "https://03.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx"
+   },
+   // Google Slides
+   "felcaaldnbdncclmgdcncolpebgiejap" : {
+-    "external_update_url": "https://clients2.google.com/service/update2/crx"
++    "external_update_url": "https://04.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx"
+   }
+ }
+ 
+diff --git a/chrome/browser/resources/options/reset_profile_settings_overlay.html b/chrome/browser/resources/options/reset_profile_settings_overlay.html
+index 98d5248..66bef84 100644
+--- a/chrome/browser/resources/options/reset_profile_settings_overlay.html
++++ b/chrome/browser/resources/options/reset_profile_settings_overlay.html
+@@ -23,7 +23,7 @@
+   </div>
+   <div id="feedback-bar" class="gray-bottom-bar checkbox">
+     <span class="controlled-setting-with-label">
+-      <input id="send-settings" type="checkbox" checked>
++      <input id="send-settings" type="checkbox">
+       <span>
+         <label for="send-settings" i18n-content="resetProfileSettingsFeedback">
+         </label>
+diff --git a/chrome/browser/ui/browser_ui_prefs.cc b/chrome/browser/ui/browser_ui_prefs.cc
+index 447861e..357b00d 100644
+--- a/chrome/browser/ui/browser_ui_prefs.cc
++++ b/chrome/browser/ui/browser_ui_prefs.cc
+@@ -101,7 +101,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kEnableTranslate,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+   registry->RegisterStringPref(
+       prefs::kCloudPrintEmail,
+@@ -113,7 +113,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kCloudPrintSubmitEnabled,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kDevToolsDisabled,
+@@ -150,7 +150,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kEnableDoNotTrack,
+-      false,
++      true,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ 
+   // Dictionaries to keep track of default tasks in the file browser.
+diff --git a/chrome/browser/ui/navigation_correction_tab_observer.cc b/chrome/browser/ui/navigation_correction_tab_observer.cc
+index 53c4326..78977ce 100644
+--- a/chrome/browser/ui/navigation_correction_tab_observer.cc
++++ b/chrome/browser/ui/navigation_correction_tab_observer.cc
+@@ -54,7 +54,7 @@ NavigationCorrectionTabObserver::~NavigationCorrectionTabObserver() {
+ void NavigationCorrectionTabObserver::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* prefs) {
+   prefs->RegisterBooleanPref(prefs::kAlternateErrorPagesEnabled,
+-                             true,
++                             false,
+                              user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ }
+ 
+diff --git a/chrome/browser/web_resource/notification_promo.cc b/chrome/browser/web_resource/notification_promo.cc
+index 8999dd8..744b580 100644
+--- a/chrome/browser/web_resource/notification_promo.cc
++++ b/chrome/browser/web_resource/notification_promo.cc
+@@ -33,7 +33,7 @@ namespace {
+ 
+ const int kDefaultGroupSize = 100;
+ 
+-const char promo_server_url[] = "https://clients3.google.com/crsignal/client";
++const char promo_server_url[] = "about:blank";
+ 
+ // The name of the preference that stores the promotion object.
+ const char kPrefPromoObject[] = "promo";
+diff --git a/chrome/common/chrome_paths_linux.cc b/chrome/common/chrome_paths_linux.cc
+index 95dd086..51ed551 100644
+--- a/chrome/common/chrome_paths_linux.cc
++++ b/chrome/common/chrome_paths_linux.cc
+@@ -64,11 +64,7 @@ bool GetDefaultUserDataDirectory(base::FilePath* result) {
+   base::FilePath config_dir(GetXDGDirectory(env.get(),
+                                             kXdgConfigHomeEnvVar,
+                                             kDotConfigDir));
+-#if defined(GOOGLE_CHROME_BUILD)
+-  *result = config_dir.Append("google-chrome");
+-#else
+-  *result = config_dir.Append("chromium");
+-#endif
++  *result = config_dir.Append("iridium");
+   return true;
+ }
+ 
+diff --git a/chrome/common/chrome_version_info.cc b/chrome/common/chrome_version_info.cc
+index e197bd0..df1c1ba 100644
+--- a/chrome/common/chrome_version_info.cc
++++ b/chrome/common/chrome_version_info.cc
+@@ -18,7 +18,7 @@ namespace chrome {
+ std::string VersionInfo::ProductNameAndVersionForUserAgent() const {
+   if (!is_valid())
+     return std::string();
+-  return "Chrome/" + Version();
++  return "Iridium/" + Version();
+ }
+ 
+ #if defined(OS_WIN) || defined(OS_MACOSX)
+diff --git a/chrome/common/extensions/extension_constants.cc b/chrome/common/extensions/extension_constants.cc
+index c21de09..c959a85 100644
+--- a/chrome/common/extensions/extension_constants.cc
++++ b/chrome/common/extensions/extension_constants.cc
+@@ -49,12 +49,12 @@ GURL GetWebstoreSearchPageUrl(const std::string& query) {
+ }
+ 
+ const char kGalleryUpdateHttpsUrl[] =
+-    "https://clients2.google.com/service/update2/crx";
++    "https://05.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx";
+ // TODO(battre): Delete the HTTP URL once the blacklist is downloaded via HTTPS.
+ const char kExtensionBlocklistUrlPrefix[] =
+-    "http://www.gstatic.com/chrome/extensions/blacklist";
++    "http://19.trk.iridiumbrowser.de/www.gstatic.com/chrome/extensions/blacklist";
+ const char kExtensionBlocklistHttpsUrlPrefix[] =
+-    "https://www.gstatic.com/chrome/extensions/blacklist";
++    "https://20.trk.iridiumbrowser.de/www.gstatic.com/chrome/extensions/blacklist";
+ 
+ GURL GetWebstoreUpdateUrl() {
+   CommandLine* cmdline = CommandLine::ForCurrentProcess();
+diff --git a/components/autofill/core/browser/autofill_manager.cc b/components/autofill/core/browser/autofill_manager.cc
+index b8d824b..30480a8 100644
+--- a/components/autofill/core/browser/autofill_manager.cc
++++ b/components/autofill/core/browser/autofill_manager.cc
+@@ -192,7 +192,7 @@ void AutofillManager::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kAutofillEnabled,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ #if defined(OS_MACOSX)
+   registry->RegisterBooleanPref(
+diff --git a/components/breakpad/app/breakpad_linux.cc b/components/breakpad/app/breakpad_linux.cc
+index df9d588..aa06d65 100644
+--- a/components/breakpad/app/breakpad_linux.cc
++++ b/components/breakpad/app/breakpad_linux.cc
+@@ -77,7 +77,7 @@ namespace breakpad {
+ namespace {
+ 
+ #if !defined(OS_CHROMEOS)
+-const char kUploadURL[] = "https://clients2.google.com/cr/report";
++const char kUploadURL[] = "https://06.trk.iridiumbrowser.de/clients2.google.com/cr/report";
+ #endif
+ 
+ bool g_is_crash_reporter_enabled = false;
+diff --git a/components/breakpad/tools/crash_service.cc b/components/breakpad/tools/crash_service.cc
+index 425337f..4a88f69 100644
+--- a/components/breakpad/tools/crash_service.cc
++++ b/components/breakpad/tools/crash_service.cc
+@@ -24,7 +24,7 @@ namespace {
+ 
+ const wchar_t kTestPipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
+ 
+-const wchar_t kCrashReportURL[] = L"https://clients2.google.com/cr/report";
++const wchar_t kCrashReportURL[] = L"https://07.trk.iridiumbrowser.de/clients2.google.com/cr/report";
+ const wchar_t kCheckPointFile[] = L"crash_checkpoint.txt";
+ 
+ typedef std::map<std::wstring, std::wstring> CrashMap;
+diff --git a/components/domain_reliability/baked_in_configs/accounts_google_com.json b/components/domain_reliability/baked_in_configs/accounts_google_com.json
+index d66613a..0c84e73 100644
+--- a/components/domain_reliability/baked_in_configs/accounts_google_com.json
++++ b/components/domain_reliability/baked_in_configs/accounts_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "accounts.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://28.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://29.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/ad_doubleclick_net.json b/components/domain_reliability/baked_in_configs/ad_doubleclick_net.json
+index e042c4a..e5513ae 100644
+--- a/components/domain_reliability/baked_in_configs/ad_doubleclick_net.json
++++ b/components/domain_reliability/baked_in_configs/ad_doubleclick_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "ad.doubleclick.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://30.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://32.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/apis_google_com.json b/components/domain_reliability/baked_in_configs/apis_google_com.json
+index 6f442ea..20daf2b 100644
+--- a/components/domain_reliability/baked_in_configs/apis_google_com.json
++++ b/components/domain_reliability/baked_in_configs/apis_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "apis.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://08.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://21.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/c_admob_com.json b/components/domain_reliability/baked_in_configs/c_admob_com.json
+index 1de2ce7..7f1b14f 100644
+--- a/components/domain_reliability/baked_in_configs/c_admob_com.json
++++ b/components/domain_reliability/baked_in_configs/c_admob_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "c.admob.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://33.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://34.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/clients2_google_com.json b/components/domain_reliability/baked_in_configs/clients2_google_com.json
+index 18982df2..3f875a5 100644
+--- a/components/domain_reliability/baked_in_configs/clients2_google_com.json
++++ b/components/domain_reliability/baked_in_configs/clients2_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "clients2.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://35.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://36.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/csi_gstatic_com.json b/components/domain_reliability/baked_in_configs/csi_gstatic_com.json
+index 2cb1e82c..4ada44d 100644
+--- a/components/domain_reliability/baked_in_configs/csi_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/csi_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "csi.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://37.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://38.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/ddm_google_com.json b/components/domain_reliability/baked_in_configs/ddm_google_com.json
+index 4a33380..1eb882d 100644
+--- a/components/domain_reliability/baked_in_configs/ddm_google_com.json
++++ b/components/domain_reliability/baked_in_configs/ddm_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "ddm.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://09.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://22.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/docs_google_com.json b/components/domain_reliability/baked_in_configs/docs_google_com.json
+index 555d0ca..fe8a7fc 100644
+--- a/components/domain_reliability/baked_in_configs/docs_google_com.json
++++ b/components/domain_reliability/baked_in_configs/docs_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "docs.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://39.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://40.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/drive_google_com.json b/components/domain_reliability/baked_in_configs/drive_google_com.json
+index 7f9de68..2cd3bc1 100644
+--- a/components/domain_reliability/baked_in_configs/drive_google_com.json
++++ b/components/domain_reliability/baked_in_configs/drive_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "drive.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://10.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://23.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/e_admob_com.json b/components/domain_reliability/baked_in_configs/e_admob_com.json
+index 287ebea..61617c8 100644
+--- a/components/domain_reliability/baked_in_configs/e_admob_com.json
++++ b/components/domain_reliability/baked_in_configs/e_admob_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "e.admob.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://41.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://42.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/fonts_googleapis_com.json b/components/domain_reliability/baked_in_configs/fonts_googleapis_com.json
+index cb43d9a..73f936e 100644
+--- a/components/domain_reliability/baked_in_configs/fonts_googleapis_com.json
++++ b/components/domain_reliability/baked_in_configs/fonts_googleapis_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "fonts.googleapis.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://43.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://44.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/googleads4_g_doubleclick_net.json b/components/domain_reliability/baked_in_configs/googleads4_g_doubleclick_net.json
+index 4b1fb5d..f2b3197 100644
+--- a/components/domain_reliability/baked_in_configs/googleads4_g_doubleclick_net.json
++++ b/components/domain_reliability/baked_in_configs/googleads4_g_doubleclick_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "googleads4.g.doubleclick.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://45.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://46.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/googleads_g_doubleclick_net.json b/components/domain_reliability/baked_in_configs/googleads_g_doubleclick_net.json
+index 78cbf19..d4af996 100644
+--- a/components/domain_reliability/baked_in_configs/googleads_g_doubleclick_net.json
++++ b/components/domain_reliability/baked_in_configs/googleads_g_doubleclick_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "googleads.g.doubleclick.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://47.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://48.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/gstatic_com.json b/components/domain_reliability/baked_in_configs/gstatic_com.json
+index f2f9c82..19642ce 100644
+--- a/components/domain_reliability/baked_in_configs/gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://49.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://50.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/lh3_ggpht_com.json b/components/domain_reliability/baked_in_configs/lh3_ggpht_com.json
+index db1b206..b16d20e 100644
+--- a/components/domain_reliability/baked_in_configs/lh3_ggpht_com.json
++++ b/components/domain_reliability/baked_in_configs/lh3_ggpht_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "lh3.ggpht.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://51.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://52.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/lh4_ggpht_com.json b/components/domain_reliability/baked_in_configs/lh4_ggpht_com.json
+index c645f27..70ecdad 100644
+--- a/components/domain_reliability/baked_in_configs/lh4_ggpht_com.json
++++ b/components/domain_reliability/baked_in_configs/lh4_ggpht_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "lh4.ggpht.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://53.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://54.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/lh5_ggpht_com.json b/components/domain_reliability/baked_in_configs/lh5_ggpht_com.json
+index 85e93f9..9a7fd0e 100644
+--- a/components/domain_reliability/baked_in_configs/lh5_ggpht_com.json
++++ b/components/domain_reliability/baked_in_configs/lh5_ggpht_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "lh5.ggpht.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://55.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://56.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/lh6_ggpht_com.json b/components/domain_reliability/baked_in_configs/lh6_ggpht_com.json
+index fbdd314..9527c80 100644
+--- a/components/domain_reliability/baked_in_configs/lh6_ggpht_com.json
++++ b/components/domain_reliability/baked_in_configs/lh6_ggpht_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "lh6.ggpht.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://57.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://58.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/mail_google_com.json b/components/domain_reliability/baked_in_configs/mail_google_com.json
+index d876cc5..635de94 100644
+--- a/components/domain_reliability/baked_in_configs/mail_google_com.json
++++ b/components/domain_reliability/baked_in_configs/mail_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "mail.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://11.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://24.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/media_admob_com.json b/components/domain_reliability/baked_in_configs/media_admob_com.json
+index 12c2be0..06237e3 100644
+--- a/components/domain_reliability/baked_in_configs/media_admob_com.json
++++ b/components/domain_reliability/baked_in_configs/media_admob_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "media.admob.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://59.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://60.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/pagead2_googlesyndication_com.json b/components/domain_reliability/baked_in_configs/pagead2_googlesyndication_com.json
+index 747cc64..0685f38 100644
+--- a/components/domain_reliability/baked_in_configs/pagead2_googlesyndication_com.json
++++ b/components/domain_reliability/baked_in_configs/pagead2_googlesyndication_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "pagead2.googlesyndication.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://61.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://62.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/partner_googleadservices_com.json b/components/domain_reliability/baked_in_configs/partner_googleadservices_com.json
+index a6a918f..d6d6913 100644
+--- a/components/domain_reliability/baked_in_configs/partner_googleadservices_com.json
++++ b/components/domain_reliability/baked_in_configs/partner_googleadservices_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "partner.googleadservices.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://63.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://64.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/pubads_g_doubleclick_net.json b/components/domain_reliability/baked_in_configs/pubads_g_doubleclick_net.json
+index 9bcf189..41a7afe 100644
+--- a/components/domain_reliability/baked_in_configs/pubads_g_doubleclick_net.json
++++ b/components/domain_reliability/baked_in_configs/pubads_g_doubleclick_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "pubads.g.doubleclick.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://65.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://66.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/redirector_googlevideo_com.json b/components/domain_reliability/baked_in_configs/redirector_googlevideo_com.json
+index 19f6ea5..c3aff1e 100644
+--- a/components/domain_reliability/baked_in_configs/redirector_googlevideo_com.json
++++ b/components/domain_reliability/baked_in_configs/redirector_googlevideo_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "redirector.googlevideo.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://67.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://68.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json b/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json
+index 7881aab..dbb92f5 100644
+--- a/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json
++++ b/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json
+@@ -4,7 +4,7 @@
+   "monitored_domain": "redirector.gvt1.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://69.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/s0_2mdn_net.json b/components/domain_reliability/baked_in_configs/s0_2mdn_net.json
+index 427bdd2..6f02f0f 100644
+--- a/components/domain_reliability/baked_in_configs/s0_2mdn_net.json
++++ b/components/domain_reliability/baked_in_configs/s0_2mdn_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "s0.2mdn.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://70.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://71.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/ssl_gstatic_com.json b/components/domain_reliability/baked_in_configs/ssl_gstatic_com.json
+index 8abf57a..561236c 100644
+--- a/components/domain_reliability/baked_in_configs/ssl_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/ssl_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "ssl.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://12.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://25.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_admob_com.json b/components/domain_reliability/baked_in_configs/star_admob_com.json
+index b0e513d..314b5eb 100644
+--- a/components/domain_reliability/baked_in_configs/star_admob_com.json
++++ b/components/domain_reliability/baked_in_configs/star_admob_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.admob.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://72.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://73.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_doubleclick_net.json b/components/domain_reliability/baked_in_configs/star_doubleclick_net.json
+index f1e3617..0f75436 100644
+--- a/components/domain_reliability/baked_in_configs/star_doubleclick_net.json
++++ b/components/domain_reliability/baked_in_configs/star_doubleclick_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.doubleclick.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://74.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://75.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_g_doubleclick_net.json b/components/domain_reliability/baked_in_configs/star_g_doubleclick_net.json
+index 7e6cbd6..3d5348cba 100644
+--- a/components/domain_reliability/baked_in_configs/star_g_doubleclick_net.json
++++ b/components/domain_reliability/baked_in_configs/star_g_doubleclick_net.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.g.doubleclick.net",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://76.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://77.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_ggpht_com.json b/components/domain_reliability/baked_in_configs/star_ggpht_com.json
+index 9085235..901e5b3 100644
+--- a/components/domain_reliability/baked_in_configs/star_ggpht_com.json
++++ b/components/domain_reliability/baked_in_configs/star_ggpht_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.ggpht.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://78.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://79.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_cn.json b/components/domain_reliability/baked_in_configs/star_google_cn.json
+index 332ebb0..5810375 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_cn.json
++++ b/components/domain_reliability/baked_in_configs/star_google_cn.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.cn",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://80.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://81.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_co_uk.json b/components/domain_reliability/baked_in_configs/star_google_co_uk.json
+index 292d1e2..ae891ed 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_co_uk.json
++++ b/components/domain_reliability/baked_in_configs/star_google_co_uk.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.co.uk",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://82.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://83.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_com.json b/components/domain_reliability/baked_in_configs/star_google_com.json
+index f017e91..a2b2a72 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_com.json
++++ b/components/domain_reliability/baked_in_configs/star_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://84.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://85.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_com_au.json b/components/domain_reliability/baked_in_configs/star_google_com_au.json
+index ac2d17d..514ce23 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_com_au.json
++++ b/components/domain_reliability/baked_in_configs/star_google_com_au.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.com.au",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://86.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://87.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_de.json b/components/domain_reliability/baked_in_configs/star_google_de.json
+index 37ad7f7..ef15406 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_de.json
++++ b/components/domain_reliability/baked_in_configs/star_google_de.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.de",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://88.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://89.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_fr.json b/components/domain_reliability/baked_in_configs/star_google_fr.json
+index 6d26930..85368d7 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_fr.json
++++ b/components/domain_reliability/baked_in_configs/star_google_fr.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.fr",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://90.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://91.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_it.json b/components/domain_reliability/baked_in_configs/star_google_it.json
+index 3561d0a..e378420 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_it.json
++++ b/components/domain_reliability/baked_in_configs/star_google_it.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.it",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://92.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://93.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_jp.json b/components/domain_reliability/baked_in_configs/star_google_jp.json
+index b5d34c4..b0788c7 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_jp.json
++++ b/components/domain_reliability/baked_in_configs/star_google_jp.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.jp",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://94.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://95.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_org.json b/components/domain_reliability/baked_in_configs/star_google_org.json
+index 8ac9b30..5ff320b 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_org.json
++++ b/components/domain_reliability/baked_in_configs/star_google_org.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.org",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://96.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://97.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_google_ru.json b/components/domain_reliability/baked_in_configs/star_google_ru.json
+index 566b091..af76ce8 100644
+--- a/components/domain_reliability/baked_in_configs/star_google_ru.json
++++ b/components/domain_reliability/baked_in_configs/star_google_ru.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.google.ru",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://98.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://99.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_googleadservices_com.json b/components/domain_reliability/baked_in_configs/star_googleadservices_com.json
+index e170a5b..62cf8c9f 100644
+--- a/components/domain_reliability/baked_in_configs/star_googleadservices_com.json
++++ b/components/domain_reliability/baked_in_configs/star_googleadservices_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.googleadservices.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://100.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://101.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_googleapis_com.json b/components/domain_reliability/baked_in_configs/star_googleapis_com.json
+index fee1665..c5b7c9f 100644
+--- a/components/domain_reliability/baked_in_configs/star_googleapis_com.json
++++ b/components/domain_reliability/baked_in_configs/star_googleapis_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.googleapis.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://102.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://103.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_googlesyndication_com.json b/components/domain_reliability/baked_in_configs/star_googlesyndication_com.json
+index e269f3e..de31f3c 100644
+--- a/components/domain_reliability/baked_in_configs/star_googlesyndication_com.json
++++ b/components/domain_reliability/baked_in_configs/star_googlesyndication_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.googlesyndication.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://104.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://105.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_googleusercontent_com.json b/components/domain_reliability/baked_in_configs/star_googleusercontent_com.json
+index f59251b..650b32d 100644
+--- a/components/domain_reliability/baked_in_configs/star_googleusercontent_com.json
++++ b/components/domain_reliability/baked_in_configs/star_googleusercontent_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.googleusercontent.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://106.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://107.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_googlevideo_com.json b/components/domain_reliability/baked_in_configs/star_googlevideo_com.json
+index d749c17..e5ab6eb 100644
+--- a/components/domain_reliability/baked_in_configs/star_googlevideo_com.json
++++ b/components/domain_reliability/baked_in_configs/star_googlevideo_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.googlevideo.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://108.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://109.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_gstatic_com.json b/components/domain_reliability/baked_in_configs/star_gstatic_com.json
+index f83986d..aa1064c 100644
+--- a/components/domain_reliability/baked_in_configs/star_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/star_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://110.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://111.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_gvt1_com.json b/components/domain_reliability/baked_in_configs/star_gvt1_com.json
+index 0022c18..703cf53 100644
+--- a/components/domain_reliability/baked_in_configs/star_gvt1_com.json
++++ b/components/domain_reliability/baked_in_configs/star_gvt1_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.gvt1.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://112.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://113.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_youtube_com.json b/components/domain_reliability/baked_in_configs/star_youtube_com.json
+index b74bbd1..7eaedf5 100644
+--- a/components/domain_reliability/baked_in_configs/star_youtube_com.json
++++ b/components/domain_reliability/baked_in_configs/star_youtube_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.youtube.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://114.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://115.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/star_ytimg_com.json b/components/domain_reliability/baked_in_configs/star_ytimg_com.json
+index df4e2c0..60e9cb8 100644
+--- a/components/domain_reliability/baked_in_configs/star_ytimg_com.json
++++ b/components/domain_reliability/baked_in_configs/star_ytimg_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "*.ytimg.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://116.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://117.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/t0_gstatic_com.json b/components/domain_reliability/baked_in_configs/t0_gstatic_com.json
+index c852545..4f1111e 100644
+--- a/components/domain_reliability/baked_in_configs/t0_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/t0_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "t0.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://118.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://119.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/t1_gstatic_com.json b/components/domain_reliability/baked_in_configs/t1_gstatic_com.json
+index 91b54f4..e7c908b 100644
+--- a/components/domain_reliability/baked_in_configs/t1_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/t1_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "t1.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://120.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://121.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/t2_gstatic_com.json b/components/domain_reliability/baked_in_configs/t2_gstatic_com.json
+index ae5c2ad..5501277 100644
+--- a/components/domain_reliability/baked_in_configs/t2_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/t2_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "t2.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://122.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://123.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/t3_gstatic_com.json b/components/domain_reliability/baked_in_configs/t3_gstatic_com.json
+index 5e8dd2f..3017fbd 100644
+--- a/components/domain_reliability/baked_in_configs/t3_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/t3_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "t3.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://124.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://125.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/themes_googleusercontent_com.json b/components/domain_reliability/baked_in_configs/themes_googleusercontent_com.json
+index 6092b5f..8f8125a 100644
+--- a/components/domain_reliability/baked_in_configs/themes_googleusercontent_com.json
++++ b/components/domain_reliability/baked_in_configs/themes_googleusercontent_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "themes.googleusercontent.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://126.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://127.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/www_google_com.json b/components/domain_reliability/baked_in_configs/www_google_com.json
+index 793c612..a780b88 100644
+--- a/components/domain_reliability/baked_in_configs/www_google_com.json
++++ b/components/domain_reliability/baked_in_configs/www_google_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "www.google.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://13.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://26.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/www_googleadservices_com.json b/components/domain_reliability/baked_in_configs/www_googleadservices_com.json
+index 203ce51..dfb8356 100644
+--- a/components/domain_reliability/baked_in_configs/www_googleadservices_com.json
++++ b/components/domain_reliability/baked_in_configs/www_googleadservices_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "www.googleadservices.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://128.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://129.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/www_gstatic_com.json b/components/domain_reliability/baked_in_configs/www_gstatic_com.json
+index e7d3150..565e0fb 100644
+--- a/components/domain_reliability/baked_in_configs/www_gstatic_com.json
++++ b/components/domain_reliability/baked_in_configs/www_gstatic_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "www.gstatic.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://130.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://131.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/domain_reliability/baked_in_configs/www_youtube_com.json b/components/domain_reliability/baked_in_configs/www_youtube_com.json
+index fd70e91..cefe84b 100644
+--- a/components/domain_reliability/baked_in_configs/www_youtube_com.json
++++ b/components/domain_reliability/baked_in_configs/www_youtube_com.json
+@@ -4,10 +4,10 @@
+   "monitored_domain": "www.youtube.com",
+   "collectors": [
+     {
+-      "upload_url": "https://clients2.google.com/domainreliability/upload"
++      "upload_url": "https://14.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
+     },
+     {
+-      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
++      "upload_url": "https://27.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
+     }
+   ],
+   "monitored_resources": [
+diff --git a/components/password_manager/core/browser/password_manager.cc b/components/password_manager/core/browser/password_manager.cc
+index e05dab3..7fb2903 100644
+--- a/components/password_manager/core/browser/password_manager.cc
++++ b/components/password_manager/core/browser/password_manager.cc
+@@ -79,7 +79,7 @@ void PasswordManager::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kPasswordManagerSavingEnabled,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kPasswordManagerAllowShowPasswords,
+diff --git a/components/policy/core/common/policy_loader_win.cc b/components/policy/core/common/policy_loader_win.cc
+index 2e2ddc8..31f6b97 100644
+--- a/components/policy/core/common/policy_loader_win.cc
++++ b/components/policy/core/common/policy_loader_win.cc
+@@ -69,7 +69,7 @@ const char kLegacyBrowserSupportExtensionId[] =
+ 
+ // The web store url that is the only trusted source for extensions.
+ const char kExpectedWebStoreUrl[] =
+-    ";https://clients2.google.com/service/update2/crx";
++    ";https://15.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx";
+ // String to be prepended to each blocked entry.
+ const char kBlockedExtensionPrefix[] = "[BLOCKED]";
+ 
+diff --git a/components/policy/resources/policy_templates.json b/components/policy/resources/policy_templates.json
+index 8e0945a..51e37ce 100644
+--- a/components/policy/resources/policy_templates.json
++++ b/components/policy/resources/policy_templates.json
+@@ -1648,7 +1648,7 @@
+             'dynamic_refresh': True,
+             'per_profile': True,
+           },
+-          'example_value': ['lcncmkcnkcdbbanbjakcencbaoegdjlp;https://clients2.google.com/service/update2/crx'],
++          'example_value': ['lcncmkcnkcdbbanbjakcencbaoegdjlp;https://16.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx'],
+           'id': 34,
+           'caption': '''Configure the list of force-installed extensions''',
+           'desc': '''Allows you to specify a list of extensions that will be installed silently, without user interaction.
+@@ -1657,7 +1657,7 @@
+ 
+           For each item, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retrieve the extension specified by the extension ID from the update service at the specified update URL and silently install it.
+ 
+-          For example, <ph name="EXTENSION_POLICY_EXAMPLE">lcncmkcnkcdbbanbjakcencbaoegdjlp;https://clients2.google.com/service/update2/crx</ph> installs the <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME">Google SSL Web Search</ph> extension from the standard Chrome Web Store update URL. For more information about hosting extensions, see: <ph name="LINK_TO_EXTENSION_DOC2">https://developer.chrome.com/extensions/hosting</ph>.
++          For example, <ph name="EXTENSION_POLICY_EXAMPLE">lcncmkcnkcdbbanbjakcencbaoegdjlp;https://17.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx</ph> installs the <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME">Google SSL Web Search</ph> extension from the standard Chrome Web Store update URL. For more information about hosting extensions, see: <ph name="LINK_TO_EXTENSION_DOC2">https://developer.chrome.com/extensions/hosting</ph>.
+ 
+           Users will be unable to uninstall extensions that are specified by this policy. If you remove an extension from this list, then it will be automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Extensions specified in this list are also automatically whitelisted for installation; the ExtensionsInstallBlacklist does not affect them.
+ 
+@@ -4192,7 +4192,7 @@
+       'features': {
+         'dynamic_refresh': True,
+       },
+-      'example_value': [ { "extension-id": "khgabmflimjjbclkmljlpmgaleanedem", "update-url": "http://clients2.google.com/service/update2/crx" } ],
++      'example_value': [ { "extension-id": "khgabmflimjjbclkmljlpmgaleanedem", "update-url": "http://18.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx" } ],
+       'id': 135,
+       'caption': '''List of AppPack extensions''',
+       'desc': '''This policy is active in retail mode only.
+diff --git a/components/search_engines/prepopulated_engines.json b/components/search_engines/prepopulated_engines.json
+index c4feb4b..4b8d65e 100644
+--- a/components/search_engines/prepopulated_engines.json
++++ b/components/search_engines/prepopulated_engines.json
+@@ -36,6 +36,17 @@
+   // The following engines are included in country lists and are added to the
+   // list of search engines on the first run depending on user's country.
+   "elements": {
++    "duckduckgo": {
++      "name": "DuckDuckGo",
++      "keyword": "duckduckgo.com",
++      "favicon_url": "https://duckduckgo.com/favicon.ico",
++      "search_url": "https://duckduckgo.com/?q={searchTerms}",
++      "suggest_url": "https://duckduckgo.com/?q={searchTerms}&language={language}&kac=1",
++      "new_tab_url": "https://duckduckgo.com/",
++      "type": "SEARCH_ENGINE_DUCKDUCKGO",
++      "id": 11
++    },
++
+     "aol": {
+       "name": "AOL",
+       "keyword": "aol.com",
+diff --git a/components/search_engines/search_engine_type.h b/components/search_engines/search_engine_type.h
+index d49c046..7dba2a7 100644
+--- a/components/search_engines/search_engine_type.h
++++ b/components/search_engines/search_engine_type.h
+@@ -58,6 +58,7 @@ enum SearchEngineType {
+   SEARCH_ENGINE_YAHOO,
+   SEARCH_ENGINE_YANDEX,
+   SEARCH_ENGINE_ZOZNAM,
++  SEARCH_ENGINE_DUCKDUCKGO,
+   SEARCH_ENGINE_MAX          // Bounding value needed for UMA histogram macro.
+ };
+ 
+diff --git a/components/search_engines/template_url_prepopulate_data.cc b/components/search_engines/template_url_prepopulate_data.cc
+index e63a58c..2564d43 100644
+--- a/components/search_engines/template_url_prepopulate_data.cc
++++ b/components/search_engines/template_url_prepopulate_data.cc
+@@ -45,435 +45,435 @@ namespace {
+ 
+ // Default (for countries with no better engine set)
+ const PrepopulatedEngine* engines_default[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // United Arab Emirates
+ const PrepopulatedEngine* engines_AE[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Albania
+ const PrepopulatedEngine* engines_AL[] =
+-    { &google, &yahoo, &bing_en_XA, &bing_ar_XA, };
++    { &duckduckgo, &google, &yahoo, &bing_en_XA, &bing_ar_XA, };
+ 
+ // Argentina
+ const PrepopulatedEngine* engines_AR[] =
+-    { &google, &bing_es_AR, &yahoo_ar, };
++    { &duckduckgo, &google, &bing_es_AR, &yahoo_ar, };
+ 
+ // Austria
+ const PrepopulatedEngine* engines_AT[] =
+-    { &google, &bing_de_AT, &yahoo_at, };
++    { &duckduckgo, &google, &bing_de_AT, &yahoo_at, };
+ 
+ // Australia
+ const PrepopulatedEngine* engines_AU[] =
+-    { &google, &bing_en_AU, &yahoo_au, };
++    { &duckduckgo, &google, &bing_en_AU, &yahoo_au, };
+ 
+ // Bosnia and Herzegovina
+ const PrepopulatedEngine* engines_BA[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Belgium
+ const PrepopulatedEngine* engines_BE[] =
+-    { &google, &bing_nl_BE, &bing_fr_BE, &yahoo, &yahoo_fr, };
++    { &duckduckgo, &google, &bing_nl_BE, &bing_fr_BE, &yahoo, &yahoo_fr, };
+ 
+ // Bulgaria
+ const PrepopulatedEngine* engines_BG[] =
+-    { &google, &bing, &ask, };
++    { &duckduckgo, &google, &bing, &ask, };
+ 
+ // Bahrain
+ const PrepopulatedEngine* engines_BH[] =
+-    { &google, &yahoo_maktoob, &bing_en_XA, &bing_ar_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_en_XA, &bing_ar_XA, };
+ 
+ // Burundi
+ const PrepopulatedEngine* engines_BI[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Brunei
+ const PrepopulatedEngine* engines_BN[] =
+-    { &google, &yahoo_my, &bing, };
++    { &duckduckgo, &google, &yahoo_my, &bing, };
+ 
+ // Bolivia
+ const PrepopulatedEngine* engines_BO[] =
+-    { &google, &bing_es_XL, &yahoo, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo, };
+ 
+ // Brazil
+ const PrepopulatedEngine* engines_BR[] =
+-    { &google, &ask_br, &bing_pt_BR, &yahoo_br, };
++    { &duckduckgo, &google, &ask_br, &bing_pt_BR, &yahoo_br, };
+ 
+ // Belarus
+ const PrepopulatedEngine* engines_BY[] =
+-    { &google, &yahoo_ru, &bing_ru_RU, };
++    { &duckduckgo, &google, &yahoo_ru, &bing_ru_RU, };
+ 
+ // Belize
+ const PrepopulatedEngine* engines_BZ[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Canada
+ const PrepopulatedEngine* engines_CA[] =
+-    { &google, &bing_en_CA, &bing_fr_CA, &ask, &yahoo_ca, &yahoo_qc, };
++    { &duckduckgo, &google, &bing_en_CA, &bing_fr_CA, &ask, &yahoo_ca, &yahoo_qc, };
+ 
+ // Switzerland
+ const PrepopulatedEngine* engines_CH[] =
+-    { &google, &bing_de_CH, &bing_fr_CH, &yahoo_ch, };
++    { &duckduckgo, &google, &bing_de_CH, &bing_fr_CH, &yahoo_ch, };
+ 
+ // Chile
+ const PrepopulatedEngine* engines_CL[] =
+-    { &google, &bing_es_CL, &yahoo_cl, };
++    { &duckduckgo, &google, &bing_es_CL, &yahoo_cl, };
+ 
+ // China
+ const PrepopulatedEngine* engines_CN[] =
+-    { &google, &baidu, &sogou, };
++    { &duckduckgo, &google, &baidu, &sogou, };
+ 
+ // Colombia
+ const PrepopulatedEngine* engines_CO[] =
+-    { &google, &bing_es_XL, &yahoo_co, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo_co, };
+ 
+ // Costa Rica
+ const PrepopulatedEngine* engines_CR[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Czech Republic
+ const PrepopulatedEngine* engines_CZ[] =
+-    { &google, &seznam, &bing, };
++    { &duckduckgo, &google, &seznam, &bing, };
+ 
+ // Germany
+ const PrepopulatedEngine* engines_DE[] =
+-    { &google, &bing_de_DE, &yahoo_de };
++    { &duckduckgo, &google, &bing_de_DE, &yahoo_de };
+ 
+ // Denmark
+ const PrepopulatedEngine* engines_DK[] =
+-    { &google, &bing_da_DK, &yahoo_dk, };
++    { &duckduckgo, &google, &bing_da_DK, &yahoo_dk, };
+ 
+ // Dominican Republic
+ const PrepopulatedEngine* engines_DO[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Algeria
+ const PrepopulatedEngine* engines_DZ[] =
+-    { &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
++    { &duckduckgo, &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
+ 
+ // Ecuador
+ const PrepopulatedEngine* engines_EC[] =
+-    { &google, &bing_es_XL, &yahoo, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo, };
+ 
+ // Estonia
+ const PrepopulatedEngine* engines_EE[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Egypt
+ const PrepopulatedEngine* engines_EG[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Spain
+ const PrepopulatedEngine* engines_ES[] =
+-    { &google, &bing_es_ES, &yahoo_es, };
++    { &duckduckgo, &google, &bing_es_ES, &yahoo_es, };
+ 
+ // Faroe Islands
+ const PrepopulatedEngine* engines_FO[] =
+-    { &google, &bing_da_DK, &ask, };
++    { &duckduckgo, &google, &bing_da_DK, &ask, };
+ 
+ // Finland
+ const PrepopulatedEngine* engines_FI[] =
+-    { &google, &bing_fi_FI, &yahoo_fi, };
++    { &duckduckgo, &google, &bing_fi_FI, &yahoo_fi, };
+ 
+ // France
+ const PrepopulatedEngine* engines_FR[] =
+-    { &google, &bing_fr_FR, &yahoo_fr, };
++    { &duckduckgo, &google, &bing_fr_FR, &yahoo_fr, };
+ 
+ // United Kingdom
+ const PrepopulatedEngine* engines_GB[] =
+-    { &google, &bing_en_GB, &yahoo_uk, &ask_uk, };
++    { &duckduckgo, &google, &bing_en_GB, &yahoo_uk, &ask_uk, };
+ 
+ // Greece
+ const PrepopulatedEngine* engines_GR[] =
+-    { &google, &bing, &yahoo_gr, };
++    { &duckduckgo, &google, &bing, &yahoo_gr, };
+ 
+ // Guatemala
+ const PrepopulatedEngine* engines_GT[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Hong Kong
+ const PrepopulatedEngine* engines_HK[] =
+-    { &google, &yahoo_hk, &baidu, &bing_zh_HK, };
++    { &duckduckgo, &google, &yahoo_hk, &baidu, &bing_zh_HK, };
+ 
+ // Honduras
+ const PrepopulatedEngine* engines_HN[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Croatia
+ const PrepopulatedEngine* engines_HR[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Hungary
+ const PrepopulatedEngine* engines_HU[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Indonesia
+ const PrepopulatedEngine* engines_ID[] =
+-    { &google, &yahoo_id, &bing, };
++    { &duckduckgo, &google, &yahoo_id, &bing, };
+ 
+ // Ireland
+ const PrepopulatedEngine* engines_IE[] =
+-    { &google, &bing_en_IE, &yahoo_uk, };
++    { &duckduckgo, &google, &bing_en_IE, &yahoo_uk, };
+ 
+ // Israel
+ const PrepopulatedEngine* engines_IL[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // India
+ const PrepopulatedEngine* engines_IN[] =
+-    { &google, &bing_en_IN, &yahoo_in, };
++    { &duckduckgo, &google, &bing_en_IN, &yahoo_in, };
+ 
+ // Iraq
+ const PrepopulatedEngine* engines_IQ[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Iran
+ const PrepopulatedEngine* engines_IR[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Iceland
+ const PrepopulatedEngine* engines_IS[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Italy
+ const PrepopulatedEngine* engines_IT[] =
+-    { &google, &virgilio, &bing_it_IT, };
++    { &duckduckgo, &google, &virgilio, &bing_it_IT, };
+ 
+ // Jamaica
+ const PrepopulatedEngine* engines_JM[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Jordan
+ const PrepopulatedEngine* engines_JO[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Japan
+ const PrepopulatedEngine* engines_JP[] =
+-    { &google, &yahoo_jp, &bing_ja_JP, };
++    { &duckduckgo, &google, &yahoo_jp, &bing_ja_JP, };
+ 
+ // Kenya
+ const PrepopulatedEngine* engines_KE[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Kuwait
+ const PrepopulatedEngine* engines_KW[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // South Korea
+ const PrepopulatedEngine* engines_KR[] =
+-    { &google, &naver, &daum, };
++    { &duckduckgo, &google, &naver, &daum, };
+ 
+ // Kazakhstan
+ const PrepopulatedEngine* engines_KZ[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Lebanon
+ const PrepopulatedEngine* engines_LB[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Liechtenstein
+ const PrepopulatedEngine* engines_LI[] =
+-    { &google, &bing_de_DE, &yahoo_de, };
++    { &duckduckgo, &google, &bing_de_DE, &yahoo_de, };
+ 
+ // Lithuania
+ const PrepopulatedEngine* engines_LT[] =
+-    { &google, &bing, &yandex_ru, };
++    { &duckduckgo, &google, &bing, &yandex_ru, };
+ 
+ // Luxembourg
+ const PrepopulatedEngine* engines_LU[] =
+-    { &google, &bing_fr_FR, &yahoo_fr, };
++    { &duckduckgo, &google, &bing_fr_FR, &yahoo_fr, };
+ 
+ // Latvia
+ const PrepopulatedEngine* engines_LV[] =
+-    { &google, &yandex_ru, &bing, };
++    { &duckduckgo, &google, &yandex_ru, &bing, };
+ 
+ // Libya
+ const PrepopulatedEngine* engines_LY[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Morocco
+ const PrepopulatedEngine* engines_MA[] =
+-    { &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
++    { &duckduckgo, &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
+ 
+ // Monaco
+ const PrepopulatedEngine* engines_MC[] =
+-    { &google, &yahoo_fr, &bing_fr_FR, };
++    { &duckduckgo, &google, &yahoo_fr, &bing_fr_FR, };
+ 
+ // Moldova
+ const PrepopulatedEngine* engines_MD[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Montenegro
+ const PrepopulatedEngine* engines_ME[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Macedonia
+ const PrepopulatedEngine* engines_MK[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Mexico
+ const PrepopulatedEngine* engines_MX[] =
+-    { &google, &bing_es_MX, &yahoo_mx, };
++    { &duckduckgo, &google, &bing_es_MX, &yahoo_mx, };
+ 
+ // Malaysia
+ const PrepopulatedEngine* engines_MY[] =
+-    { &google, &yahoo_my, &bing, };
++    { &duckduckgo, &google, &yahoo_my, &bing, };
+ 
+ // Nicaragua
+ const PrepopulatedEngine* engines_NI[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Netherlands
+ const PrepopulatedEngine* engines_NL[] =
+-    { &google, &yahoo_nl, &vinden, };
++    { &duckduckgo, &google, &yahoo_nl, &vinden, };
+ 
+ // Norway
+ const PrepopulatedEngine* engines_NO[] =
+-    { &google, &bing_nb_NO, &kvasir, };
++    { &duckduckgo, &google, &bing_nb_NO, &kvasir, };
+ 
+ // New Zealand
+ const PrepopulatedEngine* engines_NZ[] =
+-    { &google, &bing_en_NZ, &yahoo_nz, };
++    { &duckduckgo, &google, &bing_en_NZ, &yahoo_nz, };
+ 
+ // Oman
+ const PrepopulatedEngine* engines_OM[] =
+-    { &google, &bing_ar_XA, &yahoo_maktoob, &bing_en_XA, };
++    { &duckduckgo, &google, &bing_ar_XA, &yahoo_maktoob, &bing_en_XA, };
+ 
+ // Panama
+ const PrepopulatedEngine* engines_PA[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Peru
+ const PrepopulatedEngine* engines_PE[] =
+-    { &google, &bing_es_XL, &yahoo_pe, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo_pe, };
+ 
+ // Philippines
+ const PrepopulatedEngine* engines_PH[] =
+-    { &google, &yahoo_ph, &bing_en_PH, };
++    { &duckduckgo, &google, &yahoo_ph, &bing_en_PH, };
+ 
+ // Pakistan
+ const PrepopulatedEngine* engines_PK[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Puerto Rico
+ const PrepopulatedEngine* engines_PR[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Poland
+ const PrepopulatedEngine* engines_PL[] =
+-    { &google, &onet, &bing_pl_PL, };
++    { &duckduckgo, &google, &onet, &bing_pl_PL, };
+ 
+ // Portugal
+ const PrepopulatedEngine* engines_PT[] =
+-    { &google, &bing_pt_PT, &yahoo, };
++    { &duckduckgo, &google, &bing_pt_PT, &yahoo, };
+ 
+ // Paraguay
+ const PrepopulatedEngine* engines_PY[] =
+-    { &google, &bing_es_XL, &yahoo, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo, };
+ 
+ // Qatar
+ const PrepopulatedEngine* engines_QA[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Romania
+ const PrepopulatedEngine* engines_RO[] =
+-    { &google, &yahoo_ro, &bing, };
++    { &duckduckgo, &google, &yahoo_ro, &bing, };
+ 
+ // Serbia
+ const PrepopulatedEngine* engines_RS[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Russia
+ const PrepopulatedEngine* engines_RU[] =
+-    { &google, &yandex_ru, &mail_ru, };
++    { &duckduckgo, &google, &yandex_ru, &mail_ru, };
+ 
+ // Rwanda
+ const PrepopulatedEngine* engines_RW[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Saudi Arabia
+ const PrepopulatedEngine* engines_SA[] =
+-    { &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
++    { &duckduckgo, &google, &yahoo_maktoob, &bing_ar_XA, &bing_en_XA, };
+ 
+ // Sweden
+ const PrepopulatedEngine* engines_SE[] =
+-    { &google, &bing_sv_SE, &yahoo_se, };
++    { &duckduckgo, &google, &bing_sv_SE, &yahoo_se, };
+ 
+ // Singapore
+ const PrepopulatedEngine* engines_SG[] =
+-    { &google, &yahoo_sg, &bing_en_SG, };
++    { &duckduckgo, &google, &yahoo_sg, &bing_en_SG, };
+ 
+ // Slovenia
+ const PrepopulatedEngine* engines_SI[] =
+-    { &google, &najdi, &ask, };
++    { &duckduckgo, &google, &najdi, &ask, };
+ 
+ // Slovakia
+ const PrepopulatedEngine* engines_SK[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // El Salvador
+ const PrepopulatedEngine* engines_SV[] =
+-    { &google, &yahoo, &bing_es_XL, };
++    { &duckduckgo, &google, &yahoo, &bing_es_XL, };
+ 
+ // Syria
+ const PrepopulatedEngine* engines_SY[] =
+-    { &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
++    { &duckduckgo, &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
+ 
+ // Thailand
+ const PrepopulatedEngine* engines_TH[] =
+-    { &google, &yahoo_th, &bing, };
++    { &duckduckgo, &google, &yahoo_th, &bing, };
+ 
+ // Tunisia
+ const PrepopulatedEngine* engines_TN[] =
+-    { &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
++    { &duckduckgo, &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
+ 
+ // Turkey
+ const PrepopulatedEngine* engines_TR[] =
+-    { &google, &bing_tr_TR, &yahoo_tr, &yandex_tr, };
++    { &duckduckgo, &google, &bing_tr_TR, &yahoo_tr, &yandex_tr, };
+ 
+ // Trinidad and Tobago
+ const PrepopulatedEngine* engines_TT[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Taiwan
+ const PrepopulatedEngine* engines_TW[] =
+-    { &google, &yahoo_tw, &bing_zh_TW, };
++    { &duckduckgo, &google, &yahoo_tw, &bing_zh_TW, };
+ 
+ // Tanzania
+ const PrepopulatedEngine* engines_TZ[] =
+-    { &google, &yahoo, &bing, };
++    { &duckduckgo, &google, &yahoo, &bing, };
+ 
+ // Ukraine
+ const PrepopulatedEngine* engines_UA[] =
+-    { &google, &yandex_ua, &bing_ru_RU, };
++    { &duckduckgo, &google, &yandex_ua, &bing_ru_RU, };
+ 
+ // United States
+ const PrepopulatedEngine* engines_US[] =
+-    { &google, &bing_en_US, &yahoo, &aol, &ask, };
++    { &duckduckgo, &google, &bing_en_US, &yahoo, &aol, &ask, };
+ 
+ // Uruguay
+ const PrepopulatedEngine* engines_UY[] =
+-    { &google, &bing_es_XL, &yahoo, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo, };
+ 
+ // Venezuela
+ const PrepopulatedEngine* engines_VE[] =
+-    { &google, &bing_es_XL, &yahoo_ve, };
++    { &duckduckgo, &google, &bing_es_XL, &yahoo_ve, };
+ 
+ // Vietnam
+ const PrepopulatedEngine* engines_VN[] =
+-    { &google, &yahoo_vn, &bing, };
++    { &duckduckgo, &google, &yahoo_vn, &bing, };
+ 
+ // Yemen
+ const PrepopulatedEngine* engines_YE[] =
+-    { &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
++    { &duckduckgo, &google, &bing_ar_XA, &bing_en_XA, &yahoo_maktoob, };
+ 
+ // South Africa
+ const PrepopulatedEngine* engines_ZA[] =
+-    { &google, &bing, &yahoo, };
++    { &duckduckgo, &google, &bing, &yahoo, };
+ 
+ // Zimbabwe
+ const PrepopulatedEngine* engines_ZW[] =
+-    { &google, &bing, &yahoo, &ask, };
++    { &duckduckgo, &google, &bing, &yahoo, &ask, };
+ 
+ // A list of all the engines that we know about.
+ const PrepopulatedEngine* kAllEngines[] = {
+@@ -487,6 +487,7 @@ const PrepopulatedEngine* kAllEngines[] = {
+   &bing_fr_FR,   &bing_it_IT,   &bing_ja_JP,   &bing_lv_LV,   &bing_nb_NO,
+   &bing_nl_BE,   &bing_pl_PL,   &bing_pt_BR,   &bing_pt_PT,   &bing_ru_RU,
+   &bing_sv_SE,   &bing_tr_TR,   &bing_zh_HK,   &bing_zh_TW,   &daum,
++  &duckduckgo,
+   &google,       &kvasir,       &mail_ru,      &najdi,        &naver,
+   &onet,         &seznam,       &sogou,        &vinden,       &virgilio,
+   &yahoo,        &yahoo_ar,     &yahoo_at,     &yahoo_au,     &yahoo_br,
+diff --git a/components/translate/core/browser/translate_url_fetcher.cc b/components/translate/core/browser/translate_url_fetcher.cc
+index 09704fd..d89497f 100644
+--- a/components/translate/core/browser/translate_url_fetcher.cc
++++ b/components/translate/core/browser/translate_url_fetcher.cc
+@@ -61,6 +61,7 @@ bool TranslateURLFetcher::Request(
+   if (!extra_request_header_.empty())
+     fetcher_->SetExtraRequestHeaders(extra_request_header_);
+ 
++  fprintf(stderr, "translator: fetching something from %s\n", url_.spec().c_str());
+   fetcher_->Start();
+ 
+   return true;
+diff --git a/content/browser/media/webrtc_identity_store.cc b/content/browser/media/webrtc_identity_store.cc
+index 4a02b71..3943b60 100644
+--- a/content/browser/media/webrtc_identity_store.cc
++++ b/content/browser/media/webrtc_identity_store.cc
+@@ -192,13 +192,13 @@ base::Closure WebRTCIdentityStore::RequestIdentity(
+   if (!request) {
+     request = new WebRTCIdentityRequest(origin, identity_name, common_name);
+     // |request| will delete itself after the result is posted.
+-    if (!backend_->FindIdentity(
+-            origin,
+-            identity_name,
+-            common_name,
+-            base::Bind(
+-                &WebRTCIdentityStore::BackendFindCallback, this, request))) {
+-      // Bail out if the backend failed to start the task.
++    if (!BrowserThread::PostTask(
++          BrowserThread::IO,
++          FROM_HERE,
++          base::Bind(base::Bind(
++                &WebRTCIdentityStore::BackendFindCallback, this, request),
++                net::ERR_FILE_NOT_FOUND, "", ""))) {
++      // Bail out if the task could not be started.
+       delete request;
+       return base::Closure();
+     }
+@@ -272,12 +272,7 @@ void WebRTCIdentityStore::GenerateIdentityCallback(
+     WebRTCIdentityRequestResult* result) {
+   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+   if (result->error == net::OK) {
+-    DVLOG(2) << "New identity generated and added to the backend.";
+-    backend_->AddIdentity(request->origin_,
+-                          request->identity_name_,
+-                          request->common_name_,
+-                          result->certificate,
+-                          result->private_key);
++    DVLOG(2) << "New identity generated.";
+   }
+   PostRequestResult(request, *result);
+ }
+diff --git a/content/common/user_agent.cc b/content/common/user_agent.cc
+index 1176c48..38f2d9f 100644
+--- a/content/common/user_agent.cc
++++ b/content/common/user_agent.cc
+@@ -191,6 +191,10 @@ std::string BuildUserAgentFromOSAndProduct(const std::string& os_info,
+       product.c_str(),
+       WEBKIT_VERSION_MAJOR,
+       WEBKIT_VERSION_MINOR);
++  if (strncmp(product.c_str(), "Iridium/", 8) == 0) {
++  	const char *p = strchr(product.c_str(), '/') + 1;
++  	base::StringAppendF(&user_agent, " Chrome/%s", p);
++  }
+   return user_agent;
+ }
+ 
+diff --git a/net/cert/x509_util.cc b/net/cert/x509_util.cc
+index d74340e..7dd92b3 100644
+--- a/net/cert/x509_util.cc
++++ b/net/cert/x509_util.cc
+@@ -16,7 +16,7 @@ namespace net {
+ namespace x509_util {
+ 
+ // RSA keys created by CreateKeyAndSelfSignedCert will be of this length.
+-static const uint16 kRSAKeyLength = 1024;
++static const uint16 kRSAKeyLength = 2048;
+ 
+ // Certificates made by CreateKeyAndSelfSignedCert and
+ //  CreateKeyAndChannelIDEC will be signed using this digest algorithm.
+diff --git a/net/dns/host_resolver_impl.cc b/net/dns/host_resolver_impl.cc
+index 136941d..0f319d2 100644
+--- a/net/dns/host_resolver_impl.cc
++++ b/net/dns/host_resolver_impl.cc
+@@ -2158,8 +2158,8 @@ HostResolverImpl::Key HostResolverImpl::GetEffectiveKeyForRequest(
+       base::TimeTicks start_time = base::TimeTicks::Now();
+       // Google DNS address.
+       const uint8 kIPv6Address[] =
+-          { 0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00,
+-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88 };
++          { 0x2a, 0x01, 0x04, 0xf8, 0x01, 0x41, 0x6f, 0xfe,
++            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+       IPAddressNumber address(kIPv6Address,
+                               kIPv6Address + arraysize(kIPv6Address));
+       BoundNetLog probe_net_log = BoundNetLog::Make(
+diff --git a/net/third_party/nss/ssl/ssl3ecc.c b/net/third_party/nss/ssl/ssl3ecc.c
+index 39f9af1..0b4a8f4 100644
+--- a/net/third_party/nss/ssl/ssl3ecc.c
++++ b/net/third_party/nss/ssl/ssl3ecc.c
+@@ -154,15 +154,6 @@ static const Bits2Curve bits2curve [] = {
+    {  65535,     ec_noName    }
+ };
+ 
+-typedef struct ECDHEKeyPairStr {
+-    ssl3KeyPair *  pair;
+-    int            error;  /* error code of the call-once function */
+-    PRCallOnceType once;
+-} ECDHEKeyPair;
+-
+-/* arrays of ECDHE KeyPairs */
+-static ECDHEKeyPair gECDHEKeyPairs[ec_pastLastName];
+-
+ SECStatus 
+ ssl3_ECName2Params(PLArenaPool * arena, ECName curve, SECKEYECParams * params)
+ {
+@@ -484,49 +475,28 @@ ssl3_GetCurveNameForServerSocket(sslSocket *ss)
+ 					  requiredECCbits);
+ }
+ 
+-/* function to clear out the lists */
++/*
++ * Creates the ephemeral public and private ECDH keys used by
++ * server in ECDHE_RSA and ECDHE_ECDSA handshakes.
++ * For now, the elliptic curve is chosen to be the same
++ * strength as the signing certificate (ECC or RSA).
++ * We need an API to specify the curve. This won't be a real
++ * issue until we further develop server-side support for ECC
++ * cipher suites.
++ */
+ static SECStatus 
+-ssl3_ShutdownECDHECurves(void *appData, void *nssData)
+-{
+-    int i;
+-    ECDHEKeyPair *keyPair = &gECDHEKeyPairs[0];
+-
+-    for (i=0; i < ec_pastLastName; i++, keyPair++) {
+-	if (keyPair->pair) {
+-	    ssl3_FreeKeyPair(keyPair->pair);
+-	}
+-    }
+-    memset(gECDHEKeyPairs, 0, sizeof gECDHEKeyPairs);
+-    return SECSuccess;
+-}
+-
+-static PRStatus
+-ssl3_ECRegister(void)
+-{
+-    SECStatus rv;
+-    rv = NSS_RegisterShutdown(ssl3_ShutdownECDHECurves, gECDHEKeyPairs);
+-    if (rv != SECSuccess) {
+-	gECDHEKeyPairs[ec_noName].error = PORT_GetError();
+-    }
+-    return (PRStatus)rv;
+-}
+-
+-/* CallOnce function, called once for each named curve. */
+-static PRStatus 
+-ssl3_CreateECDHEphemeralKeyPair(void * arg)
++ssl3_CreateECDHEphemeralKeys(sslSocket *ss, ECName ec_curve)
+ {
+     SECKEYPrivateKey *    privKey  = NULL;
+     SECKEYPublicKey *     pubKey   = NULL;
+     ssl3KeyPair *	  keyPair  = NULL;
+-    ECName                ec_curve = (ECName)arg;
+     SECKEYECParams        ecParams = { siBuffer, NULL, 0 };
++    SECStatus		  status;
+ 
+-    PORT_Assert(gECDHEKeyPairs[ec_curve].pair == NULL);
+-
+-    /* ok, no one has generated a global key for this curve yet, do so */
+-    if (ssl3_ECName2Params(NULL, ec_curve, &ecParams) != SECSuccess) {
+-	gECDHEKeyPairs[ec_curve].error = PORT_GetError();
+-	return PR_FAILURE;
++    fprintf(stderr, "*** Successfully using patched ssl3_CreateECDHEphemeralKeys\n");
++    status = ssl3_ECName2Params(NULL, ec_curve, &ecParams);
++    if (status != SECSuccess) {
++	return status;
+     }
+ 
+     privKey = SECKEY_CreateECPrivateKey(&ecParams, &pubKey, NULL);    
+@@ -540,51 +510,10 @@ ssl3_CreateECDHEphemeralKeyPair(void * arg)
+ 	    SECKEY_DestroyPublicKey(pubKey);
+ 	}
+ 	ssl_MapLowLevelError(SEC_ERROR_KEYGEN_FAIL);
+-	gECDHEKeyPairs[ec_curve].error = PORT_GetError();
+-	return PR_FAILURE;
+-    }
+-
+-    gECDHEKeyPairs[ec_curve].pair = keyPair;
+-    return PR_SUCCESS;
+-}
+-
+-/*
+- * Creates the ephemeral public and private ECDH keys used by
+- * server in ECDHE_RSA and ECDHE_ECDSA handshakes.
+- * For now, the elliptic curve is chosen to be the same
+- * strength as the signing certificate (ECC or RSA).
+- * We need an API to specify the curve. This won't be a real
+- * issue until we further develop server-side support for ECC
+- * cipher suites.
+- */
+-static SECStatus
+-ssl3_CreateECDHEphemeralKeys(sslSocket *ss, ECName ec_curve)
+-{
+-    ssl3KeyPair *	  keyPair        = NULL;
+-
+-    /* if there's no global key for this curve, make one. */
+-    if (gECDHEKeyPairs[ec_curve].pair == NULL) {
+-	PRStatus status;
+-
+-	status = PR_CallOnce(&gECDHEKeyPairs[ec_noName].once, ssl3_ECRegister);
+-        if (status != PR_SUCCESS) {
+-	    PORT_SetError(gECDHEKeyPairs[ec_noName].error);
+-	    return SECFailure;
+-    	}
+-	status = PR_CallOnceWithArg(&gECDHEKeyPairs[ec_curve].once,
+-	                            ssl3_CreateECDHEphemeralKeyPair,
+-				    (void *)ec_curve);
+-        if (status != PR_SUCCESS) {
+-	    PORT_SetError(gECDHEKeyPairs[ec_curve].error);
+-	    return SECFailure;
+-    	}
++	return SECFailure;
+     }
+ 
+-    keyPair = gECDHEKeyPairs[ec_curve].pair;
+-    PORT_Assert(keyPair != NULL);
+-    if (!keyPair) 
+-    	return SECFailure;
+-    ss->ephemeralECDHKeyPair = ssl3_GetKeyPairRef(keyPair);
++    ss->ephemeralECDHKeyPair = keyPair;
+ 
+     return SECSuccess;
+ }

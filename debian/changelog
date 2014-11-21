@@ -1,0 +1,7 @@
+iridium-browser (38.0.2125.104-0iridium38.0+1) precise; urgency=low
+
+  * Initial release, based on chromium 38.0.2125.104.
+  * Contains patches for iridium-browser 38.0.
+  * Build with clang on Ubuntu Precise (12.04).
+
+ -- Joachim Bauch <bauch@struktur.de>  Fri, 21 Nov 2014 09:41:34 +0100

@@ -1,0 +1,165 @@
+Source: iridium-browser
+Section: web
+Priority: optional
+Maintainer: Joachim Bauch <bauch@struktur.de>
+XS-Testsuite: autopkgtest
+Homepage: http://iridium-browser.org
+Vcs-Git: git://git.netitwork.net/iridium-browser
+Vcs-Browser: https://git.netitwork.net/pub/cgit.cgi/iridium-browser/
+Build-Depends:
+	debhelper (>= 9),
+	dh-buildinfo,
+	ninja-build (>= 1.3),
+	pkg-config,
+	lsb-release,
+	quilt,
+	python,
+	bison,
+	gperf,
+	libpulse-dev,
+	libcups2-dev | libcupsys2-dev,
+	libasound2-dev,
+	libnss3-dev,
+	libgles2-mesa-dev [armel armhf],
+	libpci-dev,
+	libxtst-dev,
+	libxss-dev,
+	libgtk2.0-dev,
+	libgnome-keyring-dev,
+	libudev-dev,
+	libgconf2-dev,
+	libdrm-dev,
+	libcap-dev,
+	libexif-dev,
+	libgcrypt-dev,
+	libkrb5-dev,
+	libxkbcommon-dev,
+	libssl-dev,
+	chrpath,
+	g++-4.8 | clang-3.5 | clang-3.4,
+	xdg-utils
+Standards-Version: 3.9.3
+
+Package: iridium-browser
+Architecture: armhf armel i386 amd64
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${shlibs:Depends}, ${misc:Depends},
+	bash,
+	libnss3,
+	xdg-utils,
+	iridium-codecs-ffmpeg-extra (>= 0.6) | iridium-codecs-ffmpeg (>= 0.6)
+Recommends: iridium-browser-l10n
+Provides: www-browser, iridium-browser-inspector
+Replaces: iridium-browser-inspector
+Conflicts: iridium-browser-inspector
+Description: iridium browser
+ iridium is a free, open, and libre browser modification of the Chromium code
+ base, with privacy being enhanced in several key areas. Automatic transmission
+ of partial queries, keywords, metrics to central services inhibited and only
+ occurs with consent.
+ .
+ In addition, all our builds are reproducible, and modifications are auditable,
+ setting the project ahead of other secure browser providers.
+ .
+ This package contains the iridium browser
+
+Package: iridium-browser-dbg
+Architecture: armhf armel i386 amd64
+Priority: extra
+Section: debug
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${misc:Depends}, iridium-browser (= ${binary:Version})
+Description: iridium-browser debug symbols
+ Debug symbols for the iridium browser
+
+Package: iridium-browser-l10n
+Architecture: all
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${misc:Depends}, iridium-browser (>= ${binary:Version}),
+ iridium-browser (<< ${binary:Version}.1~)
+Replaces: iridium-browser
+Description: iridium-browser language packages
+ iridium is a free, open, and libre browser modification of the Chromium code
+ base, with privacy being enhanced in several key areas. Automatic transmission
+ of partial queries, keywords, metrics to central services inhibited and only
+ occurs with consent.
+ .
+ This package contains language packages for 65 languages:
+ am, ar, ast, bg, bn, bs, ca, ca@valencia, cs, da, de, el, en-AU, en-GB, eo,
+ es-419, es, et, eu, fa, fil, fi, fr, gl, gu, he, hi, hr, hu, hy, ia, id, it,
+ ja, ka, kn, ko, ku, kw, lt, lv, ml, mr, ms, nb, nl, pl, pt-BR, pt-PT, ro, ru,
+ sk, sl, sr, sv, sw, ta, te, th, tr, ug, uk, vi, zh-CN, zh-TW
+
+Package: iridium-codecs-ffmpeg
+Architecture: armhf armel i386 amd64
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Conflicts: iridium-codecs-ffmpeg-extra
+Replaces: iridium-codecs-ffmpeg-extra
+Description: Free ffmpeg codecs for the iridium Browser
+ iridium is a free, open, and libre browser modification of the Chromium code
+ base, with privacy being enhanced in several key areas. Automatic transmission
+ of partial queries, keywords, metrics to central services inhibited and only
+ occurs with consent.
+ .
+ This package contains the multi-threaded ffmpeg codecs needed for the HTML5
+ <audio> and <video> tags. Only the free ogg, vorbis and theora codecs are
+ included. See iridium-codecs-ffmpeg-extra for additional codecs
+
+Package: iridium-codecs-ffmpeg-dbg
+Architecture: armhf armel i386 amd64
+Section: debug
+Priority: extra
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${misc:Depends}, iridium-codecs-ffmpeg (= ${binary:Version})
+Conflicts: iridium-codecs-ffmpeg-extra-dbg
+Replaces: iridium-codecs-ffmpeg-extra-dbg
+Description: iridium-codecs-ffmpeg debug symbols
+ Debug symbols for the free ffmpeg-mt codecs
+
+Package: iridium-codecs-ffmpeg-extra
+Architecture: armhf armel i386 amd64
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Conflicts: iridium-codecs-ffmpeg
+Replaces: iridium-codecs-ffmpeg
+Description: Extra ffmpeg codecs for the iridium Browser
+ iridium is a free, open, and libre browser modification of the Chromium code
+ base, with privacy being enhanced in several key areas. Automatic transmission
+ of partial queries, keywords, metrics to central services inhibited and only
+ occurs with consent.
+ .
+ This package contains the multi-threaded ffmpeg codecs needed for the HTML5
+ <audio> and <video> tags. In addition to the patent-free ogg, vorbis and
+ theora codecs, aac/ac3/mpeg4audio/h264/mov/mp3 are also included.  See
+ iridium-codecs-ffmpeg if you prefer only the patent-free codecs
+
+Package: iridium-codecs-ffmpeg-extra-dbg
+Architecture: armhf armel i386 amd64
+Section: debug
+Priority: extra
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${misc:Depends}, iridium-codecs-ffmpeg-extra (= ${binary:Version})
+Conflicts: iridium-codecs-ffmpeg-dbg
+Replaces: iridium-codecs-ffmpeg-dbg
+Description: iridium-codecs-ffmpeg-extra debug symbols
+ Debug symbols for the extra ffmpeg-mt codecs
+
+Package: iridium-chromedriver
+Architecture: armhf armel i386 amd64
+Pre-Depends: dpkg (>= 1.15.6)
+Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (>= 4.0.203.0~)
+Description: WebDriver driver for the iridium Browser
+ Chromedriver serves as a bridge between iridium Browser and Selenium 
+ WebDriver.
+ .
+ See http://code.google.com/p/selenium/wiki/ChromeDriver for details.
+
+Package: iridium-chromedriver-dbg
+Architecture: armhf armel i386 amd64
+Pre-Depends: dpkg (>= 1.15.6)
+Section: debug
+Priority: extra
+Depends: ${misc:Depends}, iridium-chromedriver (= ${binary:Version})
+Description: iridium-chromedriver debug symbols
+ Debug symbols for the iridium-chromedriver package.

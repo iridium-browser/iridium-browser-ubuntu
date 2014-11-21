@@ -1,0 +1,11 @@
+--- a/base/cpu.cc
++++ b/base/cpu.cc
+@@ -135,7 +135,7 @@ class LazyCpuInfoValue {
+         brand_.assign(line.substr(strlen(kModelNamePrefix)));
+       }
+ 
+-      for (size_t i = 0; i < arraysize(kUnsignedValues); i++) {
++      for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kUnsignedValues); i++) {
+         const char *key = kUnsignedValues[i].key;
+         const size_t len = strlen(key);
+ 
