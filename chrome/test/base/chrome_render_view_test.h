@@ -35,9 +35,11 @@ class ChromeRenderViewTest : public content::RenderViewTest {
   virtual content::ContentRendererClient*
       CreateContentRendererClient() OVERRIDE;
 
+#if defined(ENABLE_EXTENSIONS)
   scoped_ptr<extensions::DispatcherDelegate> extension_dispatcher_delegate_;
+#endif
 
-  autofill::TestPasswordAutofillAgent* password_autofill_;
+  autofill::TestPasswordAutofillAgent* password_autofill_agent_;
   autofill::TestPasswordGenerationAgent* password_generation_;
   autofill::AutofillAgent* autofill_agent_;
 

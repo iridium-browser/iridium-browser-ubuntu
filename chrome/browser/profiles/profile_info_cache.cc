@@ -5,7 +5,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -24,11 +24,10 @@
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -736,7 +735,7 @@ void ProfileInfoCache::SetProfileIsUsingDefaultAvatarAtIndex(
   SetInfoForProfileAtIndex(index, info.release());
 }
 
-bool ProfileInfoCache::IsDefaultProfileName(const base::string16& name) {
+bool ProfileInfoCache::IsDefaultProfileName(const base::string16& name) const {
   // Check if it's a "First user" old-style name.
   if (name == l10n_util::GetStringUTF16(IDS_DEFAULT_PROFILE_NAME) ||
       name == l10n_util::GetStringUTF16(IDS_LEGACY_DEFAULT_PROFILE_NAME))

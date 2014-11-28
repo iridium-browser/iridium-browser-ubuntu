@@ -34,6 +34,7 @@
 namespace blink {
 
 class TextMetrics FINAL : public RefCountedWillBeGarbageCollected<TextMetrics>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<TextMetrics> create() { return adoptRefWillBeNoop(new TextMetrics); }
 
@@ -88,10 +89,7 @@ private:
         , m_emHeightDescent(0)
         , m_hangingBaseline(0)
         , m_alphabeticBaseline(0)
-        , m_ideographicBaseline(0)
-    {
-        ScriptWrappable::init(this);
-    }
+        , m_ideographicBaseline(0) { }
 
     // x-direction
     float m_width;

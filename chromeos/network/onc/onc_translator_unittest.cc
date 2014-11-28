@@ -56,8 +56,8 @@ INSTANTIATE_TEST_CASE_P(
                        "shill_openvpn.json"),
         std::make_pair("openvpn_clientcert_with_cert_pems.onc",
                        "shill_openvpn_clientcert.json"),
-        std::make_pair("cellular.onc",
-                       "shill_cellular.json")));
+        std::make_pair("cellular.onc", "shill_cellular.json"),
+        std::make_pair("wimax.onc", "shill_wimax.json")));
 
 // First parameter: Filename of source Shill json.
 // Second parameter: Filename of expected translated ONC network part.
@@ -78,7 +78,7 @@ TEST_P(ONCTranslatorShillToOncTest, Translate) {
       test_utils::ReadTestDictionary(result_onc_filename));
 
   scoped_ptr<base::DictionaryValue> translation(TranslateShillServiceToONCPart(
-      *shill_network, &kNetworkWithStateSignature));
+      *shill_network, ::onc::ONC_SOURCE_NONE, &kNetworkWithStateSignature));
 
   EXPECT_TRUE(test_utils::Equals(expected_onc_network.get(),
                                  translation.get()));
@@ -98,16 +98,18 @@ INSTANTIATE_TEST_CASE_P(
                        "translation_of_shill_wifi_clientcert.onc"),
         std::make_pair("shill_wifi_wpa1.json",
                        "translation_of_shill_wifi_wpa1.onc"),
-        std::make_pair("shill_l2tpipsec.json",
+        std::make_pair("shill_output_l2tpipsec.json",
                        "translation_of_shill_l2tpipsec.onc"),
-        std::make_pair("shill_openvpn.json",
+        std::make_pair("shill_output_openvpn.json",
                        "translation_of_shill_openvpn.onc"),
-        std::make_pair("shill_openvpn_with_errors.json",
+        std::make_pair("shill_output_openvpn_with_errors.json",
                        "translation_of_shill_openvpn_with_errors.onc"),
         std::make_pair("shill_wifi_with_state.json",
                        "translation_of_shill_wifi_with_state.onc"),
         std::make_pair("shill_cellular_with_state.json",
-                       "translation_of_shill_cellular_with_state.onc")));
+                       "translation_of_shill_cellular_with_state.onc"),
+        std::make_pair("shill_wimax_with_state.json",
+                       "translation_of_shill_wimax_with_state.onc")));
 
 }  // namespace onc
 }  // namespace chromeos

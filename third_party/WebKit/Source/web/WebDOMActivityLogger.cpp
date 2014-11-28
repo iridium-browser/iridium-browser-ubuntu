@@ -38,8 +38,6 @@
 #include "wtf/PassRefPtr.h"
 #include "wtf/text/WTFString.h"
 
-using namespace blink;
-
 namespace blink {
 
 class DOMActivityLoggerContainer : public V8DOMActivityLogger {
@@ -57,11 +55,6 @@ public:
     virtual void logSetter(const String& apiName, const v8::Handle<v8::Value>& newValue) OVERRIDE
     {
         m_domActivityLogger->logSetter(WebString(apiName), newValue, getURL(), getTitle());
-    }
-
-    virtual void logSetter(const String& apiName, const v8::Handle<v8::Value>& newValue, const v8::Handle<v8::Value>& oldValue) OVERRIDE
-    {
-        m_domActivityLogger->logSetter(WebString(apiName), newValue, oldValue, getURL(), getTitle());
     }
 
     virtual void logMethod(const String& apiName, int argc, const v8::Handle<v8::Value>* argv) OVERRIDE

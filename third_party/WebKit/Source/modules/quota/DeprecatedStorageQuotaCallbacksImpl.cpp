@@ -36,13 +36,13 @@
 
 namespace blink {
 
-DeprecatedStorageQuotaCallbacksImpl::DeprecatedStorageQuotaCallbacksImpl(PassOwnPtr<StorageUsageCallback> usageCallback, PassOwnPtr<StorageErrorCallback> errorCallback)
+DeprecatedStorageQuotaCallbacksImpl::DeprecatedStorageQuotaCallbacksImpl(StorageUsageCallback* usageCallback, StorageErrorCallback* errorCallback)
     : m_usageCallback(usageCallback)
     , m_errorCallback(errorCallback)
 {
 }
 
-DeprecatedStorageQuotaCallbacksImpl::DeprecatedStorageQuotaCallbacksImpl(PassOwnPtr<StorageQuotaCallback> quotaCallback, PassOwnPtr<StorageErrorCallback> errorCallback)
+DeprecatedStorageQuotaCallbacksImpl::DeprecatedStorageQuotaCallbacksImpl(StorageQuotaCallback* quotaCallback, StorageErrorCallback* errorCallback)
     : m_quotaCallback(quotaCallback)
     , m_errorCallback(errorCallback)
 {
@@ -50,6 +50,14 @@ DeprecatedStorageQuotaCallbacksImpl::DeprecatedStorageQuotaCallbacksImpl(PassOwn
 
 DeprecatedStorageQuotaCallbacksImpl::~DeprecatedStorageQuotaCallbacksImpl()
 {
+}
+
+void DeprecatedStorageQuotaCallbacksImpl::trace(Visitor* visitor)
+{
+    visitor->trace(m_usageCallback);
+    visitor->trace(m_quotaCallback);
+    visitor->trace(m_errorCallback);
+    StorageQuotaCallbacks::trace(visitor);
 }
 
 void DeprecatedStorageQuotaCallbacksImpl::didQueryStorageUsageAndQuota(unsigned long long usageInBytes, unsigned long long quotaInBytes)

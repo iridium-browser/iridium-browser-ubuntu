@@ -14,7 +14,7 @@
 
 class Profile;
 
-namespace fileapi {
+namespace storage {
 class FileSystemURL;
 }
 
@@ -85,15 +85,6 @@ DriveAppRegistry* GetDriveAppRegistryByProfile(Profile* profile);
 // or disabled), returns NULL.
 DriveServiceInterface* GetDriveServiceByProfile(Profile* profile);
 
-// Returns the gdata file resource url formatted as "drive:<path>"
-GURL FilePathToDriveURL(const base::FilePath& path);
-
-// Converts a drive: URL back to a path that can be passed to FileSystem.
-base::FilePath DriveURLToFilePath(const GURL& url);
-
-// Overwrites |url| with a Drive URL when appropriate.
-void MaybeSetDriveURL(Profile* profile, const base::FilePath& path, GURL* url);
-
 // Returns true if the given path is under the Drive mount point.
 bool IsUnderDriveMountPoint(const base::FilePath& path);
 
@@ -110,7 +101,7 @@ Profile* ExtractProfileFromPath(const base::FilePath& path);
 // Extracts the Drive path (e.g., "drive/foo.txt") from the filesystem URL.
 // Returns an empty path if |url| does not point under Drive mount point.
 base::FilePath ExtractDrivePathFromFileSystemUrl(
-    const fileapi::FileSystemURL& url);
+    const storage::FileSystemURL& url);
 
 // Escapes a file name in Drive cache.
 // Replaces percent ('%'), period ('.') and slash ('/') with %XX (hex)

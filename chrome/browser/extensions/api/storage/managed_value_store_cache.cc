@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
@@ -161,7 +161,7 @@ void ManagedValueStoreCache::ExtensionTracker::LoadSchemas(
   ExtensionSet::const_iterator it = added->begin();
   while (it != added->end()) {
     std::string to_remove;
-    if (!UsesManagedStorage(*it))
+    if (!UsesManagedStorage(it->get()))
       to_remove = (*it)->id();
     ++it;
     if (!to_remove.empty())

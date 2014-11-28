@@ -8,6 +8,9 @@
             "className": "WebInspector.TimelinePanel"
         }
     ],
+    "dependencies": [
+        "components"
+    ],
     "scripts": [
         "CountersGraph.js",
         "Layers3DView.js",
@@ -30,6 +33,7 @@
         "TimelineView.js",
         "TimelineLayersView.js",
         "TimelinePaintProfilerView.js",
+        "TracingModel.js",
         "TracingTimelineUIUtils.js",
         "TransformController.js",
         "PaintProfilerView.js",

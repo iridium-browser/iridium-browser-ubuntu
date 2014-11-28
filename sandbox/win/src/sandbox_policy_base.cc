@@ -373,85 +373,16 @@ ResultCode PolicyBase::SetStderrHandle(HANDLE handle) {
   return SBOX_ALL_OK;
 }
 
-ResultCode PolicyBase::AddRule(SubSystem subsystem, Semantics semantics,
+ResultCode PolicyBase::AddRule(SubSystem subsystem,
+                               Semantics semantics,
                                const wchar_t* pattern) {
-  if (NULL == policy_) {
-    policy_ = MakeBrokerPolicyMemory();
-    DCHECK(policy_);
-    policy_maker_ = new LowLevelPolicy(policy_);
-    DCHECK(policy_maker_);
-  }
-
-  switch (subsystem) {
-    case SUBSYS_FILES: {
-      if (!file_system_init_) {
-        if (!FileSystemPolicy::SetInitialRules(policy_maker_))
-          return SBOX_ERROR_BAD_PARAMS;
-        file_system_init_ = true;
-      }
-      if (!FileSystemPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-    case SUBSYS_SYNC: {
-      if (!SyncPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-    case SUBSYS_PROCESS: {
-      if (lockdown_level_  < USER_INTERACTIVE &&
-          TargetPolicy::PROCESS_ALL_EXEC == semantics) {
-        // This is unsupported. This is a huge security risk to give full access
-        // to a process handle.
-        return SBOX_ERROR_UNSUPPORTED;
-      }
-      if (!ProcessPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-    case SUBSYS_NAMED_PIPES: {
-      if (!NamedPipePolicy::GenerateRules(pattern, semantics, policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-    case SUBSYS_REGISTRY: {
-      if (!RegistryPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-    case SUBSYS_HANDLES: {
-      if (!HandlePolicy::GenerateRules(pattern, semantics, policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-
-    case SUBSYS_WIN32K_LOCKDOWN: {
-      if (!ProcessMitigationsWin32KLockdownPolicy::GenerateRules(
-              pattern, semantics,policy_maker_)) {
-        NOTREACHED();
-        return SBOX_ERROR_BAD_PARAMS;
-      }
-      break;
-    }
-
-    default: {
-      return SBOX_ERROR_UNSUPPORTED;
-    }
-  }
-
-  return SBOX_ALL_OK;
+  ResultCode result = AddRuleInternal(subsystem, semantics, pattern);
+  LOG_IF(ERROR, result != SBOX_ALL_OK) << "Failed to add sandbox rule."
+                                       << " error = " << result
+                                       << ", subsystem = " << subsystem
+                                       << ", semantics = " << semantics
+                                       << ", pattern = '" << pattern << "'";
+  return result;
 }
 
 ResultCode PolicyBase::AddDllToUnload(const wchar_t* dll_name) {
@@ -528,7 +459,7 @@ ResultCode PolicyBase::MakeTokens(HANDLE* initial, HANDLE* lockdown) {
   // integrity label on the object is no higher than the sandboxed process's
   // integrity level. So, we lower the label on the desktop process if it's
   // not already low enough for our process.
-  if (use_alternate_desktop_ &&
+  if (alternate_desktop_handle_ && use_alternate_desktop_ &&
       integrity_level_ != INTEGRITY_LEVEL_LAST &&
       alternate_desktop_integrity_level_label_ < integrity_level_ &&
       base::win::OSInfo::GetInstance()->version() >= base::win::VERSION_VISTA) {
@@ -733,6 +664,86 @@ bool PolicyBase::SetupAllInterceptions(TargetProcess* target) {
 
 bool PolicyBase::SetupHandleCloser(TargetProcess* target) {
   return handle_closer_.InitializeTargetHandles(target);
+}
+
+ResultCode PolicyBase::AddRuleInternal(SubSystem subsystem,
+                                       Semantics semantics,
+                                       const wchar_t* pattern) {
+  if (NULL == policy_) {
+    policy_ = MakeBrokerPolicyMemory();
+    DCHECK(policy_);
+    policy_maker_ = new LowLevelPolicy(policy_);
+    DCHECK(policy_maker_);
+  }
+
+  switch (subsystem) {
+    case SUBSYS_FILES: {
+      if (!file_system_init_) {
+        if (!FileSystemPolicy::SetInitialRules(policy_maker_))
+          return SBOX_ERROR_BAD_PARAMS;
+        file_system_init_ = true;
+      }
+      if (!FileSystemPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+    case SUBSYS_SYNC: {
+      if (!SyncPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+    case SUBSYS_PROCESS: {
+      if (lockdown_level_ < USER_INTERACTIVE &&
+          TargetPolicy::PROCESS_ALL_EXEC == semantics) {
+        // This is unsupported. This is a huge security risk to give full access
+        // to a process handle.
+        return SBOX_ERROR_UNSUPPORTED;
+      }
+      if (!ProcessPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+    case SUBSYS_NAMED_PIPES: {
+      if (!NamedPipePolicy::GenerateRules(pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+    case SUBSYS_REGISTRY: {
+      if (!RegistryPolicy::GenerateRules(pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+    case SUBSYS_HANDLES: {
+      if (!HandlePolicy::GenerateRules(pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+
+    case SUBSYS_WIN32K_LOCKDOWN: {
+      if (!ProcessMitigationsWin32KLockdownPolicy::GenerateRules(
+              pattern, semantics, policy_maker_)) {
+        NOTREACHED();
+        return SBOX_ERROR_BAD_PARAMS;
+      }
+      break;
+    }
+
+    default: { return SBOX_ERROR_UNSUPPORTED; }
+  }
+
+  return SBOX_ALL_OK;
 }
 
 }  // namespace sandbox

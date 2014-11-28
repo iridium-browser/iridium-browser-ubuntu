@@ -6,6 +6,9 @@
 
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#if defined(OS_MACOSX)
+#include "base/metrics/field_trial.h"
+#endif
 #include "base/metrics/histogram.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/media/media_stream_audio_processor_options.h"
@@ -196,7 +199,7 @@ MediaStreamAudioProcessor::MediaStreamAudioProcessor(
     // In unit tests not creating a message filter, |aec_dump_message_filter_|
     // will be NULL. We can just ignore that. Other unit tests and browser tests
     // ensure that we do get the filter when we should.
-    if (aec_dump_message_filter_)
+    if (aec_dump_message_filter_.get())
       aec_dump_message_filter_->AddDelegate(this);
   }
 }
@@ -268,7 +271,7 @@ void MediaStreamAudioProcessor::Stop() {
 
   stopped_ = true;
 
-  if (aec_dump_message_filter_) {
+  if (aec_dump_message_filter_.get()) {
     aec_dump_message_filter_->RemoveDelegate(this);
     aec_dump_message_filter_ = NULL;
   }
@@ -414,6 +417,10 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
     config.Set<webrtc::DelayCorrection>(new webrtc::DelayCorrection(true));
   if (goog_experimental_ns)
     config.Set<webrtc::ExperimentalNs>(new webrtc::ExperimentalNs(true));
+#if defined(OS_MACOSX)
+  if (base::FieldTrialList::FindFullName("NoReportedDelayOnMac") == "Enabled")
+    config.Set<webrtc::ReportedDelay>(new webrtc::ReportedDelay(false));
+#endif
 
   // Create and configure the webrtc::AudioProcessing.
   audio_processing_.reset(webrtc::AudioProcessing::Create(config));

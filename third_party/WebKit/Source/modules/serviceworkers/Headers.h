@@ -9,7 +9,6 @@
 #include "modules/serviceworkers/FetchHeaderList.h"
 #include "wtf/Forward.h"
 #include "wtf/PassOwnPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -19,20 +18,20 @@ class HeadersForEachCallback;
 class ScriptValue;
 
 // http://fetch.spec.whatwg.org/#headers-class
-class Headers FINAL : public RefCountedWillBeGarbageCollected<Headers>, public ScriptWrappable {
-    DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(Headers);
+class Headers FINAL : public GarbageCollected<Headers>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum Guard { ImmutableGuard, RequestGuard, RequestNoCORSGuard, ResponseGuard, NoneGuard };
 
-    static PassRefPtrWillBeRawPtr<Headers> create();
-    static PassRefPtrWillBeRawPtr<Headers> create(ExceptionState&);
-    static PassRefPtrWillBeRawPtr<Headers> create(const Headers*, ExceptionState&);
-    static PassRefPtrWillBeRawPtr<Headers> create(const Dictionary&, ExceptionState&);
+    static Headers* create();
+    static Headers* create(ExceptionState&);
+    static Headers* create(const Headers*, ExceptionState&);
+    static Headers* create(const Dictionary&, ExceptionState&);
 
     // Shares the FetchHeaderList. Called when creating a Request or Response.
-    static PassRefPtrWillBeRawPtr<Headers> create(FetchHeaderList*);
+    static Headers* create(FetchHeaderList*);
 
-    PassRefPtrWillBeRawPtr<Headers> createCopy() const;
+    Headers* createCopy() const;
 
     // Headers.idl implementation.
     void append(const String& name, const String& value, ExceptionState&);
@@ -42,8 +41,8 @@ public:
     bool has(const String& key, ExceptionState&);
     void set(const String& key, const String& value, ExceptionState&);
     unsigned long size() const;
-    void forEach(PassOwnPtr<HeadersForEachCallback>, ScriptValue&);
-    void forEach(PassOwnPtr<HeadersForEachCallback>);
+    void forEach(HeadersForEachCallback*, const ScriptValue&);
+    void forEach(HeadersForEachCallback*);
 
     void setGuard(Guard guard) { m_guard = guard; }
     Guard guard() const { return m_guard; }
@@ -58,9 +57,9 @@ private:
     Headers();
     // Shares the FetchHeaderList. Called when creating a Request or Response.
     explicit Headers(FetchHeaderList*);
-    void forEachInternal(PassOwnPtr<HeadersForEachCallback>, ScriptValue*);
+    void forEachInternal(HeadersForEachCallback*, const ScriptValue*);
 
-    RefPtrWillBeMember<FetchHeaderList> m_headerList;
+    Member<FetchHeaderList> m_headerList;
     Guard m_guard;
 };
 

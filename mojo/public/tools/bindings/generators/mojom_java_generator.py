@@ -6,8 +6,12 @@
 
 import argparse
 import ast
+import contextlib
 import os
 import re
+import shutil
+import tempfile
+import zipfile
 
 from jinja2 import contextfilter
 
@@ -95,11 +99,8 @@ def NameToComponent(name):
   name = re.sub('([^A-Z_])([A-Z])', r'\1_\2', name)
   return [x.lower() for x in name.split('_')]
 
-def CapitalizeFirst(string):
-  return string[0].upper() + string[1:]
-
 def UpperCamelCase(name):
-  return ''.join([CapitalizeFirst(x) for x in NameToComponent(name)])
+  return ''.join([x.capitalize() for x in NameToComponent(name)])
 
 def CamelCase(name):
   uccc = UpperCamelCase(name)
@@ -122,12 +123,12 @@ def GetNameForElement(element):
                           mojom.Field)):
     return CamelCase(element.name)
   if isinstance(element,  mojom.EnumValue):
-    return (UpperCamelCase(element.enum_name) + '.' +
+    return (GetNameForElement(element.enum) + '.' +
             ConstantStyle(element.name))
   if isinstance(element, (mojom.NamedValue,
                           mojom.Constant)):
     return ConstantStyle(element.name)
-  raise Exception("Unexpected element: " % element)
+  raise Exception('Unexpected element: ' % element)
 
 def GetInterfaceResponseName(method):
   return UpperCamelCase(method.name + 'Response')
@@ -135,6 +136,58 @@ def GetInterfaceResponseName(method):
 def ParseStringAttribute(attribute):
   assert isinstance(attribute, basestring)
   return attribute
+
+def GetJavaTrueFalse(value):
+  return 'true' if value else 'false'
+
+def GetArrayNullabilityFlags(kind):
+    """Returns nullability flags for an array type, see Decoder.java.
+
+    As we have dedicated decoding functions for arrays, we have to pass
+    nullability information about both the array itself, as well as the array
+    element type there.
+    """
+    assert mojom.IsAnyArrayKind(kind)
+    ARRAY_NULLABLE   = \
+        'org.chromium.mojo.bindings.BindingsHelper.ARRAY_NULLABLE'
+    ELEMENT_NULLABLE = \
+        'org.chromium.mojo.bindings.BindingsHelper.ELEMENT_NULLABLE'
+    NOTHING_NULLABLE = \
+        'org.chromium.mojo.bindings.BindingsHelper.NOTHING_NULLABLE'
+
+    flags_to_set = []
+    if mojom.IsNullableKind(kind):
+        flags_to_set.append(ARRAY_NULLABLE)
+    if mojom.IsNullableKind(kind.kind):
+        flags_to_set.append(ELEMENT_NULLABLE)
+
+    if not flags_to_set:
+        flags_to_set = [NOTHING_NULLABLE]
+    return ' | '.join(flags_to_set)
+
+
+def AppendEncodeDecodeParams(initial_params, context, kind, bit):
+  """ Appends standard parameters shared between encode and decode calls. """
+  params = list(initial_params)
+  if (kind == mojom.BOOL):
+    params.append(str(bit))
+  if mojom.IsReferenceKind(kind):
+    if mojom.IsAnyArrayKind(kind):
+      params.append(GetArrayNullabilityFlags(kind))
+    else:
+      params.append(GetJavaTrueFalse(mojom.IsNullableKind(kind)))
+  if mojom.IsAnyArrayKind(kind):
+    if mojom.IsFixedArrayKind(kind):
+      params.append(str(kind.length))
+    else:
+      params.append(
+        'org.chromium.mojo.bindings.BindingsHelper.UNSPECIFIED_ARRAY_LENGTH');
+  if mojom.IsInterfaceKind(kind):
+    params.append('%s.MANAGER' % GetJavaType(context, kind))
+  if mojom.IsAnyArrayKind(kind) and mojom.IsInterfaceKind(kind.kind):
+    params.append('%s.MANAGER' % GetJavaType(context, kind.kind))
+  return params
+
 
 @contextfilter
 def DecodeMethod(context, kind, offset, bit):
@@ -144,36 +197,25 @@ def DecodeMethod(context, kind, offset, bit):
     if mojom.IsEnumKind(kind):
       return _DecodeMethodName(mojom.INT32)
     if mojom.IsInterfaceRequestKind(kind):
-      return "readInterfaceRequest"
+      return 'readInterfaceRequest'
     if mojom.IsInterfaceKind(kind):
-      return "readServiceInterface"
+      return 'readServiceInterface'
     return _spec_to_decode_method[kind.spec]
   methodName = _DecodeMethodName(kind)
-  additionalParams = ''
-  if (kind == mojom.BOOL):
-    additionalParams = ', %d' % bit
-  if mojom.IsInterfaceKind(kind):
-    additionalParams = ', %s.BUILDER' % GetJavaType(context, kind)
-  if mojom.IsAnyArrayKind(kind) and mojom.IsInterfaceKind(kind.kind):
-    additionalParams = ', %s.BUILDER' % GetJavaType(context, kind.kind)
-  return '%s(%s%s)' % (methodName, offset, additionalParams)
+  params = AppendEncodeDecodeParams([ str(offset) ], context, kind, bit)
+  return '%s(%s)' % (methodName, ', '.join(params))
 
 @contextfilter
 def EncodeMethod(context, kind, variable, offset, bit):
-  additionalParams = ''
-  if (kind == mojom.BOOL):
-    additionalParams = ', %d' % bit
-  if mojom.IsInterfaceKind(kind):
-    additionalParams = ', %s.BUILDER' % GetJavaType(context, kind)
-  if mojom.IsAnyArrayKind(kind) and mojom.IsInterfaceKind(kind.kind):
-    additionalParams = ', %s.BUILDER' % GetJavaType(context, kind.kind)
-  return 'encode(%s, %s%s)' % (variable, offset, additionalParams)
+  params = AppendEncodeDecodeParams(
+      [ variable, str(offset) ], context, kind, bit)
+  return 'encode(%s)' % ', '.join(params)
 
 def GetPackage(module):
   if 'JavaPackage' in module.attributes:
     return ParseStringAttribute(module.attributes['JavaPackage'])
   # Default package.
-  return "org.chromium.mojom." + module.namespace
+  return 'org.chromium.mojom.' + module.namespace
 
 def GetNameForKind(context, kind):
   def _GetNameHierachy(kind):
@@ -203,27 +245,27 @@ def GetJavaType(context, kind, boxed=False):
   if mojom.IsStructKind(kind) or mojom.IsInterfaceKind(kind):
     return GetNameForKind(context, kind)
   if mojom.IsInterfaceRequestKind(kind):
-    return ("org.chromium.mojo.bindings.InterfaceRequest<%s>" %
+    return ('org.chromium.mojo.bindings.InterfaceRequest<%s>' %
             GetNameForKind(context, kind.kind))
   if mojom.IsAnyArrayKind(kind):
-    return "%s[]" % GetJavaType(context, kind.kind)
+    return '%s[]' % GetJavaType(context, kind.kind)
   if mojom.IsEnumKind(kind):
-    return "int"
+    return 'int'
   return _spec_to_java_type[kind.spec]
 
 @contextfilter
 def DefaultValue(context, field):
   assert field.default
   if isinstance(field.kind, mojom.Struct):
-    assert field.default == "default"
-    return "new %s()" % GetJavaType(context, field.kind)
-  return "(%s) %s" % (
+    assert field.default == 'default'
+    return 'new %s()' % GetJavaType(context, field.kind)
+  return '(%s) %s' % (
       GetJavaType(context, field.kind),
       ExpressionToText(context, field.default, kind_spec=field.kind.spec))
 
 @contextfilter
 def ConstantValue(context, constant):
-  return "(%s) %s" % (
+  return '(%s) %s' % (
       GetJavaType(context, constant.kind),
       ExpressionToText(context, constant.value, kind_spec=constant.kind.spec))
 
@@ -260,6 +302,19 @@ def ExpressionToText(context, token, kind_spec=''):
     if number >= 2 ** 63:
       number -= 2 ** 64
     return '%dL' % number
+  if isinstance(token, mojom.BuiltinValue):
+    if token.value == 'double.INFINITY':
+      return 'java.lang.Double.POSITIVE_INFINITY'
+    if token.value == 'double.NEGATIVE_INFINITY':
+      return 'java.lang.Double.NEGATIVE_INFINITY'
+    if token.value == 'double.NAN':
+      return 'java.lang.Double.NaN'
+    if token.value == 'float.INFINITY':
+      return 'java.lang.Float.POSITIVE_INFINITY'
+    if token.value == 'float.NEGATIVE_INFINITY':
+      return 'java.lang.Float.NEGATIVE_INFINITY'
+    if token.value == 'float.NAN':
+      return 'java.lang.Float.NaN'
   return token
 
 def IsPointerArrayKind(kind):
@@ -267,6 +322,14 @@ def IsPointerArrayKind(kind):
     return False
   sub_kind = kind.kind
   return mojom.IsObjectKind(sub_kind)
+
+def GetResponseStructFromMethod(method):
+  return generator.GetDataHeader(
+      False, generator.GetResponseStructFromMethod(method))
+
+def GetStructFromMethod(method):
+  return generator.GetDataHeader(
+      False, generator.GetStructFromMethod(method))
 
 def GetConstantsMainEntityName(module):
   if 'JavaConstantsClassName' in module.attributes:
@@ -276,88 +339,151 @@ def GetConstantsMainEntityName(module):
   return (UpperCamelCase(module.path.split('/')[-1].rsplit('.', 1)[0]) +
           'Constants')
 
+def GetMethodOrdinalName(method):
+  return ConstantStyle(method.name) + '_ORDINAL'
+
+def HasMethodWithResponse(interface):
+  for method in interface.methods:
+    if method.response_parameters:
+      return True
+  return False
+
+def HasMethodWithoutResponse(interface):
+  for method in interface.methods:
+    if not method.response_parameters:
+      return True
+  return False
+
+@contextlib.contextmanager
+def TempDir():
+  dirname = tempfile.mkdtemp()
+  try:
+    yield dirname
+  finally:
+    shutil.rmtree(dirname)
+
+def ZipContentInto(root, zip_filename):
+  with zipfile.ZipFile(zip_filename, 'w') as zip_file:
+    for dirname, _, files in os.walk(root):
+      for filename in files:
+        path = os.path.join(dirname, filename)
+        path_in_archive = os.path.relpath(path, root)
+        zip_file.write(path, path_in_archive)
+
 class Generator(generator.Generator):
 
   java_filters = {
-    "interface_response_name": GetInterfaceResponseName,
-    "constant_value": ConstantValue,
-    "default_value": DefaultValue,
-    "decode_method": DecodeMethod,
-    "expression_to_text": ExpressionToText,
-    "encode_method": EncodeMethod,
-    "is_handle": mojom.IsNonInterfaceHandleKind,
-    "is_pointer_array_kind": IsPointerArrayKind,
-    "is_struct_kind": mojom.IsStructKind,
-    "java_type": GetJavaType,
-    "name": GetNameForElement,
-    "new_array": NewArray,
-    "struct_size": lambda ps: ps.GetTotalSize() + _HEADER_SIZE,
+    'interface_response_name': GetInterfaceResponseName,
+    'constant_value': ConstantValue,
+    'default_value': DefaultValue,
+    'decode_method': DecodeMethod,
+    'expression_to_text': ExpressionToText,
+    'encode_method': EncodeMethod,
+    'has_method_with_response': HasMethodWithResponse,
+    'has_method_without_response': HasMethodWithoutResponse,
+    'is_fixed_array_kind': mojom.IsFixedArrayKind,
+    'is_handle': mojom.IsNonInterfaceHandleKind,
+    'is_nullable_kind': mojom.IsNullableKind,
+    'is_pointer_array_kind': IsPointerArrayKind,
+    'is_struct_kind': mojom.IsStructKind,
+    'java_type': GetJavaType,
+    'java_true_false': GetJavaTrueFalse,
+    'method_ordinal_name': GetMethodOrdinalName,
+    'name': GetNameForElement,
+    'new_array': NewArray,
+    'response_struct_from_method': GetResponseStructFromMethod,
+    'struct_from_method': GetStructFromMethod,
+    'struct_size': lambda ps: ps.GetTotalSize() + _HEADER_SIZE,
   }
 
   def GetJinjaExports(self):
     return {
-      "module": self.module,
-      "package": GetPackage(self.module),
+      'package': GetPackage(self.module),
     }
 
-  @UseJinja("java_templates/enum.java.tmpl", filters=java_filters)
-  def GenerateEnumSource(self, enum):
+  def GetJinjaExportsForInterface(self, interface):
     exports = self.GetJinjaExports()
-    exports.update({"enum": enum})
-    return exports
-
-  @UseJinja("java_templates/struct.java.tmpl", filters=java_filters)
-  def GenerateStructSource(self, struct):
-    exports = self.GetJinjaExports()
-    exports.update({"struct": struct})
-    return exports
-
-  @UseJinja("java_templates/interface.java.tmpl", filters=java_filters)
-  def GenerateInterfaceSource(self, interface):
-    exports = self.GetJinjaExports()
-    exports.update({"interface": interface})
+    exports.update({'interface': interface})
     if interface.client:
       for client in self.module.interfaces:
         if client.name == interface.client:
-          exports.update({"client": client})
+          exports.update({'client': client})
     return exports
 
-  @UseJinja("java_templates/constants.java.tmpl", filters=java_filters)
+  @UseJinja('java_templates/enum.java.tmpl', filters=java_filters)
+  def GenerateEnumSource(self, enum):
+    exports = self.GetJinjaExports()
+    exports.update({'enum': enum})
+    return exports
+
+  @UseJinja('java_templates/struct.java.tmpl', filters=java_filters)
+  def GenerateStructSource(self, struct):
+    exports = self.GetJinjaExports()
+    exports.update({'struct': struct})
+    return exports
+
+  @UseJinja('java_templates/interface.java.tmpl', filters=java_filters)
+  def GenerateInterfaceSource(self, interface):
+    return self.GetJinjaExportsForInterface(interface)
+
+  @UseJinja('java_templates/interface_internal.java.tmpl', filters=java_filters)
+  def GenerateInterfaceInternalSource(self, interface):
+    return self.GetJinjaExportsForInterface(interface)
+
+  @UseJinja('java_templates/constants.java.tmpl', filters=java_filters)
   def GenerateConstantsSource(self, module):
     exports = self.GetJinjaExports()
-    exports.update({"main_entity": GetConstantsMainEntityName(module),
-                    "constants": module.constants})
+    exports.update({'main_entity': GetConstantsMainEntityName(module),
+                    'constants': module.constants})
     return exports
 
-  def GenerateFiles(self, unparsed_args):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--java_output_directory", dest="java_output_directory")
-    args = parser.parse_args(unparsed_args)
-    if self.output_dir and args.java_output_directory:
-      self.output_dir = os.path.join(args.java_output_directory,
-                                     GetPackage(self.module).replace('.', '/'))
-      if not os.path.exists(self.output_dir):
-        try:
-          os.makedirs(self.output_dir)
-        except:
-          # Ignore errors on directory creation.
-          pass
+  def DoGenerateFiles(self):
+    if not os.path.exists(self.output_dir):
+      try:
+        os.makedirs(self.output_dir)
+      except:
+        # Ignore errors on directory creation.
+        pass
+
+    # Keep this above the others as .GetStructs() changes the state of the
+    # module, annotating structs with required information.
+    for struct in self.GetStructs():
+      self.Write(self.GenerateStructSource(struct),
+                 '%s.java' % GetNameForElement(struct))
 
     for enum in self.module.enums:
       self.Write(self.GenerateEnumSource(enum),
-                 "%s.java" % GetNameForElement(enum))
-
-    for struct in self.module.structs:
-      self.Write(self.GenerateStructSource(struct),
-                 "%s.java" % GetNameForElement(struct))
+                 '%s.java' % GetNameForElement(enum))
 
     for interface in self.module.interfaces:
       self.Write(self.GenerateInterfaceSource(interface),
-                 "%s.java" % GetNameForElement(interface))
+                 '%s.java' % GetNameForElement(interface))
+      self.Write(self.GenerateInterfaceInternalSource(interface),
+                 '%s_Internal.java' % GetNameForElement(interface))
 
     if self.module.constants:
       self.Write(self.GenerateConstantsSource(self.module),
-                 "%s.java" % GetConstantsMainEntityName(self.module))
+                 '%s.java' % GetConstantsMainEntityName(self.module))
+
+  def GenerateFiles(self, unparsed_args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--java_output_directory', dest='java_output_directory')
+    args = parser.parse_args(unparsed_args)
+    package_path = GetPackage(self.module).replace('.', '/')
+
+    # Generate the java files in a temporary directory and place a single
+    # srcjar in the output directory.
+    zip_filename = os.path.join(self.output_dir,
+                                "%s.srcjar" % self.module.name)
+    with TempDir() as temp_java_root:
+      self.output_dir = os.path.join(temp_java_root, package_path)
+      self.DoGenerateFiles();
+      ZipContentInto(temp_java_root, zip_filename)
+
+    if args.java_output_directory:
+      # If requested, generate the java files directly into indicated directory.
+      self.output_dir = os.path.join(args.java_output_directory, package_path)
+      self.DoGenerateFiles();
 
   def GetJinjaParameters(self):
     return {
@@ -367,5 +493,6 @@ class Generator(generator.Generator):
 
   def GetGlobals(self):
     return {
+      'namespace': self.module.namespace,
       'module': self.module,
     }

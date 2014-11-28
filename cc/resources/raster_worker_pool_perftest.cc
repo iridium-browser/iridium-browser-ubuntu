@@ -8,14 +8,16 @@
 #include "base/time/time.h"
 #include "cc/debug/lap_timer.h"
 #include "cc/output/context_provider.h"
+#include "cc/resources/bitmap_raster_worker_pool.h"
 #include "cc/resources/gpu_raster_worker_pool.h"
-#include "cc/resources/image_copy_raster_worker_pool.h"
-#include "cc/resources/image_raster_worker_pool.h"
+#include "cc/resources/one_copy_raster_worker_pool.h"
 #include "cc/resources/pixel_buffer_raster_worker_pool.h"
+#include "cc/resources/raster_buffer.h"
 #include "cc/resources/rasterizer.h"
 #include "cc/resources/resource_pool.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_resource.h"
+#include "cc/resources/zero_copy_raster_worker_pool.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/test_context_support.h"
@@ -48,6 +50,16 @@ class PerfGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
     if (pname == GL_MAX_TEXTURE_SIZE)
       *params = INT_MAX;
   }
+  virtual void GenQueriesEXT(GLsizei n, GLuint* queries) OVERRIDE {
+    for (GLsizei i = 0; i < n; ++i)
+      queries[i] = 1u;
+  }
+  virtual void GetQueryObjectuivEXT(GLuint query,
+                                    GLenum pname,
+                                    GLuint* params) OVERRIDE {
+    if (pname == GL_QUERY_RESULT_AVAILABLE_EXT)
+      *params = 1;
+  }
 };
 
 class PerfContextProvider : public ContextProvider {
@@ -55,7 +67,12 @@ class PerfContextProvider : public ContextProvider {
   PerfContextProvider() : context_gl_(new PerfGLES2Interface) {}
 
   virtual bool BindToCurrentThread() OVERRIDE { return true; }
-  virtual Capabilities ContextCapabilities() OVERRIDE { return Capabilities(); }
+  virtual Capabilities ContextCapabilities() OVERRIDE {
+    Capabilities capabilities;
+    capabilities.gpu.map_image = true;
+    capabilities.gpu.sync_query = true;
+    return capabilities;
+  }
   virtual gpu::gles2::GLES2Interface* ContextGL() OVERRIDE {
     return context_gl_.get();
   }
@@ -78,9 +95,10 @@ class PerfContextProvider : public ContextProvider {
 
 enum RasterWorkerPoolType {
   RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER,
-  RASTER_WORKER_POOL_TYPE_IMAGE,
-  RASTER_WORKER_POOL_TYPE_IMAGE_COPY,
-  RASTER_WORKER_POOL_TYPE_GPU
+  RASTER_WORKER_POOL_TYPE_ZERO_COPY,
+  RASTER_WORKER_POOL_TYPE_ONE_COPY,
+  RASTER_WORKER_POOL_TYPE_GPU,
+  RASTER_WORKER_POOL_TYPE_BITMAP
 };
 
 static const int kTimeLimitMillis = 2000;
@@ -122,10 +140,10 @@ class PerfRasterTaskImpl : public RasterTask {
 
   // Overridden from RasterizerTask:
   virtual void ScheduleOnOriginThread(RasterizerTaskClient* client) OVERRIDE {
-    client->AcquireCanvasForRaster(this);
+    raster_buffer_ = client->AcquireBufferForRaster(resource());
   }
   virtual void CompleteOnOriginThread(RasterizerTaskClient* client) OVERRIDE {
-    client->ReleaseCanvasForRaster(this);
+    client->ReleaseBufferForRaster(raster_buffer_.Pass());
   }
   virtual void RunReplyOnOriginThread() OVERRIDE { Reset(); }
 
@@ -139,6 +157,7 @@ class PerfRasterTaskImpl : public RasterTask {
 
  private:
   scoped_ptr<ScopedResource> resource_;
+  scoped_ptr<RasterBuffer> raster_buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(PerfRasterTaskImpl);
 };
@@ -147,24 +166,15 @@ class RasterWorkerPoolPerfTestBase {
  public:
   typedef std::vector<scoped_refptr<RasterTask> > RasterTaskVector;
 
+  enum NamedTaskSet { REQUIRED_FOR_ACTIVATION = 0, ALL = 1 };
+
   RasterWorkerPoolPerfTestBase()
       : context_provider_(make_scoped_refptr(new PerfContextProvider)),
         task_runner_(new base::TestSimpleTaskRunner),
         task_graph_runner_(new TaskGraphRunner),
         timer_(kWarmupRuns,
                base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
-               kTimeCheckInterval) {
-    output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
-    CHECK(output_surface_->BindToClient(&output_surface_client_));
-
-    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    resource_provider_ =
-        ResourceProvider::Create(
-            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
-            false).Pass();
-    staging_resource_pool_ = ResourcePool::Create(
-        resource_provider_.get(), GL_TEXTURE_2D, RGBA_8888);
-  }
+               kTimeCheckInterval) {}
 
   void CreateImageDecodeTasks(unsigned num_image_decode_tasks,
                               ImageDecodeTask::Vector* image_decode_tasks) {
@@ -180,7 +190,8 @@ class RasterWorkerPoolPerfTestBase {
     for (unsigned i = 0; i < num_raster_tasks; ++i) {
       scoped_ptr<ScopedResource> resource(
           ScopedResource::Create(resource_provider_.get()));
-      resource->Allocate(size, ResourceProvider::TextureUsageAny, RGBA_8888);
+      resource->Allocate(
+          size, ResourceProvider::TextureHintImmutable, RGBA_8888);
 
       ImageDecodeTask::Vector dependencies = image_decode_tasks;
       raster_tasks->push_back(
@@ -192,9 +203,11 @@ class RasterWorkerPoolPerfTestBase {
                             const RasterTaskVector& raster_tasks) {
     for (size_t i = 0u; i < raster_tasks.size(); ++i) {
       bool required_for_activation = (i % 2) == 0;
-      queue->items.push_back(RasterTaskQueue::Item(raster_tasks[i].get(),
-                                                   required_for_activation));
-      queue->required_for_activation_count += required_for_activation;
+      TaskSetCollection task_set_collection;
+      task_set_collection[ALL] = true;
+      task_set_collection[REQUIRED_FOR_ACTIVATION] = required_for_activation;
+      queue->items.push_back(
+          RasterTaskQueue::Item(raster_tasks[i].get(), task_set_collection));
     }
   }
 
@@ -202,9 +215,7 @@ class RasterWorkerPoolPerfTestBase {
   scoped_refptr<ContextProvider> context_provider_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
-  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
-  scoped_ptr<ResourcePool> staging_resource_pool_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   scoped_ptr<TaskGraphRunner> task_graph_runner_;
   LapTimer timer_;
@@ -215,9 +226,11 @@ class RasterWorkerPoolPerfTest
       public testing::TestWithParam<RasterWorkerPoolType>,
       public RasterizerClient {
  public:
-  RasterWorkerPoolPerfTest() {
+  // Overridden from testing::Test:
+  virtual void SetUp() OVERRIDE {
     switch (GetParam()) {
       case RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER:
+        Create3dOutputSurfaceAndResourceProvider();
         raster_worker_pool_ = PixelBufferRasterWorkerPool::Create(
             task_runner_.get(),
             task_graph_runner_.get(),
@@ -225,47 +238,55 @@ class RasterWorkerPoolPerfTest
             resource_provider_.get(),
             std::numeric_limits<size_t>::max());
         break;
-      case RASTER_WORKER_POOL_TYPE_IMAGE:
+      case RASTER_WORKER_POOL_TYPE_ZERO_COPY:
+        Create3dOutputSurfaceAndResourceProvider();
         raster_worker_pool_ =
-            ImageRasterWorkerPool::Create(task_runner_.get(),
-                                          task_graph_runner_.get(),
-                                          resource_provider_.get());
+            ZeroCopyRasterWorkerPool::Create(task_runner_.get(),
+                                             task_graph_runner_.get(),
+                                             resource_provider_.get());
         break;
-      case RASTER_WORKER_POOL_TYPE_IMAGE_COPY:
+      case RASTER_WORKER_POOL_TYPE_ONE_COPY:
+        Create3dOutputSurfaceAndResourceProvider();
+        staging_resource_pool_ = ResourcePool::Create(
+            resource_provider_.get(), GL_TEXTURE_2D, RGBA_8888);
         raster_worker_pool_ =
-            ImageCopyRasterWorkerPool::Create(task_runner_.get(),
-                                              task_graph_runner_.get(),
-                                              context_provider_.get(),
-                                              resource_provider_.get(),
-                                              staging_resource_pool_.get());
+            OneCopyRasterWorkerPool::Create(task_runner_.get(),
+                                            task_graph_runner_.get(),
+                                            context_provider_.get(),
+                                            resource_provider_.get(),
+                                            staging_resource_pool_.get());
         break;
       case RASTER_WORKER_POOL_TYPE_GPU:
+        Create3dOutputSurfaceAndResourceProvider();
         raster_worker_pool_ =
             GpuRasterWorkerPool::Create(task_runner_.get(),
                                         context_provider_.get(),
                                         resource_provider_.get());
+        break;
+      case RASTER_WORKER_POOL_TYPE_BITMAP:
+        CreateSoftwareOutputSurfaceAndResourceProvider();
+        raster_worker_pool_ =
+            BitmapRasterWorkerPool::Create(task_runner_.get(),
+                                           task_graph_runner_.get(),
+                                           resource_provider_.get());
         break;
     }
 
     DCHECK(raster_worker_pool_);
     raster_worker_pool_->AsRasterizer()->SetClient(this);
   }
-
-  // Overridden from testing::Test:
   virtual void TearDown() OVERRIDE {
     raster_worker_pool_->AsRasterizer()->Shutdown();
     raster_worker_pool_->AsRasterizer()->CheckForCompletedTasks();
   }
 
   // Overriden from RasterizerClient:
-  virtual bool ShouldForceTasksRequiredForActivationToComplete() const
-      OVERRIDE {
-    return false;
-  }
-  virtual void DidFinishRunningTasks() OVERRIDE {
+  virtual void DidFinishRunningTasks(TaskSet task_set) OVERRIDE {
     raster_worker_pool_->AsRasterizer()->CheckForCompletedTasks();
   }
-  virtual void DidFinishRunningTasksRequiredForActivation() OVERRIDE {}
+  virtual TaskSetCollection TasksThatShouldBeForcedToComplete() const OVERRIDE {
+    return TaskSetCollection();
+  }
 
   void RunMessageLoopUntilAllTasksHaveCompleted() {
     task_graph_runner_->RunUntilIdle();
@@ -375,22 +396,47 @@ class RasterWorkerPoolPerfTest
   }
 
  private:
+  void Create3dOutputSurfaceAndResourceProvider() {
+    output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
+    CHECK(output_surface_->BindToClient(&output_surface_client_));
+    resource_provider_ =
+        ResourceProvider::Create(
+            output_surface_.get(), NULL, NULL, 0, false, 1, false).Pass();
+  }
+
+  void CreateSoftwareOutputSurfaceAndResourceProvider() {
+    output_surface_ = FakeOutputSurface::CreateSoftware(
+        make_scoped_ptr(new SoftwareOutputDevice));
+    CHECK(output_surface_->BindToClient(&output_surface_client_));
+    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                  &shared_bitmap_manager_,
+                                                  NULL,
+                                                  0,
+                                                  false,
+                                                  1,
+                                                  false).Pass();
+  }
+
   std::string TestModifierString() const {
     switch (GetParam()) {
       case RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER:
         return std::string("_pixel_raster_worker_pool");
-      case RASTER_WORKER_POOL_TYPE_IMAGE:
-        return std::string("_image_raster_worker_pool");
-      case RASTER_WORKER_POOL_TYPE_IMAGE_COPY:
-        return std::string("_image_copy_raster_worker_pool");
+      case RASTER_WORKER_POOL_TYPE_ZERO_COPY:
+        return std::string("_zero_copy_raster_worker_pool");
+      case RASTER_WORKER_POOL_TYPE_ONE_COPY:
+        return std::string("_one_copy_raster_worker_pool");
       case RASTER_WORKER_POOL_TYPE_GPU:
         return std::string("_gpu_raster_worker_pool");
+      case RASTER_WORKER_POOL_TYPE_BITMAP:
+        return std::string("_bitmap_raster_worker_pool");
     }
     NOTREACHED();
     return std::string();
   }
 
+  scoped_ptr<ResourcePool> staging_resource_pool_;
   scoped_ptr<RasterWorkerPool> raster_worker_pool_;
+  TestSharedBitmapManager shared_bitmap_manager_;
 };
 
 TEST_P(RasterWorkerPoolPerfTest, ScheduleTasks) {
@@ -423,13 +469,23 @@ TEST_P(RasterWorkerPoolPerfTest, ScheduleAndExecuteTasks) {
 INSTANTIATE_TEST_CASE_P(RasterWorkerPoolPerfTests,
                         RasterWorkerPoolPerfTest,
                         ::testing::Values(RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER,
-                                          RASTER_WORKER_POOL_TYPE_IMAGE,
-                                          RASTER_WORKER_POOL_TYPE_IMAGE_COPY,
-                                          RASTER_WORKER_POOL_TYPE_GPU));
+                                          RASTER_WORKER_POOL_TYPE_ZERO_COPY,
+                                          RASTER_WORKER_POOL_TYPE_ONE_COPY,
+                                          RASTER_WORKER_POOL_TYPE_GPU,
+                                          RASTER_WORKER_POOL_TYPE_BITMAP));
 
 class RasterWorkerPoolCommonPerfTest : public RasterWorkerPoolPerfTestBase,
                                        public testing::Test {
  public:
+  // Overridden from testing::Test:
+  virtual void SetUp() OVERRIDE {
+    output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
+    CHECK(output_surface_->BindToClient(&output_surface_client_));
+    resource_provider_ =
+        ResourceProvider::Create(
+            output_surface_.get(), NULL, NULL, 0, false, 1, false).Pass();
+  }
+
   void RunBuildRasterTaskQueueTest(const std::string& test_name,
                                    unsigned num_raster_tasks,
                                    unsigned num_image_decode_tasks) {

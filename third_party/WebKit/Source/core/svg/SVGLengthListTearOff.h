@@ -39,6 +39,7 @@ namespace blink {
 class SVGLengthListTearOff FINAL
     : public SVGListPropertyTearOffHelper<SVGLengthListTearOff, SVGLengthList>
     , public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtr<SVGLengthListTearOff> create(PassRefPtr<SVGLengthList> target, SVGElement* contextElement, PropertyIsAnimValType propertyIsAnimVal, const QualifiedName& attributeName = QualifiedName::null())
     {
@@ -49,10 +50,9 @@ private:
     SVGLengthListTearOff(PassRefPtr<SVGLengthList> target, SVGElement* contextElement, PropertyIsAnimValType propertyIsAnimVal, const QualifiedName& attributeName = QualifiedName::null())
         : SVGListPropertyTearOffHelper<SVGLengthListTearOff, SVGLengthList>(target, contextElement, propertyIsAnimVal, attributeName)
     {
-        ScriptWrappable::init(this);
     }
 };
 
 } // namespace blink
 
-#endif // SVGLengthListTearOff_h_
+#endif // SVGLengthListTearOff_h

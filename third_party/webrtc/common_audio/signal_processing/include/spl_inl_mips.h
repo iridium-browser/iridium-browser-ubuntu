@@ -66,18 +66,6 @@ static __inline int32_t WEBRTC_SPL_MUL_16_32_RSFT16(int16_t a,
   return value32;
 }
 
-static __inline int32_t WEBRTC_SPL_MUL_32_32_RSFT32BI(int32_t a,
-                                                      int32_t b) {
-  int32_t tmp = 0;
-
-  if ((32767 < a) || (a < 0))
-    tmp = WEBRTC_SPL_MUL_16_32_RSFT16(((int16_t)(a >> 16)), b);
-  tmp += WEBRTC_SPL_MUL_16_32_RSFT16(((int16_t)((a & 0x0000FFFF) >> 1)),
-                                     b) >> 15;
-
-  return tmp;
-}
-
 #if defined(MIPS_DSP_R1_LE)
 static __inline int16_t WebRtcSpl_SatW32ToW16(int32_t value32) {
   __asm __volatile(
@@ -149,10 +137,10 @@ static __inline int16_t WebRtcSpl_GetSizeInBits(uint32_t n) {
     : [n] "r" (n), [i32] "r" (i32)
   );
 
-  return bits;
+  return (int16_t)bits;
 }
 
-static __inline int WebRtcSpl_NormW32(int32_t a) {
+static __inline int16_t WebRtcSpl_NormW32(int32_t a) {
   int zeros = 0;
 
   __asm __volatile(
@@ -172,10 +160,10 @@ static __inline int WebRtcSpl_NormW32(int32_t a) {
     : [a] "r" (a)
   );
 
-  return zeros;
+  return (int16_t)zeros;
 }
 
-static __inline int WebRtcSpl_NormU32(uint32_t a) {
+static __inline int16_t WebRtcSpl_NormU32(uint32_t a) {
   int zeros = 0;
 
   __asm __volatile(
@@ -184,10 +172,10 @@ static __inline int WebRtcSpl_NormU32(uint32_t a) {
     : [a] "r" (a)
   );
 
-  return (zeros & 0x1f);
+  return (int16_t)(zeros & 0x1f);
 }
 
-static __inline int WebRtcSpl_NormW16(int16_t a) {
+static __inline int16_t WebRtcSpl_NormW16(int16_t a) {
   int zeros = 0;
   int a0 = a << 16;
 
@@ -208,7 +196,7 @@ static __inline int WebRtcSpl_NormW16(int16_t a) {
     : [a0] "r" (a0)
   );
 
-  return zeros;
+  return (int16_t)zeros;
 }
 
 static __inline int32_t WebRtc_MulAccumW16(int16_t a,

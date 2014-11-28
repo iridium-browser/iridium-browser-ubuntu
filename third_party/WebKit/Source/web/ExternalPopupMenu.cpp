@@ -39,16 +39,17 @@
 #include "platform/text/TextDirection.h"
 #include "public/platform/WebVector.h"
 #include "public/web/WebExternalPopupMenu.h"
+#include "public/web/WebFrameClient.h"
 #include "public/web/WebMenuItemInfo.h"
 #include "public/web/WebPopupMenuInfo.h"
-#include "public/web/WebViewClient.h"
+#include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 
 namespace blink {
 
 ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame, PopupMenuClient* popupMenuClient, WebViewImpl& webView)
     : m_popupMenuClient(popupMenuClient)
-    , m_frameView(frame.view())
+    , m_localFrame(frame)
     , m_webView(webView)
     , m_dispatchEventTimer(this, &ExternalPopupMenu::dispatchEvent)
     , m_webExternalPopupMenu(0)
@@ -57,6 +58,12 @@ ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame, PopupMenuClient* popupMe
 
 ExternalPopupMenu::~ExternalPopupMenu()
 {
+}
+
+void ExternalPopupMenu::trace(Visitor* visitor)
+{
+    visitor->trace(m_localFrame);
+    PopupMenu::trace(visitor);
 }
 
 void ExternalPopupMenu::show(const FloatQuad& controlPosition, const IntSize&, int index)
@@ -73,9 +80,10 @@ void ExternalPopupMenu::show(const FloatQuad& controlPosition, const IntSize&, i
     getPopupMenuInfo(info, *m_popupMenuClient);
     if (info.items.isEmpty())
         return;
-    m_webExternalPopupMenu = m_webView.client()->createExternalPopupMenu(info, this);
+    WebLocalFrameImpl* webframe = WebLocalFrameImpl::fromFrame(m_localFrame.get());
+    m_webExternalPopupMenu = webframe->client()->createExternalPopupMenu(info, this);
     if (m_webExternalPopupMenu) {
-        m_webExternalPopupMenu->show(m_frameView->contentsToWindow(rect));
+        m_webExternalPopupMenu->show(m_localFrame->view()->contentsToWindow(rect));
 #if OS(MACOSX)
         const WebInputEvent* currentEvent = WebViewImpl::currentInputEvent();
         if (currentEvent && currentEvent->type == WebInputEvent::MouseDown) {
@@ -133,7 +141,7 @@ void ExternalPopupMenu::didAcceptIndex(int index)
     // derefed. This ensures it does not get deleted while we are running this
     // method.
     int popupMenuItemIndex = toPopupMenuItemIndex(index, *m_popupMenuClient);
-    RefPtr<ExternalPopupMenu> guard(this);
+    RefPtrWillBeRawPtr<ExternalPopupMenu> guard(this);
 
     if (m_popupMenuClient) {
         m_popupMenuClient->popupDidHide();
@@ -152,7 +160,9 @@ void ExternalPopupMenu::didAcceptIndices(const WebVector<int>& indices)
     // Calling methods on the PopupMenuClient might lead to this object being
     // derefed. This ensures it does not get deleted while we are running this
     // method.
-    RefPtr<ExternalPopupMenu> protect(this);
+    RefPtrWillBeRawPtr<ExternalPopupMenu> protect(this);
+
+    m_popupMenuClient->popupDidHide();
 
     if (!indices.size())
         m_popupMenuClient->valueChanged(static_cast<unsigned>(-1), true);
@@ -161,18 +171,13 @@ void ExternalPopupMenu::didAcceptIndices(const WebVector<int>& indices)
             m_popupMenuClient->listBoxSelectItem(toPopupMenuItemIndex(indices[i], *m_popupMenuClient), (i > 0), false, (i == indices.size() - 1));
     }
 
-    // The call to valueChanged above might have lead to a call to
-    // disconnectClient, so we might not have a PopupMenuClient anymore.
-    if (m_popupMenuClient)
-        m_popupMenuClient->popupDidHide();
-
     m_webExternalPopupMenu = 0;
 }
 
 void ExternalPopupMenu::didCancel()
 {
     // See comment in didAcceptIndex on why we need this.
-    RefPtr<ExternalPopupMenu> guard(this);
+    RefPtrWillBeRawPtr<ExternalPopupMenu> guard(this);
 
     if (m_popupMenuClient)
         m_popupMenuClient->popupDidHide();

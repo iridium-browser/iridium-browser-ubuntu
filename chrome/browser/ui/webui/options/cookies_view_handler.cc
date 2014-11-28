@@ -22,14 +22,14 @@
 #include "chrome/browser/browsing_data/browsing_data_service_worker_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/cookies_tree_model_util.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 
-namespace fileapi {
+namespace storage {
 class FileSystemContext;
 }
 
@@ -192,7 +192,7 @@ void CookiesViewHandler::EnsureCookiesTreeModelCreated() {
         storage_partition->GetIndexedDBContext();
     content::ServiceWorkerContext* service_worker_context =
         storage_partition->GetServiceWorkerContext();
-    fileapi::FileSystemContext* file_system_context =
+    storage::FileSystemContext* file_system_context =
         storage_partition->GetFileSystemContext();
     LocalDataContainer* container = new LocalDataContainer(
         new BrowsingDataCookieHelper(profile->GetRequestContext()),
@@ -203,7 +203,7 @@ void CookiesViewHandler::EnsureCookiesTreeModelCreated() {
         new BrowsingDataIndexedDBHelper(indexed_db_context),
         BrowsingDataFileSystemHelper::Create(file_system_context),
         BrowsingDataQuotaHelper::Create(profile),
-        BrowsingDataChannelIDHelper::Create(profile),
+        BrowsingDataChannelIDHelper::Create(profile->GetRequestContext()),
         new BrowsingDataServiceWorkerHelper(service_worker_context),
         BrowsingDataFlashLSOHelper::Create(profile));
     cookies_tree_model_.reset(

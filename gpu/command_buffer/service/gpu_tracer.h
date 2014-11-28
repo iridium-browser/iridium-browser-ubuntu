@@ -19,40 +19,85 @@
 namespace gpu {
 namespace gles2 {
 
+class Outputter;
+class GPUTrace;
+
 // Id used to keep trace namespaces separate
 enum GpuTracerSource {
+  kTraceGroupInvalid = -1,
+
   kTraceGroupMarker = 0,
   kTraceCHROMIUM = 1,
   kTraceDecoder = 2,
+
+  NUM_TRACER_SOURCES
+};
+
+enum GpuTracerType {
+  kTracerTypeInvalid = -1,
+
+  kTracerTypeARBTimer,
+  kTracerTypeDisjointTimer
+};
+
+// Marker structure for a Trace.
+struct TraceMarker {
+  TraceMarker(const std::string& name);
+  ~TraceMarker();
+
+  std::string name_;
+  scoped_refptr<GPUTrace> trace_;
 };
 
 // Traces GPU Commands.
-class GPUTracer {
+class GPUTracer : public base::SupportsWeakPtr<GPUTracer> {
  public:
-  static scoped_ptr<GPUTracer> Create(gles2::GLES2Decoder* decoder);
-
-  GPUTracer();
-  virtual ~GPUTracer();
+  explicit GPUTracer(gles2::GLES2Decoder* decoder);
+  ~GPUTracer();
 
   // Scheduled processing in decoder begins.
-  virtual bool BeginDecoding() = 0;
+  bool BeginDecoding();
 
   // Scheduled processing in decoder ends.
-  virtual bool EndDecoding() = 0;
+  bool EndDecoding();
 
   // Begin a trace marker.
-  virtual bool Begin(const std::string& name, GpuTracerSource source) = 0;
+  bool Begin(const std::string& name, GpuTracerSource source);
 
   // End the last started trace marker.
-  virtual bool End(GpuTracerSource source) = 0;
+  bool End(GpuTracerSource source);
 
-  virtual bool IsTracing() = 0;
+  bool IsTracing();
 
   // Retrieve the name of the current open trace.
   // Returns empty string if no current open trace.
-  virtual const std::string& CurrentName() const = 0;
+  const std::string& CurrentName() const;
 
  private:
+  // Trace Processing.
+  scoped_refptr<GPUTrace> CreateTrace(const std::string& name);
+  void Process();
+  void ProcessTraces();
+
+  void CalculateTimerOffset();
+  void IssueProcessTask();
+
+  scoped_refptr<Outputter> outputter_;
+  std::vector<TraceMarker> markers_[NUM_TRACER_SOURCES];
+  std::deque<scoped_refptr<GPUTrace> > traces_;
+
+  const unsigned char* gpu_trace_srv_category;
+  const unsigned char* gpu_trace_dev_category;
+  gles2::GLES2Decoder* decoder_;
+
+  int64 timer_offset_;
+  GpuTracerSource last_tracer_source_;
+
+  GpuTracerType tracer_type_;
+  bool gpu_timing_synced_;
+  bool gpu_executing_;
+  bool process_posted_;
+
   DISALLOW_COPY_AND_ASSIGN(GPUTracer);
 };
 
@@ -88,12 +133,12 @@ class TraceOutputter : public Outputter {
 class GPU_EXPORT GPUTrace
     : public base::RefCounted<GPUTrace> {
  public:
-  explicit GPUTrace(const std::string& name);
   GPUTrace(scoped_refptr<Outputter> outputter,
            const std::string& name,
-           int64 offset);
+           int64 offset,
+           GpuTracerType tracer_type);
 
-  bool IsEnabled() { return enabled_; }
+  bool IsEnabled() { return tracer_type_ != kTracerTypeInvalid; }
   const std::string& name() { return name_; }
 
   void Start();
@@ -114,8 +159,8 @@ class GPU_EXPORT GPUTrace
   int64 offset_;
   int64 start_time_;
   int64 end_time_;
+  GpuTracerType tracer_type_;
   bool end_requested_;
-  bool enabled_;
 
   GLuint queries_[2];
 

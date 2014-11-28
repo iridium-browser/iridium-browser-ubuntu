@@ -10,6 +10,8 @@
 #include "content/browser/frame_host/navigator.h"
 #include "content/common/content_export.h"
 
+struct FrameMsg_Navigate_Params;
+
 namespace content {
 
 class NavigationControllerImpl;
@@ -22,6 +24,13 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
  public:
   NavigatorImpl(NavigationControllerImpl* navigation_controller,
                 NavigatorDelegate* delegate);
+
+  // Fills in |params| based on the content of |entry|.
+  static void MakeNavigateParams(const NavigationEntryImpl& entry,
+                                 const NavigationControllerImpl& controller,
+                                 NavigationController::ReloadType reload_type,
+                                 base::TimeTicks navigation_start,
+                                 FrameMsg_Navigate_Params* params);
 
   // Navigator implementation.
   virtual NavigationController* GetController() OVERRIDE;
@@ -37,11 +46,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       const GURL& url,
       int error_code,
       const base::string16& error_description) OVERRIDE;
-  virtual void DidRedirectProvisionalLoad(
-      RenderFrameHostImpl* render_frame_host,
-      int32 page_id,
-      const GURL& source_url,
-      const GURL& target_url) OVERRIDE;
   virtual void DidNavigate(
       RenderFrameHostImpl* render_frame_host,
       const FrameHostMsg_DidCommitProvisionalLoad_Params&
@@ -49,7 +53,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
   virtual bool NavigateToPendingEntry(
       RenderFrameHostImpl* render_frame_host,
       NavigationController::ReloadType reload_type) OVERRIDE;
-  virtual base::TimeTicks GetCurrentLoadStart() OVERRIDE;
   virtual void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
                               const GURL& url,
                               const Referrer& referrer,
@@ -61,11 +64,14 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       const GURL& url,
       const std::vector<GURL>& redirect_chain,
       const Referrer& referrer,
-      PageTransition page_transition,
+      ui::PageTransition page_transition,
       WindowOpenDisposition disposition,
       const GlobalRequestID& transferred_global_request_id,
       bool should_replace_current_entry,
       bool user_gesture) OVERRIDE;
+  virtual void CommitNavigation(
+      RenderFrameHostImpl* render_frame_host,
+      const NavigationBeforeCommitInfo& info) OVERRIDE;
 
  private:
   virtual ~NavigatorImpl() {}
@@ -79,6 +85,10 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
 
   bool ShouldAssignSiteForURL(const GURL& url);
 
+  void CheckWebUIRendererDoesNotDisplayNormalURL(
+    RenderFrameHostImpl* render_frame_host,
+    const GURL& url);
+
   // The NavigationController that will keep track of session history for all
   // RenderFrameHost objects using this NavigatorImpl.
   // TODO(nasko): Move ownership of the NavigationController from
@@ -88,9 +98,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
   // Used to notify the object embedding this Navigator about navigation
   // events. Can be NULL in tests.
   NavigatorDelegate* delegate_;
-
-  // System time at which the current load was started.
-  base::TimeTicks current_load_start_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigatorImpl);
 };

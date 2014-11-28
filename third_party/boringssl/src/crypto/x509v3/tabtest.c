@@ -62,14 +62,16 @@
 
 #include <stdio.h>
 
+#include <openssl/crypto.h>
 #include <openssl/x509v3.h>
 
 #include "ext_dat.h"
 
-int main()
+int main(void)
 {
 	int i, prev = -1, bad = 0;
 	const X509V3_EXT_METHOD **tmp;
+        CRYPTO_library_init();
 	i = sizeof(standard_exts) / sizeof(X509V3_EXT_METHOD *);
 	if(i != STANDARD_EXTENSION_COUNT)
 		fprintf(stderr, "Extension number invalid expecting %d\n", i);

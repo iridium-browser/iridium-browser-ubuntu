@@ -14,8 +14,8 @@
 #include "base/debug/crash_logging.h"
 #include "base/debug/debugger.h"
 #include "base/debug/trace_event.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -43,16 +43,12 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/component_updater/cld_component_installer.h"
-#include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/component_updater/ev_whitelist_component_installer.h"
 #include "chrome/browser/component_updater/flash_component_installer.h"
-#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
 #include "chrome/browser/component_updater/recovery_component_installer.h"
 #include "chrome/browser/component_updater/swiftshader_component_installer.h"
 #include "chrome/browser/component_updater/widevine_cdm_component_installer.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/google/google_search_counter.h"
@@ -61,7 +57,6 @@
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/metrics/field_trial_synchronizer.h"
 #include "chrome/browser/metrics/thread_watcher.h"
-#include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
 #include "chrome/browser/net/chrome_net_log.h"
@@ -69,8 +64,8 @@
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
-#include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
+#include "chrome/browser/power/process_power_collector.h"
 #include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
@@ -102,10 +97,13 @@
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/component_updater/component_updater_service.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/language_usage_metrics/language_usage_metrics.h"
 #include "components/metrics/metrics_service.h"
+#include "components/metrics/profiler/tracking_synchronizer.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/rappor/rappor_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -122,11 +120,6 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
-#include "extensions/browser/extension_protocols.h"
-#include "grit/app_locale_settings.h"
-#include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/platform_locale_settings.h"
 #include "net/base/net_module.h"
 #include "net/base/sdch_manager.h"
@@ -137,6 +130,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/strings/grit/app_locale_settings.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/metrics/thread_watcher_android.h"
@@ -187,7 +181,13 @@
 #endif
 
 #if !defined(DISABLE_NACL)
+#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
 #include "components/nacl/browser/nacl_process_host.h"
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/startup_helper.h"
+#include "extensions/browser/extension_protocols.h"
 #endif
 
 #if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
@@ -402,7 +402,9 @@ void RegisterComponentsForUpdate() {
   RegisterPepperFlashComponent(cus);
   RegisterSwiftShaderComponent(cus);
   RegisterWidevineCdmComponent(cus);
+#if !defined(DISABLE_NACL)
   g_browser_process->pnacl_component_installer()->RegisterPnaclComponent(cus);
+#endif
 #endif
 
   if (translate::CldDataSource::ShouldRegisterForComponentUpdates()) {
@@ -430,7 +432,7 @@ void RegisterComponentsForUpdate() {
 #endif
 
 #if defined(OS_WIN)
-  ExecutePendingSwReporter(cus, g_browser_process->local_state());
+  RegisterSwReporterComponent(cus, g_browser_process->local_state());
 #endif
 
   cus->Start();
@@ -547,7 +549,6 @@ ChromeBrowserMainParts::ChromeBrowserMainParts(
       result_code_(content::RESULT_CODE_NORMAL_EXIT),
       startup_watcher_(new StartupTimeBomb()),
       shutdown_watcher_(new ShutdownWatcherHelper()),
-      startup_timer_(new performance_monitor::StartupTimer()),
       browser_field_trials_(parameters.command_line),
       profile_(NULL),
       run_message_loop_(true),
@@ -580,7 +581,7 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
 
   // Initialize FieldTrialList to support FieldTrials that use one-time
   // randomization.
-  MetricsService* metrics = browser_process_->metrics_service();
+  metrics::MetricsService* metrics = browser_process_->metrics_service();
   field_trial_list_.reset(
       new base::FieldTrialList(metrics->CreateEntropyProvider().release()));
 
@@ -637,7 +638,7 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
 
 void ChromeBrowserMainParts::StartMetricsRecording() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::StartMetricsRecording");
-  MetricsService* metrics = g_browser_process->metrics_service();
+  metrics::MetricsService* metrics = g_browser_process->metrics_service();
 
   const bool only_do_metrics_recording =
       parsed_command_line_.HasSwitch(switches::kMetricsRecordingOnly) ||
@@ -655,7 +656,6 @@ void ChromeBrowserMainParts::StartMetricsRecording() {
   // TODO(asvitkine): Since this function is not run on Android, RAPPOR is
   // currently disabled there. http://crbug.com/370041
   browser_process_->rappor_service()->Start(
-      browser_process_->local_state(),
       browser_process_->system_request_context(),
       metrics_enabled);
 }
@@ -954,7 +954,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #endif
 
   // Initialize tracking synchronizer system.
-  tracking_synchronizer_ = new chrome_browser_metrics::TrackingSynchronizer();
+  tracking_synchronizer_ = new metrics::TrackingSynchronizer();
 
 #if defined(OS_MACOSX)
   // Get the Keychain API to register for distributed notifications on the main
@@ -1242,8 +1242,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   // Profile creation ----------------------------------------------------------
 
-  MetricsService::SetExecutionPhase(MetricsService::CREATE_PROFILE,
-                                    g_browser_process->local_state());
+  metrics::MetricsService::SetExecutionPhase(
+      metrics::MetricsService::CREATE_PROFILE,
+      g_browser_process->local_state());
   profile_ = CreatePrimaryProfile(parameters(),
                                   user_data_dir_,
                                   parsed_command_line());
@@ -1373,28 +1374,22 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   browser_process_->intranet_redirect_detector();
   GoogleSearchCounter::RegisterForNotifications();
 
-  if (parsed_command_line().HasSwitch(switches::kEnableSdchOverHttps)) {
-    net::SdchManager::EnableSecureSchemeSupport(true);
-  } else {
-    // Check SDCH field trial.
-    const char kSdchFieldTrialName[] = "SDCH";
-    const char kEnabledAllGroupName[] = "EnabledAll";
-    const char kEnabledHttpOnlyGroupName[] = "EnabledHttpOnly";
-    const char kDisabledAllGroupName[] = "DisabledAll";
+  // Check SDCH field trial.  Default is now that everything is enabled,
+  // so provide options for disabling HTTPS or all of SDCH.
+  const char kSdchFieldTrialName[] = "SDCH";
+  const char kEnabledHttpOnlyGroupName[] = "EnabledHttpOnly";
+  const char kDisabledAllGroupName[] = "DisabledAll";
 
-    // Store in a string on return to keep underlying storage for
-    // StringPiece stable.
-    std::string sdch_trial_group_string =
-        base::FieldTrialList::FindFullName(kSdchFieldTrialName);
-    base::StringPiece sdch_trial_group(sdch_trial_group_string);
-    if (sdch_trial_group.starts_with(kEnabledAllGroupName)) {
-      net::SdchManager::EnableSecureSchemeSupport(true);
-      net::SdchManager::EnableSdchSupport(true);
-    } else if (sdch_trial_group.starts_with(kEnabledHttpOnlyGroupName)) {
-      net::SdchManager::EnableSdchSupport(true);
-    } else if (sdch_trial_group.starts_with(kDisabledAllGroupName)) {
-      net::SdchManager::EnableSdchSupport(false);
-    }
+  // Store in a string on return to keep underlying storage for
+  // StringPiece stable.
+  std::string sdch_trial_group_string =
+      base::FieldTrialList::FindFullName(kSdchFieldTrialName);
+  base::StringPiece sdch_trial_group(sdch_trial_group_string);
+  if (sdch_trial_group.starts_with(kEnabledHttpOnlyGroupName)) {
+    net::SdchManager::EnableSdchSupport(true);
+    net::SdchManager::EnableSecureSchemeSupport(false);
+  } else if (sdch_trial_group.starts_with(kDisabledAllGroupName)) {
+    net::SdchManager::EnableSdchSupport(false);
   }
 
 #if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
@@ -1417,16 +1412,17 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // Start watching for hangs during startup. We disarm this hang detector when
   // ThreadWatcher takes over or when browser is shutdown or when
   // startup_watcher_ is deleted.
-  MetricsService::SetExecutionPhase(MetricsService::STARTUP_TIMEBOMB_ARM,
-                                    g_browser_process->local_state());
-  startup_watcher_->Arm(base::TimeDelta::FromSeconds(300));
+  metrics::MetricsService::SetExecutionPhase(
+      metrics::MetricsService::STARTUP_TIMEBOMB_ARM,
+      g_browser_process->local_state());
+  startup_watcher_->Arm(base::TimeDelta::FromSeconds(600));
 
   // On mobile, need for clean shutdown arises only when the application comes
   // to foreground (i.e. MetricsService::OnAppEnterForeground is called).
   // http://crbug.com/179143
 #if !defined(OS_ANDROID)
   // Start watching for a hang.
-  MetricsService::LogNeedForCleanShutdown(g_browser_process->local_state());
+  browser_process_->metrics_service()->LogNeedForCleanShutdown();
 #endif
 
 #if defined(ENABLE_FULL_PRINTING)
@@ -1440,8 +1436,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 #endif
 
   // Start watching all browser threads for responsiveness.
-  MetricsService::SetExecutionPhase(MetricsService::THREAD_WATCHER_START,
-                                    g_browser_process->local_state());
+  metrics::MetricsService::SetExecutionPhase(
+      metrics::MetricsService::THREAD_WATCHER_START,
+      g_browser_process->local_state());
   ThreadWatcherList::StartWatchingAll(parsed_command_line());
 
 #if defined(OS_ANDROID)
@@ -1554,15 +1551,14 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   browser_creator_.reset();
 #endif  // !defined(OS_ANDROID)
 
-  performance_monitor::PerformanceMonitor::GetInstance()->Initialize();
+#if !defined(OS_ANDROID)
+  process_power_collector_.reset(new ProcessPowerCollector);
+  process_power_collector_->Initialize();
+#endif
 
   PostBrowserStart();
 
   if (parameters().ui_task) {
-    // We end the startup timer here if we have parameters to run, because we
-    // never start to run the main loop (where we normally stop the timer).
-    startup_timer_->SignalStartupComplete(
-        performance_monitor::StartupTimer::STARTUP_TEST);
     parameters().ui_task->Run();
     delete parameters().ui_task;
     run_message_loop_ = false;
@@ -1595,16 +1591,15 @@ bool ChromeBrowserMainParts::MainMessageLoopRun(int* result_code) {
   // UI thread message loop as possible to get a stable measurement
   // across versions.
   RecordBrowserStartupTime();
-  startup_timer_->SignalStartupComplete(
-      performance_monitor::StartupTimer::STARTUP_NORMAL);
 
   DCHECK(base::MessageLoopForUI::IsCurrent());
   base::RunLoop run_loop;
 
   performance_monitor::PerformanceMonitor::GetInstance()->StartGatherCycle();
 
-  MetricsService::SetExecutionPhase(MetricsService::MAIN_MESSAGE_LOOP_RUN,
-                                    g_browser_process->local_state());
+  metrics::MetricsService::SetExecutionPhase(
+      metrics::MetricsService::MAIN_MESSAGE_LOOP_RUN,
+      g_browser_process->local_state());
   run_loop.Run();
 
   return true;
@@ -1621,12 +1616,17 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
 
   // Start watching for jank during shutdown. It gets disarmed when
   // |shutdown_watcher_| object is destructed.
-  MetricsService::SetExecutionPhase(MetricsService::SHUTDOWN_TIMEBOMB_ARM,
-                                    g_browser_process->local_state());
+  metrics::MetricsService::SetExecutionPhase(
+      metrics::MetricsService::SHUTDOWN_TIMEBOMB_ARM,
+      g_browser_process->local_state());
   shutdown_watcher_->Arm(base::TimeDelta::FromSeconds(300));
 
   // Disarm the startup hang detector time bomb if it is still Arm'ed.
   startup_watcher_->Disarm();
+
+  // Remove observers attached to D-Bus clients before DbusThreadManager is
+  // shut down.
+  process_power_collector_.reset();
 
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostMainMessageLoopRun();
@@ -1668,7 +1668,7 @@ void ChromeBrowserMainParts::PostDestroyThreads() {
   // a higher level on the stack, so that it is impossible for an early return
   // to bypass this code.  Perhaps we need a *final* hook that is called on all
   // paths from content/browser/browser_main.
-  CHECK(MetricsService::UmaMetricsProperlyShutdown());
+  CHECK(metrics::MetricsService::UmaMetricsProperlyShutdown());
 
 #if defined(OS_CHROMEOS)
   chromeos::CrosSettings::Shutdown();

@@ -293,7 +293,7 @@ WebInspector.SourcesView.prototype = {
 
     /**
      * @param {!WebInspector.UISourceCode} uiSourceCode
-     * @param {number=} lineNumber
+     * @param {number=} lineNumber 0-based
      * @param {number=} columnNumber
      * @param {boolean=} omitFocus
      * @param {boolean=} omitHighlight
@@ -352,7 +352,7 @@ WebInspector.SourcesView.prototype = {
         break;
         }
         sourceFrame.setHighlighterType(uiSourceCode.highlighterType());
-        this._sourceFramesByUISourceCode.put(uiSourceCode, sourceFrame);
+        this._sourceFramesByUISourceCode.set(uiSourceCode, sourceFrame);
         this._historyManager.trackSourceFrameCursorJumps(sourceFrame);
         return sourceFrame;
     },
@@ -402,7 +402,7 @@ WebInspector.SourcesView.prototype = {
 
     /**
      * @param {!WebInspector.UISourceCode} uiSourceCode
-     * @return {!WebInspector.SourceFrame}
+     * @return {!WebInspector.UISourceCodeFrame}
      */
     viewForFile: function(uiSourceCode)
     {
@@ -532,7 +532,7 @@ WebInspector.SourcesView.prototype = {
          */
         function searchResultsChanged()
         {
-            this._searchableView.cancelSearch();
+            this.performSearch(query, false, false);
         }
 
         this._searchView.performSearch(query, shouldJump, !!jumpBackwards, finishedCallback.bind(this), currentMatchChanged.bind(this), searchResultsChanged.bind(this));
@@ -626,7 +626,7 @@ WebInspector.SourcesView.prototype = {
         /** @type {!Map.<!WebInspector.UISourceCode, number>} */
         var defaultScores = new Map();
         for (var i = 1; i < uiSourceCodes.length; ++i) // Skip current element
-            defaultScores.put(uiSourceCodes[i], uiSourceCodes.length - i);
+            defaultScores.set(uiSourceCodes[i], uiSourceCodes.length - i);
         WebInspector.OpenResourceDialog.show(this, this.element, query, defaultScores);
     },
 

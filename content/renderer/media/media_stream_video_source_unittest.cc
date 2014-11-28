@@ -18,6 +18,7 @@
 #include "content/renderer/media/mock_media_stream_video_source.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/web/WebHeap.h"
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -55,6 +56,11 @@ class MediaStreamVideoSourceTest
     webkit_source_.setExtraData(mock_source_);
   }
 
+  virtual void TearDown() {
+    webkit_source_.reset();
+    blink::WebHeap::collectAllGarbageForTesting();
+  }
+
  protected:
   // Create a track that's associated with |webkit_source_|.
   blink::WebMediaStreamTrack CreateTrack(
@@ -77,10 +83,10 @@ class MediaStreamVideoSourceTest
     blink::WebMediaStreamTrack track = CreateTrack("123", constraints);
 
     mock_source_->CompleteGetSupportedFormats();
-    const media::VideoCaptureParams& format = mock_source()->start_params();
-    EXPECT_EQ(expected_width, format.requested_format.frame_size.width());
-    EXPECT_EQ(expected_height, format.requested_format.frame_size.height());
-    EXPECT_EQ(expected_frame_rate, format.requested_format.frame_rate);
+    const media::VideoCaptureFormat& format = mock_source()->start_format();
+    EXPECT_EQ(expected_width, format.frame_size.width());
+    EXPECT_EQ(expected_height, format.frame_size.height());
+    EXPECT_EQ(expected_frame_rate, format.frame_rate);
 
     EXPECT_EQ(0, NumberOfSuccessConstraintsCallbacks());
     mock_source_->StartMockedSource();
@@ -196,6 +202,10 @@ class MediaStreamVideoSourceTest
 
     MediaStreamVideoSink::RemoveFromVideoTrack(&sink1, track1);
     MediaStreamVideoSink::RemoveFromVideoTrack(&sink2, track2);
+  }
+
+  void SetSourceSupportedFormats(const media::VideoCaptureFormats& formats) {
+    mock_source_->SetSupportedFormats(formats);
   }
 
   void ReleaseTrackAndSourceOnAddTrackCallback(
@@ -420,10 +430,10 @@ TEST_F(MediaStreamVideoSourceTest, OptionalAspectRatioTooHigh) {
       "123", factory.CreateWebMediaConstraints());
   mock_source()->CompleteGetSupportedFormats();
 
-  const media::VideoCaptureParams& params = mock_source()->start_params();
+  const media::VideoCaptureFormat& format = mock_source()->start_format();
   double aspect_ratio =
-      static_cast<double>(params.requested_format.frame_size.width()) /
-      params.requested_format.frame_size.height();
+      static_cast<double>(format.frame_size.width()) /
+      format.frame_size.height();
   EXPECT_LT(aspect_ratio, 2);
 }
 
@@ -738,18 +748,25 @@ TEST_F(MediaStreamVideoSourceTest, Use0FpsSupportedFormat) {
   MediaStreamVideoSink::RemoveFromVideoTrack(&sink, track);
 }
 
-// Test that a source producing no frames calls back the MSVCS to tell so, and
-// this in turn tells the Track attached. Then start passing frames, and check
+// Test that a source producing no frames change the source readyState to muted.
 // that in a reasonable time frame the muted state turns to false.
 TEST_F(MediaStreamVideoSourceTest, MutedSource) {
+  // Setup the source for support a frame rate of 2000fps in order to test
+  // the muted event faster. This is since the frame monitoring uses
+  // PostDelayedTask that is dependent on the source frame rate.
+  media::VideoCaptureFormats formats;
+      formats.push_back(media::VideoCaptureFormat(
+          gfx::Size(640, 480), 2000, media::PIXEL_FORMAT_I420));
+  SetSourceSupportedFormats(formats);
+
   MockMediaConstraintFactory factory;
   blink::WebMediaStreamTrack track =
       CreateTrackAndStartSource(factory.CreateWebMediaConstraints(),
-                                640, 480, 30);
-
+                                640, 480, 2000);
   MockMediaStreamVideoSink sink;
   MediaStreamVideoSink::AddToVideoTrack(&sink, sink.GetDeliverFrameCB(), track);
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track)->GetMutedState(), false);
+  EXPECT_EQ(track.source().readyState(),
+            blink::WebMediaStreamSource::ReadyStateLive);
 
   base::RunLoop run_loop;
   base::Closure quit_closure = run_loop.QuitClosure();
@@ -758,67 +775,22 @@ TEST_F(MediaStreamVideoSourceTest, MutedSource) {
       .WillOnce(DoAll(SaveArg<0>(&muted_state), RunClosure(quit_closure)));
   run_loop.Run();
   EXPECT_EQ(muted_state, true);
-  // TODO(mcasas): When added, check |track|'s (WebMediaStreamTrack) Muted
-  // attribute, should be true. In the meantime, check the MediaStreamTrack's.
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track)->GetMutedState(), true);
 
+  EXPECT_EQ(track.source().readyState(),
+            blink::WebMediaStreamSource::ReadyStateMuted);
+
+  base::RunLoop run_loop2;
+  base::Closure quit_closure2 = run_loop2.QuitClosure();
   EXPECT_CALL(*mock_source(), DoSetMutedState(_))
-      .WillOnce(DoAll(SaveArg<0>(&muted_state), RunClosure(quit_closure)));
-  // Mock frame delivery happens asynchronously, not according to the configured
-  // frame rate, potentially many frames can pass before the muted state is
-  // flipped. |kMaxFrameCount| is used as a reasonable high bound of this value.
-  const int kMaxFrameCount = 10000;
-  int i = 0;
-  while (muted_state != false || ++i > kMaxFrameCount)
-    DeliverVideoFrameAndWaitForRenderer(640, 480, &sink);
+      .WillOnce(DoAll(SaveArg<0>(&muted_state), RunClosure(quit_closure2)));
+  DeliverVideoFrameAndWaitForRenderer(640, 480, &sink);
+  run_loop2.Run();
+
   EXPECT_EQ(muted_state, false);
-  EXPECT_LT(i, kMaxFrameCount);
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track)->GetMutedState(), false);
+  EXPECT_EQ(track.source().readyState(),
+            blink::WebMediaStreamSource::ReadyStateLive);
 
   MediaStreamVideoSink::RemoveFromVideoTrack(&sink, track);
-}
-
-// Test that a source producing no frames calls back the MSVCS to tell so, and
-// this in turn tells all the Tracks attached.
-TEST_F(MediaStreamVideoSourceTest, MutedSourceWithTwoTracks) {
-  MockMediaConstraintFactory factory1;
-  blink::WebMediaStreamTrack track1 =
-      CreateTrackAndStartSource(factory1.CreateWebMediaConstraints(),
-                                MediaStreamVideoSource::kDefaultWidth,
-                                MediaStreamVideoSource::kDefaultHeight,
-                                30);
-
-  MockMediaConstraintFactory factory2;
-  factory2.AddMandatory(MediaStreamVideoSource::kMaxFrameRate, 15);
-  blink::WebMediaStreamTrack track2 = CreateTrack(
-      "123", factory2.CreateWebMediaConstraints());
-  EXPECT_EQ(0, NumberOfFailedConstraintsCallbacks());
-
-  MockMediaStreamVideoSink sink1;
-  MediaStreamVideoSink::AddToVideoTrack(&sink1, sink1.GetDeliverFrameCB(),
-                                        track1);
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track1)->GetMutedState(), false);
-
-  MockMediaStreamVideoSink sink2;
-  MediaStreamVideoSink::AddToVideoTrack(&sink2, sink2.GetDeliverFrameCB(),
-                                        track2);
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track2)->GetMutedState(), false);
-
-  base::RunLoop run_loop;
-  base::Closure quit_closure = run_loop.QuitClosure();
-  bool muted_state = false;
-  EXPECT_CALL(*mock_source(), DoSetMutedState(_))
-      .WillOnce(DoAll(SaveArg<0>(&muted_state), RunClosure(quit_closure)));
-  run_loop.Run();
-  EXPECT_EQ(muted_state, true);
-
-  // TODO(mcasas): When added, check |track|'s (WebMediaStreamTrack) Muted
-  // attribute, should be true. In the meantime, check the MediaStreamTrack's.
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track1)->GetMutedState(), true);
-  EXPECT_EQ(MediaStreamTrack::GetTrack(track2)->GetMutedState(), true);
-
-  MediaStreamVideoSink::RemoveFromVideoTrack(&sink1, track1);
-  MediaStreamVideoSink::RemoveFromVideoTrack(&sink2, track2);
 }
 
 }  // namespace content

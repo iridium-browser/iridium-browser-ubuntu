@@ -16,15 +16,14 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.ipc.invalidation.common.CommonProtos2;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.types.SimplePair;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.PropertyRecord;
+import com.google.ipc.invalidation.ticl.proto.JavaClient.StatisticsState;
 import com.google.ipc.invalidation.util.InternalBase;
 import com.google.ipc.invalidation.util.Marshallable;
 import com.google.ipc.invalidation.util.TextBuilder;
 import com.google.ipc.invalidation.util.TypedUtil;
-import com.google.protos.ipc.invalidation.ClientProtocol.PropertyRecord;
-import com.google.protos.ipc.invalidation.JavaClient.StatisticsState;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -64,6 +63,7 @@ public class Statistics extends InternalBase implements Marshallable<StatisticsS
     TOKEN_CONTROL,
     ERROR,
     CONFIG_CHANGE,
+    STALE_INVALIDATION,  // An already acked INVALIDATION.
     TOTAL, // Refers to the actual ServerToClientMessage messages received from the network.
   }
 
@@ -282,13 +282,13 @@ public class Statistics extends InternalBase implements Marshallable<StatisticsS
   public StatisticsState marshal() {
     // Get all the non-zero counters, convert them to proto PropertyRecord messages, and return
     // a StatisticsState containing the records.
-    StatisticsState.Builder builder = StatisticsState.newBuilder();
     List<SimplePair<String, Integer>> counters = new ArrayList<SimplePair<String, Integer>>();
     getNonZeroStatistics(counters);
+    List<PropertyRecord> propertyRecords = new ArrayList<PropertyRecord>(counters.size());
     for (SimplePair<String, Integer> counter : counters) {
-      builder.addCounter(CommonProtos2.newPropertyRecord(counter.getFirst(), counter.getSecond()));
+      propertyRecords.add(PropertyRecord.create(counter.getFirst(), counter.getSecond()));
     }
-    return builder.build();
+    return StatisticsState.create(propertyRecords);
   }
 
   /**

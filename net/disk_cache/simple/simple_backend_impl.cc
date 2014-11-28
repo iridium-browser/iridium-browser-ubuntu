@@ -14,15 +14,15 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "net/base/net_errors.h"
@@ -39,9 +39,7 @@
 using base::Callback;
 using base::Closure;
 using base::FilePath;
-using base::MessageLoopProxy;
 using base::SequencedWorkerPool;
-using base::SingleThreadTaskRunner;
 using base::Time;
 using base::DirectoryExists;
 using base::CreateDirectory;
@@ -225,19 +223,19 @@ class SimpleBackendImpl::ActiveEntryProxy
   base::WeakPtr<SimpleBackendImpl> backend_;
 };
 
-SimpleBackendImpl::SimpleBackendImpl(const FilePath& path,
-                                     int max_bytes,
-                                     net::CacheType cache_type,
-                                     base::SingleThreadTaskRunner* cache_thread,
-                                     net::NetLog* net_log)
+SimpleBackendImpl::SimpleBackendImpl(
+    const FilePath& path,
+    int max_bytes,
+    net::CacheType cache_type,
+    const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
+    net::NetLog* net_log)
     : path_(path),
       cache_type_(cache_type),
       cache_thread_(cache_thread),
       orig_max_size_(max_bytes),
-      entry_operations_mode_(
-          cache_type == net::DISK_CACHE ?
-              SimpleEntryImpl::OPTIMISTIC_OPERATIONS :
-              SimpleEntryImpl::NON_OPTIMISTIC_OPERATIONS),
+      entry_operations_mode_(cache_type == net::DISK_CACHE ?
+                                 SimpleEntryImpl::OPTIMISTIC_OPERATIONS :
+                                 SimpleEntryImpl::NON_OPTIMISTIC_OPERATIONS),
       net_log_(net_log) {
   MaybeHistogramFdLimit(cache_type_);
 }
@@ -252,19 +250,22 @@ int SimpleBackendImpl::Init(const CompletionCallback& completion_callback) {
   worker_pool_ = g_sequenced_worker_pool->GetTaskRunnerWithShutdownBehavior(
       SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
 
-  index_.reset(new SimpleIndex(MessageLoopProxy::current(), this, cache_type_,
-                               make_scoped_ptr(new SimpleIndexFile(
-                                   cache_thread_.get(), worker_pool_.get(),
-                                   cache_type_, path_))));
+  index_.reset(new SimpleIndex(
+      base::ThreadTaskRunnerHandle::Get(),
+      this,
+      cache_type_,
+      make_scoped_ptr(new SimpleIndexFile(
+          cache_thread_, worker_pool_.get(), cache_type_, path_))));
   index_->ExecuteWhenReady(
       base::Bind(&RecordIndexLoad, cache_type_, base::TimeTicks::Now()));
 
   PostTaskAndReplyWithResult(
-      cache_thread_,
+      cache_thread_.get(),
       FROM_HERE,
-      base::Bind(&SimpleBackendImpl::InitCacheStructureOnDisk, path_,
-                 orig_max_size_),
-      base::Bind(&SimpleBackendImpl::InitializeIndex, AsWeakPtr(),
+      base::Bind(
+          &SimpleBackendImpl::InitCacheStructureOnDisk, path_, orig_max_size_),
+      base::Bind(&SimpleBackendImpl::InitializeIndex,
+                 AsWeakPtr(),
                  completion_callback));
   return net::ERR_IO_PENDING;
 }
@@ -279,15 +280,13 @@ int SimpleBackendImpl::GetMaxFileSize() const {
 }
 
 void SimpleBackendImpl::OnDoomStart(uint64 entry_hash) {
-  // TODO(ttuttle): Revert to DCHECK once http://crbug.com/317138 is fixed.
-  CHECK_EQ(0u, entries_pending_doom_.count(entry_hash));
+  DCHECK_EQ(0u, entries_pending_doom_.count(entry_hash));
   entries_pending_doom_.insert(
       std::make_pair(entry_hash, std::vector<Closure>()));
 }
 
 void SimpleBackendImpl::OnDoomComplete(uint64 entry_hash) {
-  // TODO(ttuttle): Revert to DCHECK once http://crbug.com/317138 is fixed.
-  CHECK_EQ(1u, entries_pending_doom_.count(entry_hash));
+  DCHECK_EQ(1u, entries_pending_doom_.count(entry_hash));
   base::hash_map<uint64, std::vector<Closure> >::iterator it =
       entries_pending_doom_.find(entry_hash);
   std::vector<Closure> to_run_closures;
@@ -313,11 +312,8 @@ void SimpleBackendImpl::DoomEntries(std::vector<uint64>* entry_hashes,
   //    SimpleSynchronousEntry::DoomEntrySet and delete the files en masse.
   for (int i = mass_doom_entry_hashes->size() - 1; i >= 0; --i) {
     const uint64 entry_hash = (*mass_doom_entry_hashes)[i];
-    // TODO(ttuttle): Revert to DCHECK once http://crbug.com/317138 is fixed.
-    CHECK(active_entries_.count(entry_hash) == 0 ||
-          entries_pending_doom_.count(entry_hash) == 0)
-        << "The entry 0x" << std::hex << entry_hash
-        << " is both active and pending doom.";
+    DCHECK(active_entries_.count(entry_hash) == 0 ||
+           entries_pending_doom_.count(entry_hash) == 0);
     if (!active_entries_.count(entry_hash) &&
         !entries_pending_doom_.count(entry_hash)) {
       continue;
@@ -336,8 +332,7 @@ void SimpleBackendImpl::DoomEntries(std::vector<uint64>* entry_hashes,
            it = to_doom_individually_hashes.begin(),
            end = to_doom_individually_hashes.end(); it != end; ++it) {
     const int doom_result = DoomEntryFromHash(*it, barrier_callback);
-    // TODO(ttuttle): Revert to DCHECK once http://crbug.com/317138 is fixed.
-    CHECK_EQ(net::ERR_IO_PENDING, doom_result);
+    DCHECK_EQ(net::ERR_IO_PENDING, doom_result);
     index_->Remove(*it);
   }
 
@@ -352,13 +347,15 @@ void SimpleBackendImpl::DoomEntries(std::vector<uint64>* entry_hashes,
   // base::Passed before mass_doom_entry_hashes.get().
   std::vector<uint64>* mass_doom_entry_hashes_ptr =
       mass_doom_entry_hashes.get();
-  PostTaskAndReplyWithResult(
-      worker_pool_, FROM_HERE,
-      base::Bind(&SimpleSynchronousEntry::DoomEntrySet,
-                 mass_doom_entry_hashes_ptr, path_),
-      base::Bind(&SimpleBackendImpl::DoomEntriesComplete,
-                 AsWeakPtr(), base::Passed(&mass_doom_entry_hashes),
-                 barrier_callback));
+  PostTaskAndReplyWithResult(worker_pool_.get(),
+                             FROM_HERE,
+                             base::Bind(&SimpleSynchronousEntry::DoomEntrySet,
+                                        mass_doom_entry_hashes_ptr,
+                                        path_),
+                             base::Bind(&SimpleBackendImpl::DoomEntriesComplete,
+                                        AsWeakPtr(),
+                                        base::Passed(&mass_doom_entry_hashes),
+                                        barrier_callback));
 }
 
 net::CacheType SimpleBackendImpl::GetCacheType() const {
@@ -470,20 +467,78 @@ int SimpleBackendImpl::DoomEntriesSince(
   return DoomEntriesBetween(initial_time, Time(), callback);
 }
 
-int SimpleBackendImpl::OpenNextEntry(void** iter,
-                                     Entry** next_entry,
-                                     const CompletionCallback& callback) {
-  CompletionCallback get_next_entry =
-      base::Bind(&SimpleBackendImpl::GetNextEntryInIterator, AsWeakPtr(), iter,
-                 next_entry, callback);
-  return index_->ExecuteWhenReady(get_next_entry);
-}
+class SimpleBackendImpl::SimpleIterator FINAL : public Iterator {
+ public:
+  explicit SimpleIterator(base::WeakPtr<SimpleBackendImpl> backend)
+      : backend_(backend),
+        weak_factory_(this) {
+  }
 
-void SimpleBackendImpl::EndEnumeration(void** iter) {
-  SimpleIndex::HashList* entry_list =
-      static_cast<SimpleIndex::HashList*>(*iter);
-  delete entry_list;
-  *iter = NULL;
+  // From Backend::Iterator:
+  virtual int OpenNextEntry(Entry** next_entry,
+                            const CompletionCallback& callback) OVERRIDE {
+    CompletionCallback open_next_entry_impl =
+        base::Bind(&SimpleIterator::OpenNextEntryImpl,
+                   weak_factory_.GetWeakPtr(), next_entry, callback);
+    return backend_->index_->ExecuteWhenReady(open_next_entry_impl);
+  }
+
+  void OpenNextEntryImpl(Entry** next_entry,
+                         const CompletionCallback& callback,
+                         int index_initialization_error_code) {
+    if (!backend_) {
+      callback.Run(net::ERR_FAILED);
+      return;
+    }
+    if (index_initialization_error_code != net::OK) {
+      callback.Run(index_initialization_error_code);
+      return;
+    }
+    if (!hashes_to_enumerate_)
+      hashes_to_enumerate_ = backend_->index()->GetAllHashes().Pass();
+
+    while (!hashes_to_enumerate_->empty()) {
+      uint64 entry_hash = hashes_to_enumerate_->back();
+      hashes_to_enumerate_->pop_back();
+      if (backend_->index()->Has(entry_hash)) {
+        *next_entry = NULL;
+        CompletionCallback continue_iteration = base::Bind(
+            &SimpleIterator::CheckIterationReturnValue,
+            weak_factory_.GetWeakPtr(),
+            next_entry,
+            callback);
+        int error_code_open = backend_->OpenEntryFromHash(entry_hash,
+                                                          next_entry,
+                                                          continue_iteration);
+        if (error_code_open == net::ERR_IO_PENDING)
+          return;
+        if (error_code_open != net::ERR_FAILED) {
+          callback.Run(error_code_open);
+          return;
+        }
+      }
+    }
+    callback.Run(net::ERR_FAILED);
+  }
+
+  void CheckIterationReturnValue(Entry** entry,
+                                 const CompletionCallback& callback,
+                                 int error_code) {
+    if (error_code == net::ERR_FAILED) {
+      OpenNextEntry(entry, callback);
+      return;
+    }
+    callback.Run(error_code);
+  }
+
+ private:
+  base::WeakPtr<SimpleBackendImpl> backend_;
+  scoped_ptr<std::vector<uint64> > hashes_to_enumerate_;
+  base::WeakPtrFactory<SimpleIterator> weak_factory_;
+};
+
+scoped_ptr<Backend::Iterator> SimpleBackendImpl::CreateIterator() {
+  return scoped_ptr<Iterator>(new SimpleIterator(AsWeakPtr()));
 }
 
 void SimpleBackendImpl::GetStats(
@@ -611,49 +666,10 @@ int SimpleBackendImpl::DoomEntryFromHash(uint64 entry_hash,
   return net::ERR_IO_PENDING;
 }
 
-void SimpleBackendImpl::GetNextEntryInIterator(
-    void** iter,
-    Entry** next_entry,
-    const CompletionCallback& callback,
-    int error_code) {
-  if (error_code != net::OK) {
-    callback.Run(error_code);
-    return;
-  }
-  if (*iter == NULL) {
-    *iter = index()->GetAllHashes().release();
-  }
-  SimpleIndex::HashList* entry_list =
-      static_cast<SimpleIndex::HashList*>(*iter);
-  while (entry_list->size() > 0) {
-    uint64 entry_hash = entry_list->back();
-    entry_list->pop_back();
-    if (index()->Has(entry_hash)) {
-      *next_entry = NULL;
-      CompletionCallback continue_iteration = base::Bind(
-          &SimpleBackendImpl::CheckIterationReturnValue,
-          AsWeakPtr(),
-          iter,
-          next_entry,
-          callback);
-      int error_code_open = OpenEntryFromHash(entry_hash,
-                                              next_entry,
-                                              continue_iteration);
-      if (error_code_open == net::ERR_IO_PENDING)
-        return;
-      if (error_code_open != net::ERR_FAILED) {
-        callback.Run(error_code_open);
-        return;
-      }
-    }
-  }
-  callback.Run(net::ERR_FAILED);
-}
-
 void SimpleBackendImpl::OnEntryOpenedFromHash(
     uint64 hash,
     Entry** entry,
-    scoped_refptr<SimpleEntryImpl> simple_entry,
+    const scoped_refptr<SimpleEntryImpl>& simple_entry,
     const CompletionCallback& callback,
     int error_code) {
   if (error_code != net::OK) {
@@ -662,7 +678,7 @@ void SimpleBackendImpl::OnEntryOpenedFromHash(
   }
   DCHECK(*entry);
   std::pair<EntryMap::iterator, bool> insert_result =
-      active_entries_.insert(EntryMap::value_type(hash, simple_entry));
+      active_entries_.insert(EntryMap::value_type(hash, simple_entry.get()));
   EntryMap::iterator& it = insert_result.first;
   const bool did_insert = insert_result.second;
   if (did_insert) {
@@ -683,7 +699,7 @@ void SimpleBackendImpl::OnEntryOpenedFromHash(
 void SimpleBackendImpl::OnEntryOpenedFromKey(
     const std::string key,
     Entry** entry,
-    scoped_refptr<SimpleEntryImpl> simple_entry,
+    const scoped_refptr<SimpleEntryImpl>& simple_entry,
     const CompletionCallback& callback,
     int error_code) {
   int final_code = error_code;
@@ -701,18 +717,6 @@ void SimpleBackendImpl::OnEntryOpenedFromKey(
     SIMPLE_CACHE_UMA(BOOLEAN, "KeyMatchedOnOpen", cache_type_, key_matches);
   }
   callback.Run(final_code);
-}
-
-void SimpleBackendImpl::CheckIterationReturnValue(
-    void** iter,
-    Entry** entry,
-    const CompletionCallback& callback,
-    int error_code) {
-  if (error_code == net::ERR_FAILED) {
-    OpenNextEntry(iter, entry, callback);
-    return;
-  }
-  callback.Run(error_code);
 }
 
 void SimpleBackendImpl::DoomEntriesComplete(

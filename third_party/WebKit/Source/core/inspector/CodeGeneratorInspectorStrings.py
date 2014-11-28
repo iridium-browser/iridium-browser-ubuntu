@@ -70,7 +70,7 @@ $code    if (m_inspectorFrontendChannel)
 """)
 
 callback_main_methods = (
-"""InspectorBackendDispatcher::$agentName::$callbackName::$callbackName(PassRefPtr<InspectorBackendDispatcherImpl> backendImpl, int id) : CallbackBase(backendImpl, id) {}
+"""InspectorBackendDispatcher::$agentName::$callbackName::$callbackName(PassRefPtrWillBeRawPtr<InspectorBackendDispatcherImpl> backendImpl, int id) : CallbackBase(backendImpl, id) {}
 
 void InspectorBackendDispatcher::$agentName::$callbackName::sendSuccess($parameters)
 {
@@ -126,6 +126,7 @@ backend_h = (
 
 #include "InspectorTypeBuilder.h"
 
+#include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
@@ -140,15 +141,17 @@ typedef String ErrorString;
 
 class InspectorBackendDispatcherImpl;
 
-class InspectorBackendDispatcher: public RefCounted<InspectorBackendDispatcher> {
+class InspectorBackendDispatcher: public RefCountedWillBeGarbageCollectedFinalized<InspectorBackendDispatcher> {
 public:
-    static PassRefPtr<InspectorBackendDispatcher> create(InspectorFrontendChannel* inspectorFrontendChannel);
+    static PassRefPtrWillBeRawPtr<InspectorBackendDispatcher> create(InspectorFrontendChannel* inspectorFrontendChannel);
     virtual ~InspectorBackendDispatcher() { }
+    virtual void trace(Visitor*) { }
 
-    class CallbackBase: public RefCounted<CallbackBase> {
+    class CallbackBase: public RefCountedWillBeGarbageCollectedFinalized<CallbackBase> {
     public:
-        CallbackBase(PassRefPtr<InspectorBackendDispatcherImpl> backendImpl, int id);
+        CallbackBase(PassRefPtrWillBeRawPtr<InspectorBackendDispatcherImpl> backendImpl, int id);
         virtual ~CallbackBase();
+        virtual void trace(Visitor*);
         void sendFailure(const ErrorString&);
         bool isActive();
 
@@ -158,7 +161,7 @@ public:
     private:
         void disable() { m_alreadySent = true; }
 
-        RefPtr<InspectorBackendDispatcherImpl> m_backendImpl;
+        RefPtrWillBeMember<InspectorBackendDispatcherImpl> m_backendImpl;
         int m_id;
         bool m_alreadySent;
 
@@ -278,15 +281,15 @@ const char InspectorBackendDispatcherImpl::InvalidParamsFormatString[] = "Some a
 
 $methods
 
-PassRefPtr<InspectorBackendDispatcher> InspectorBackendDispatcher::create(InspectorFrontendChannel* inspectorFrontendChannel)
+PassRefPtrWillBeRawPtr<InspectorBackendDispatcher> InspectorBackendDispatcher::create(InspectorFrontendChannel* inspectorFrontendChannel)
 {
-    return adoptRef(new InspectorBackendDispatcherImpl(inspectorFrontendChannel));
+    return adoptRefWillBeNoop(new InspectorBackendDispatcherImpl(inspectorFrontendChannel));
 }
 
 
 void InspectorBackendDispatcherImpl::dispatch(const String& message)
 {
-    RefPtr<InspectorBackendDispatcher> protect = this;
+    RefPtrWillBeRawPtr<InspectorBackendDispatcher> protect(this);
     typedef void (InspectorBackendDispatcherImpl::*CallHandler)(long callId, JSONObject* messageObject, JSONArray* protocolErrors);
     typedef HashMap<String, CallHandler> DispatchMap;
     DEFINE_STATIC_LOCAL(DispatchMap, dispatchMap, );
@@ -484,10 +487,15 @@ bool InspectorBackendDispatcher::getCommandName(const String& message, String* r
     return true;
 }
 
-InspectorBackendDispatcher::CallbackBase::CallbackBase(PassRefPtr<InspectorBackendDispatcherImpl> backendImpl, int id)
+InspectorBackendDispatcher::CallbackBase::CallbackBase(PassRefPtrWillBeRawPtr<InspectorBackendDispatcherImpl> backendImpl, int id)
     : m_backendImpl(backendImpl), m_id(id), m_alreadySent(false) {}
 
 InspectorBackendDispatcher::CallbackBase::~CallbackBase() {}
+
+void InspectorBackendDispatcher::CallbackBase::trace(Visitor* visitor)
+{
+    visitor->trace(m_backendImpl);
+}
 
 void InspectorBackendDispatcher::CallbackBase::sendFailure(const ErrorString& error)
 {
@@ -575,30 +583,6 @@ private:
 
     WTF_MAKE_NONCOPYABLE(OptOutput);
 };
-
-
-// A small transient wrapper around int type, that can be used as a funciton parameter type
-// cleverly disallowing C++ implicit casts from float or double.
-class ExactlyInt {
-public:
-    template<typename T>
-    ExactlyInt(T t) : m_value(cast_to_int<T>(t)) {}
-
-    ExactlyInt() {}
-
-    operator int() { return m_value; }
-private:
-    int m_value;
-
-    template<typename T>
-    static int cast_to_int(T) { return T::default_case_cast_is_not_supported(); }
-};
-
-template<>
-inline int ExactlyInt::cast_to_int<int>(int i) { return i; }
-
-template<>
-inline int ExactlyInt::cast_to_int<unsigned int>(unsigned int i) { return i; }
 
 class RuntimeCastHelper {
 public:

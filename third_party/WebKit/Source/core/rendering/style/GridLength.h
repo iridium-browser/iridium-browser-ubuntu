@@ -45,7 +45,6 @@ public:
         , m_flex(0)
         , m_type(LengthType)
     {
-        ASSERT(!length.isUndefined());
     }
 
     explicit GridLength(double flex)
@@ -60,6 +59,8 @@ public:
     const Length& length() const { ASSERT(isLength()); return m_length; }
 
     double flex() const { ASSERT(isFlex()); return m_flex; }
+
+    bool isPercentage() const { return m_type == LengthType && m_length.isPercent(); }
 
     bool operator==(const GridLength& o) const
     {

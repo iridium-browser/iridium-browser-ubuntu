@@ -4,7 +4,7 @@
 
 #include "base/android/build_info.h"
 #include "base/basictypes.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -598,7 +598,6 @@ class AudioAndroidInputTest : public AudioAndroidOutputTest,
                                AudioParameters::NO_EFFECTS;
     AudioParameters params(audio_input_parameters().format(),
                            audio_input_parameters().channel_layout(),
-                           audio_input_parameters().input_channels(),
                            audio_input_parameters().sample_rate(),
                            audio_input_parameters().bits_per_sample(),
                            audio_input_parameters().frames_per_buffer(),
@@ -805,7 +804,6 @@ TEST_P(AudioAndroidInputTest,
   AudioParameters native_params = GetInputStreamParameters();
   AudioParameters params(native_params.format(),
                          native_params.channel_layout(),
-                         native_params.input_channels(),
                          native_params.sample_rate(),
                          native_params.bits_per_sample(),
                          native_params.sample_rate() / 100,
@@ -813,9 +811,23 @@ TEST_P(AudioAndroidInputTest,
   StartInputStreamCallbacks(params);
 }
 
+
+#if defined(__aarch64__)
+// Disable StartOutputStreamCallbacks and
+// StartOutputStreamCallbacksNonDefaultParameters on Arm64: crbug.com/418029
+#define MAYBE_StartOutputStreamCallbacks DISABLED_StartOutputStreamCallbacks
+#define MAYBE_StartOutputStreamCallbacksNonDefaultParameters  \
+    DISABLED_StartOutputStreamCallbacksNonDefaultParameters
+#else
+#define MAYBE_StartOutputStreamCallbacks StartOutputStreamCallbacks
+#define MAYBE_StartOutputStreamCallbacksNonDefaultParameters  \
+    StartOutputStreamCallbacksNonDefaultParameters
+#endif
+
+
 // Start output streaming using default output parameters and ensure that the
 // callback sequence is sane.
-TEST_F(AudioAndroidOutputTest, StartOutputStreamCallbacks) {
+TEST_F(AudioAndroidOutputTest, MAYBE_StartOutputStreamCallbacks) {
   GetDefaultOutputStreamParametersOnAudioThread();
   StartOutputStreamCallbacks(audio_output_parameters());
 }
@@ -825,7 +837,8 @@ TEST_F(AudioAndroidOutputTest, StartOutputStreamCallbacks) {
 // select a 10ms buffer size instead of the default size and to open up the
 // device in mono.
 // TODO(henrika): possibly add support for more variations.
-TEST_F(AudioAndroidOutputTest, StartOutputStreamCallbacksNonDefaultParameters) {
+TEST_F(AudioAndroidOutputTest,
+       MAYBE_StartOutputStreamCallbacksNonDefaultParameters) {
   GetDefaultOutputStreamParametersOnAudioThread();
   AudioParameters params(audio_output_parameters().format(),
                          CHANNEL_LAYOUT_MONO,

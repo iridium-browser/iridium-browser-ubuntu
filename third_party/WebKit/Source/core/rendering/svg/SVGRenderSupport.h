@@ -33,6 +33,7 @@ class GraphicsContext;
 class PaintInvalidationState;
 class LayoutRect;
 struct PaintInfo;
+class Path;
 class RenderGeometryMap;
 class RenderLayerModelObject;
 class RenderObject;
@@ -79,6 +80,9 @@ public:
     // Shared between SVG renderers and resources.
     static void applyStrokeStyleToContext(GraphicsContext*, const RenderStyle*, const RenderObject*);
     static void applyStrokeStyleToStrokeData(StrokeData*, const RenderStyle*, const RenderObject*);
+
+    // Fill and/or stroke the provided |path|.
+    static void fillOrStrokePath(GraphicsContext*, unsigned short resourceMode, const Path&);
 
     // Determines if any ancestor's transform has changed.
     static bool transformToRootChanged(RenderObject*);

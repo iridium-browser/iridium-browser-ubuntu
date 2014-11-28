@@ -18,9 +18,10 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "base/threading/platform_thread.h"
 #include "base/tuple.h"
-#include "chrome/browser/content_settings/content_settings_observer.h"
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_pattern.h"
+#include "chrome/browser/content_settings/content_settings_override_provider.h"
+#include "components/content_settings/core/browser/content_settings_observer.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 
 class ExtensionService;
@@ -33,6 +34,8 @@ class Value;
 }
 
 namespace content_settings {
+class OverrideProvider;
+class ObservableProvider;
 class ProviderInterface;
 class PrefProvider;
 }
@@ -46,9 +49,13 @@ class HostContentSettingsMap
       public base::RefCountedThreadSafe<HostContentSettingsMap> {
  public:
   enum ProviderType {
+    // EXTENSION names is a layering violation when this class will move to
+    // components.
+    // TODO(mukai): find the solution.
     INTERNAL_EXTENSION_PROVIDER = 0,
     POLICY_PROVIDER,
     CUSTOM_EXTENSION_PROVIDER,
+    OVERRIDE_PROVIDER,
     PREF_PROVIDER,
     DEFAULT_PROVIDER,
     NUM_PROVIDER_TYPES,
@@ -56,14 +63,12 @@ class HostContentSettingsMap
 
   HostContentSettingsMap(PrefService* prefs, bool incognito);
 
-#if defined(ENABLE_EXTENSIONS)
-  // In some cases, the ExtensionService is not available at the time the
-  // HostContentSettingsMap is constructed. In these cases, we register the
-  // service once it's available.
-  void RegisterExtensionService(ExtensionService* extension_service);
-#endif
-
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+
+  // Adds a new provider for |type|.
+  void RegisterProvider(
+      ProviderType type,
+      scoped_ptr<content_settings::ObservableProvider> provider);
 
   // Returns the default setting for a particular content type. If |provider_id|
   // is not NULL, the id of the provider which provided the default setting is
@@ -97,9 +102,8 @@ class HostContentSettingsMap
   // setting, NULL is returned and the |source| field of |info| is set to
   // |SETTING_SOURCE_NONE|. The pattern fiels of |info| are set to empty
   // patterns.
-  // The ownership of the resulting |Value| is transfered to the caller.
   // May be called on any thread.
-  base::Value* GetWebsiteSetting(
+  scoped_ptr<base::Value> GetWebsiteSetting(
       const GURL& primary_url,
       const GURL& secondary_url,
       ContentSettingsType content_type,
@@ -147,6 +151,16 @@ class HostContentSettingsMap
                          ContentSettingsType content_type,
                          const std::string& resource_identifier,
                          base::Value* value);
+
+  // Sets the most specific rule that currently defines the permission for the
+  // given permission type.
+  void SetNarrowestWebsiteSetting(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier,
+      ContentSetting setting,
+      content_settings::SettingInfo existing_info);
 
   // Convenience method to add a content setting for the given URLs, making sure
   // that there is no setting overriding it.
@@ -238,6 +252,31 @@ class HostContentSettingsMap
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type);
 
+  // Returns the content setting without considering the global on/off toggle
+  // for the content setting that matches the URLs.
+  ContentSetting GetContentSettingWithoutOverride(
+      const GURL& primary_url,
+      const GURL& secondary_url,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier);
+
+  // Returns the single content setting |value| without considering the
+  // global on/off toggle for the content setting that matches the given
+  // patterns.
+  scoped_ptr<base::Value> GetWebsiteSettingWithoutOverride(
+      const GURL& primary_url,
+      const GURL& secondary_url,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier,
+      content_settings::SettingInfo* info) const;
+
+  // Sets globally if a given |content_type| |is_enabled|.
+  void SetContentSettingOverride(ContentSettingsType content_type,
+                                 bool is_enabled);
+
+  // Returns if a given |content_type| is enabled.
+  bool GetContentSettingOverride(ContentSettingsType content_type);
+
   // Adds/removes an observer for content settings changes.
   void AddObserver(content_settings::Observer* observer);
   void RemoveObserver(content_settings::Observer* observer);
@@ -281,6 +320,16 @@ class HostContentSettingsMap
   // teardown), so that we can DCHECK in RegisterExtensionService that
   // it is not being called too late.
   void UsedContentSettingsProviders() const;
+
+  // Returns the single content setting |value| with a toggle for if it
+  // takes the global on/off switch into account.
+  scoped_ptr<base::Value> GetWebsiteSettingInternal(
+      const GURL& primary_url,
+      const GURL& secondary_url,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier,
+      content_settings::SettingInfo* info,
+      bool get_override) const;
 
   content_settings::PrefProvider* GetPrefProvider();
 

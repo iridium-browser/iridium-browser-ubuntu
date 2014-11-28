@@ -404,6 +404,24 @@ Number.preciseMillisToString = function(ms, precision)
   return WebInspector.UIString(format, ms);
 }
 
+/** @type {!WebInspector.UIStringFormat} */
+WebInspector._subMillisFormat = new WebInspector.UIStringFormat("%.3f\u2009ms");
+
+/** @type {!WebInspector.UIStringFormat} */
+WebInspector._millisFormat = new WebInspector.UIStringFormat("%.0f\u2009ms");
+
+/** @type {!WebInspector.UIStringFormat} */
+WebInspector._secondsFormat = new WebInspector.UIStringFormat("%.2f\u2009s");
+
+/** @type {!WebInspector.UIStringFormat} */
+WebInspector._minutesFormat = new WebInspector.UIStringFormat("%.1f\u2009min");
+
+/** @type {!WebInspector.UIStringFormat} */
+WebInspector._hoursFormat = new WebInspector.UIStringFormat("%.1f\u2009hrs");
+
+/** @type {!WebInspector.UIStringFormat} */
+WebInspector._daysFormat = new WebInspector.UIStringFormat("%.1f\u2009days");
+
 /**
  * @param {number} ms
  * @param {boolean=} higherResolution
@@ -418,24 +436,24 @@ Number.millisToString = function(ms, higherResolution)
         return "0";
 
     if (higherResolution && ms < 1000)
-        return WebInspector.UIString("%.3f\u2009ms", ms);
+        return WebInspector._subMillisFormat.format(ms);
     else if (ms < 1000)
-        return WebInspector.UIString("%.0f\u2009ms", ms);
+        return WebInspector._millisFormat.format(ms);
 
     var seconds = ms / 1000;
     if (seconds < 60)
-        return WebInspector.UIString("%.2f\u2009s", seconds);
+        return WebInspector._secondsFormat.format(seconds);
 
     var minutes = seconds / 60;
     if (minutes < 60)
-        return WebInspector.UIString("%.1f\u2009min", minutes);
+        return WebInspector._minutesFormat.format(minutes);
 
     var hours = minutes / 60;
     if (hours < 24)
-        return WebInspector.UIString("%.1f\u2009hrs", hours);
+        return WebInspector._hoursFormat.format(hours);
 
     var days = hours / 24;
-    return WebInspector.UIString("%.1f\u2009days", days);
+    return WebInspector._daysFormat.format(days);
 }
 
 /**
@@ -495,11 +513,11 @@ WebInspector.useLowerCaseMenuTitles = function()
 
 /**
  * @param {string} format
- * @param {?Array.<string>} substitutions
+ * @param {?ArrayLike} substitutions
  * @param {!Object.<string, function(string, ...):*>} formatters
  * @param {string} initialValue
  * @param {function(string, string): ?} append
- * @return {!{formattedResult: string, unusedSubstitutions: ?Array.<string>}};
+ * @return {!{formattedResult: string, unusedSubstitutions: ?ArrayLike}};
  */
 WebInspector.formatLocalized = function(format, substitutions, formatters, initialValue, append)
 {
@@ -863,7 +881,7 @@ WebInspector.InvokeOnceHandlers.prototype = {
         var methods = this._handlers.get(object);
         if (!methods) {
             methods = new Set();
-            this._handlers.put(object, methods);
+            this._handlers.set(object, methods);
         }
         methods.add(method);
     },
@@ -959,6 +977,98 @@ WebInspector.animateFunction = function(func, params, frames, animationComplete)
     }
 
     return cancelAnimation;
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.Object}
+ * @param {!Element} element
+ */
+WebInspector.LongClickController = function(element)
+{
+    this._element = element;
+}
+
+/**
+ * @enum {string}
+ */
+WebInspector.LongClickController.Events = {
+    LongClick: "LongClick",
+    LongPress: "LongPress"
+};
+
+WebInspector.LongClickController.prototype = {
+    reset: function()
+    {
+        if (this._longClickInterval) {
+            clearInterval(this._longClickInterval);
+            delete this._longClickInterval;
+        }
+    },
+
+    enable: function()
+    {
+        if (this._longClickData)
+            return;
+        var boundMouseDown = mouseDown.bind(this);
+        var boundMouseUp = mouseUp.bind(this);
+        var boundReset = this.reset.bind(this);
+
+        this._element.addEventListener("mousedown", boundMouseDown, false);
+        this._element.addEventListener("mouseout", boundReset, false);
+        this._element.addEventListener("mouseup", boundMouseUp, false);
+        this._element.addEventListener("click", boundReset, true);
+
+        var longClicks = 0;
+
+        this._longClickData = { mouseUp: boundMouseUp, mouseDown: boundMouseDown, reset: boundReset };
+
+        /**
+         * @param {!Event} e
+         * @this {WebInspector.LongClickController}
+         */
+        function mouseDown(e)
+        {
+            if (e.which !== 1)
+                return;
+            longClicks = 0;
+            this._longClickInterval = setInterval(longClicked.bind(this, e), 200);
+        }
+
+        /**
+         * @param {!Event} e
+         * @this {WebInspector.LongClickController}
+         */
+        function mouseUp(e)
+        {
+            if (e.which !== 1)
+                return;
+            this.reset();
+        }
+
+        /**
+         * @param {!Event} e
+         * @this {WebInspector.LongClickController}
+         */
+        function longClicked(e)
+        {
+            ++longClicks;
+            this.dispatchEventToListeners(longClicks === 1 ? WebInspector.LongClickController.Events.LongClick : WebInspector.LongClickController.Events.LongPress, e);
+        }
+    },
+
+    disable: function()
+    {
+        if (!this._longClickData)
+            return;
+        this._element.removeEventListener("mousedown", this._longClickData.mouseDown, false);
+        this._element.removeEventListener("mouseout", this._longClickData.reset, false);
+        this._element.removeEventListener("mouseup", this._longClickData.mouseUp, false);
+        this._element.addEventListener("click", this._longClickData.reset, true);
+        delete this._longClickData;
+    },
+
+    __proto__: WebInspector.Object.prototype
 }
 
 ;(function() {

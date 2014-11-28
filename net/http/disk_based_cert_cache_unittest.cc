@@ -30,10 +30,10 @@ struct TestCertMetaData {
 };
 
 const TestCertMetaData kCert1 = {
-    "root_ca_cert.pem", "cert:4C005EF1CF45F80D4A5A2BCFB00D4F198121E8D4"};
+    "root_ca_cert.pem", "cert:738D348A8AFCEC4F79C3E4B1845D985AF601AB0F"};
 
 const TestCertMetaData kCert2 = {
-    "ok_cert.pem", "cert:9174C7CB9E4919604E7B1BFC430E4929DA45F65F"};
+    "ok_cert.pem", "cert:6C9DFD2CFA9885C71BE6DE0EA0CF962AC8F9131B"};
 
 // MockTransactions are required to use the MockDiskCache backend.
 // |key| is a cache key, and is equivalent to the key that will be
@@ -144,7 +144,7 @@ void ImportCert(disk_cache::Backend* backend,
   memcpy(buffer->data(), write_data.data(), write_data.size());
   rv = entry->WriteData(0 /* index */,
                         0 /* offset */,
-                        buffer,
+                        buffer.get(),
                         write_data.size(),
                         callback.callback(),
                         true /* truncate */);
@@ -168,8 +168,11 @@ void CheckCertCached(disk_cache::Backend* backend,
   ASSERT_TRUE(encoded);
   int entry_size = entry->GetDataSize(0 /* index */);
   scoped_refptr<IOBuffer> buffer(new IOBuffer(entry_size));
-  rv = entry->ReadData(
-      0 /* index */, 0 /* offset */, buffer, entry_size, callback.callback());
+  rv = entry->ReadData(0 /* index */,
+                       0 /* offset */,
+                       buffer.get(),
+                       entry_size,
+                       callback.callback());
   EXPECT_EQ(entry_size, callback.GetResult(rv));
   entry->Close();
   X509Certificate::OSCertHandle cached_cert_handle =

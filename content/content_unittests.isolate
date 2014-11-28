@@ -11,10 +11,17 @@
         ],
       },
     }],
-    ['OS=="android" or OS=="mac" or OS=="win"', {
+    ['OS=="android"', {
       'variables': {
         'isolate_dependency_tracked': [
-          '<(PRODUCT_DIR)/content_resources.pak',
+          '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="mac" or OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/content_shell.pak',
         ],
       },
     }],
@@ -39,6 +46,12 @@
           '../testing/xvfb.py',
           '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
+        ],
+      },
+    }],
+    ['OS=="linux" and use_ozone==0', {
+      'variables': {
+        'isolate_dependency_tracked': [
           '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
         ],
       },
@@ -71,8 +84,15 @@
         ],
       },
     }],
+    ['OS=="win" and (fastbuild==0 or fastbuild==1)', {
+      'variables': {
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/content_unittests.exe.pdb',
+        ],
+      },
+    }],
   ],
   'includes': [
-    '../third_party/icu/icu.isolate',
+    '../base/base.isolate',
   ],
 }

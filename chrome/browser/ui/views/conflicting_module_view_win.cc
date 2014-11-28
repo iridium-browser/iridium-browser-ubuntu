@@ -10,11 +10,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -197,7 +197,7 @@ void ConflictingModuleView::ButtonPressed(views::Button* sender,
         content::OpenURLParams(help_center_url_,
                                content::Referrer(),
                                NEW_FOREGROUND_TAB,
-                               content::PAGE_TRANSITION_LINK,
+                               ui::PAGE_TRANSITION_LINK,
                                false));
 
     EnumerateModulesModel* model = EnumerateModulesModel::GetInstance();

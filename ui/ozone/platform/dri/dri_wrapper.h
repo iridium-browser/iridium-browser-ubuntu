@@ -30,6 +30,9 @@ class DriWrapper {
   DriWrapper(const char* device_path);
   virtual ~DriWrapper();
 
+  // Open device.
+  virtual void Initialize();
+
   // Get the CRTC state. This is generally used to save state before using the
   // CRTC. When the user finishes using the CRTC, the user should restore the
   // CRTC to it's initial state. Use |SetCrtc| to restore the state.
@@ -50,6 +53,9 @@ class DriWrapper {
   virtual bool SetCrtc(drmModeCrtc* crtc, std::vector<uint32_t> connectors);
 
   virtual bool DisableCrtc(uint32_t crtc_id);
+
+  // Returns the connector properties for |connector_id|.
+  virtual ScopedDrmConnectorPtr GetConnector(uint32_t connector_id);
 
   // Register a buffer with the CRTC. On successful registration, the CRTC will
   // assign a framebuffer ID to |framebuffer|.
@@ -132,6 +138,9 @@ class DriWrapper {
   int fd_;
 
  private:
+  // Path to DRM device.
+  const char* device_path_;
+
   DISALLOW_COPY_AND_ASSIGN(DriWrapper);
 };
 

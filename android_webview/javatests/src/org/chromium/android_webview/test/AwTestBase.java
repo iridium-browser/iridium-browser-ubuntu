@@ -19,10 +19,10 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.InMemorySharedPreferences;
 import org.chromium.content.browser.ContentSettings;
-import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -259,7 +259,7 @@ public class AwTestBase
         getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                awContents.getContentViewCore().reload(true);
+                awContents.getNavigationController().reload(true);
             }
         });
         onPageFinishedHelper.waitForCallback(currentCallCount, 1, WAIT_TIMEOUT_MS,
@@ -274,7 +274,7 @@ public class AwTestBase
      */
     public static class TestDependencyFactory extends AwContents.DependencyFactory {
         public AwTestContainerView createAwTestContainerView(AwTestRunnerActivity activity) {
-            return new AwTestContainerView(activity);
+            return new AwTestContainerView(activity, false);
         }
         public AwSettings createAwSettings(Context context, boolean supportsLegacyQuirks) {
             return new AwSettings(context, false, supportsLegacyQuirks);
@@ -355,7 +355,7 @@ public class AwTestBase
         return runTestOnUiThreadAndGetResult(new Callable<String>() {
             @Override
             public String call() throws Exception {
-                return awContents.getContentViewCore().getTitle();
+                return awContents.getTitle();
             }
         });
     }

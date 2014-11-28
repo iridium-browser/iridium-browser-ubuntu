@@ -14,20 +14,18 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/strings/string_split.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/core/browser/content_settings_rule.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "url/gurl.h"
 
@@ -512,7 +510,7 @@ void PrefProvider::CanonicalizeContentSettingsExceptions(
   DCHECK(all_settings_dictionary);
 
   std::vector<std::string> remove_items;
-  std::vector<std::pair<std::string, std::string> > move_items;
+  base::StringPairs move_items;
   for (base::DictionaryValue::Iterator i(*all_settings_dictionary);
        !i.IsAtEnd();
        i.Advance()) {

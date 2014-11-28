@@ -42,7 +42,6 @@ using namespace HTMLNames;
 inline HTMLTableRowElement::HTMLTableRowElement(Document& document)
     : HTMLTablePartElement(trTag, document)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(HTMLTableRowElement)
@@ -112,12 +111,6 @@ int HTMLTableRowElement::sectionRowIndex() const
     } while (n);
 
     return rIndex;
-}
-
-PassRefPtrWillBeRawPtr<HTMLElement> HTMLTableRowElement::insertCell(ExceptionState& exceptionState)
-{
-    // The default 'index' argument value is -1.
-    return insertCell(-1, exceptionState);
 }
 
 PassRefPtrWillBeRawPtr<HTMLElement> HTMLTableRowElement::insertCell(int index, ExceptionState& exceptionState)

@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -45,7 +45,8 @@ class FeedbackUploader : public base::SupportsWeakPtr<FeedbackUploader> {
   friend class FeedbackUploaderTest;
 
   struct ReportsUploadTimeComparator {
-    bool operator()(FeedbackReport* a, FeedbackReport* b) const;
+    bool operator()(const scoped_refptr<FeedbackReport>& a,
+                    const scoped_refptr<FeedbackReport>& b) const;
   };
 
   void Init();

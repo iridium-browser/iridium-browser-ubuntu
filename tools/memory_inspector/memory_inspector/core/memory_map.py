@@ -5,13 +5,16 @@
 import bisect
 
 
+PAGE_SIZE = 4096
+
+
 class Map(object):
   """Models the memory map of a given |backends.Process|.
 
   This is typically obtained by calling backends.Process.DumpMemoryMaps()."""
 
   def __init__(self):
-    self.entries = []
+    self.entries = []  # List of |MapEntry|, sorted by start address.
 
   def Add(self, entry):
     assert(isinstance(entry, MapEntry))
@@ -39,7 +42,6 @@ class Map(object):
 
 class MapEntry(object):
   """An entry (address range + stats) in a memory |Map|."""
-  PAGE_SIZE = 4096
 
   def __init__(self, start, end, prot_flags, mapped_file, mapped_offset,
       priv_dirty_bytes=0, priv_clean_bytes=0, shared_dirty_bytes=0,
@@ -59,25 +61,41 @@ class MapEntry(object):
     # the presence of its corresponding page.
     self.resident_pages = resident_pages or []
 
-  def GetRelativeOffset(self, abs_addr):
+  def GetRelativeMMOffset(self, abs_addr):
+    """Converts abs_addr to the corresponding offset in the mm.
+
+    Returns:
+      A tuple: (page_index, offset_in_page)
+    """
+    assert(self.Contains(abs_addr))
+    offset = abs_addr - self.start
+    return (offset / PAGE_SIZE, offset & (PAGE_SIZE - 1))
+
+  def GetRelativeFileOffset(self, abs_addr):
     """Converts abs_addr to the corresponding offset in the mapped file."""
-    assert(abs_addr >= self.start and abs_addr <= self.end)
+    assert(self.Contains(abs_addr))
     return abs_addr - self.start + self.mapped_offset
 
   def IsPageResident(self, relative_page_index):
     """Checks whether a given memory page is resident in memory."""
     assert(relative_page_index >= 0 and
-           relative_page_index < self.len / MapEntry.PAGE_SIZE)
-    assert(len(self.resident_pages) * MapEntry.PAGE_SIZE * 8 >= self.len)
+           relative_page_index < self.len / PAGE_SIZE)
     arr_idx = relative_page_index / 8
     arr_bit = relative_page_index % 8
+    # Trailing zeros are trimmed by memdump (to optimize dump time).
+    if arr_idx >= len(self.resident_pages):
+      return False
     return (self.resident_pages[arr_idx] & (1 << arr_bit)) != 0
+
+  def Contains(self, abs_addr):
+    """Determines whether a given absolute address belongs to the current mm."""
+    return abs_addr >= self.start and abs_addr <= self.end
 
   def __cmp__(self, other):
     """Comparison operator required for bisect."""
     if isinstance(other, MapEntry):
       return self.start - other.start
-    elif isinstance(other, int):
+    elif isinstance(other, (long, int)):
       return self.start - other
     else:
       raise Exception('Cannot compare with %s' % other.__class__)
@@ -85,3 +103,12 @@ class MapEntry(object):
   @property
   def len(self):
     return self.end - self.start + 1
+
+  @property
+  def num_pages(self):
+    return self.len / PAGE_SIZE
+
+  @property
+  def rss_bytes(self):
+    return (self.priv_dirty_bytes + self.priv_clean_bytes +
+            self.shared_dirty_bytes + self.shared_clean_bytes)

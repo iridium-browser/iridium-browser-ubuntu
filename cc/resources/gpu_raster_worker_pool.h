@@ -8,6 +8,7 @@
 #include "base/memory/weak_ptr.h"
 #include "cc/resources/raster_worker_pool.h"
 #include "cc/resources/rasterizer.h"
+#include "third_party/skia/include/core/SkMultiPictureDraw.h"
 
 namespace cc {
 class ContextProvider;
@@ -34,16 +35,16 @@ class CC_EXPORT GpuRasterWorkerPool : public RasterWorkerPool,
   virtual void CheckForCompletedTasks() OVERRIDE;
 
   // Overridden from RasterizerTaskClient:
-  virtual SkCanvas* AcquireCanvasForRaster(RasterTask* task) OVERRIDE;
-  virtual void ReleaseCanvasForRaster(RasterTask* task) OVERRIDE;
+  virtual scoped_ptr<RasterBuffer> AcquireBufferForRaster(
+      const Resource* resource) OVERRIDE;
+  virtual void ReleaseBufferForRaster(scoped_ptr<RasterBuffer> buffer) OVERRIDE;
 
  private:
   GpuRasterWorkerPool(base::SequencedTaskRunner* task_runner,
                       ContextProvider* context_provider,
                       ResourceProvider* resource_provider);
 
-  void OnRasterFinished();
-  void OnRasterRequiredForActivationFinished();
+  void OnRasterFinished(TaskSet task_set);
   void ScheduleRunTasksOnOriginThread();
   void RunTasksOnOriginThread();
   void RunTaskOnOriginThread(RasterizerTask* task);
@@ -54,21 +55,20 @@ class CC_EXPORT GpuRasterWorkerPool : public RasterWorkerPool,
   RasterizerClient* client_;
   ContextProvider* context_provider_;
   ResourceProvider* resource_provider_;
+  SkMultiPictureDraw multi_picture_draw_;
 
   bool run_tasks_on_origin_thread_pending_;
 
-  bool raster_tasks_pending_;
-  bool raster_tasks_required_for_activation_pending_;
+  TaskSetCollection raster_pending_;
 
-  base::WeakPtrFactory<GpuRasterWorkerPool> raster_finished_weak_ptr_factory_;
-
-  scoped_refptr<RasterizerTask> raster_finished_task_;
-  scoped_refptr<RasterizerTask> raster_required_for_activation_finished_task_;
+  scoped_refptr<RasterizerTask> raster_finished_tasks_[kNumberOfTaskSets];
 
   // Task graph used when scheduling tasks and vector used to gather
   // completed tasks.
   TaskGraph graph_;
   Task::Vector completed_tasks_;
+
+  base::WeakPtrFactory<GpuRasterWorkerPool> raster_finished_weak_ptr_factory_;
 
   base::WeakPtrFactory<GpuRasterWorkerPool> weak_ptr_factory_;
 

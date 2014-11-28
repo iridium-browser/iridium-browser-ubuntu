@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <iomanip>
 #include <windows.h>
-#include <winspool.h>
 #include <setupapi.h>  // Must be included after windows.h
+#include <winspool.h>
+#include <iomanip>
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/file_version_info_win.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process/process.h"
 #include "base/process/launch.h"
+#include "base/process/process.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/win/registry.h"
@@ -147,7 +147,7 @@ HRESULT RegisterPortMonitor(bool install, const base::FilePath& install_path) {
 
   DWORD exit_code = S_OK;
   if (install) {
-    if (!GetExitCodeProcess(regsvr32_handle, &exit_code)) {
+    if (!GetExitCodeProcess(regsvr32_handle.Get(), &exit_code)) {
       LOG(ERROR) << "Unable to get regsvr32.exe exit code.";
       return GetLastHResult();
     }
@@ -345,7 +345,7 @@ HRESULT InstallPrinter(void) {
   base::string16 port_name;
   printer_info.pPortName = const_cast<LPWSTR>(kPortName);
   printer_info.Attributes = PRINTER_ATTRIBUTE_DIRECT|PRINTER_ATTRIBUTE_LOCAL;
-  printer_info.pPrintProcessor = L"winprint";
+  printer_info.pPrintProcessor = const_cast<LPWSTR>(L"winprint");
   HANDLE handle = AddPrinter(NULL, 2, reinterpret_cast<BYTE*>(&printer_info));
   if (handle == NULL) {
     HRESULT result = GetLastHResult();

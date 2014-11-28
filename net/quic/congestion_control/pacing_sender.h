@@ -41,8 +41,8 @@ class NET_EXPORT_PRIVATE PacingSender : public SendAlgorithmInterface {
       QuicTime feedback_receive_time) OVERRIDE;
   virtual void OnCongestionEvent(bool rtt_updated,
                                  QuicByteCount bytes_in_flight,
-                                 const CongestionMap& acked_packets,
-                                 const CongestionMap& lost_packets) OVERRIDE;
+                                 const CongestionVector& acked_packets,
+                                 const CongestionVector& lost_packets) OVERRIDE;
   virtual bool OnPacketSent(QuicTime sent_time,
                             QuicByteCount bytes_in_flight,
                             QuicPacketSequenceNumber sequence_number,
@@ -59,6 +59,7 @@ class NET_EXPORT_PRIVATE PacingSender : public SendAlgorithmInterface {
   virtual QuicTime::Delta RetransmissionDelay() const OVERRIDE;
   virtual QuicByteCount GetCongestionWindow() const OVERRIDE;
   virtual bool InSlowStart() const OVERRIDE;
+  virtual bool InRecovery() const OVERRIDE;
   virtual QuicByteCount GetSlowStartThreshold() const OVERRIDE;
   virtual CongestionControlType GetCongestionControlType() const OVERRIDE;
 

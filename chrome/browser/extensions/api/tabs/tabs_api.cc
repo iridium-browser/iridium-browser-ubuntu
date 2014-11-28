@@ -8,7 +8,6 @@
 #include <limits>
 #include <vector>
 
-#include "apps/app_window.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -20,6 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/apps/scoped_keep_alive.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/api/tabs/windows_util.h"
@@ -30,6 +30,7 @@
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/apps/chrome_app_delegate.h"
 #include "chrome/browser/ui/browser.h"
@@ -64,15 +65,16 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_function_util.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/file_reader.h"
 #include "extensions/browser/script_executor.h"
+#include "extensions/common/api/extension_types.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/message_bundle.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -84,12 +86,11 @@
 #include "ui/base/ui_base_types.h"
 
 #if defined(USE_ASH)
-#include "apps/app_window_registry.h"
 #include "ash/ash_switches.h"
 #include "chrome/browser/extensions/api/tabs/ash_panel_contents.h"
+#include "extensions/browser/app_window/app_window_registry.h"
 #endif
 
-using apps::AppWindow;
 using content::BrowserThread;
 using content::NavigationController;
 using content::NavigationEntry;
@@ -103,7 +104,7 @@ namespace windows = api::windows;
 namespace keys = tabs_constants;
 namespace tabs = api::tabs;
 
-using api::tabs::InjectDetails;
+using core_api::extension_types::InjectDetails;
 
 namespace {
 
@@ -116,6 +117,22 @@ bool GetBrowserFromWindowID(ChromeUIThreadExtensionFunction* function,
       ExtensionTabUtil::GetBrowserFromWindowID(function, window_id, &error);
   if (!result) {
     function->SetError(error);
+    return false;
+  }
+
+  *browser = result;
+  return true;
+}
+
+bool GetBrowserFromWindowID(ChromeExtensionFunctionDetails* details,
+                            int window_id,
+                            Browser** browser) {
+  std::string error;
+  Browser* result;
+  result =
+      ExtensionTabUtil::GetBrowserFromWindowID(*details, window_id, &error);
+  if (!result) {
+    details->function()->SetError(error);
     return false;
   }
 
@@ -494,8 +511,10 @@ bool WindowsCreateFunction::RunSync() {
       create_params.window_type = AppWindow::WINDOW_TYPE_V1_PANEL;
       create_params.window_spec.bounds = window_bounds;
       create_params.focused = saw_focus_key && focused;
-      AppWindow* app_window =
-          new AppWindow(window_profile, new ChromeAppDelegate(), extension());
+      AppWindow* app_window = new AppWindow(
+          window_profile,
+          new ChromeAppDelegate(make_scoped_ptr(new ScopedKeepAlive)),
+          extension());
       AshPanelContents* ash_panel_contents = new AshPanelContents(app_window);
       app_window->Init(urls[0], ash_panel_contents, create_params);
       SetResult(ash_panel_contents->GetExtensionWindowController()
@@ -543,7 +562,7 @@ bool WindowsCreateFunction::RunSync() {
 
   for (std::vector<GURL>::iterator i = urls.begin(); i != urls.end(); ++i) {
     WebContents* tab = chrome::AddSelectedTabWithURL(
-        new_window, *i, content::PAGE_TRANSITION_LINK);
+        new_window, *i, ui::PAGE_TRANSITION_LINK);
     if (create_panel) {
       TabHelper::FromWebContents(tab)->SetExtensionAppIconById(extension_id);
     }
@@ -786,12 +805,21 @@ bool TabsQueryFunction::RunSync() {
   bool loading = params->query_info.status ==
       tabs::Query::Params::QueryInfo::STATUS_LOADING;
 
-  // It is o.k. to use URLPattern::SCHEME_ALL here because this function does
-  // not grant access to the content of the tabs, only to seeing their URLs and
-  // meta data.
-  URLPattern url_pattern(URLPattern::SCHEME_ALL, "<all_urls>");
-  if (params->query_info.url.get())
-    url_pattern = URLPattern(URLPattern::SCHEME_ALL, *params->query_info.url);
+  URLPatternSet url_patterns;
+  if (params->query_info.url.get()) {
+    std::vector<std::string> url_pattern_strings;
+    if (params->query_info.url->as_string)
+      url_pattern_strings.push_back(*params->query_info.url->as_string);
+    else if (params->query_info.url->as_strings)
+      url_pattern_strings.swap(*params->query_info.url->as_strings);
+    // It is o.k. to use URLPattern::SCHEME_ALL here because this function does
+    // not grant access to the content of the tabs, only to seeing their URLs
+    // and meta data.
+    if (!url_patterns.Populate(url_pattern_strings, URLPattern::SCHEME_ALL,
+                               true, &error_)) {
+      return false;
+    }
+  }
 
   std::string title;
   if (params->query_info.title.get())
@@ -877,7 +905,8 @@ bool TabsQueryFunction::RunSync() {
                                           base::UTF8ToUTF16(title)))
         continue;
 
-      if (!url_pattern.MatchesURL(web_contents->GetURL()))
+      if (!url_patterns.is_empty() &&
+          !url_patterns.MatchesURL(web_contents->GetURL()))
         continue;
 
       if (loading_status_set && loading != web_contents->IsLoading())
@@ -1087,7 +1116,7 @@ bool TabsUpdateFunction::RunAsync() {
       error_ = keys::kNoSelectedTabError;
       return false;
     }
-    tab_id = SessionID::IdForTab(contents);
+    tab_id = SessionTabHelper::IdForTab(contents);
   } else {
     tab_id = *params->tab_id;
   }
@@ -1224,7 +1253,7 @@ bool TabsUpdateFunction::UpdateURL(const std::string &url_string,
   }
 
   web_contents_->GetController().LoadURL(
-      url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
+      url, content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
 
   // The URL of a tab contents never actually changes to a JavaScript URL, so
   // this check only makes sense in other cases.
@@ -1440,7 +1469,7 @@ bool TabsReloadFunction::RunSync() {
     // This does as same as Browser::ReloadInternal.
     NavigationEntry* entry = web_contents->GetController().GetVisibleEntry();
     OpenURLParams params(entry->GetURL(), Referrer(), CURRENT_TAB,
-                         content::PAGE_TRANSITION_RELOAD, false);
+                         ui::PAGE_TRANSITION_RELOAD, false);
     GetCurrentBrowser()->OpenURL(params);
   } else if (bypass_cache) {
     web_contents->GetController().ReloadIgnoringCache(true);
@@ -1496,8 +1525,12 @@ bool TabsRemoveFunction::RemoveTab(int tab_id) {
   return true;
 }
 
+TabsCaptureVisibleTabFunction::TabsCaptureVisibleTabFunction()
+    : chrome_details_(this) {
+}
+
 bool TabsCaptureVisibleTabFunction::IsScreenshotEnabled() {
-  PrefService* service = GetProfile()->GetPrefs();
+  PrefService* service = chrome_details_.GetProfile()->GetPrefs();
   if (service->GetBoolean(prefs::kDisableScreenshots)) {
     error_ = keys::kScreenshotsDisabled;
     return false;
@@ -1507,7 +1540,7 @@ bool TabsCaptureVisibleTabFunction::IsScreenshotEnabled() {
 
 WebContents* TabsCaptureVisibleTabFunction::GetWebContentsForID(int window_id) {
   Browser* browser = NULL;
-  if (!GetBrowserFromWindowID(this, window_id, &browser))
+  if (!GetBrowserFromWindowID(&chrome_details_, window_id, &browser))
     return NULL;
 
   WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
@@ -1517,7 +1550,7 @@ WebContents* TabsCaptureVisibleTabFunction::GetWebContentsForID(int window_id) {
   }
 
   if (!extension()->permissions_data()->CanCaptureVisiblePage(
-          SessionID::IdForTab(contents), &error_)) {
+          SessionTabHelper::IdForTab(contents), &error_)) {
     return NULL;
   }
   return contents;
@@ -1633,7 +1666,7 @@ void TabsDetectLanguageFunction::GotLanguage(const std::string& language) {
 }
 
 ExecuteCodeInTabFunction::ExecuteCodeInTabFunction()
-    : execute_tab_id_(-1) {
+    : chrome_details_(this), execute_tab_id_(-1) {
 }
 
 ExecuteCodeInTabFunction::~ExecuteCodeInTabFunction() {}
@@ -1647,6 +1680,39 @@ bool ExecuteCodeInTabFunction::HasPermission() {
   return ExtensionFunction::HasPermission();
 }
 
+bool ExecuteCodeInTabFunction::Init() {
+  if (details_.get())
+    return true;
+
+  // |tab_id| is optional so it's ok if it's not there.
+  int tab_id = -1;
+  if (args_->GetInteger(0, &tab_id))
+    EXTENSION_FUNCTION_VALIDATE(tab_id >= 0);
+
+  // |details| are not optional.
+  base::DictionaryValue* details_value = NULL;
+  if (!args_->GetDictionary(1, &details_value))
+    return false;
+  scoped_ptr<InjectDetails> details(new InjectDetails());
+  if (!InjectDetails::Populate(*details_value, details.get()))
+    return false;
+
+  // If the tab ID wasn't given then it needs to be converted to the
+  // currently active tab's ID.
+  if (tab_id == -1) {
+    Browser* browser = chrome_details_.GetCurrentBrowser();
+    if (!browser)
+      return false;
+    content::WebContents* web_contents = NULL;
+    if (!ExtensionTabUtil::GetDefaultTab(browser, &web_contents, &tab_id))
+      return false;
+  }
+
+  execute_tab_id_ = tab_id;
+  details_ = details.Pass();
+  return true;
+}
+
 bool ExecuteCodeInTabFunction::CanExecuteScriptOnPage() {
   content::WebContents* contents = NULL;
 
@@ -1654,7 +1720,7 @@ bool ExecuteCodeInTabFunction::CanExecuteScriptOnPage() {
   // tab in the current window.
   CHECK_GE(execute_tab_id_, 0);
   if (!GetTabById(execute_tab_id_,
-                  GetProfile(),
+                  chrome_details_.GetProfile(),
                   include_incognito(),
                   NULL,
                   NULL,
@@ -1687,7 +1753,7 @@ ScriptExecutor* ExecuteCodeInTabFunction::GetScriptExecutor() {
   content::WebContents* contents = NULL;
 
   bool success = GetTabById(execute_tab_id_,
-                            GetProfile(),
+                            chrome_details_.GetProfile(),
                             include_incognito(),
                             &browser,
                             NULL,
@@ -1721,39 +1787,6 @@ void TabsExecuteScriptFunction::OnExecuteCodeFinished(
   if (error.empty())
     SetResult(result.DeepCopy());
   ExecuteCodeInTabFunction::OnExecuteCodeFinished(error, on_url, result);
-}
-
-bool ExecuteCodeInTabFunction::Init() {
-  if (details_.get())
-    return true;
-
-  // |tab_id| is optional so it's ok if it's not there.
-  int tab_id = -1;
-  if (args_->GetInteger(0, &tab_id))
-    EXTENSION_FUNCTION_VALIDATE(tab_id >= 0);
-
-  // |details| are not optional.
-  base::DictionaryValue* details_value = NULL;
-  if (!args_->GetDictionary(1, &details_value))
-    return false;
-  scoped_ptr<InjectDetails> details(new InjectDetails());
-  if (!InjectDetails::Populate(*details_value, details.get()))
-    return false;
-
-  // If the tab ID wasn't given then it needs to be converted to the
-  // currently active tab's ID.
-  if (tab_id == -1) {
-    Browser* browser = GetCurrentBrowser();
-    if (!browser)
-      return false;
-    content::WebContents* web_contents = NULL;
-    if (!ExtensionTabUtil::GetDefaultTab(browser, &web_contents, &tab_id))
-      return false;
-  }
-
-  execute_tab_id_ = tab_id;
-  details_ = details.Pass();
-  return true;
 }
 
 bool TabsInsertCSSFunction::ShouldInsertCSS() const {

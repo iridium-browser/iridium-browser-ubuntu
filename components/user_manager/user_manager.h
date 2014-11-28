@@ -145,6 +145,10 @@ class USER_MANAGER_EXPORT UserManager {
   // Switches to active user identified by |user_id|. User has to be logged in.
   virtual void SwitchActiveUser(const std::string& user_id) = 0;
 
+  // Switches to the last active user (called after crash happens and session
+  // restore has completed).
+  virtual void SwitchToLastActiveUser() = 0;
+
   // Called when browser session is started i.e. after
   // browser_creator.LaunchBrowser(...) was called after user sign in.
   // When user is at the image screen IsUserLoggedIn() will return true
@@ -288,6 +292,9 @@ class USER_MANAGER_EXPORT UserManager {
 
   // Returns true if supervised users allowed.
   virtual bool AreSupervisedUsersAllowed() const = 0;
+
+  // Force update login state.
+  virtual void ForceUpdateState() {}
 
  protected:
   // Sets UserManager instance.

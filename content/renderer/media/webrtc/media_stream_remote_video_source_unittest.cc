@@ -12,6 +12,7 @@
 #include "content/renderer/media/webrtc/mock_peer_connection_dependency_factory.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/web/WebHeap.h"
 #include "third_party/libjingle/source/talk/media/webrtc/webrtcvideoframe.h"
 
 namespace content {
@@ -35,12 +36,11 @@ class MediaStreamRemoteVideoSourceTest
   MediaStreamRemoteVideoSourceTest()
       : child_process_(new ChildProcess()),
         mock_factory_(new MockPeerConnectionDependencyFactory()),
-        webrtc_video_track_(
-            mock_factory_->CreateLocalVideoTrack(
-                "test",
-                static_cast<cricket::VideoCapturer*>(NULL))),
-        remote_source_(
-            new MediaStreamRemoteVideoSourceUnderTest(webrtc_video_track_)),
+        webrtc_video_track_(mock_factory_->CreateLocalVideoTrack(
+            "test",
+            static_cast<cricket::VideoCapturer*>(NULL))),
+        remote_source_(new MediaStreamRemoteVideoSourceUnderTest(
+            webrtc_video_track_.get())),
         number_of_successful_constraints_applied_(0),
         number_of_failed_constraints_applied_(0) {
     webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
@@ -49,21 +49,26 @@ class MediaStreamRemoteVideoSourceTest
     webkit_source_.setExtraData(remote_source_);
   }
 
+  virtual void TearDown() OVERRIDE {
+    webkit_source_.reset();
+    blink::WebHeap::collectAllGarbageForTesting();
+  }
+
   MediaStreamRemoteVideoSourceUnderTest* source() {
     return remote_source_;
   }
 
- MediaStreamVideoTrack* CreateTrack() {
-   bool enabled = true;
-   blink::WebMediaConstraints constraints;
-   constraints.initialize();
-   return new MediaStreamVideoTrack(
-       source(),
-       constraints,
-       base::Bind(
-           &MediaStreamRemoteVideoSourceTest::OnConstraintsApplied,
-           base::Unretained(this)),
-       enabled);
+  MediaStreamVideoTrack* CreateTrack() {
+    bool enabled = true;
+    blink::WebMediaConstraints constraints;
+    constraints.initialize();
+    return new MediaStreamVideoTrack(
+        source(),
+        constraints,
+        base::Bind(
+            &MediaStreamRemoteVideoSourceTest::OnConstraintsApplied,
+            base::Unretained(this)),
+        enabled);
   }
 
   int NumberOfSuccessConstraintsCallbacks() const {

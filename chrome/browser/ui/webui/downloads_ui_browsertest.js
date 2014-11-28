@@ -26,7 +26,7 @@ BaseDownloadsWebUITest.prototype = {
   /**
    * Browse to the downloads page & call our preLoad().
    */
-  browsePreload: 'chrome://downloads',
+  browsePreload: 'chrome://downloads/',
 
   /** @override */
   typedefCppFixture: 'DownloadsUIBrowserTest',
@@ -35,6 +35,12 @@ BaseDownloadsWebUITest.prototype = {
   testGenPreamble: function() {
     GEN('  SetDeleteAllowed(true);');
   },
+
+  /** @override */
+  runAccessibilityChecks: true,
+
+  /** @override */
+  accessibilityIssuesAreErrors: true,
 
   /**
    * Sends TOTAL_RESULT_COUNT fake downloads to the page. This can't be called
@@ -134,6 +140,14 @@ TEST_F('BaseDownloadsWebUITest', 'DeleteAllowed', function() {
   this.testHelper(true, false);
   // TODO(pamg): Mock out the back-end calls, so we can also test removing a
   // single item.
+  testDone();
+});
+
+// Test that clicking <a href=#> doesn't actually go to #.
+TEST_F('BaseDownloadsWebUITest', 'PoundLinkClicksDontChangeUrl', function() {
+  assertEquals(this.browsePreload, document.location.href);
+  document.querySelector('.clear-all-link').click();
+  assertEquals(this.browsePreload, document.location.href);
   testDone();
 });
 

@@ -60,6 +60,11 @@ void ImageQualityController::remove(RenderObject* renderer)
     }
 }
 
+bool ImageQualityController::has(RenderObject* renderer)
+{
+    return gImageQualityController && gImageQualityController->m_objectLayerSizeMap.contains(renderer);
+}
+
 InterpolationQuality ImageQualityController::chooseInterpolationQuality(GraphicsContext* context, RenderObject* object, Image* image, const void* layer, const LayoutSize& layoutSize)
 {
     if (object->style()->imageRendering() == ImageRenderingPixelated
@@ -137,7 +142,7 @@ void ImageQualityController::highQualityRepaintTimerFired(Timer<ImageQualityCont
                 return;
             }
         }
-        it->key->paintInvalidationForWholeRenderer();
+        it->key->setShouldDoFullPaintInvalidation(true);
     }
 
     m_liveResizeOptimizationIsActive = false;

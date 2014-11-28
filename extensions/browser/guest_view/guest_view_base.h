@@ -145,7 +145,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   //
   // This should be the name of the API as it appears in the _api_features.json
   // file.
-  virtual const char* GetAPINamespace() = 0;
+  virtual const char* GetAPINamespace() const = 0;
+
+  // This method is to be implemented by the derived class. This method is the
+  // task prefix to show for a task produced by this GuestViewBase's derived
+  // type.
+  virtual int GetTaskPrefix() const = 0;
 
   // This method is to be implemented by the derived class. Given a set of
   // initialization parameters, a concrete subclass of GuestViewBase can
@@ -155,6 +160,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   virtual void CreateWebContents(
       const std::string& embedder_extension_id,
       int embedder_render_process_id,
+      const GURL& embedder_site_url,
       const base::DictionaryValue& create_params,
       const WebContentsCreatedCallback& callback) = 0;
 
@@ -187,22 +193,18 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
     return embedder_web_contents_;
   }
 
-  // Returns the guest WebContents.
-  content::WebContents* guest_web_contents() const {
-    return web_contents();
-  }
-
-  // Returns the extra parameters associated with this GuestView passed
-  // in from JavaScript.
-  base::DictionaryValue* extra_params() const {
-    return extra_params_.get();
-  }
+  // Returns the parameters associated with the element hosting this GuestView
+  // passed in from JavaScript.
+  base::DictionaryValue* attach_params() const { return attach_params_.get(); }
 
   // Returns whether this guest has an associated embedder.
   bool attached() const { return !!embedder_web_contents_; }
 
   // Returns the instance ID of the <*view> element.
   int view_instance_id() const { return view_instance_id_; }
+
+  // Returns the instance ID of this GuestViewBase.
+  int guest_instance_id() const { return guest_instance_id_; }
 
   // Returns the extension ID of the embedder.
   const std::string& embedder_extension_id() const {
@@ -222,6 +224,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
     return opener_.get();
   }
 
+  // Sets some additional chrome/ initialization parameters.
+  void SetAttachParams(const base::DictionaryValue& params);
   void SetOpener(GuestViewBase* opener);
 
   // RenderProcessHostObserver implementation
@@ -232,17 +236,16 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // BrowserPluginGuestDelegate implementation.
   virtual void Destroy() OVERRIDE FINAL;
-  virtual void DidAttach() OVERRIDE FINAL;
+  virtual void DidAttach(int guest_proxy_routing_id) OVERRIDE FINAL;
   virtual void ElementSizeChanged(const gfx::Size& old_size,
                                   const gfx::Size& new_size) OVERRIDE FINAL;
-  virtual int GetGuestInstanceID() const OVERRIDE;
   virtual void GuestSizeChanged(const gfx::Size& old_size,
                                 const gfx::Size& new_size) OVERRIDE FINAL;
   virtual void RegisterDestructionCallback(
       const DestructionCallback& callback) OVERRIDE FINAL;
   virtual void WillAttach(
       content::WebContents* embedder_web_contents,
-      const base::DictionaryValue& extra_params) OVERRIDE FINAL;
+      int browser_plugin_instance_id) OVERRIDE FINAL;
 
   // Dispatches an event |event_name| to the embedder with the |event| fields.
   void DispatchEventToEmbedder(Event* event);
@@ -272,6 +275,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   virtual void WebContentsDestroyed() OVERRIDE FINAL;
 
   // WebContentsDelegate implementation.
+  virtual void ActivateContents(content::WebContents* contents) OVERRIDE FINAL;
+  virtual void DeactivateContents(
+      content::WebContents* contents) OVERRIDE FINAL;
+  virtual void RunFileChooser(
+      content::WebContents* web_contents,
+      const content::FileChooserParams& params) OVERRIDE;
   virtual bool ShouldFocusPageAfterCrash() OVERRIDE FINAL;
   virtual bool PreHandleGestureEvent(
       content::WebContents* source,
@@ -281,12 +290,18 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   std::string embedder_extension_id_;
   int embedder_render_process_id_;
   content::BrowserContext* browser_context_;
+
   // |guest_instance_id_| is a profile-wide unique identifier for a guest
   // WebContents.
   const int guest_instance_id_;
+
   // |view_instance_id_| is an identifier that's unique within a particular
   // embedder RenderViewHost for a particular <*view> instance.
   int view_instance_id_;
+
+  // |element_instance_id_| is an identififer that's unique to a particular
+  // GuestViewContainer element.
+  int element_instance_id_;
 
   bool initialized_;
 
@@ -299,11 +314,11 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   DestructionCallback destruction_callback_;
 
-  // The extra parameters associated with this GuestView passed
-  // in from JavaScript. This will typically be the view instance ID,
-  // the API to use, and view-specific parameters. These parameters
-  // are passed along to new guests that are created from this guest.
-  scoped_ptr<base::DictionaryValue> extra_params_;
+  // The parameters associated with the element hosting this GuestView that
+  // are passed in from JavaScript. This will typically be the view instance ID,
+  // and element-specific parameters. These parameters are passed along to new
+  // guests that are created from this guest.
+  scoped_ptr<base::DictionaryValue> attach_params_;
 
   scoped_ptr<EmbedderWebContentsObserver> embedder_web_contents_observer_;
 

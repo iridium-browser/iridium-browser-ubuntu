@@ -38,11 +38,13 @@
 #include "bindings/core/v8/V8Document.h"
 #include "bindings/core/v8/V8FormData.h"
 #include "bindings/core/v8/V8HTMLDocument.h"
+#include "bindings/core/v8/V8ReadableStream.h"
 #include "bindings/core/v8/V8Stream.h"
 #include "bindings/core/v8/custom/V8ArrayBufferCustom.h"
 #include "bindings/core/v8/custom/V8ArrayBufferViewCustom.h"
 #include "core/dom/Document.h"
 #include "core/inspector/InspectorInstrumentation.h"
+#include "core/streams/ReadableStream.h"
 #include "core/streams/Stream.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/xml/XMLHttpRequest.h"
@@ -65,13 +67,13 @@ void V8XMLHttpRequest::constructorCustom(const v8::FunctionCallbackInfo<v8::Valu
     RefPtrWillBeRawPtr<XMLHttpRequest> xmlHttpRequest = XMLHttpRequest::create(context, securityOrigin);
 
     v8::Handle<v8::Object> wrapper = info.Holder();
-    V8DOMWrapper::associateObjectWithWrapper<V8XMLHttpRequest>(xmlHttpRequest.release(), &wrapperTypeInfo, wrapper, info.GetIsolate(), WrapperConfiguration::Dependent);
+    V8DOMWrapper::associateObjectWithWrapper<V8XMLHttpRequest>(xmlHttpRequest.release(), &wrapperTypeInfo, wrapper, info.GetIsolate());
     info.GetReturnValue().Set(wrapper);
 }
 
 void V8XMLHttpRequest::responseTextAttributeGetterCustom(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toNative(info.Holder());
+    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toImpl(info.Holder());
     ExceptionState exceptionState(ExceptionState::GetterContext, "responseText", "XMLHttpRequest", info.Holder(), info.GetIsolate());
     ScriptString text = xmlHttpRequest->responseText(exceptionState);
     if (exceptionState.throwIfNeeded())
@@ -85,7 +87,7 @@ void V8XMLHttpRequest::responseTextAttributeGetterCustom(const v8::PropertyCallb
 
 void V8XMLHttpRequest::responseAttributeGetterCustom(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toNative(info.Holder());
+    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toImpl(info.Holder());
 
     switch (xmlHttpRequest->responseTypeCode()) {
     case XMLHttpRequest::ResponseTypeDefault:
@@ -132,7 +134,14 @@ void V8XMLHttpRequest::responseAttributeGetterCustom(const v8::PropertyCallbackI
 
     case XMLHttpRequest::ResponseTypeLegacyStream:
         {
-            Stream* stream = xmlHttpRequest->responseStream();
+            Stream* stream = xmlHttpRequest->responseLegacyStream();
+            v8SetReturnValueFast(info, stream, xmlHttpRequest);
+            return;
+        }
+
+    case XMLHttpRequest::ResponseTypeStream:
+        {
+            ReadableStream* stream = xmlHttpRequest->responseStream();
             v8SetReturnValueFast(info, stream, xmlHttpRequest);
             return;
         }
@@ -165,7 +174,7 @@ void V8XMLHttpRequest::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value
         return;
     }
 
-    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toNative(info.Holder());
+    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toImpl(info.Holder());
 
     TOSTRING_VOID(V8StringResource<>, method, info[0]);
     TOSTRING_VOID(V8StringResource<>, urlstring, info[1]);
@@ -203,7 +212,7 @@ static bool isDocumentType(v8::Handle<v8::Value> value, v8::Isolate* isolate)
 
 void V8XMLHttpRequest::sendMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toNative(info.Holder());
+    XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toImpl(info.Holder());
 
     InspectorInstrumentation::willSendXMLHttpRequest(xmlHttpRequest->executionContext(), xmlHttpRequest->url());
 
@@ -216,27 +225,27 @@ void V8XMLHttpRequest::sendMethodCustom(const v8::FunctionCallbackInfo<v8::Value
             xmlHttpRequest->send(exceptionState);
         } else if (isDocumentType(arg, info.GetIsolate())) {
             v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
-            Document* document = V8Document::toNative(object);
+            Document* document = V8Document::toImpl(object);
             ASSERT(document);
             xmlHttpRequest->send(document, exceptionState);
         } else if (V8Blob::hasInstance(arg, info.GetIsolate())) {
             v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
-            Blob* blob = V8Blob::toNative(object);
+            Blob* blob = V8Blob::toImpl(object);
             ASSERT(blob);
             xmlHttpRequest->send(blob, exceptionState);
         } else if (V8FormData::hasInstance(arg, info.GetIsolate())) {
             v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
-            DOMFormData* domFormData = V8FormData::toNative(object);
+            DOMFormData* domFormData = V8FormData::toImpl(object);
             ASSERT(domFormData);
             xmlHttpRequest->send(domFormData, exceptionState);
         } else if (V8ArrayBuffer::hasInstance(arg, info.GetIsolate())) {
             v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
-            ArrayBuffer* arrayBuffer = V8ArrayBuffer::toNative(object);
+            ArrayBuffer* arrayBuffer = V8ArrayBuffer::toImpl(object);
             ASSERT(arrayBuffer);
             xmlHttpRequest->send(arrayBuffer, exceptionState);
         } else if (V8ArrayBufferView::hasInstance(arg, info.GetIsolate())) {
             v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
-            ArrayBufferView* arrayBufferView = V8ArrayBufferView::toNative(object);
+            ArrayBufferView* arrayBufferView = V8ArrayBufferView::toImpl(object);
             ASSERT(arrayBufferView);
             xmlHttpRequest->send(arrayBufferView, exceptionState);
         } else {

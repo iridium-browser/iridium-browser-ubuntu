@@ -157,9 +157,9 @@ html[dir='rtl'] .display-filter-button {
 }
 
 #display-filter-controls label span {
-  -webkit-align-items: flex-start;
   -webkit-appearance: none;
   -webkit-user-select: none;
+  align-items: flex-start;
   background-color: buttonface;
   background-image: -webkit-linear-gradient(rgb(237, 237, 237),
                                             rgb(237, 237, 237) 38%,
@@ -170,7 +170,6 @@ html[dir='rtl'] .display-filter-button {
               inset 0 1px 2px rgba(255, 255, 255, 0.75);
   box-sizing: border-box;
   color: rgb(68, 68, 68);
-  cursor: default;
   display: inline-block;
   letter-spacing: normal;
   line-height: 2em;
@@ -246,21 +245,24 @@ html[dir='rtl'] #display-filter-controls label span.first-button-component,
 
 .entry-box,
 .site-domain-row {
-  -webkit-align-items: center;
-  cursor: default;
-  display: -webkit-flex;
-  /* An odd line-height ensures a consistent baseline on all platforms. */
-  line-height: 1.75em;
+  align-items: center;
+  display: flex;
   margin-bottom: 6px;
   /* The box should be no bigger than its parent. */
   max-width: 100%;
+  min-height: 2em;
   overflow: hidden;
   padding-bottom: 1px;
 }
 
+.entry-box {
+  /* Ensures a consistent baseline on all platforms. */
+  line-height: 1.75em;
+}
+
 .site-domain-wrapper {
   cursor: pointer;
-  display: -webkit-flex;
+  display: flex;
   width: 100%;
 }
 
@@ -299,11 +301,11 @@ h2.timeframe {
 }
 
 .entry .domain {
+  -webkit-padding-end: 6px;
+  -webkit-padding-start: 2px;
   color: rgb(151, 156, 160);
   min-width: -webkit-min-content;
   overflow: hidden;
-  padding-left: 6px;
-  padding-right: 6px;
   white-space: nowrap;
 }
 
@@ -366,7 +368,7 @@ html[dir='rtl'] .site-domain {
 }
 
 .filter-status > div {
-  -webkit-flex: 0 0 auto;
+  flex: 0 0 auto;
   -webkit-transition: background-color 150ms;
   border-radius: 3px;
   display: none;
@@ -429,11 +431,11 @@ html[dir='rtl'] .site-domain {
 }
 
 .entry-box-container {
-  display: -webkit-flex;
+  display: flex;
 }
 
 .entry .visit-entry {
-  display: -webkit-flex;
+  display: flex;
   min-width: 0;
 }
 
@@ -447,7 +449,7 @@ html[dir='rtl'] .site-domain {
 .entry .visit-entry,
 .site-domain {
   /* Make room for the favicon. */
-  -webkit-padding-start: 20px;
+  -webkit-padding-start: 16px;
 
   /* Control the favicon appearance. */
   background-position-y: center;
@@ -458,10 +460,6 @@ html[dir='rtl'] .site-domain {
 html[dir='rtl'] .entry .visit-entry,
 html[dir='rtl'] .site-domain {
   background-position-x: right;
-}
-
-.site-domain button {
-  color: rgb(48, 57, 66);
 }
 
 .site-domain button:hover {
@@ -492,10 +490,11 @@ html .expand .site-domain-arrow {
 .entry .bookmark-section {
   -webkit-margin-end: 3px;
   -webkit-margin-start: 8px;
-  background:
-      url(../../../../ui/webui/resources/images/star_small.png) no-repeat;
+  background: no-repeat center
+      url(../../../../ui/webui/resources/images/star_small.png);
+  border: none;
   display: inline-block;
-  height: 11px;
+  height: 15px;
   min-width: 15px;
   visibility: hidden;
 }
@@ -504,8 +503,19 @@ html .expand .site-domain-arrow {
   visibility: visible;
 }
 
-.entry .title > a {
+.entry .title > a,
+.site-domain .link-button {
   color: rgb(48, 57, 66);
+  margin: 2px;
+  padding: 2px;
+  /* Focus outlines are rendered differently for each platform. */
+<if expr="is_macosx">
+  margin: 4px;
+  padding: 0;
+</if>
+<if expr="is_win">
+  padding: 0 2px;
+</if>
   text-decoration: none;
 }
 

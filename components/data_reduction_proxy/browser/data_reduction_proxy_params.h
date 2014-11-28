@@ -51,14 +51,11 @@ class DataReductionProxyParams {
   static const unsigned int kAllowed = (1 << 0);
   static const unsigned int kFallbackAllowed = (1 << 1);
   static const unsigned int kAlternativeAllowed = (1 << 2);
-  static const unsigned int kPromoAllowed = (1 << 3);
-  static const unsigned int kHoldback = (1 << 4);
+  static const unsigned int kAlternativeFallbackAllowed = (1 << 3);
+  static const unsigned int kPromoAllowed = (1 << 4);
+  static const unsigned int kHoldback = (1 << 5);
 
   typedef std::vector<GURL> DataReductionProxyList;
-
-  // Returns true if this client is part of the data reduction proxy field
-  // trial.
-  static bool IsIncludedInFieldTrial();
 
   // Returns true if this client is part of field trial to use an alternative
   // configuration for the data reduction proxy.
@@ -82,6 +79,13 @@ class DataReductionProxyParams {
   // users have enabled it to be used. The UI will not indicate that a holdback
   // is in effect.
   static bool IsIncludedInHoldbackFieldTrial();
+
+  // Returns true if this client is part of a field trial that removes the
+  // |MISSING_VIA_HEADER_OTHER| proxy bypass case. This experiment changes proxy
+  // bypass logic to not trigger a proxy bypass when a response with a non-4xx
+  // response code is expected to have a data reduction proxy via header, but
+  // the data reduction proxy via header is missing.
+  static bool IsIncludedInRemoveMissingViaHeaderOtherBypassFieldTrial();
 
   // Constructs configuration parameters. If |kAllowed|, then the standard
   // data reduction proxy configuration is allowed to be used. If
@@ -204,6 +208,12 @@ class DataReductionProxyParams {
     return alt_allowed_;
   }
 
+  // Returns true if the alternative fallback data reduction proxy
+  // configuration may be used.
+  bool alternative_fallback_allowed() const {
+    return alt_fallback_allowed_;
+  }
+
   // Returns true if the data reduction proxy promo may be shown.
   // This is idependent of whether the data reduction proxy is allowed.
   // TODO(bengr): maybe tie to whether proxy is allowed.
@@ -236,7 +246,10 @@ class DataReductionProxyParams {
   // Initialize the values of the proxies, and probe URL, from command
   // line flags and preprocessor constants, and check that there are
   // corresponding definitions for the allowed configurations.
-  bool Init(bool allowed, bool fallback_allowed, bool alt_allowed);
+  bool Init(bool allowed,
+            bool fallback_allowed,
+            bool alt_allowed,
+            bool alt_fallback_allowed);
 
   // Initialize the values of the proxies, and probe URL from command
   // line flags and preprocessor constants.
@@ -245,6 +258,7 @@ class DataReductionProxyParams {
   // Returns the corresponding string from preprocessor constants if defined,
   // and an empty string otherwise.
   virtual std::string GetDefaultDevOrigin() const;
+  virtual std::string GetDefaultDevFallbackOrigin() const;
   virtual std::string GetDefaultOrigin() const;
   virtual std::string GetDefaultFallbackOrigin() const;
   virtual std::string GetDefaultSSLOrigin() const;
@@ -277,6 +291,7 @@ class DataReductionProxyParams {
   bool allowed_;
   bool fallback_allowed_;
   bool alt_allowed_;
+  bool alt_fallback_allowed_;
   bool promo_allowed_;
   bool holdback_;
 

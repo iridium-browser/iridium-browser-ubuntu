@@ -74,11 +74,30 @@ ParserHelper Parser::expressions_[] = {
   {NULL, NULL, -1},                                             // ELSE
   {&Parser::Name, &Parser::IdentifierOrCall, PRECEDENCE_CALL},  // IDENTIFIER
   {NULL, NULL, -1},                                             // COMMA
-  {NULL, NULL, -1},                                             // COMMENT
+  {NULL, NULL, -1},                   // UNCLASSIFIED_COMMENT
+  {NULL, NULL, -1},                   // LINE_COMMENT
+  {NULL, NULL, -1},                   // SUFFIX_COMMENT
+  {&Parser::BlockComment, NULL, -1},  // BLOCK_COMMENT
 };
 
 Parser::Parser(const std::vector<Token>& tokens, Err* err)
-    : tokens_(tokens), err_(err), cur_(0) {
+    : err_(err), cur_(0) {
+  for (std::vector<Token>::const_iterator i(tokens.begin()); i != tokens.end();
+       ++i) {
+    switch(i->type()) {
+      case Token::LINE_COMMENT:
+        line_comment_tokens_.push_back(*i);
+        break;
+      case Token::SUFFIX_COMMENT:
+        suffix_comment_tokens_.push_back(*i);
+        break;
+      default:
+        // Note that BLOCK_COMMENTs (top-level standalone comments) are passed
+        // through the real parser.
+        tokens_.push_back(*i);
+        break;
+    }
+  }
 }
 
 Parser::~Parser() {
@@ -214,6 +233,12 @@ scoped_ptr<ParseNode> Parser::Name(Token token) {
   return IdentifierOrCall(scoped_ptr<ParseNode>(), token).Pass();
 }
 
+scoped_ptr<ParseNode> Parser::BlockComment(Token token) {
+  scoped_ptr<BlockCommentNode> comment(new BlockCommentNode());
+  comment->set_comment(token);
+  return comment.PassAs<ParseNode>();
+}
+
 scoped_ptr<ParseNode> Parser::Group(Token token) {
   scoped_ptr<ParseNode> expr = ParseExpression();
   if (has_error())
@@ -233,7 +258,7 @@ scoped_ptr<ParseNode> Parser::Not(Token token) {
 }
 
 scoped_ptr<ParseNode> Parser::List(Token node) {
-  scoped_ptr<ParseNode> list(ParseList(Token::RIGHT_BRACKET, true));
+  scoped_ptr<ParseNode> list(ParseList(node, Token::RIGHT_BRACKET, true));
   if (!has_error() && !at_end())
     Consume(Token::RIGHT_BRACKET, "Expected ']'");
   return list.Pass();
@@ -263,13 +288,14 @@ scoped_ptr<ParseNode> Parser::IdentifierOrCall(scoped_ptr<ParseNode> left,
   list->set_end_token(token);
   scoped_ptr<BlockNode> block;
   bool has_arg = false;
-  if (Match(Token::LEFT_PAREN)) {
+  if (LookAhead(Token::LEFT_PAREN)) {
+    Token start_token = Consume();
     // Parsing a function call.
     has_arg = true;
     if (Match(Token::RIGHT_PAREN)) {
       // Nothing, just an empty call.
     } else {
-      list = ParseList(Token::RIGHT_PAREN, false);
+      list = ParseList(start_token, Token::RIGHT_PAREN, false);
       if (has_error())
         return scoped_ptr<ParseNode>();
       Consume(Token::RIGHT_PAREN, "Expected ')' after call");
@@ -352,10 +378,11 @@ scoped_ptr<ParseNode> Parser::DotOperator(scoped_ptr<ParseNode> left,
 }
 
 // Does not Consume the start or end token.
-scoped_ptr<ListNode> Parser::ParseList(Token::Type stop_before,
+scoped_ptr<ListNode> Parser::ParseList(Token start_token,
+                                       Token::Type stop_before,
                                        bool allow_trailing_comma) {
   scoped_ptr<ListNode> list(new ListNode);
-  list->set_begin_token(cur_token());
+  list->set_begin_token(start_token);
   bool just_got_comma = false;
   bool first_time = true;
   while (!LookAhead(stop_before)) {
@@ -379,7 +406,13 @@ scoped_ptr<ListNode> Parser::ParseList(Token::Type stop_before,
           Err(tokens_[tokens_.size() - 1], "Unexpected end of file in list.");
       return scoped_ptr<ListNode>();
     }
-    just_got_comma = Match(Token::COMMA);
+    if (list->contents().back()->AsBlockComment()) {
+      // If there was a comment inside the list, we don't need a comma to the
+      // next item, so pretend we got one, if we're expecting one.
+      just_got_comma = allow_trailing_comma;
+    } else {
+      just_got_comma = Match(Token::COMMA);
+    }
   }
   if (just_got_comma && !allow_trailing_comma) {
     *err_ = Err(cur_token(), "Trailing comma");
@@ -403,6 +436,13 @@ scoped_ptr<ParseNode> Parser::ParseFile() {
     *err_ = Err(cur_token(), "Unexpected here, should be newline.");
   if (has_error())
     return scoped_ptr<ParseNode>();
+
+  // TODO(scottmg): If this is measurably expensive, it could be done only
+  // when necessary (when reformatting, or during tests). Comments are
+  // separate from the parse tree at this point, so downstream code can remain
+  // ignorant of them.
+  AssignComments(file.get());
+
   return file.PassAs<ParseNode>();
 }
 
@@ -411,6 +451,8 @@ scoped_ptr<ParseNode> Parser::ParseStatement() {
     return ParseBlock().PassAs<ParseNode>();
   } else if (LookAhead(Token::IF)) {
     return ParseCondition();
+  } else if (LookAhead(Token::BLOCK_COMMENT)) {
+    return BlockComment(Consume());
   } else {
     // TODO(scottmg): Is this too strict? Just drop all the testing if we want
     // to allow "pointless" expressions and return ParseExpression() directly.
@@ -451,7 +493,7 @@ scoped_ptr<BlockNode> Parser::ParseBlock() {
 
 scoped_ptr<ParseNode> Parser::ParseCondition() {
   scoped_ptr<ConditionNode> condition(new ConditionNode);
-  Consume(Token::IF, "Expected 'if'");
+  condition->set_if_token(Consume(Token::IF, "Expected 'if'"));
   Consume(Token::LEFT_PAREN, "Expected '(' after 'if'.");
   condition->set_condition(ParseExpression());
   if (IsAssignment(condition->condition()))
@@ -463,4 +505,121 @@ scoped_ptr<ParseNode> Parser::ParseCondition() {
   if (has_error())
     return scoped_ptr<ParseNode>();
   return condition.PassAs<ParseNode>();
+}
+
+void Parser::TraverseOrder(const ParseNode* root,
+                           std::vector<const ParseNode*>* pre,
+                           std::vector<const ParseNode*>* post) {
+  if (root) {
+    pre->push_back(root);
+
+    if (const AccessorNode* accessor = root->AsAccessor()) {
+      TraverseOrder(accessor->index(), pre, post);
+      TraverseOrder(accessor->member(), pre, post);
+    } else if (const BinaryOpNode* binop = root->AsBinaryOp()) {
+      TraverseOrder(binop->left(), pre, post);
+      TraverseOrder(binop->right(), pre, post);
+    } else if (const BlockNode* block = root->AsBlock()) {
+      const std::vector<ParseNode*>& statements = block->statements();
+      for (std::vector<ParseNode*>::const_iterator i(statements.begin());
+          i != statements.end();
+          ++i) {
+        TraverseOrder(*i, pre, post);
+      }
+    } else if (const ConditionNode* condition = root->AsConditionNode()) {
+      TraverseOrder(condition->condition(), pre, post);
+      TraverseOrder(condition->if_true(), pre, post);
+      TraverseOrder(condition->if_false(), pre, post);
+    } else if (const FunctionCallNode* func_call = root->AsFunctionCall()) {
+      TraverseOrder(func_call->args(), pre, post);
+      TraverseOrder(func_call->block(), pre, post);
+    } else if (root->AsIdentifier()) {
+      // Nothing.
+    } else if (const ListNode* list = root->AsList()) {
+      const std::vector<const ParseNode*>& contents = list->contents();
+      for (std::vector<const ParseNode*>::const_iterator i(contents.begin());
+          i != contents.end();
+          ++i) {
+        TraverseOrder(*i, pre, post);
+      }
+    } else if (root->AsLiteral()) {
+      // Nothing.
+    } else if (const UnaryOpNode* unaryop = root->AsUnaryOp()) {
+      TraverseOrder(unaryop->operand(), pre, post);
+    } else if (root->AsBlockComment()) {
+      // Nothing.
+    } else {
+      CHECK(false) << "Unhandled case in TraverseOrder.";
+    }
+
+    post->push_back(root);
+  }
+}
+
+void Parser::AssignComments(ParseNode* file) {
+  // Start by generating a pre- and post- order traversal of the tree so we
+  // can determine what's before and after comments.
+  std::vector<const ParseNode*> pre;
+  std::vector<const ParseNode*> post;
+  TraverseOrder(file, &pre, &post);
+
+  // Assign line comments to syntax immediately following.
+  int cur_comment = 0;
+  for (std::vector<const ParseNode*>::const_iterator i = pre.begin();
+       i != pre.end();
+       ++i) {
+    const Location& start = (*i)->GetRange().begin();
+    while (cur_comment < static_cast<int>(line_comment_tokens_.size())) {
+      if (start.byte() >= line_comment_tokens_[cur_comment].location().byte()) {
+        const_cast<ParseNode*>(*i)->comments_mutable()->append_before(
+            line_comment_tokens_[cur_comment]);
+        ++cur_comment;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Remaining line comments go at end of file.
+  for (; cur_comment < static_cast<int>(line_comment_tokens_.size());
+       ++cur_comment)
+    file->comments_mutable()->append_after(line_comment_tokens_[cur_comment]);
+
+  // Assign suffix to syntax immediately before.
+  cur_comment = static_cast<int>(suffix_comment_tokens_.size() - 1);
+  for (std::vector<const ParseNode*>::const_reverse_iterator i = post.rbegin();
+       i != post.rend();
+       ++i) {
+    // Don't assign suffix comments to the function call or list, but instead
+    // to the last thing inside.
+    if ((*i)->AsFunctionCall() || (*i)->AsList())
+      continue;
+
+    const Location& start = (*i)->GetRange().begin();
+    const Location& end = (*i)->GetRange().end();
+
+    // Don't assign suffix comments to something that starts on an earlier
+    // line, so that in:
+    //
+    // sources = [ "a",
+    //     "b" ] # comment
+    //
+    // it's attached to "b", not sources = [ ... ].
+    if (start.line_number() != end.line_number())
+      continue;
+
+    while (cur_comment >= 0) {
+      if (end.byte() <= suffix_comment_tokens_[cur_comment].location().byte()) {
+        const_cast<ParseNode*>(*i)->comments_mutable()->append_suffix(
+            suffix_comment_tokens_[cur_comment]);
+        --cur_comment;
+      } else {
+        break;
+      }
+    }
+
+    // Suffix comments were assigned in reverse, so if there were multiple on
+    // the same node, they need to be reversed.
+    const_cast<ParseNode*>(*i)->comments_mutable()->ReverseSuffix();
+  }
 }

@@ -35,6 +35,7 @@ class RenderSVGImage FINAL : public RenderSVGModelObject {
 public:
     explicit RenderSVGImage(SVGImageElement*);
     virtual ~RenderSVGImage();
+    virtual void destroy() OVERRIDE;
 
     bool updateImageViewport();
     virtual void setNeedsBoundariesUpdate() OVERRIDE { m_needsBoundariesUpdate = true; }
@@ -42,20 +43,19 @@ public:
 
     RenderImageResource* imageResource() { return m_imageResource.get(); }
 
-    // Note: Assumes the PaintInfo context has had all local transforms applied.
-    void paintForeground(PaintInfo&);
+    virtual const AffineTransform& localToParentTransform() const OVERRIDE { return m_localTransform; }
+    OwnPtr<ImageBuffer>& bufferedForeground() { return m_bufferedForeground; }
+
+    virtual FloatRect paintInvalidationRectInLocalCoordinates() const OVERRIDE { return m_paintInvalidationBoundingBox; }
+    virtual FloatRect objectBoundingBox() const OVERRIDE { return m_objectBoundingBox; }
 
 private:
     virtual const char* renderName() const OVERRIDE { return "RenderSVGImage"; }
     virtual bool isSVGImage() const OVERRIDE { return true; }
 
-    virtual const AffineTransform& localToParentTransform() const OVERRIDE { return m_localTransform; }
-
-    virtual FloatRect objectBoundingBox() const OVERRIDE { return m_objectBoundingBox; }
     virtual FloatRect strokeBoundingBox() const OVERRIDE { return m_objectBoundingBox; }
-    virtual FloatRect paintInvalidationRectInLocalCoordinates() const OVERRIDE { return m_paintInvalidationBoundingBox; }
 
-    virtual void addFocusRingRects(Vector<IntRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer = 0) const OVERRIDE;
+    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const OVERRIDE;
 
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) OVERRIDE;
 

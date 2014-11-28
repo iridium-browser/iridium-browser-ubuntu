@@ -53,9 +53,12 @@ void ParseUrl(base::StringPiece url, std::string* scheme, std::string* host,
 
 NextProtoVector SpdyNextProtos() {
   NextProtoVector next_protos;
-  for (int i = kProtoMinimumVersion; i <= kProtoMaximumVersion; ++i) {
-    next_protos.push_back(static_cast<NextProto>(i));
-  }
+  next_protos.push_back(kProtoHTTP11);
+  next_protos.push_back(kProtoDeprecatedSPDY2);
+  next_protos.push_back(kProtoSPDY3);
+  next_protos.push_back(kProtoSPDY31);
+  next_protos.push_back(kProtoSPDY4);
+  next_protos.push_back(kProtoQUIC1SPDY3);
   return next_protos;
 }
 
@@ -248,6 +251,9 @@ class PriorityGetter : public BufferedSpdyFramerVisitorInterface {
   virtual void OnPushPromise(SpdyStreamId stream_id,
                              SpdyStreamId promised_stream_id,
                              const SpdyHeaderBlock& headers) OVERRIDE {}
+  virtual bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) OVERRIDE {
+    return false;
+  }
 
  private:
   SpdyPriority priority_;
@@ -520,8 +526,8 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
 
   scoped_refptr<TransportSocketParams> transport_params(
       new TransportSocketParams(
-          key.host_port_pair(), false, false,
-          OnHostResolutionCallback()));
+          key.host_port_pair(), false, false, OnHostResolutionCallback(),
+          TransportSocketParams::COMBINE_CONNECT_AND_WRITE_DEFAULT));
 
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   TestCompletionCallback callback;

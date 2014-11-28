@@ -88,6 +88,8 @@ class PermissionMessage {
     kIdentityEmail,
     kExperienceSamplingPrivate,
     kCopresence,
+    kTopSites,
+    kU2fDevices,
     kEnumBoundary,
   };
   COMPILE_ASSERT(PermissionMessage::kNone > PermissionMessage::kUnknown,

@@ -25,6 +25,7 @@
 
 #include "core/rendering/InlineBox.h"
 #include "core/rendering/RenderText.h" // so textRenderer() can be inline
+#include "platform/fonts/TextBlob.h"
 #include "platform/text/TextRun.h"
 #include "wtf/Forward.h"
 
@@ -111,7 +112,7 @@ public:
 
     virtual LayoutRect localSelectionRect(int startPos, int endPos);
     bool isSelected(int startPos, int endPos) const;
-    void selectionStartEnd(int& sPos, int& ePos);
+    void selectionStartEnd(int& sPos, int& ePos) const;
 
 protected:
     virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
@@ -123,7 +124,7 @@ private:
     virtual void attachLine() OVERRIDE FINAL;
 
 public:
-    virtual RenderObject::SelectionState selectionState() OVERRIDE FINAL;
+    virtual RenderObject::SelectionState selectionState() const OVERRIDE FINAL;
 
 private:
     virtual void clearTruncation() OVERRIDE FINAL { m_truncation = cNoTruncation; }
@@ -182,7 +183,7 @@ protected:
     virtual void paintTextMatchMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&);
 
 private:
-    void paintDecoration(GraphicsContext*, const FloatPoint& boxOrigin, TextDecoration, const ShadowList*);
+    void paintDecoration(GraphicsContext*, const FloatPoint& boxOrigin, TextDecoration);
     void paintSelection(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, Color textColor);
 
     TextRun::ExpansionBehavior expansionBehavior() const

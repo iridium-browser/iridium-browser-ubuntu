@@ -197,22 +197,33 @@ static inline T toSmallerInt(v8::Handle<v8::Value> value, IntegerConversionConfi
             exceptionState.throwTypeError("Value is outside the '" + String(typeName) + "' value range.");
             return 0;
         }
+        if (configuration == Clamp)
+            return clampTo<T>(result);
         result %= LimitsTrait::numberOfValues;
         return static_cast<T>(result > LimitsTrait::maxValue ? result - LimitsTrait::numberOfValues : result);
     }
 
     // Can the value be converted to a number?
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
-    if (numberObject.IsEmpty()) {
-        exceptionState.throwTypeError("Not convertible to a number value (of type '" + String(typeName) + "'.");
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
         return 0;
     }
+
+    ASSERT(!numberObject.IsEmpty());
 
     if (configuration == EnforceRange)
         return enforceRange(numberObject->Value(), LimitsTrait::minValue, LimitsTrait::maxValue, typeName, exceptionState);
 
     double numberValue = numberObject->Value();
-    if (std::isnan(numberValue) || std::isinf(numberValue) || !numberValue)
+    if (std::isnan(numberValue) || !numberValue)
+        return 0;
+
+    if (configuration == Clamp)
+        return clampTo<T>(numberValue);
+
+    if (std::isinf(numberValue))
         return 0;
 
     numberValue = numberValue < 0 ? -floor(fabs(numberValue)) : floor(fabs(numberValue));
@@ -235,26 +246,34 @@ static inline T toSmallerUInt(v8::Handle<v8::Value> value, IntegerConversionConf
             exceptionState.throwTypeError("Value is outside the '" + String(typeName) + "' value range.");
             return 0;
         }
+        if (configuration == Clamp)
+            return clampTo<T>(result);
         return static_cast<T>(result);
     }
 
     // Can the value be converted to a number?
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
-    if (numberObject.IsEmpty()) {
-        exceptionState.throwTypeError("Not convertible to a number value (of type '" + String(typeName) + "'.");
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
         return 0;
     }
+
+    ASSERT(!numberObject.IsEmpty());
 
     if (configuration == EnforceRange)
         return enforceRange(numberObject->Value(), 0, LimitsTrait::maxValue, typeName, exceptionState);
 
-    // Does the value convert to nan or to an infinity?
     double numberValue = numberObject->Value();
-    if (std::isnan(numberValue) || std::isinf(numberValue) || !numberValue)
+
+    if (std::isnan(numberValue) || !numberValue)
         return 0;
 
     if (configuration == Clamp)
-        return clampTo<T>(numberObject->Value());
+        return clampTo<T>(numberValue);
+
+    if (std::isinf(numberValue))
+        return 0;
 
     numberValue = numberValue < 0 ? -floor(fabs(numberValue)) : floor(fabs(numberValue));
     return static_cast<T>(fmod(numberValue, LimitsTrait::numberOfValues));
@@ -311,25 +330,30 @@ int32_t toInt32(v8::Handle<v8::Value> value, IntegerConversionConfiguration conf
         return value->Int32Value();
 
     // Can the value be converted to a number?
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
-    if (numberObject.IsEmpty()) {
-        exceptionState.throwTypeError("Not convertible to a number value (of type 'long'.)");
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
         return 0;
     }
+
+    ASSERT(!numberObject.IsEmpty());
 
     if (configuration == EnforceRange)
         return enforceRange(numberObject->Value(), kMinInt32, kMaxInt32, "long", exceptionState);
 
-    // Does the value convert to nan or to an infinity?
     double numberValue = numberObject->Value();
-    if (std::isnan(numberValue) || std::isinf(numberValue))
+
+    if (std::isnan(numberValue))
         return 0;
 
     if (configuration == Clamp)
-        return clampTo<int32_t>(numberObject->Value());
+        return clampTo<int32_t>(numberValue);
 
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(int32_t, result, numberObject->Int32Value(), exceptionState, 0);
-    return result;
+    if (std::isinf(numberValue))
+        return 0;
+
+    return numberObject->Int32Value();
 }
 
 int32_t toInt32(v8::Handle<v8::Value> value)
@@ -353,29 +377,36 @@ uint32_t toUInt32(v8::Handle<v8::Value> value, IntegerConversionConfiguration co
             exceptionState.throwTypeError("Value is outside the 'unsigned long' value range.");
             return 0;
         }
+        if (configuration == Clamp)
+            return clampTo<uint32_t>(result);
         return result;
     }
 
     // Can the value be converted to a number?
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
-    if (numberObject.IsEmpty()) {
-        exceptionState.throwTypeError("Not convertible to a number value (of type 'unsigned long'.)");
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
         return 0;
     }
+
+    ASSERT(!numberObject.IsEmpty());
 
     if (configuration == EnforceRange)
         return enforceRange(numberObject->Value(), 0, kMaxUInt32, "unsigned long", exceptionState);
 
-    // Does the value convert to nan or to an infinity?
     double numberValue = numberObject->Value();
-    if (std::isnan(numberValue) || std::isinf(numberValue))
+
+    if (std::isnan(numberValue))
         return 0;
 
     if (configuration == Clamp)
-        return clampTo<uint32_t>(numberObject->Value());
+        return clampTo<uint32_t>(numberValue);
 
-    TONATIVE_DEFAULT(uint32_t, result, numberObject->Uint32Value(), 0);
-    return result;
+    if (std::isinf(numberValue))
+        return 0;
+
+    return numberObject->Uint32Value();
 }
 
 uint32_t toUInt32(v8::Handle<v8::Value> value)
@@ -386,29 +417,34 @@ uint32_t toUInt32(v8::Handle<v8::Value> value)
 
 int64_t toInt64(v8::Handle<v8::Value> value, IntegerConversionConfiguration configuration, ExceptionState& exceptionState)
 {
+    // Clamping not supported for int64_t/long long int. See Source/wtf/MathExtras.h.
+    ASSERT(configuration != Clamp);
+
     // Fast case. The value is a 32-bit integer.
     if (value->IsInt32())
         return value->Int32Value();
 
     // Can the value be converted to a number?
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
-    if (numberObject.IsEmpty()) {
-        exceptionState.throwTypeError("Not convertible to a number value (of type 'long long'.)");
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
         return 0;
     }
 
-    double x = numberObject->Value();
+    ASSERT(!numberObject.IsEmpty());
+
+    double numberValue = numberObject->Value();
 
     if (configuration == EnforceRange)
-        return enforceRange(x, -kJSMaxInteger, kJSMaxInteger, "long long", exceptionState);
+        return enforceRange(numberValue, -kJSMaxInteger, kJSMaxInteger, "long long", exceptionState);
 
-    // Does the value convert to nan or to an infinity?
-    if (std::isnan(x) || std::isinf(x))
+    if (std::isnan(numberValue) || std::isinf(numberValue))
         return 0;
 
     // NaNs and +/-Infinity should be 0, otherwise modulo 2^64.
     unsigned long long integer;
-    doubleToInteger(x, integer);
+    doubleToInteger(numberValue, integer);
     return integer;
 }
 
@@ -433,28 +469,38 @@ uint64_t toUInt64(v8::Handle<v8::Value> value, IntegerConversionConfiguration co
             exceptionState.throwTypeError("Value is outside the 'unsigned long long' value range.");
             return 0;
         }
+        if (configuration == Clamp)
+            return clampTo<uint64_t>(result);
         return result;
     }
 
     // Can the value be converted to a number?
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
-    if (numberObject.IsEmpty()) {
-        exceptionState.throwTypeError("Not convertible to a number value (of type 'unsigned long long'.)");
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
         return 0;
     }
 
-    double x = numberObject->Value();
+    ASSERT(!numberObject.IsEmpty());
+
+    double numberValue = numberObject->Value();
 
     if (configuration == EnforceRange)
-        return enforceRange(x, 0, kJSMaxInteger, "unsigned long long", exceptionState);
+        return enforceRange(numberValue, 0, kJSMaxInteger, "unsigned long long", exceptionState);
 
-    // Does the value convert to nan or to an infinity?
-    if (std::isnan(x) || std::isinf(x))
+    if (std::isnan(numberValue))
+        return 0;
+
+    if (configuration == Clamp)
+        return clampTo<uint64_t>(numberValue);
+
+    if (std::isinf(numberValue))
         return 0;
 
     // NaNs and +/-Infinity should be 0, otherwise modulo 2^64.
     unsigned long long integer;
-    doubleToInteger(x, integer);
+    doubleToInteger(numberValue, integer);
     return integer;
 }
 
@@ -466,7 +512,21 @@ uint64_t toUInt64(v8::Handle<v8::Value> value)
 
 float toFloat(v8::Handle<v8::Value> value, ExceptionState& exceptionState)
 {
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::Number>, numberObject, value->ToNumber(), exceptionState, 0);
+    return static_cast<float>(toDouble(value, exceptionState));
+}
+
+double toDouble(v8::Handle<v8::Value> value, ExceptionState& exceptionState)
+{
+    if (value->IsNumber())
+        return value->NumberValue();
+
+    v8::TryCatch block;
+    v8::Local<v8::Number> numberObject(value->ToNumber());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return 0;
+    }
+
     return numberObject->NumberValue();
 }
 
@@ -481,7 +541,13 @@ String toByteString(v8::Handle<v8::Value> value, ExceptionState& exceptionState)
         return String();
 
     // 1. Let x be ToString(v)
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::String>, stringObject, value->ToString(), exceptionState, String());
+    v8::TryCatch block;
+    v8::Local<v8::String> stringObject(value->ToString());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return String();
+    }
+
     String x = toCoreString(stringObject);
 
     // 2. If the value of any element of x is greater than 255, then throw a TypeError.
@@ -605,7 +671,13 @@ String toScalarValueString(v8::Handle<v8::Value> value, ExceptionState& exceptio
     // http://encoding.spec.whatwg.org/#type-scalarvaluestring
     if (value.IsEmpty())
         return String();
-    TONATIVE_DEFAULT_EXCEPTIONSTATE(v8::Local<v8::String>, stringObject, value->ToString(), exceptionState, String());
+
+    v8::TryCatch block;
+    v8::Local<v8::String> stringObject(value->ToString());
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return String();
+    }
 
     // ScalarValueString is identical to DOMString except that "convert a
     // DOMString to a sequence of Unicode characters" is used subsequently
@@ -618,7 +690,7 @@ PassRefPtrWillBeRawPtr<XPathNSResolver> toXPathNSResolver(v8::Handle<v8::Value> 
 {
     RefPtrWillBeRawPtr<XPathNSResolver> resolver = nullptr;
     if (V8XPathNSResolver::hasInstance(value, isolate))
-        resolver = V8XPathNSResolver::toNative(v8::Handle<v8::Object>::Cast(value));
+        resolver = V8XPathNSResolver::toImpl(v8::Handle<v8::Object>::Cast(value));
     else if (value->IsObject())
         resolver = V8CustomXPathNSResolver::create(value->ToObject(), isolate);
     return resolver;
@@ -631,7 +703,7 @@ LocalDOMWindow* toDOMWindow(v8::Handle<v8::Value> value, v8::Isolate* isolate)
 
     v8::Handle<v8::Object> windowWrapper = V8Window::findInstanceInPrototypeChain(v8::Handle<v8::Object>::Cast(value), isolate);
     if (!windowWrapper.IsEmpty())
-        return V8Window::toNative(windowWrapper);
+        return V8Window::toImpl(windowWrapper);
     return 0;
 }
 
@@ -679,10 +751,10 @@ ExecutionContext* toExecutionContext(v8::Handle<v8::Context> context)
     v8::Handle<v8::Object> global = context->Global();
     v8::Handle<v8::Object> windowWrapper = V8Window::findInstanceInPrototypeChain(global, context->GetIsolate());
     if (!windowWrapper.IsEmpty())
-        return V8Window::toNative(windowWrapper)->executionContext();
+        return V8Window::toImpl(windowWrapper)->executionContext();
     v8::Handle<v8::Object> workerWrapper = V8WorkerGlobalScope::findInstanceInPrototypeChain(global, context->GetIsolate());
     if (!workerWrapper.IsEmpty())
-        return V8WorkerGlobalScope::toNative(workerWrapper)->executionContext();
+        return V8WorkerGlobalScope::toImpl(workerWrapper)->executionContext();
     // FIXME: Is this line of code reachable?
     return 0;
 }
@@ -735,7 +807,7 @@ v8::Local<v8::Context> toV8Context(LocalFrame* frame, DOMWrapperWorld& world)
     v8::Local<v8::Context> context = frame->script().windowProxy(world)->context();
     if (context.IsEmpty())
         return v8::Local<v8::Context>();
-    LocalFrame* attachedFrame= toFrameIfNotDetached(context);
+    LocalFrame* attachedFrame = toFrameIfNotDetached(context);
     return frame == attachedFrame ? context : v8::Local<v8::Context>();
 }
 
@@ -866,7 +938,8 @@ PassRefPtr<JSONValue> v8ToJSONValue(v8::Isolate* isolate, v8::Handle<v8::Value> 
 V8TestingScope::V8TestingScope(v8::Isolate* isolate)
     : m_handleScope(isolate)
     , m_contextScope(v8::Context::New(isolate))
-    , m_scriptState(ScriptStateForTesting::create(isolate->GetCurrentContext(), DOMWrapperWorld::create()))
+    // We reuse the main world since the main world is guaranteed to be registered to ScriptController.
+    , m_scriptState(ScriptStateForTesting::create(isolate->GetCurrentContext(), &DOMWrapperWorld::mainWorld()))
 {
 }
 
@@ -891,7 +964,9 @@ void GetDevToolsFunctionInfo(v8::Handle<v8::Function> function, v8::Isolate* iso
     scriptId = originalFunction->ScriptId();
     v8::ScriptOrigin origin = originalFunction->GetScriptOrigin();
     if (!origin.ResourceName().IsEmpty()) {
-        resourceName = NativeValueTraits<String>::nativeValue(origin.ResourceName(), isolate);
+        V8StringResource<> stringResource(origin.ResourceName());
+        stringResource.prepare();
+        resourceName = stringResource;
         lineNumber = originalFunction->GetScriptLineNumber() + 1;
     }
     if (resourceName.isEmpty()) {
@@ -907,6 +982,22 @@ PassRefPtr<TraceEvent::ConvertableToTraceFormat> devToolsTraceEventData(Executio
     int lineNumber = 1;
     GetDevToolsFunctionInfo(function, isolate, scriptId, resourceName, lineNumber);
     return InspectorFunctionCallEvent::data(context, scriptId, resourceName, lineNumber);
+}
+
+v8::Local<v8::Value> v8DoneIteratorResult(v8::Isolate* isolate)
+{
+    v8::Local<v8::Object> result = v8::Object::New(isolate);
+    result->Set(v8String(isolate, "value"), v8::Undefined(isolate));
+    result->Set(v8String(isolate, "done"), v8Boolean(true, isolate));
+    return result;
+}
+
+v8::Local<v8::Value> v8IteratorResult(v8::Isolate* isolate, v8::Handle<v8::Value> value)
+{
+    v8::Local<v8::Object> result = v8::Object::New(isolate);
+    result->Set(v8String(isolate, "value"), value);
+    result->Set(v8String(isolate, "done"), v8Boolean(false, isolate));
+    return result;
 }
 
 } // namespace blink

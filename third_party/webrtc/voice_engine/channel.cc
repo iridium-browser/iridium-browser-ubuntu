@@ -16,7 +16,6 @@
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/modules/interface/module_common_types.h"
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
-#include "webrtc/modules/rtp_rtcp/interface/remote_ntp_time_estimator.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_payload_registry.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_receiver.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_receiver_strategy.h"
@@ -699,15 +698,18 @@ int32_t Channel::GetAudioFrame(int32_t id, AudioFrame& audioFrame)
           (unwrap_timestamp - capture_start_rtp_time_stamp_) /
           (GetPlayoutFrequency() / 1000);
 
-      // Compute ntp time.
-      audioFrame.ntp_time_ms_ = ntp_estimator_->Estimate(audioFrame.timestamp_);
-      // |ntp_time_ms_| won't be valid until at least 2 RTCP SRs are received.
-      if (audioFrame.ntp_time_ms_ > 0) {
-        // Compute |capture_start_ntp_time_ms_| so that
-        // |capture_start_ntp_time_ms_| + |elapsed_time_ms_| == |ntp_time_ms_|
+      {
         CriticalSectionScoped lock(ts_stats_lock_.get());
-        capture_start_ntp_time_ms_ =
-            audioFrame.ntp_time_ms_ - audioFrame.elapsed_time_ms_;
+        // Compute ntp time.
+        audioFrame.ntp_time_ms_ = ntp_estimator_.Estimate(
+            audioFrame.timestamp_);
+        // |ntp_time_ms_| won't be valid until at least 2 RTCP SRs are received.
+        if (audioFrame.ntp_time_ms_ > 0) {
+          // Compute |capture_start_ntp_time_ms_| so that
+          // |capture_start_ntp_time_ms_| + |elapsed_time_ms_| == |ntp_time_ms_|
+          capture_start_ntp_time_ms_ =
+              audioFrame.ntp_time_ms_ - audioFrame.elapsed_time_ms_;
+        }
       }
     }
 
@@ -877,7 +879,7 @@ Channel::Channel(int32_t channelId,
     _outputExternalMediaCallbackPtr(NULL),
     _timeStamp(0), // This is just an offset, RTP module will add it's own random offset
     _sendTelephoneEventPayloadType(106),
-    ntp_estimator_(new RemoteNtpTimeEstimator(Clock::GetRealTimeClock())),
+    ntp_estimator_(Clock::GetRealTimeClock()),
     jitter_buffer_playout_timestamp_(0),
     playout_timestamp_rtp_(0),
     playout_timestamp_rtcp_(0),
@@ -1390,61 +1392,6 @@ Channel::StopReceiving()
 }
 
 int32_t
-Channel::SetNetEQPlayoutMode(NetEqModes mode)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
-                 "Channel::SetNetEQPlayoutMode()");
-    AudioPlayoutMode playoutMode(voice);
-    switch (mode)
-    {
-        case kNetEqDefault:
-            playoutMode = voice;
-            break;
-        case kNetEqStreaming:
-            playoutMode = streaming;
-            break;
-        case kNetEqFax:
-            playoutMode = fax;
-            break;
-        case kNetEqOff:
-            playoutMode = off;
-            break;
-    }
-    if (audio_coding_->SetPlayoutMode(playoutMode) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
-            "SetNetEQPlayoutMode() failed to set playout mode");
-        return -1;
-    }
-    return 0;
-}
-
-int32_t
-Channel::GetNetEQPlayoutMode(NetEqModes& mode)
-{
-    const AudioPlayoutMode playoutMode = audio_coding_->PlayoutMode();
-    switch (playoutMode)
-    {
-        case voice:
-            mode = kNetEqDefault;
-            break;
-        case streaming:
-            mode = kNetEqStreaming;
-            break;
-        case fax:
-            mode = kNetEqFax;
-            break;
-        case off:
-            mode = kNetEqOff;
-    }
-    WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
-                 VoEId(_instanceId,_channelId),
-                 "Channel::GetNetEQPlayoutMode() => mode=%u", mode);
-    return 0;
-}
-
-int32_t
 Channel::RegisterVoiceEngineObserver(VoiceEngineObserver& observer)
 {
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
@@ -1749,14 +1696,14 @@ Channel::SetSendCNPayloadType(int type, PayloadFrequencies frequency)
     return 0;
 }
 
-int Channel::SetOpusMaxBandwidth(int bandwidth_hz) {
+int Channel::SetOpusMaxPlaybackRate(int frequency_hz) {
   WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, _channelId),
-               "Channel::SetOpusMaxBandwidth()");
+               "Channel::SetOpusMaxPlaybackRate()");
 
-  if (audio_coding_->SetOpusMaxBandwidth(bandwidth_hz) != 0) {
+  if (audio_coding_->SetOpusMaxPlaybackRate(frequency_hz) != 0) {
     _engineStatisticsPtr->SetLastError(
         VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
-        "SetOpusMaxBandwidth() failed to set maximum encoding bandwidth");
+        "SetOpusMaxPlaybackRate() failed to set maximum playback rate");
     return -1;
   }
   return 0;
@@ -1949,8 +1896,11 @@ int32_t Channel::ReceivedRTCPPacket(const int8_t* data, int32_t length) {
         "Channel::IncomingRTPPacket() RTCP packet is invalid");
   }
 
-  ntp_estimator_->UpdateRtcpTimestamp(rtp_receiver_->SSRC(),
-                                      _rtpRtcpModule.get());
+  {
+    CriticalSectionScoped lock(ts_stats_lock_.get());
+    ntp_estimator_.UpdateRtcpTimestamp(rtp_receiver_->SSRC(),
+                                       _rtpRtcpModule.get());
+  }
   return 0;
 }
 
@@ -3476,43 +3426,7 @@ Channel::GetRTPStatistics(CallStatistics& stats)
                  stats.jitterSamples);
 
     // --- RTT
-
-    uint16_t RTT(0);
-    RTCPMethod method = _rtpRtcpModule->RTCP();
-    if (method == kRtcpOff)
-    {
-        WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                     VoEId(_instanceId, _channelId),
-                     "GetRTPStatistics() RTCP is disabled => valid RTT "
-                     "measurements cannot be retrieved");
-    } else
-    {
-        // The remote SSRC will be zero if no RTP packet has been received.
-        uint32_t remoteSSRC = rtp_receiver_->SSRC();
-        if (remoteSSRC > 0)
-        {
-            uint16_t avgRTT(0);
-            uint16_t maxRTT(0);
-            uint16_t minRTT(0);
-
-            if (_rtpRtcpModule->RTT(remoteSSRC, &RTT, &avgRTT, &minRTT, &maxRTT)
-                != 0)
-            {
-                WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                             VoEId(_instanceId, _channelId),
-                             "GetRTPStatistics() failed to retrieve RTT from "
-                             "the RTP/RTCP module");
-            }
-        } else
-        {
-            WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                         VoEId(_instanceId, _channelId),
-                         "GetRTPStatistics() failed to measure RTT since no "
-                         "RTP packets have been received yet");
-        }
-    }
-
-    stats.rttMs = static_cast<int> (RTT);
+    stats.rttMs = GetRTT();
 
     WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
                  VoEId(_instanceId, _channelId),
@@ -4559,6 +4473,53 @@ int32_t Channel::GetPlayoutFrequency() {
     }
   }
   return playout_frequency;
+}
+
+int Channel::GetRTT() const {
+  RTCPMethod method = _rtpRtcpModule->RTCP();
+  if (method == kRtcpOff) {
+    WEBRTC_TRACE(kTraceWarning, kTraceVoice,
+                 VoEId(_instanceId, _channelId),
+                 "GetRTPStatistics() RTCP is disabled => valid RTT "
+                 "measurements cannot be retrieved");
+    return 0;
+  }
+  std::vector<RTCPReportBlock> report_blocks;
+  _rtpRtcpModule->RemoteRTCPStat(&report_blocks);
+  if (report_blocks.empty()) {
+    WEBRTC_TRACE(kTraceWarning, kTraceVoice,
+                 VoEId(_instanceId, _channelId),
+                 "GetRTPStatistics() failed to measure RTT since no "
+                 "RTCP packets have been received yet");
+    return 0;
+  }
+
+  uint32_t remoteSSRC = rtp_receiver_->SSRC();
+  std::vector<RTCPReportBlock>::const_iterator it = report_blocks.begin();
+  for (; it != report_blocks.end(); ++it) {
+    if (it->remoteSSRC == remoteSSRC)
+      break;
+  }
+  if (it == report_blocks.end()) {
+    // We have not received packets with SSRC matching the report blocks.
+    // To calculate RTT we try with the SSRC of the first report block.
+    // This is very important for send-only channels where we don't know
+    // the SSRC of the other end.
+    remoteSSRC = report_blocks[0].remoteSSRC;
+  }
+  uint16_t rtt = 0;
+  uint16_t avg_rtt = 0;
+  uint16_t max_rtt= 0;
+  uint16_t min_rtt = 0;
+  if (_rtpRtcpModule->RTT(remoteSSRC, &rtt, &avg_rtt, &min_rtt, &max_rtt)
+      != 0) {
+    WEBRTC_TRACE(kTraceWarning, kTraceVoice,
+                 VoEId(_instanceId, _channelId),
+                 "GetRTPStatistics() failed to retrieve RTT from "
+                 "the RTP/RTCP module");
+    return 0;
+  }
+  return static_cast<int>(rtt);
 }
 
 }  // namespace voe

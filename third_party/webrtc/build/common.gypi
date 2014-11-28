@@ -23,13 +23,13 @@
           ['build_with_chromium==1', {
             'build_with_libjingle': 1,
             'webrtc_root%': '<(DEPTH)/third_party/webrtc',
-            'apk_tests_path%': '<(DEPTH)/third_party/webrtc/build/apk_tests.gyp',
+            'apk_tests_path%': '<(DEPTH)/third_party/webrtc/build/apk_tests_noop.gyp',
             'modules_java_gyp_path%': '<(DEPTH)/third_party/webrtc/modules/modules_java_chromium.gyp',
             'gen_core_neon_offsets_gyp%': '<(DEPTH)/third_party/webrtc/modules/audio_processing/gen_core_neon_offsets_chromium.gyp',
           }, {
             'build_with_libjingle%': 0,
             'webrtc_root%': '<(DEPTH)/webrtc',
-            'apk_tests_path%': '<(DEPTH)/webrtc/build/apk_test_noop.gyp',
+            'apk_tests_path%': '<(DEPTH)/webrtc/build/apk_tests.gyp',
             'modules_java_gyp_path%': '<(DEPTH)/webrtc/modules/modules_java.gyp',
             'gen_core_neon_offsets_gyp%':'<(DEPTH)/webrtc/modules/audio_processing/gen_core_neon_offsets.gyp',
           }],
@@ -53,6 +53,7 @@
     'gen_core_neon_offsets_gyp%': '<(gen_core_neon_offsets_gyp)',
     'webrtc_vp8_dir%': '<(webrtc_vp8_dir)',
     'include_opus%': '<(include_opus)',
+    'rtc_relative_path%': 1,
     'rbe_components_path%': '<(rbe_components_path)',
     'external_libraries%': '0',
     'json_root%': '<(DEPTH)/third_party/jsoncpp/source/include/',
@@ -112,6 +113,16 @@
     'mips_fpu%' : 1,
     'enable_android_opensl%': 1,
 
+    # Link-Time Optimizations
+    # Executes code generation at link-time instead of compile-time
+    # https://gcc.gnu.org/wiki/LinkTimeOptimization
+    'use_lto%': 0,
+
+    # Defer ssl perference to that specified through sslconfig.h instead of
+    # choosing openssl or nss directly.  In practice, this can be used to
+    # enable schannel on windows.
+    'use_legacy_ssl_defaults%': 0,
+
     'conditions': [
       ['build_with_chromium==1', {
         # Exclude pulse audio on Chromium since its prerequisites don't require
@@ -121,11 +132,6 @@
         # Exclude internal ADM since Chromium uses its own IO handling.
         'include_internal_audio_device%': 0,
 
-        # Exclude internal VCM in Chromium build.
-        'include_internal_video_capture%': 0,
-
-        # Exclude internal video render module in Chromium build.
-        'include_internal_video_render%': 0,
       }, {  # Settings for the standalone (not-in-Chromium) build.
         # TODO(andrew): For now, disable the Chrome plugins, which causes a
         # flood of chromium-style warnings. Investigate enabling them:
@@ -134,8 +140,6 @@
 
         'include_pulse_audio%': 1,
         'include_internal_audio_device%': 1,
-        'include_internal_video_capture%': 1,
-        'include_internal_video_render%': 1,
       }],
       ['build_with_libjingle==1', {
         'include_tests%': 0,
@@ -176,6 +180,9 @@
          'cflags': [
            '<!@(pkg-config --cflags dbus-glib-1)',
          ],
+      }],
+      ['rtc_relative_path==1', {
+        'defines': ['EXPAT_RELATIVE_PATH',],
       }],
       ['enable_video==1', {
         'defines': ['WEBRTC_MODULE_UTILITY_VIDEO',],

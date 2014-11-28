@@ -13,7 +13,7 @@
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/apps/chrome_apps_client.h"
+#include "chrome/browser/ui/apps/chrome_app_window_client.h"
 #include "chrome/test/base/testing_browser_process_platform_part.h"
 #include "components/network_time/network_time_tracker.h"
 #include "content/public/browser/notification_service.h"
@@ -75,7 +75,7 @@ TestingBrowserProcess::TestingBrowserProcess()
 #if defined(ENABLE_EXTENSIONS)
   extensions_browser_client_.reset(
       new extensions::ChromeExtensionsBrowserClient);
-  apps::AppsClient::Set(ChromeAppsClient::GetInstance());
+  extensions::AppWindowClient::Set(ChromeAppWindowClient::GetInstance());
   extensions::ExtensionsBrowserClient::Set(extensions_browser_client_.get());
 #endif
 }
@@ -104,7 +104,7 @@ MetricsServicesManager* TestingBrowserProcess::GetMetricsServicesManager() {
   return NULL;
 }
 
-MetricsService* TestingBrowserProcess::metrics_service() {
+metrics::MetricsService* TestingBrowserProcess::metrics_service() {
   return NULL;
 }
 
@@ -266,7 +266,7 @@ bool TestingBrowserProcess::IsShuttingDown() {
 }
 
 printing::PrintJobManager* TestingBrowserProcess::print_job_manager() {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINTING)
   if (!print_job_manager_.get())
     print_job_manager_.reset(new printing::PrintJobManager());
   return print_job_manager_.get();

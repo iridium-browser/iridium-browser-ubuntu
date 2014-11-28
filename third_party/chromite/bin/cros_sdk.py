@@ -1,10 +1,11 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 # TODO(ferringb): remove this as soon as depot_tools is gutted of its
 # import logic, and is just a re-exec.
+
+from __future__ import print_function
 
 import os
 import sys

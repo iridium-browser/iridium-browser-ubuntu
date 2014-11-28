@@ -50,8 +50,7 @@ class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
       const sync_driver::DataTypeController::TypeMap* controllers,
       const sync_driver::DataTypeEncryptionHandler* encryption_handler,
       browser_sync::SyncBackendHost* backend,
-      sync_driver::DataTypeManagerObserver* observer,
-      sync_driver::FailedDataTypesHandler* failed_data_types_handler)
+      sync_driver::DataTypeManagerObserver* observer)
           OVERRIDE;
 
   virtual browser_sync::SyncBackendHost* CreateSyncBackendHost(
@@ -61,12 +60,13 @@ class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
       const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
       const base::FilePath& sync_folder) OVERRIDE;
 
-  virtual scoped_ptr<browser_sync::LocalDeviceInfoProvider>
+  virtual scoped_ptr<sync_driver::LocalDeviceInfoProvider>
       CreateLocalDeviceInfoProvider() OVERRIDE;
 
   virtual base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
       syncer::ModelType type) OVERRIDE;
   virtual scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
+      const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
       syncer::AttachmentService::Delegate* delegate) OVERRIDE;
 

@@ -6,6 +6,7 @@
 """Unit tests for cros_portage_upgrade.py."""
 
 from __future__ import print_function
+
 import exceptions
 import filecmp
 import mox
@@ -1940,9 +1941,11 @@ class RunBoardTest(CpuTestBase):
 
     # Add test-specific mocks/stubs
     self.mox.StubOutWithMock(os.path, 'exists')
+    self.mox.StubOutWithMock(osutils, 'RmDir')
 
     # Replay script
     os.path.exists('/tmp/portage/.git/shallow').AndReturn(False)
+    osutils.RmDir('/tmp/portage', ignore_missing=True)
     os.path.exists('/tmp/portage').AndReturn(True)
     mocked_upgrader._RunGit(
         '/tmp/portage', ['remote', 'set-url', 'origin',

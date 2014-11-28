@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/api/bluetooth_socket/bluetooth_socket_api.h"
+#include "extensions/browser/api/bluetooth_socket/bluetooth_socket_api.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
 
@@ -33,6 +33,8 @@ class EasyUnlockPrivateAPI : public BrowserContextKeyedAPI {
   static BrowserContextKeyedAPIFactory<EasyUnlockPrivateAPI>*
       GetFactoryInstance();
 
+  static const bool kServiceRedirectedInIncognito = true;
+
   explicit EasyUnlockPrivateAPI(content::BrowserContext* context);
   virtual ~EasyUnlockPrivateAPI();
 
@@ -51,6 +53,8 @@ class EasyUnlockPrivateAPI : public BrowserContextKeyedAPI {
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateAPI);
 };
 
+// TODO(tbarzic): Replace SyncExtensionFunction/AsyncExtensionFunction overrides
+// with UIThreadExtensionFunction throughout the file.
 class EasyUnlockPrivateGetStringsFunction : public SyncExtensionFunction {
  public:
   EasyUnlockPrivateGetStringsFunction();
@@ -158,15 +162,16 @@ class EasyUnlockPrivateSeekBluetoothDeviceByAddressFunction
   // AsyncExtensionFunction:
   virtual bool RunAsync() OVERRIDE;
 
-  // Callback that is called when the seek operation succeeds.
-  void OnSeekCompleted(const easy_unlock::SeekDeviceResult& seek_result);
+  // Callbacks that are called when the seek operation succeeds or fails.
+  void OnSeekSuccess();
+  void OnSeekFailure(const std::string& error_message);
 
   DISALLOW_COPY_AND_ASSIGN(
       EasyUnlockPrivateSeekBluetoothDeviceByAddressFunction);
 };
 
 class EasyUnlockPrivateConnectToBluetoothServiceInsecurelyFunction
-    : public BluetoothSocketAbstractConnectFunction {
+    : public core_api::BluetoothSocketAbstractConnectFunction {
  public:
   DECLARE_EXTENSION_FUNCTION(
       "easyUnlockPrivate.connectToBluetoothServiceInsecurely",
@@ -275,6 +280,53 @@ class EasyUnlockPrivateGetRemoteDevicesFunction : public SyncExtensionFunction {
   virtual bool RunSync() OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetRemoteDevicesFunction);
+};
+
+class EasyUnlockPrivateGetSignInChallengeFunction :
+    public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.getSignInChallenge",
+                             EASYUNLOCKPRIVATE_GETSIGNINCHALLENGE)
+  EasyUnlockPrivateGetSignInChallengeFunction();
+
+ private:
+  virtual ~EasyUnlockPrivateGetSignInChallengeFunction();
+
+  // SyncExtensionFunction:
+  virtual bool RunSync() OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetSignInChallengeFunction);
+};
+
+class EasyUnlockPrivateTrySignInSecretFunction :
+    public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.trySignInSecret",
+                             EASYUNLOCKPRIVATE_TRYSIGNINSECRET)
+  EasyUnlockPrivateTrySignInSecretFunction();
+
+ private:
+  virtual ~EasyUnlockPrivateTrySignInSecretFunction();
+
+  // SyncExtensionFunction:
+  virtual bool RunSync() OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateTrySignInSecretFunction);
+};
+
+class EasyUnlockPrivateGetUserInfoFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.getUserInfo",
+                             EASYUNLOCKPRIVATE_GETUSERINFO)
+  EasyUnlockPrivateGetUserInfoFunction();
+
+ private:
+  virtual ~EasyUnlockPrivateGetUserInfoFunction();
+
+  // SyncExtensionFunction:
+  virtual bool RunSync() OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetUserInfoFunction);
 };
 
 }  // namespace api

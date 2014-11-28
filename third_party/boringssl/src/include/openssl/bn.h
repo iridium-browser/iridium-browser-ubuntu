@@ -284,6 +284,22 @@ OPENSSL_EXPORT int BN_print_fp(FILE *fp, const BIGNUM *a);
 OPENSSL_EXPORT BN_ULONG BN_get_word(const BIGNUM *bn);
 
 
+/* Internal functions.
+ *
+ * These functions are useful for code that is doing low-level manipulations of
+ * BIGNUM values. However, be sure that no other function in this file does
+ * what you want before turning to these. */
+
+/* bn_correct_top decrements |bn->top| until |bn->d[top-1]| is non-zero or
+ * until |top| is zero. */
+OPENSSL_EXPORT void bn_correct_top(BIGNUM *bn);
+
+/* bn_wexpand ensures that |bn| has at least |words| works of space without
+ * altering its value. It returns one on success or zero on allocation
+ * failure. */
+OPENSSL_EXPORT BIGNUM *bn_wexpand(BIGNUM *bn, unsigned words);
+
+
 /* BIGNUM pools.
  *
  * Certain BIGNUM operations need to use many temporary variables and
@@ -335,11 +351,11 @@ OPENSSL_EXPORT int BN_uadd(BIGNUM *r, const BIGNUM *a, const BIGNUM *b);
 /* BN_add_word adds |w| to |a|. It returns one on success and zero otherwise. */
 OPENSSL_EXPORT int BN_add_word(BIGNUM *a, BN_ULONG w);
 
-/* BN_sub sets |r| = |a| + |b|, where |r| must be a distinct pointer from |a|
+/* BN_sub sets |r| = |a| - |b|, where |r| must be a distinct pointer from |a|
  * and |b|. It returns one on success and zero on allocation failure. */
 OPENSSL_EXPORT int BN_sub(BIGNUM *r, const BIGNUM *a, const BIGNUM *b);
 
-/* BN_usub sets |r| = |a| + |b|, where |a| and |b| are non-negative integers,
+/* BN_usub sets |r| = |a| - |b|, where |a| and |b| are non-negative integers,
  * |b| < |a| and |r| must be a distinct pointer from |a| and |b|. It returns
  * one on success and zero on allocation failure. */
 OPENSSL_EXPORT int BN_usub(BIGNUM *r, const BIGNUM *a, const BIGNUM *b);
@@ -776,7 +792,7 @@ struct bn_mont_ctx_st {
   int ri;    /* number of bits in R */
 };
 
-unsigned BN_num_bits_word(BN_ULONG l);
+OPENSSL_EXPORT unsigned BN_num_bits_word(BN_ULONG l);
 
 #define BN_FLG_MALLOCED 0x01
 #define BN_FLG_STATIC_DATA 0x02

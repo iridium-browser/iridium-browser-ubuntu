@@ -22,14 +22,14 @@
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
+#include "storage/browser/fileapi/file_system_backend.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_operation_runner.h"
+#include "storage/browser/fileapi/file_system_url.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "webkit/browser/fileapi/file_system_backend.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_operation_runner.h"
-#include "webkit/browser/fileapi/file_system_url.h"
 
 using content::BrowserThread;
-using fileapi::FileSystemURL;
+using storage::FileSystemURL;
 
 namespace file_manager {
 namespace util {
@@ -54,7 +54,7 @@ void ShowWarningMessageBox(Profile* profile,
 void ExecuteFileTaskForUrl(Profile* profile,
                            const file_tasks::TaskDescriptor& task,
                            const GURL& url) {
-  fileapi::FileSystemContext* file_system_context =
+  storage::FileSystemContext* file_system_context =
       GetFileSystemContextForExtensionId(profile, kFileManagerAppId);
 
   file_tasks::ExecuteFileTask(
@@ -142,8 +142,15 @@ void OnContinueOpenItemCompleted(Profile* profile,
                                  const base::FilePath& file_path,
                                  bool result) {
   if (!result) {
-    ShowWarningMessageBox(
-        profile, file_path, IDS_FILE_BROWSER_ERROR_VIEWING_FILE);
+    int message;
+    if (file_path.Extension() == FILE_PATH_LITERAL(".dmg"))
+      message = IDS_FILE_BROWSER_ERROR_VIEWING_FILE_FOR_DMG;
+    else if (file_path.Extension() == FILE_PATH_LITERAL(".exe") ||
+             file_path.Extension() == FILE_PATH_LITERAL(".msi"))
+      message = IDS_FILE_BROWSER_ERROR_VIEWING_FILE_FOR_EXECUTABLE;
+    else
+      message = IDS_FILE_BROWSER_ERROR_VIEWING_FILE;
+    ShowWarningMessageBox(profile, file_path, message);
   }
 }
 

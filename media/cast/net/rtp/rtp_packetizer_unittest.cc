@@ -72,6 +72,10 @@ class TestRtpPacketTransport : public PacketSender {
     return true;
   }
 
+  virtual int64 GetBytesSent() OVERRIDE {
+    return 0;
+  }
+
   size_t number_of_packets_received() const { return packets_sent_; }
 
   void set_expected_number_of_packets(size_t expected_number_of_packets) {
@@ -98,16 +102,18 @@ class TestRtpPacketTransport : public PacketSender {
 class RtpPacketizerTest : public ::testing::Test {
  protected:
   RtpPacketizerTest()
-      : task_runner_(new test::FakeSingleThreadTaskRunner(&testing_clock_)),
-        video_frame_(),
-        packet_storage_(200) {
+      : task_runner_(new test::FakeSingleThreadTaskRunner(&testing_clock_)) {
     config_.sequence_number = kSeqNum;
     config_.ssrc = kSsrc;
     config_.payload_type = kPayload;
     config_.max_payload_length = kMaxPacketLength;
     transport_.reset(new TestRtpPacketTransport(config_));
-    pacer_.reset(new PacedSender(
-        &testing_clock_, &logging_, transport_.get(), task_runner_));
+    pacer_.reset(new PacedSender(kTargetBurstSize,
+                                 kMaxBurstSize,
+                                 &testing_clock_,
+                                 &logging_,
+                                 transport_.get(),
+                                 task_runner_));
     pacer_->RegisterVideoSsrc(config_.ssrc);
     rtp_packetizer_.reset(new RtpPacketizer(
         pacer_.get(), &packet_storage_, config_));

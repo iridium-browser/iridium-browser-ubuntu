@@ -53,6 +53,9 @@ bool MaybeBypassProxyAndPrepareToRetry(
           request, &data_reduction_proxy_type_info)) {
     return false;
   }
+  // TODO(bengr): Implement bypass for CONNECT tunnel.
+  if (data_reduction_proxy_type_info.is_ssl)
+    return false;
 
   // Empty implies either that the request was served from cache or that
   // request was served directly from the origin.
@@ -62,6 +65,12 @@ bool MaybeBypassProxyAndPrepareToRetry(
   if (data_reduction_proxy_type_info.proxy_servers.first.is_empty())
     return false;
 
+  // At this point, the response is expected to have the data reduction proxy
+  // via header, so detect and report cases where the via header is missing.
+  DataReductionProxyUsageStats::DetectAndRecordMissingViaHeaderResponseCode(
+      !data_reduction_proxy_type_info.proxy_servers.second.is_empty(),
+      original_response_headers);
+
   DataReductionProxyTamperDetection::DetectAndReport(
       original_response_headers,
       data_reduction_proxy_type_info.proxy_servers.first.SchemeIsSecure());
@@ -70,6 +79,15 @@ bool MaybeBypassProxyAndPrepareToRetry(
   DataReductionProxyBypassType bypass_type =
       GetDataReductionProxyBypassType(original_response_headers,
                                       &data_reduction_proxy_info);
+
+  if (bypass_type == BYPASS_EVENT_TYPE_MISSING_VIA_HEADER_OTHER &&
+      DataReductionProxyParams::
+          IsIncludedInRemoveMissingViaHeaderOtherBypassFieldTrial()) {
+    // Ignore MISSING_VIA_HEADER_OTHER proxy bypass events if the client is part
+    // of the field trial to remove these kinds of bypasses.
+    bypass_type = BYPASS_EVENT_TYPE_MAX;
+  }
+
   if (proxy_bypass_type)
     *proxy_bypass_type = bypass_type;
   if (bypass_type == BYPASS_EVENT_TYPE_MAX)
@@ -121,7 +139,8 @@ void OnResolveProxyHandler(const GURL& url,
     data_reduction_proxy_config.proxy_rules().Apply(
         url, &data_reduction_proxy_info);
     data_reduction_proxy_info.DeprioritizeBadProxies(proxy_retry_info);
-    result->Use(data_reduction_proxy_info);
+    if (!data_reduction_proxy_info.proxy_server().is_direct())
+      result->UseProxyList(data_reduction_proxy_info.proxy_list());
   }
 
   if ((load_flags & net::LOAD_BYPASS_DATA_REDUCTION_PROXY) &&

@@ -1,7 +1,5 @@
 .. _devcycle-running:
 
-:template: standard_nacl_api
-
 #######
 Running
 #######
@@ -67,49 +65,57 @@ below. Each technique has certain requirements (NaCl flag, web server, and/or
 CWS metadata); these are explained in the :ref:`Requirements <requirements>`
 section below.
 
-.. list-table::
-   :header-rows: 1
 
-   * - #
-     - Technique
-     - Requires NaCl flag
-     - Requires Web Server
-     - Requires CWS Metadata
-     - Description
-   * - 1
-     - Local server
-     - |CHK|
-     - |CHK|
-     -
-     - Run a local server and simply point your browser to your application on
-       the server.
-   * - 2
-     - Packaged application loaded as an unpacked extension
-     -
-     -
-     - |CHK|
-     - Load your packaged application into Chrome as an unpacked extension and
-       run it without a server. An unpacked extension is simply an application
-       whose source and metadata files are located in a plain (unzipped) folder
-       on your development machine. The CWS manifest file (explained below) must
-       specify a ``local_path`` field.
-   * - 3
-     - Hosted application loaded as an unpacked extension
-     -
-     - |CHK|
-     - |CHK|
-     - Load your hosted application into Chrome as an unpacked extension and run
-       it from a server (which can be a local server). The CWS manifest file
-       must specify a ``web_url`` field.
-   * - 4
-     - CWS application with untrusted testers
-     -
-     -
-     - |CHK|
-     - This is the standard technique for distributing a packaged or hosted
-       application in the CWS, but you can limit the application to a few
-       trusted testers. This technique requires a server if your application is
-       a hosted application.
++--------------------------------------------------------+----------+----------+
+| Technique                                              | Requires | Requires |
+|                                                        | Web      | CWS      |
+|                                                        | Server   | Metadata |
++========================================================+==========+==========+
+|**1. Local server**                                     | |CHK|    |          |
+|                                                        |          |          |
+| ..                                                     |          |          |
+|                                                        |          |          |
+|  Run a local server and simply point your browser to   |          |          |
+|  your application on the server.                       |          |          |
+|                                                        |          |          |
+|  .. Note::                                             |          |          |
+|    :class: note                                        |          |          |
+|                                                        |          |          |
+|    This technique requires the NaCl flag.              |          |          |
++---------------------------------------------+----------+----------+----------+
+|**2. Packaged application loaded as an unpacked         |          | |CHK|    |
+|extension**                                             |          |          |
+|                                                        |          |          |
+| ..                                                     |          |          |
+|                                                        |          |          |
+|  Load your packaged application into Chrome as an      |          |          |
+|  unpacked extension and run it without a server. An    |          |          |
+|  unpacked extension is an application whose source and |          |          |
+|  metadata files are located in an unzipped folder on   |          |          |
+|  your development machine. The CWS manifest file       |          |          |
+|  (explained below) must specify a local_path field.    |          |          |
++--------------------------------------------------------+----------+----------+
+|**3. Hosted application loaded as an unpacked           | |CHK|    | |CHK|    |
+|extension**                                             |          |          |
+|                                                        |          |          |
+| ..                                                     |          |          |
+|                                                        |          |          |
+|  Load your hosted application into Chrome as an        |          |          |
+|  unpacked extension and run it from a server (which can|          |          |
+|  be a local server). The CWS manifest file must specify|          |          |
+|  a web_url field.                                      |          |          |
++--------------------------------------------------------+----------+----------+
+|**4. CWS application with untrusted testers**           |          | |CHK|    |
+|                                                        |          |          |
+| ..                                                     |          |          |
+|                                                        |          |          |
+|  The standard technique for distributing a packaged or |          |          |
+|  hosted application in the CWS. You can limit the      |          |          |
+|  application to trusted testers. This technique        |          |          |
+|  requires a server if your application is a hosted     |          |          |
+|  application.                                          |          |          |
++--------------------------------------------------------+----------+----------+
+
 
 .. |CHK| image:: /images/check-red.png
 
@@ -292,9 +298,9 @@ To run your application from a local server:
 * Enable the :ref:`Native Client flag <flag>` in Chrome.
 * Start a :ref:`local web server <web_server>`.
 * Put your application under the examples directory in the SDK bundle you are
-  using (e.g., in the directory ``pepper_31/examples/my_app``).
+  using (for example, in the directory ``pepper_35/examples/my_app``).
 * Access your application on the local server by typing the location of its
-  HTML file in Chrome, e.g.:
+  HTML file in Chrome, for example:
   ``http://localhost:5103/my_app/my_app_main_page.html``.
 
 .. Note::
@@ -420,7 +426,7 @@ is how to do so:
    * Upload the application files (.html, .nmf, .nexe, .css, .js, image files,
      etc.) to the server on which the application is being hosted.
    * Use `Google Webmaster Tools <http://www.google.com/webmasters/tools/>`_ to
-     verify ownership of the web site on which the application runs.
+     verify ownership of the website on which the application runs.
 
 #. Log in to the `Chrome Web Store Developer Dashboard
    <https://chrome.google.com/webstore/developer/dashboard>`_.

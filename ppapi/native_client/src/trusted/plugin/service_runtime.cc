@@ -9,28 +9,20 @@
 #include "ppapi/native_client/src/trusted/plugin/service_runtime.h"
 
 #include <string.h>
-#include <set>
 #include <string>
 #include <utility>
 
 #include "base/compiler_specific.h"
 
-#include "native_client/src/include/checked_cast.h"
 #include "native_client/src/include/portability_io.h"
 #include "native_client/src/include/portability_string.h"
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
-#include "native_client/src/include/nacl_string.h"
 #include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/shared/platform/nacl_log.h"
 #include "native_client/src/shared/platform/nacl_sync.h"
 #include "native_client/src/shared/platform/nacl_sync_checked.h"
 #include "native_client/src/shared/platform/nacl_sync_raii.h"
-#include "native_client/src/shared/platform/scoped_ptr_refcount.h"
-#include "native_client/src/trusted/desc/nacl_desc_imc.h"
-// remove when we no longer need to cast the DescWrapper below.
-#include "native_client/src/trusted/desc/nacl_desc_io.h"
-#include "native_client/src/trusted/desc/nrd_xfer.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 
 #include "native_client/src/public/imc_types.h"
@@ -58,14 +50,12 @@ PluginReverseInterface::PluginReverseInterface(
     nacl::WeakRefAnchor* anchor,
     PP_Instance pp_instance,
     ServiceRuntime* service_runtime,
-    pp::CompletionCallback init_done_cb,
-    pp::CompletionCallback crash_cb)
+    pp::CompletionCallback init_done_cb)
       : anchor_(anchor),
         pp_instance_(pp_instance),
         service_runtime_(service_runtime),
         shutting_down_(false),
-        init_done_cb_(init_done_cb),
-        crash_cb_(crash_cb) {
+        init_done_cb_(init_done_cb) {
   NaClXMutexCtor(&mu_);
   NaClXCondVarCtor(&cv_);
 }
@@ -83,10 +73,9 @@ void PluginReverseInterface::ShutDown() {
   NaClLog(4, "PluginReverseInterface::Shutdown: broadcasted, exiting\n");
 }
 
-void PluginReverseInterface::DoPostMessage(nacl::string message) {
-  std::string full_message = std::string("DEBUG_POSTMESSAGE:") + message;
-  GetNaClInterface()->PostMessageToJavaScript(pp_instance_,
-                                              full_message.c_str());
+void PluginReverseInterface::DoPostMessage(std::string message) {
+  // This feature is no longer used.
+  // TODO(teravest): Remove this once this is gone from nacl::ReverseInterface.
 }
 
 void PluginReverseInterface::StartupInitializationComplete() {
@@ -106,8 +95,18 @@ void PluginReverseInterface::StartupInitializationComplete() {
 // TODO(bsy): OpenManifestEntry should use the manifest to ResolveKey
 // and invoke StreamAsFile with a completion callback that invokes
 // GetPOSIXFileDesc.
-bool PluginReverseInterface::OpenManifestEntry(nacl::string url_key,
+bool PluginReverseInterface::OpenManifestEntry(std::string url_key,
                                                struct NaClFileInfo* info) {
+  // This method should only ever be called from the PNaCl translator, as the
+  // IRT is not available there.
+  // TODO(teravest): Remove support for OpenManifestEntry here once
+  // crbug.com/302078 is resolved.
+  if (service_runtime_->main_service_runtime()) {
+    NaClLog(LOG_ERROR,
+            "OpenManifestEntry should only be used by PNaCl translator.\n");
+    return false;
+  }
+
   bool op_complete = false;  // NB: mu_ and cv_ also controls access to this!
   // The to_open object is owned by the weak ref callback. Because this function
   // waits for the callback to finish, the to_open object will be deallocated on
@@ -223,26 +222,16 @@ void PluginReverseInterface::StreamAsFile_MainThreadContinuation(
 }
 
 void PluginReverseInterface::ReportCrash() {
-  NaClLog(4, "PluginReverseInterface::ReportCrash\n");
-
-  if (crash_cb_.pp_completion_callback().func != NULL) {
-    NaClLog(4, "PluginReverseInterface::ReportCrash: invoking CB\n");
-    pp::Module::Get()->core()->CallOnMainThread(0, crash_cb_, PP_OK);
-    // Clear the callback to avoid it gets invoked twice.
-    crash_cb_ = pp::CompletionCallback();
-  } else {
-    NaClLog(1,
-            "PluginReverseInterface::ReportCrash:"
-            " crash_cb_ not valid, skipping\n");
-  }
+  // This is now handled through Chromium IPC.
 }
 
 void PluginReverseInterface::ReportExitStatus(int exit_status) {
-  service_runtime_->set_exit_status(exit_status);
+  // We do nothing here; reporting exit status is handled through a separate
+  // embedder interface.
 }
 
 int64_t PluginReverseInterface::RequestQuotaForWrite(
-    nacl::string file_id, int64_t offset, int64_t bytes_to_write) {
+    std::string file_id, int64_t offset, int64_t bytes_to_write) {
   return bytes_to_write;
 }
 
@@ -250,8 +239,7 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
                                PP_Instance pp_instance,
                                bool main_service_runtime,
                                bool uses_nonsfi_mode,
-                               pp::CompletionCallback init_done_cb,
-                               pp::CompletionCallback crash_cb)
+                               pp::CompletionCallback init_done_cb)
     : plugin_(plugin),
       pp_instance_(pp_instance),
       main_service_runtime_(main_service_runtime),
@@ -259,7 +247,7 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
       reverse_service_(NULL),
       anchor_(new nacl::WeakRefAnchor()),
       rev_interface_(new PluginReverseInterface(anchor_, pp_instance, this,
-                                                init_done_cb, crash_cb)),
+                                                init_done_cb)),
       start_sel_ldr_done_(false),
       start_nexe_done_(false),
       nexe_started_ok_(false),
@@ -487,24 +475,21 @@ bool ServiceRuntime::StartNexeInternal() {
 }
 
 void ServiceRuntime::ReapLogs() {
-  // On a load failure the service runtime does not crash itself to
+  // TODO(teravest): We should allow the NaCl process to crash itself when a
+  // module fails to start, and remove the call to RemoteLog() here. The
+  // reverse channel is no longer needed for crash reporting.
+  //
+  // The reasoning behind the current code behavior follows:
+  // On a load failure the NaCl process does not crash itself to
   // avoid a race where the no-more-senders error on the reverse
   // channel service thread might cause the crash-detection logic to
   // kick in before the start_module RPC reply has been received. So
-  // we induce a service runtime crash here. We do not release
-  // subprocess_ since it's needed to collect crash log output after
-  // the error is reported.
+  // we induce a NaCl process crash here.
   RemoteLog(LOG_FATAL, "reap logs\n");
-  if (NULL == reverse_service_) {
-    // No crash detector thread.
-    NaClLog(LOG_ERROR, "scheduling to get crash log\n");
-    // Invoking rev_interface's method is workaround to avoid crash_cb
-    // gets called twice or more. We should clean this up later.
-    rev_interface_->ReportCrash();
-    NaClLog(LOG_ERROR, "should fire soon\n");
-  } else {
-    NaClLog(LOG_ERROR, "Reverse service thread will pick up crash log\n");
-  }
+
+  // TODO(teravest): Release subprocess_ here since it's no longer needed. It
+  // was previously kept around to collect crash log output from the bootstrap
+  // channel.
 }
 
 void ServiceRuntime::ReportLoadError(const ErrorInfo& error_info) {
@@ -531,7 +516,7 @@ SrpcClient* ServiceRuntime::SetupAppChannel() {
   }
 }
 
-bool ServiceRuntime::RemoteLog(int severity, const nacl::string& msg) {
+bool ServiceRuntime::RemoteLog(int severity, const std::string& msg) {
   NaClSrpcResultCodes rpc_result =
       NaClSrpcInvokeBySignature(&command_channel_,
                                 "log:is:",
@@ -580,20 +565,6 @@ ServiceRuntime::~ServiceRuntime() {
   anchor_->Unref();
   NaClCondVarDtor(&cond_);
   NaClMutexDtor(&mu_);
-}
-
-void ServiceRuntime::set_exit_status(int exit_status) {
-  nacl::MutexLocker take(&mu_);
-  if (main_service_runtime_)
-    plugin_->set_exit_status(exit_status & 0xff);
-}
-
-nacl::string ServiceRuntime::GetCrashLogOutput() {
-  if (NULL != subprocess_.get()) {
-    return subprocess_->GetCrashLogOutput();
-  } else {
-    return std::string();
-  }
 }
 
 }  // namespace plugin

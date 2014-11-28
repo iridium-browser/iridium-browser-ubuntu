@@ -295,10 +295,11 @@ class ADMXWriter(xml_formatted_writer.XMLFormattedWriter):
       raise Exception('Unknown policy type %s.' % policy_type)
 
   def WritePolicy(self, policy):
-    self._WritePolicy(policy,
-                      policy['name'],
-                      self.config['win_reg_mandatory_key_name'],
-                      self._active_mandatory_policy_group_name)
+    if self.CanBeMandatory(policy):
+      self._WritePolicy(policy,
+                        policy['name'],
+                        self.config['win_reg_mandatory_key_name'],
+                        self._active_mandatory_policy_group_name)
 
   def WriteRecommendedPolicy(self, policy):
     self._WritePolicy(policy,

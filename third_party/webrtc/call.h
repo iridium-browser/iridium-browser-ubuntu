@@ -56,6 +56,10 @@ class OveruseCallback {
 // etc.
 class Call {
  public:
+  enum NetworkState {
+    kNetworkUp,
+    kNetworkDown,
+  };
   struct Config {
     explicit Config(newapi::Transport* send_transport)
         : webrtc_config(NULL),
@@ -88,8 +92,7 @@ class Call {
 
   virtual VideoSendStream* CreateVideoSendStream(
       const VideoSendStream::Config& config,
-      const std::vector<VideoStream>& video_streams,
-      const void* encoder_settings) = 0;
+      const VideoEncoderConfig& encoder_config) = 0;
 
   virtual void DestroyVideoSendStream(VideoSendStream* send_stream) = 0;
 
@@ -110,6 +113,8 @@ class Call {
   // Returns the total estimated receive bandwidth for the call. Note: this can
   // differ from the actual receive bitrate.
   virtual uint32_t ReceiveBitrateEstimate() = 0;
+
+  virtual void SignalNetworkState(NetworkState state) = 0;
 
   virtual ~Call() {}
 };

@@ -12,15 +12,18 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
+#include "chrome/browser/extensions/signin/gaia_auth_extension_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/login/authenticated_user_email_retriever.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "components/policy/core/browser/cloud/message_util.h"
@@ -30,8 +33,6 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -39,10 +40,6 @@ namespace chromeos {
 namespace {
 
 const char kJsScreenPath[] = "login.OAuthEnrollmentScreen";
-
-// Start page of GAIA authentication extension.
-const char kGaiaExtStartPage[] =
-    "chrome-extension://mfffpogegjflfpflabcdkioaeobkgjik/main.html";
 
 // Enrollment step names.
 const char kEnrollmentStepSignin[] = "signin";
@@ -591,7 +588,9 @@ void EnrollmentScreenHandler::OnTokenFetched(
 
 void EnrollmentScreenHandler::DoShow() {
   base::DictionaryValue screen_data;
-  screen_data.SetString("signin_url", kGaiaExtStartPage);
+  screen_data.SetString(
+      "signin_url",
+      base::StringPrintf("%s/main.html", extensions::kGaiaAuthExtensionOrigin));
   screen_data.SetString("gaiaUrl", GaiaUrls::GetInstance()->gaia_url().spec());
   screen_data.SetString("enrollment_mode",
                         EnrollmentModeToString(enrollment_mode_));

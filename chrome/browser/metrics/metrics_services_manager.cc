@@ -30,7 +30,7 @@ MetricsServicesManager::MetricsServicesManager(PrefService* local_state)
 MetricsServicesManager::~MetricsServicesManager() {
 }
 
-MetricsService* MetricsServicesManager::GetMetricsService() {
+metrics::MetricsService* MetricsServicesManager::GetMetricsService() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return GetChromeMetricsServiceClient()->metrics_service();
 }
@@ -38,7 +38,7 @@ MetricsService* MetricsServicesManager::GetMetricsService() {
 rappor::RapporService* MetricsServicesManager::GetRapporService() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!rappor_service_)
-    rappor_service_.reset(new rappor::RapporService);
+    rappor_service_.reset(new rappor::RapporService(local_state_));
   return rappor_service_.get();
 }
 

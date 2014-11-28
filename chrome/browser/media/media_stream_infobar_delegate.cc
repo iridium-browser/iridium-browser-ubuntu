@@ -9,10 +9,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -143,7 +144,7 @@ bool MediaStreamInfoBarDelegate::LinkClicked(
           GURL(chrome::kMediaAccessLearnMoreUrl),
           content::Referrer(),
           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-          content::PAGE_TRANSITION_LINK, false));
+          ui::PAGE_TRANSITION_LINK, false));
 
   return false;  // Do not dismiss the info bar.
 }

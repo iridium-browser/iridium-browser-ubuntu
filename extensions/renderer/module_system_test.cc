@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -131,6 +131,8 @@ ModuleSystemTestEnvironment::ModuleSystemTestEnvironment(v8::Isolate* isolate)
   context_.reset(new ScriptContext(context_holder_->context(),
                                    NULL,  // WebFrame
                                    NULL,  // Extension
+                                   Feature::BLESSED_EXTENSION_CONTEXT,
+                                   NULL,  // Effective Extension
                                    Feature::BLESSED_EXTENSION_CONTEXT));
   context_->v8_context()->Enter();
   assert_natives_ = new AssertNatives(context_.get());
@@ -209,11 +211,14 @@ v8::Handle<v8::Object> ModuleSystemTestEnvironment::CreateGlobal(
 
 ModuleSystemTest::ModuleSystemTest()
     : isolate_(v8::Isolate::GetCurrent()),
-      env_(CreateEnvironment()),
       should_assertions_be_made_(true) {
 }
 
 ModuleSystemTest::~ModuleSystemTest() {
+}
+
+void ModuleSystemTest::SetUp() {
+  env_ = CreateEnvironment();
 }
 
 void ModuleSystemTest::TearDown() {
@@ -221,6 +226,18 @@ void ModuleSystemTest::TearDown() {
   EXPECT_EQ(should_assertions_be_made_,
             env_->assert_natives()->assertion_made());
   EXPECT_FALSE(env_->assert_natives()->failed());
+  env_.reset();
+  v8::HeapStatistics stats;
+  isolate_->GetHeapStatistics(&stats);
+  size_t old_heap_size = 0;
+  // Run the GC until the heap size reaches a steady state to ensure that
+  // all the garbage is collected.
+  while (stats.used_heap_size() != old_heap_size) {
+    old_heap_size = stats.used_heap_size();
+    isolate_->RequestGarbageCollectionForTesting(
+        v8::Isolate::kFullGarbageCollection);
+    isolate_->GetHeapStatistics(&stats);
+  }
 }
 
 scoped_ptr<ModuleSystemTestEnvironment> ModuleSystemTest::CreateEnvironment() {

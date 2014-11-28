@@ -11,9 +11,9 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/ui/auto_login_infobar_delegate.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "jni/AutoLoginDelegate_jni.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -98,7 +98,7 @@ void AutoLoginInfoBarDelegateAndroid::LoginSuccess(JNIEnv* env,
   // WARNING: |this| may be deleted at this point!  Do not access any members!
   contents->OpenURL(content::OpenURLParams(
       GURL(base::android::ConvertJavaStringToUTF8(env, result)),
-      content::Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_AUTO_BOOKMARK,
+      content::Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_AUTO_BOOKMARK,
       false));
 }
 

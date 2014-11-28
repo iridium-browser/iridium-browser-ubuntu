@@ -135,38 +135,58 @@ void DistillerImpl::DistillNextPage() {
 void DistillerImpl::OnPageDistillationFinished(
     int page_num,
     const GURL& page_url,
-    scoped_ptr<DistilledPageInfo> distilled_page,
+    scoped_ptr<proto::DomDistillerResult> distiller_result,
     bool distillation_successful) {
-  DCHECK(distilled_page.get());
   DCHECK(started_pages_index_.find(page_num) != started_pages_index_.end());
   if (distillation_successful) {
+    DCHECK(distiller_result.get());
     DistilledPageData* page_data =
         GetPageAtIndex(started_pages_index_[page_num]);
     page_data->distilled_page_proto =
         new base::RefCountedData<DistilledPageProto>();
     page_data->page_num = page_num;
-    page_data->distilled_page_proto->data.set_title(distilled_page->title);
+    if (distiller_result->has_title()) {
+      page_data->distilled_page_proto->data.set_title(
+          distiller_result->title());
+    }
     page_data->distilled_page_proto->data.set_url(page_url.spec());
-    page_data->distilled_page_proto->data.set_html(distilled_page->html);
-
-    GURL next_page_url(distilled_page->next_page_url);
-    if (next_page_url.is_valid()) {
-      // The pages should be in same origin.
-      DCHECK_EQ(next_page_url.GetOrigin(), page_url.GetOrigin());
-      AddToDistillationQueue(page_num + 1, next_page_url);
+    if (distiller_result->has_distilled_content() &&
+        distiller_result->distilled_content().has_html()) {
+      page_data->distilled_page_proto->data.set_html(
+          distiller_result->distilled_content().html());
+    }
+    if (distiller_result->has_debug_info() &&
+        distiller_result->debug_info().has_log()) {
+      page_data->distilled_page_proto->data.mutable_debug_info()->set_log(
+          distiller_result->debug_info().log());
     }
 
-    GURL prev_page_url(distilled_page->prev_page_url);
-    if (prev_page_url.is_valid()) {
-      DCHECK_EQ(prev_page_url.GetOrigin(), page_url.GetOrigin());
-      AddToDistillationQueue(page_num - 1, prev_page_url);
+    if (distiller_result->has_pagination_info()) {
+      proto::PaginationInfo pagination_info =
+          distiller_result->pagination_info();
+      if (pagination_info.has_next_page()) {
+        GURL next_page_url(pagination_info.next_page());
+        if (next_page_url.is_valid()) {
+          // The pages should be in same origin.
+          DCHECK_EQ(next_page_url.GetOrigin(), page_url.GetOrigin());
+          AddToDistillationQueue(page_num + 1, next_page_url);
+        }
+      }
+
+      if (pagination_info.has_prev_page()) {
+        GURL prev_page_url(pagination_info.prev_page());
+        if (prev_page_url.is_valid()) {
+          DCHECK_EQ(prev_page_url.GetOrigin(), page_url.GetOrigin());
+          AddToDistillationQueue(page_num - 1, prev_page_url);
+        }
+      }
     }
 
-    for (size_t img_num = 0; img_num < distilled_page->image_urls.size();
+    for (int img_num = 0; img_num < distiller_result->image_urls_size();
          ++img_num) {
       std::string image_id =
           base::IntToString(page_num + 1) + "_" + base::IntToString(img_num);
-      FetchImage(page_num, image_id, distilled_page->image_urls[img_num]);
+      FetchImage(page_num, image_id, distiller_result->image_urls(img_num));
     }
 
     AddPageIfDone(page_num);
@@ -200,7 +220,7 @@ void DistillerImpl::OnFetchImageDone(int page_num,
                                      const std::string& response) {
   DCHECK(started_pages_index_.find(page_num) != started_pages_index_.end());
   DistilledPageData* page_data = GetPageAtIndex(started_pages_index_[page_num]);
-  DCHECK(page_data->distilled_page_proto);
+  DCHECK(page_data->distilled_page_proto.get());
   DCHECK(url_fetcher);
   ScopedVector<DistillerURLFetcher>::iterator fetcher_it =
       std::find(page_data->image_fetchers_.begin(),

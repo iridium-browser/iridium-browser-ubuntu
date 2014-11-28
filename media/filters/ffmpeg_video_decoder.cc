@@ -149,6 +149,10 @@ int FFmpegVideoDecoder::GetVideoBuffer(struct AVCodecContext* codec_context,
   return 0;
 }
 
+std::string FFmpegVideoDecoder::GetDisplayName() const {
+  return "FFmpegVideoDecoder";
+}
+
 void FFmpegVideoDecoder::Initialize(const VideoDecoderConfig& config,
                                     bool low_delay,
                                     const PipelineStatusCB& status_cb,
@@ -177,7 +181,7 @@ void FFmpegVideoDecoder::Initialize(const VideoDecoderConfig& config,
 void FFmpegVideoDecoder::Decode(const scoped_refptr<DecoderBuffer>& buffer,
                                 const DecodeCB& decode_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(buffer);
+  DCHECK(buffer.get());
   DCHECK(!decode_cb.is_null());
   CHECK_NE(state_, kUninitialized);
 

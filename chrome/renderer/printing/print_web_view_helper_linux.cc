@@ -8,10 +8,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/print_messages.h"
 #include "content/public/renderer/render_thread.h"
-#include "printing/metafile.h"
-#include "printing/metafile_impl.h"
 #include "printing/metafile_skia_wrapper.h"
 #include "printing/page_size_margins.h"
+#include "printing/pdf_metafile_skia.h"
 #include "skia/ext/platform_device.h"
 #include "skia/ext/vector_canvas.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -32,16 +31,15 @@ bool PrintWebViewHelper::RenderPreviewPage(
   PrintMsg_PrintPage_Params page_params;
   page_params.params = print_params;
   page_params.page_number = page_number;
-  scoped_ptr<Metafile> draft_metafile;
-  Metafile* initial_render_metafile = print_preview_context_.metafile();
+  scoped_ptr<PdfMetafileSkia> draft_metafile;
+  PdfMetafileSkia* initial_render_metafile = print_preview_context_.metafile();
   if (print_preview_context_.IsModifiable() && is_print_ready_metafile_sent_) {
-    draft_metafile.reset(new PreviewMetafile);
+    draft_metafile.reset(new PdfMetafileSkia);
     initial_render_metafile = draft_metafile.get();
   }
 
   base::TimeTicks begin_time = base::TimeTicks::Now();
   PrintPageInternal(page_params,
-                    print_preview_context_.GetPrintCanvasSize(),
                     print_preview_context_.prepared_frame(),
                     initial_render_metafile);
   print_preview_context_.RenderedPreviewPage(
@@ -51,16 +49,15 @@ bool PrintWebViewHelper::RenderPreviewPage(
   } else if (print_preview_context_.IsModifiable() &&
              print_preview_context_.generate_draft_pages()) {
     DCHECK(!draft_metafile.get());
-    draft_metafile.reset(
-        print_preview_context_.metafile()->GetMetafileForCurrentPage());
+    draft_metafile =
+        print_preview_context_.metafile()->GetMetafileForCurrentPage();
   }
   return PreviewPageRendered(page_number, draft_metafile.get());
 }
 
 bool PrintWebViewHelper::PrintPagesNative(blink::WebFrame* frame,
-                                          int page_count,
-                                          const gfx::Size& canvas_size) {
-  NativeMetafile metafile;
+                                          int page_count) {
+  PdfMetafileSkia metafile;
   if (!metafile.Init())
     return false;
 
@@ -87,7 +84,7 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebFrame* frame,
   page_params.params = params.params;
   for (size_t i = 0; i < printed_pages.size(); ++i) {
     page_params.page_number = printed_pages[i];
-    PrintPageInternal(page_params, canvas_size, frame, &metafile);
+    PrintPageInternal(page_params, frame, &metafile);
   }
 
   // blink::printEnd() for PDF should be called before metafile is closed.
@@ -150,9 +147,8 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebFrame* frame,
 
 void PrintWebViewHelper::PrintPageInternal(
     const PrintMsg_PrintPage_Params& params,
-    const gfx::Size& canvas_size,
     WebFrame* frame,
-    Metafile* metafile) {
+    PdfMetafileSkia* metafile) {
   PageSizeMargins page_layout_in_points;
   double scale_factor = 1.0f;
   ComputePageLayoutInPointsForCss(frame, params.page_number, params.params,
@@ -181,10 +177,12 @@ void PrintWebViewHelper::PrintPageInternal(
   if (params.params.display_header_footer) {
     // |page_number| is 0-based, so 1 is added.
     // TODO(vitalybuka) : why does it work only with 1.25?
-    PrintHeaderAndFooter(canvas.get(), params.page_number + 1,
+    PrintHeaderAndFooter(canvas.get(),
+                         params.page_number + 1,
                          print_preview_context_.total_page_count(),
+                         *frame,
                          scale_factor / 1.25,
-                         page_layout_in_points, *header_footer_info_,
+                         page_layout_in_points,
                          params.params);
   }
   RenderPageContent(frame, params.page_number, canvas_area, content_area,

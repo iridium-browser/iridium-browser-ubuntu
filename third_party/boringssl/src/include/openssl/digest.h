@@ -76,6 +76,7 @@ extern "C" {
  * The following functions return |EVP_MD| objects that implement the named hash
  * function. */
 
+OPENSSL_EXPORT const EVP_MD *EVP_md4(void);
 OPENSSL_EXPORT const EVP_MD *EVP_md5(void);
 OPENSSL_EXPORT const EVP_MD *EVP_sha1(void);
 OPENSSL_EXPORT const EVP_MD *EVP_sha224(void);
@@ -198,6 +199,10 @@ OPENSSL_EXPORT size_t EVP_MD_block_size(const EVP_MD *md);
 /* EVP_MD_CTX_copy sets |out|, which must /not/ be initialised, to be a copy of
  * |in|. It returns one on success and zero on error. */
 OPENSSL_EXPORT int EVP_MD_CTX_copy(EVP_MD_CTX *out, const EVP_MD_CTX *in);
+
+/* EVP_add_digest does nothing and returns one. It exists only for
+ * compatibility with OpenSSL. */
+OPENSSL_EXPORT int EVP_add_digest(const EVP_MD *digest);
 
 
 /* Digest operation accessors. */

@@ -10,19 +10,18 @@
 #include "chrome/browser/sync_file_system/local/sync_file_system_backend.h"
 #include "chrome/browser/sync_file_system/logger.h"
 #include "chrome/browser/sync_file_system/sync_callbacks.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/fileapi/sandbox_file_system_backend_delegate.h"
-#include "webkit/common/fileapi/file_system_util.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/fileapi/sandbox_file_system_backend_delegate.h"
+#include "storage/common/fileapi/file_system_util.h"
 
 namespace sync_file_system {
 
 namespace {
 
 // This runs on FileSystemContext's default_file_task_runner.
-void ResetFileChangeTracker(
-    fileapi::FileSystemContext* file_system_context,
-    const fileapi::FileSystemURL& url) {
+void ResetFileChangeTracker(storage::FileSystemContext* file_system_context,
+                            const storage::FileSystemURL& url) {
   DCHECK(file_system_context->default_file_task_runner()->
              RunsTasksOnCurrentThread());
   SyncFileSystemBackend* backend =
@@ -35,21 +34,21 @@ void ResetFileChangeTracker(
 }  // namespace
 
 RootDeleteHelper::RootDeleteHelper(
-    fileapi::FileSystemContext* file_system_context,
+    storage::FileSystemContext* file_system_context,
     LocalFileSyncStatus* sync_status,
-    const fileapi::FileSystemURL& url,
+    const storage::FileSystemURL& url,
     const FileStatusCallback& callback)
     : file_system_context_(file_system_context),
       url_(url),
       callback_(callback),
       sync_status_(sync_status),
       weak_factory_(this) {
-  DCHECK(file_system_context_);
+  DCHECK(file_system_context_.get());
   DCHECK(url_.is_valid());
   DCHECK(!callback_.is_null());
   DCHECK(sync_status_);
   // This is expected to run on the filesystem root.
-  DCHECK(fileapi::VirtualPath::IsRootPath(url.path()));
+  DCHECK(storage::VirtualPath::IsRootPath(url.path()));
 }
 
 RootDeleteHelper::~RootDeleteHelper() {
@@ -89,10 +88,12 @@ void RootDeleteHelper::DidResetFileChangeTracker() {
 
   // Reopening the filesystem.
   file_system_context_->sandbox_delegate()->OpenFileSystem(
-      url_.origin(), url_.type(),
-      fileapi::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
+      url_.origin(),
+      url_.type(),
+      storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
       base::Bind(&RootDeleteHelper::DidOpenFileSystem,
-                 weak_factory_.GetWeakPtr()), GURL());
+                 weak_factory_.GetWeakPtr()),
+      GURL());
 }
 
 void RootDeleteHelper::DidOpenFileSystem(const GURL& /* root */,

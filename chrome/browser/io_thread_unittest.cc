@@ -129,14 +129,15 @@ TEST_F(IOThreadTest, EnableQuicFromFieldTrialGroup) {
   EXPECT_TRUE(params.enable_quic);
   EXPECT_FALSE(params.enable_quic_time_based_loss_detection);
   EXPECT_EQ(1350u, params.quic_max_packet_length);
+  EXPECT_EQ(1.0, params.alternate_protocol_probability_threshold);
   EXPECT_EQ(default_params.quic_supported_versions,
             params.quic_supported_versions);
   EXPECT_EQ(net::QuicTagVector(), params.quic_connection_options);
   EXPECT_FALSE(params.quic_always_require_handshake_confirmation);
+  EXPECT_FALSE(params.quic_disable_connection_pooling);
 }
 
 TEST_F(IOThreadTest, EnableQuicFromCommandLine) {
-  base::CommandLine::StringVector args;
   command_line_.AppendSwitch("enable-quic");
 
   ConfigureQuicGlobals();
@@ -146,7 +147,6 @@ TEST_F(IOThreadTest, EnableQuicFromCommandLine) {
 }
 
 TEST_F(IOThreadTest, EnablePacingFromCommandLine) {
-  base::CommandLine::StringVector args;
   command_line_.AppendSwitch("enable-quic");
   command_line_.AppendSwitch("enable-quic-pacing");
 
@@ -182,7 +182,6 @@ TEST_F(IOThreadTest, EnablePacingFromFieldTrialParams) {
 }
 
 TEST_F(IOThreadTest, EnableTimeBasedLossDetectionFromCommandLine) {
-  base::CommandLine::StringVector args;
   command_line_.AppendSwitch("enable-quic");
   command_line_.AppendSwitch("enable-quic-time-based-loss-detection");
 
@@ -212,7 +211,6 @@ TEST_F(IOThreadTest, EnableTimeBasedLossDetectionFromFieldTrialParams) {
 }
 
 TEST_F(IOThreadTest, PacketLengthFromCommandLine) {
-  base::CommandLine::StringVector args;
   command_line_.AppendSwitch("enable-quic");
   command_line_.AppendSwitchASCII("quic-max-packet-length", "1350");
 
@@ -242,7 +240,6 @@ TEST_F(IOThreadTest, PacketLengthFromFieldTrialParams) {
 }
 
 TEST_F(IOThreadTest, QuicVersionFromCommandLine) {
-  base::CommandLine::StringVector args;
   command_line_.AppendSwitch("enable-quic");
   std::string version =
       net::QuicVersionToString(net::QuicSupportedVersions().back());
@@ -272,7 +269,6 @@ TEST_F(IOThreadTest, QuicVersionFromFieldTrialParams) {
 }
 
 TEST_F(IOThreadTest, QuicConnectionOptionsFromCommandLine) {
-  base::CommandLine::StringVector args;
   command_line_.AppendSwitch("enable-quic");
   command_line_.AppendSwitchASCII("quic-connection-options",
                                   "PACE,TIME,TBBR,REJ");
@@ -329,6 +325,48 @@ TEST_F(IOThreadTest,
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
   EXPECT_TRUE(params.quic_always_require_handshake_confirmation);
+}
+
+TEST_F(IOThreadTest,
+       QuicDisableConnectionPoolingFromFieldTrialParams) {
+  field_trial_group_ = "Enabled";
+  field_trial_params_["disable_connection_pooling"] = "true";
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_TRUE(params.quic_disable_connection_pooling);
+}
+
+TEST_F(IOThreadTest,
+       AlternateProtocolProbabilityThresholdFromFlag) {
+  command_line_.AppendSwitchASCII("alternate-protocol-probability-threshold",
+                                  ".5");
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_EQ(.5, params.alternate_protocol_probability_threshold);
+}
+
+TEST_F(IOThreadTest,
+       AlternateProtocolProbabilityThresholdFromEnableQuicFlag) {
+  command_line_.AppendSwitch("enable-quic");
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_EQ(0, params.alternate_protocol_probability_threshold);
+}
+
+TEST_F(IOThreadTest,
+       AlternateProtocolProbabilityThresholdFromParams) {
+  field_trial_group_ = "Enabled";
+  field_trial_params_["alternate_protocol_probability_threshold"] = ".5";
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_EQ(.5, params.alternate_protocol_probability_threshold);
 }
 
 }  // namespace test

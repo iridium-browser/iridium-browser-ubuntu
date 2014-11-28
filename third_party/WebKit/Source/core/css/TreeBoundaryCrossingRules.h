@@ -40,7 +40,7 @@ class RuleFeatureSet;
 class TreeBoundaryCrossingRules FINAL {
     DISALLOW_ALLOCATION();
 public:
-    void addTreeBoundaryCrossingRules(const RuleSet&, ContainerNode& scope, CSSStyleSheet*);
+    void addTreeBoundaryCrossingRules(const RuleSet&, CSSStyleSheet*, unsigned sheetIndex, ContainerNode&);
 
     void reset(const ContainerNode* scopingNode);
     void collectFeaturesTo(RuleFeatureSet&);
@@ -50,7 +50,28 @@ public:
 
 private:
     size_t size() const { return m_scopingNodes.size(); }
-    typedef WillBeHeapVector<std::pair<CSSStyleSheet*, OwnPtrWillBeMember<RuleSet> > > CSSStyleSheetRuleSubSet;
+    class RuleSubSet FINAL : public NoBaseWillBeGarbageCollected<RuleSubSet> {
+    public:
+        static PassOwnPtrWillBeRawPtr<RuleSubSet> create(CSSStyleSheet* sheet, unsigned index, PassOwnPtrWillBeRawPtr<RuleSet> rules)
+        {
+            return adoptPtrWillBeNoop(new RuleSubSet(sheet, index, rules));
+        }
+
+        CSSStyleSheet* parentStyleSheet;
+        unsigned parentIndex;
+        OwnPtrWillBeMember<RuleSet> ruleSet;
+
+        void trace(Visitor*);
+
+    private:
+        RuleSubSet(CSSStyleSheet* sheet, unsigned index, PassOwnPtrWillBeRawPtr<RuleSet> rules)
+            : parentStyleSheet(sheet)
+            , parentIndex(index)
+            , ruleSet(rules)
+        {
+        }
+    };
+    typedef WillBeHeapVector<OwnPtrWillBeMember<RuleSubSet> > CSSStyleSheetRuleSubSet;
     void collectFeaturesFromRuleSubSet(CSSStyleSheetRuleSubSet*, RuleFeatureSet&);
 
     DocumentOrderedList m_scopingNodes;

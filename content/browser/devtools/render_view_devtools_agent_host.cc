@@ -6,8 +6,9 @@
 
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/devtools/devtools_manager_impl.h"
+#include "content/browser/devtools/devtools_manager.h"
 #include "content/browser/devtools/devtools_power_handler.h"
 #include "content/browser/devtools/devtools_protocol.h"
 #include "content/browser/devtools/devtools_protocol_constants.h"
@@ -24,6 +25,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host_iterator.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 #if defined(OS_ANDROID)
 #include "content/browser/power_save_blocker_impl.h"
@@ -72,7 +74,7 @@ bool DevToolsAgentHost::IsDebuggerAttached(WebContents* web_contents) {
 }
 
 //static
-std::vector<WebContents*> DevToolsAgentHost::GetInspectableWebContents() {
+std::vector<WebContents*> DevToolsAgentHostImpl::GetInspectableWebContents() {
   std::set<WebContents*> set;
   scoped_ptr<RenderWidgetHostIterator> widgets(
       RenderWidgetHost::GetRenderWidgetHosts());
@@ -127,7 +129,7 @@ WebContents* RenderViewDevToolsAgentHost::GetWebContents() {
   return web_contents();
 }
 
-void RenderViewDevToolsAgentHost::DispatchOnInspectorBackend(
+void RenderViewDevToolsAgentHost::DispatchProtocolMessage(
     const std::string& message) {
   std::string error_message;
 
@@ -136,11 +138,11 @@ void RenderViewDevToolsAgentHost::DispatchOnInspectorBackend(
   scoped_refptr<DevToolsProtocol::Command> command =
       DevToolsProtocol::ParseCommand(message_dict.get(), &error_message);
 
-  if (command) {
+  if (command.get()) {
     scoped_refptr<DevToolsProtocol::Response> overridden_response;
 
     DevToolsManagerDelegate* delegate =
-        DevToolsManagerImpl::GetInstance()->delegate();
+        DevToolsManager::GetInstance()->delegate();
     if (delegate) {
       scoped_ptr<base::DictionaryValue> overridden_response_value(
           delegate->HandleCommand(this, message_dict.get()));
@@ -148,20 +150,20 @@ void RenderViewDevToolsAgentHost::DispatchOnInspectorBackend(
         overridden_response = DevToolsProtocol::ParseResponse(
             overridden_response_value.get());
     }
-    if (!overridden_response)
+    if (!overridden_response.get())
       overridden_response = overrides_handler_->HandleCommand(command);
-    if (!overridden_response)
+    if (!overridden_response.get())
       overridden_response = tracing_handler_->HandleCommand(command);
-    if (!overridden_response)
+    if (!overridden_response.get())
       overridden_response = power_handler_->HandleCommand(command);
-    if (overridden_response) {
+    if (overridden_response.get()) {
       if (!overridden_response->is_async_promise())
         OnDispatchOnInspectorFrontend(overridden_response->Serialize());
       return;
     }
   }
 
-  IPCDevToolsAgentHost::DispatchOnInspectorBackend(message);
+  IPCDevToolsAgentHost::DispatchProtocolMessage(message);
 }
 
 void RenderViewDevToolsAgentHost::SendMessageToAgent(IPC::Message* msg) {
@@ -177,10 +179,10 @@ void RenderViewDevToolsAgentHost::OnClientAttached() {
 
   InnerOnClientAttached();
 
-  // TODO(kaznacheev): Move this call back to DevToolsManagerImpl when
+  // TODO(kaznacheev): Move this call back to DevToolsManager when
   // extensions::ProcessManager no longer relies on this notification.
   if (!reattaching_)
-    DevToolsManagerImpl::GetInstance()->NotifyObservers(this, true);
+    DevToolsAgentHostImpl::NotifyCallbacks(this, true);
 }
 
 void RenderViewDevToolsAgentHost::InnerOnClientAttached() {
@@ -209,10 +211,10 @@ void RenderViewDevToolsAgentHost::OnClientDetached() {
   power_handler_->OnClientDetached();
   ClientDetachedFromRenderer();
 
-  // TODO(kaznacheev): Move this call back to DevToolsManagerImpl when
+  // TODO(kaznacheev): Move this call back to DevToolsManager when
   // extensions::ProcessManager no longer relies on this notification.
   if (!reattaching_)
-    DevToolsManagerImpl::GetInstance()->NotifyObservers(this, false);
+    DevToolsAgentHostImpl::NotifyCallbacks(this, false);
 }
 
 void RenderViewDevToolsAgentHost::ClientDetachedFromRenderer() {
@@ -286,7 +288,7 @@ void RenderViewDevToolsAgentHost::RenderViewDeleted(RenderViewHost* rvh) {
 
   DCHECK(render_view_host_);
   scoped_refptr<RenderViewDevToolsAgentHost> protect(this);
-  NotifyCloseListener();
+  HostClosed();
   ClearRenderViewHost();
   Release();
 }
@@ -319,6 +321,8 @@ bool RenderViewDevToolsAgentHost::OnMessageReceived(
 }
 
 void RenderViewDevToolsAgentHost::DidAttachInterstitialPage() {
+  overrides_handler_->DidAttachInterstitialPage();
+
   if (!render_view_host_)
     return;
   // The rvh set in AboutToNavigateRenderView turned out to be interstitial.
@@ -329,6 +333,10 @@ void RenderViewDevToolsAgentHost::DidAttachInterstitialPage() {
     return;
   DisconnectRenderViewHost();
   ConnectRenderViewHost(web_contents->GetRenderViewHost());
+}
+
+void RenderViewDevToolsAgentHost::DidDetachInterstitialPage() {
+  overrides_handler_->DidDetachInterstitialPage();
 }
 
 void RenderViewDevToolsAgentHost::Observe(int type,
@@ -371,6 +379,39 @@ void RenderViewDevToolsAgentHost::ConnectWebContents(WebContents* wc) {
   ConnectRenderViewHost(wc->GetRenderViewHost());
 }
 
+DevToolsAgentHost::Type RenderViewDevToolsAgentHost::GetType() {
+  return TYPE_WEB_CONTENTS;
+}
+
+std::string RenderViewDevToolsAgentHost::GetTitle() {
+  if (WebContents* web_contents = GetWebContents())
+    return base::UTF16ToUTF8(web_contents->GetTitle());
+  return "";
+}
+
+GURL RenderViewDevToolsAgentHost::GetURL() {
+  if (WebContents* web_contents = GetWebContents())
+    return web_contents->GetVisibleURL();
+  return render_view_host_ ?
+      render_view_host_->GetMainFrame()->GetLastCommittedURL() : GURL();
+}
+
+bool RenderViewDevToolsAgentHost::Activate() {
+  if (render_view_host_) {
+    render_view_host_->GetDelegate()->Activate();
+    return true;
+  }
+  return false;
+}
+
+bool RenderViewDevToolsAgentHost::Close() {
+  if (render_view_host_) {
+    render_view_host_->ClosePage();
+    return true;
+  }
+  return false;
+}
+
 void RenderViewDevToolsAgentHost::ConnectRenderViewHost(RenderViewHost* rvh) {
   SetRenderViewHost(rvh);
   if (IsAttached())
@@ -386,8 +427,7 @@ void RenderViewDevToolsAgentHost::RenderViewCrashed() {
   scoped_refptr<DevToolsProtocol::Notification> notification =
       DevToolsProtocol::CreateNotification(
           devtools::Inspector::targetCrashed::kName, NULL);
-  DevToolsManagerImpl::GetInstance()->
-      DispatchOnInspectorFrontend(this, notification->Serialize());
+  SendMessageToClient(notification->Serialize());
 }
 
 bool RenderViewDevToolsAgentHost::DispatchIPCMessage(
@@ -403,8 +443,6 @@ bool RenderViewDevToolsAgentHost::DispatchIPCMessage(
                         OnSaveAgentRuntimeState)
     IPC_MESSAGE_HANDLER_GENERIC(ViewHostMsg_SwapCompositorFrame,
                                 handled = false; OnSwapCompositorFrame(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(ViewHostMsg_SetTouchEventEmulationEnabled,
-                                handled = OnSetTouchEventEmulationEnabled(msg))
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -416,11 +454,6 @@ void RenderViewDevToolsAgentHost::OnSwapCompositorFrame(
   if (!ViewHostMsg_SwapCompositorFrame::Read(&message, &param))
     return;
   overrides_handler_->OnSwapCompositorFrame(param.b.metadata);
-}
-
-bool RenderViewDevToolsAgentHost::OnSetTouchEventEmulationEnabled(
-    const IPC::Message& message) {
-  return overrides_handler_->OnSetTouchEventEmulationEnabled();
 }
 
 void RenderViewDevToolsAgentHost::SynchronousSwapCompositorFrame(
@@ -441,15 +474,7 @@ void RenderViewDevToolsAgentHost::OnDispatchOnInspectorFrontend(
     const std::string& message) {
   if (!render_view_host_)
     return;
-
-  scoped_refptr<DevToolsProtocol::Notification> notification =
-      DevToolsProtocol::ParseNotification(message);
-
-  if (notification) {
-    tracing_handler_->HandleNotification(notification);
-  }
-  DevToolsManagerImpl::GetInstance()->DispatchOnInspectorFrontend(
-      this, message);
+  SendMessageToClient(message);
 }
 
 }  // namespace content

@@ -68,13 +68,10 @@ void VerifyCodecHasDefaultFeedbackParams(const cricket::VideoCodec& codec) {
 namespace cricket {
 FakeVideoSendStream::FakeVideoSendStream(
     const webrtc::VideoSendStream::Config& config,
-    const std::vector<webrtc::VideoStream>& video_streams,
-    const void* encoder_settings)
-    : sending_(false),
-      config_(config),
-      codec_settings_set_(false) {
+    const webrtc::VideoEncoderConfig& encoder_config)
+    : sending_(false), config_(config), codec_settings_set_(false) {
   assert(config.encoder_settings.encoder != NULL);
-  ReconfigureVideoEncoder(video_streams, encoder_settings);
+  ReconfigureVideoEncoder(encoder_config);
 }
 
 webrtc::VideoSendStream::Config FakeVideoSendStream::GetConfig() {
@@ -82,7 +79,7 @@ webrtc::VideoSendStream::Config FakeVideoSendStream::GetConfig() {
 }
 
 std::vector<webrtc::VideoStream> FakeVideoSendStream::GetVideoStreams() {
-  return video_streams_;
+  return encoder_config_.streams;
 }
 
 bool FakeVideoSendStream::IsSending() const {
@@ -104,15 +101,14 @@ webrtc::VideoSendStream::Stats FakeVideoSendStream::GetStats() const {
 }
 
 bool FakeVideoSendStream::ReconfigureVideoEncoder(
-    const std::vector<webrtc::VideoStream>& streams,
-    const void* encoder_specific) {
-  video_streams_ = streams;
-  if (encoder_specific != NULL) {
+    const webrtc::VideoEncoderConfig& config) {
+  encoder_config_ = config;
+  if (config.encoder_specific_settings != NULL) {
     assert(config_.encoder_settings.payload_name == "VP8");
-    vp8_settings_ =
-        *reinterpret_cast<const webrtc::VideoCodecVP8*>(encoder_specific);
+    vp8_settings_ = *reinterpret_cast<const webrtc::VideoCodecVP8*>(
+                        config.encoder_specific_settings);
   }
-  codec_settings_set_ = encoder_specific != NULL;
+  codec_settings_set_ = config.encoder_specific_settings != NULL;
   return true;
 }
 
@@ -157,7 +153,9 @@ void FakeVideoReceiveStream::Stop() {
 void FakeVideoReceiveStream::GetCurrentReceiveCodec(webrtc::VideoCodec* codec) {
 }
 
-FakeCall::FakeCall() { SetVideoCodecs(GetDefaultVideoCodecs()); }
+FakeCall::FakeCall() : network_state_(kNetworkUp) {
+  SetVideoCodecs(GetDefaultVideoCodecs());
+}
 
 FakeCall::~FakeCall() {
   EXPECT_EQ(0u, video_send_streams_.size());
@@ -218,12 +216,15 @@ std::vector<webrtc::VideoCodec> FakeCall::GetDefaultVideoCodecs() {
   return codecs;
 }
 
+webrtc::Call::NetworkState FakeCall::GetNetworkState() const {
+  return network_state_;
+}
+
 webrtc::VideoSendStream* FakeCall::CreateVideoSendStream(
     const webrtc::VideoSendStream::Config& config,
-    const std::vector<webrtc::VideoStream>& video_streams,
-    const void* encoder_settings) {
+    const webrtc::VideoEncoderConfig& encoder_config) {
   FakeVideoSendStream* fake_stream =
-      new FakeVideoSendStream(config, video_streams, encoder_settings);
+      new FakeVideoSendStream(config, encoder_config);
   video_send_streams_.push_back(fake_stream);
   return fake_stream;
 }
@@ -274,6 +275,10 @@ uint32_t FakeCall::ReceiveBitrateEstimate() {
   return 0;
 }
 
+void FakeCall::SignalNetworkState(webrtc::Call::NetworkState state) {
+  network_state_ = state;
+}
+
 FakeWebRtcVideoChannel2::FakeWebRtcVideoChannel2(
     FakeCall* call,
     WebRtcVideoEngine2* engine,
@@ -289,6 +294,7 @@ FakeWebRtcVideoChannel2::~FakeWebRtcVideoChannel2() {
 VoiceMediaChannel* FakeWebRtcVideoChannel2::GetVoiceChannel() {
   return voice_channel_;
 }
+
 FakeCall* FakeWebRtcVideoChannel2::GetFakeCall() {
   return fake_call_;
 }
@@ -309,7 +315,8 @@ WebRtcVideoChannel2* FakeWebRtcVideoMediaChannelFactory::Create(
 
 class WebRtcVideoEngine2Test : public testing::Test {
  public:
-  WebRtcVideoEngine2Test() : engine_(&factory_) {
+  WebRtcVideoEngine2Test() {
+    engine_.SetChannelFactory(&factory_);
     std::vector<VideoCodec> engine_codecs = engine_.codecs();
     assert(!engine_codecs.empty());
     bool codec_set = false;
@@ -535,14 +542,16 @@ WEBRTC_BASE_TEST(AdaptResolution16x10);
 
 WEBRTC_BASE_TEST(AdaptResolution4x3);
 
-WEBRTC_BASE_TEST(MuteStream);
-
-WEBRTC_BASE_TEST(MultipleSendStreams);
-
 // TODO(juberti): Restore this test once we support sending 0 fps.
 WEBRTC_DISABLED_BASE_TEST(AdaptDropAllFrames);
 // TODO(juberti): Understand why we get decode errors on this test.
 WEBRTC_DISABLED_BASE_TEST(AdaptFramerate);
+
+WEBRTC_BASE_TEST(SendsLowerResolutionOnSmallerFrames);
+
+WEBRTC_BASE_TEST(MuteStream);
+
+WEBRTC_BASE_TEST(MultipleSendStreams);
 
 WEBRTC_BASE_TEST(SetSendStreamFormat0x0);
 
@@ -1611,8 +1620,17 @@ TEST_F(WebRtcVideoChannel2Test, DISABLED_UpdateEncoderCodecsAfterSetFactory) {
   FAIL() << "Not implemented.";  // TODO(pbos): Implement.
 }
 
-TEST_F(WebRtcVideoChannel2Test, DISABLED_OnReadyToSend) {
-  FAIL() << "Not implemented.";  // TODO(pbos): Implement.
+TEST_F(WebRtcVideoChannel2Test, OnReadyToSendSignalsNetworkState) {
+  EXPECT_EQ(webrtc::Call::kNetworkUp,
+            fake_channel_->GetFakeCall()->GetNetworkState());
+
+  channel_->OnReadyToSend(false);
+  EXPECT_EQ(webrtc::Call::kNetworkDown,
+            fake_channel_->GetFakeCall()->GetNetworkState());
+
+  channel_->OnReadyToSend(true);
+  EXPECT_EQ(webrtc::Call::kNetworkUp,
+            fake_channel_->GetFakeCall()->GetNetworkState());
 }
 
 TEST_F(WebRtcVideoChannel2Test, DISABLED_CaptureFrameTimestampToNtpTimestamp) {

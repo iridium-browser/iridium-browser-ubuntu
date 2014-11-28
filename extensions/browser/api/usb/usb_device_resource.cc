@@ -9,14 +9,15 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/lazy_instance.h"
 #include "base/synchronization/lock.h"
-#include "components/usb_service/usb_device_handle.h"
 #include "content/public/browser/browser_thread.h"
+#include "device/usb/usb_device_handle.h"
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/common/api/usb.h"
 
 using content::BrowserThread;
-using usb_service::UsbDeviceHandle;
+using device::UsbDeviceHandle;
 
 namespace extensions {
 
@@ -37,9 +38,11 @@ UsbDeviceResource::UsbDeviceResource(const std::string& owner_extension_id,
 }
 
 UsbDeviceResource::~UsbDeviceResource() {
-  BrowserThread::PostTask(BrowserThread::FILE,
-                          FROM_HERE,
-                          base::Bind(&UsbDeviceHandle::Close, device_));
+  device_->Close();
+}
+
+bool UsbDeviceResource::IsPersistent() const {
+  return false;
 }
 
 }  // namespace extensions

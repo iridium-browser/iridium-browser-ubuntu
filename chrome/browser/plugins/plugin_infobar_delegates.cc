@@ -16,14 +16,15 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -61,7 +62,7 @@ bool PluginInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
       content::OpenURLParams(
           GURL(GetLearnMoreURL()), content::Referrer(),
           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-          content::PAGE_TRANSITION_LINK, false));
+          ui::PAGE_TRANSITION_LINK, false));
   return false;
 }
 
@@ -400,7 +401,7 @@ bool PluginInstallerInfoBarDelegate::LinkClicked(
       content::OpenURLParams(
           url, content::Referrer(),
           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-          content::PAGE_TRANSITION_LINK, false));
+          ui::PAGE_TRANSITION_LINK, false));
   return false;
 }
 
@@ -482,15 +483,9 @@ int PluginMetroModeInfoBarDelegate::GetButtons() const {
 
 base::string16 PluginMetroModeInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
-#if defined(USE_AURA) && defined(USE_ASH)
-  return l10n_util::GetStringUTF16(IDS_WIN8_DESKTOP_RESTART);
-#else
-  return l10n_util::GetStringUTF16((mode_ == MISSING_PLUGIN) ?
-      IDS_WIN8_DESKTOP_RESTART : IDS_WIN8_DESKTOP_OPEN);
-#endif
+  return l10n_util::GetStringUTF16(IDS_WIN_DESKTOP_RESTART);
 }
 
-#if defined(USE_AURA) && defined(USE_ASH)
 void LaunchDesktopInstanceHelper(const base::string16& url) {
   base::FilePath exe_path;
   if (!PathService::Get(base::FILE_EXE, &exe_path))
@@ -504,7 +499,6 @@ void LaunchDesktopInstanceHelper(const base::string16& url) {
   aura::RemoteWindowTreeHostWin::Instance()->HandleOpenURLOnDesktop(
       shortcut_path, url);
 }
-#endif
 
 bool PluginMetroModeInfoBarDelegate::Accept() {
   chrome::AttemptRestartToDesktopMode();
@@ -527,7 +521,7 @@ bool PluginMetroModeInfoBarDelegate::LinkClicked(
               "https://support.google.com/chrome/?p=ib_redirect_to_desktop"),
           content::Referrer(),
           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-          content::PAGE_TRANSITION_LINK, false));
+          ui::PAGE_TRANSITION_LINK, false));
   return false;
 }
 

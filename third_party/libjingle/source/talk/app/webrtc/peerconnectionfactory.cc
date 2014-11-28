@@ -41,6 +41,7 @@
 #include "talk/media/webrtc/webrtcmediaengine.h"
 #include "talk/media/webrtc/webrtcvideodecoderfactory.h"
 #include "talk/media/webrtc/webrtcvideoencoderfactory.h"
+#include "webrtc/base/bind.h"
 #include "webrtc/modules/audio_device/include/audio_device.h"
 
 using rtc::scoped_refptr;
@@ -239,14 +240,14 @@ bool PeerConnectionFactory::Initialize_s() {
       new cricket::DummyDeviceManager());
   // TODO:  Need to make sure only one VoE is created inside
   // WebRtcMediaEngine.
-  cricket::WebRtcMediaEngine* webrtc_media_engine(
-      new cricket::WebRtcMediaEngine(default_adm_.get(),
-                                     NULL,  // No secondary adm.
-                                     video_encoder_factory_.get(),
-                                     video_decoder_factory_.get()));
+  cricket::MediaEngineInterface* media_engine(
+      cricket::WebRtcMediaEngineFactory::Create(default_adm_.get(),
+                                                NULL,  // No secondary adm.
+                                                video_encoder_factory_.get(),
+                                                video_decoder_factory_.get()));
 
   channel_manager_.reset(new cricket::ChannelManager(
-      webrtc_media_engine, device_manager, worker_thread_));
+      media_engine, device_manager, worker_thread_));
   channel_manager_->SetVideoRtxEnabled(true);
   if (!channel_manager_->Init()) {
     return false;

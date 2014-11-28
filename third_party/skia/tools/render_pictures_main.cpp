@@ -30,11 +30,16 @@ DEFINE_bool(bench_record, false, "If true, drop into an infinite loop of recordi
 DECLARE_bool(deferImageDecoding);
 DEFINE_string(descriptions, "", "one or more key=value pairs to add to the descriptions section "
               "of the JSON summary.");
+DEFINE_string(imageBaseGSUrl, "", "The Google Storage image base URL the images are stored in.");
 DEFINE_int32(maxComponentDiff, 256, "Maximum diff on a component, 0 - 256. Components that differ "
              "by more than this amount are considered errors, though all diffs are reported. "
              "Requires --validate.");
 DEFINE_string(mismatchPath, "", "Write images for tests that failed due to "
               "pixel mismatches into this directory.");
+#if GR_GPU_STATS
+DEFINE_bool(gpuStats, false, "Only meaningful with gpu configurations. "
+            "Report some GPU call statistics.");
+#endif
 DEFINE_bool(preprocess, false, "If true, perform device specific preprocessing before rendering.");
 DEFINE_string(readJsonSummaryPath, "", "JSON file to read image expectations from.");
 DECLARE_string(readPath);
@@ -144,11 +149,11 @@ static bool render_picture_internal(const SkString& inputPath, const SkString* w
                                     SkBitmap** out) {
     SkString inputFilename = SkOSPath::Basename(inputPath.c_str());
     SkString writePathString;
-    if (NULL != writePath && writePath->size() > 0 && !FLAGS_writeEncodedImages) {
+    if (writePath && writePath->size() > 0 && !FLAGS_writeEncodedImages) {
         writePathString.set(*writePath);
     }
     SkString mismatchPathString;
-    if (NULL != mismatchPath && mismatchPath->size() > 0) {
+    if (mismatchPath && mismatchPath->size() > 0) {
         mismatchPathString.set(*mismatchPath);
     }
 
@@ -183,24 +188,30 @@ static bool render_picture_internal(const SkString& inputPath, const SkString* w
         // Because the GPU preprocessing step relies on the in-memory picture
         // statistics we need to rerecord the picture here
         SkPictureRecorder recorder;
-        picture->draw(recorder.beginRecording(picture->width(), picture->height(), NULL, 0));
+        picture->playback(recorder.beginRecording(picture->cullRect().width(), 
+                                                  picture->cullRect().height(), 
+                                                  NULL, 0));
         picture.reset(recorder.endRecording());
     }
 
     while (FLAGS_bench_record) {
         SkPictureRecorder recorder;
-        picture->draw(recorder.beginRecording(picture->width(), picture->height(), NULL, 0));
+        picture->playback(recorder.beginRecording(picture->cullRect().width(), 
+                                                  picture->cullRect().height(), 
+                                                  NULL, 0));
         SkAutoTUnref<SkPicture> other(recorder.endRecording());
     }
 
-    SkDebugf("drawing... [%i %i] %s\n", picture->width(), picture->height(),
+    SkDebugf("drawing... [%f %f %f %f] %s\n", 
+             picture->cullRect().fLeft, picture->cullRect().fTop,
+             picture->cullRect().fRight, picture->cullRect().fBottom,
              inputPath.c_str());
 
     renderer.init(picture, &writePathString, &mismatchPathString, &inputFilename,
                   FLAGS_writeChecksumBasedFilenames);
 
     if (FLAGS_preprocess) {
-        if (NULL != renderer.getCanvas()) {
+        if (renderer.getCanvas()) {
             renderer.getCanvas()->EXPERIMENTAL_optimize(renderer.getPicture());
         }
     }
@@ -243,7 +254,7 @@ public:
     }
 
     ~AutoRestoreBbhType() {
-        if (NULL != fRenderer) {
+        if (fRenderer) {
             fRenderer->setBBoxHierarchyType(fSavedBbhType);
         }
     }
@@ -292,7 +303,12 @@ static bool render_picture(const SkString& inputPath, const SkString* writePath,
             referenceRenderer->ref();  // to match auto unref below
             arbbh.set(referenceRenderer, sk_tools::PictureRenderer::kNone_BBoxHierarchyType);
         } else {
+#if SK_SUPPORT_GPU
+            referenceRenderer = SkNEW_ARGS(sk_tools::SimplePictureRenderer,
+                                           (renderer.getGrContextOptions()));
+#else
             referenceRenderer = SkNEW(sk_tools::SimplePictureRenderer);
+#endif
         }
         SkAutoTUnref<sk_tools::PictureRenderer> aurReferenceRenderer(referenceRenderer);
 
@@ -357,17 +373,17 @@ static bool render_picture(const SkString& inputPath, const SkString* writePath,
         sk_tools::replace_char(&outputFilename, '.', '_');
         outputFilename.append(".png");
 
-        if (NULL != jsonSummaryPtr) {
+        if (jsonSummaryPtr) {
             sk_tools::ImageDigest imageDigest(*bitmap);
             jsonSummaryPtr->add(inputFilename.c_str(), outputFilename.c_str(), imageDigest);
-            if ((NULL != mismatchPath) && !mismatchPath->isEmpty() &&
-                !jsonSummaryPtr->matchesExpectation(inputFilename.c_str(), imageDigest)) {
+            if ((mismatchPath) && !mismatchPath->isEmpty() &&
+                !jsonSummaryPtr->getExpectation(inputFilename.c_str()).matches(imageDigest)) {
                 success &= sk_tools::write_bitmap_to_disk(*bitmap, *mismatchPath, NULL,
                                                           outputFilename);
             }
         }
 
-        if ((NULL != writePath) && !writePath->isEmpty()) {
+        if ((writePath) && !writePath->isEmpty()) {
             success &= sk_tools::write_bitmap_to_disk(*bitmap, *writePath, NULL, outputFilename);
         }
     }
@@ -484,6 +500,13 @@ int tool_main(int argc, char** argv) {
 #endif
     }
 #endif
+#if GR_GPU_STATS
+    if (FLAGS_gpuStats && renderer->isUsingGpuDevice()) {
+        GrContext* ctx = renderer->getGrContext();
+        SkDebugf("RenderTarget Binds: %d\n", ctx->gpuStats()->renderTargetBinds());
+        SkDebugf("Shader Compilations: %d\n", ctx->gpuStats()->shaderCompilations());
+    }
+#endif
 #endif
     if (FLAGS_writeJsonSummaryPath.count() == 1) {
         // If there were any descriptions on the command line, insert them now.
@@ -492,6 +515,9 @@ int tool_main(int argc, char** argv) {
             SkStrSplit(FLAGS_descriptions[i], "=", &tokens);
             SkASSERT(tokens.count() == 2);
             jsonSummary.addDescription(tokens[0].c_str(), tokens[1].c_str());
+        }
+        if (FLAGS_imageBaseGSUrl.count() == 1) {
+          jsonSummary.setImageBaseGSUrl(FLAGS_imageBaseGSUrl[0]);
         }
         jsonSummary.writeToFile(FLAGS_writeJsonSummaryPath[0]);
     }

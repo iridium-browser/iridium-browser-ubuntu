@@ -15,6 +15,7 @@
 #include "webrtc/base/physicalsocketserver.h"
 #include "webrtc/base/socketaddress.h"
 #include "webrtc/base/thread.h"
+#include "webrtc/test/testsupport/gtest_disable.h"
 
 #if defined(WEBRTC_WIN)
 #include <comdef.h>  // NOLINT
@@ -105,6 +106,13 @@ class CustomThread : public rtc::Thread {
   CustomThread() {}
   virtual ~CustomThread() { Stop(); }
   bool Start() { return false; }
+
+  bool WrapCurrent() {
+    return Thread::WrapCurrent();
+  }
+  void UnwrapCurrent() {
+    Thread::UnwrapCurrent();
+  }
 };
 
 
@@ -191,7 +199,7 @@ TEST(ThreadTest, DISABLED_Main) {
 
 // Test that setting thread names doesn't cause a malfunction.
 // There's no easy way to verify the name was set properly at this time.
-TEST(ThreadTest, Names) {
+TEST(ThreadTest, DISABLED_ON_MAC(Names)) {
   // Default name
   Thread *thread;
   thread = new Thread();
@@ -214,7 +222,7 @@ TEST(ThreadTest, Names) {
 
 // Test that setting thread priorities doesn't cause a malfunction.
 // There's no easy way to verify the priority was set properly at this time.
-TEST(ThreadTest, Priorities) {
+TEST(ThreadTest, DISABLED_ON_MAC(Priorities)) {
   Thread *thread;
   thread = new Thread();
   EXPECT_TRUE(thread->SetPriority(PRIORITY_HIGH));
@@ -239,9 +247,7 @@ TEST(ThreadTest, Priorities) {
 
 }
 
-TEST(ThreadTest, Wrap) {
-  Thread* current_thread = Thread::Current();
-  current_thread->UnwrapCurrent();
+TEST(ThreadTest, DISABLED_ON_MAC(Wrap)) {
   CustomThread* cthread = new CustomThread();
   EXPECT_TRUE(cthread->WrapCurrent());
   EXPECT_TRUE(cthread->RunningForTest());
@@ -249,10 +255,9 @@ TEST(ThreadTest, Wrap) {
   cthread->UnwrapCurrent();
   EXPECT_FALSE(cthread->RunningForTest());
   delete cthread;
-  current_thread->WrapCurrent();
 }
 
-TEST(ThreadTest, Invoke) {
+TEST(ThreadTest, DISABLED_ON_MAC(Invoke)) {
   // Create and start the thread.
   Thread thread;
   thread.Start();
@@ -269,6 +274,78 @@ TEST(ThreadTest, Invoke) {
   };
   EXPECT_EQ(999, thread.Invoke<int>(&LocalFuncs::Func1));
   thread.Invoke<void>(&LocalFuncs::Func2);
+}
+
+// Verifies that two threads calling Invoke on each other at the same time does
+// not deadlock.
+TEST(ThreadTest, TwoThreadsInvokeNoDeadlock) {
+  AutoThread thread;
+  Thread* current_thread = Thread::Current();
+  ASSERT_TRUE(current_thread != NULL);
+
+  Thread other_thread;
+  other_thread.Start();
+
+  struct LocalFuncs {
+    static void Set(bool* out) { *out = true; }
+    static void InvokeSet(Thread* thread, bool* out) {
+      thread->Invoke<void>(Bind(&Set, out));
+    }
+  };
+
+  bool called = false;
+  other_thread.Invoke<void>(
+      Bind(&LocalFuncs::InvokeSet, current_thread, &called));
+
+  EXPECT_TRUE(called);
+}
+
+// Verifies that if thread A invokes a call on thread B and thread C is trying
+// to invoke A at the same time, thread A does not handle C's invoke while
+// invoking B.
+TEST(ThreadTest, ThreeThreadsInvoke) {
+  AutoThread thread;
+  Thread* thread_a = Thread::Current();
+  Thread thread_b, thread_c;
+  thread_b.Start();
+  thread_c.Start();
+
+  struct LocalFuncs {
+    static void Set(bool* out) { *out = true; }
+    static void InvokeSet(Thread* thread, bool* out) {
+      thread->Invoke<void>(Bind(&Set, out));
+    }
+
+    // Set |out| true and call InvokeSet on |thread|.
+    static void SetAndInvokeSet(bool* out, Thread* thread, bool* out_inner) {
+      *out = true;
+      InvokeSet(thread, out_inner);
+    }
+
+    // Asynchronously invoke SetAndInvokeSet on |thread1| and wait until
+    // |thread1| starts the call.
+    static void AsyncInvokeSetAndWait(
+        Thread* thread1, Thread* thread2, bool* out) {
+      bool async_invoked = false;
+
+      AsyncInvoker invoker;
+      invoker.AsyncInvoke<void>(
+          thread1, Bind(&SetAndInvokeSet, &async_invoked, thread2, out));
+
+      EXPECT_TRUE_WAIT(async_invoked, 2000);
+    }
+  };
+
+  bool thread_a_called = false;
+
+  // Start the sequence A --(invoke)--> B --(async invoke)--> C --(invoke)--> A.
+  // Thread B returns when C receives the call and C should be blocked until A
+  // starts to process messages.
+  thread_b.Invoke<void>(Bind(&LocalFuncs::AsyncInvokeSetAndWait,
+                             &thread_c, thread_a, &thread_a_called));
+  EXPECT_FALSE(thread_a_called);
+
+  EXPECT_TRUE_WAIT(thread_a_called, 2000);
 }
 
 class AsyncInvokeTest : public testing::Test {
@@ -300,7 +377,7 @@ class AsyncInvokeTest : public testing::Test {
   Thread* expected_thread_;
 };
 
-TEST_F(AsyncInvokeTest, FireAndForget) {
+TEST_F(AsyncInvokeTest, DISABLED_FireAndForget) {
   AsyncInvoker invoker;
   // Create and start the thread.
   Thread thread;
@@ -311,7 +388,7 @@ TEST_F(AsyncInvokeTest, FireAndForget) {
   EXPECT_TRUE_WAIT(called, kWaitTimeout);
 }
 
-TEST_F(AsyncInvokeTest, WithCallback) {
+TEST_F(AsyncInvokeTest, DISABLED_WithCallback) {
   AsyncInvoker invoker;
   // Create and start the thread.
   Thread thread;
@@ -324,7 +401,7 @@ TEST_F(AsyncInvokeTest, WithCallback) {
   EXPECT_EQ_WAIT(42, int_value_, kWaitTimeout);
 }
 
-TEST_F(AsyncInvokeTest, CancelInvoker) {
+TEST_F(AsyncInvokeTest, DISABLED_CancelInvoker) {
   // Create and start the thread.
   Thread thread;
   thread.Start();
@@ -340,7 +417,7 @@ TEST_F(AsyncInvokeTest, CancelInvoker) {
   EXPECT_EQ(0, int_value_);
 }
 
-TEST_F(AsyncInvokeTest, CancelCallingThread) {
+TEST_F(AsyncInvokeTest, DISABLED_CancelCallingThread) {
   AsyncInvoker invoker;
   { // Create and start the thread.
     Thread thread;
@@ -357,7 +434,7 @@ TEST_F(AsyncInvokeTest, CancelCallingThread) {
   EXPECT_EQ(0, int_value_);
 }
 
-TEST_F(AsyncInvokeTest, KillInvokerBeforeExecute) {
+TEST_F(AsyncInvokeTest, DISABLED_KillInvokerBeforeExecute) {
   Thread thread;
   thread.Start();
   {
@@ -374,7 +451,7 @@ TEST_F(AsyncInvokeTest, KillInvokerBeforeExecute) {
   EXPECT_EQ(0, int_value_);
 }
 
-TEST_F(AsyncInvokeTest, Flush) {
+TEST_F(AsyncInvokeTest, DISABLED_Flush) {
   AsyncInvoker invoker;
   bool flag1 = false;
   bool flag2 = false;
@@ -392,7 +469,7 @@ TEST_F(AsyncInvokeTest, Flush) {
   EXPECT_TRUE(flag2);
 }
 
-TEST_F(AsyncInvokeTest, FlushWithIds) {
+TEST_F(AsyncInvokeTest, DISABLED_FlushWithIds) {
   AsyncInvoker invoker;
   bool flag1 = false;
   bool flag2 = false;

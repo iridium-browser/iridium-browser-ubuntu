@@ -6,12 +6,12 @@
 
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/local_device_info_provider.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
 #include "chrome/browser/sync/sessions/sessions_util.h"
 #include "chrome/browser/sync/sessions/synced_window_delegates_getter.h"
 #include "chrome/common/url_constants.h"
+#include "components/sync_driver/local_device_info_provider.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
@@ -25,6 +25,8 @@
 
 using content::NavigationEntry;
 using sessions::SerializedNavigationEntry;
+using sync_driver::DeviceInfo;
+using sync_driver::LocalDeviceInfoProvider;
 using syncer::SyncChange;
 using syncer::SyncData;
 
@@ -122,7 +124,7 @@ syncer::SyncMergeResult SessionsSyncManager::MergeDataAndStartSyncing(
     base_specifics->set_session_tag(current_machine_tag());
     sync_pb::SessionHeader* header_s = base_specifics->mutable_header();
     header_s->set_client_name(current_session_name_);
-    header_s->set_device_type(DeviceInfo::GetLocalDeviceType());
+    header_s->set_device_type(local_device_info->device_type());
     syncer::SyncData data = syncer::SyncData::CreateLocalData(
         current_machine_tag(), current_session_name_, specifics);
     new_changes.push_back(syncer::SyncChange(
@@ -158,7 +160,11 @@ void SessionsSyncManager::AssociateWindows(
   SyncedSession* current_session = session_tracker_.GetSession(local_tag);
   current_session->modified_time = base::Time::Now();
   header_s->set_client_name(current_session_name_);
-  header_s->set_device_type(DeviceInfo::GetLocalDeviceType());
+  // SessionDataTypeController ensures that the local device info
+  // is available before activating this datatype.
+  DCHECK(local_device_);
+  const DeviceInfo* local_device_info = local_device_->GetLocalDeviceInfo();
+  header_s->set_device_type(local_device_info->device_type());
 
   session_tracker_.ResetSessionTracking(local_tag);
   std::set<SyncedWindowDelegate*> windows =
@@ -336,6 +342,24 @@ void SessionsSyncManager::RebuildAssociations() {
   StopSyncing(syncer::SESSIONS);
   MergeDataAndStartSyncing(
       syncer::SESSIONS, data, processor.Pass(), error_handler.Pass());
+}
+
+bool SessionsSyncManager::IsValidSessionHeader(
+    const sync_pb::SessionHeader& header) {
+  // Verify that tab IDs appear only once within a session.
+  // Intended to prevent http://crbug.com/360822.
+  std::set<int> session_tab_ids;
+  for (int i = 0; i < header.window_size(); ++i) {
+    const sync_pb::SessionWindow& window = header.window(i);
+    for (int j = 0; j < window.tab_size(); ++j) {
+      const int tab_id = window.tab(j);
+      bool success = session_tab_ids.insert(tab_id).second;
+      if (!success)
+        return false;
+    }
+  }
+
+  return true;
 }
 
 void SessionsSyncManager::OnLocalTabModified(SyncedTabDelegate* modified_tab) {
@@ -588,6 +612,12 @@ void SessionsSyncManager::UpdateTrackerWithForeignSession(
     // Read in the header data for this foreign session.
     // Header data contains window information and ordered tab id's for each
     // window.
+
+    if (!IsValidSessionHeader(specifics.header())) {
+      LOG(WARNING) << "Ignoring foreign session node with invalid header "
+                   << "and tag " << foreign_session_tag << ".";
+      return;
+    }
 
     // Load (or create) the SyncedSession object for this client.
     const sync_pb::SessionHeader& header = specifics.header();

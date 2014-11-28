@@ -48,6 +48,8 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
       const v8::FunctionCallbackInfo<v8::Value>& args);
   void SetDestinationCastUdpTransport(
       const v8::FunctionCallbackInfo<v8::Value>& args);
+  void SetOptionsCastUdpTransport(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
   void StopCastUdpTransport(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -83,8 +85,6 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
   typedef std::map<int, linked_ptr<CastUdpTransport> > UdpTransportMap;
   UdpTransportMap udp_transport_map_;
 
-  base::WeakPtrFactory<CastStreamingNativeHandler> weak_factory_;
-
   extensions::ScopedPersistent<v8::Function> create_callback_;
 
   typedef std::map<int,
@@ -92,6 +92,8 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
       RtpStreamCallbackMap;
   RtpStreamCallbackMap get_raw_events_callbacks_;
   RtpStreamCallbackMap get_stats_callbacks_;
+
+  base::WeakPtrFactory<CastStreamingNativeHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CastStreamingNativeHandler);
 };

@@ -14,24 +14,24 @@
   },
   "RegistryEntries": {
     "HKEY_LOCAL_MACHINE\\$CHROME_UPDATE_REGISTRY_SUBKEY": {
-      "exists": true,
+      "exists": "required",
       "values": {
         "pv": {"type": "SZ", "data": "$MINI_INSTALLER_FILE_VERSION"}
       }
     },
     "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$CHROME_LONG_NAME": {
-      "exists": true,
+      "exists": "required",
       "values": {
         "UninstallString": {
           "type": "SZ",
-          "data": "\"$PROGRAM_FILES\\$CHROME_DIR\\Application\\$MINI_INSTALLER_FILE_VERSION\\Installer\\setup.exe\" --uninstall --multi-install --chrome --system-level"
+          "data": "\"$PROGRAM_FILES\\$CHROME_DIR\\Application\\$MINI_INSTALLER_FILE_VERSION\\Installer\\setup.exe\" --uninstall --multi-install --chrome --system-level --verbose-logging"
         },
         "Version": {"type": "SZ", "data": "$MINI_INSTALLER_FILE_VERSION"}
       }
     },
     "HKEY_LOCAL_MACHINE\\Software\\Classes\\$CHROME_SHORT_NAME": {
       "condition": "$WINDOWS_VERSION >= $VERSION_WIN8",
-      "exists": true
+      "exists": "required"
     }
   }
 }

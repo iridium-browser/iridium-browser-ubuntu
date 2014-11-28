@@ -16,6 +16,7 @@
 
 #include "nacl_io/filesystem.h"
 #include "nacl_io/getdents_helper.h"
+#include "nacl_io/html5fs/html5_fs.h"
 #include "nacl_io/kernel_handle.h"
 #include "nacl_io/osdirent.h"
 #include "nacl_io/pepper_interface.h"
@@ -125,8 +126,13 @@ Error Html5FsNode::GetDents(size_t offs,
           std::min(static_cast<size_t>(file_name_length),
                    MEMBER_SIZE(dirent, d_name) - 1);  // -1 for NULL.
 
-      // TODO(binji): Better handling of ino numbers.
-      helper.AddDirent(1, file_name, file_name_length);
+      // The INO is based on the running hash of fully qualified path, so
+      // a childs INO must be the parent directories hash, plus '/', plus
+      // the filename.
+      ino_t child_ino = Html5Fs::HashPathSegment(stat_.st_ino, file_name,
+                                                 file_name_length);
+
+      helper.AddDirent(child_ino, file_name, file_name_length);
     }
 
     var_iface_->Release(file_name_var);
@@ -268,13 +274,17 @@ Error Html5FsNode::Init(int open_flags) {
     return EIO;
   }
 
+  // Set all files and directories to RWX.
+  SetMode(S_IWALL | S_IRALL | S_IXALL);
+
   // First query the FileRef to see if it is a file or directory.
   PP_FileInfo file_info;
   int32_t query_result = file_ref_iface_->Query(
       fileref_resource_, &file_info, PP_BlockUntilComplete());
   // If this is a directory, do not get a FileIO.
-  if (query_result == PP_OK && file_info.type == PP_FILETYPE_DIRECTORY)
+  if (query_result == PP_OK && file_info.type == PP_FILETYPE_DIRECTORY) {
     return 0;
+  }
 
   fileio_resource_ =
       file_io_iface_->Create(filesystem_->ppapi()->GetInstance());

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef EXTENSIONS_RENDERER_DISPATCHER_DELEGATE_H
-#define EXTENSIONS_RENDERER_DISPATCHER_DELEGATE_H
+#ifndef EXTENSIONS_RENDERER_DISPATCHER_DELEGATE_H_
+#define EXTENSIONS_RENDERER_DISPATCHER_DELEGATE_H_
 
 #include <set>
 #include <string>
@@ -36,7 +36,9 @@ class DispatcherDelegate {
       const v8::Handle<v8::Context>& v8_context,
       blink::WebFrame* frame,
       const Extension* extension,
-      Feature::Context context_type) = 0;
+      Feature::Context context_type,
+      const Extension* effective_extension,
+      Feature::Context effective_context_type) = 0;
 
   // Initializes origin permissions for a newly created extension context.
   virtual void InitOriginPermissions(const Extension* extension,
@@ -81,12 +83,8 @@ class DispatcherDelegate {
       int tab_id,
       const std::string& extension_id,
       const extensions::URLPatternSet& origin_set) {}
-
-  // Allows the delegate to respond to reports from the browser about WebRequest
-  // API usage from within this process.
-  virtual void HandleWebRequestAPIUsage(bool webrequest_used) {}
 };
 
 }  // namespace extensions
 
-#endif  // EXTENSIONS_RENDERER_DISPATCHER_DELEGATE_H
+#endif  // EXTENSIONS_RENDERER_DISPATCHER_DELEGATE_H_

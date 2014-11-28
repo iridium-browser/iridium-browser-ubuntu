@@ -9,18 +9,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/extensions/extension_creator_filter.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/crx_file/crx_file.h"
+#include "components/crx_file/id_util.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/signature_creator.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
-#include "extensions/common/id_util.h"
-#include "grit/generated_resources.h"
 #include "third_party/zlib/google/zip.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -99,7 +99,7 @@ bool ExtensionCreator::ValidateManifest(const base::FilePath& extension_dir,
   public_key.insert(public_key.begin(),
                     public_key_bytes.begin(), public_key_bytes.end());
 
-  std::string extension_id = id_util::GenerateId(public_key);
+  std::string extension_id = crx_file::id_util::GenerateId(public_key);
 
   // Load the extension once. We don't really need it, but this does a lot of
   // useful validation of the structure.
@@ -211,7 +211,8 @@ bool ExtensionCreator::SignZip(const base::FilePath& zip_path,
                                crypto::RSAPrivateKey* private_key,
                                std::vector<uint8>* signature) {
   scoped_ptr<crypto::SignatureCreator> signature_creator(
-      crypto::SignatureCreator::Create(private_key));
+      crypto::SignatureCreator::Create(private_key,
+                                       crypto::SignatureCreator::SHA1));
   base::ScopedFILE zip_handle(base::OpenFile(zip_path, "rb"));
   size_t buffer_size = 1 << 16;
   scoped_ptr<uint8[]> buffer(new uint8[buffer_size]);

@@ -25,7 +25,7 @@
 
 #include "core/CSSValueKeywords.h"
 #include "core/StylePropertyShorthand.h"
-#include "core/css/RuntimeCSSEnabled.h"
+#include "core/css/CSSPropertyMetadata.h"
 #include "wtf/BitArray.h"
 #include "wtf/text/StringBuilder.h"
 
@@ -70,7 +70,7 @@ String StylePropertySerializer::asText() const
         StylePropertySet::PropertyReference property = m_propertySet.propertyAt(n);
         CSSPropertyID propertyID = property.id();
         // Only enabled or internal properties should be part of the style.
-        ASSERT(RuntimeCSSEnabled::isCSSPropertyEnabled(propertyID) || isInternalProperty(propertyID));
+        ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID) || isInternalProperty(propertyID));
         CSSPropertyID shorthandPropertyID = CSSPropertyInvalid;
         CSSPropertyID borderFallbackShorthandProperty = CSSPropertyInvalid;
         String value;
@@ -122,6 +122,12 @@ String StylePropertySerializer::asText() const
                 shorthandPropertyID = CSSPropertyBorder;
             if (!shorthandPropertyID)
                 shorthandPropertyID = borderFallbackShorthandProperty;
+            break;
+        case CSSPropertyBorderTopLeftRadius:
+        case CSSPropertyBorderTopRightRadius:
+        case CSSPropertyBorderBottomLeftRadius:
+        case CSSPropertyBorderBottomRightRadius:
+            shorthandPropertyID = CSSPropertyBorderRadius;
             break;
         case CSSPropertyWebkitBorderHorizontalSpacing:
         case CSSPropertyWebkitBorderVerticalSpacing:
@@ -715,12 +721,12 @@ static void appendBackgroundRepeatValue(StringBuilder& builder, const CSSValue& 
     if (repeatXValueId == repeatYValueId) {
         builder.append(repeatX.cssText());
     } else if (repeatXValueId == CSSValueNoRepeat && repeatYValueId == CSSValueRepeat) {
-        builder.append("repeat-y");
+        builder.appendLiteral("repeat-y");
     } else if (repeatXValueId == CSSValueRepeat && repeatYValueId == CSSValueNoRepeat) {
-        builder.append("repeat-x");
+        builder.appendLiteral("repeat-x");
     } else {
         builder.append(repeatX.cssText());
-        builder.append(" ");
+        builder.appendLiteral(" ");
         builder.append(repeatY.cssText());
     }
 }
@@ -762,7 +768,7 @@ String StylePropertySerializer::backgroundRepeatPropertyValue() const
     StringBuilder builder;
     for (size_t i = 0; i < shorthandLength; ++i) {
         if (i)
-            builder.append(", ");
+            builder.appendLiteral(", ");
         appendBackgroundRepeatValue(builder,
             *repeatXList->item(i % repeatXList->length()),
             *repeatYList->item(i % repeatYList->length()));

@@ -18,13 +18,13 @@
 #include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_names_util.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/web_preferences.h"
-#include "grit/locale_settings.h"
 #include "grit/platform_locale_settings.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
@@ -61,7 +61,6 @@ const char* kPrefsToObserve[] = {
   prefs::kWebKitForceEnableZoom,
   prefs::kWebKitPasswordEchoEnabled,
 #endif
-  prefs::kWebKitInspectorSettings,
   prefs::kWebKitJavascriptCanOpenWindowsAutomatically,
   prefs::kWebKitJavascriptEnabled,
   prefs::kWebKitJavaEnabled,
@@ -422,9 +421,6 @@ void PrefsTabHelper::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       prefs::kWebKitShrinksStandaloneImagesToFit,
       pref_defaults.shrinks_standalone_images_to_fit,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      prefs::kWebKitInspectorSettings,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kWebKitTextAreasAreResizable,

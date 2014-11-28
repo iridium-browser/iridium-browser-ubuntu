@@ -34,7 +34,6 @@
 
 using namespace WTF;
 using namespace Unicode;
-using namespace std;
 
 namespace blink {
 
@@ -45,8 +44,8 @@ WidthIterator::WidthIterator(const Font* font, const TextRun& run, HashSet<const
     , m_runWidthSoFar(0)
     , m_isAfterExpansion(!run.allowsLeadingExpansion())
     , m_fallbackFonts(fallbackFonts)
-    , m_maxGlyphBoundingBoxY(numeric_limits<float>::min())
-    , m_minGlyphBoundingBoxY(numeric_limits<float>::max())
+    , m_maxGlyphBoundingBoxY(std::numeric_limits<float>::min())
+    , m_minGlyphBoundingBoxY(std::numeric_limits<float>::max())
     , m_firstGlyphOverflow(0)
     , m_lastGlyphOverflow(0)
     , m_accountForGlyphBounds(accountForGlyphBounds)
@@ -70,7 +69,7 @@ WidthIterator::WidthIterator(const Font* font, const TextRun& run, HashSet<const
     }
 }
 
-GlyphData WidthIterator::glyphDataForCharacter(CharacterData& charData)
+GlyphData WidthIterator::glyphDataForCharacter(CharacterData& charData, bool normalizeSpace)
 {
     ASSERT(m_font);
 
@@ -81,7 +80,7 @@ GlyphData WidthIterator::glyphDataForCharacter(CharacterData& charData)
     }
 #endif
 
-    return m_font->glyphDataForCharacter(charData.character, m_run.rtl());
+    return m_font->glyphDataForCharacter(charData.character, m_run.rtl(), normalizeSpace);
 }
 
 float WidthIterator::characterWidth(UChar32 character, const GlyphData& glyphData) const
@@ -101,23 +100,13 @@ float WidthIterator::characterWidth(UChar32 character, const GlyphData& glyphDat
     return width;
 }
 
-void WidthIterator::cacheFallbackFont(UChar32 character, const SimpleFontData* fontData,
+void WidthIterator::cacheFallbackFont(const SimpleFontData* fontData,
     const SimpleFontData* primaryFont)
 {
     if (fontData == primaryFont)
         return;
 
-    // FIXME: This does a little extra work that could be avoided if
-    // glyphDataForCharacter() returned whether it chose to use a small caps font.
-    if (m_font->fontDescription().variant() == FontVariantNormal || character == toUpper(character)) {
-        m_fallbackFonts->add(fontData);
-    } else {
-        ASSERT(m_font->fontDescription().variant() == FontVariantSmallCaps);
-        const GlyphData uppercaseGlyphData = m_font->glyphDataForCharacter(toUpper(character),
-            m_run.rtl());
-        if (uppercaseGlyphData.fontData != primaryFont)
-            m_fallbackFonts->add(uppercaseGlyphData.fontData);
-    }
+    m_fallbackFonts->add(fontData);
 }
 
 float WidthIterator::adjustSpacing(float width, const CharacterData& charData,
@@ -179,10 +168,10 @@ void WidthIterator::updateGlyphBounds(const GlyphData& glyphData, float width, b
     FloatRect bounds = glyphData.fontData->boundsForGlyph(glyphData.glyph);
 
     if (firstCharacter)
-        m_firstGlyphOverflow = max<float>(0, -bounds.x());
-    m_lastGlyphOverflow = max<float>(0, bounds.maxX() - width);
-    m_maxGlyphBoundingBoxY = max(m_maxGlyphBoundingBoxY, bounds.maxY());
-    m_minGlyphBoundingBoxY = min(m_minGlyphBoundingBoxY, bounds.y());
+        m_firstGlyphOverflow = std::max<float>(0, -bounds.x());
+    m_lastGlyphOverflow = std::max<float>(0, bounds.maxX() - width);
+    m_maxGlyphBoundingBoxY = std::max(m_maxGlyphBoundingBoxY, bounds.maxY());
+    m_minGlyphBoundingBoxY = std::min(m_minGlyphBoundingBoxY, bounds.y());
 }
 
 template <typename TextIterator>
@@ -193,22 +182,32 @@ unsigned WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuffer*
 
     const SimpleFontData* primaryFont = m_font->primaryFont();
     const SimpleFontData* lastFontData = primaryFont;
+    bool normalizeSpace = m_run.normalizeSpace();
 
     CharacterData charData;
     while (textIterator.consume(charData.character, charData.clusterLength)) {
         charData.characterOffset = textIterator.currentCharacter();
 
-        const GlyphData glyphData = glyphDataForCharacter(charData);
+        GlyphData glyphData = glyphDataForCharacter(charData, normalizeSpace);
+
+        // Some fonts do not have a glyph for zero-width-space,
+        // in that case use the space character and override the width.
+        float width;
+        if (!glyphData.glyph && Character::treatAsZeroWidthSpaceInComplexScript(charData.character)) {
+            charData.character = space;
+            glyphData = glyphDataForCharacter(charData);
+            width = 0;
+        } else {
+            width = characterWidth(charData.character, glyphData);
+        }
+
         Glyph glyph = glyphData.glyph;
         const SimpleFontData* fontData = glyphData.fontData;
         ASSERT(fontData);
 
-        // Now that we have a glyph and font data, get its width.
-        float width = characterWidth(charData.character, glyphData);
-
         if (m_fallbackFonts && lastFontData != fontData && width) {
             lastFontData = fontData;
-            cacheFallbackFont(charData.character, fontData, primaryFont);
+            cacheFallbackFont(fontData, primaryFont);
         }
 
         if (hasExtraSpacing)

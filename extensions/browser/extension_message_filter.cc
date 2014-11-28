@@ -4,13 +4,20 @@
 
 #include "extensions/browser/extension_message_filter.h"
 
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "extensions/browser/blob_holder.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/guest_view/guest_view_base.h"
+#include "extensions/browser/guest_view/guest_view_manager.h"
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_constants.h"
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
@@ -41,8 +48,10 @@ void ExtensionMessageFilter::OverrideThreadForMessage(
     BrowserThread::ID* thread) {
   switch (message.type()) {
     case ExtensionHostMsg_AddListener::ID:
+    case ExtensionHostMsg_AttachGuest::ID:
     case ExtensionHostMsg_RemoveListener::ID:
     case ExtensionHostMsg_AddLazyListener::ID:
+    case ExtensionHostMsg_CreateMimeHandlerViewGuest::ID:
     case ExtensionHostMsg_RemoveLazyListener::ID:
     case ExtensionHostMsg_AddFilteredListener::ID:
     case ExtensionHostMsg_RemoveFilteredListener::ID:
@@ -71,6 +80,10 @@ bool ExtensionMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnExtensionRemoveListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_AddLazyListener,
                         OnExtensionAddLazyListener)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_AttachGuest,
+                        OnExtensionAttachGuest)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_CreateMimeHandlerViewGuest,
+                        OnExtensionCreateMimeHandlerViewGuest)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveLazyListener,
                         OnExtensionRemoveLazyListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_AddFilteredListener,
@@ -105,7 +118,7 @@ void ExtensionMessageFilter::OnExtensionAddListener(
   if (!router)
     return;
 
-  if (Extension::IdIsValid(extension_id)) {
+  if (crx_file::id_util::IdIsValid(extension_id)) {
     router->AddEventListener(event_name, process, extension_id);
   } else if (listener_url.is_valid()) {
     router->AddEventListenerForURL(event_name, process, listener_url);
@@ -126,7 +139,7 @@ void ExtensionMessageFilter::OnExtensionRemoveListener(
   if (!router)
     return;
 
-  if (Extension::IdIsValid(extension_id)) {
+  if (crx_file::id_util::IdIsValid(extension_id)) {
     router->RemoveEventListener(event_name, process, extension_id);
   } else if (listener_url.is_valid()) {
     router->RemoveEventListenerForURL(event_name, process, listener_url);
@@ -142,6 +155,59 @@ void ExtensionMessageFilter::OnExtensionAddLazyListener(
   if (!router)
     return;
   router->AddLazyEventListener(event_name, extension_id);
+}
+
+void ExtensionMessageFilter::OnExtensionAttachGuest(
+    int routing_id,
+    int element_instance_id,
+    int guest_instance_id,
+    const base::DictionaryValue& params) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  GuestViewManager* manager =
+      GuestViewManager::FromBrowserContext(browser_context_);
+  if (!manager)
+    return;
+
+  manager->AttachGuest(render_process_id_,
+                       routing_id,
+                       element_instance_id,
+                       guest_instance_id,
+                       params);
+}
+
+void ExtensionMessageFilter::OnExtensionCreateMimeHandlerViewGuest(
+    int render_frame_id,
+    const std::string& src,
+    const std::string& mime_type,
+    int element_instance_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  GuestViewManager* manager =
+      GuestViewManager::FromBrowserContext(browser_context_);
+  if (!manager)
+    return;
+
+  content::RenderFrameHost* rfh =
+      content::RenderFrameHost::FromID(render_process_id_, render_frame_id);
+  content::WebContents* embedder_web_contents =
+      content::WebContents::FromRenderFrameHost(rfh);
+  if (!embedder_web_contents)
+    return;
+
+  GuestViewManager::WebContentsCreatedCallback callback =
+      base::Bind(&ExtensionMessageFilter::MimeHandlerViewGuestCreatedCallback,
+                 this,
+                 element_instance_id,
+                 render_process_id_,
+                 render_frame_id,
+                 src);
+  base::DictionaryValue create_params;
+  create_params.SetString(mime_handler_view::kMimeType, mime_type);
+  create_params.SetString(mime_handler_view::kSrc, src);
+  manager->CreateGuest(MimeHandlerViewGuest::Type,
+                       "",
+                       embedder_web_contents,
+                       create_params,
+                       callback);
 }
 
 void ExtensionMessageFilter::OnExtensionRemoveLazyListener(
@@ -227,6 +293,42 @@ void ExtensionMessageFilter::OnExtensionRequestForIOThread(
       weak_ptr_factory_.GetWeakPtr(),
       routing_id,
       params);
+}
+
+void ExtensionMessageFilter::MimeHandlerViewGuestCreatedCallback(
+    int element_instance_id,
+    int embedder_render_process_id,
+    int embedder_render_frame_id,
+    const std::string& src,
+    content::WebContents* web_contents) {
+  GuestViewManager* manager =
+      GuestViewManager::FromBrowserContext(browser_context_);
+  if (!manager)
+    return;
+
+  MimeHandlerViewGuest* guest_view =
+      MimeHandlerViewGuest::FromWebContents(web_contents);
+  if (!guest_view)
+    return;
+  int guest_instance_id = guest_view->guest_instance_id();
+
+  content::RenderFrameHost* rfh = content::RenderFrameHost::FromID(
+      embedder_render_process_id, embedder_render_frame_id);
+  if (!rfh)
+    return;
+
+  base::DictionaryValue attach_params;
+  attach_params.SetString(mime_handler_view::kSrc, src);
+  manager->AttachGuest(embedder_render_process_id,
+                       rfh->GetRenderViewHost()->GetRoutingID(),
+                       element_instance_id,
+                       guest_instance_id,
+                       attach_params);
+
+  IPC::Message* msg =
+      new ExtensionMsg_CreateMimeHandlerViewGuestACK(element_instance_id);
+  msg->set_routing_id(rfh->GetRoutingID());
+  rfh->Send(msg);
 }
 
 }  // namespace extensions

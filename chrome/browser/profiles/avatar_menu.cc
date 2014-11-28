@@ -23,11 +23,12 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -52,6 +53,9 @@ AvatarMenu::AvatarMenu(ProfileInfoInterface* profile_cache,
                        Browser* browser)
     : profile_list_(ProfileList::Create(profile_cache)),
       menu_actions_(AvatarMenuActions::Create()),
+#if defined(ENABLE_MANAGED_USERS)
+      supervised_user_observer_(this),
+#endif
       profile_info_(profile_cache),
       observer_(observer),
       browser_(browser) {
@@ -63,6 +67,15 @@ AvatarMenu::AvatarMenu(ProfileInfoInterface* profile_cache,
   // Register this as an observer of the info cache.
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
       content::NotificationService::AllSources());
+
+#if defined(ENABLE_MANAGED_USERS)
+  // Register this as an observer of the SupervisedUserService to be notified
+  // of changes to the custodian info.
+  if (browser_) {
+    supervised_user_observer_.Add(
+        SupervisedUserServiceFactory::GetForProfile(browser_->profile()));
+  }
+#endif
 }
 
 AvatarMenu::~AvatarMenu() {
@@ -122,7 +135,9 @@ void AvatarMenu::SwitchToProfile(size_t index,
   if (switches::IsNewAvatarMenu()) {
     // Don't open a browser window for signed-out profiles.
     if (item.signin_required) {
-      chrome::ShowUserManager(item.profile_path);
+      UserManager::Show(item.profile_path,
+                        profiles::USER_MANAGER_NO_TUTORIAL,
+                        profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
       return;
     }
   }
@@ -135,7 +150,7 @@ void AvatarMenu::SwitchToProfile(size_t index,
     desktop_type = browser_->host_desktop_type();
 
   profiles::SwitchToProfile(path, desktop_type, always_create,
-                            profiles::ProfileSwitchingDoneCallback(),
+                            ProfileManager::CreateCallback(),
                             metric);
 }
 
@@ -231,3 +246,11 @@ void AvatarMenu::Observe(int type,
   if (observer_)
     observer_->OnAvatarMenuChanged(this);
 }
+
+#if defined(ENABLE_MANAGED_USERS)
+void AvatarMenu::OnCustodianInfoChanged() {
+  RebuildMenu();
+  if (observer_)
+    observer_->OnAvatarMenuChanged(this);
+}
+#endif

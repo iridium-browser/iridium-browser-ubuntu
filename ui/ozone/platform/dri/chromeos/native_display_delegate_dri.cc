@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "ui/display/types/chromeos/native_display_observer.h"
+#include "ui/display/types/native_display_observer.h"
 #include "ui/events/ozone/device/device_event.h"
 #include "ui/events/ozone/device/device_manager.h"
 #include "ui/ozone/platform/dri/chromeos/display_mode_dri.h"
@@ -19,7 +19,56 @@
 namespace ui {
 
 namespace {
+
 const size_t kMaxDisplayCount = 2;
+
+const char kContentProtection[] = "Content Protection";
+
+struct ContentProtectionMapping {
+  const char* name;
+  HDCPState state;
+};
+
+const ContentProtectionMapping kContentProtectionStates[] = {
+    {"Undesired", HDCP_STATE_UNDESIRED},
+    {"Desired", HDCP_STATE_DESIRED},
+    {"Enabled", HDCP_STATE_ENABLED}};
+
+uint32_t GetContentProtectionValue(drmModePropertyRes* property,
+                                   HDCPState state) {
+  std::string name;
+  for (size_t i = 0; i < arraysize(kContentProtectionStates); ++i) {
+    if (kContentProtectionStates[i].state == state) {
+      name = kContentProtectionStates[i].name;
+      break;
+    }
+  }
+
+  for (int i = 0; i < property->count_enums; ++i)
+    if (name == property->enums[i].name)
+      return i;
+
+  NOTREACHED();
+  return 0;
+}
+
+class DisplaySnapshotComparator {
+ public:
+  DisplaySnapshotComparator(const DisplaySnapshotDri* snapshot)
+      : snapshot_(snapshot) {}
+
+  bool operator()(const DisplaySnapshotDri* other) const {
+    if (snapshot_->connector() == other->connector() &&
+        snapshot_->crtc() == other->crtc())
+      return true;
+
+    return false;
+  }
+
+ private:
+  const DisplaySnapshotDri* snapshot_;
+};
+
 }  // namespace
 
 NativeDisplayDelegateDri::NativeDisplayDelegateDri(
@@ -29,6 +78,8 @@ NativeDisplayDelegateDri::NativeDisplayDelegateDri(
     : dri_(dri),
       screen_manager_(screen_manager),
       device_manager_(device_manager) {
+  // TODO(dnicoara): Remove when async display configuration is supported.
+  screen_manager_->ForceInitializationOfPrimaryDisplay();
 }
 
 NativeDisplayDelegateDri::~NativeDisplayDelegateDri() {
@@ -162,14 +213,61 @@ void NativeDisplayDelegateDri::CreateFrameBuffer(const gfx::Size& size) {}
 
 bool NativeDisplayDelegateDri::GetHDCPState(const DisplaySnapshot& output,
                                             HDCPState* state) {
-  NOTIMPLEMENTED();
+  const DisplaySnapshotDri& dri_output =
+      static_cast<const DisplaySnapshotDri&>(output);
+
+  ScopedDrmConnectorPtr connector(dri_->GetConnector(dri_output.connector()));
+  if (!connector) {
+    LOG(ERROR) << "Failed to get connector " << dri_output.connector();
+    return false;
+  }
+
+  ScopedDrmPropertyPtr hdcp_property(
+      dri_->GetProperty(connector.get(), kContentProtection));
+  if (!hdcp_property) {
+    LOG(ERROR) << "'" << kContentProtection << "' property doesn't exist.";
+    return false;
+  }
+
+  DCHECK_LT(static_cast<int>(hdcp_property->prop_id), connector->count_props);
+  int hdcp_state_idx = connector->prop_values[hdcp_property->prop_id];
+  DCHECK_LT(hdcp_state_idx, hdcp_property->count_enums);
+
+  std::string name(hdcp_property->enums[hdcp_state_idx].name);
+  for (size_t i = 0; i < arraysize(kContentProtectionStates); ++i) {
+    if (name == kContentProtectionStates[i].name) {
+      *state = kContentProtectionStates[i].state;
+      VLOG(3) << "HDCP state: " << *state << " (" << name << ")";
+      return true;
+    }
+  }
+
+  LOG(ERROR) << "Unknown content protection value '" << name << "'";
   return false;
 }
 
 bool NativeDisplayDelegateDri::SetHDCPState(const DisplaySnapshot& output,
                                             HDCPState state) {
-  NOTIMPLEMENTED();
-  return false;
+  const DisplaySnapshotDri& dri_output =
+      static_cast<const DisplaySnapshotDri&>(output);
+
+  ScopedDrmConnectorPtr connector(dri_->GetConnector(dri_output.connector()));
+  if (!connector) {
+    LOG(ERROR) << "Failed to get connector " << dri_output.connector();
+    return false;
+  }
+
+  ScopedDrmPropertyPtr hdcp_property(
+      dri_->GetProperty(connector.get(), kContentProtection));
+  if (!hdcp_property) {
+    LOG(ERROR) << "'" << kContentProtection << "' property doesn't exist.";
+    return false;
+  }
+
+  return dri_->SetProperty(
+      dri_output.connector(),
+      hdcp_property->prop_id,
+      GetContentProtectionValue(hdcp_property.get(), state));
 }
 
 std::vector<ui::ColorCalibrationProfile>
@@ -209,17 +307,24 @@ void NativeDisplayDelegateDri::NotifyScreenManager(
     const std::vector<DisplaySnapshotDri*>& new_displays,
     const std::vector<DisplaySnapshotDri*>& old_displays) const {
   for (size_t i = 0; i < old_displays.size(); ++i) {
-    bool found = false;
-    for (size_t j = 0; j < new_displays.size(); ++j) {
-      if (old_displays[i]->connector() == new_displays[j]->connector() &&
-          old_displays[i]->crtc() == new_displays[j]->crtc()) {
-        found = true;
-        break;
-      }
-    }
+    const std::vector<DisplaySnapshotDri*>::const_iterator it =
+        std::find_if(new_displays.begin(),
+                     new_displays.end(),
+                     DisplaySnapshotComparator(old_displays[i]));
 
-    if (!found)
+    if (it == new_displays.end())
       screen_manager_->RemoveDisplayController(old_displays[i]->crtc());
+  }
+
+  for (size_t i = 0; i < new_displays.size(); ++i) {
+    const std::vector<DisplaySnapshotDri*>::const_iterator it =
+        std::find_if(old_displays.begin(),
+                     old_displays.end(),
+                     DisplaySnapshotComparator(new_displays[i]));
+
+    if (it == old_displays.end())
+      screen_manager_->AddDisplayController(new_displays[i]->crtc(),
+                                            new_displays[i]->connector());
   }
 }
 

@@ -109,7 +109,7 @@ void RenderLayerFilterInfo::notifyFinished(Resource*)
     // even happen if this element is style sharing and RenderObject::setStyle() returns early.
     // Filters need to find a better way to hook into the system.
     toElement(renderer->node())->scheduleSVGFilterLayerUpdateHack();
-    renderer->paintInvalidationForWholeRenderer();
+    renderer->setShouldDoFullPaintInvalidation(true);
 }
 
 void RenderLayerFilterInfo::updateReferenceFilterClients(const FilterOperations& operations)
@@ -129,7 +129,7 @@ void RenderLayerFilterInfo::updateReferenceFilterClients(const FilterOperations&
             m_externalSVGReferences.append(cachedSVGDocument);
         } else {
             // Reference is internal; add layer as a client so we can trigger
-            // filter repaint on SVG attribute change.
+            // filter paint invalidation on SVG attribute change.
             Element* filter = m_layer->renderer()->node()->document().getElementById(referenceFilterOperation->fragment());
             if (!isSVGFilterElement(filter))
                 continue;

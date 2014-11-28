@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -510,7 +510,7 @@ void PnaclHost::StoreTranslatedNexe(
   }
   pending_backend_operations_++;
   disk_cache_->StoreNexe(it->second.cache_key,
-                         buffer,
+                         buffer.get(),
                          base::Bind(&PnaclHost::OnTranslatedNexeStored,
                                     weak_factory_.GetWeakPtr(),
                                     it->first));

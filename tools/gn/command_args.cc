@@ -9,7 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -115,7 +115,7 @@ void PrintArgHelp(const base::StringPiece& name, const Value& value) {
 int ListArgs(const std::string& build_dir) {
   Setup* setup = new Setup;
   setup->set_check_for_bad_items(false);
-  if (!setup->DoSetup(build_dir) || !setup->Run())
+  if (!setup->DoSetup(build_dir, false) || !setup->Run())
     return 1;
 
   Scope::KeyValueMap build_args;
@@ -233,7 +233,7 @@ int EditArgsFile(const std::string& build_dir) {
     // Don't fill build arguments. We're about to edit the file which supplies
     // these in the first place.
     setup.set_fill_arguments(false);
-    if (!setup.DoSetup(build_dir))
+    if (!setup.DoSetup(build_dir, true))
       return 1;
 
     // Ensure the file exists. Need to normalize path separators since on

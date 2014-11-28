@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -34,18 +35,19 @@
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_urls.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -171,7 +173,8 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   profile_pref_change_registrar_.Init(profile_->GetPrefs());
-  profile_pref_change_registrar_.Add(prefs::kShowBookmarkBar, callback);
+  profile_pref_change_registrar_.Add(bookmarks::prefs::kShowBookmarkBar,
+                                     callback);
   profile_pref_change_registrar_.Add(prefs::kNtpShownPage, callback);
   profile_pref_change_registrar_.Add(prefs::kSignInPromoShowNTPBubble,
                                      callback);
@@ -312,8 +315,8 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
       l10n_util::GetStringUTF16(new_tab_link_ids));
   localized_strings.SetString("learnMoreLink", new_tab_link);
 
-  bool bookmark_bar_attached = profile_->GetPrefs()->GetBoolean(
-      prefs::kShowBookmarkBar);
+  bool bookmark_bar_attached =
+      profile_->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar);
   localized_strings.SetBoolean("bookmarkbarattached", bookmark_bar_attached);
 
   webui::SetFontAndTextDirection(&localized_strings);
@@ -389,7 +392,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   PrefService* prefs = profile_->GetPrefs();
   base::DictionaryValue load_time_data;
   load_time_data.SetBoolean("bookmarkbarattached",
-      prefs->GetBoolean(prefs::kShowBookmarkBar));
+      prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
   load_time_data.SetBoolean("hasattribution",
       ThemeServiceFactory::GetForProfile(profile_)->HasCustomImage(
           IDR_THEME_NTP_ATTRIBUTION));
@@ -490,8 +493,8 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("showWebStoreIcon",
                             !prefs->GetBoolean(prefs::kHideWebStoreIcon));
 
-  bool streamlined_hosted_apps = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableStreamlinedHostedApps);
+  bool streamlined_hosted_apps =
+      extensions::util::IsStreamlinedHostedAppsEnabled();
   load_time_data.SetBoolean("enableStreamlinedHostedApps",
                             streamlined_hosted_apps);
   // Use a different string for launching as a regular tab for streamlined

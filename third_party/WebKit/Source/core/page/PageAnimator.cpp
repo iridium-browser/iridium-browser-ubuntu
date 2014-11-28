@@ -12,10 +12,11 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGDocumentExtensions.h"
+#include "platform/Logging.h"
 
 namespace blink {
 
-PageAnimator::PageAnimator(Page* page)
+PageAnimator::PageAnimator(Page& page)
     : m_page(page)
     , m_animationFramePending(false)
     , m_servicingAnimations(false)
@@ -23,8 +24,19 @@ PageAnimator::PageAnimator(Page* page)
 {
 }
 
+PassRefPtrWillBeRawPtr<PageAnimator> PageAnimator::create(Page& page)
+{
+    return adoptRefWillBeNoop(new PageAnimator(page));
+}
+
+void PageAnimator::trace(Visitor* visitor)
+{
+    visitor->trace(m_page);
+}
+
 void PageAnimator::serviceScriptedAnimations(double monotonicAnimationStartTime)
 {
+    RefPtrWillBeRawPtr<PageAnimator> protector(this);
     m_animationFramePending = false;
     TemporaryChange<bool> servicing(m_servicingAnimations, true);
 
@@ -35,8 +47,14 @@ void PageAnimator::serviceScriptedAnimations(double monotonicAnimationStartTime)
     }
 
     for (size_t i = 0; i < documents.size(); ++i) {
-        if (documents[i]->frame())
+        if (documents[i]->frame()) {
             documents[i]->view()->serviceScrollAnimations(monotonicAnimationStartTime);
+
+            if (const FrameView::ScrollableAreaSet* scrollableAreas = documents[i]->view()->scrollableAreas()) {
+                for (FrameView::ScrollableAreaSet::iterator it = scrollableAreas->begin(); it != scrollableAreas->end(); ++it)
+                    (*it)->serviceScrollAnimations(monotonicAnimationStartTime);
+            }
+        }
     }
 
     for (size_t i = 0; i < documents.size(); ++i) {

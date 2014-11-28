@@ -22,6 +22,8 @@ class TestingPrefServiceSimple;
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyStatisticsPrefs;
+
 class TestDataReductionProxyConfig : public DataReductionProxyConfigurator {
  public:
   TestDataReductionProxyConfig();
@@ -63,11 +65,13 @@ class MockDataReductionProxySettings : public C {
           DataReductionProxyParams::kFallbackAllowed |
           DataReductionProxyParams::kPromoAllowed,
           TestDataReductionProxyParams::HAS_EVERYTHING &
-          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN)) {}
+          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+          ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)) {}
   MockDataReductionProxySettings<C>(int flags)
       : C(new TestDataReductionProxyParams(flags,
           TestDataReductionProxyParams::HAS_EVERYTHING &
-          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN)) {}
+          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+          ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)) {}
   MOCK_METHOD0(GetURLFetcherForAvailabilityCheck, net::URLFetcher*());
   MOCK_METHOD0(GetOriginalProfilePrefs, PrefService*());
   MOCK_METHOD0(GetLocalStatePrefs, PrefService*());
@@ -162,6 +166,7 @@ class DataReductionProxySettingsTestBase : public testing::Test {
   scoped_ptr<TestDataReductionProxyParams> expected_params_;
   base::Time last_update_time_;
   bool proxy_enabled_;
+  scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs_;
 };
 
 // Test implementations should be subclasses of an instantiation of this

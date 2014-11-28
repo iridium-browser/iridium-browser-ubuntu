@@ -9,40 +9,17 @@ namespace blink {
 
 DOMMatrix* DOMMatrix::create()
 {
-    return new DOMMatrix(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    return new DOMMatrix(TransformationMatrix());
 }
 
 DOMMatrix* DOMMatrix::create(DOMMatrixReadOnly* other)
 {
-    return new DOMMatrix(other->m11(), other->m12(), other->m13(), other->m14(),
-        other->m21(), other->m22(), other->m23(), other->m24(),
-        other->m31(), other->m32(), other->m33(), other->m34(),
-        other->m41(), other->m42(), other->m43(), other->m44(),
-        other->is2D());
+    return new DOMMatrix(other->matrix(), other->is2D());
 }
 
-DOMMatrix::DOMMatrix(double m11, double m12, double m13, double m14,
-    double m21, double m22, double m23, double m24,
-    double m31, double m32, double m33, double m34,
-    double m41, double m42, double m43, double m44,
-    bool is2D)
+DOMMatrix::DOMMatrix(const TransformationMatrix& matrix, bool is2D)
 {
-    m_matrix[0][0] = m11;
-    m_matrix[0][1] = m12;
-    m_matrix[0][2] = m13;
-    m_matrix[0][3] = m14;
-    m_matrix[1][0] = m21;
-    m_matrix[1][1] = m22;
-    m_matrix[1][2] = m23;
-    m_matrix[1][3] = m24;
-    m_matrix[2][0] = m31;
-    m_matrix[2][1] = m32;
-    m_matrix[2][2] = m33;
-    m_matrix[2][3] = m34;
-    m_matrix[3][0] = m41;
-    m_matrix[3][1] = m42;
-    m_matrix[3][2] = m43;
-    m_matrix[3][3] = m44;
+    m_matrix = matrix;
     m_is2D = is2D;
 }
 
@@ -50,6 +27,77 @@ void DOMMatrix::setIs2D(bool value)
 {
     if (m_is2D)
         m_is2D = value;
+}
+
+DOMMatrix* DOMMatrix::multiplySelf(DOMMatrix* other)
+{
+    if (!other->is2D())
+        m_is2D = false;
+
+    m_matrix = m_matrix * other->matrix();
+
+    return this;
+}
+
+DOMMatrix* DOMMatrix::preMultiplySelf(DOMMatrix* other)
+{
+    if (!other->is2D())
+        m_is2D = false;
+
+    m_matrix = other->matrix() * m_matrix;
+
+    return this;
+}
+
+DOMMatrix* DOMMatrix::translateSelf(double tx, double ty, double tz)
+{
+    if (!tx && !ty && !tz)
+        return this;
+
+    if (tz)
+        m_is2D = false;
+
+    if (m_is2D)
+        m_matrix.translate(tx, ty);
+    else
+        m_matrix.translate3d(tx, ty, tz);
+
+    return this;
+}
+
+DOMMatrix* DOMMatrix::scaleSelf(double scale, double ox, double oy)
+{
+    return scaleNonUniformSelf(scale, scale, 1, ox, oy);
+}
+
+DOMMatrix* DOMMatrix::scale3dSelf(double scale, double ox, double oy, double oz)
+{
+    return scaleNonUniformSelf(scale, scale, scale, ox, oy, oz);
+}
+
+DOMMatrix* DOMMatrix::scaleNonUniformSelf(double sx, double sy, double sz,
+    double ox, double oy, double oz)
+{
+    if (sz != 1 || oz)
+        m_is2D = false;
+
+    if (sx == 1 && sy == 1 && sz == 1)
+        return this;
+
+    bool hasTranslation = (ox || oy || oz);
+
+    if (hasTranslation)
+        translateSelf(ox, oy, oz);
+
+    if (m_is2D)
+        m_matrix.scaleNonUniform(sx, sy);
+    else
+        m_matrix.scale3d(sx, sy, sz);
+
+    if (hasTranslation)
+        translateSelf(-ox, -oy, -oz);
+
+    return this;
 }
 
 } // namespace blink

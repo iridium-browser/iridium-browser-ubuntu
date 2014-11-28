@@ -10,6 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/common/extension_builder.h"
@@ -17,7 +18,6 @@
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "grit/extensions_strings.h"
-#include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -63,7 +63,7 @@ TEST_F(AppInfoPermissionsPanelTest, NoPermissionsObtainedCorrectly) {
           .SetManifest(ValidAppManifest())
           .SetID(kTestExtensionId)
           .Build();
-  AppInfoPermissionsPanel panel(&profile_, app);
+  AppInfoPermissionsPanel panel(&profile_, app.get());
 
   EXPECT_TRUE(panel.GetActivePermissionMessages().empty());
   EXPECT_TRUE(panel.GetRetainedFilePaths().empty());
@@ -87,7 +87,7 @@ TEST_F(AppInfoPermissionsPanelTest, RequiredPermissionsObtainedCorrectly) {
                                              // a message
           .SetID(kTestExtensionId)
           .Build();
-  AppInfoPermissionsPanel panel(&profile_, app);
+  AppInfoPermissionsPanel panel(&profile_, app.get());
 
   const std::vector<base::string16> permission_messages =
       panel.GetActivePermissionMessages();
@@ -117,7 +117,7 @@ TEST_F(AppInfoPermissionsPanelTest, OptionalPermissionsObtainedCorrectly) {
                                             // a message
           .SetID(kTestExtensionId)
           .Build();
-  AppInfoPermissionsPanel panel(&profile_, app);
+  AppInfoPermissionsPanel panel(&profile_, app.get());
 
   // Optional permissions don't appear until they are 'activated' at runtime.
   // TODO(sashab): Activate the optional permissions and ensure they are
@@ -140,7 +140,7 @@ TEST_F(AppInfoPermissionsPanelTest, RetainedFilePermissionsObtainedCorrectly) {
                       extensions::ListBuilder().Append("retainEntries")))))
           .SetID(kTestExtensionId)
           .Build();
-  AppInfoPermissionsPanel panel(&profile_, app);
+  AppInfoPermissionsPanel panel(&profile_, app.get());
   apps::SavedFilesService* files_service =
       apps::SavedFilesService::Get(&profile_);
   files_service->RegisterFileEntry(

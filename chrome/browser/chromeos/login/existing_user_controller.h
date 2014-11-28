@@ -22,6 +22,7 @@
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -36,7 +37,6 @@ namespace chromeos {
 
 class CrosSettings;
 class LoginDisplayHost;
-class UserContext;
 
 namespace login {
 class NetworkStateHelper;
@@ -254,6 +254,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Username of the last login attempt.
   std::string last_login_attempt_username_;
 
+  // Auth flow of the last login attempt.
+  UserContext::AuthFlow last_login_attempt_auth_flow_;
+
   // OOBE/login display host.
   LoginDisplayHost* host_;
 
@@ -276,9 +279,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Used for notifications during the login process.
   content::NotificationRegistrar registrar_;
-
-  // Factory of callbacks.
-  base::WeakPtrFactory<ExistingUserController> weak_factory_;
 
   // The displayed email for the next login attempt set by |SetDisplayEmail|.
   std::string display_email_;
@@ -334,6 +334,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
       local_account_auto_login_delay_subscription_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
+
+  // Factory of callbacks.
+  base::WeakPtrFactory<ExistingUserController> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExistingUserController);
 };

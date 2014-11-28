@@ -7,18 +7,16 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/geolocation/geolocation_permission_context.h"
 #include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
-#include "chrome/browser/guest_view/web_view/web_view_constants.h"
-#include "chrome/browser/guest_view/web_view/web_view_guest.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/browser/guest_view/web_view/web_view_constants.h"
+#include "extensions/browser/guest_view/web_view/web_view_guest.h"
 
 ChromeWebViewPermissionHelperDelegate::ChromeWebViewPermissionHelperDelegate(
     extensions::WebViewPermissionHelper* web_view_permission_helper)
-    : WebViewPermissionHelperDelegate(
-        web_view_permission_helper->web_view_guest()->guest_web_contents()),
-      web_view_permission_helper_(web_view_permission_helper),
+    : WebViewPermissionHelperDelegate(web_view_permission_helper),
       weak_factory_(this) {
 }
 
@@ -72,7 +70,7 @@ void ChromeWebViewPermissionHelperDelegate::OnBlockedUnauthorizedPlugin(
   base::DictionaryValue info;
   info.SetString(std::string(kPluginName), name);
   info.SetString(std::string(kPluginIdentifier), identifier);
-  web_view_permission_helper_->RequestPermission(
+  web_view_permission_helper()->RequestPermission(
       WEB_VIEW_PERMISSION_TYPE_LOAD_PLUGIN,
       info,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::OnPermissionResponse,
@@ -123,44 +121,6 @@ void ChromeWebViewPermissionHelperDelegate::OnPermissionResponse(
 
 #endif  // defined(ENABLE_PLUGINS)
 
-void ChromeWebViewPermissionHelperDelegate::RequestMediaAccessPermission(
-    content::WebContents* source,
-    const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback) {
-  base::DictionaryValue request_info;
-  request_info.SetString(guestview::kUrl, request.security_origin.spec());
-  web_view_permission_helper_->RequestPermission(
-      WEB_VIEW_PERMISSION_TYPE_MEDIA,
-      request_info,
-      base::Bind(
-          &ChromeWebViewPermissionHelperDelegate::OnMediaPermissionResponse,
-          base::Unretained(this),
-          request,
-          callback),
-      false /* allowed_by_default */);
-}
-
- void ChromeWebViewPermissionHelperDelegate::OnMediaPermissionResponse(
-    const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
-    bool allow,
-    const std::string& user_input) {
-  if (!allow || !web_view_guest()->attached()) {
-    // Deny the request.
-    callback.Run(content::MediaStreamDevices(),
-                 content::MEDIA_DEVICE_INVALID_STATE,
-                 scoped_ptr<content::MediaStreamUI>());
-    return;
-  }
-  if (!web_view_guest()->embedder_web_contents()->GetDelegate())
-    return;
-
-  web_view_guest()->embedder_web_contents()->GetDelegate()->
-      RequestMediaAccessPermission(web_view_guest()->embedder_web_contents(),
-                                   request,
-                                   callback);
-}
-
 void ChromeWebViewPermissionHelperDelegate::CanDownload(
     content::RenderViewHost* render_view_host,
     const GURL& url,
@@ -168,7 +128,7 @@ void ChromeWebViewPermissionHelperDelegate::CanDownload(
     const base::Callback<void(bool)>& callback) {
   base::DictionaryValue request_info;
   request_info.SetString(guestview::kUrl, url.spec());
-  web_view_permission_helper_->RequestPermission(
+  web_view_permission_helper()->RequestPermission(
       WEB_VIEW_PERMISSION_TYPE_DOWNLOAD,
       request_info,
       base::Bind(
@@ -196,7 +156,7 @@ void ChromeWebViewPermissionHelperDelegate::RequestPointerLockPermission(
   request_info.SetString(guestview::kUrl,
                          web_contents()->GetLastCommittedURL().spec());
 
-  web_view_permission_helper_->RequestPermission(
+  web_view_permission_helper()->RequestPermission(
       WEB_VIEW_PERMISSION_TYPE_POINTER_LOCK,
       request_info,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::
@@ -233,7 +193,7 @@ void ChromeWebViewPermissionHelperDelegate::RequestGeolocationPermission(
                  bridge_id,
                  user_gesture,
                  callback);
-  int request_id = web_view_permission_helper_->RequestPermission(
+  int request_id = web_view_permission_helper()->RequestPermission(
       WEB_VIEW_PERMISSION_TYPE_GEOLOCATION,
       request_info,
       permission_callback,
@@ -275,7 +235,7 @@ void ChromeWebViewPermissionHelperDelegate::OnGeolocationPermissionResponse(
 void ChromeWebViewPermissionHelperDelegate::CancelGeolocationPermissionRequest(
     int bridge_id) {
   int request_id = RemoveBridgeID(bridge_id);
-  web_view_permission_helper_->CancelPendingPermissionRequest(request_id);
+  web_view_permission_helper()->CancelPendingPermissionRequest(request_id);
 }
 
 int ChromeWebViewPermissionHelperDelegate::RemoveBridgeID(int bridge_id) {
@@ -295,7 +255,7 @@ void ChromeWebViewPermissionHelperDelegate::RequestFileSystemPermission(
     const base::Callback<void(bool)>& callback) {
   base::DictionaryValue request_info;
   request_info.SetString(guestview::kUrl, url.spec());
-  web_view_permission_helper_->RequestPermission(
+  web_view_permission_helper()->RequestPermission(
       WEB_VIEW_PERMISSION_TYPE_FILESYSTEM,
       request_info,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::

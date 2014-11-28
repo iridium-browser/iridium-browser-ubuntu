@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/memory/ref_counted.h"
-#include "webkit/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/async_file_util.h"
 
 namespace base {
 class FilePath;
@@ -31,8 +31,8 @@ class MTPDeviceAsyncDelegate {
 
   // A callback to be called when ReadDirectory method call succeeds.
   typedef base::Callback<
-      void(const fileapi::AsyncFileUtil::EntryList& file_list,
-           bool has_more)> ReadDirectorySuccessCallback;
+      void(const storage::AsyncFileUtil::EntryList& file_list, bool has_more)>
+      ReadDirectorySuccessCallback;
 
   // A callback to be called when GetFileInfo/ReadDirectory/CreateSnapshot
   // method call fails.
@@ -92,11 +92,12 @@ class MTPDeviceAsyncDelegate {
   // Reads up to |buf_len| bytes from |device_file_path| into |buf|. Invokes the
   // appropriate callback asynchronously when complete. Only valid when
   // IsStreaming() is true.
-  virtual void ReadBytes(
-      const base::FilePath& device_file_path,
-      net::IOBuffer* buf, int64 offset, int buf_len,
-      const ReadBytesSuccessCallback& success_callback,
-      const ErrorCallback& error_callback) = 0;
+  virtual void ReadBytes(const base::FilePath& device_file_path,
+                         const scoped_refptr<net::IOBuffer>& buf,
+                         int64 offset,
+                         int buf_len,
+                         const ReadBytesSuccessCallback& success_callback,
+                         const ErrorCallback& error_callback) = 0;
 
   // Called when the
   // (1) Browser application is in shutdown mode (or)

@@ -12,7 +12,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "content/public/browser/devtools_manager.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
@@ -114,7 +114,7 @@ Shell* Shell::CreateShell(WebContents* web_contents,
 
 void Shell::CloseAllWindows() {
   base::AutoReset<bool> auto_reset(&quit_message_loop_, false);
-  DevToolsManager::GetInstance()->CloseAllClientHosts();
+  DevToolsAgentHost::DetachAllClients();
   std::vector<Shell*> open_windows(windows_);
   for (size_t i = 0; i < open_windows.size(); ++i)
     open_windows[i]->Close();
@@ -171,8 +171,8 @@ void Shell::LoadURL(const GURL& url) {
 
 void Shell::LoadURLForFrame(const GURL& url, const std::string& frame_name) {
   NavigationController::LoadURLParams params(url);
-  params.transition_type = PageTransitionFromInt(
-      PAGE_TRANSITION_TYPED | PAGE_TRANSITION_FROM_ADDRESS_BAR);
+  params.transition_type = ui::PageTransitionFromInt(
+      ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
   params.frame_name = frame_name;
   web_contents_->GetController().LoadURLWithParams(params);
   web_contents_->Focus();

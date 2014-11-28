@@ -56,8 +56,9 @@ bool SocketInputStream::Next(const void** data, int* size) {
 
 void SocketInputStream::BackUp(int count) {
   DCHECK(GetState() == READY || GetState() == EMPTY);
-  DCHECK_GT(count, 0);
-  DCHECK_LE(count, next_pos_);
+  // TODO(zea): investigating crbug.com/409985
+  CHECK_GT(count, 0);
+  CHECK_LE(count, next_pos_);
 
   next_pos_ -= count;
   DVLOG(1) << "Backing up " << count << " bytes in input buffer. "
@@ -76,7 +77,7 @@ int64 SocketInputStream::ByteCount() const {
   return next_pos_;
 }
 
-size_t SocketInputStream::UnreadByteCount() const {
+int SocketInputStream::UnreadByteCount() const {
   DCHECK_NE(GetState(), CLOSED);
   DCHECK_NE(GetState(), READING);
   return read_buffer_->BytesConsumed() - next_pos_;
@@ -101,12 +102,12 @@ net::Error SocketInputStream::Refresh(const base::Closure& callback,
   }
 
   DVLOG(1) << "Refreshing input stream, limit of " << byte_limit << " bytes.";
-  int result = socket_->Read(
-      read_buffer_,
-      byte_limit,
-      base::Bind(&SocketInputStream::RefreshCompletionCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback));
+  int result =
+      socket_->Read(read_buffer_.get(),
+                    byte_limit,
+                    base::Bind(&SocketInputStream::RefreshCompletionCallback,
+                               weak_ptr_factory_.GetWeakPtr(),
+                               callback));
   DVLOG(1) << "Read returned " << result;
   if (result == net::ERR_IO_PENDING) {
     last_error_ = net::ERR_IO_PENDING;
@@ -137,6 +138,8 @@ void SocketInputStream::RebuildBuffer() {
     DVLOG(1) << "Have " << unread_data_size << " unread bytes remaining.";
   }
   read_buffer_->DidConsume(unread_data_size);
+  // TODO(zea): investigating crbug.com/409985
+  CHECK_GE(UnreadByteCount(), 0);
 }
 
 net::Error SocketInputStream::last_error() const {
@@ -179,6 +182,8 @@ void SocketInputStream::RefreshCompletionCallback(
   DCHECK_GT(result, 0);
   last_error_ = net::OK;
   read_buffer_->DidConsume(result);
+  // TODO(zea): investigating crbug.com/409985
+  CHECK_GT(UnreadByteCount(), 0);
 
   DVLOG(1) << "Refresh complete with " << result << " new bytes. "
            << "Current position " << next_pos_
@@ -256,12 +261,12 @@ net::Error SocketOutputStream::Flush(const base::Closure& callback) {
   }
 
   DVLOG(1) << "Flushing " << next_pos_ << " bytes into socket.";
-  int result = socket_->Write(
-      write_buffer_,
-      next_pos_,
-      base::Bind(&SocketOutputStream::FlushCompletionCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback));
+  int result =
+      socket_->Write(write_buffer_.get(),
+                     next_pos_,
+                     base::Bind(&SocketOutputStream::FlushCompletionCallback,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                callback));
   DVLOG(1) << "Write returned " << result;
   if (result == net::ERR_IO_PENDING) {
     last_error_ = net::ERR_IO_PENDING;

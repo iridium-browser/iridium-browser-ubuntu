@@ -45,13 +45,15 @@ AudioRendererImpl::AudioRendererImpl(
     media::AudioRendererSink* sink,
     ScopedVector<AudioDecoder> decoders,
     const SetDecryptorReadyCB& set_decryptor_ready_cb,
-    AudioHardwareConfig* hardware_config)
+    const AudioHardwareConfig& hardware_config,
+    const scoped_refptr<MediaLog>& media_log)
     : task_runner_(task_runner),
       expecting_config_changes_(false),
       sink_(sink),
       audio_buffer_stream_(new AudioBufferStream(task_runner,
                                                  decoders.Pass(),
-                                                 set_decryptor_ready_cb)),
+                                                 set_decryptor_ready_cb,
+                                                 media_log)),
       hardware_config_(hardware_config),
       playback_rate_(0),
       state_(kUninitialized),
@@ -61,7 +63,6 @@ AudioRendererImpl::AudioRendererImpl(
       pending_read_(false),
       received_end_of_stream_(false),
       rendered_end_of_stream_(false),
-      last_timestamp_update_(kNoTimestamp()),
       weak_factory_(this) {
   audio_buffer_stream_->set_splice_observer(base::Bind(
       &AudioRendererImpl::OnNewSpliceBuffer, weak_factory_.GetWeakPtr()));
@@ -148,18 +149,30 @@ void AudioRendererImpl::SetMediaTime(base::TimeDelta time) {
   DCHECK_EQ(state_, kFlushed);
 
   start_timestamp_ = time;
+  ended_timestamp_ = kInfiniteDuration();
+  last_render_ticks_ = base::TimeTicks();
   audio_clock_.reset(new AudioClock(time, audio_parameters_.sample_rate()));
 }
 
 base::TimeDelta AudioRendererImpl::CurrentMediaTime() {
-  DVLOG(1) << __FUNCTION__;
-  DCHECK(task_runner_->BelongsToCurrentThread());
+  DVLOG(2) << __FUNCTION__;
 
-  // TODO(scherkus): Finish implementing when ready to switch Pipeline to using
-  // TimeSource http://crbug.com/370634
-  NOTIMPLEMENTED();
+  // In practice the Render() method is called with a high enough frequency
+  // that returning only the front timestamp is good enough and also prevents
+  // returning values that go backwards in time.
+  base::AutoLock auto_lock(lock_);
+  return audio_clock_->front_timestamp();
+}
 
-  return base::TimeDelta();
+base::TimeDelta AudioRendererImpl::CurrentMediaTimeForSyncingVideo() {
+  DVLOG(2) << __FUNCTION__;
+
+  base::AutoLock auto_lock(lock_);
+  if (last_render_ticks_.is_null())
+    return audio_clock_->front_timestamp();
+
+  return audio_clock_->TimestampSinceWriting(base::TimeTicks::Now() -
+                                             last_render_ticks_);
 }
 
 TimeSource* AudioRendererImpl::GetTimeSource() {
@@ -203,10 +216,8 @@ void AudioRendererImpl::ResetDecoderDone() {
     DCHECK_EQ(state_, kFlushed);
     DCHECK(!flush_cb_.is_null());
 
-    audio_clock_.reset();
     received_end_of_stream_ = false;
     rendered_end_of_stream_ = false;
-    last_timestamp_update_ = kNoTimestamp();
 
     // Flush() may have been called while underflowed/not fully buffered.
     if (buffering_state_ != BUFFERING_HAVE_NOTHING)
@@ -240,7 +251,6 @@ void AudioRendererImpl::StartPlaying() {
 void AudioRendererImpl::Initialize(DemuxerStream* stream,
                                    const PipelineStatusCB& init_cb,
                                    const StatisticsCB& statistics_cb,
-                                   const TimeCB& time_cb,
                                    const BufferingStateCB& buffering_state_cb,
                                    const base::Closure& ended_cb,
                                    const PipelineStatusCB& error_cb) {
@@ -249,17 +259,18 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
   DCHECK_EQ(stream->type(), DemuxerStream::AUDIO);
   DCHECK(!init_cb.is_null());
   DCHECK(!statistics_cb.is_null());
-  DCHECK(!time_cb.is_null());
   DCHECK(!buffering_state_cb.is_null());
   DCHECK(!ended_cb.is_null());
   DCHECK(!error_cb.is_null());
   DCHECK_EQ(kUninitialized, state_);
-  DCHECK(sink_);
+  DCHECK(sink_.get());
 
   state_ = kInitializing;
 
-  init_cb_ = init_cb;
-  time_cb_ = time_cb;
+  // Always post |init_cb_| because |this| could be destroyed if initialization
+  // failed.
+  init_cb_ = BindToCurrentLoop(init_cb);
+
   buffering_state_cb_ = buffering_state_cb;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
@@ -274,14 +285,13 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
         stream->audio_decoder_config().channel_layout(),
         ChannelLayoutToChannelCount(
             stream->audio_decoder_config().channel_layout()),
-        0,
         stream->audio_decoder_config().samples_per_second(),
         stream->audio_decoder_config().bits_per_channel(),
         buffer_size);
     buffer_converter_.reset();
   } else {
     // TODO(rileya): Support hardware config changes
-    const AudioParameters& hw_params = hardware_config_->GetOutputConfig();
+    const AudioParameters& hw_params = hardware_config_.GetOutputConfig();
     audio_parameters_.Reset(
         hw_params.format(),
         // Always use the source's channel layout and channel count to avoid
@@ -291,10 +301,9 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
         stream->audio_decoder_config().channel_layout(),
         ChannelLayoutToChannelCount(
             stream->audio_decoder_config().channel_layout()),
-        hw_params.input_channels(),
         hw_params.sample_rate(),
         hw_params.bits_per_sample(),
-        hardware_config_->GetHighLatencyBufferSize());
+        hardware_config_.GetHighLatencyBufferSize());
   }
 
   audio_clock_.reset(
@@ -348,13 +357,12 @@ void AudioRendererImpl::OnAudioBufferStreamInitialized(bool success) {
   }
 
   DCHECK(!sink_playing_);
-
   base::ResetAndReturn(&init_cb_).Run(PIPELINE_OK);
 }
 
 void AudioRendererImpl::SetVolume(float volume) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(sink_);
+  DCHECK(sink_.get());
   sink_->SetVolume(volume);
 }
 
@@ -508,7 +516,7 @@ void AudioRendererImpl::SetPlaybackRate(float playback_rate) {
   DVLOG(1) << __FUNCTION__ << "(" << playback_rate << ")";
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_GE(playback_rate, 0);
-  DCHECK(sink_);
+  DCHECK(sink_.get());
 
   base::AutoLock auto_lock(lock_);
 
@@ -535,7 +543,7 @@ void AudioRendererImpl::SetPlaybackRate(float playback_rate) {
 bool AudioRendererImpl::IsBeforeStartTime(
     const scoped_refptr<AudioBuffer>& buffer) {
   DCHECK_EQ(state_, kPlaying);
-  return buffer && !buffer->end_of_stream() &&
+  return buffer.get() && !buffer->end_of_stream() &&
          (buffer->timestamp() + buffer->duration()) < start_timestamp_;
 }
 
@@ -547,9 +555,9 @@ int AudioRendererImpl::Render(AudioBus* audio_bus,
   const int delay_frames = static_cast<int>(playback_delay.InSecondsF() *
                                             audio_parameters_.sample_rate());
   int frames_written = 0;
-  base::Closure time_cb;
   {
     base::AutoLock auto_lock(lock_);
+    last_render_ticks_ = base::TimeTicks::Now();
 
     // Ensure Stop() hasn't destroyed our |algorithm_| on the pipeline thread.
     if (!algorithm_) {
@@ -587,21 +595,32 @@ int AudioRendererImpl::Render(AudioBus* audio_bus,
       frames_written =
           algorithm_->FillBuffer(audio_bus, requested_frames, playback_rate_);
     }
-    audio_clock_->WroteAudio(
-        frames_written, requested_frames, delay_frames, playback_rate_);
 
+    // Per the TimeSource API the media time should always increase even after
+    // we've rendered all known audio data. Doing so simplifies scenarios where
+    // we have other sources of media data that need to be scheduled after audio
+    // data has ended.
+    //
+    // That being said, we don't want to advance time when underflowed as we
+    // know more decoded frames will eventually arrive. If we did, we would
+    // throw things out of sync when said decoded frames arrive.
+    int frames_after_end_of_stream = 0;
     if (frames_written == 0) {
-      if (received_end_of_stream_ && !rendered_end_of_stream_ &&
-          !audio_clock_->audio_data_buffered()) {
-        rendered_end_of_stream_ = true;
-        task_runner_->PostTask(FROM_HERE, ended_cb_);
-      } else if (!received_end_of_stream_ && state_ == kPlaying) {
-        if (buffering_state_ != BUFFERING_HAVE_NOTHING) {
-          algorithm_->IncreaseQueueCapacity();
-          SetBufferingState_Locked(BUFFERING_HAVE_NOTHING);
-        }
+      if (received_end_of_stream_) {
+        if (ended_timestamp_ == kInfiniteDuration())
+          ended_timestamp_ = audio_clock_->back_timestamp();
+        frames_after_end_of_stream = requested_frames;
+      } else if (state_ == kPlaying &&
+                 buffering_state_ != BUFFERING_HAVE_NOTHING) {
+        algorithm_->IncreaseQueueCapacity();
+        SetBufferingState_Locked(BUFFERING_HAVE_NOTHING);
       }
     }
+
+    audio_clock_->WroteAudio(frames_written + frames_after_end_of_stream,
+                             requested_frames,
+                             delay_frames,
+                             playback_rate_);
 
     if (CanRead_Locked()) {
       task_runner_->PostTask(FROM_HERE,
@@ -609,23 +628,12 @@ int AudioRendererImpl::Render(AudioBus* audio_bus,
                                         weak_factory_.GetWeakPtr()));
     }
 
-    // Firing |ended_cb_| means we no longer need to run |time_cb_|.
-    if (!rendered_end_of_stream_ &&
-        last_timestamp_update_ != audio_clock_->current_media_timestamp()) {
-      // Since |max_time| uses linear interpolation, only provide an upper bound
-      // that is for audio data at the same playback rate. Failing to do so can
-      // make time jump backwards when the linear interpolated time advances
-      // past buffered regions of audio at different rates.
-      last_timestamp_update_ = audio_clock_->current_media_timestamp();
-      base::TimeDelta max_time =
-          last_timestamp_update_ +
-          audio_clock_->contiguous_audio_data_buffered_at_same_rate();
-      time_cb = base::Bind(time_cb_, last_timestamp_update_, max_time);
+    if (audio_clock_->front_timestamp() >= ended_timestamp_ &&
+        !rendered_end_of_stream_) {
+      rendered_end_of_stream_ = true;
+      task_runner_->PostTask(FROM_HERE, ended_cb_);
     }
   }
-
-  if (!time_cb.is_null())
-    task_runner_->PostTask(FROM_HERE, time_cb);
 
   DCHECK_LE(frames_written, requested_frames);
   return frames_written;

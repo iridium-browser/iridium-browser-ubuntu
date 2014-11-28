@@ -48,6 +48,7 @@ struct MessageEventInit : public EventInit {
 };
 
 class MessageEvent FINAL : public Event {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<MessageEvent> create()
     {
@@ -113,6 +114,8 @@ public:
     void entangleMessagePorts(ExecutionContext*);
 
     virtual void trace(Visitor*) OVERRIDE;
+
+    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) OVERRIDE;
 
 private:
     MessageEvent();

@@ -7,11 +7,11 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/painter.h"
 #include "ui/views/view.h"
 
@@ -351,9 +351,7 @@ void BubbleBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
   gfx::Rect bounds(view->GetLocalBounds());
   bounds.Inset(border_->GetInsets());
 
-  SkScalar radius = SkIntToScalar(border_->GetBorderCornerRadius());
-  path.addRoundRect(gfx::RectToSkRect(bounds), radius, radius);
-  canvas->DrawPath(path, paint);
+  canvas->DrawRoundRect(bounds, border_->GetBorderCornerRadius(), paint);
 }
 
 }  // namespace views

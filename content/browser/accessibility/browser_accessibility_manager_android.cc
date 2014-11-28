@@ -247,6 +247,7 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
   bool is_root = node->GetParent() == NULL;
   Java_BrowserAccessibilityManager_setAccessibilityNodeInfoLocation(
       env, obj, info,
+      id,
       absolute_rect.x(), absolute_rect.y(),
       parent_relative_rect.x(), parent_relative_rect.y(),
       absolute_rect.width(), absolute_rect.height(),
@@ -355,14 +356,17 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityEvent(
         node->ColumnCount(),
         node->IsHierarchical());
   }
-  if (node->IsCollectionItem() || node->IsHeading()) {
+  if (node->IsHeading()) {
+    Java_BrowserAccessibilityManager_setAccessibilityEventHeadingFlag(
+        env, obj, event, true);
+  }
+  if (node->IsCollectionItem()) {
     Java_BrowserAccessibilityManager_setAccessibilityEventCollectionItemInfo(
         env, obj, event,
         node->RowIndex(),
         node->RowSpan(),
         node->ColumnIndex(),
-        node->ColumnSpan(),
-        node->IsHeading());
+        node->ColumnSpan());
   }
   if (node->IsRangeType()) {
     Java_BrowserAccessibilityManager_setAccessibilityEventRangeInfo(

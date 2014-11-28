@@ -1,10 +1,11 @@
 #!/usr/bin/python
-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Unittests for build stages."""
+
+from __future__ import print_function
 
 import copy
 import glob
@@ -19,6 +20,7 @@ from chromite.cbuildbot import commands
 from chromite.cbuildbot import cbuildbot_config as config
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import manifest_version
+from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
@@ -113,6 +115,8 @@ class RunBuildStagesTest(cros_test_lib.MoxTempDirTestCase,
 
     self.mox.StubOutWithMock(cros_build_lib, 'RunCommand')
 
+    cidb.CIDBConnectionFactory.SetupNoCidb()
+
     api = self.mox.CreateMock(cros_build_lib.CommandResult)
     api.returncode = 0
     api.output = constants.REEXEC_API_VERSION
@@ -150,6 +154,8 @@ class RunBuildStagesTest(cros_test_lib.MoxTempDirTestCase,
       del os.environ['CHROMEOS_OFFICIAL']
 
     self.mox.StubOutWithMock(cros_build_lib, 'RunCommand')
+
+    cidb.CIDBConnectionFactory.SetupNoCidb()
 
     api = self.mox.CreateMock(cros_build_lib.CommandResult)
     api.returncode = 0

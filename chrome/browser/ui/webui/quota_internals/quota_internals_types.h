@@ -9,8 +9,8 @@
 #include <string>
 
 #include "base/time/time.h"
+#include "storage/common/quota/quota_types.h"
 #include "url/gurl.h"
-#include "webkit/common/quota/quota_types.h"
 
 namespace base {
 class Value;
@@ -21,7 +21,7 @@ namespace quota_internals {
 // Represends global usage and quota information for specific type of storage.
 class GlobalStorageInfo {
  public:
-  explicit GlobalStorageInfo(quota::StorageType type);
+  explicit GlobalStorageInfo(storage::StorageType type);
   ~GlobalStorageInfo();
 
   void set_usage(int64 usage) {
@@ -40,7 +40,7 @@ class GlobalStorageInfo {
   // deleting the returned pointer.
   base::Value* NewValue() const;
  private:
-  quota::StorageType type_;
+  storage::StorageType type_;
 
   int64 usage_;
   int64 unlimited_usage_;
@@ -50,7 +50,7 @@ class GlobalStorageInfo {
 // Represents per host usage and quota information for the storage.
 class PerHostStorageInfo {
  public:
-  PerHostStorageInfo(const std::string& host, quota::StorageType type);
+  PerHostStorageInfo(const std::string& host, storage::StorageType type);
   ~PerHostStorageInfo();
 
   void set_usage(int64 usage) {
@@ -66,7 +66,7 @@ class PerHostStorageInfo {
   base::Value* NewValue() const;
  private:
   std::string host_;
-  quota::StorageType type_;
+  storage::StorageType type_;
 
   int64 usage_;
   int64 quota_;
@@ -75,7 +75,7 @@ class PerHostStorageInfo {
 // Represendts per origin usage and access time information.
 class PerOriginStorageInfo {
  public:
-  PerOriginStorageInfo(const GURL& origin, quota::StorageType type);
+  PerOriginStorageInfo(const GURL& origin, storage::StorageType type);
   ~PerOriginStorageInfo();
 
   void set_in_use(bool in_use) {
@@ -99,7 +99,7 @@ class PerOriginStorageInfo {
   base::Value* NewValue() const;
  private:
   GURL origin_;
-  quota::StorageType type_;
+  storage::StorageType type_;
   std::string host_;
 
   int in_use_;
@@ -107,6 +107,6 @@ class PerOriginStorageInfo {
   base::Time last_access_time_;
   base::Time last_modified_time_;
 };
-}  // quota_internals
+}  // namespace quota_internals
 
 #endif  // CHROME_BROWSER_UI_WEBUI_QUOTA_INTERNALS_QUOTA_INTERNALS_TYPES_H_

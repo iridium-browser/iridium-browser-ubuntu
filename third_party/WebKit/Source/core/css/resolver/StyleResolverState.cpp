@@ -39,16 +39,11 @@ StyleResolverState::StyleResolverState(Document& document, Element* element, Ren
     , m_applyPropertyToVisitedLinkStyle(false)
     , m_lineHeightValue(nullptr)
     , m_styleMap(*this, m_elementStyleResources)
-    , m_currentRule(nullptr)
 {
     if (!parentStyle && m_elementContext.parentNode())
         m_parentStyle = m_elementContext.parentNode()->renderStyle();
 
-    // FIXME: Animation unitests will start animations on non-active documents!
-    // http://crbug.com/330095
-    // ASSERT(document.isActive());
-    if (!document.isActive())
-        return;
+    ASSERT(document.isActive());
     m_elementStyleResources.setDeviceScaleFactor(document.frameHost()->deviceScaleFactor());
 }
 

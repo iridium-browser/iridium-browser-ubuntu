@@ -100,7 +100,7 @@
 
         'conditions': [
           # Compute the architecture that we're building on.
-          ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
+          ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="android"', {
             # This handles the Linux platforms we generally deal with. Anything
             # else gets passed through, which probably won't work very well;
             # such hosts should pass an explicit target_arch to gyp.
@@ -308,7 +308,13 @@
             'cflags': ['-fPIC'],
           }],
           ['OS=="android"', {
-            'defines': ['NACL_ANDROID=1'],
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'defines': ['NACL_ANDROID=1'],
+              }, {
+                'defines': ['NACL_ANDROID=0'],
+              }],
+            ],
            }, {
             'defines': ['NACL_ANDROID=0'],
             'link_settings': {
@@ -451,6 +457,7 @@
           'NACL_LINUX=1',
           'NACL_OSX=0',
           'NACL_WINDOWS=0',
+          '_DEFAULT_SOURCE=1',
           '_BSD_SOURCE=1',
           '_POSIX_C_SOURCE=199506',
           '_XOPEN_SOURCE=600',
@@ -589,6 +596,9 @@
           }],
           ['nacl_standalone==1 and target_arch=="x64"', {
             'xcode_settings': {'ARCHS': ['x86_64']},
+          }],
+          ['nacl_standalone==1 and target_arch=="ia32"', {
+            'xcode_settings': {'ARCHS': ['i386']},
           }],
           ['nacl_standalone==1', {
             'target_conditions': [

@@ -14,19 +14,22 @@
 #include <map>
 #include <vector>
 
+#include "webrtc/base/thread_annotations.h"
 #include "webrtc/call.h"
 #include "webrtc/common.h"
 #include "webrtc/config.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
+#include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/rw_lock_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
-#include "webrtc/system_wrappers/interface/thread_annotations.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 #include "webrtc/video/video_receive_stream.h"
 #include "webrtc/video/video_send_stream.h"
 #include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_codec.h"
+#include "webrtc/video_engine/include/vie_rtp_rtcp.h"
+#include "webrtc/video_engine/include/vie_network.h"
 #include "webrtc/video_engine/include/vie_rtp_rtcp.h"
 
 namespace webrtc {
@@ -37,6 +40,15 @@ const char* RtpExtension::kAbsSendTime =
 bool RtpExtension::IsSupported(const std::string& name) {
   return name == webrtc::RtpExtension::kTOffset ||
          name == webrtc::RtpExtension::kAbsSendTime;
+}
+
+VideoEncoder* VideoEncoder::Create(VideoEncoder::EncoderType codec_type) {
+  switch (codec_type) {
+    case kVp8:
+      return VP8Encoder::Create();
+  }
+  assert(false);
+  return NULL;
 }
 
 namespace internal {
@@ -75,8 +87,7 @@ class Call : public webrtc::Call, public PacketReceiver {
 
   virtual VideoSendStream* CreateVideoSendStream(
       const VideoSendStream::Config& config,
-      const std::vector<VideoStream>& video_streams,
-      const void* encoder_settings) OVERRIDE;
+      const VideoEncoderConfig& encoder_config) OVERRIDE;
 
   virtual void DestroyVideoSendStream(webrtc::VideoSendStream* send_stream)
       OVERRIDE;
@@ -93,18 +104,26 @@ class Call : public webrtc::Call, public PacketReceiver {
   virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
                                        size_t length) OVERRIDE;
 
+  virtual void SignalNetworkState(NetworkState state) OVERRIDE;
+
  private:
   DeliveryStatus DeliverRtcp(const uint8_t* packet, size_t length);
   DeliveryStatus DeliverRtp(const uint8_t* packet, size_t length);
 
   Call::Config config_;
 
-  std::map<uint32_t, VideoReceiveStream*> receive_ssrcs_
-      GUARDED_BY(receive_lock_);
-  scoped_ptr<RWLockWrapper> receive_lock_;
+  // Needs to be held while write-locking |receive_crit_| or |send_crit_|. This
+  // ensures that we have a consistent network state signalled to all senders
+  // and receivers.
+  scoped_ptr<CriticalSectionWrapper> network_enabled_crit_;
+  bool network_enabled_ GUARDED_BY(network_enabled_crit_);
 
-  std::map<uint32_t, VideoSendStream*> send_ssrcs_ GUARDED_BY(send_lock_);
-  scoped_ptr<RWLockWrapper> send_lock_;
+  scoped_ptr<RWLockWrapper> receive_crit_;
+  std::map<uint32_t, VideoReceiveStream*> receive_ssrcs_
+      GUARDED_BY(receive_crit_);
+
+  scoped_ptr<RWLockWrapper> send_crit_;
+  std::map<uint32_t, VideoSendStream*> send_ssrcs_ GUARDED_BY(send_crit_);
 
   scoped_ptr<CpuOveruseObserverProxy> overuse_observer_proxy_;
 
@@ -135,8 +154,10 @@ const int kDefaultVideoStreamBitrateBps = 300000;
 
 Call::Call(webrtc::VideoEngine* video_engine, const Call::Config& config)
     : config_(config),
-      receive_lock_(RWLockWrapper::CreateRWLock()),
-      send_lock_(RWLockWrapper::CreateRWLock()),
+      network_enabled_crit_(CriticalSectionWrapper::CreateCriticalSection()),
+      network_enabled_(true),
+      receive_crit_(RWLockWrapper::CreateRWLock()),
+      send_crit_(RWLockWrapper::CreateRWLock()),
       video_engine_(video_engine),
       base_channel_id_(-1) {
   assert(video_engine != NULL);
@@ -174,8 +195,7 @@ PacketReceiver* Call::Receiver() { return this; }
 
 VideoSendStream* Call::CreateVideoSendStream(
     const VideoSendStream::Config& config,
-    const std::vector<VideoStream>& video_streams,
-    const void* encoder_settings) {
+    const VideoEncoderConfig& encoder_config) {
   assert(config.rtp.ssrcs.size() > 0);
 
   // TODO(mflodman): Base the start bitrate on a current bandwidth estimate, if
@@ -185,18 +205,22 @@ VideoSendStream* Call::CreateVideoSendStream(
       overuse_observer_proxy_.get(),
       video_engine_,
       config,
-      video_streams,
-      encoder_settings,
+      encoder_config,
       suspended_send_ssrcs_,
       base_channel_id_,
       config_.start_bitrate_bps != -1 ? config_.start_bitrate_bps
                                       : kDefaultVideoStreamBitrateBps);
 
-  WriteLockScoped write_lock(*send_lock_);
+  // This needs to be taken before send_crit_ as both locks need to be held
+  // while changing network state.
+  CriticalSectionScoped lock(network_enabled_crit_.get());
+  WriteLockScoped write_lock(*send_crit_);
   for (size_t i = 0; i < config.rtp.ssrcs.size(); ++i) {
     assert(send_ssrcs_.find(config.rtp.ssrcs[i]) == send_ssrcs_.end());
     send_ssrcs_[config.rtp.ssrcs[i]] = send_stream;
   }
+  if (!network_enabled_)
+    send_stream->SignalNetworkState(kNetworkDown);
   return send_stream;
 }
 
@@ -207,7 +231,7 @@ void Call::DestroyVideoSendStream(webrtc::VideoSendStream* send_stream) {
 
   VideoSendStream* send_stream_impl = NULL;
   {
-    WriteLockScoped write_lock(*send_lock_);
+    WriteLockScoped write_lock(*send_crit_);
     std::map<uint32_t, VideoSendStream*>::iterator it = send_ssrcs_.begin();
     while (it != send_ssrcs_.end()) {
       if (it->second == static_cast<VideoSendStream*>(send_stream)) {
@@ -240,7 +264,10 @@ VideoReceiveStream* Call::CreateVideoReceiveStream(
                              config_.voice_engine,
                              base_channel_id_);
 
-  WriteLockScoped write_lock(*receive_lock_);
+  // This needs to be taken before receive_crit_ as both locks need to be held
+  // while changing network state.
+  CriticalSectionScoped lock(network_enabled_crit_.get());
+  WriteLockScoped write_lock(*receive_crit_);
   assert(receive_ssrcs_.find(config.rtp.remote_ssrc) == receive_ssrcs_.end());
   receive_ssrcs_[config.rtp.remote_ssrc] = receive_stream;
   // TODO(pbos): Configure different RTX payloads per receive payload.
@@ -249,6 +276,8 @@ VideoReceiveStream* Call::CreateVideoReceiveStream(
   if (it != config.rtp.rtx.end())
     receive_ssrcs_[it->second.ssrc] = receive_stream;
 
+  if (!network_enabled_)
+    receive_stream->SignalNetworkState(kNetworkDown);
   return receive_stream;
 }
 
@@ -258,7 +287,7 @@ void Call::DestroyVideoReceiveStream(
 
   VideoReceiveStream* receive_stream_impl = NULL;
   {
-    WriteLockScoped write_lock(*receive_lock_);
+    WriteLockScoped write_lock(*receive_crit_);
     // Remove all ssrcs pointing to a receive stream. As RTX retransmits on a
     // separate SSRC there can be either one or two.
     std::map<uint32_t, VideoReceiveStream*>::iterator it =
@@ -289,6 +318,31 @@ uint32_t Call::ReceiveBitrateEstimate() {
   return 0;
 }
 
+void Call::SignalNetworkState(NetworkState state) {
+  // Take crit for entire function, it needs to be held while updating streams
+  // to guarantee a consistent state across streams.
+  CriticalSectionScoped lock(network_enabled_crit_.get());
+  network_enabled_ = state == kNetworkUp;
+  {
+    ReadLockScoped write_lock(*send_crit_);
+    for (std::map<uint32_t, VideoSendStream*>::iterator it =
+             send_ssrcs_.begin();
+         it != send_ssrcs_.end();
+         ++it) {
+      it->second->SignalNetworkState(state);
+    }
+  }
+  {
+    ReadLockScoped write_lock(*receive_crit_);
+    for (std::map<uint32_t, VideoReceiveStream*>::iterator it =
+             receive_ssrcs_.begin();
+         it != receive_ssrcs_.end();
+         ++it) {
+      it->second->SignalNetworkState(state);
+    }
+  }
+}
+
 PacketReceiver::DeliveryStatus Call::DeliverRtcp(const uint8_t* packet,
                                                        size_t length) {
   // TODO(pbos): Figure out what channel needs it actually.
@@ -297,7 +351,7 @@ PacketReceiver::DeliveryStatus Call::DeliverRtcp(const uint8_t* packet,
   //             there's no receiver of the packet.
   bool rtcp_delivered = false;
   {
-    ReadLockScoped read_lock(*receive_lock_);
+    ReadLockScoped read_lock(*receive_crit_);
     for (std::map<uint32_t, VideoReceiveStream*>::iterator it =
              receive_ssrcs_.begin();
          it != receive_ssrcs_.end();
@@ -308,7 +362,7 @@ PacketReceiver::DeliveryStatus Call::DeliverRtcp(const uint8_t* packet,
   }
 
   {
-    ReadLockScoped read_lock(*send_lock_);
+    ReadLockScoped read_lock(*send_crit_);
     for (std::map<uint32_t, VideoSendStream*>::iterator it =
              send_ssrcs_.begin();
          it != send_ssrcs_.end();
@@ -329,7 +383,7 @@ PacketReceiver::DeliveryStatus Call::DeliverRtp(const uint8_t* packet,
   const uint8_t* ptr = &packet[8];
   uint32_t ssrc = ptr[0] << 24 | ptr[1] << 16 | ptr[2] << 8 | ptr[3];
 
-  ReadLockScoped read_lock(*receive_lock_);
+  ReadLockScoped read_lock(*receive_crit_);
   std::map<uint32_t, VideoReceiveStream*>::iterator it =
       receive_ssrcs_.find(ssrc);
 

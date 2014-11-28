@@ -61,7 +61,6 @@ IDBObjectStore::IDBObjectStore(const IDBObjectStoreMetadata& metadata, IDBTransa
     , m_deleted(false)
 {
     ASSERT(m_transaction);
-    ScriptWrappable::init(this);
 }
 
 void IDBObjectStore::trace(Visitor* visitor)
@@ -140,25 +139,25 @@ static void generateIndexKeysForValue(v8::Isolate* isolate, const IDBIndexMetada
     }
 }
 
-IDBRequest* IDBObjectStore::add(ScriptState* scriptState, ScriptValue& value, const ScriptValue& key, ExceptionState& exceptionState)
+IDBRequest* IDBObjectStore::add(ScriptState* scriptState, const ScriptValue& value, const ScriptValue& key, ExceptionState& exceptionState)
 {
     IDB_TRACE("IDBObjectStore::add");
     return put(scriptState, WebIDBPutModeAddOnly, IDBAny::create(this), value, key, exceptionState);
 }
 
-IDBRequest* IDBObjectStore::put(ScriptState* scriptState, ScriptValue& value, const ScriptValue& key, ExceptionState& exceptionState)
+IDBRequest* IDBObjectStore::put(ScriptState* scriptState, const ScriptValue& value, const ScriptValue& key, ExceptionState& exceptionState)
 {
     IDB_TRACE("IDBObjectStore::put");
     return put(scriptState, WebIDBPutModeAddOrUpdate, IDBAny::create(this), value, key, exceptionState);
 }
 
-IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode, IDBAny* source, ScriptValue& value, const ScriptValue& keyValue, ExceptionState& exceptionState)
+IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode, IDBAny* source, const ScriptValue& value, const ScriptValue& keyValue, ExceptionState& exceptionState)
 {
     IDBKey* key = keyValue.isUndefined() ? nullptr : scriptValueToIDBKey(scriptState->isolate(), keyValue);
     return put(scriptState, putMode, source, value, key, exceptionState);
 }
 
-IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode, IDBAny* source, ScriptValue& value, IDBKey* key, ExceptionState& exceptionState)
+IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode, IDBAny* source, const ScriptValue& value, IDBKey* key, ExceptionState& exceptionState)
 {
     if (isDeleted()) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::objectStoreDeletedErrorMessage);
@@ -186,7 +185,6 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
     // side effects (i.e. getters) are not triggered. Construct the
     // clone lazily since the operation may be expensive.
     ScriptValue clone;
-    value.clear();
 
     const IDBKeyPath& keyPath = m_metadata.keyPath;
     const bool usesInLineKeys = !keyPath.isNull();
@@ -406,18 +404,7 @@ private:
 };
 }
 
-IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& name, const IDBKeyPath& keyPath, const Dictionary& options, ExceptionState& exceptionState)
-{
-    bool unique = false;
-    DictionaryHelper::get(options, "unique", unique);
-
-    bool multiEntry = false;
-    DictionaryHelper::get(options, "multiEntry", multiEntry);
-
-    return createIndex(scriptState, name, keyPath, unique, multiEntry, exceptionState);
-}
-
-IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& name, const IDBKeyPath& keyPath, bool unique, bool multiEntry, ExceptionState& exceptionState)
+IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& name, const IDBKeyPath& keyPath, const IDBIndexParameters& options, ExceptionState& exceptionState)
 {
     IDB_TRACE("IDBObjectStore::createIndex");
     if (!m_transaction->isVersionChange()) {
@@ -449,7 +436,7 @@ IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& na
         return 0;
     }
 
-    if (keyPath.type() == IDBKeyPath::ArrayType && multiEntry) {
+    if (keyPath.type() == IDBKeyPath::ArrayType && options.multiEntry()) {
         exceptionState.throwDOMException(InvalidAccessError, "The keyPath argument was an array and the multiEntry option is true.");
         return 0;
     }
@@ -459,11 +446,11 @@ IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& na
     }
 
     int64_t indexId = m_metadata.maxIndexId + 1;
-    backendDB()->createIndex(m_transaction->id(), id(), indexId, name, keyPath, unique, multiEntry);
+    backendDB()->createIndex(m_transaction->id(), id(), indexId, name, keyPath, options.unique(), options.multiEntry());
 
     ++m_metadata.maxIndexId;
 
-    IDBIndexMetadata metadata(name, indexId, keyPath, unique, multiEntry);
+    IDBIndexMetadata metadata(name, indexId, keyPath, options.unique(), options.multiEntry());
     IDBIndex* index = IDBIndex::create(metadata, this, m_transaction.get());
     m_indexMap.set(name, index);
     m_metadata.indexes.set(indexId, metadata);

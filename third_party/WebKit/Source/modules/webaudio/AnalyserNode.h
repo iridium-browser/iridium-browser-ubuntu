@@ -34,10 +34,11 @@ namespace blink {
 class ExceptionState;
 
 class AnalyserNode FINAL : public AudioBasicInspectorNode {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<AnalyserNode> create(AudioContext* context, float sampleRate)
+    static AnalyserNode* create(AudioContext* context, float sampleRate)
     {
-        return adoptRefWillBeNoop(new AnalyserNode(context, sampleRate));
+        return adoptRefCountedGarbageCollectedWillBeNoop(new AnalyserNode(context, sampleRate));
     }
 
     virtual ~AnalyserNode();

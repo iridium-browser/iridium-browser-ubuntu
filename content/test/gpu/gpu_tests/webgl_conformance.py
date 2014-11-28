@@ -53,10 +53,7 @@ conformance_harness_script = r"""
   window.parent.webglTestHarness = testHarness;
   window.console.log = testHarness.log;
   window.onerror = function(message, url, line) {
-    testHarness._failures++;
-    if (message) {
-      testHarness.log(message);
-    }
+    testHarness.reportResults(null, false, message);
     testHarness.notifyFinished(null);
   };
 """
@@ -95,7 +92,7 @@ class WebglConformancePage(page_module.Page):
   def RunNavigateSteps(self, action_runner):
     action_runner.NavigateToPage(self)
     action_runner.WaitForJavaScriptCondition(
-        'webglTestHarness._finished', timeout_in_seconds=120)
+        'webglTestHarness._finished', timeout_in_seconds=180)
 
 
 class WebglConformance(benchmark_module.Benchmark):

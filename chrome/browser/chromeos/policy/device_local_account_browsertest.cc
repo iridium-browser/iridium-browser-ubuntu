@@ -7,8 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "apps/app_window_registry.h"
-#include "apps/ui/native_app_window.h"
 #include "ash/shell.h"
 #include "ash/system/chromeos/session/logout_confirmation_controller.h"
 #include "ash/system/chromeos/session/logout_confirmation_dialog.h"
@@ -17,8 +15,8 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
@@ -114,6 +112,9 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "crypto/rsa_private_key.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_registry.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/notification_types.h"
@@ -385,7 +386,7 @@ bool IsSessionStarted() {
 class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
                                public user_manager::UserManager::Observer,
                                public chrome::BrowserListObserver,
-                               public apps::AppWindowRegistry::Observer {
+                               public extensions::AppWindowRegistry::Observer {
  protected:
   DeviceLocalAccountTest()
       : user_id_1_(GenerateDeviceLocalAccountUserId(
@@ -519,12 +520,12 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
       run_loop_->Quit();
   }
 
-  virtual void OnAppWindowAdded(apps::AppWindow* app_window) OVERRIDE {
+  virtual void OnAppWindowAdded(extensions::AppWindow* app_window) OVERRIDE {
     if (run_loop_)
       run_loop_->Quit();
   }
 
-  virtual void OnAppWindowRemoved(apps::AppWindow* app_window) OVERRIDE {
+  virtual void OnAppWindowRemoved(extensions::AppWindow* app_window) OVERRIDE {
     if (run_loop_)
       run_loop_->Quit();
   }
@@ -722,7 +723,9 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
             &layouts_from_locale);
     ASSERT_FALSE(layouts_from_locale.empty());
     EXPECT_EQ(layouts_from_locale.front(),
-              input_method_manager->GetCurrentInputMethod().id());
+              input_method_manager->GetActiveIMEState()
+                  ->GetCurrentInputMethod()
+                  .id());
   }
 
   const std::string user_id_1_;
@@ -1284,8 +1287,8 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, LastWindowClosedLogoutReminder) {
 
   Profile* profile = GetProfileForTest();
   ASSERT_TRUE(profile);
-  apps::AppWindowRegistry* app_window_registry =
-      apps::AppWindowRegistry::Get(profile);
+  extensions::AppWindowRegistry* app_window_registry =
+      extensions::AppWindowRegistry::Get(profile);
   app_window_registry->AddObserver(this);
 
   // Verify that the logout confirmation dialog is not showing.
@@ -1510,8 +1513,10 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, NoRecommendedLocaleSwitch) {
   EXPECT_EQ(l10n_util::GetLanguage(kPublicSessionLocale),
             icu::Locale::getDefault().getLanguage());
   EXPECT_EQ(public_session_input_method_id_,
-            chromeos::input_method::InputMethodManager::Get()->
-                GetCurrentInputMethod().id());
+            chromeos::input_method::InputMethodManager::Get()
+                ->GetActiveIMEState()
+                ->GetCurrentInputMethod()
+                .id());
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, OneRecommendedLocale) {
@@ -1740,8 +1745,10 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MultipleRecommendedLocales) {
   EXPECT_EQ(l10n_util::GetLanguage(kPublicSessionLocale),
             icu::Locale::getDefault().getLanguage());
   EXPECT_EQ(public_session_input_method_id_,
-            chromeos::input_method::InputMethodManager::Get()->
-                GetCurrentInputMethod().id());
+            chromeos::input_method::InputMethodManager::Get()
+                ->GetActiveIMEState()
+                ->GetCurrentInputMethod()
+                .id());
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, InvalidRecommendedLocale) {
@@ -1911,8 +1918,10 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, TermsOfServiceWithLocaleSwitch) {
   EXPECT_EQ(l10n_util::GetLanguage(kPublicSessionLocale),
             icu::Locale::getDefault().getLanguage());
   EXPECT_EQ(public_session_input_method_id_,
-            chromeos::input_method::InputMethodManager::Get()->
-                GetCurrentInputMethod().id());
+            chromeos::input_method::InputMethodManager::Get()
+                ->GetActiveIMEState()
+                ->GetCurrentInputMethod()
+                .id());
 
   // Click the accept button.
   ASSERT_TRUE(content::ExecuteScript(contents_,
@@ -1925,8 +1934,10 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, TermsOfServiceWithLocaleSwitch) {
   EXPECT_EQ(l10n_util::GetLanguage(kPublicSessionLocale),
             icu::Locale::getDefault().getLanguage());
   EXPECT_EQ(public_session_input_method_id_,
-            chromeos::input_method::InputMethodManager::Get()->
-                GetCurrentInputMethod().id());
+            chromeos::input_method::InputMethodManager::Get()
+                ->GetActiveIMEState()
+                ->GetCurrentInputMethod()
+                .id());
 }
 
 class TermsOfServiceDownloadTest : public DeviceLocalAccountTest,

@@ -9,7 +9,6 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
-#include "net/base/net_errors.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -25,7 +24,7 @@ namespace protocol {
 
 class Authenticator;
 class ChannelAuthenticator;
-class FakeSocket;
+class FakeStreamSocket;
 
 class AuthenticatorTestBase : public testing::Test {
  public:
@@ -37,7 +36,7 @@ class AuthenticatorTestBase : public testing::Test {
    public:
     MockChannelDoneCallback();
     ~MockChannelDoneCallback();
-    MOCK_METHOD1(OnDone, void(net::Error error));
+    MOCK_METHOD1(OnDone, void(int error));
   };
 
   static void ContinueAuthExchangeWith(Authenticator* sender,
@@ -49,9 +48,9 @@ class AuthenticatorTestBase : public testing::Test {
   void RunHostInitiatedAuthExchange();
   void RunChannelAuth(bool expected_fail);
 
-  void OnHostConnected(net::Error error,
+  void OnHostConnected(int error,
                        scoped_ptr<net::StreamSocket> socket);
-  void OnClientConnected(net::Error error,
+  void OnClientConnected(int error,
                          scoped_ptr<net::StreamSocket> socket);
 
   base::MessageLoop message_loop_;
@@ -61,8 +60,8 @@ class AuthenticatorTestBase : public testing::Test {
   std::string host_cert_;
   scoped_ptr<Authenticator> host_;
   scoped_ptr<Authenticator> client_;
-  scoped_ptr<FakeSocket> client_fake_socket_;
-  scoped_ptr<FakeSocket> host_fake_socket_;
+  scoped_ptr<FakeStreamSocket> client_fake_socket_;
+  scoped_ptr<FakeStreamSocket> host_fake_socket_;
   scoped_ptr<ChannelAuthenticator> client_auth_;
   scoped_ptr<ChannelAuthenticator> host_auth_;
   MockChannelDoneCallback client_callback_;

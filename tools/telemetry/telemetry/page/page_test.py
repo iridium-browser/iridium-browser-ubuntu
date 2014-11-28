@@ -193,7 +193,7 @@ class PageTest(command_line.Command):
     if page.startup_url:
       options.browser_options.startup_url = page.startup_url
 
-  def WillStartBrowser(self, browser):
+  def WillStartBrowser(self, platform):
     """Override to manipulate the browser environment before it launches."""
 
   def DidStartBrowser(self, browser):
@@ -215,15 +215,6 @@ class PageTest(command_line.Command):
     This will occur before the browser is torn down.
     """
     self.options = None
-
-  def WillRunPageRepeats(self, page):
-    """Override to do operations before each page is iterated over."""
-
-  def DidRunPageRepeats(self, page):
-    """Override to do operations after each page is iterated over."""
-
-  def DidStartHTTPServer(self, tab):
-    """Override to do operations after the HTTP server is started."""
 
   def WillNavigateToPage(self, page, tab):
     """Override to do operations before the page is navigated, notably Telemetry

@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "cc/blink/web_layer_impl.h"
 #include "cc/layers/io_surface_layer.h"
 #include "content/child/appcache/web_application_cache_host_impl.h"
 #include "content/child/multipart_response_delegate.h"
@@ -25,7 +26,6 @@
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/renderer/compositor_bindings/web_layer_impl.h"
 #include "content/renderer/npapi/webplugin_delegate_proxy.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_process.h"
@@ -544,8 +544,8 @@ WebPluginImpl::WebPluginImpl(
       ignore_response_error_(false),
       file_path_(file_path),
       mime_type_(base::UTF16ToASCII(params.mimeType)),
-      weak_factory_(this),
-      loader_client_(this) {
+      loader_client_(this),
+      weak_factory_(this) {
   DCHECK_EQ(params.attributeNames.size(), params.attributeValues.size());
   base::StringToLowerASCII(&mime_type_);
 
@@ -851,7 +851,7 @@ void WebPluginImpl::AcceleratedPluginSwappedIOSurface() {
     if (next_io_surface_id_) {
       if (!io_surface_layer_.get()) {
         io_surface_layer_ = cc::IOSurfaceLayer::Create();
-        web_layer_.reset(new WebLayerImpl(io_surface_layer_));
+        web_layer_.reset(new cc_blink::WebLayerImpl(io_surface_layer_));
         container_->setWebLayer(web_layer_.get());
       }
       io_surface_layer_->SetIOSurfaceProperties(
@@ -1047,7 +1047,7 @@ void WebPluginImpl::didReceiveResponse(WebURLLoader* loader,
   // destroy the stream and invoke the NPP_DestroyStream function on the
   // plugin if the HTTP request fails.
   const GURL& url = response.url();
-  if (url.SchemeIs("http") || url.SchemeIs("https")) {
+  if (url.SchemeIs(url::kHttpScheme) || url.SchemeIs(url::kHttpsScheme)) {
     if (response.httpStatusCode() < 100 || response.httpStatusCode() >= 400) {
       // The plugin instance could be in the process of deletion here.
       // Verify if the WebPluginResourceClient instance still exists before
@@ -1170,7 +1170,7 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
   // in which case we route the output to the plugin rather than routing it
   // to the plugin's frame.
   bool is_javascript_url =
-      url::FindAndCompareScheme(url, strlen(url), "javascript", NULL);
+      url::FindAndCompareScheme(url, strlen(url), url::kJavaScriptScheme, NULL);
   RoutingStatus routing_status = RouteToFrame(
       url, is_javascript_url, popups_allowed, method, target, buf, len,
       notify_id, referrer_flag);

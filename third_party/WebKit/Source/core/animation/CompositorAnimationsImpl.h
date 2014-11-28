@@ -32,25 +32,29 @@
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/Timing.h"
 #include "platform/animation/TimingFunction.h"
-#include "public/platform/WebAnimation.h"
+#include "public/platform/WebCompositorAnimation.h"
 
 namespace blink {
+
+class WebCompositorAnimationCurve;
 
 class CompositorAnimationsImpl {
 private:
     struct CompositorTiming {
-        bool reverse;
-        bool alternate;
+        Timing::PlaybackDirection direction;
         double scaledDuration;
         double scaledTimeOffset;
-        int adjustedIterationCount;
+        double adjustedIterationCount;
+        double playbackRate;
+        Timing::FillMode fillMode;
+        double iterationStart;
     };
 
-    static bool convertTimingForCompositor(const Timing&, CompositorTiming& out);
+    static bool convertTimingForCompositor(const Timing&, double timeOffset, CompositorTiming& out, double playerPlaybackRate);
 
-    static void getAnimationOnCompositor(const Timing&, double startTime, const KeyframeEffectModelBase&, Vector<OwnPtr<blink::WebAnimation> >& animations);
+    static void getAnimationOnCompositor(const Timing&, double startTime, double timeOffset, const KeyframeEffectModelBase&, Vector<OwnPtr<WebCompositorAnimation> >& animations, double playerPlaybackRate);
 
-    static void addKeyframesToCurve(blink::WebAnimationCurve&, const AnimatableValuePropertySpecificKeyframeVector&, bool reverse);
+    static void addKeyframesToCurve(WebCompositorAnimationCurve&, const AnimatableValuePropertySpecificKeyframeVector&, const Timing&);
 
     friend class CompositorAnimations;
     friend class AnimationCompositorAnimationsTest;

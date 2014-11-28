@@ -38,14 +38,12 @@ class ACMOpus : public ACMGenericCodec {
 
   virtual int SetPacketLossRate(int loss_rate) OVERRIDE;
 
-  virtual int SetOpusMaxBandwidth(int max_bandwidth) OVERRIDE;
+  virtual int SetOpusMaxPlaybackRate(int frequency_hz) OVERRIDE;
 
  protected:
   void DestructEncoderSafe();
 
   int16_t InternalCreateEncoder();
-
-  void InternalDestructEncoderInst(void* ptr_inst);
 
   int16_t SetBitRateSafe(const int32_t rate) OVERRIDE
       EXCLUSIVE_LOCKS_REQUIRED(codec_wrapper_lock_);
@@ -55,7 +53,6 @@ class ACMOpus : public ACMGenericCodec {
   int32_t bitrate_;
   int channels_;
 
-  bool fec_enabled_;
   int packet_loss_rate_;
 };
 

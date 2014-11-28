@@ -298,7 +298,7 @@ FileTable.decorate = function(self, metadataCache, volumeManager, fullPage) {
   self.setRenderFunction(self.renderTableRow_.bind(self,
       self.getRenderFunction()));
 
-  self.scrollBar_ = MainPanelScrollBar();
+  self.scrollBar_ = new MainPanelScrollBar();
   self.scrollBar_.initialize(self, self.list);
   // Keep focus on the file list when clicking on the header.
   self.header.addEventListener('mousedown', function(e) {
@@ -334,8 +334,8 @@ FileTable.decorate = function(self, metadataCache, volumeManager, fullPage) {
    *
    * @param {number} x X coordinate value.
    * @param {number} y Y coordinate value.
-   * @param {=number} opt_width Width of the coordinate.
-   * @param {=number} opt_height Height of the coordinate.
+   * @param {number=} opt_width Width of the coordinate.
+   * @param {number=} opt_height Height of the coordinate.
    * @return {Array.<number>} Index list of hit elements.
    */
   self.list.getHitElements = function(x, y, opt_width, opt_height) {
@@ -356,14 +356,14 @@ FileTable.decorate = function(self, metadataCache, volumeManager, fullPage) {
  */
 FileTable.prototype.setDateTimeFormat = function(use12hourClock) {
   this.timeFormatter_ = Intl.DateTimeFormat(
-        [] /* default locale */,
-        {hour: 'numeric', minute: 'numeric',
-         hour12: use12hourClock});
+      [] /* default locale */,
+      {hour: 'numeric', minute: 'numeric', hour12: use12hourClock});
   this.dateFormatter_ = Intl.DateTimeFormat(
-        [] /* default locale */,
-        {year: 'numeric', month: 'short', day: 'numeric',
-         hour: 'numeric', minute: 'numeric',
-         hour12: use12hourClock});
+      [] /* default locale */,
+      {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', hour12: use12hourClock
+      });
 };
 
 /**
@@ -395,7 +395,7 @@ FileTable.prototype.shouldStartDragSelection_ = function(event) {
 
   // If the pointed item is already selected, it should not start the drag
   // selection.
-  if (this.lastSelection_.indexOf(itemIndex) !== -1)
+  if (this.lastSelection_ && this.lastSelection_.indexOf(itemIndex) !== -1)
     return false;
 
   // If the horizontal value is not hit to column, it should start the drag
@@ -476,8 +476,8 @@ FileTable.prototype.updateSize_ = function(div, entry) {
     return;
   } else if (filesystemProps.size === 0 &&
              FileType.isHosted(entry)) {
-    var driveProps = this.metadataCache_.getCached(entry, 'drive');
-    if (!driveProps) {
+    var externalProps = this.metadataCache_.getCached(entry, 'external');
+    if (!externalProps) {
       var locationInfo = this.volumeManager_.getLocationInfo(entry);
       if (locationInfo && locationInfo.isDriveBased) {
         // Should not reach here, since we already have size metadata.
@@ -485,7 +485,7 @@ FileTable.prototype.updateSize_ = function(div, entry) {
         div.textContent = '...';
         return;
       }
-    } else if (driveProps.hosted) {
+    } else if (externalProps.hosted) {
       div.textContent = '--';
       return;
     }
@@ -602,11 +602,11 @@ FileTable.prototype.updateListItemsMetadata = function(type, entries) {
     forEachCell('.table-row-cell > .size', function(item, entry, unused) {
       this.updateSize_(item, entry);
     });
-  } else if (type === 'drive') {
+  } else if (type === 'external') {
     // The cell name does not matter as the entire list item is needed.
     forEachCell('.table-row-cell > .date', function(item, entry, listItem) {
-      var props = this.metadataCache_.getCached(entry, 'drive');
-      filelist.updateListItemDriveProps(listItem, props);
+      var props = this.metadataCache_.getCached(entry, 'external');
+      filelist.updateListItemExternalProps(listItem, props);
     });
   }
 };
@@ -679,10 +679,10 @@ filelist.decorateListItem = function(li, entry, metadataCache) {
   li.classList.add(entry.isDirectory ? 'directory' : 'file');
   // The metadata may not yet be ready. In that case, the list item will be
   // updated when the metadata is ready via updateListItemsMetadata. For files
-  // not on Drive, driveProps is not available.
-  var driveProps = metadataCache.getCached(entry, 'drive');
-  if (driveProps)
-    filelist.updateListItemDriveProps(li, driveProps);
+  // not on an external backend, externalProps is not available.
+  var externalProps = metadataCache.getCached(entry, 'external');
+  if (externalProps)
+    filelist.updateListItemExternalProps(li, externalProps);
 
   // Overriding the default role 'list' to 'listbox' for better
   // accessibility on ChromeOS.
@@ -729,13 +729,13 @@ filelist.renderFileNameLabel = function(doc, entry) {
 };
 
 /**
- * Updates grid item or table row for the driveProps.
+ * Updates grid item or table row for the externalProps.
  * @param {cr.ui.ListItem} li List item.
- * @param {Object} driveProps Metadata.
+ * @param {Object} externalProps Metadata.
  */
-filelist.updateListItemDriveProps = function(li, driveProps) {
+filelist.updateListItemExternalProps = function(li, externalProps) {
   if (li.classList.contains('file')) {
-    if (driveProps.availableOffline)
+    if (externalProps.availableOffline)
       li.classList.remove('dim-offline');
     else
       li.classList.add('dim-offline');
@@ -748,11 +748,11 @@ filelist.updateListItemDriveProps = function(li, driveProps) {
   if (!iconDiv)
     return;
 
-  if (driveProps.customIconUrl)
-    iconDiv.style.backgroundImage = 'url(' + driveProps.customIconUrl + ')';
+  if (externalProps.customIconUrl)
+    iconDiv.style.backgroundImage = 'url(' + externalProps.customIconUrl + ')';
   else
     iconDiv.style.backgroundImage = '';  // Back to the default image.
 
   if (li.classList.contains('directory'))
-    iconDiv.classList.toggle('shared', driveProps.shared);
+    iconDiv.classList.toggle('shared', externalProps.shared);
 };

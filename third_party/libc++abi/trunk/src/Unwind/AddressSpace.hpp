@@ -17,7 +17,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if !_LIBUNWIND_IS_BAREMETAL
 #include <dlfcn.h>
+#endif
 
 #if __APPLE__
 #include <mach-o/getsect.h>
@@ -31,11 +34,39 @@ namespace libunwind {
 #include "dwarf2.h"
 #include "Registers.hpp"
 
+#if LIBCXXABI_ARM_EHABI
+#if __linux__
+
+typedef long unsigned int *_Unwind_Ptr;
+extern "C" _Unwind_Ptr __gnu_Unwind_Find_exidx(_Unwind_Ptr addr, int *len);
+
+// Emulate the BSD dl_unwind_find_exidx API when on a GNU libdl system.
+#define dl_unwind_find_exidx __gnu_Unwind_Find_exidx
+
+#elif !_LIBUNWIND_IS_BAREMETAL
+#include <link.h>
+#else // _LIBUNWIND_IS_BAREMETAL
+// When statically linked on bare-metal, the symbols for the EH table are looked
+// up without going through the dynamic loader.
+struct EHTEntry {
+  uint32_t functionOffset;
+  uint32_t unwindOpcodes;
+};
+extern EHTEntry __exidx_start;
+extern EHTEntry __exidx_end;
+#endif // !_LIBUNWIND_IS_BAREMETAL
+
+#endif  // LIBCXXABI_ARM_EHABI
+
 namespace libunwind {
 
 /// Used by findUnwindSections() to return info about needed sections.
 struct UnwindInfoSections {
-  uintptr_t        dso_base;
+#if _LIBUNWIND_SUPPORT_DWARF_UNWIND || _LIBUNWIND_SUPPORT_DWARF_INDEX ||       \
+    _LIBUNWIND_SUPPORT_COMPACT_UNWIND
+  // No dso_base for ARM EHABI.
+  uintptr_t       dso_base;
+#endif
 #if _LIBUNWIND_SUPPORT_DWARF_UNWIND
   uintptr_t       dwarf_section;
   uintptr_t       dwarf_section_length;
@@ -47,6 +78,10 @@ struct UnwindInfoSections {
 #if _LIBUNWIND_SUPPORT_COMPACT_UNWIND
   uintptr_t       compact_unwind_section;
   uintptr_t       compact_unwind_section_length;
+#endif
+#if LIBCXXABI_ARM_EHABI
+  uintptr_t       arm_section;
+  uintptr_t       arm_section_length;
 #endif
 };
 
@@ -196,12 +231,14 @@ inline LocalAddressSpace::pint_t LocalAddressSpace::getEncodedP(pint_t &addr,
     result = (pint_t)getSLEB128(addr, end);
     break;
   case DW_EH_PE_sdata2:
-    result = (uint16_t)get16(addr);
+    // Sign extend from signed 16-bit value.
+    result = (pint_t)(int16_t)get16(addr);
     p += 2;
     addr = (pint_t) p;
     break;
   case DW_EH_PE_sdata4:
-    result = (uint32_t)get32(addr);
+    // Sign extend from signed 32-bit value.
+    result = (pint_t)(int32_t)get32(addr);
     p += 4;
     addr = (pint_t) p;
     break;
@@ -301,9 +338,21 @@ inline bool LocalAddressSpace::findUnwindSections(pint_t targetAddr,
     info.compact_unwind_section_length = dyldInfo.compact_unwind_section_length;
     return true;
   }
-#else
-  // TO DO
-
+#elif LIBCXXABI_ARM_EHABI
+ #if _LIBUNWIND_IS_BAREMETAL
+  // Bare metal is statically linked, so no need to ask the dynamic loader
+  info.arm_section =        (uintptr_t)(&__exidx_start);
+  info.arm_section_length = (uintptr_t)(&__exidx_end - &__exidx_start);
+ #else
+  int length = 0;
+  info.arm_section = (uintptr_t) dl_unwind_find_exidx(
+      (_Unwind_Ptr) targetAddr, &length);
+  info.arm_section_length = (uintptr_t)length;
+ #endif
+  _LIBUNWIND_TRACE_UNWINDING("findUnwindSections: section %X length %x\n",
+                             info.arm_section, info.arm_section_length);
+  if (info.arm_section && info.arm_section_length)
+    return true;
 #endif
 
   return false;
@@ -315,6 +364,8 @@ inline bool LocalAddressSpace::findOtherFDE(pint_t targetAddr, pint_t &fde) {
   return checkKeyMgrRegisteredFDEs(targetAddr, *((void**)&fde));
 #else
   // TO DO: if OS has way to dynamically register FDEs, check that.
+  (void)targetAddr;
+  (void)fde;
   return false;
 #endif
 }
@@ -322,14 +373,16 @@ inline bool LocalAddressSpace::findOtherFDE(pint_t targetAddr, pint_t &fde) {
 inline bool LocalAddressSpace::findFunctionName(pint_t addr, char *buf,
                                                 size_t bufLen,
                                                 unw_word_t *offset) {
-  dl_info dyldInfo;
+#if !_LIBUNWIND_IS_BAREMETAL
+  Dl_info dyldInfo;
   if (dladdr((void *)addr, &dyldInfo)) {
     if (dyldInfo.dli_sname != NULL) {
-      strlcpy(buf, dyldInfo.dli_sname, bufLen);
+      snprintf(buf, bufLen, "%s", dyldInfo.dli_sname);
       *offset = (addr - (pint_t) dyldInfo.dli_saddr);
       return true;
     }
   }
+#endif
   return false;
 }
 

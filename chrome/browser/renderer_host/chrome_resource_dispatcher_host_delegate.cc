@@ -13,10 +13,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/component_updater/component_updater_resource_throttle.h"
-#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_resource_throttle.h"
+#include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/prefetch/prefetch.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -32,7 +32,6 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
@@ -53,6 +52,10 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 
+#if !defined(DISABLE_NACL)
+#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
+#endif
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "components/policy/core/common/cloud/policy_header_io_helper.h"
 #endif
@@ -62,10 +65,11 @@
 #include "chrome/browser/apps/ephemeral_app_throttle.h"
 #include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
 #include "chrome/browser/extensions/user_script_listener.h"
-#include "chrome/browser/guest_view/web_view/web_view_renderer_state.h"
 #include "chrome/common/extensions/manifest_handlers/mime_types_handler.h"
+#include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/user_script.h"
 #endif
 
@@ -223,6 +227,7 @@ void LaunchURL(const GURL& url, int render_process_id, int render_view_id) {
 }
 #endif  // !defined(OS_ANDROID)
 
+#if !defined(DISABLE_NACL)
 void AppendComponentUpdaterThrottles(
     net::URLRequest* request,
     content::ResourceContext* resource_context,
@@ -251,8 +256,9 @@ void AppendComponentUpdaterThrottles(
         component_updater::GetOnDemandResourceThrottle(cus, crx_id));
   }
 }
+#endif  // !defined(DISABLE_NACL)
 
-}  // end namespace
+}  // namespace
 
 ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate(
     prerender::PrerenderTracker* prerender_tracker)
@@ -271,8 +277,6 @@ ChromeResourceDispatcherHostDelegate::~ChromeResourceDispatcherHostDelegate() {
 }
 
 bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
-    int child_id,
-    int route_id,
     const std::string& method,
     const GURL& url,
     ResourceType resource_type,
@@ -299,8 +303,6 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     content::ResourceContext* resource_context,
     content::AppCacheService* appcache_service,
     ResourceType resource_type,
-    int child_id,
-    int route_id,
     ScopedVector<content::ResourceThrottle>* throttles) {
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
   bool is_prerendering =
@@ -395,18 +397,24 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
 #endif
 
   signin::AppendMirrorRequestHeaderIfPossible(
-      request, GURL() /* redirect_url */,
-      io_data, info->GetChildID(), info->GetRouteID());
+      request, GURL() /* redirect_url */, io_data);
 
   AppendStandardResourceThrottles(request,
                                   resource_context,
                                   resource_type,
                                   throttles);
+#if !defined(DISABLE_NACL)
   if (!is_prerendering) {
     AppendComponentUpdaterThrottles(request,
                                     resource_context,
                                     resource_type,
                                     throttles);
+  }
+#endif
+
+  if (io_data->resource_prefetch_predictor_observer()) {
+    io_data->resource_prefetch_predictor_observer()->OnRequestStarted(
+        request, resource_type, info->GetChildID(), info->GetRenderFrameID());
   }
 }
 
@@ -491,12 +499,10 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
       || io_data->IsDataReductionProxyEnabled()
 #endif
   ) {
-    bool is_subresource_request =
-        resource_type != content::RESOURCE_TYPE_MAIN_FRAME;
     content::ResourceThrottle* throttle =
         SafeBrowsingResourceThrottleFactory::Create(request,
                                                     resource_context,
-                                                    is_subresource_request,
+                                                    resource_type,
                                                     safe_browsing_.get());
     if (throttle)
       throttles->push_back(throttle);
@@ -659,6 +665,7 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
                                               info->GetRouteID());
 
   // Build in additional protection for the chrome web store origin.
+#if defined(ENABLE_EXTENSIONS)
   GURL webstore_url(extension_urls::GetWebstoreLaunchURL());
   if (request->url().DomainIs(webstore_url.host().c_str())) {
     net::HttpResponseHeaders* response_headers = request->response_headers();
@@ -668,6 +675,10 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
       response_headers->AddHeader("x-frame-options: sameorigin");
     }
   }
+#endif
+
+  if (io_data->resource_prefetch_predictor_observer())
+    io_data->resource_prefetch_predictor_observer()->OnResponseStarted(request);
 
   // Ignores x-frame-options for the chrome signin UI.
   const std::string request_spec(
@@ -692,9 +703,10 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
     content::ResourceContext* resource_context,
     content::ResourceResponse* response) {
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
-  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+
   // See if the response contains the Google-Accounts-SignIn header.  If so,
   // then the user has just finished signing in, and the server is allowing the
   // browser to suggest connecting the user's profile to the account.
@@ -709,8 +721,12 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
   // response and let Chrome handle the action with native UI. The only
   // exception is requests from gaia webview, since the native profile
   // management UI is built on top of it.
-  signin::AppendMirrorRequestHeaderIfPossible(request, redirect_url, io_data,
-      info->GetChildID(), info->GetRouteID());
+  signin::AppendMirrorRequestHeaderIfPossible(request, redirect_url, io_data);
+
+  if (io_data->resource_prefetch_predictor_observer()) {
+    io_data->resource_prefetch_predictor_observer()->OnRequestRedirected(
+        redirect_url, request);
+  }
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (io_data->policy_header_helper())

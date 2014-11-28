@@ -9,9 +9,6 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "ui/base/webui/web_ui_util.h"
-#include "ui/gfx/image/image.h"
-#include "ui/gfx/image/image_skia.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -23,6 +20,30 @@ namespace {
 base::LazyInstance<ScreenlockBridge> g_screenlock_bridge_bridge_instance =
     LAZY_INSTANCE_INITIALIZER;
 
+// Ids for the icons that are supported by lock screen and signin screen
+// account picker as user pod custom icons.
+// The id's should be kept in sync with values used by user_pod_row.js.
+const char kLockedUserPodCustomIconId[] = "locked";
+const char kUnlockedUserPodCustomIconId[] = "unlocked";
+const char kHardlockedUserPodCustomIconId[] = "hardlocked";
+const char kSpinnerUserPodCustomIconId[] = "spinner";
+
+// Given the user pod icon, returns its id as used by the user pod UI code.
+std::string GetIdForIcon(ScreenlockBridge::UserPodCustomIcon icon) {
+  switch (icon) {
+    case ScreenlockBridge::USER_POD_CUSTOM_ICON_LOCKED:
+      return kLockedUserPodCustomIconId;
+    case ScreenlockBridge::USER_POD_CUSTOM_ICON_UNLOCKED:
+      return kUnlockedUserPodCustomIconId;
+    case ScreenlockBridge::USER_POD_CUSTOM_ICON_HARDLOCKED:
+      return kHardlockedUserPodCustomIconId;
+    case ScreenlockBridge::USER_POD_CUSTOM_ICON_SPINNER:
+      return kSpinnerUserPodCustomIconId;
+    default:
+      return "";
+  }
+}
+
 }  // namespace
 
 // static
@@ -31,13 +52,7 @@ ScreenlockBridge* ScreenlockBridge::Get() {
 }
 
 ScreenlockBridge::UserPodCustomIconOptions::UserPodCustomIconOptions()
-    : width_(0u),
-      height_(0u),
-      animation_set_(false),
-      animation_resource_width_(0u),
-      animation_frame_length_ms_(0u),
-      opacity_(100u),
-      autoshow_tooltip_(false),
+    : autoshow_tooltip_(false),
       hardlock_on_click_(false) {
 }
 
@@ -46,24 +61,8 @@ ScreenlockBridge::UserPodCustomIconOptions::~UserPodCustomIconOptions() {}
 scoped_ptr<base::DictionaryValue>
 ScreenlockBridge::UserPodCustomIconOptions::ToDictionaryValue() const {
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-  if (!icon_image_ && icon_resource_url_.empty())
-    return result.Pass();
-
-  if (icon_image_) {
-    gfx::ImageSkia icon_skia = icon_image_->AsImageSkia();
-    base::DictionaryValue* icon_representations = new base::DictionaryValue();
-    icon_representations->SetString(
-        "scale1x",
-        webui::GetBitmapDataUrl(
-            icon_skia.GetRepresentation(1.0f).sk_bitmap()));
-    icon_representations->SetString(
-        "scale2x",
-        webui::GetBitmapDataUrl(
-            icon_skia.GetRepresentation(2.0f).sk_bitmap()));
-    result->Set("data", icon_representations);
-  } else {
-    result->SetString("resourceUrl", icon_resource_url_);
-  }
+  std::string icon_id = GetIdForIcon(icon_);
+  result->SetString("id", icon_id);
 
   if (!tooltip_.empty()) {
     base::DictionaryValue* tooltip_options = new base::DictionaryValue();
@@ -72,21 +71,8 @@ ScreenlockBridge::UserPodCustomIconOptions::ToDictionaryValue() const {
     result->Set("tooltip", tooltip_options);
   }
 
-  base::DictionaryValue* size = new base::DictionaryValue();
-  size->SetInteger("height", height_);
-  size->SetInteger("width", width_);
-  result->Set("size", size);
-
-  result->SetInteger("opacity", opacity_);
-
-  if (animation_set_) {
-    base::DictionaryValue* animation = new base::DictionaryValue();
-    animation->SetInteger("resourceWidth",
-                          animation_resource_width_);
-    animation->SetInteger("frameLengthMs",
-                          animation_frame_length_ms_);
-    result->Set("animation", animation);
-  }
+  if (!aria_label_.empty())
+    result->SetString("ariaLabel", aria_label_);
 
   if (hardlock_on_click_)
     result->SetBoolean("hardlockOnClick", true);
@@ -94,38 +80,9 @@ ScreenlockBridge::UserPodCustomIconOptions::ToDictionaryValue() const {
   return result.Pass();
 }
 
-void ScreenlockBridge::UserPodCustomIconOptions::SetIconAsResourceURL(
-    const std::string& url) {
-  DCHECK(!icon_image_);
-
-  icon_resource_url_ = url;
-}
-
-void ScreenlockBridge::UserPodCustomIconOptions::SetIconAsImage(
-    const gfx::Image& image) {
-  DCHECK(icon_resource_url_.empty());
-
-  icon_image_.reset(new gfx::Image(image));
-  SetSize(image.Width(), image.Height());
-}
-
-void ScreenlockBridge::UserPodCustomIconOptions::SetSize(size_t icon_width,
-                                                         size_t icon_height) {
-  width_ = icon_width;
-  height_ = icon_height;
-}
-
-void ScreenlockBridge::UserPodCustomIconOptions::SetAnimation(
-    size_t resource_width,
-    size_t frame_length_ms) {
-  animation_set_ = true;
-  animation_resource_width_ = resource_width;
-  animation_frame_length_ms_ = frame_length_ms;
-}
-
-void ScreenlockBridge::UserPodCustomIconOptions::SetOpacity(size_t opacity) {
-  DCHECK_LE(opacity, 100u);
-  opacity_ = opacity;
+void ScreenlockBridge::UserPodCustomIconOptions::SetIcon(
+    ScreenlockBridge::UserPodCustomIcon icon) {
+  icon_ = icon;
 }
 
 void ScreenlockBridge::UserPodCustomIconOptions::SetTooltip(
@@ -133,6 +90,11 @@ void ScreenlockBridge::UserPodCustomIconOptions::SetTooltip(
     bool autoshow) {
   tooltip_ = tooltip;
   autoshow_tooltip_ = autoshow;
+}
+
+void ScreenlockBridge::UserPodCustomIconOptions::SetAriaLabel(
+    const base::string16& aria_label) {
+  aria_label_ = aria_label;
 }
 
 void ScreenlockBridge::UserPodCustomIconOptions::SetHardlockOnClick() {
@@ -161,6 +123,13 @@ void ScreenlockBridge::SetLockHandler(LockHandler* lock_handler) {
     FOR_EACH_OBSERVER(Observer, observers_, OnScreenDidLock());
   else
     FOR_EACH_OBSERVER(Observer, observers_, OnScreenDidUnlock());
+}
+
+void ScreenlockBridge::SetFocusedUser(const std::string& user_id) {
+  if (user_id == focused_user_id_)
+    return;
+  focused_user_id_ = user_id;
+  FOR_EACH_OBSERVER(Observer, observers_, OnFocusedUserChanged(user_id));
 }
 
 bool ScreenlockBridge::IsLocked() const {

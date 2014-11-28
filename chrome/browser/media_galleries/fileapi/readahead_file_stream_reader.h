@@ -9,14 +9,14 @@
 
 #include "base/memory/weak_ptr.h"
 #include "net/base/io_buffer.h"
-#include "webkit/browser/blob/file_stream_reader.h"
+#include "storage/browser/blob/file_stream_reader.h"
 
 // Wraps a source FileStreamReader with a readahead buffer.
 class ReadaheadFileStreamReader
-    : public NON_EXPORTED_BASE(webkit_blob::FileStreamReader) {
+    : public NON_EXPORTED_BASE(storage::FileStreamReader) {
  public:
   // Takes ownership of |source|.
-  explicit ReadaheadFileStreamReader(webkit_blob::FileStreamReader* source);
+  explicit ReadaheadFileStreamReader(storage::FileStreamReader* source);
 
   virtual ~ReadaheadFileStreamReader();
 
@@ -38,7 +38,7 @@ class ReadaheadFileStreamReader
   void OnFinishReadFromSource(net::IOBuffer* buffer, int result);
 
   // This is reset to NULL upon encountering a read error or EOF.
-  scoped_ptr<webkit_blob::FileStreamReader> source_;
+  scoped_ptr<storage::FileStreamReader> source_;
 
   // This stores the error or EOF from the source FileStreamReader. Its
   // value is undefined if |source_| is non-NULL.

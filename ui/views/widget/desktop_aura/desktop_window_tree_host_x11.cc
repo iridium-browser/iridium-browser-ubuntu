@@ -129,8 +129,7 @@ const char* kAtomsToCache[] = {
 DesktopWindowTreeHostX11::DesktopWindowTreeHostX11(
     internal::NativeWidgetDelegate* native_widget_delegate,
     DesktopNativeWidgetAura* desktop_native_widget_aura)
-    : close_widget_factory_(this),
-      xdisplay_(gfx::GetXDisplay()),
+    : xdisplay_(gfx::GetXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
       atom_cache_(xdisplay_, kAtomsToCache),
@@ -138,6 +137,7 @@ DesktopWindowTreeHostX11::DesktopWindowTreeHostX11(
       is_fullscreen_(false),
       is_always_on_top_(false),
       use_native_frame_(false),
+      should_maximize_after_map_(false),
       use_argb_visual_(false),
       drag_drop_client_(NULL),
       native_widget_delegate_(native_widget_delegate),
@@ -146,7 +146,8 @@ DesktopWindowTreeHostX11::DesktopWindowTreeHostX11(
       window_parent_(NULL),
       window_shape_(NULL),
       custom_window_shape_(false),
-      urgency_hint_set_(false) {
+      urgency_hint_set_(false),
+      close_widget_factory_(this) {
 }
 
 DesktopWindowTreeHostX11::~DesktopWindowTreeHostX11() {
@@ -366,9 +367,6 @@ void DesktopWindowTreeHostX11::ShowWindowWithState(
 
   if (show_state == ui::SHOW_STATE_NORMAL ||
       show_state == ui::SHOW_STATE_MAXIMIZED) {
-    // Note: XFCE ignores a maximize hint given before mapping the window.
-    if (show_state == ui::SHOW_STATE_MAXIMIZED)
-      Maximize();
     Activate();
   }
 
@@ -541,6 +539,10 @@ void DesktopWindowTreeHostX11::Maximize() {
       SetBounds(adjusted_bounds);
   }
 
+  // Some WMs do not respect maximization hints on unmapped windows, so we
+  // save this one for later too.
+  should_maximize_after_map_ = !window_mapped_;
+
   // When we are in the process of requesting to maximize a window, we can
   // accurately keep track of our restored bounds instead of relying on the
   // heuristics that are in the PropertyNotify and ConfigureNotify handlers.
@@ -559,6 +561,7 @@ void DesktopWindowTreeHostX11::Minimize() {
 }
 
 void DesktopWindowTreeHostX11::Restore() {
+  should_maximize_after_map_ = false;
   SetWMSpecState(false,
                  atom_cache_.GetAtom("_NET_WM_STATE_MAXIMIZED_VERT"),
                  atom_cache_.GetAtom("_NET_WM_STATE_MAXIMIZED_HORZ"));
@@ -705,6 +708,8 @@ void DesktopWindowTreeHostX11::SetFullscreen(bool fullscreen) {
   if (is_fullscreen_ == fullscreen)
     return;
   is_fullscreen_ = fullscreen;
+  if (is_fullscreen_)
+    delayed_resize_task_.Cancel();
 
   // Work around a bug where if we try to unfullscreen, metacity immediately
   // fullscreens us again. This is a little flickery and not necessary if
@@ -845,6 +850,10 @@ bool DesktopWindowTreeHostX11::IsTranslucentWindowOpacitySupported() const {
   return false;
 }
 
+void DesktopWindowTreeHostX11::SizeConstraintsChanged() {
+  UpdateMinAndMaxSize();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopWindowTreeHostX11, aura::WindowTreeHost implementation:
 
@@ -928,6 +937,9 @@ gfx::Point DesktopWindowTreeHostX11::GetLocationOnNativeScreen() const {
 }
 
 void DesktopWindowTreeHostX11::SetCapture() {
+  if (HasCapture())
+    return;
+
   // Grabbing the mouse is asynchronous. However, we synchronously start
   // forwarding all mouse events received by Chrome to the
   // aura::WindowEventDispatcher which has capture. This makes capture
@@ -935,9 +947,10 @@ void DesktopWindowTreeHostX11::SetCapture() {
   // - |g_current_capture|'s X window has capture.
   // OR
   // - The topmost window underneath the mouse is managed by Chrome.
-  if (g_current_capture)
-    g_current_capture->OnHostLostWindowCapture();
+  DesktopWindowTreeHostX11* old_capturer = g_current_capture;
   g_current_capture = this;
+  if (old_capturer)
+    old_capturer->OnHostLostWindowCapture();
 
   unsigned int event_mask = PointerMotionMask | ButtonReleaseMask |
                             ButtonPressMask;
@@ -1240,12 +1253,19 @@ void DesktopWindowTreeHostX11::OnWMStateUpdated() {
   // HWNDMessageHandler::GetClientAreaBounds() returns an empty size when the
   // window is minimized. On Linux, returning empty size in GetBounds() or
   // SetBounds() does not work.
+  // We also propagate the minimization to the compositor, to makes sure that we
+  // don't draw any 'blank' frames that could be noticed in applications such as
+  // window manager previews, which show content even when a window is
+  // minimized.
   bool is_minimized = IsMinimized();
   if (is_minimized != was_minimized) {
-    if (is_minimized)
+    if (is_minimized) {
+      compositor()->SetVisible(false);
       content_window_->Hide();
-    else
+    } else {
       content_window_->Show();
+      compositor()->SetVisible(true);
+    }
   }
 
   if (restored_bounds_.IsEmpty()) {
@@ -1542,7 +1562,8 @@ std::list<XID>& DesktopWindowTreeHostX11::open_windows() {
 void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
   if (show_state != ui::SHOW_STATE_DEFAULT &&
       show_state != ui::SHOW_STATE_NORMAL &&
-      show_state != ui::SHOW_STATE_INACTIVE) {
+      show_state != ui::SHOW_STATE_INACTIVE &&
+      show_state != ui::SHOW_STATE_MAXIMIZED) {
     // It will behave like SHOW_STATE_NORMAL.
     NOTIMPLEMENTED();
   }
@@ -1579,6 +1600,13 @@ void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
   if (ui::X11EventSource::GetInstance())
     ui::X11EventSource::GetInstance()->BlockUntilWindowMapped(xwindow_);
   window_mapped_ = true;
+
+  // Some WMs only respect maximize hints after the window has been mapped.
+  // Check whether we need to re-do a maximization.
+  if (should_maximize_after_map_) {
+    Maximize();
+    should_maximize_after_map_ = false;
+  }
 }
 
 void DesktopWindowTreeHostX11::SetWindowTransparency() {

@@ -61,10 +61,10 @@ static void useCounterCallback(v8::Isolate* isolate, v8::Isolate::UseCounterFeat
     }
 }
 
-V8PerIsolateData::V8PerIsolateData(v8::Isolate* isolate)
-    : m_isolate(isolate)
-    , m_isolateHolder(adoptPtr(new gin::IsolateHolder(m_isolate, v8ArrayBufferAllocator())))
-    , m_stringCache(adoptPtr(new StringCache(m_isolate)))
+V8PerIsolateData::V8PerIsolateData()
+    : m_destructionPending(false)
+    , m_isolateHolder(adoptPtr(new gin::IsolateHolder()))
+    , m_stringCache(adoptPtr(new StringCache(isolate())))
     , m_hiddenValue(adoptPtr(new V8HiddenValue()))
     , m_constructorMode(ConstructorMode::CreateNewObject)
     , m_recursionLevel(0)
@@ -75,16 +75,18 @@ V8PerIsolateData::V8PerIsolateData(v8::Isolate* isolate)
     , m_gcEventData(adoptPtr(new GCEventData()))
     , m_performingMicrotaskCheckpoint(false)
 {
+    // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
+    isolate()->Enter();
 #if ENABLE(ASSERT)
     // currentThread will always be non-null in production, but can be null in Chromium unit tests.
     if (blink::Platform::current()->currentThread())
-        isolate->AddCallCompletedCallback(&assertV8RecursionScope);
+        isolate()->AddCallCompletedCallback(&assertV8RecursionScope);
 #endif
     if (isMainThread()) {
         mainThreadPerIsolateData = this;
-        PageScriptDebugServer::setMainThreadIsolate(isolate);
+        PageScriptDebugServer::setMainThreadIsolate(isolate());
     }
-    isolate->SetUseCounterCallback(&useCounterCallback);
+    isolate()->SetUseCounterCallback(&useCounterCallback);
 }
 
 V8PerIsolateData::~V8PerIsolateData()
@@ -102,36 +104,48 @@ v8::Isolate* V8PerIsolateData::mainThreadIsolate()
     return mainThreadPerIsolateData->isolate();
 }
 
-void V8PerIsolateData::ensureInitialized(v8::Isolate* isolate)
+v8::Isolate* V8PerIsolateData::initialize()
 {
-    ASSERT(isolate);
-    if (!isolate->GetData(gin::kEmbedderBlink)) {
-        V8PerIsolateData* data = new V8PerIsolateData(isolate);
-        isolate->SetData(gin::kEmbedderBlink, data);
-    }
+    V8PerIsolateData* data = new V8PerIsolateData();
+    v8::Isolate* isolate = data->isolate();
+    isolate->SetData(gin::kEmbedderBlink, data);
+    return isolate;
 }
 
 v8::Persistent<v8::Value>& V8PerIsolateData::ensureLiveRoot()
 {
     if (m_liveRoot.isEmpty())
-        m_liveRoot.set(m_isolate, v8::Null(m_isolate));
+        m_liveRoot.set(isolate(), v8::Null(isolate()));
     return m_liveRoot.getUnsafe();
 }
 
-void V8PerIsolateData::dispose(v8::Isolate* isolate)
+void V8PerIsolateData::willBeDestroyed(v8::Isolate* isolate)
+{
+    V8PerIsolateData* data = from(isolate);
+
+    ASSERT(!data->m_destructionPending);
+    data->m_destructionPending = true;
+
+    // Clear any data that may have handles into the heap,
+    // prior to calling ThreadState::detach().
+    data->m_idbPendingTransactionMonitor.clear();
+}
+
+void V8PerIsolateData::destroy(v8::Isolate* isolate)
 {
 #if ENABLE(ASSERT)
     if (blink::Platform::current()->currentThread())
         isolate->RemoveCallCompletedCallback(&assertV8RecursionScope);
 #endif
-    void* data = isolate->GetData(gin::kEmbedderBlink);
-    delete static_cast<V8PerIsolateData*>(data);
-    isolate->SetData(gin::kEmbedderBlink, 0);
+    V8PerIsolateData* data = from(isolate);
+    // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
+    isolate->Exit();
+    delete data;
 }
 
 V8PerIsolateData::DOMTemplateMap& V8PerIsolateData::currentDOMTemplateMap()
 {
-    if (DOMWrapperWorld::current(m_isolate).isMainWorld())
+    if (DOMWrapperWorld::current(isolate()).isMainWorld())
         return m_domTemplateMapForMainWorld;
     return m_domTemplateMapForNonMainWorld;
 }
@@ -141,10 +155,10 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::domTemplate(void* domTemplate
     DOMTemplateMap& domTemplateMap = currentDOMTemplateMap();
     DOMTemplateMap::iterator result = domTemplateMap.find(domTemplateKey);
     if (result != domTemplateMap.end())
-        return result->value.Get(m_isolate);
+        return result->value.Get(isolate());
 
-    v8::Local<v8::FunctionTemplate> templ = v8::FunctionTemplate::New(m_isolate, callback, data, signature, length);
-    domTemplateMap.add(domTemplateKey, v8::Eternal<v8::FunctionTemplate>(m_isolate, templ));
+    v8::Local<v8::FunctionTemplate> templ = v8::FunctionTemplate::New(isolate(), callback, data, signature, length);
+    domTemplateMap.add(domTemplateKey, v8::Eternal<v8::FunctionTemplate>(isolate(), templ));
     return templ;
 }
 
@@ -153,19 +167,19 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(void* dom
     DOMTemplateMap& domTemplateMap = currentDOMTemplateMap();
     DOMTemplateMap::iterator result = domTemplateMap.find(domTemplateKey);
     if (result != domTemplateMap.end())
-        return result->value.Get(m_isolate);
+        return result->value.Get(isolate());
     return v8::Local<v8::FunctionTemplate>();
 }
 
 void V8PerIsolateData::setDOMTemplate(void* domTemplateKey, v8::Handle<v8::FunctionTemplate> templ)
 {
-    currentDOMTemplateMap().add(domTemplateKey, v8::Eternal<v8::FunctionTemplate>(m_isolate, v8::Local<v8::FunctionTemplate>(templ)));
+    currentDOMTemplateMap().add(domTemplateKey, v8::Eternal<v8::FunctionTemplate>(isolate(), v8::Local<v8::FunctionTemplate>(templ)));
 }
 
 v8::Local<v8::Context> V8PerIsolateData::ensureScriptRegexpContext()
 {
     if (!m_scriptRegexpScriptState) {
-        v8::Local<v8::Context> context(v8::Context::New(m_isolate));
+        v8::Local<v8::Context> context(v8::Context::New(isolate()));
         m_scriptRegexpScriptState = ScriptState::create(context, DOMWrapperWorld::create());
     }
     return m_scriptRegexpScriptState->context();
@@ -182,7 +196,7 @@ bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* info, v8::Handle<v8::V
     DOMTemplateMap::iterator result = domTemplateMap.find(info);
     if (result == domTemplateMap.end())
         return false;
-    v8::Handle<v8::FunctionTemplate> templ = result->value.Get(m_isolate);
+    v8::Handle<v8::FunctionTemplate> templ = result->value.Get(isolate());
     return templ->HasInstance(value);
 }
 
@@ -201,7 +215,7 @@ v8::Handle<v8::Object> V8PerIsolateData::findInstanceInPrototypeChain(const Wrap
     DOMTemplateMap::iterator result = domTemplateMap.find(info);
     if (result == domTemplateMap.end())
         return v8::Handle<v8::Object>();
-    v8::Handle<v8::FunctionTemplate> templ = result->value.Get(m_isolate);
+    v8::Handle<v8::FunctionTemplate> templ = result->value.Get(isolate());
     return v8::Handle<v8::Object>::Cast(value)->FindInstanceInPrototypeChain(templ);
 }
 
@@ -226,8 +240,15 @@ static void constructorOfToString(const v8::FunctionCallbackInfo<v8::Value>& inf
 v8::Handle<v8::FunctionTemplate> V8PerIsolateData::toStringTemplate()
 {
     if (m_toStringTemplate.isEmpty())
-        m_toStringTemplate.set(m_isolate, v8::FunctionTemplate::New(m_isolate, constructorOfToString));
-    return m_toStringTemplate.newLocal(m_isolate);
+        m_toStringTemplate.set(isolate(), v8::FunctionTemplate::New(isolate(), constructorOfToString));
+    return m_toStringTemplate.newLocal(isolate());
+}
+
+IDBPendingTransactionMonitor* V8PerIsolateData::ensureIDBPendingTransactionMonitor()
+{
+    if (!m_idbPendingTransactionMonitor)
+        m_idbPendingTransactionMonitor = adoptPtr(new IDBPendingTransactionMonitor());
+    return m_idbPendingTransactionMonitor.get();
 }
 
 } // namespace blink

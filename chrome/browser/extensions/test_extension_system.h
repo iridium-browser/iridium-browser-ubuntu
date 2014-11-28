@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_TEST_EXTENSION_SYSTEM_H_
 #define CHROME_BROWSER_EXTENSIONS_TEST_EXTENSION_SYSTEM_H_
 
+#include "base/memory/scoped_vector.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/one_shot_event.h"
 
@@ -73,7 +74,7 @@ class TestExtensionSystem : public ExtensionSystem {
   virtual LazyBackgroundTaskQueue* lazy_background_task_queue() OVERRIDE;
   void SetEventRouter(scoped_ptr<EventRouter> event_router);
   virtual EventRouter* event_router() OVERRIDE;
-  virtual ExtensionWarningService* warning_service() OVERRIDE;
+  virtual WarningService* warning_service() OVERRIDE;
   virtual Blacklist* blacklist() OVERRIDE;
   virtual ErrorConsole* error_console() OVERRIDE;
   virtual InstallVerifier* install_verifier() OVERRIDE;
@@ -86,10 +87,9 @@ class TestExtensionSystem : public ExtensionSystem {
       GetDeclarativeUserScriptMasterByExtension(
           const ExtensionId& extension_id) OVERRIDE;
 
-  void SetReady() {
-    LOG(INFO) << "SetReady()";
-    ready_.Signal();
-  }
+  // Note that you probably want to use base::RunLoop().RunUntilIdle() right
+  // after this to run all the accumulated tasks.
+  void SetReady() { ready_.Signal(); }
 
   // Factory method for tests to use with SetTestingProfile.
   static KeyedService* Build(content::BrowserContext* profile);
@@ -101,9 +101,8 @@ class TestExtensionSystem : public ExtensionSystem {
   scoped_ptr<StateStore> state_store_;
   // A pointer to the TestingValueStore owned by |state_store_|.
   TestingValueStore* value_store_;
+  ScopedVector<DeclarativeUserScriptMaster> declarative_user_script_masters_;
   scoped_ptr<Blacklist> blacklist_;
-  scoped_ptr<StandardManagementPolicyProvider>
-      standard_management_policy_provider_;
   scoped_ptr<ManagementPolicy> management_policy_;
   scoped_ptr<RuntimeData> runtime_data_;
   scoped_ptr<ExtensionService> extension_service_;

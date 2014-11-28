@@ -65,15 +65,14 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
       int render_process_id,
       int opener_id,
       bool* no_javascript_access) OVERRIDE;
+  virtual content::DevToolsManagerDelegate*
+      GetDevToolsManagerDelegate() OVERRIDE;
   virtual void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
       std::vector<content::FileDescriptorInfo>* mappings) OVERRIDE;
 
  private:
-  // Note: BrowserMainLoop holds ownership of CastBrowserMainParts after it is
-  // created.
-  CastBrowserMainParts* shell_browser_main_parts_;
   scoped_ptr<URLRequestContextFactory> url_request_context_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CastContentBrowserClient);

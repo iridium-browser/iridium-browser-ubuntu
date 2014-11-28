@@ -6,7 +6,6 @@
 implementation classes that are used by blink's core/modules.
 """
 
-import copy
 import operator
 from v8_globals import includes
 import v8_types
@@ -19,6 +18,7 @@ DICTIONARY_H_INCLUDES = frozenset([
 ])
 
 DICTIONARY_CPP_INCLUDES = frozenset([
+    'bindings/core/v8/ExceptionState.h',
     # FIXME: Remove this, http://crbug.com/321462
     'bindings/core/v8/Dictionary.h',
 ])
@@ -30,6 +30,12 @@ def setter_name_for_dictionary_member(member):
 
 def has_method_name_for_dictionary_member(member):
     return 'has%s' % v8_utilities.capitalize(member.name)
+
+
+def unwrap_nullable_if_needed(idl_type):
+    if idl_type.is_nullable:
+        return idl_type.inner_type
+    return idl_type
 
 
 # Context for V8 bindings
@@ -50,14 +56,7 @@ def dictionary_context(dictionary):
 def member_context(member):
     idl_type = member.idl_type
     idl_type.add_includes_for_type()
-
-    def idl_type_for_default_value():
-        copied_type = copy.copy(idl_type)
-        # IdlType for default values shouldn't be nullable. Otherwise,
-        # it will generate meaningless expression like
-        # 'String("default value").isNull() ? ...'.
-        copied_type.is_nullable = False
-        return copied_type
+    idl_type = unwrap_nullable_if_needed(idl_type)
 
     def default_values():
         if not member.default_value:
@@ -65,7 +64,7 @@ def member_context(member):
         if member.default_value.is_null:
             return None, 'v8::Null(isolate)'
         cpp_default_value = str(member.default_value)
-        v8_default_value = idl_type_for_default_value().cpp_value_to_v8_value(
+        v8_default_value = idl_type.cpp_value_to_v8_value(
             cpp_value=cpp_default_value, isolate='isolate',
             creation_context='creationContext')
         return cpp_default_value, v8_default_value
@@ -79,7 +78,9 @@ def member_context(member):
             cpp_value='impl->%s()' % member.name, isolate='isolate',
             creation_context='creationContext',
             extended_attributes=member.extended_attributes),
+        'enum_validation_expression': idl_type.enum_validation_expression,
         'has_method_name': has_method_name_for_dictionary_member(member),
+        'is_object': idl_type.name == 'Object',
         'name': member.name,
         'setter_name': setter_name_for_dictionary_member(member),
         'v8_default_value': v8_default_value,
@@ -101,7 +102,8 @@ def dictionary_impl_context(dictionary, interfaces_info):
 
 
 def member_impl_context(member, interfaces_info, header_includes):
-    idl_type = member.idl_type
+    idl_type = unwrap_nullable_if_needed(member.idl_type)
+    is_object = idl_type.name == 'Object'
 
     def getter_expression():
         if idl_type.impl_should_use_nullable_container:
@@ -109,9 +111,10 @@ def member_impl_context(member, interfaces_info, header_includes):
         return 'm_%s' % member.name
 
     def has_method_expression():
-        if (idl_type.impl_should_use_nullable_container or
-            idl_type.is_string_type):
+        if idl_type.impl_should_use_nullable_container or idl_type.is_enum or idl_type.is_string_type:
             return '!m_%s.isNull()' % member.name
+        elif is_object:
+            return '!(m_{0}.isEmpty() || m_{0}.isNull() || m_{0}.isUndefined())'.format(member.name)
         else:
             return 'm_%s' % member.name
 
@@ -121,11 +124,17 @@ def member_impl_context(member, interfaces_info, header_includes):
             return v8_types.cpp_template_type('Nullable', member_cpp_type)
         return member_cpp_type
 
+    cpp_default_value = None
+    if member.default_value and not member.default_value.is_null:
+        cpp_default_value = str(member.default_value)
+
     header_includes.update(idl_type.impl_includes_for_type(interfaces_info))
     return {
+        'cpp_default_value': cpp_default_value,
         'getter_expression': getter_expression(),
         'has_method_expression': has_method_expression(),
         'has_method_name': has_method_name_for_dictionary_member(member),
+        'is_object': is_object,
         'is_traceable': (idl_type.is_garbage_collected or
                          idl_type.is_will_be_garbage_collected),
         'member_cpp_type': member_cpp_type(),

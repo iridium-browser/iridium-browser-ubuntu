@@ -53,7 +53,7 @@ void PictureLayer::PushPropertiesTo(LayerImpl* base_layer) {
   // See PictureLayerImpl::PushPropertiesTo for more details.
   layer_impl->invalidation_.Clear();
   layer_impl->invalidation_.Swap(&pile_invalidation_);
-  layer_impl->pile_ = PicturePileImpl::CreateFromOther(pile_.get());
+  layer_impl->UpdatePile(PicturePileImpl::CreateFromOther(pile_.get()));
 }
 
 void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
@@ -182,13 +182,11 @@ skia::RefPtr<SkPicture> PictureLayer::GetPicture() const {
 
   int width = bounds().width();
   int height = bounds().height();
-  gfx::RectF opaque;
 
   SkPictureRecorder recorder;
   SkCanvas* canvas = recorder.beginRecording(width, height, NULL, 0);
   client_->PaintContents(canvas,
                          gfx::Rect(width, height),
-                         &opaque,
                          ContentLayerClient::GRAPHICS_CONTEXT_ENABLED);
   skia::RefPtr<SkPicture> picture = skia::AdoptRef(recorder.endRecording());
   return picture;

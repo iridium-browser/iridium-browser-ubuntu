@@ -89,8 +89,15 @@ class List(command_line.OptparseCommand):
   def Run(self, args):
     if args.json_output_file:
       possible_browser = browser_finder.FindBrowser(args)
+      if args.browser_type in (
+          'exact', 'release', 'release_x64', 'debug', 'debug_x64', 'canary'):
+        args.browser_type = 'reference'
+        possible_reference_browser = browser_finder.FindBrowser(args)
+      else:
+        possible_reference_browser = None
       with open(args.json_output_file, 'w') as f:
-        f.write(_GetJsonTestList(possible_browser, args.tests, args.num_shards))
+        f.write(_GetJsonTestList(possible_browser, possible_reference_browser,
+                                 args.tests, args.num_shards))
     else:
       _PrintTestList(args.tests)
     return 0
@@ -151,19 +158,18 @@ class Run(command_line.OptparseCommand):
         parser.error('Need to specify a page set for "%s".' % test_class.Name())
       if len(args.positional_args) > 2:
         parser.error('Too many arguments.')
-      page_set_path = args.positional_args[1]
-      if not os.path.exists(page_set_path):
-        parser.error('Page set not found.')
-      if not (os.path.isfile(page_set_path) and
-              discover.IsPageSetFile(page_set_path)):
-        parser.error('Unsupported page set file format.')
+      page_set_name = args.positional_args[1]
+      page_set_class = _MatchPageSetName(page_set_name)
+      if page_set_class is None:
+        parser.error("Page set %s not found. Available sets:\n%s" %
+                     (page_set_name, _AvailablePageSetNamesString()))
 
       class TestWrapper(benchmark.Benchmark):
         test = test_class
 
         @classmethod
         def CreatePageSet(cls, options):
-          return page_set.PageSet.FromFile(page_set_path)
+          return page_set_class()
 
       test_class = TestWrapper
     else:
@@ -213,6 +219,28 @@ def _Tests():
   return tests
 
 
+# TODO(ariblue): Use discover.py's abstracted _MatchName class (in pending CL
+# 432543003) and eliminate _MatchPageSetName and _MatchTestName.
+def _MatchPageSetName(input_name):
+  page_sets = []
+  for base_dir in config.base_paths:
+    page_sets += discover.DiscoverClasses(base_dir, base_dir, page_set.PageSet,
+                                          index_by_class_name=True).values()
+  for p in page_sets:
+    if input_name == p.Name():
+      return p
+  return None
+
+
+def _AvailablePageSetNamesString():
+  result = ""
+  for base_dir in config.base_paths:
+    for p in discover.DiscoverClasses(base_dir, base_dir, page_set.PageSet,
+                                      index_by_class_name=True).values():
+      result += p.Name() + "\n"
+  return result
+
+
 def _MatchTestName(input_test_name, exact_matches=True):
   def _Matches(input_string, search_string):
     if search_string.startswith(input_string):
@@ -233,26 +261,26 @@ def _MatchTestName(input_test_name, exact_matches=True):
     for test_class in _Tests():
       if exact_match == test_class.Name():
         return [test_class]
+    return []
 
   # Fuzzy matching.
   return [test_class for test_class in _Tests()
           if _Matches(input_test_name, test_class.Name())]
 
 
-def _GetJsonTestList(possible_browser, test_classes, num_shards):
+def _GetJsonTestList(possible_browser, possible_reference_browser,
+                     test_classes, num_shards):
   """Returns a list of all enabled tests in a JSON format expected by buildbots.
 
   JSON format (see build/android/pylib/perf/test_runner.py):
-  { "version": int,
+  { "version": <int>,
     "steps": {
-      "foo": {
-        "device_affinity": int,
-        "cmd": "script_to_execute foo"
+      <string>: {
+        "device_affinity": <int>,
+        "cmd": <string>,
+        "perf_dashboard_id": <string>,
       },
-      "bar": {
-        "device_affinity": int,
-        "cmd": "script_to_execute bar"
-      }
+      ...
     }
   }
   """
@@ -266,18 +294,33 @@ def _GetJsonTestList(possible_browser, test_classes, num_shards):
       continue
     if not decorators.IsEnabled(test_class, possible_browser):
       continue
-    name = test_class.Name()
-    output['steps'][name] = {
-      'cmd': ' '.join([sys.executable, os.path.realpath(sys.argv[0]),
-                       '--browser=%s' % possible_browser.browser_type,
-                       '-v', '--output-format=buildbot', name]),
-      # TODO(tonyg): Currently we set the device affinity to a stable hash of
-      # the test name. This somewhat evenly distributes benchmarks among the
-      # requested number of shards. However, it is far from optimal in terms of
-      # cycle time. We should add a test size decorator (e.g. small, medium,
-      # large) and let that inform sharding.
-      'device_affinity': int(hashlib.sha1(name).hexdigest(), 16) % num_shards
+
+    base_name = test_class.Name()
+    base_cmd = [sys.executable, os.path.realpath(sys.argv[0]),
+                '-v', '--output-format=buildbot', base_name]
+    perf_dashboard_id = base_name
+    # TODO(tonyg): Currently we set the device affinity to a stable hash of the
+    # test name. This somewhat evenly distributes benchmarks among the requested
+    # number of shards. However, it is far from optimal in terms of cycle time.
+    # We should add a test size decorator (e.g. small, medium, large) and let
+    # that inform sharding.
+    device_affinity = int(hashlib.sha1(base_name).hexdigest(), 16) % num_shards
+
+    output['steps'][base_name] = {
+      'cmd': ' '.join(base_cmd + [
+            '--browser=%s' % possible_browser.browser_type]),
+      'device_affinity': device_affinity,
+      'perf_dashboard_id': perf_dashboard_id,
     }
+    if (possible_reference_browser and
+        decorators.IsEnabled(test_class, possible_reference_browser)):
+      output['steps'][base_name + '.reference'] = {
+        'cmd': ' '.join(base_cmd + [
+              '--browser=reference', '--output-trace-tag=_ref']),
+        'device_affinity': device_affinity,
+        'perf_dashboard_id': perf_dashboard_id,
+      }
+
   return json.dumps(output, indent=2, sort_keys=True)
 
 

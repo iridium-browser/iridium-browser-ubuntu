@@ -308,7 +308,7 @@ WebInspector.TimelineUIUtils.generateDetailsContentForFrame = function(frameMode
     contentHelper.appendTextRow(WebInspector.UIString("CPU time"), Number.millisToString(frame.cpuTime, true));
     contentHelper.appendElementRow(WebInspector.UIString("Aggregated Time"),
         WebInspector.TimelineUIUtils._generateAggregatedInfo(frame.timeByCategory));
-    if (WebInspector.experimentsSettings.layersPanel.isEnabled() && frame.layerTree) {
+    if (Runtime.experiments.isEnabled("layersPanel") && frame.layerTree) {
         contentHelper.appendElementRow(WebInspector.UIString("Layer tree"),
                                        WebInspector.Linkifier.linkifyUsingRevealer(frame.layerTree, WebInspector.UIString("show")));
     }
@@ -456,7 +456,7 @@ WebInspector.TimelinePopupContentHelper.prototype = {
     _createCell: function(content, styleName)
     {
         var text = document.createElement("label");
-        text.appendChild(document.createTextNode(content));
+        text.createTextChild(String(content));
         var cell = document.createElement("td");
         cell.className = "timeline-details";
         if (styleName)

@@ -27,9 +27,9 @@
 #include "core/css/CSSKeyframesRule.h"
 
 #include "core/css/CSSKeyframeRule.h"
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/CSSRuleList.h"
 #include "core/css/CSSStyleSheet.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/frame/UseCounter.h"
 #include "wtf/text/StringBuilder.h"
 
@@ -124,8 +124,7 @@ void CSSKeyframesRule::insertRule(const String& ruleText)
 
     CSSStyleSheet* styleSheet = parentStyleSheet();
     CSSParserContext context(parserContext(), UseCounter::getFrom(styleSheet));
-    BisonCSSParser parser(context);
-    RefPtrWillBeRawPtr<StyleKeyframe> keyframe = parser.parseKeyframeRule(styleSheet ? styleSheet->contents() : 0, ruleText);
+    RefPtrWillBeRawPtr<StyleKeyframe> keyframe = CSSParser::parseKeyframeRule(context, styleSheet ? styleSheet->contents() : 0, ruleText);
     if (!keyframe)
         return;
 
@@ -163,19 +162,19 @@ String CSSKeyframesRule::cssText() const
 {
     StringBuilder result;
     if (isVendorPrefixed())
-        result.append("@-webkit-keyframes ");
+        result.appendLiteral("@-webkit-keyframes ");
     else
-        result.append("@keyframes ");
+        result.appendLiteral("@keyframes ");
     result.append(name());
-    result.append(" { \n");
+    result.appendLiteral(" { \n");
 
     unsigned size = length();
     for (unsigned i = 0; i < size; ++i) {
-        result.append("  ");
+        result.appendLiteral("  ");
         result.append(m_keyframesRule->keyframes()[i]->cssText());
-        result.append("\n");
+        result.append('\n');
     }
-    result.append("}");
+    result.append('}');
     return result.toString();
 }
 

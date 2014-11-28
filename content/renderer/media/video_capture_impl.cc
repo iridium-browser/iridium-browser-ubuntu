@@ -73,7 +73,10 @@ void VideoCaptureImpl::DeInit() {
 
 void VideoCaptureImpl::SuspendCapture(bool suspend) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  suspended_ = suspend;
+  Send(suspend ?
+       static_cast<IPC::Message*>(new VideoCaptureHostMsg_Pause(device_id_)) :
+       static_cast<IPC::Message*>(
+           new VideoCaptureHostMsg_Resume(device_id_, session_id_, params_)));
 }
 
 void VideoCaptureImpl::StartCapture(
@@ -103,8 +106,8 @@ void VideoCaptureImpl::StartCapture(
       clients_[client_id] = client_info;
       // TODO(sheu): Allowing resolution change will require that all
       // outstanding clients of a capture session support resolution change.
-      DCHECK_EQ(params_.allow_resolution_change,
-                params.allow_resolution_change);
+      DCHECK_EQ(params_.resolution_change_policy,
+                params.resolution_change_policy);
     } else if (state_ == VIDEO_CAPTURE_STATE_STOPPING) {
       clients_pending_on_restart_[client_id] = client_info;
       DVLOG(1) << "StartCapture: Got new resolution "
@@ -199,13 +202,14 @@ void VideoCaptureImpl::OnBufferDestroyed(int buffer_id) {
   if (iter == client_buffers_.end())
     return;
 
-  DCHECK(!iter->second || iter->second->HasOneRef())
+  DCHECK(!iter->second.get() || iter->second->HasOneRef())
       << "Instructed to delete buffer we are still using.";
   client_buffers_.erase(iter);
 }
 
 void VideoCaptureImpl::OnBufferReceived(int buffer_id,
                                         const media::VideoCaptureFormat& format,
+                                        const gfx::Rect& visible_rect,
                                         base::TimeTicks timestamp) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -235,8 +239,8 @@ void VideoCaptureImpl::OnBufferReceived(int buffer_id,
       media::VideoFrame::WrapExternalPackedMemory(
           media::VideoFrame::I420,
           last_frame_format_.frame_size,
-          gfx::Rect(last_frame_format_.frame_size),
-          last_frame_format_.frame_size,
+          visible_rect,
+          gfx::Size(visible_rect.width(), visible_rect.height()),
           reinterpret_cast<uint8*>(buffer->buffer->memory()),
           buffer->buffer_size,
           buffer->buffer->handle(),

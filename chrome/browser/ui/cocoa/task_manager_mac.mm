@@ -15,7 +15,7 @@
 #import "chrome/browser/ui/cocoa/window_size_autosaver.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/pref_names.h"
-#include "grit/generated_resources.h"
+#include "chrome/grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/image/image_skia.h"
@@ -64,8 +64,6 @@ const struct ColumnWidth {
       arraysize("32767") * kCharWidth, -1 },
   { IDS_TASK_MANAGER_IDLE_WAKEUPS_COLUMN,
       arraysize("idlewakeups") * kCharWidth, -1 },
-  { IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN,
-      arraysize("15 ") * kCharWidth, -1 },
 };
 
 class SortHelper {
@@ -309,7 +307,6 @@ class SortHelper {
                 visible:NO];
   [self addColumnWithId:IDS_TASK_MANAGER_IDLE_WAKEUPS_COLUMN
                 visible:NO];
-  [self addColumnWithId:IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN visible:NO];
 }
 
 // Creates a context menu for the table header that allows the user to toggle

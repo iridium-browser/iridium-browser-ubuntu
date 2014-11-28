@@ -40,7 +40,6 @@ namespace blink {
 PerformanceNavigation::PerformanceNavigation(LocalFrame* frame)
     : DOMWindowProperty(frame)
 {
-    ScriptWrappable::init(this);
 }
 
 unsigned short PerformanceNavigation::type() const
@@ -77,6 +76,11 @@ unsigned short PerformanceNavigation::redirectCount() const
         return 0;
 
     return timing->redirectCount();
+}
+
+void PerformanceNavigation::trace(Visitor* visitor)
+{
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

@@ -6,13 +6,13 @@
 #define CHROME_BROWSER_MEDIA_GALLERIES_FILEAPI_MEDIA_FILE_VALIDATOR_FACTORY_H_
 
 #include "base/basictypes.h"
-#include "webkit/browser/fileapi/copy_or_move_file_validator.h"
+#include "storage/browser/fileapi/copy_or_move_file_validator.h"
 
 namespace base {
 class FilePath;
 }
 
-namespace fileapi {
+namespace storage {
 class FileSystemURL;
 }
 
@@ -20,15 +20,16 @@ class FileSystemURL;
 // strategies (depending on the file type) to attempt to verify that the file
 // is a valid media file.
 class MediaFileValidatorFactory
-    : public fileapi::CopyOrMoveFileValidatorFactory {
+    : public storage::CopyOrMoveFileValidatorFactory {
  public:
   MediaFileValidatorFactory();
   virtual ~MediaFileValidatorFactory();
 
   // CopyOrMoveFileValidatorFactory implementation.
-  virtual fileapi::CopyOrMoveFileValidator* CreateCopyOrMoveFileValidator(
-            const fileapi::FileSystemURL& src,
-            const base::FilePath& platform_path) OVERRIDE;
+  virtual storage::CopyOrMoveFileValidator* CreateCopyOrMoveFileValidator(
+      const storage::FileSystemURL& src,
+      const base::FilePath& platform_path) OVERRIDE;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(MediaFileValidatorFactory);
 };

@@ -14,7 +14,6 @@ namespace content {
 MockBrowserPluginManager::MockBrowserPluginManager(
     RenderViewImpl* render_view)
     : BrowserPluginManager(render_view),
-      guest_instance_id_counter_(0),
       last_plugin_(NULL) {
 }
 
@@ -24,21 +23,9 @@ MockBrowserPluginManager::~MockBrowserPluginManager() {
 BrowserPlugin* MockBrowserPluginManager::CreateBrowserPlugin(
     RenderViewImpl* render_view,
     blink::WebFrame* frame,
-    bool auto_navigate) {
-  last_plugin_ = new MockBrowserPlugin(render_view, frame, auto_navigate);
+    scoped_ptr<BrowserPluginDelegate> delegate) {
+  last_plugin_ = new MockBrowserPlugin(render_view, frame, delegate.Pass());
   return last_plugin_;
-}
-
-void MockBrowserPluginManager::AllocateInstanceID(
-    BrowserPlugin* browser_plugin) {
-  AllocateInstanceIDACK(browser_plugin, ++guest_instance_id_counter_);
-}
-
-void MockBrowserPluginManager::AllocateInstanceIDACK(
-    BrowserPlugin* browser_plugin,
-    int guest_instance_id) {
-  scoped_ptr<base::DictionaryValue> extra_params(new base::DictionaryValue());
-  browser_plugin->Attach(guest_instance_id, extra_params.Pass());
 }
 
 bool MockBrowserPluginManager::Send(IPC::Message* msg) {

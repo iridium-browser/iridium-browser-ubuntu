@@ -5,6 +5,8 @@
 
 """Unittests for the osutils.py module (imagine that!)."""
 
+from __future__ import print_function
+
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
@@ -113,30 +115,6 @@ class TestOsutils(cros_test_lib.TempDirTestCase):
     osutils.Touch(path, makedirs=True)
     self.assertTrue(os.path.exists(path))
     self.assertEqual(os.path.getsize(path), 0)
-
-  def testFindDepotTools(self):
-    """Verify FindDepotTools() works in various cases."""
-    depot_tools_path = self.tempdir
-    gclient_path = os.path.join(self.tempdir, 'gclient.py')
-    gitcl_path = os.path.join(self.tempdir, 'git_cl.py')
-
-    path = ':'.join(['/usr/local/bin', depot_tools_path, '/usr/bin'])
-    os.environ['PATH'] = path
-    # No binaries found.
-    self.assertEquals(osutils.FindDepotTools(), None)
-
-    osutils.Touch(gclient_path)
-    # No git_cl.py in path.
-    self.assertEquals(osutils.FindDepotTools(), None)
-
-    osutils.Touch(gitcl_path)
-    self.assertEquals(osutils.FindDepotTools(), depot_tools_path)
-
-    # Check trailing '/' in depot tools location in PATH is handled
-    # correctly.
-    path = ':'.join(['/usr/local/bin', depot_tools_path + '/', '/usr/bin'])
-    os.environ['PATH'] = path
-    self.assertEquals(osutils.FindDepotTools(), depot_tools_path)
 
 
 class TempDirTests(cros_test_lib.TestCase):
@@ -543,6 +521,35 @@ tmpfs /mnt/\134 tmpfs ro 0 0
     self.assertEqual(r[4].source, 'weird system')
     self.assertEqual(r[5].destination, '/mnt/spaced dir')
     self.assertEqual(r[6].destination, '/mnt/\\')
+
+
+class ResolveSymlinkTest(cros_test_lib.TestCase):
+  """Tests for ResolveSymlink."""
+
+  def testRelativeLink(self):
+    os.symlink('target', 'link')
+    self.assertEqual(osutils.ResolveSymlink('link'), 'target')
+    os.unlink('link')
+
+  def testAbsoluteLink(self):
+    os.symlink('/target', 'link')
+    self.assertEqual(osutils.ResolveSymlink('link'), '/target')
+    self.assertEqual(osutils.ResolveSymlink('link', '/root'), '/root/target')
+    os.unlink('link')
+
+  def testRecursion(self):
+    os.symlink('target', 'link1')
+    os.symlink('link1', 'link2')
+    self.assertEqual(osutils.ResolveSymlink('link2'), 'target')
+    os.unlink('link2')
+    os.unlink('link1')
+
+  def testRecursionWithAbsoluteLink(self):
+    os.symlink('target', 'link1')
+    os.symlink('/link1', 'link2')
+    self.assertEqual(osutils.ResolveSymlink('link2', '.'), './target')
+    os.unlink('link2')
+    os.unlink('link1')
 
 
 if __name__ == '__main__':

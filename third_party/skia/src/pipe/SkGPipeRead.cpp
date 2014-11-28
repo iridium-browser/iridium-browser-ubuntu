@@ -26,6 +26,7 @@
 #include "SkRasterizer.h"
 #include "SkRRect.h"
 #include "SkShader.h"
+#include "SkTextBlob.h"
 #include "SkTypeface.h"
 #include "SkXfermode.h"
 
@@ -193,8 +194,8 @@ public:
         *fTypefaces.append() = SkTypeface::Deserialize(&stream);
     }
 
-    void setTypeface(SkPaint* paint, unsigned id) {
-        paint->setTypeface(id ? fTypefaces[id - 1] : NULL);
+    SkTypeface* getTypeface(unsigned id) const {
+        return id ? fTypefaces[id - 1] : NULL;
     }
 
 private:
@@ -670,6 +671,33 @@ static void drawPicture_rp(SkCanvas* canvas, SkReader32* reader, uint32_t op32,
     UNIMPLEMENTED
 }
 
+static void drawTextBlob_rp(SkCanvas* canvas, SkReader32* reader, uint32_t op32,
+                            SkGPipeState* state) {
+    SkScalar x = reader->readScalar();
+    SkScalar y = reader->readScalar();
+
+    int typefaceCount = reader->readU32();
+    SkAutoSTMalloc<16, SkTypeface*> typefaceArray(typefaceCount);
+    if (state->getFlags() & SkGPipeWriter::kCrossProcess_Flag) {
+        for (int i = 0; i < typefaceCount; ++i) {
+            typefaceArray[i] = state->getTypeface(reader->readU32());
+        }
+    } else {
+        reader->read(typefaceArray.get(), typefaceCount * sizeof(SkTypeface*));
+    }
+
+    size_t blobSize = reader->readU32();
+    const void* data = reader->skip(SkAlign4(blobSize));
+
+    if (state->shouldDraw()) {
+        SkReadBuffer blobBuffer(data, blobSize);
+        blobBuffer.setTypefaceArray(typefaceArray.get(), typefaceCount);
+        SkAutoTUnref<const SkTextBlob> blob(SkTextBlob::CreateFromBuffer(blobBuffer));
+        SkASSERT(blob.get());
+
+        canvas->drawTextBlob(blob, x, y, state->paint());
+    }
+}
 ///////////////////////////////////////////////////////////////////////////////
 
 static void paintOp_rp(SkCanvas*, SkReader32* reader, uint32_t op32,
@@ -714,7 +742,8 @@ static void paintOp_rp(SkCanvas*, SkReader32* reader, uint32_t op32,
             case kTypeface_PaintOp:
                 SkASSERT(SkToBool(state->getFlags() &
                                   SkGPipeWriter::kCrossProcess_Flag));
-                state->setTypeface(p, data); break;
+                p->setTypeface(state->getTypeface(data));
+                break;
             default: SkDEBUGFAIL("bad paintop"); return;
         }
         SkASSERT(reader->offset() <= stop);
@@ -814,6 +843,7 @@ static const ReadProc gReadTable[] = {
     drawRRect_rp,
     drawSprite_rp,
     drawText_rp,
+    drawTextBlob_rp,
     drawTextOnPath_rp,
     drawVertices_rp,
     restore_rp,

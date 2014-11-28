@@ -28,10 +28,18 @@
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/public/irt_core.h"
 #include "native_client/src/trusted/service_runtime/include/machine/_types.h"
-#include "native_client/src/trusted/service_runtime/include/sys/mman.h"
-#include "native_client/src/trusted/service_runtime/include/sys/stat.h"
+#if !defined(__native_client__)
+/*
+ * TODO(dschuff): Remove this ifdef (and the #define nacl_abi_foo lines below
+ * that replace it) once the service runtime's stat.h is includable directly
+ * (as opposed to being part of toolchain) by untrusted code.
+ * see https://code.google.com/p/nativeclient/issues/detail?id=3909
+ */
+# include "native_client/src/trusted/service_runtime/include/sys/mman.h"
+# include "native_client/src/trusted/service_runtime/include/sys/stat.h"
+# include "native_client/src/trusted/service_runtime/include/sys/unistd.h"
+#endif
 #include "native_client/src/trusted/service_runtime/include/sys/time.h"
-#include "native_client/src/trusted/service_runtime/include/sys/unistd.h"
 #include "native_client/src/untrusted/irt/irt.h"
 #include "native_client/src/untrusted/irt/irt_dev.h"
 #include "native_client/src/untrusted/irt/irt_interfaces.h"
@@ -550,12 +558,25 @@ static int irt_rename(const char *oldpath, const char *newpath) {
   return check_error(rename(oldpath, newpath));
 }
 
+static int irt_symlink(const char *oldpath, const char *newpath) {
+  return check_error(symlink(oldpath, newpath));
+}
+
 static int irt_chmod(const char *pathname, mode_t mode) {
   return check_error(chmod(pathname, mode));
 }
 
 static int irt_access(const char *pathname, int mode) {
   return check_error(access(pathname, mode));
+}
+
+static int irt_readlink(const char *path, char *buf, size_t count,
+                        size_t *nread) {
+  ssize_t result = readlink(path, buf, count);
+  if (result < 0)
+    return errno;
+  *nread = result;
+  return 0;
 }
 
 static int irt_getpid(int *pid) {
@@ -631,8 +652,6 @@ const struct nacl_irt_clock nacl_irt_clock = {
 };
 #endif
 
-DEFINE_STUB(symlink)
-DEFINE_STUB(readlink)
 DEFINE_STUB(utimes)
 const struct nacl_irt_dev_filename nacl_irt_dev_filename = {
   irt_open,
@@ -646,10 +665,10 @@ const struct nacl_irt_dev_filename nacl_irt_dev_filename = {
   irt_lstat,
   irt_link,
   irt_rename,
-  USE_STUB(nacl_irt_dev_filename, symlink),
+  irt_symlink,
   irt_chmod,
   irt_access,
-  USE_STUB(nacl_irt_dev_filename, readlink),
+  irt_readlink,
   USE_STUB(nacl_irt_dev_filename, utimes),
 };
 

@@ -16,9 +16,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 #include "net/base/io_buffer.h"
+#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/common/fileapi/file_system_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
-#include "webkit/browser/fileapi/async_file_util.h"
-#include "webkit/common/fileapi/file_system_util.h"
 
 using storage_monitor::StorageMonitor;
 
@@ -182,12 +182,12 @@ void MTPDeviceTaskHelper::OnDidReadDirectory(
   if (error)
     return HandleDeviceError(error_callback, base::File::FILE_ERROR_FAILED);
 
-  fileapi::AsyncFileUtil::EntryList entries;
+  storage::AsyncFileUtil::EntryList entries;
   base::FilePath current;
   MTPDeviceObjectEnumerator file_enum(file_entries);
   while (!(current = file_enum.Next()).empty()) {
-    fileapi::DirectoryEntry entry;
-    entry.name = fileapi::VirtualPath::BaseName(current).value();
+    storage::DirectoryEntry entry;
+    entry.name = storage::VirtualPath::BaseName(current).value();
     uint32 file_id = 0;
     bool ret = file_enum.GetEntryId(&file_id);
     DCHECK(ret);
@@ -209,7 +209,7 @@ void MTPDeviceTaskHelper::OnGetFileInfoToReadBytes(
     const MtpFileEntry& file_entry,
     bool error) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(request.buf);
+  DCHECK(request.buf.get());
   DCHECK_GE(request.buf_len, 0);
   DCHECK_GE(request.offset, 0);
   if (error) {

@@ -15,7 +15,7 @@ cr.define('cr.ui.pageManager', function() {
    * @param {string} name Page name.
    * @param {string} title Page title, used for history.
    * @param {string} pageDivName ID of the div corresponding to the page.
-   * @extends {EventTarget}
+   * @extends {cr.EventTarget}
    */
   function Page(name, title, pageDivName) {
     this.name = name;
@@ -28,6 +28,7 @@ cr.define('cr.ui.pageManager', function() {
     this.pageDiv.page = null;
     this.tab = null;
     this.lastFocusedElement = null;
+    this.hash = '';
   }
 
   Page.prototype = {
@@ -35,7 +36,7 @@ cr.define('cr.ui.pageManager', function() {
 
     /**
      * The parent page of this page, or null for root pages.
-     * @type {Page}
+     * @type {cr.ui.pageManager.Page}
      */
     parentPage: null,
 
@@ -64,6 +65,12 @@ cr.define('cr.ui.pageManager', function() {
      * Initializes page content.
      */
     initializePage: function() {},
+
+    /**
+     * Called by the PageManager when this.hash changes while the page is
+     * already visible. This is analogous to the hashchange DOM event.
+     */
+    didChangeHash: function() {},
 
     /**
      * Sets focus on the first focusable element. Override for a custom focus
@@ -116,6 +123,35 @@ cr.define('cr.ui.pageManager', function() {
     canShowPage: function() {
       return true;
     },
+
+    /**
+     * Updates the hash of the current page. If the page is topmost, the history
+     * state is updated.
+     * @param {string} hash The new hash value. Like location.hash, this
+     *     should include the leading '#' if not empty.
+     */
+    setHash: function(hash) {
+      if (this.hash == hash)
+        return;
+      this.hash = hash;
+      PageManager.onPageHashChanged(this);
+    },
+
+    /**
+     * Called after the page has been shown.
+     */
+    didShowPage: function() {},
+
+    /**
+     * Called before the page will be hidden, e.g., when a different root page
+     * will be shown.
+     */
+    willHidePage: function() {},
+
+    /**
+     * Called after the overlay has been closed.
+     */
+    didClosePage: function() {},
 
     /**
      * Gets the container div for this page if it is an overlay.
@@ -243,6 +279,7 @@ cr.define('cr.ui.pageManager', function() {
         pageDiv.page = this;
         // NOTE: This is a hacky way to force the container to layout which
         // will allow us to trigger the webkit transition.
+        /** @suppress {uselessCode} */
         container.scrollTop;
 
         this.pageDiv.removeAttribute('aria-hidden');

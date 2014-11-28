@@ -82,7 +82,10 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
             # Debug logging.
             '--vmodule=*/chromeos/net/*=2,*/chromeos/login/*=2'])
 
-    if not self.browser_options.gaia_login:
+    # Disable GAIA services unless we're using GAIA login, or if there's an
+    # explicit request for it.
+    if (self.browser_options.disable_gaia_services and
+        not self.browser_options.gaia_login):
       args.append('--disable-gaia-services')
 
     return args
@@ -232,7 +235,7 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     # Workaround for crbug.com/374462 - the bug doesn't manifest in the guest
     # session, which also starts with an open browser tab.
     retries = 3
-    while not self._is_guest:
+    while not self._is_guest and not self.browser_options.gaia_login:
       try:
         # Open a new window/tab.
         tab = self.tab_list_backend.New(timeout=30)

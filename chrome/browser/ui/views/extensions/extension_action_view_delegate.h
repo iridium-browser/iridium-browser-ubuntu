@@ -11,9 +11,12 @@ class WebContents;
 
 namespace views {
 class FocusManager;
+class MenuButton;
 class View;
 class Widget;
 }
+
+class ExtensionActionViewController;
 
 // The view that surrounds an ExtensionAction and owns the
 // ExtensionActionViewController. Since different actions can subclass
@@ -33,8 +36,17 @@ class ExtensionActionViewDelegate {
   // Returns the parent for the associated context menu.
   virtual views::Widget* GetParentForContextMenu() = 0;
 
+  // In some cases (such as when an action is shown in a menu), a substitute
+  // ExtensionActionViewController should be used for showing popups. This
+  // returns the preferred control.
+  virtual ExtensionActionViewController* GetPreferredPopupViewController() = 0;
+
   // Returns the reference view for the extension action's popup.
   virtual views::View* GetReferenceViewForPopup() = 0;
+
+  // Returns the MenuButton (if any) to use in showing the context menu (this
+  // allows views code to update the pressed state of the button).
+  virtual views::MenuButton* GetContextMenuButton() = 0;
 
   // Returns the current web contents.
   virtual content::WebContents* GetCurrentWebContents() = 0;
@@ -51,14 +63,6 @@ class ExtensionActionViewDelegate {
 
   // Does any additional cleanup after the popup is closed.
   virtual void CleanupPopup() {}
-
-  // Called immediately before the context menu is shown.
-  virtual void OnWillShowContextMenus() {}
-
-  // Called once the context menu has closed.
-  // This may not be called if the context menu is showing and |this| is
-  // deleted.
-  virtual void OnContextMenuDone() {}
 
  protected:
   virtual ~ExtensionActionViewDelegate() {}

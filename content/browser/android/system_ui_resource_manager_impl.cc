@@ -29,7 +29,7 @@ SkBitmap CreateOverscrollGlowLBitmap(const gfx::Size& screen_size) {
 
   SkPaint paint;
   paint.setAntiAlias(true);
-  paint.setAlpha(0x33);
+  paint.setAlpha(0xBB);
   paint.setStyle(SkPaint::kFill_Style);
 
   const float arc_width =
@@ -40,11 +40,7 @@ SkBitmap CreateOverscrollGlowLBitmap(const gfx::Size& screen_size) {
   SkRect arc_rect = SkRect::MakeXYWH(
       -arc_width / 2.f, -arc_width - y, arc_width * 2.f, arc_width * 2.f);
   SkBitmap glow_bitmap;
-  if (!glow_bitmap.allocPixels(
-          SkImageInfo::MakeA8(bounds.width(), bounds.height()))) {
-    LOG(FATAL) << " Failed to allocate bitmap of size " << bounds.width() << "x"
-               << bounds.height();
-  }
+  glow_bitmap.allocPixels(SkImageInfo::MakeA8(bounds.width(), bounds.height()));
   glow_bitmap.eraseColor(SK_ColorTRANSPARENT);
 
   SkCanvas canvas(glow_bitmap);

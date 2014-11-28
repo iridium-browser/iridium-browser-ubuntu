@@ -40,7 +40,9 @@
 #include "content/public/common/user_agent.h"
 #include "grit/browser_resources.h"
 #include "jni/DevToolsServer_jni.h"
+#include "net/base/net_errors.h"
 #include "net/socket/unix_domain_listen_socket_posix.h"
+#include "net/socket/unix_domain_server_socket_posix.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -65,17 +67,6 @@ const char kFrontEndURL[] =
     "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
 const char kTetheringSocketName[] = "chrome_devtools_tethering_%d_%d";
 
-const char kTargetTypePage[] = "page";
-const char kTargetTypeOther[] = "other";
-
-static GURL GetFaviconURLForContents(WebContents* web_contents) {
-  content::NavigationController& controller = web_contents->GetController();
-  content::NavigationEntry* entry = controller.GetActiveEntry();
-  if (entry != NULL && entry->GetURL().is_valid())
-    return entry->GetFavicon().url;
-  return GURL();
-}
-
 bool AuthorizeSocketAccessWithDebugPermission(
     const net::UnixDomainServerSocket::Credentials& credentials) {
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -84,191 +75,6 @@ bool AuthorizeSocketAccessWithDebugPermission(
       credentials.process_id, credentials.user_id) ||
       content::CanUserConnectToDevTools(credentials);
 }
-
-class TargetBase : public content::DevToolsTarget {
- public:
-  // content::DevToolsTarget implementation:
-  virtual std::string GetParentId() const OVERRIDE { return std::string(); }
-
-  virtual std::string GetTitle() const OVERRIDE { return title_; }
-
-  virtual std::string GetDescription() const OVERRIDE { return std::string(); }
-
-  virtual GURL GetURL() const OVERRIDE { return url_; }
-
-  virtual GURL GetFaviconURL() const OVERRIDE { return favicon_url_; }
-
-  virtual base::TimeTicks GetLastActivityTime() const OVERRIDE {
-    return last_activity_time_;
-  }
-
- protected:
-  explicit TargetBase(WebContents* web_contents)
-      : title_(base::UTF16ToUTF8(web_contents->GetTitle())),
-        url_(web_contents->GetURL()),
-        favicon_url_(GetFaviconURLForContents(web_contents)),
-        last_activity_time_(web_contents->GetLastActiveTime()) {
-  }
-
-  TargetBase(const base::string16& title, const GURL& url)
-      : title_(base::UTF16ToUTF8(title)),
-        url_(url)
-  {}
-
- private:
-  const std::string title_;
-  const GURL url_;
-  const GURL favicon_url_;
-  const base::TimeTicks last_activity_time_;
-};
-
-class TabTarget : public TargetBase {
- public:
-  static TabTarget* CreateForWebContents(int tab_id,
-                                         WebContents* web_contents) {
-    return new TabTarget(tab_id, web_contents);
-  }
-
-  static TabTarget* CreateForUnloadedTab(int tab_id,
-                                         const base::string16& title,
-                                         const GURL& url) {
-    return new TabTarget(tab_id, title, url);
-  }
-
-  // content::DevToolsTarget implementation:
-  virtual std::string GetId() const OVERRIDE {
-    return base::IntToString(tab_id_);
-  }
-
-  virtual std::string GetType() const OVERRIDE { return kTargetTypePage; }
-
-  virtual bool IsAttached() const OVERRIDE {
-    TabModel* model;
-    int index;
-    if (!FindTab(&model, &index))
-      return false;
-    WebContents* web_contents = model->GetWebContentsAt(index);
-    if (!web_contents)
-      return false;
-    return DevToolsAgentHost::IsDebuggerAttached(web_contents);
-  }
-
-  virtual scoped_refptr<DevToolsAgentHost> GetAgentHost() const OVERRIDE {
-    TabModel* model;
-    int index;
-    if (!FindTab(&model, &index))
-      return NULL;
-    WebContents* web_contents = model->GetWebContentsAt(index);
-    if (!web_contents) {
-      // The tab has been pushed out of memory, pull it back.
-      TabAndroid* tab = model->GetTabAt(index);
-      if (!tab)
-        return NULL;
-
-      tab->LoadIfNeeded();
-      web_contents = model->GetWebContentsAt(index);
-      if (!web_contents)
-        return NULL;
-    }
-    return DevToolsAgentHost::GetOrCreateFor(web_contents);
-  }
-
-  virtual bool Activate() const OVERRIDE {
-    TabModel* model;
-    int index;
-    if (!FindTab(&model, &index))
-      return false;
-    model->SetActiveIndex(index);
-    return true;
-  }
-
-  virtual bool Close() const OVERRIDE {
-    TabModel* model;
-    int index;
-    if (!FindTab(&model, &index))
-      return false;
-    model->CloseTabAt(index);
-    return true;
-  }
-
- private:
-  TabTarget(int tab_id, WebContents* web_contents)
-      : TargetBase(web_contents),
-        tab_id_(tab_id) {
-  }
-
-  TabTarget(int tab_id, const base::string16& title, const GURL& url)
-      : TargetBase(title, url),
-        tab_id_(tab_id) {
-  }
-
-  bool FindTab(TabModel** model_result, int* index_result) const {
-    for (TabModelList::const_iterator iter = TabModelList::begin();
-        iter != TabModelList::end(); ++iter) {
-      TabModel* model = *iter;
-      for (int i = 0; i < model->GetTabCount(); ++i) {
-        TabAndroid* tab = model->GetTabAt(i);
-        if (tab && tab->GetAndroidId() == tab_id_) {
-          *model_result = model;
-          *index_result = i;
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  const int tab_id_;
-};
-
-class NonTabTarget : public TargetBase {
- public:
-  explicit NonTabTarget(WebContents* web_contents)
-      : TargetBase(web_contents),
-        agent_host_(DevToolsAgentHost::GetOrCreateFor(web_contents)) {
-  }
-
-  // content::DevToolsTarget implementation:
-  virtual std::string GetId() const OVERRIDE {
-    return agent_host_->GetId();
-  }
-
-  virtual std::string GetType() const OVERRIDE {
-    if (TabModelList::begin() == TabModelList::end()) {
-      // If there are no tab models we must be running in ChromeShell.
-      // Return the 'page' target type for backwards compatibility.
-      return kTargetTypePage;
-    }
-    return kTargetTypeOther;
-  }
-
-  virtual bool IsAttached() const OVERRIDE {
-    return agent_host_->IsAttached();
-  }
-
-  virtual scoped_refptr<DevToolsAgentHost> GetAgentHost() const OVERRIDE {
-    return agent_host_;
-  }
-
-  virtual bool Activate() const OVERRIDE {
-    WebContents* web_contents = agent_host_->GetWebContents();
-    if (!web_contents)
-      return false;
-    web_contents->GetDelegate()->ActivateContents(web_contents);
-    return true;
-  }
-
-  virtual bool Close() const OVERRIDE {
-    WebContents* web_contents = agent_host_->GetWebContents();
-    if (!web_contents)
-      return false;
-    web_contents->GetRenderViewHost()->ClosePage();
-    return true;
-  }
-
- private:
-  scoped_refptr<DevToolsAgentHost> agent_host_;
-};
 
 // Delegate implementation for the devtools http handler on android. A new
 // instance of this gets created each time devtools is enabled.
@@ -297,77 +103,6 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
 
   virtual base::FilePath GetDebugFrontendDir() OVERRIDE {
     return base::FilePath();
-  }
-
-  virtual std::string GetPageThumbnailData(const GURL& url) OVERRIDE {
-    Profile* profile =
-        ProfileManager::GetLastUsedProfile()->GetOriginalProfile();
-    history::TopSites* top_sites = profile->GetTopSites();
-    if (top_sites) {
-      scoped_refptr<base::RefCountedMemory> data;
-      if (top_sites->GetPageThumbnail(url, false, &data))
-        return std::string(data->front_as<char>(), data->size());
-    }
-    return "";
-  }
-
-  virtual scoped_ptr<content::DevToolsTarget> CreateNewTarget(
-      const GURL& url) OVERRIDE {
-    if (TabModelList::empty())
-      return scoped_ptr<content::DevToolsTarget>();
-    TabModel* tab_model = TabModelList::get(0);
-    if (!tab_model)
-      return scoped_ptr<content::DevToolsTarget>();
-    WebContents* web_contents = tab_model->CreateNewTabForDevTools(url);
-    if (!web_contents)
-      return scoped_ptr<content::DevToolsTarget>();
-
-    TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
-    if (!tab)
-      return scoped_ptr<content::DevToolsTarget>();
-
-    return scoped_ptr<content::DevToolsTarget>(
-        TabTarget::CreateForWebContents(tab->GetAndroidId(), web_contents));
-  }
-
-  virtual void EnumerateTargets(TargetCallback callback) OVERRIDE {
-    TargetList targets;
-
-    // Enumerate existing tabs, including the ones with no WebContents.
-    std::set<WebContents*> tab_web_contents;
-    for (TabModelList::const_iterator iter = TabModelList::begin();
-        iter != TabModelList::end(); ++iter) {
-      TabModel* model = *iter;
-      for (int i = 0; i < model->GetTabCount(); ++i) {
-        TabAndroid* tab = model->GetTabAt(i);
-        if (!tab)
-          continue;
-
-        WebContents* web_contents = model->GetWebContentsAt(i);
-        if (web_contents) {
-          tab_web_contents.insert(web_contents);
-          targets.push_back(TabTarget::CreateForWebContents(tab->GetAndroidId(),
-                                                            web_contents));
-        } else {
-          targets.push_back(TabTarget::CreateForUnloadedTab(tab->GetAndroidId(),
-                                                            tab->GetTitle(),
-                                                            tab->GetURL()));
-        }
-      }
-    }
-
-    // Add targets for WebContents not associated with any tabs.
-    std::vector<WebContents*> wc_list =
-        DevToolsAgentHost::GetInspectableWebContents();
-    for (std::vector<WebContents*>::iterator it = wc_list.begin();
-         it != wc_list.end();
-         ++it) {
-      if (tab_web_contents.find(*it) != tab_web_contents.end())
-        continue;
-      targets.push_back(new NonTabTarget(*it));
-    }
-
-    callback.Run(targets);
   }
 
   virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
@@ -399,6 +134,49 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
   DISALLOW_COPY_AND_ASSIGN(DevToolsServerDelegate);
 };
 
+// Factory for UnixDomainServerSocket. It tries a fallback socket when
+// original socket doesn't work.
+class UnixDomainServerSocketFactory
+    : public content::DevToolsHttpHandler::ServerSocketFactory {
+ public:
+  UnixDomainServerSocketFactory(
+      const std::string& socket_name,
+      const net::UnixDomainServerSocket::AuthCallback& auth_callback)
+      : content::DevToolsHttpHandler::ServerSocketFactory(socket_name, 0, 1),
+        auth_callback_(auth_callback) {
+  }
+
+ private:
+  // content::DevToolsHttpHandler::ServerSocketFactory.
+  virtual scoped_ptr<net::ServerSocket> Create() const OVERRIDE {
+    return scoped_ptr<net::ServerSocket>(
+        new net::UnixDomainServerSocket(auth_callback_,
+                                        true /* use_abstract_namespace */));
+  }
+
+  virtual scoped_ptr<net::ServerSocket> CreateAndListen() const OVERRIDE {
+    scoped_ptr<net::ServerSocket> socket = Create();
+    if (!socket)
+      return scoped_ptr<net::ServerSocket>();
+
+    if (socket->ListenWithAddressAndPort(address_, port_, backlog_) == net::OK)
+      return socket.Pass();
+
+    // Try a fallback socket name.
+    const std::string fallback_address(
+        base::StringPrintf("%s_%d", address_.c_str(), getpid()));
+    if (socket->ListenWithAddressAndPort(fallback_address, port_, backlog_)
+        == net::OK)
+      return socket.Pass();
+
+    return scoped_ptr<net::ServerSocket>();
+  }
+
+  const net::UnixDomainServerSocket::AuthCallback auth_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(UnixDomainServerSocketFactory);
+};
+
 }  // namespace
 
 DevToolsServer::DevToolsServer(const std::string& socket_name_prefix)
@@ -425,12 +203,10 @@ void DevToolsServer::Start(bool allow_debug_permission) {
       allow_debug_permission ?
           base::Bind(&AuthorizeSocketAccessWithDebugPermission) :
           base::Bind(&content::CanUserConnectToDevTools);
-
+  scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory> factory(
+      new UnixDomainServerSocketFactory(socket_name_, auth_callback));
   protocol_handler_ = content::DevToolsHttpHandler::Start(
-      new net::deprecated::UnixDomainListenSocketWithAbstractNamespaceFactory(
-          socket_name_,
-          base::StringPrintf("%s_%d", socket_name_.c_str(), getpid()),
-          auth_callback),
+      factory.Pass(),
       base::StringPrintf(kFrontEndURL, content::GetWebKitRevision().c_str()),
       new DevToolsServerDelegate(auth_callback),
       base::FilePath());

@@ -9,27 +9,22 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/notification_provider/notification_provider_api.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/extension_welcome_notification.h"
+#include "chrome/browser/notifications/extension_welcome_notification_factory.h"
 #include "chrome/browser/notifications/fullscreen_notification_blocker.h"
 #include "chrome/browser/notifications/message_center_settings_controller.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_conversion_helper.h"
 #include "chrome/browser/notifications/screen_lock_notification_blocker.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/extensions/api/notification_provider.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
-#include "extensions/browser/info_map.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "ui/gfx/image/image_skia.h"
@@ -76,8 +71,11 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
   message_center_->SetNotifierSettingsProvider(settings_provider_.get());
 
 #if defined(OS_CHROMEOS)
+#if !defined(USE_ATHENA)
+  // TODO(oshima|hashimoto): Support notification on athena. crbug.com/408755.
   blockers_.push_back(
       new LoginStateNotificationBlockerChromeOS(message_center));
+#endif
 #else
   blockers_.push_back(new ScreenLockNotificationBlocker(message_center));
 #endif
@@ -89,9 +87,6 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
   // views.Other platforms have global ownership and Create will return NULL.
   tray_.reset(message_center::CreateMessageCenterTray());
 #endif
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_FULLSCREEN_CHANGED,
-                 content::NotificationService::AllSources());
 }
 
 MessageCenterNotificationManager::~MessageCenterNotificationManager() {
@@ -119,7 +114,7 @@ void MessageCenterNotificationManager::Add(const Notification& notification,
   if (Update(notification, profile))
     return;
 
-  DesktopNotificationServiceFactory::GetForProfile(profile)->
+  ExtensionWelcomeNotificationFactory::GetForBrowserContext(profile)->
       ShowWelcomeNotificationIfNecessary(notification);
 
   // WARNING: You MUST update the message center via the notification within a
@@ -320,18 +315,6 @@ void MessageCenterNotificationManager::SetMessageCenterTrayDelegateForTest(
   tray_.reset(delegate);
 }
 
-void MessageCenterNotificationManager::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_FULLSCREEN_CHANGED) {
-    const bool is_fullscreen = *content::Details<bool>(details).ptr();
-
-    if (is_fullscreen && tray_.get() && tray_->GetMessageCenterTray())
-      tray_->GetMessageCenterTray()->HidePopupBubble();
-  }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ImageDownloads
 
@@ -405,7 +388,7 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloadWithImage(
   if (url.is_empty())
     return;
 
-  content::WebContents* contents = notification.GetWebContents();
+  content::WebContents* contents = notification.delegate()->GetWebContents();
   if (!contents) {
     LOG(WARNING) << "Notification needs an image but has no WebContents";
     return;
@@ -476,30 +459,7 @@ void MessageCenterNotificationManager::ProfileNotification::StartDownloads() {
 
 void
 MessageCenterNotificationManager::ProfileNotification::OnDownloadsCompleted() {
-  notification_.DoneRendering();
-}
-
-std::string
-    MessageCenterNotificationManager::ProfileNotification::GetExtensionId() {
-  extensions::InfoMap* extension_info_map =
-      extensions::ExtensionSystem::Get(profile())->info_map();
-  extensions::ExtensionSet extensions;
-  extension_info_map->GetExtensionsWithAPIPermissionForSecurityOrigin(
-      notification().origin_url(),
-      notification().process_id(),
-      extensions::APIPermission::kNotifications,
-      &extensions);
-
-  DesktopNotificationService* desktop_service =
-      DesktopNotificationServiceFactory::GetForProfile(profile());
-  for (extensions::ExtensionSet::const_iterator iter = extensions.begin();
-       iter != extensions.end(); ++iter) {
-    if (desktop_service->IsNotifierEnabled(message_center::NotifierId(
-            message_center::NotifierId::APPLICATION, (*iter)->id()))) {
-      return (*iter)->id();
-    }
-  }
-  return std::string();
+  notification_.delegate()->ReleaseRenderViewHost();
 }
 
 void

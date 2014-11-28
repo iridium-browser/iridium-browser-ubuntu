@@ -561,7 +561,7 @@ FFmpegDemuxer::FFmpegDemuxer(
 
 FFmpegDemuxer::~FFmpegDemuxer() {}
 
-void FFmpegDemuxer::Stop(const base::Closure& callback) {
+void FFmpegDemuxer::Stop() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   // The order of Stop() and Abort() is important here.  If Abort() is called
@@ -583,7 +583,6 @@ void FFmpegDemuxer::Stop(const base::Closure& callback) {
   }
 
   data_source_ = NULL;
-  task_runner_->PostTask(FROM_HERE, callback);
 }
 
 void FFmpegDemuxer::Seek(base::TimeDelta time, const PipelineStatusCB& cb) {
@@ -667,6 +666,10 @@ void FFmpegDemuxer::Initialize(DemuxerHost* host,
                  status_cb));
 }
 
+base::Time FFmpegDemuxer::GetTimelineOffset() const {
+  return timeline_offset_;
+}
+
 DemuxerStream* FFmpegDemuxer::GetStream(DemuxerStream::Type type) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   return GetFFmpegStream(type);
@@ -681,10 +684,6 @@ FFmpegDemuxerStream* FFmpegDemuxer::GetFFmpegStream(
     }
   }
   return NULL;
-}
-
-base::Time FFmpegDemuxer::GetTimelineOffset() const {
-  return timeline_offset_;
 }
 
 base::TimeDelta FFmpegDemuxer::GetStartTime() const {

@@ -150,7 +150,8 @@ void WebContentsObserverAndroid::DidNavigateMainFrame(
       (details.type == NAVIGATION_TYPE_IN_PAGE || details.is_in_page);
   Java_WebContentsObserverAndroid_didNavigateMainFrame(
       env, obj.obj(), jstring_url.obj(), jstring_base_url.obj(),
-      details.is_navigation_to_different_page(), is_fragment_navigation);
+      details.is_navigation_to_different_page(), is_fragment_navigation,
+      details.http_status_code);
 }
 
 void WebContentsObserverAndroid::DidNavigateAnyFrame(
@@ -164,8 +165,8 @@ void WebContentsObserverAndroid::DidNavigateAnyFrame(
       ConvertUTF8ToJavaString(env, params.url.spec()));
   ScopedJavaLocalRef<jstring> jstring_base_url(
       ConvertUTF8ToJavaString(env, params.base_url.spec()));
-  jboolean jboolean_is_reload =
-      PageTransitionCoreTypeIs(params.transition, PAGE_TRANSITION_RELOAD);
+  jboolean jboolean_is_reload = ui::PageTransitionCoreTypeIs(
+      params.transition, ui::PAGE_TRANSITION_RELOAD);
 
   Java_WebContentsObserverAndroid_didNavigateAnyFrame(
       env, obj.obj(), jstring_url.obj(), jstring_base_url.obj(),
@@ -201,7 +202,7 @@ void WebContentsObserverAndroid::DidStartProvisionalLoadForFrame(
 void WebContentsObserverAndroid::DidCommitProvisionalLoadForFrame(
     RenderFrameHost* render_frame_host,
     const GURL& url,
-    PageTransition transition_type) {
+    ui::PageTransition transition_type) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj(weak_java_observer_.get(env));
   if (obj.is_null())

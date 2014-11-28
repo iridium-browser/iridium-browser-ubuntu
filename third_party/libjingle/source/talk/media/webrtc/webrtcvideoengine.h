@@ -42,6 +42,9 @@
 
 #if !defined(LIBPEERCONNECTION_LIB) && \
     !defined(LIBPEERCONNECTION_IMPLEMENTATION)
+// If you hit this, then you've tried to include this header from outside
+// a shared library.  An instance of this class must only be created from
+// within the library that actually implements it.
 #error "Bogus include."
 #endif
 
@@ -98,24 +101,23 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
                     ViEWrapper* vie_wrapper,
                     ViETraceWrapper* tracing,
                     rtc::CpuMonitor* cpu_monitor);
-  ~WebRtcVideoEngine();
+  virtual ~WebRtcVideoEngine();
 
   // Basic video engine implementation.
   bool Init(rtc::Thread* worker_thread);
   void Terminate();
 
   int GetCapabilities();
-  bool SetOptions(const VideoOptions &options);
   bool SetDefaultEncoderConfig(const VideoEncoderConfig& config);
   VideoEncoderConfig GetDefaultEncoderConfig() const;
 
-  WebRtcVideoMediaChannel* CreateChannel(VoiceMediaChannel* voice_channel);
+  virtual WebRtcVideoMediaChannel* CreateChannel(
+      VoiceMediaChannel* voice_channel);
 
   const std::vector<VideoCodec>& codecs() const;
   const std::vector<RtpHeaderExtension>& rtp_header_extensions() const;
   void SetLogging(int min_sev, const char* filter);
 
-  bool SetLocalRenderer(VideoRenderer* renderer);
   sigslot::repeater2<VideoCapturer*, CaptureState> SignalCaptureStateChange;
 
   // Set the VoiceEngine for A/V sync. This can only be called before Init.
@@ -127,7 +129,8 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   // Set a WebRtcVideoEncoderFactory for external encoding. Video engine does
   // not take the ownership of |encoder_factory|. The caller needs to make sure
   // that |encoder_factory| outlives the video engine.
-  void SetExternalEncoderFactory(WebRtcVideoEncoderFactory* encoder_factory);
+  virtual void SetExternalEncoderFactory(
+      WebRtcVideoEncoderFactory* encoder_factory);
   // Enable the render module with timing control.
   bool EnableTimedRender();
 
@@ -225,9 +228,6 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   VideoChannels channels_;
 
   bool capture_started_;
-  int local_renderer_w_;
-  int local_renderer_h_;
-  VideoRenderer* local_renderer_;
 
   rtc::scoped_ptr<rtc::CpuMonitor> cpu_monitor_;
 };
@@ -238,7 +238,7 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
  public:
   WebRtcVideoMediaChannel(WebRtcVideoEngine* engine,
                           VoiceMediaChannel* voice_channel);
-  ~WebRtcVideoMediaChannel();
+  virtual ~WebRtcVideoMediaChannel();
   bool Init();
 
   WebRtcVideoEngine* engine() { return engine_; }
@@ -310,6 +310,20 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   virtual int SendPacket(int channel, const void* data, int len);
   virtual int SendRTCPPacket(int channel, const void* data, int len);
 
+  // Checks the current bitrate estimate and modifies the bitrates
+  // accordingly, including converting kAutoBandwidth to the correct defaults.
+  virtual void SanitizeBitrates(
+      int channel_id, webrtc::VideoCodec* video_codec);
+  virtual void LogSendCodecChange(const std::string& reason);
+  bool SetPrimaryAndRtxSsrcs(
+      int channel_id, int idx, uint32 primary_ssrc,
+      const StreamParams& send_params);
+  bool SetLimitedNumberOfSendSsrcs(
+      int channel_id, const StreamParams& send_params, size_t limit);
+  virtual bool SetSendSsrcs(
+      int channel_id, const StreamParams& send_params,
+      const webrtc::VideoCodec& codec);
+
  private:
   typedef std::map<uint32, WebRtcVideoChannelRecvInfo*> RecvChannelMap;
   typedef std::map<uint32, WebRtcVideoChannelSendInfo*> SendChannelMap;
@@ -339,22 +353,23 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   bool SetSendCodec(const webrtc::VideoCodec& codec);
   bool SetSendCodec(WebRtcVideoChannelSendInfo* send_channel,
                     const webrtc::VideoCodec& codec);
-  void LogSendCodecChange(const std::string& reason);
   // Prepares the channel with channel id |info->channel_id()| to receive all
   // codecs in |receive_codecs_| and start receive packets.
   bool SetReceiveCodecs(WebRtcVideoChannelRecvInfo* info);
   // Returns the channel ID that receives the stream with SSRC |ssrc|.
   int GetRecvChannelId(uint32 ssrc);
   bool MaybeSetRtxSsrc(const StreamParams& sp, int channel_id);
+  // Create and register an external endcoder if it's possible to do
+  // so and one isn't already registered.
+  bool MaybeRegisterExternalEncoder(
+      WebRtcVideoChannelSendInfo* send_channel,
+      const webrtc::VideoCodec& codec);
   // Given captured video frame size, checks if we need to reset vie send codec.
   // |reset| is set to whether resetting has happened on vie or not.
   // Returns false on error.
   bool MaybeResetVieSendCodec(WebRtcVideoChannelSendInfo* send_channel,
                               int new_width, int new_height, bool is_screencast,
                               bool* reset);
-  // Checks the current bitrate estimate and modifies the bitrates
-  // accordingly, including converting kAutoBandwidth to the correct defaults.
-  void MaybeChangeBitrates(int channel_id, webrtc::VideoCodec* video_codec);
   // Helper function for starting the sending of media on all channels or
   // |channel_id|. Note that these two function do not change |sending_|.
   bool StartSend();
@@ -371,9 +386,10 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   // Returns the ssrc key corresponding to the provided local SSRC in
   // |ssrc_key|. The return value is true upon success.  If the local
   // ssrc correspond to that of the default channel the key is
-  // kDefaultChannelSsrcKey.
-  // For all other channels the returned ssrc key will be the same as
-  // the local ssrc.
+  // kDefaultChannelSsrcKey.  For all other channels the returned ssrc
+  // key will be the same as the local ssrc.  If a stream has more
+  // than one ssrc, the first (corresponding to
+  // StreamParams::first_ssrc()) is used as the key.
   bool GetSendChannelSsrcKey(uint32 local_ssrc, uint32* ssrc_key);
   WebRtcVideoChannelSendInfo* GetDefaultSendChannel();
   WebRtcVideoChannelSendInfo* GetSendChannelBySsrcKey(uint32 ssrc_key);
@@ -387,8 +403,6 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   bool IsDefaultChannelId(int channel_id) const {
     return channel_id == default_channel_id_;
   }
-  bool GetDefaultRenderer(VideoRenderer** renderer);
-
   bool DeleteSendChannel(uint32 ssrc_key);
 
   WebRtcVideoChannelRecvInfo* GetDefaultRecvChannel();
@@ -414,10 +428,6 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   // Signal when cpu adaptation has no further scope to adapt.
   void OnCpuAdaptationUnable();
 
-  // Set the local (send-side) RTX SSRC corresponding to primary_ssrc.
-  bool SetLocalRtxSsrc(int channel_id, const StreamParams& send_params,
-                       uint32 primary_ssrc, int stream_idx);
-
   // Connect |capturer| to WebRtcVideoMediaChannel if it is only registered
   // to one send channel, i.e. the first send channel.
   void MaybeConnectCapturer(VideoCapturer* capturer);
@@ -426,6 +436,9 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   void MaybeDisconnectCapturer(VideoCapturer* capturer);
 
   bool RemoveRecvStreamInternal(uint32 ssrc);
+
+  // Set the ssrc to use for RTCP receiver reports.
+  void SetReceiverReportSsrc(uint32 ssrc);
 
   // Global state.
   WebRtcVideoEngine* engine_;
@@ -454,6 +467,7 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   std::map<int, int> associated_payload_types_;
   bool render_started_;
   uint32 first_receive_ssrc_;
+  uint32 receiver_report_ssrc_;
   std::vector<RtpHeaderExtension> receive_extensions_;
   int num_unsignalled_recv_channels_;
 

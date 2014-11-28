@@ -76,7 +76,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
              const GURL& scope,
              const GURL& script_url,
              bool pause_after_download,
-             const std::vector<int>& possible_process_ids,
              const StatusCallback& callback);
 
   // Stops the worker. It is invalid to call this when the worker is
@@ -90,12 +89,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   ServiceWorkerStatusCode SendMessage(const IPC::Message& message);
 
   void ResumeAfterDownload();
-
-  // Add or remove |process_id| to the internal process set where this
-  // worker can be started.
-  void AddProcessReference(int process_id);
-  void ReleaseProcessReference(int process_id);
-  bool HasProcessToRun() const { return !process_refs_.empty(); }
 
   int embedded_worker_id() const { return embedded_worker_id_; }
   Status status() const { return status_; }
@@ -113,9 +106,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
 
   friend class EmbeddedWorkerRegistry;
   FRIEND_TEST_ALL_PREFIXES(EmbeddedWorkerInstanceTest, StartAndStop);
-  FRIEND_TEST_ALL_PREFIXES(EmbeddedWorkerInstanceTest, SortProcesses);
-
-  typedef std::map<int, int> ProcessRefMap;
 
   // Constructor is called via EmbeddedWorkerRegistry::CreateWorker().
   // This instance holds a ref of |registry|.
@@ -143,18 +133,21 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
                        bool wait_for_debugger);
 
   // Called back from Registry when the worker instance has ack'ed that
-  // it finished loading the script.
-  void OnScriptLoaded();
+  // it is ready for inspection.
+  void OnReadyForInspection();
+
+  // Called back from Registry when the worker instance has ack'ed that
+  // it finished loading the script and has started a worker thread.
+  void OnScriptLoaded(int thread_id);
 
   // Called back from Registry when the worker instance has ack'ed that
   // it failed to load the script.
   void OnScriptLoadFailed();
 
   // Called back from Registry when the worker instance has ack'ed that
-  // its WorkerGlobalScope is actually started and parsed on |thread_id| in the
-  // child process.
+  // its WorkerGlobalScope is actually started and parsed.
   // This will change the internal status from STARTING to RUNNING.
-  void OnStarted(int thread_id);
+  void OnStarted();
 
   void OnPausedAfterDownload();
 
@@ -182,11 +175,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
                               int line_number,
                               const GURL& source_url);
 
-  // Chooses a list of processes to try to start this worker in, ordered by how
-  // many clients are currently in those processes.
-  std::vector<int> SortProcesses(
-      const std::vector<int>& possible_process_ids) const;
-
   base::WeakPtr<ServiceWorkerContextCore> context_;
   scoped_refptr<EmbeddedWorkerRegistry> registry_;
   const int embedded_worker_id_;
@@ -197,7 +185,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   int thread_id_;
   int worker_devtools_agent_route_id_;
 
-  ProcessRefMap process_refs_;
   ListenerList listener_list_;
 
   base::WeakPtrFactory<EmbeddedWorkerInstance> weak_factory_;

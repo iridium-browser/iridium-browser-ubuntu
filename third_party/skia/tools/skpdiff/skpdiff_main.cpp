@@ -27,6 +27,7 @@
 #include "SkGraphics.h"
 #include "SkStream.h"
 #include "SkTDArray.h"
+#include "SkTaskGroup.h"
 
 #include "SkDifferentPixelsMetric.h"
 #include "SkDiffContext.h"
@@ -125,6 +126,7 @@ int tool_main(int argc, char * argv[]) {
 
     // Needed by various Skia components
     SkAutoGraphics ag;
+    SkTaskGroup::Enabler enabled;
 
     if (FLAGS_list) {
         SkDebugf("Available Metrics:\n");
@@ -132,7 +134,7 @@ int tool_main(int argc, char * argv[]) {
 
     // Figure which differs the user chose, and optionally print them if the user requests it
     SkTDArray<SkImageDiffer*> chosenDiffers;
-    for (int differIndex = 0; NULL != gDiffers[differIndex]; differIndex++) {
+    for (int differIndex = 0; gDiffers[differIndex]; differIndex++) {
         SkImageDiffer* differ = gDiffers[differIndex];
         if (FLAGS_list) {
             SkDebugf("    %s", differ->getName());

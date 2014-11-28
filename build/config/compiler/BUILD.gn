@@ -14,6 +14,23 @@ declare_args() {
   # Normally, Android builds are lightly optimized, even for debug builds, to
   # keep binary size down. Setting this flag to true disables such optimization
   android_full_debug = false
+
+  # Whether to use the binary binutils checked into third_party/binutils.
+  # These are not multi-arch so cannot be used except on x86 and x86-64 (the
+  # only two architectures that are currently checked in). Turn this off when
+  # you are using a custom toolchain and need to control -B in cflags.
+  linux_use_bundled_binutils = is_linux && cpu_arch == "x64"
+}
+
+use_gold = is_linux && cpu_arch == "x64"
+
+if (!is_win) {
+  # linux_use_debug_fission: whether to use split DWARF debug info
+  # files. This can reduce link time significantly, but is incompatible
+  # with some utilities such as icecc and ccache. Requires gold and
+  # gcc >= 4.8 or clang.
+  # http://gcc.gnu.org/wiki/DebugFission
+  use_debug_fission = use_gold && linux_use_bundled_binutils
 }
 
 # default_include_dirs ---------------------------------------------------------
@@ -88,6 +105,29 @@ config("compiler") {
     }
   }
 
+  if (is_clang && is_debug) {
+    # Allow comparing the address of references and 'this' against 0
+    # in debug builds. Technically, these can never be null in
+    # well-defined C/C++ and Clang can optimize such checks away in
+    # release builds, but they may be used in asserts in debug builds.
+    cflags_cc += [
+      "-Wno-undefined-bool-conversion",
+      "-Wno-tautological-undefined-compare",
+    ]
+  }
+
+  if (is_clang && !is_win) {
+    # This is here so that all files get recompiled after a clang roll and
+    # when turning clang on or off. (defines are passed via the command line,
+    # and build system rebuild things when their commandline changes). Nothing
+    # should ever read this define.
+    defines += [
+      "CR_CLANG_REVISION=" +
+          exec_script(
+              "//tools/clang/scripts/posix-print-revision.py", [], "value")
+    ]
+  }
+
   # Mac-specific compiler flags setup.
   # ----------------------------------
   if (is_mac || is_ios) {
@@ -123,7 +163,7 @@ config("compiler") {
     # CPU architecture. We may or may not be doing a cross compile now, so for
     # simplicity we always explicitly set the architecture.
     if (cpu_arch == "x64") {
-      cflags += [ "-m64" ]
+      cflags += [ "-m64", "-march=x86-64", ]
       ldflags += [ "-m64" ]
     } else if (cpu_arch == "x86") {
       cflags += [ "-m32" ]
@@ -144,6 +184,20 @@ config("compiler") {
           if (is_android && !is_clang) {  # Clang doesn't support this option.
             cflags += [ "-mthumb-interwork" ]
           }
+        }
+        if (!is_clang) {
+          # Clang doesn't support these flags.
+          cflags += [
+            # The tree-sra optimization (scalar replacement for
+            # aggregates enabling subsequent optimizations) leads to
+            # invalid code generation when using the Android NDK's
+            # compiler (r5-r7). This can be verified using
+            # webkit_unit_tests' WTF.Checked_int8_t test.
+            "-fno-tree-sra",
+            # The following option is disabled to improve binary
+            # size and performance in gcc 4.9.
+            "-fno-caller-saves",
+          ]
         }
       }
     }
@@ -182,37 +236,46 @@ config("compiler") {
   # ------------------------------------
   if (is_linux) {
     cflags += [ "-pthread" ]
-
-    if (cpu_arch == "x64") {
-      # Use gold for linking on 64-bit Linux only (on 32-bit it runs out of
-      # address space, and it doesn't support cross-compiling).
-      gold_path = rebase_path("//third_party/binutils/Linux_x64/Release/bin",
-                              root_build_dir)
-      ldflags += [
-        "-B$gold_path",
-
-        # There seems to be a conflict of --icf and -pie in gold which can
-        # generate crashy binaries. As a security measure, -pie takes
-        # precedence for now.
-        # TODO(brettw) common.gypi has this only for target toolset.
-        #"-Wl,--icf=safe",
-        "-Wl,--icf=none",
-
-        # Experimentation found that using four linking threads
-        # saved ~20% of link time.
-        # https://groups.google.com/a/chromium.org/group/chromium-dev/browse_thread/thread/281527606915bb36
-        # Only apply this to the target linker, since the host
-        # linker might not be gold, but isn't used much anyway.
-        # TODO(raymes): Disable threading because gold is frequently
-        # crashing on the bots: crbug.com/161942.
-        #"-Wl,--threads",
-        #"-Wl,--thread-count=4",
-      ]
-    }
-
     ldflags += [
       "-pthread",
     ]
+  }
+  if (use_gold) {
+    # Use gold for linking on 64-bit Linux only (on 32-bit it runs out of
+    # address space, and it doesn't support cross-compiling).
+    gold_path = rebase_path("//third_party/binutils/Linux_x64/Release/bin",
+                            root_build_dir)
+    ldflags += [
+      "-B$gold_path",
+
+      # Newer gccs and clangs support -fuse-ld, use the flag to force gold
+      # selection.
+      # gcc -- http://gcc.gnu.org/onlinedocs/gcc-4.8.0/gcc/Optimize-Options.html
+      "-fuse-ld=gold",
+
+      # There seems to be a conflict of --icf and -pie in gold which can
+      # generate crashy binaries. As a security measure, -pie takes
+      # precedence for now.
+      # TODO(brettw) common.gypi has this only for target toolset.
+      #"-Wl,--icf=safe",
+      "-Wl,--icf=none",
+
+      # Experimentation found that using four linking threads
+      # saved ~20% of link time.
+      # https://groups.google.com/a/chromium.org/group/chromium-dev/browse_thread/thread/281527606915bb36
+      # Only apply this to the target linker, since the host
+      # linker might not be gold, but isn't used much anyway.
+      # TODO(raymes): Disable threading because gold is frequently
+      # crashing on the bots: crbug.com/161942.
+      #"-Wl,--threads",
+      #"-Wl,--thread-count=4",
+    ]
+  }
+
+  if (linux_use_bundled_binutils) {
+    binutils_path = rebase_path("//third_party/binutils/Linux_x64/Release/bin",
+                                root_build_dir)
+    cflags += [ "-B$binutils_path" ]
   }
 
   # Clang-specific compiler flags setup.
@@ -238,15 +301,6 @@ config("compiler") {
       # Clang doesn't support these flags.
       cflags += [
         "-finline-limit=64",
-        # The following 6 options are disabled to save on
-        # binary size in gcc 4.8.
-        # TODO(fdegans) Reevaluate when we upgrade GCC.
-        "-fno-partial-inlining",
-        "-fno-early-inlining",
-        "-fno-tree-copy-prop",
-        "-fno-tree-loop-optimize",
-        "-fno-move-loop-invariants",
-        "-fno-caller-saves",
       ]
     }
     if (is_android_webview_build) {
@@ -454,8 +508,6 @@ config("runtime_library") {
 # Toggles between higher and lower warnings for code that is (or isn't)
 # part of Chromium.
 
-# TODO: -Werror should always be on, independent of chromium_code
-# http://crbug.com/393046
 config("chromium_code") {
   if (is_win) {
     cflags = [
@@ -464,6 +516,7 @@ config("chromium_code") {
   } else {
     cflags = [
       "-Wall",
+      "-Wextra",
 
       # GCC turns on -Wsign-compare for C++ under -Wall, but clang doesn't,
       # so we specify it explicitly.
@@ -471,11 +524,6 @@ config("chromium_code") {
       # http://code.google.com/p/chromium/issues/detail?id=90453
       "-Wsign-compare",
     ]
-    if (!is_linux) {
-      # TODO: Add this unconditionally once linux builds without warnings with
-      # clang in the gn build.
-      cflags += [ "-Werror" ]
-    }
 
     # In Chromium code, we define __STDC_foo_MACROS in order to get the
     # C99 macros on Mac and Linux.
@@ -483,12 +531,6 @@ config("chromium_code") {
       "__STDC_CONSTANT_MACROS",
       "__STDC_FORMAT_MACROS",
     ]
-
-    # TODO(brettw) this should also be enabled on Linux but some files
-    # currently fail.
-    if (is_mac) {
-      cflags += [ "-Wextra" ]
-    }
   }
 }
 config("no_chromium_code") {
@@ -641,6 +683,7 @@ config("default_warnings") {
     cflags = [
       # Enables.
       "-Wendif-labels",  # Weird old-style text after an #endif.
+      "-Werror",  # Warnings as errors.
 
       # Disables.
       "-Wno-missing-field-initializers",  # "struct foo f = {0};"
@@ -676,15 +719,17 @@ config("default_warnings") {
         # http://crbug.com/255186
         "-Wno-deprecated-register",
 
-        # Clang spots more unused functions.
-        "-Wno-unused-function",
-      ]
+        # TODO(thakis): This used to be implied by -Wno-unused-function,
+        # which we no longer use. Check if it makes sense to remove
+        # this as well. http://crbug.com/316352
+        "-Wno-unneeded-internal-declaration",
 
-      if (!is_mac && !is_ios) {
-        cflags_cc += [
-          "-Wno-reserved-user-defined-literal",
-        ]
-      }
+        # TODO(thakis): Remove, http://crbug.com/263960
+        "-Wno-reserved-user-defined-literal",
+
+        # TODO(hans): Clean this up. Or disable with finer granularity.
+        "-Wno-unused-local-typedef",
+      ]
     }
     if (gcc_version >= 48) {
       cflags_cc += [
@@ -876,6 +921,9 @@ config("symbols") {
     ldflags = [ "/DEBUG" ]
   } else {
     cflags = [ "-g2" ]
+    if (use_debug_fission) {
+      cflags += [ "-gsplit-dwarf" ]
+    }
   }
 }
 
@@ -885,6 +933,9 @@ config("minimal_symbols") {
     ldflags = [ "/DEBUG" ]
   } else {
     cflags = [ "-g1" ]
+    if (use_debug_fission) {
+      cflags += [ "-gsplit-dwarf" ]
+    }
   }
 }
 

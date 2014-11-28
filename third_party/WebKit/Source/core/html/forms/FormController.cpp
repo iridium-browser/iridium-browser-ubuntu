@@ -166,7 +166,7 @@ unsigned FormElementKeyHash::hash(const FormElementKey& key)
 }
 
 struct FormElementKeyHashTraits : WTF::GenericHashTraits<FormElementKey> {
-    static void constructDeletedValue(FormElementKey& slot) { new (NotNull, &slot) FormElementKey(WTF::HashTableDeletedValue); }
+    static void constructDeletedValue(FormElementKey& slot, bool) { new (NotNull, &slot) FormElementKey(WTF::HashTableDeletedValue); }
     static bool isDeletedValue(const FormElementKey& value) { return value.isHashTableDeletedValue(); }
 };
 
@@ -317,7 +317,7 @@ static inline void recordFormStructure(const HTMLFormElement& form, StringBuilde
     // 2 is enough to distinguish forms in webkit.org/b/91209#c0
     const size_t namedControlsToBeRecorded = 2;
     const FormAssociatedElement::List& controls = form.associatedElements();
-    builder.append(" [");
+    builder.appendLiteral(" [");
     for (size_t i = 0, namedControls = 0; i < controls.size() && namedControls < namedControlsToBeRecorded; ++i) {
         if (!controls[i]->isFormControlElementWithState())
             continue;
@@ -329,9 +329,9 @@ static inline void recordFormStructure(const HTMLFormElement& form, StringBuilde
             continue;
         namedControls++;
         builder.append(name);
-        builder.append(" ");
+        builder.append(' ');
     }
-    builder.append("]");
+    builder.append(']');
 }
 
 static inline String formSignature(const HTMLFormElement& form)
@@ -413,7 +413,7 @@ static String formStateSignature()
     // In the legacy version of serialized state, the first item was a name
     // attribute value of a form control. The following string literal should
     // contain some characters which are rarely used for name attribute values.
-    DEFINE_STATIC_LOCAL(String, signature, ("\n\r?% WebKit serialized form state version 8 \n\r=&"));
+    DEFINE_STATIC_LOCAL(String, signature, ("\n\r?% Blink serialized form state version 9 \n\r=&"));
     return signature;
 }
 

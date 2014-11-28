@@ -27,6 +27,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/cache_type.h"
+#include "net/base/net_log.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/http/http_cache.h"
@@ -175,7 +176,8 @@ AwURLRequestContextGetter::AwURLRequestContextGetter(
     scoped_ptr<data_reduction_proxy::DataReductionProxyConfigService>
         config_service)
     : partition_path_(partition_path),
-      cookie_store_(cookie_store) {
+      cookie_store_(cookie_store),
+      net_log_(new net::NetLog()) {
   data_reduction_proxy_config_service_ = config_service.Pass();
   // CreateSystemProxyConfigService for Android must be called on main thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -205,6 +207,7 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   }
   builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
       AwContentBrowserClient::GetAcceptLangsImpl()));
+  builder.set_net_log(net_log_.get());
   ApplyCmdlineOverridesToURLRequestContextBuilder(&builder);
 
   url_request_context_.reset(builder.Build());
@@ -223,7 +226,6 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
           20 * 1024 * 1024,  // 20M
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
 
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
   AwBrowserContext* browser_context = AwBrowserContext::GetDefault();
   DCHECK(browser_context);
   DataReductionProxySettings* data_reduction_proxy_settings =
@@ -235,11 +237,13 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
           data_reduction_proxy_settings->params(),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
 
+  // Compression statistics are not gathered for WebView, so
+  // DataReductionProxyStatisticsPrefs is not instantiated and passed to the
+  // network delegate.
   aw_network_delegate->set_data_reduction_proxy_params(
       data_reduction_proxy_settings->params());
   aw_network_delegate->set_data_reduction_proxy_auth_request_handler(
       data_reduction_proxy_auth_request_handler_.get());
-#endif
 
   main_http_factory_.reset(main_cache);
   url_request_context_->set_http_transaction_factory(main_cache);
@@ -273,6 +277,15 @@ void AwURLRequestContextGetter::SetHandlersAndInterceptors(
 data_reduction_proxy::DataReductionProxyAuthRequestHandler*
 AwURLRequestContextGetter::GetDataReductionProxyAuthRequestHandler() const {
   return data_reduction_proxy_auth_request_handler_.get();
+}
+
+net::NetLog* AwURLRequestContextGetter::GetNetLog() {
+  return net_log_.get();
+}
+
+void AwURLRequestContextGetter::SetKeyOnIO(const std::string& key) {
+  DCHECK(data_reduction_proxy_auth_request_handler_);
+  data_reduction_proxy_auth_request_handler_->InitAuthentication(key);
 }
 
 }  // namespace android_webview

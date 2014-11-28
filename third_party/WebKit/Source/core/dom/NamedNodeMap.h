@@ -37,6 +37,7 @@ class Node;
 class ExceptionState;
 
 class NamedNodeMap FINAL : public NoBaseWillBeGarbageCollected<NamedNodeMap>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
     friend class Element;
 public:
@@ -74,7 +75,6 @@ private:
     {
         // Only supports NamedNodeMaps with Element associated.
         ASSERT(m_element);
-        ScriptWrappable::init(this);
     }
 
     RawPtrWillBeMember<Element> m_element;

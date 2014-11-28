@@ -7,17 +7,19 @@ package org.chromium.chrome.browser.sync;
 import android.content.Context;
 import android.util.Log;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
 import org.chromium.sync.internal_api.pub.SyncDecryptionPassphraseType;
 import org.chromium.sync.internal_api.pub.base.ModelType;
 
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -227,6 +229,14 @@ public class ProfileSyncService {
         return nativeHasExplicitPassphraseTime(mNativeProfileSyncServiceAndroid);
     }
 
+    /**
+     * Returns the current explicit passphrase time in milliseconds since epoch.
+     */
+    public long getExplicitPassphraseTime() {
+        assert isSyncInitialized();
+        return nativeGetExplicitPassphraseTime(mNativeProfileSyncServiceAndroid);
+    }
+
     public String getSyncEnterGooglePassphraseBodyWithDateText() {
         assert isSyncInitialized();
         return nativeGetSyncEnterGooglePassphraseBodyWithDateText(mNativeProfileSyncServiceAndroid);
@@ -299,6 +309,17 @@ public class ProfileSyncService {
     }
 
     /**
+     * Checks if encrypting all the data types is allowed.
+     *
+     * @return true if encrypting all data types is allowed, false if only passwords are allowed to
+     * be encrypted.
+     */
+    public boolean isEncryptEverythingAllowed() {
+        assert isSyncInitialized();
+        return nativeIsEncryptEverythingAllowed(mNativeProfileSyncServiceAndroid);
+    }
+
+    /**
      * Checks if the all the data types are encrypted.
      *
      * @return true if all data types are encrypted, false if only passwords are encrypted.
@@ -345,6 +366,11 @@ public class ProfileSyncService {
     public Set<ModelType> getPreferredDataTypes() {
         long modelTypeSelection =
                 nativeGetEnabledDataTypes(mNativeProfileSyncServiceAndroid);
+        return modelTypeSelectionToSet(modelTypeSelection);
+    }
+
+    @VisibleForTesting
+    public static Set<ModelType> modelTypeSelectionToSet(long modelTypeSelection) {
         Set<ModelType> syncTypes = new HashSet<ModelType>();
         if ((modelTypeSelection & ModelTypeSelection.AUTOFILL) != 0) {
             syncTypes.add(ModelType.AUTOFILL);
@@ -384,6 +410,9 @@ public class ProfileSyncService {
         }
         if ((modelTypeSelection & ModelTypeSelection.FAVICON_TRACKING) != 0) {
             syncTypes.add(ModelType.FAVICON_TRACKING);
+        }
+        if ((modelTypeSelection & ModelTypeSelection.SUPERVISED_USER_SETTING) != 0) {
+            syncTypes.add(ModelType.MANAGED_USER_SETTING);
         }
         return syncTypes;
     }
@@ -497,8 +526,41 @@ public class ProfileSyncService {
      * @return The difference measured in microseconds, between last sync cycle completion time
      * and 1 January 1970 00:00:00 UTC.
      */
+    @VisibleForTesting
     public long getLastSyncedTimeForTest() {
         return nativeGetLastSyncedTimeForTest(mNativeProfileSyncServiceAndroid);
+    }
+
+    /**
+     * Overrides the Sync engine's NetworkResources. This is used to set up the Sync FakeServer for
+     * testing.
+     *
+     * @param networkResources the pointer to the NetworkResources created by the native code. It
+     *                         is assumed that the Java caller has ownership of this pointer;
+     *                         ownership is transferred as part of this call.
+     */
+    public void overrideNetworkResourcesForTest(long networkResources) {
+        nativeOverrideNetworkResourcesForTest(mNativeProfileSyncServiceAndroid, networkResources);
+    }
+
+    @CalledByNative
+    private static String modelTypeSelectionToStringForTest(long modelTypeSelection) {
+        SortedSet<String> set = new TreeSet<String>();
+        Set<ModelType> filteredTypes = ModelType.filterOutNonInvalidationTypes(
+                modelTypeSelectionToSet(modelTypeSelection));
+        for (ModelType type : filteredTypes) {
+            set.add(type.toString());
+        }
+        StringBuilder sb = new StringBuilder();
+        Iterator<String> it = set.iterator();
+        if (it.hasNext()) {
+            sb.append(it.next());
+            while (it.hasNext()) {
+                sb.append(", ");
+                sb.append(it.next());
+            }
+        }
+        return sb.toString();
     }
 
     // Native methods
@@ -517,6 +579,7 @@ public class ProfileSyncService {
     private native int nativeGetAuthError(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsSyncInitialized(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsFirstSetupInProgress(long nativeProfileSyncServiceAndroid);
+    private native boolean nativeIsEncryptEverythingAllowed(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsEncryptEverythingEnabled(long nativeProfileSyncServiceAndroid);
     private native void nativeEnableEncryptEverything(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsPassphraseRequiredForDecryption(
@@ -531,6 +594,7 @@ public class ProfileSyncService {
     private native boolean nativeIsCryptographerReady(long nativeProfileSyncServiceAndroid);
     private native int nativeGetPassphraseType(long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasExplicitPassphraseTime(long nativeProfileSyncServiceAndroid);
+    private native long nativeGetExplicitPassphraseTime(long nativeProfileSyncServiceAndroid);
     private native String nativeGetSyncEnterGooglePassphraseBodyWithDateText(
             long nativeProfileSyncServiceAndroid);
     private native String nativeGetSyncEnterCustomPassphraseBodyWithDateText(
@@ -552,4 +616,6 @@ public class ProfileSyncService {
     private native boolean nativeHasUnrecoverableError(long nativeProfileSyncServiceAndroid);
     private native String nativeGetAboutInfoForTest(long nativeProfileSyncServiceAndroid);
     private native long nativeGetLastSyncedTimeForTest(long nativeProfileSyncServiceAndroid);
+    private native void nativeOverrideNetworkResourcesForTest(
+            long nativeProfileSyncServiceAndroid, long networkResources);
 }

@@ -32,18 +32,15 @@
 #include "modules/webaudio/AudioContext.h"
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "platform/Logging.h"
+#include "platform/audio/AudioUtilities.h"
 #include "platform/graphics/media/MediaPlayer.h"
 #include "wtf/Locker.h"
 
-// These are somewhat arbitrary limits, but we need to do some kind of sanity-checking.
-const unsigned minSampleRate = 8000;
-const unsigned maxSampleRate = 192000;
-
 namespace blink {
 
-PassRefPtrWillBeRawPtr<MediaElementAudioSourceNode> MediaElementAudioSourceNode::create(AudioContext* context, HTMLMediaElement* mediaElement)
+MediaElementAudioSourceNode* MediaElementAudioSourceNode::create(AudioContext* context, HTMLMediaElement* mediaElement)
 {
-    return adoptRefWillBeNoop(new MediaElementAudioSourceNode(context, mediaElement));
+    return adoptRefCountedGarbageCollectedWillBeNoop(new MediaElementAudioSourceNode(context, mediaElement));
 }
 
 MediaElementAudioSourceNode::MediaElementAudioSourceNode(AudioContext* context, HTMLMediaElement* mediaElement)
@@ -52,7 +49,6 @@ MediaElementAudioSourceNode::MediaElementAudioSourceNode(AudioContext* context, 
     , m_sourceNumberOfChannels(0)
     , m_sourceSampleRate(0)
 {
-    ScriptWrappable::init(this);
     // Default to stereo. This could change depending on what the media element
     // .src is set to.
     addOutput(AudioNodeOutput::create(this, 2));
@@ -77,7 +73,7 @@ void MediaElementAudioSourceNode::dispose()
 void MediaElementAudioSourceNode::setFormat(size_t numberOfChannels, float sourceSampleRate)
 {
     if (numberOfChannels != m_sourceNumberOfChannels || sourceSampleRate != m_sourceSampleRate) {
-        if (!numberOfChannels || numberOfChannels > AudioContext::maxNumberOfChannels() || sourceSampleRate < minSampleRate || sourceSampleRate > maxSampleRate) {
+        if (!numberOfChannels || numberOfChannels > AudioContext::maxNumberOfChannels() || !AudioUtilities::isValidAudioBufferSampleRate(sourceSampleRate)) {
             // process() will generate silence for these uninitialized values.
             WTF_LOG(Media, "MediaElementAudioSourceNode::setFormat(%u, %f) - unhandled format change", static_cast<unsigned>(numberOfChannels), sourceSampleRate);
             m_sourceNumberOfChannels = 0;
@@ -145,18 +141,12 @@ void MediaElementAudioSourceNode::process(size_t numberOfFrames)
 
 void MediaElementAudioSourceNode::lock()
 {
-#if !ENABLE(OILPAN)
-    ref();
-#endif
     m_processLock.lock();
 }
 
 void MediaElementAudioSourceNode::unlock()
 {
     m_processLock.unlock();
-#if !ENABLE(OILPAN)
-    deref();
-#endif
 }
 
 void MediaElementAudioSourceNode::trace(Visitor* visitor)

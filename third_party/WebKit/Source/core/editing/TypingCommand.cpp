@@ -169,7 +169,7 @@ void TypingCommand::insertText(Document& document, const String& text, Options o
 // FIXME: We shouldn't need to take selectionForInsertion. It should be identical to FrameSelection's current selection.
 void TypingCommand::insertText(Document& document, const String& text, const VisibleSelection& selectionForInsertion, Options options, TextCompositionType compositionType)
 {
-    RefPtr<LocalFrame> frame = document.frame();
+    RefPtrWillBeRawPtr<LocalFrame> frame = document.frame();
     ASSERT(frame);
 
     VisibleSelection currentSelection = frame->selection().selection();
@@ -390,8 +390,7 @@ bool TypingCommand::makeEditableRootEmpty()
         return false;
 
     if (root->firstChild() == root->lastChild()) {
-        Element* firstElementChild = ElementTraversal::firstWithin(*root);
-        if (isHTMLBRElement(firstElementChild)) {
+        if (isHTMLBRElement(root->firstChild())) {
             // If there is a single child and it could be a placeholder, leave it alone.
             if (root->renderer() && root->renderer()->isRenderBlockFlow())
                 return false;

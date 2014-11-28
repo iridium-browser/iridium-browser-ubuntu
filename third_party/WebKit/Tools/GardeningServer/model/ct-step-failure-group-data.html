@@ -1,0 +1,45 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="ct-builder-list.html">
+<link rel="import" href="ct-commit-list.html">
+
+<script>
+function CTStepFailureGroupData(failures, commitList) {
+  this.failures = failures;
+  this.commitList = commitList;
+  this.builderList = new CTBuilderList(failures);
+  this.category = 'step';
+};
+
+CTStepFailureGroupData.prototype.getAnnotations = function() {
+  return this.failures.map(function(failure) {
+    return failure.annotations();
+  }).flatten();
+};
+
+CTStepFailureGroupData.prototype.failureKeys = function() {
+  return this.failures.map(function(failure) {
+    return failure.keys();
+  }).flatten();
+};
+
+CTStepFailureGroupData.prototype.failedOnce = function() {
+  if (!this.failures.length)
+    return false;
+
+  for (var i = 0; i < this.failures.length; i++) {
+    var totalFailures = 0;
+    var resultNodes = this.failures[i].resultNodesByBuilder;
+    for (var r in resultNodes) {
+      totalFailures += resultNodes[r].failingBuildCount;
+      if (totalFailures > 1)
+        return false;
+    }
+  }
+  return true;
+};
+</script>

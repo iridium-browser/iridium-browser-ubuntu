@@ -12,6 +12,7 @@
 #include "core/loader/ThreadableLoader.h"
 #include "core/xml/XMLHttpRequest.h"
 #include "modules/serviceworkers/FetchManager.h"
+#include "modules/serviceworkers/HeadersForEachCallback.h"
 #include "modules/serviceworkers/RequestInit.h"
 #include "platform/NotImplemented.h"
 #include "platform/network/HTTPParsers.h"
@@ -23,11 +24,33 @@ namespace blink {
 
 namespace {
 
-PassRefPtrWillBeRawPtr<Request> createRequestWithRequestData(PassRefPtrWillBeRawPtr<FetchRequestData> request, const RequestInit& init, FetchRequestData::Mode mode, FetchRequestData::Credentials credentials, ExceptionState& exceptionState)
+class FillWebRequestHeaders : public HeadersForEachCallback {
+public:
+    FillWebRequestHeaders(WebServiceWorkerRequest* webRequest) : m_webRequest(webRequest) { }
+
+    virtual bool handleItem(ScriptValue, const String&, const String&, Headers*)
+    {
+        ASSERT_NOT_REACHED();
+        return false;
+    }
+
+    virtual bool handleItem(const String& value, const String& key, Headers*)
+    {
+        m_webRequest->appendHeader(key, value);
+        return true;
+    }
+
+private:
+    WebServiceWorkerRequest* m_webRequest;
+};
+
+} // namespace
+
+Request* Request::createRequestWithRequestData(ExecutionContext* context, FetchRequestData* request, const RequestInit& init, FetchRequestData::Mode mode, FetchRequestData::Credentials credentials, ExceptionState& exceptionState)
 {
-    // "6. Let |mode| be |init|'s mode member if it is present, and
+    // "7. Let |mode| be |init|'s mode member if it is present, and
     // |fallbackMode| otherwise."
-    // "7. If |mode| is non-null, set |request|'s mode to |mode|."
+    // "8. If |mode| is non-null, set |request|'s mode to |mode|."
     if (init.mode == "same-origin") {
         request->setMode(FetchRequestData::SameOriginMode);
     } else if (init.mode == "no-cors") {
@@ -40,9 +63,9 @@ PassRefPtrWillBeRawPtr<Request> createRequestWithRequestData(PassRefPtrWillBeRaw
         request->setMode(mode);
     }
 
-    // "8. Let |credentials| be |init|'s credentials member if it is present,
+    // "9. Let |credentials| be |init|'s credentials member if it is present,
     // and |fallbackCredentials| otherwise."
-    // "9. If |credentials| is non-null, set |request|'s credentials mode to
+    // "10. If |credentials| is non-null, set |request|'s credentials mode to
     // |credentials|.
     if (init.credentials == "omit") {
         request->setCredentials(FetchRequestData::OmitCredentials);
@@ -56,51 +79,51 @@ PassRefPtrWillBeRawPtr<Request> createRequestWithRequestData(PassRefPtrWillBeRaw
         request->setCredentials(credentials);
     }
 
-    // "10. If |init|'s method member is present, let |method| be it and run
+    // "11. If |init|'s method member is present, let |method| be it and run
     // these substeps:"
     if (!init.method.isEmpty()) {
         // "1. If |method| is not a useful method, throw a TypeError."
         if (!FetchUtils::isUsefulMethod(init.method)) {
             exceptionState.throwTypeError("'" + init.method + "' HTTP method is unsupported.");
-            return nullptr;
+            return 0;
         }
         if (!isValidHTTPToken(init.method)) {
             exceptionState.throwTypeError("'" + init.method + "' is not a valid HTTP method.");
-            return nullptr;
+            return 0;
         }
         // FIXME: "2. Add case correction as in XMLHttpRequest?"
         // "3. Set |request|'s method to |method|."
         request->setMethod(XMLHttpRequest::uppercaseKnownHTTPMethod(AtomicString(init.method)));
     }
-    // "11. Let |r| be a new Request object associated with |request|, Headers
-    // object, and FetchBodyStream object."
-    RefPtrWillBeRawPtr<Request> r = Request::create(request);
+    // "12. Let |r| be a new Request object associated with |request|, Headers
+    // object."
+    Request* r = Request::create(context, request);
 
-    // "12. Let |headers| be a copy of |r|'s Headers object."
-    // "13. If |init|'s headers member is present, set |headers| to |init|'s
+    // "13. Let |headers| be a copy of |r|'s Headers object."
+    // "14. If |init|'s headers member is present, set |headers| to |init|'s
     // headers member."
     // We don't create a copy of r's Headers object when init's headers member
     // is present.
-    RefPtrWillBeRawPtr<Headers> headers = nullptr;
+    Headers* headers = 0;
     if (!init.headers && init.headersDictionary.isUndefinedOrNull()) {
         headers = r->headers()->createCopy();
     }
-    // "14. Empty |r|'s request's header list."
-    r->request()->headerList()->clearList();
+    // "15. Empty |r|'s request's header list."
+    r->clearHeaderList();
 
-    // "15. If |r|'s request's mode is no CORS, run these substeps:
+    // "16. If |r|'s request's mode is no CORS, run these substeps:
     if (r->request()->mode() == FetchRequestData::NoCORSMode) {
         // "1. If |r|'s request's method is not a simple method, throw a
         // TypeError."
         if (!FetchUtils::isSimpleMethod(r->request()->method())) {
             exceptionState.throwTypeError("'" + r->request()->method() + "' is unsupported in no-cors mode.");
-            return nullptr;
+            return 0;
         }
         // "Set |r|'s Headers object's guard to |request-no-CORS|.
         r->headers()->setGuard(Headers::RequestNoCORSGuard);
     }
 
-    // "16. Fill |r|'s Headers object with |headers|. Rethrow any exceptions."
+    // "17. Fill |r|'s Headers object with |headers|. Rethrow any exceptions."
     if (init.headers) {
         ASSERT(init.headersDictionary.isUndefinedOrNull());
         r->headers()->fillWith(init.headers.get(), exceptionState);
@@ -108,94 +131,135 @@ PassRefPtrWillBeRawPtr<Request> createRequestWithRequestData(PassRefPtrWillBeRaw
         r->headers()->fillWith(init.headersDictionary, exceptionState);
     } else {
         ASSERT(headers);
-        r->headers()->fillWith(headers.get(), exceptionState);
+        r->headers()->fillWith(headers, exceptionState);
     }
     if (exceptionState.hadException())
-        return nullptr;
-    // FIXME: Support body.
+        return 0;
+    // "18. If |init|'s body member is present, run these substeps:"
+    if (init.bodyBlobHandle) {
+        // "1. Let |stream| and |Content-Type| be the result of extracting
+        // |init|'s body member."
+        // "2. Set |r|'s request's body to |stream|."
+        // "3.If |Content-Type| is non-null and |r|'s request's header list
+        //  contains no header named `Content-Type`, append
+        // `Content-Type`/|Content-Type| to |r|'s Headers object. Rethrow any
+        // exception."
+        r->setBodyBlobHandle(init.bodyBlobHandle);
+        if (!init.bodyBlobHandle->type().isEmpty() && !r->headers()->has("Content-Type", exceptionState)) {
+            r->headers()->append("Content-Type", init.bodyBlobHandle->type(), exceptionState);
+        }
+        if (exceptionState.hadException())
+            return 0;
+    }
+    // "19. Set |r|'s MIME type to the result of extracting a MIME type from
+    // |r|'s request's header list."
+    // FIXME: We don't have MIME type in Request object yet.
+
     // "20. Return |r|."
-    return r.release();
+    return r;
 }
 
-
-} // namespace
-
-DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(Request);
-
-PassRefPtrWillBeRawPtr<Request> Request::create(ExecutionContext* context, const String& input, ExceptionState& exceptionState)
+Request* Request::create(ExecutionContext* context, const String& input, ExceptionState& exceptionState)
 {
     return create(context, input, Dictionary(), exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<Request> Request::create(ExecutionContext* context, const String& input, const Dictionary& init, ExceptionState& exceptionState)
+Request* Request::create(ExecutionContext* context, const String& input, const Dictionary& init, ExceptionState& exceptionState)
 {
-    // "1. Let |request| be |input|'s associated request, if |input| is a
+    // "2. Let |request| be |input|'s associated request, if |input| is a
     // Request object, and a new request otherwise."
-    RefPtrWillBeRawPtr<FetchRequestData> request(FetchRequestData::create(context));
-    // "2. Set |request| to a restricted copy of itself."
+    FetchRequestData* request(FetchRequestData::create(context));
+    // "3. Set |request| to a restricted copy of itself."
     request = request->createRestrictedCopy(context, SecurityOrigin::create(context->url()));
-    // "5. If |input| is a string, run these substeps:"
+    // "6. If |input| is a string, run these substeps:"
     // "1. Let |parsedURL| be the result of parsing |input| with entry settings
     // object's API base URL."
     KURL parsedURL = context->completeURL(input);
     // "2. If |parsedURL| is failure, throw a TypeError."
     if (!parsedURL.isValid()) {
         exceptionState.throwTypeError("Invalid URL");
-        return nullptr;
+        return 0;
     }
     // "3. Set |request|'s url to |parsedURL|."
     request->setURL(parsedURL);
     // "4. Set |fallbackMode| to CORS."
     // "5. Set |fallbackCredentials| to omit."
-    return createRequestWithRequestData(request.release(), RequestInit(init), FetchRequestData::CORSMode, FetchRequestData::OmitCredentials, exceptionState);
+    return createRequestWithRequestData(context, request, RequestInit(context, init, exceptionState), FetchRequestData::CORSMode, FetchRequestData::OmitCredentials, exceptionState);
 }
 
-
-PassRefPtrWillBeRawPtr<Request> Request::create(ExecutionContext* context, Request* input, ExceptionState& exceptionState)
+Request* Request::create(ExecutionContext* context, Request* input, ExceptionState& exceptionState)
 {
     return create(context, input, Dictionary(), exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<Request> Request::create(ExecutionContext* context, Request* input, const Dictionary& init, ExceptionState& exceptionState)
+Request* Request::create(ExecutionContext* context, Request* input, const Dictionary& init, ExceptionState& exceptionState)
 {
-    // "1. Let |request| be |input|'s associated request, if |input| is a
+    // "1. If input is a Request object, run these substeps:"
+    // "  1. If input's used flag is set, throw a TypeError."
+    // "  2. Set input's used flag."
+    if (input->bodyUsed()) {
+        exceptionState.throwTypeError(
+            "Cannot construct a Request with a Request object that has already been used.");
+        return 0;
+    }
+    input->setBodyUsed();
+    // "2. Let |request| be |input|'s associated request, if |input| is a
     // Request object, and a new request otherwise."
-    // "2. Set |request| to a restricted copy of itself."
-    RefPtrWillBeRawPtr<FetchRequestData> request(input->request()->createRestrictedCopy(context, SecurityOrigin::create(context->url())));
-    // "3. Let |fallbackMode| be null."
-    // "4. Let |fallbackCredentials| be null."
+    // "3. Set |request| to a restricted copy of itself."
+    FetchRequestData* request(input->request()->createRestrictedCopy(context, SecurityOrigin::create(context->url())));
+    // "4. Let |fallbackMode| be null."
+    // "5. Let |fallbackCredentials| be null."
     // Instead of using null as a special fallback value, just pass the current
     // mode and credentials; it has the same effect.
     const FetchRequestData::Mode currentMode = request->mode();
     const FetchRequestData::Credentials currentCredentials = request->credentials();
-    return createRequestWithRequestData(request.release(), RequestInit(init), currentMode, currentCredentials, exceptionState);
+    return createRequestWithRequestData(context, request, RequestInit(context, init, exceptionState), currentMode, currentCredentials, exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<Request> Request::create(PassRefPtrWillBeRawPtr<FetchRequestData> request)
+Request* Request::create(ExecutionContext* context, FetchRequestData* request)
 {
-    return adoptRefWillBeNoop(new Request(request));
+    Request* r = new Request(context, request);
+    r->suspendIfNeeded();
+    return r;
 }
 
-Request::Request(PassRefPtrWillBeRawPtr<FetchRequestData> request)
-    : m_request(request)
+Request::Request(ExecutionContext* context, FetchRequestData* request)
+    : Body(context)
+    , m_request(request)
     , m_headers(Headers::create(m_request->headerList()))
 {
     m_headers->setGuard(Headers::RequestGuard);
-    ScriptWrappable::init(this);
 }
 
-PassRefPtrWillBeRawPtr<Request> Request::create(const WebServiceWorkerRequest& webRequest)
+Request* Request::create(ExecutionContext* context, const WebServiceWorkerRequest& webRequest)
 {
-    return adoptRefWillBeNoop(new Request(webRequest));
+    Request* r = new Request(context, webRequest);
+    r->suspendIfNeeded();
+    return r;
 }
 
-Request::Request(const WebServiceWorkerRequest& webRequest)
-    : m_request(FetchRequestData::create(webRequest))
+Request* Request::create(const Request& copyFrom)
+{
+    Request* r = new Request(copyFrom);
+    r->suspendIfNeeded();
+    return r;
+}
+
+Request::Request(ExecutionContext* context, const WebServiceWorkerRequest& webRequest)
+    : Body(context)
+    , m_request(FetchRequestData::create(webRequest))
     , m_headers(Headers::create(m_request->headerList()))
 {
     m_headers->setGuard(Headers::RequestGuard);
-    ScriptWrappable::init(this);
 }
+
+Request::Request(const Request& copy_from)
+    : Body(copy_from)
+    , m_request(copy_from.m_request)
+    , m_headers(copy_from.m_headers->createCopy())
+{
+}
+
 
 String Request::method() const
 {
@@ -255,8 +319,39 @@ String Request::credentials() const
     return "";
 }
 
+Request* Request::clone() const
+{
+    return Request::create(*this);
+}
+
+void Request::populateWebServiceWorkerRequest(WebServiceWorkerRequest& webRequest)
+{
+    webRequest.setMethod(method());
+    webRequest.setURL(m_request->url());
+    m_headers->forEach(new FillWebRequestHeaders(&webRequest));
+    webRequest.setReferrer(m_request->referrer().referrer().referrer, static_cast<WebReferrerPolicy>(m_request->referrer().referrer().referrerPolicy));
+    // FIXME: How can we set isReload properly? What is the correct place to load it in to the Request object? We should investigate the right way
+    // to plumb this information in to here.
+}
+
+void Request::setBodyBlobHandle(PassRefPtr<BlobDataHandle> blobDataHandle)
+{
+    m_request->setBlobDataHandle(blobDataHandle);
+}
+
+void Request::clearHeaderList()
+{
+    m_request->headerList()->clearList();
+}
+
+PassRefPtr<BlobDataHandle> Request::blobDataHandle()
+{
+    return m_request->blobDataHandle();
+}
+
 void Request::trace(Visitor* visitor)
 {
+    Body::trace(visitor);
     visitor->trace(m_request);
     visitor->trace(m_headers);
 }

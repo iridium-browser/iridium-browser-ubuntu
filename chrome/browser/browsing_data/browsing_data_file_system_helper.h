@@ -15,10 +15,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/common/url_constants.h"
+#include "storage/common/fileapi/file_system_types.h"
 #include "url/gurl.h"
-#include "webkit/common/fileapi/file_system_types.h"
 
-namespace fileapi {
+namespace storage {
 class FileSystemContext;
 }
 
@@ -52,7 +52,7 @@ class BrowsingDataFileSystemHelper
     // The origin for which the information is relevant.
     GURL origin;
     // FileSystemType to usage (in bytes) map.
-    std::map<fileapi::FileSystemType, int64> usage_map;
+    std::map<storage::FileSystemType, int64> usage_map;
   };
 
   // Creates a BrowsingDataFileSystemHelper instance for the file systems
@@ -63,7 +63,7 @@ class BrowsingDataFileSystemHelper
   // The BrowsingDataFileSystemHelper will not change the profile itself, but
   // can modify data it contains (by removing file systems).
   static BrowsingDataFileSystemHelper* Create(
-      fileapi::FileSystemContext* file_system_context);
+      storage::FileSystemContext* file_system_context);
 
   // Starts the process of fetching file system data, which will call |callback|
   // upon completion, passing it a constant list of FileSystemInfo objects.
@@ -97,22 +97,12 @@ class CannedBrowsingDataFileSystemHelper
   // we're writing to, so we'll accept it, but not store it.
   explicit CannedBrowsingDataFileSystemHelper(Profile* profile);
 
-  // Creates a copy of the file system helper. StartFetching can only respond
-  // to one client at a time; we need to be able to act on multiple parallel
-  // requests in certain situations (see CookiesTreeModel and its clients). For
-  // these cases, simply clone the object and fire off another fetching process.
-  //
-  // Clone() is safe to call while StartFetching() is running. Clients of the
-  // newly created object must themselves execute StartFetching(), however: the
-  // copy will not have a pending fetch.
-  CannedBrowsingDataFileSystemHelper* Clone();
-
   // Manually adds a filesystem to the set of canned file systems that this
   // helper returns via StartFetching. If an origin contains both a temporary
   // and a persistent filesystem, AddFileSystem must be called twice (once for
   // each file system type).
   void AddFileSystem(const GURL& origin,
-                     fileapi::FileSystemType type,
+                     storage::FileSystemType type,
                      int64 size);
 
   // Clear this helper's list of canned filesystems.
@@ -140,8 +130,6 @@ class CannedBrowsingDataFileSystemHelper
   virtual void DeleteFileSystemOrigin(const GURL& origin) OVERRIDE {}
 
  private:
-  // Used by Clone() to create an object without a Profile
-  CannedBrowsingDataFileSystemHelper();
   virtual ~CannedBrowsingDataFileSystemHelper();
 
   // Holds the current list of filesystems returned to the client.

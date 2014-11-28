@@ -43,10 +43,6 @@ class CharacterData;
 class LocalFrame;
 class GraphicsContext;
 class HTMLFormElement;
-class MutableStylePropertySet;
-class RenderObject;
-class RenderView;
-class Settings;
 class Text;
 class VisiblePosition;
 
@@ -174,6 +170,7 @@ public:
     void scheduleVisualUpdate() const;
     void invalidateCaretRect();
     void paintCaret(GraphicsContext*, const LayoutPoint&, const LayoutRect& clipRect);
+    bool ShouldPaintCaretForTesting() const { return m_shouldPaintCaret; }
 
     // Used to suspend caret blinking while the mouse is down.
     void setCaretBlinkingSuspended(bool suspended) { m_isCaretBlinkingSuspended = suspended; }
@@ -204,7 +201,7 @@ public:
     String selectedText() const;
     String selectedTextForClipboard() const;
 
-    FloatRect bounds(bool clipToVisibleContent = true) const;
+    FloatRect bounds() const;
 
     HTMLFormElement* currentForm() const;
 
@@ -245,6 +242,7 @@ private:
 
     void notifyAccessibilityForSelectionChange();
     void notifyCompositorForSelectionChange();
+    void notifyEventHandlerForSelectionChange();
 
     void focusedOrActiveStateChanged();
 
@@ -264,7 +262,7 @@ private:
 
     VisibleSelection validateSelection(const VisibleSelection&);
 
-    LocalFrame* m_frame;
+    RawPtrWillBeMember<LocalFrame> m_frame;
 
     LayoutUnit m_xPosForVerticalArrowNavigation;
 
@@ -286,7 +284,7 @@ private:
     Timer<FrameSelection> m_caretBlinkTimer;
 
     bool m_caretRectDirty : 1;
-    bool m_caretPaint : 1;
+    bool m_shouldPaintCaret : 1;
     bool m_isCaretBlinkingSuspended : 1;
     bool m_focused : 1;
     bool m_shouldShowBlockCursor : 1;

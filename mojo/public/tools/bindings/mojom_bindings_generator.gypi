@@ -14,7 +14,7 @@
             '<(DEPTH)/mojo/public/tools/bindings/mojom_bindings_generator.py',
         'java_out_dir': '<(PRODUCT_DIR)/java_mojo/<(_target_name)/src',
         'mojom_import_args%': [
-	  '-I<(DEPTH)'
+         '-I<(DEPTH)'
         ],
       },
       'inputs': [
@@ -43,17 +43,21 @@
         '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/enum_definition.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/enum.java.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/header.java.tmpl',
-        '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/interface.java.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/interface_definition.tmpl',
+        '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/interface.java.tmpl',
+        '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/interface_internal.java.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/struct_definition.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/java_templates/struct.java.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/js_templates/enum_definition.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/js_templates/interface_definition.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/js_templates/module.js.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/js_templates/struct_definition.tmpl',
+        '<(DEPTH)/mojo/public/tools/bindings/generators/python_templates/module_macros.tmpl',
+        '<(DEPTH)/mojo/public/tools/bindings/generators/python_templates/module.py.tmpl',
         '<(DEPTH)/mojo/public/tools/bindings/generators/mojom_cpp_generator.py',
         '<(DEPTH)/mojo/public/tools/bindings/generators/mojom_java_generator.py',
         '<(DEPTH)/mojo/public/tools/bindings/generators/mojom_js_generator.py',
+        '<(DEPTH)/mojo/public/tools/bindings/generators/mojom_python_generator.py',
         '<(DEPTH)/mojo/public/tools/bindings/pylib/mojom/__init__.py',
         '<(DEPTH)/mojo/public/tools/bindings/pylib/mojom/error.py',
         '<(DEPTH)/mojo/public/tools/bindings/pylib/mojom/generate/__init__.py',
@@ -72,6 +76,7 @@
         '<(SHARED_INTERMEDIATE_DIR)/<(mojom_base_output_dir)/<(RULE_INPUT_DIRNAME)/<(RULE_INPUT_ROOT).mojom.cc',
         '<(SHARED_INTERMEDIATE_DIR)/<(mojom_base_output_dir)/<(RULE_INPUT_DIRNAME)/<(RULE_INPUT_ROOT).mojom.h',
         '<(SHARED_INTERMEDIATE_DIR)/<(mojom_base_output_dir)/<(RULE_INPUT_DIRNAME)/<(RULE_INPUT_ROOT).mojom.js',
+        '<(SHARED_INTERMEDIATE_DIR)/<(mojom_base_output_dir)/<(RULE_INPUT_DIRNAME)/<(RULE_INPUT_ROOT)_mojom.py',
         '<(SHARED_INTERMEDIATE_DIR)/<(mojom_base_output_dir)/<(RULE_INPUT_DIRNAME)/<(RULE_INPUT_ROOT).mojom-internal.h',
       ],
       'action': [

@@ -16,6 +16,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/search.h"
@@ -41,6 +42,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -51,8 +54,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/feature_switch.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
@@ -78,7 +79,6 @@
 #endif
 
 using base::UserMetricsAction;
-using content::HostZoomMap;
 using content::WebContents;
 
 namespace {
@@ -199,12 +199,10 @@ class WrenchMenuModel::HelpMenuModel : public ui::SimpleMenuModel {
 
  private:
   void Build(Browser* browser) {
-    int help_string_id = IDS_HELP_PAGE;
 #if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
-            chromeos::switches::kDisableGeniusApp)) {
-      help_string_id = IDS_GET_HELP;
-    }
+    int help_string_id = IDS_GET_HELP;
+#else
+    int help_string_id = IDS_HELP_PAGE;
 #endif
     AddItemWithStringId(IDC_HELP_PAGE_VIA_MENU, help_string_id);
     if (browser_defaults::kShowHelpMenuItemIcon) {
@@ -241,8 +239,7 @@ void ToolsMenuModel::Build(Browser* browser) {
     show_create_shortcuts = false;
 #endif
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableStreamlinedHostedApps)) {
+  if (extensions::util::IsStreamlinedHostedAppsEnabled()) {
     AddItemWithStringId(IDC_CREATE_HOSTED_APP, IDS_CREATE_HOSTED_APP);
     AddSeparator(ui::NORMAL_SEPARATOR);
   } else if (show_create_shortcuts) {
@@ -285,10 +282,10 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
   Build();
   UpdateZoomControls();
 
-  content_zoom_subscription_ = content::HostZoomMap::GetForBrowserContext(
-      browser->profile())->AddZoomLevelChangedCallback(
-          base::Bind(&WrenchMenuModel::OnZoomLevelChanged,
-                     base::Unretained(this)));
+  content_zoom_subscription_ =
+      content::HostZoomMap::GetDefaultForBrowserContext(browser->profile())
+          ->AddZoomLevelChangedCallback(base::Bind(
+              &WrenchMenuModel::OnZoomLevelChanged, base::Unretained(this)));
 
   browser_zoom_subscription_ = ZoomEventManager::GetForBrowserContext(
       browser->profile())->AddZoomLevelChangedCallback(
@@ -422,7 +419,8 @@ void WrenchMenuModel::ExecuteCommand(int command_id, int event_flags) {
 
 bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
   if (command_id == IDC_SHOW_BOOKMARK_BAR) {
-    return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
+    return browser_->profile()->GetPrefs()->GetBoolean(
+        bookmarks::prefs::kShowBookmarkBar);
   } else if (command_id == IDC_PROFILING_ENABLED) {
     return Profiling::BeingProfiled();
   } else if (command_id == IDC_TOGGLE_REQUEST_TABLET_SITE) {
@@ -545,15 +543,6 @@ void WrenchMenuModel::Build() {
   if (ShouldShowNewIncognitoWindowMenuItem())
     AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
 
-#if defined(OS_WIN) && !defined(NDEBUG) && defined(USE_ASH)
-  if (base::win::GetVersion() < base::win::VERSION_WIN8 &&
-      chrome::HOST_DESKTOP_TYPE_NATIVE != chrome::HOST_DESKTOP_TYPE_ASH) {
-    AddItemWithStringId(IDC_TOGGLE_ASH_DESKTOP,
-                        ash::Shell::HasInstance() ? IDS_CLOSE_ASH_DESKTOP :
-                                                    IDS_OPEN_ASH_DESKTOP);
-  }
-#endif
-
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
@@ -567,32 +556,17 @@ void WrenchMenuModel::Build() {
   }
 
 #if defined(OS_WIN)
-
-#if defined(USE_AURA)
- if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-     content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor()) {
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+      content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor()) {
     if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
-      // Metro mode, add the 'Relaunch Chrome in desktop mode'.
+      // ASH/Metro mode, add the 'Relaunch Chrome in desktop mode'.
       AddSeparator(ui::NORMAL_SEPARATOR);
-      AddItemWithStringId(IDC_WIN8_DESKTOP_RESTART, IDS_WIN8_DESKTOP_RESTART);
+      AddItemWithStringId(IDC_WIN_DESKTOP_RESTART, IDS_WIN_DESKTOP_RESTART);
     } else {
-      // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
       AddSeparator(ui::NORMAL_SEPARATOR);
       AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
     }
   }
-#else
-  if (base::win::IsMetroProcess()) {
-    // Metro mode, add the 'Relaunch Chrome in desktop mode'.
-    AddSeparator(ui::NORMAL_SEPARATOR);
-    AddItemWithStringId(IDC_WIN8_DESKTOP_RESTART, IDS_WIN8_DESKTOP_RESTART);
-  } else {
-    // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
-    AddSeparator(ui::NORMAL_SEPARATOR);
-    AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
-  }
-#endif
-
 #endif
 
   // Append the full menu including separators. The final separator only gets

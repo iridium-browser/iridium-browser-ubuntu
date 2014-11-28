@@ -24,6 +24,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "chrome/installer/util/install_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -32,8 +34,6 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_font_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/font.h"
@@ -64,6 +64,7 @@ enum MakeChromeDefaultResult {
 content::WebUIDataSource* CreateSetAsDefaultBrowserUIHTMLSource() {
   content::WebUIDataSource* data_source = content::WebUIDataSource::Create(
       chrome::kChromeUIMetroFlowHost);
+  data_source->SetUseJsonJSFormatV2();
   data_source->AddLocalizedString("page-title", IDS_METRO_FLOW_TAB_TITLE);
   data_source->AddLocalizedString("flowTitle", IDS_METRO_FLOW_TITLE_SHORT);
   data_source->AddLocalizedString("flowDescription",
@@ -74,7 +75,7 @@ content::WebUIDataSource* CreateSetAsDefaultBrowserUIHTMLSource() {
                                   IDS_METRO_FLOW_LOGO_STRING_ALT);
   data_source->SetJsonPath("strings.js");
   data_source->AddResourcePath("set_as_default_browser.js",
-      IDR_SET_AS_DEFAULT_BROWSER_JS);
+                               IDR_SET_AS_DEFAULT_BROWSER_JS);
   data_source->SetDefaultResource(IDR_SET_AS_DEFAULT_BROWSER_HTML);
   return data_source;
 }

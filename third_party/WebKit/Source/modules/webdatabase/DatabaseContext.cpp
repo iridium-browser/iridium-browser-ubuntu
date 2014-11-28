@@ -105,8 +105,6 @@ DatabaseContext::DatabaseContext(ExecutionContext* context)
     // For debug accounting only. We must do this before we register the
     // instance. The assertions assume this.
     DatabaseManager::manager().didConstructDatabaseContext();
-    if (context->isWorkerGlobalScope())
-        toWorkerGlobalScope(context)->registerTerminationObserver(this);
 }
 
 DatabaseContext::~DatabaseContext()
@@ -120,7 +118,6 @@ void DatabaseContext::trace(Visitor* visitor)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_databaseThread);
-    visitor->trace(m_openSyncDatabases);
 #endif
 }
 
@@ -133,20 +130,13 @@ void DatabaseContext::contextDestroyed()
 {
     RefPtrWillBeRawPtr<DatabaseContext> protector(this);
     stopDatabases();
-    if (executionContext()->isWorkerGlobalScope())
-        toWorkerGlobalScope(executionContext())->unregisterTerminationObserver(this);
     DatabaseManager::manager().unregisterDatabaseContext(this);
     ActiveDOMObject::contextDestroyed();
 }
 
-void DatabaseContext::wasRequestedToTerminate()
-{
-    DatabaseManager::manager().interruptAllDatabasesForContext(this);
-}
-
-// stop() is from stopActiveDOMObjects() which indicates that the owner LocalFrame
-// or WorkerThread is shutting down. Initiate the orderly shutdown by stopping
-// the associated databases.
+// stop() is from stopActiveDOMObjects() which indicates that the owner
+// LocalFrame is shutting down. Initiate the orderly shutdown by stopping the
+// associated databases.
 void DatabaseContext::stop()
 {
     stopDatabases();
@@ -175,60 +165,13 @@ DatabaseThread* DatabaseContext::databaseThread()
     return m_databaseThread.get();
 }
 
-void DatabaseContext::didOpenDatabase(DatabaseBackendBase& database)
+bool DatabaseContext::databaseThreadAvailable()
 {
-    if (!database.isSyncDatabase())
-        return;
-    ASSERT(isContextThread());
-#if ENABLE(OILPAN)
-    m_openSyncDatabases.add(&database, adoptPtr(new DatabaseCloser(database)));
-#else
-    m_openSyncDatabases.add(&database);
-#endif
-}
-
-void DatabaseContext::didCloseDatabase(DatabaseBackendBase& database)
-{
-#if !ENABLE(OILPAN)
-    if (!database.isSyncDatabase())
-        return;
-    ASSERT(isContextThread());
-    m_openSyncDatabases.remove(&database);
-#endif
-}
-
-#if ENABLE(OILPAN)
-DatabaseContext::DatabaseCloser::~DatabaseCloser()
-{
-    m_database.closeImmediately();
-}
-#endif
-
-void DatabaseContext::stopSyncDatabases()
-{
-    // SQLite is "multi-thread safe", but each database handle can only be used
-    // on a single thread at a time.
-    //
-    // For DatabaseBackendSync, we open the SQLite database on the script
-    // context thread. And hence we should also close it on that same
-    // thread. This means that the SQLite database need to be closed here in the
-    // destructor.
-    ASSERT(isContextThread());
-#if ENABLE(OILPAN)
-    m_openSyncDatabases.clear();
-#else
-    Vector<DatabaseBackendBase*> syncDatabases;
-    copyToVector(m_openSyncDatabases, syncDatabases);
-    m_openSyncDatabases.clear();
-    for (size_t i = 0; i < syncDatabases.size(); ++i)
-        syncDatabases[i]->closeImmediately();
-#endif
+    return databaseThread() && !m_hasRequestedTermination;
 }
 
 void DatabaseContext::stopDatabases()
 {
-    stopSyncDatabases();
-
     // Though we initiate termination of the DatabaseThread here in
     // stopDatabases(), we can't clear the m_databaseThread ref till we get to
     // the destructor. This is because the Databases that are managed by
@@ -239,21 +182,16 @@ void DatabaseContext::stopDatabases()
     // m_databaseThread RefPtr destructor will deref and delete the
     // DatabaseThread.
 
-    if (m_databaseThread && !m_hasRequestedTermination) {
-        TaskSynchronizer sync;
-        m_databaseThread->requestTermination(&sync);
+    if (databaseThreadAvailable()) {
         m_hasRequestedTermination = true;
-        sync.waitForTaskCompletion();
+        // This blocks until the database thread finishes the cleanup task.
+        m_databaseThread->terminate();
     }
 }
 
 bool DatabaseContext::allowDatabaseAccess() const
 {
-    if (executionContext()->isDocument())
-        return toDocument(executionContext())->isActive();
-    ASSERT(executionContext()->isWorkerGlobalScope());
-    // allowDatabaseAccess is not yet implemented for workers.
-    return true;
+    return toDocument(executionContext())->isActive();
 }
 
 SecurityOrigin* DatabaseContext::securityOrigin() const

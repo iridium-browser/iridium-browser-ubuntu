@@ -76,6 +76,10 @@ void SetAllowedScriptingOnAllUrls(const std::string& extension_id,
                                   content::BrowserContext* context,
                                   bool allowed);
 
+// Returns true if the --scripts-require-action flag would possibly affect
+// the given |extension|.
+bool ScriptsMayRequireActionForExtension(const Extension* extension);
+
 // Returns true if |extension_id| can be launched (possibly only after being
 // enabled).
 bool IsAppLaunchable(const std::string& extension_id,
@@ -118,6 +122,9 @@ bool SiteHasIsolatedStorage(const GURL& extension_site_url,
 // have one).
 const gfx::ImageSkia& GetDefaultExtensionIcon();
 const gfx::ImageSkia& GetDefaultAppIcon();
+
+// Returns true if the experimental streamlined hosted apps feature is enabled.
+bool IsStreamlinedHostedAppsEnabled();
 
 }  // namespace util
 }  // namespace extensions

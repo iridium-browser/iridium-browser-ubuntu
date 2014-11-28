@@ -76,9 +76,9 @@ static_library("invalidation") {
     ]
   }
 
-  # TODO(GYP) remove this when libjingle is added.
-  configs += [ "//content:libjingle_stub_config" ]
-
+  public_deps = [
+    "//third_party/cacheinvalidation",
+  ]
   deps = [
     "//base",
     "//components/gcm_driver",
@@ -87,7 +87,6 @@ static_library("invalidation") {
     "//components/signin/core/browser",
     "//google_apis",
     "//jingle:notifier",
-    "//third_party/cacheinvalidation",
 
     # TODO(sync): Remove this (http://crbug.com/133352);
     "//third_party/protobuf:protobuf_lite",
@@ -96,6 +95,7 @@ static_library("invalidation") {
 }
 
 static_library("test_support") {
+  testonly = true
   sources = [
     "fake_invalidation_handler.cc",
     "fake_invalidation_handler.h",

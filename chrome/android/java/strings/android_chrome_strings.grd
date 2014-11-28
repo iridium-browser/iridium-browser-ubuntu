@@ -163,9 +163,6 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_INCOGNITO_STACK" desc="Content description for the incognito stack selection 'button'.">
         Incognito tabs
       </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_TAB_CLOSED" desc="Content description for the tab closed message.">
-        Tab closed
-      </message>
       <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_UNDO_TAB_CLOSED" desc="Content description for the undo tab closed 'button.">
         Reopen closed tab
       </message>
@@ -257,10 +254,7 @@ You are signing in with a managed account and giving its administrator control o
         There was a problem printing the page. Please try again.
       </message>
       <message name="IDS_ACCESSIBILITY_MENU_BOOKMARK" desc="Content description for the bookmark button when the page is not currently bookmarked.">
-        Bookmark page
-      </message>
-      <message name="IDS_ACCESSIBILITY_MENU_EDIT_BOOKMARK" desc="Content description for the bookmark button when the page is currently bookmarked.">
-        Edit bookmark page
+        Bookmark this page
       </message>
       <message name="IDS_ACCESSIBILITY_MENU_FORWARD" desc="Content description for the forward navigation button.">
         Go forward
@@ -268,15 +262,15 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_ACCESSIBILITY_MENU_BACK" desc="Content description for the backard navigation button.">
         Go back
       </message>
-      <message name="IDS_ACCESSIBILITY_MENU_RELOAD" desc="Content description for the button that reloads the page.">
-        Reload
-      </message>
       <!-- ContextMenu -->
       <message name="IDS_CONTEXTMENU_OPEN_IN_NEW_TAB" desc="Context sensitive menu item to open the selected link in a new tab. [CHAR-LIMIT=30]">
         Open in new tab
       </message>
       <message name="IDS_CONTEXTMENU_OPEN_IN_INCOGNITO_TAB" desc="Context sensitive menu item to open the selected link in a new incognito tab. [CHAR-LIMIT=30]">
         Open in incognito tab
+      </message>
+      <message name="IDS_CONTEXTMENU_COPY_EMAIL_ADDRESS" desc="Context sensitive menu item for copying email address. [CHAR-LIMIT=30]">
+        Copy email address
       </message>
       <message name="IDS_CONTEXTMENU_COPY_LINK_ADDRESS" desc="Context sensitive menu item for copying the selected link URL / address. [CHAR-LIMIT=30]">
         Copy link address
@@ -362,6 +356,15 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_SEPIA_MODE" desc="Title of button that will change theme of distilled pages to sepia mode.">
         Sepia
+      </message>
+      <message name="IDS_SANS_SERIF" desc="Title of the selector button that will change the typeface of distilled pages to use a SansSerif font.">
+        Sans Serif
+      </message>
+      <message name="IDS_SERIF" desc="Title of the selector button that will change the typeface of distilled pages to use a Serif font.">
+        Serif
+      </message>
+      <message name="IDS_MONOSPACE" desc="Title of the selector button that will change the typeface of distilled pages to use a Monospace font.">
+        Monospace
       </message>
       <message name="IDS_TEXT_SIZE_SIGNIFIER" desc="A typical letter of the alphabet.  This is drawn on either end of a slider bar that allows the user to change the font size.  On one end, it is drawn smaller and on the other end larger.">
         A

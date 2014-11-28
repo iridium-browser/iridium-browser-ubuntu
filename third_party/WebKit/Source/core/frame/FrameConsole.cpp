@@ -29,18 +29,36 @@
 #include "config.h"
 #include "core/frame/FrameConsole.h"
 
+#include "bindings/core/v8/ScriptCallStackFactory.h"
 #include "core/frame/FrameHost.h"
 #include "core/inspector/ConsoleAPITypes.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/InspectorConsoleInstrumentation.h"
 #include "core/inspector/ScriptCallStack.h"
 #include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/workers/WorkerGlobalScopeProxy.h"
+#include "platform/network/ResourceResponse.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace blink {
+
+static const HashSet<int>& allClientReportingMessageTypes()
+{
+    DEFINE_STATIC_LOCAL(HashSet<int>, types, ());
+    if (types.isEmpty()) {
+        types.add(LogMessageType);
+        types.add(DirMessageType);
+        types.add(DirXMLMessageType);
+        types.add(TableMessageType);
+        types.add(TraceMessageType);
+        types.add(ClearMessageType);
+        types.add(AssertMessageType);
+    }
+    return types;
+}
 
 namespace {
 
@@ -49,38 +67,70 @@ int muteCount = 0;
 }
 
 FrameConsole::FrameConsole(LocalFrame& frame)
-    : m_frame(frame)
+    : m_frame(&frame)
 {
 }
 
+DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(FrameConsole);
+
 void FrameConsole::addMessage(PassRefPtrWillBeRawPtr<ConsoleMessage> prpConsoleMessage)
 {
-    if (muteCount)
+    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = prpConsoleMessage;
+    if (muteCount && consoleMessage->source() != ConsoleAPIMessageSource)
         return;
 
     // FIXME: This should not need to reach for the main-frame.
     // Inspector code should just take the current frame and know how to walk itself.
-    ExecutionContext* context = m_frame.document();
+    ExecutionContext* context = frame().document();
     if (!context)
         return;
 
-    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = prpConsoleMessage;
-    InspectorInstrumentation::addMessageToConsole(context, consoleMessage.get());
-
     String messageURL;
-    if (consoleMessage->callStack())
+    unsigned lineNumber = 0;
+    if (consoleMessage->callStack() && consoleMessage->callStack()->size()) {
+        lineNumber = consoleMessage->callStack()->at(0).lineNumber();
         messageURL = consoleMessage->callStack()->at(0).sourceURL();
-    else
+    } else {
+        lineNumber = consoleMessage->lineNumber();
         messageURL = consoleMessage->url();
+    }
 
-    if (consoleMessage->source() == CSSMessageSource)
+    messageStorage()->reportMessage(consoleMessage);
+
+    if (consoleMessage->source() == CSSMessageSource || consoleMessage->source() == NetworkMessageSource)
         return;
 
-    String stackTrace;
-    if (consoleMessage->callStack() && m_frame.chromeClient().shouldReportDetailedMessageForSource(consoleMessage->url()))
-        stackTrace = FrameConsole::formatStackTraceString(consoleMessage->message(), consoleMessage->callStack());
+    RefPtrWillBeRawPtr<ScriptCallStack> reportedCallStack = nullptr;
+    if (consoleMessage->source() != ConsoleAPIMessageSource) {
+        if (consoleMessage->callStack() && frame().chromeClient().shouldReportDetailedMessageForSource(messageURL))
+            reportedCallStack = consoleMessage->callStack();
+    } else {
+        if (!frame().host() || (consoleMessage->scriptArguments() && !consoleMessage->scriptArguments()->argumentCount()))
+            return;
 
-    m_frame.chromeClient().addMessageToConsole(&m_frame, consoleMessage->source(), consoleMessage->level(), consoleMessage->message(), consoleMessage->lineNumber(), messageURL, stackTrace);
+        if (!allClientReportingMessageTypes().contains(consoleMessage->type()))
+            return;
+
+        if (frame().chromeClient().shouldReportDetailedMessageForSource(messageURL))
+            reportedCallStack = createScriptCallStack(ScriptCallStack::maxCallStackSizeToCapture);
+    }
+
+    String stackTrace;
+    if (reportedCallStack)
+        stackTrace = FrameConsole::formatStackTraceString(consoleMessage->message(), reportedCallStack);
+    frame().chromeClient().addMessageToConsole(m_frame, consoleMessage->source(), consoleMessage->level(), consoleMessage->message(), lineNumber, messageURL, stackTrace);
+}
+
+void FrameConsole::reportResourceResponseReceived(DocumentLoader* loader, unsigned long requestIdentifier, const ResourceResponse& response)
+{
+    if (!loader)
+        return;
+    if (response.httpStatusCode() < 400)
+        return;
+    String message = "Failed to load resource: the server responded with a status of " + String::number(response.httpStatusCode()) + " (" + response.httpStatusText() + ')';
+    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(NetworkMessageSource, ErrorMessageLevel, message, response.url().string());
+    consoleMessage->setRequestIdentifier(requestIdentifier);
+    addMessage(consoleMessage.release());
 }
 
 String FrameConsole::formatStackTraceString(const String& originalMessage, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
@@ -89,12 +139,12 @@ String FrameConsole::formatStackTraceString(const String& originalMessage, PassR
     for (size_t i = 0; i < callStack->size(); ++i) {
         const ScriptCallFrame& frame = callStack->at(i);
         stackTrace.append("\n    at " + (frame.functionName().length() ? frame.functionName() : "(anonymous function)"));
-        stackTrace.append(" (");
+        stackTrace.appendLiteral(" (");
         stackTrace.append(frame.sourceURL());
         stackTrace.append(':');
-        stackTrace.append(String::number(frame.lineNumber()));
+        stackTrace.appendNumber(frame.lineNumber());
         stackTrace.append(':');
-        stackTrace.append(String::number(frame.columnNumber()));
+        stackTrace.appendNumber(frame.columnNumber());
         stackTrace.append(')');
     }
 
@@ -112,9 +162,33 @@ void FrameConsole::unmute()
     muteCount--;
 }
 
-void FrameConsole::adoptWorkerConsoleMessages(WorkerGlobalScopeProxy* proxy)
+ConsoleMessageStorage* FrameConsole::messageStorage()
 {
-    InspectorInstrumentation::adoptWorkerConsoleMessages(m_frame.document(), proxy);
+    LocalFrame* curFrame = m_frame;
+    Frame* topFrame = curFrame->tree().top();
+    ASSERT(topFrame->isLocalFrame());
+    LocalFrame* localTopFrame = toLocalFrame(topFrame);
+    if (localTopFrame != curFrame)
+        return localTopFrame->console().messageStorage();
+    if (!m_consoleMessageStorage)
+        m_consoleMessageStorage = ConsoleMessageStorage::createForFrame(m_frame);
+    return m_consoleMessageStorage.get();
+}
+
+void FrameConsole::clearMessages()
+{
+    messageStorage()->clear();
+}
+
+void FrameConsole::adoptWorkerMessagesAfterTermination(WorkerGlobalScopeProxy* proxy)
+{
+    messageStorage()->adoptWorkerMessagesAfterTermination(proxy);
+}
+
+void FrameConsole::trace(Visitor* visitor)
+{
+    visitor->trace(m_frame);
+    visitor->trace(m_consoleMessageStorage);
 }
 
 } // namespace blink

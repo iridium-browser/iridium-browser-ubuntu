@@ -8,12 +8,10 @@
 #include <functional>
 #include <utility>
 
-#include "apps/ui/web_contents_sizer.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_tab_helper.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_handle.h"
@@ -24,9 +22,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_helpers.h"
+#include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/history/core/browser/history_types.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -38,8 +38,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/frame_navigate_params.h"
-#include "content/public/common/page_transition_types.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/gfx/rect.h"
 
 using content::BrowserThread;
@@ -333,7 +333,7 @@ void PrerenderContents::StartPrerendering(
   web_contents_delegate_.reset(new WebContentsDelegateImpl(this));
   prerender_contents_.get()->SetDelegate(web_contents_delegate_.get());
   // Set the size of the prerender WebContents.
-  apps::ResizeWebContents(prerender_contents_.get(), size_);
+  ResizeWebContents(prerender_contents_.get(), size_);
 
   child_id_ = GetRenderViewHost()->GetProcess()->GetID();
   route_id_ = GetRenderViewHost()->GetRoutingID();
@@ -382,15 +382,15 @@ void PrerenderContents::StartPrerendering(
   content::NavigationController::LoadURLParams load_url_params(
       prerender_url_);
   load_url_params.referrer = referrer_;
-  load_url_params.transition_type = content::PAGE_TRANSITION_LINK;
+  load_url_params.transition_type = ui::PAGE_TRANSITION_LINK;
   if (origin_ == ORIGIN_OMNIBOX) {
-    load_url_params.transition_type = content::PageTransitionFromInt(
-        content::PAGE_TRANSITION_TYPED |
-        content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
+    load_url_params.transition_type = ui::PageTransitionFromInt(
+        ui::PAGE_TRANSITION_TYPED |
+        ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
   } else if (origin_ == ORIGIN_INSTANT) {
-    load_url_params.transition_type = content::PageTransitionFromInt(
-        content::PAGE_TRANSITION_GENERATED |
-        content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
+    load_url_params.transition_type = ui::PageTransitionFromInt(
+        ui::PAGE_TRANSITION_GENERATED |
+        ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
   }
   load_url_params.override_user_agent =
       prerender_manager_->config().is_overriding_user_agent ?
@@ -748,7 +748,7 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
 WebContents* PrerenderContents::ReleasePrerenderContents() {
   prerender_contents_->SetDelegate(NULL);
   content::WebContentsObserver::Observe(NULL);
-  if (alias_session_storage_namespace)
+  if (alias_session_storage_namespace.get())
     alias_session_storage_namespace->RemoveTransactionLogProcessId(child_id_);
   return prerender_contents_.release();
 }

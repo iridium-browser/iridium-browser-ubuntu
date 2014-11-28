@@ -22,9 +22,10 @@
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_constants.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
@@ -311,6 +312,8 @@ void CoreOobeHandler::ShowOobeUI(bool show) {
 }
 
 void CoreOobeHandler::UpdateA11yState() {
+#if !defined(USE_ATHENA)
+  // TODO(dpolukhin): crbug.com/412891
   DCHECK(MagnificationManager::Get());
   base::DictionaryValue a11y_info;
   a11y_info.SetBoolean("highContrastEnabled",
@@ -324,6 +327,7 @@ void CoreOobeHandler::UpdateA11yState() {
   a11y_info.SetBoolean("virtualKeyboardEnabled",
                        AccessibilityManager::Get()->IsVirtualKeyboardEnabled());
   CallJS("refreshA11yInfo", a11y_info);
+#endif
 }
 
 void CoreOobeHandler::UpdateOobeUIVisibility() {
@@ -388,7 +392,7 @@ void CoreOobeHandler::OnAccessibilityStatusChanged(
 }
 
 void CoreOobeHandler::HandleLaunchHelpApp(double help_topic_id) {
-  if (!help_app_)
+  if (!help_app_.get())
     help_app_ = new HelpAppLauncher(GetNativeWindow());
   help_app_->ShowHelpTopic(
       static_cast<HelpAppLauncher::HelpTopic>(help_topic_id));

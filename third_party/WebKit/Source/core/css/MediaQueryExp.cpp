@@ -50,7 +50,9 @@ static inline bool featureWithCSSValueID(const String& mediaFeature, const CSSPa
 
     return mediaFeature == orientationMediaFeature
         || mediaFeature == pointerMediaFeature
+        || mediaFeature == anyPointerMediaFeature
         || (mediaFeature == hoverMediaFeature && RuntimeEnabledFeatures::hoverMediaQueryKeywordsEnabled())
+        || mediaFeature == anyHoverMediaFeature
         || mediaFeature == scanMediaFeature;
 }
 
@@ -59,10 +61,11 @@ static inline bool featureWithValidIdent(const String& mediaFeature, CSSValueID 
     if (mediaFeature == orientationMediaFeature)
         return ident == CSSValuePortrait || ident == CSSValueLandscape;
 
-    if (mediaFeature == pointerMediaFeature)
+    if (mediaFeature == pointerMediaFeature || mediaFeature == anyPointerMediaFeature)
         return ident == CSSValueNone || ident == CSSValueCoarse || ident == CSSValueFine;
 
-    if (mediaFeature == hoverMediaFeature && RuntimeEnabledFeatures::hoverMediaQueryKeywordsEnabled())
+    if ((mediaFeature == hoverMediaFeature && RuntimeEnabledFeatures::hoverMediaQueryKeywordsEnabled())
+        || mediaFeature == anyHoverMediaFeature)
         return ident == CSSValueNone || ident == CSSValueOnDemand || ident == CSSValueHover;
 
     if (mediaFeature == scanMediaFeature)
@@ -181,8 +184,10 @@ static inline bool featureWithoutValue(const String& mediaFeature)
         || mediaFeature == aspectRatioMediaFeature
         || mediaFeature == deviceAspectRatioMediaFeature
         || mediaFeature == hoverMediaFeature
+        || mediaFeature == anyHoverMediaFeature
         || mediaFeature == transform3dMediaFeature
         || mediaFeature == pointerMediaFeature
+        || mediaFeature == anyPointerMediaFeature
         || mediaFeature == devicePixelRatioMediaFeature
         || mediaFeature == resolutionMediaFeature
         || mediaFeature == scanMediaFeature;
@@ -308,13 +313,13 @@ bool MediaQueryExp::operator==(const MediaQueryExp& other) const
 String MediaQueryExp::serialize() const
 {
     StringBuilder result;
-    result.append("(");
+    result.append('(');
     result.append(m_mediaFeature.lower());
     if (m_expValue.isValid()) {
-        result.append(": ");
+        result.appendLiteral(": ");
         result.append(m_expValue.cssText());
     }
-    result.append(")");
+    result.append(')');
 
     return result.toString();
 }
@@ -332,7 +337,7 @@ String MediaQueryExpValue::cssText() const
         output.append(CSSPrimitiveValue::unitTypeToString(unit));
     } else if (isRatio) {
         output.append(printNumber(numerator));
-        output.append("/");
+        output.append('/');
         output.append(printNumber(denominator));
     } else if (isID) {
         output.append(getValueName(id));

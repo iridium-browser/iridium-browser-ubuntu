@@ -36,6 +36,9 @@ extern const char kAllowedInstallSites[];
 // kInstallForceList.
 extern const char kAllowedTypes[];
 
+// A boolean that tracks whether apps are allowed to enter fullscreen mode.
+extern const char kAppFullscreenAllowed[];
+
 // Integer which specifies the launch type that bookmark apps are created with
 // by default.
 extern const char kBookmarkAppCreationLaunchType[];
@@ -43,6 +46,11 @@ extern const char kBookmarkAppCreationLaunchType[];
 // Dictionary pref that keeps track of per-extension settings. The keys are
 // extension ids.
 extern const char kExtensions[];
+
+// Dictionary pref that manages extensions, controlled by policy.
+// Values are expected to conform to the schema of the ExtensionManagement
+// policy.
+extern const char kExtensionManagement[];
 
 // A whitelist of extension ids the user can install: exceptions from the
 // following blacklist.

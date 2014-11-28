@@ -95,9 +95,15 @@ OFFICIAL_DEDUPE_NAMESPACE = 'chromium-os-upload-symbols'
 STAGING_DEDUPE_NAMESPACE = '%s-staging' % OFFICIAL_DEDUPE_NAMESPACE
 
 
-# How long to wait (in seconds) for a single upload to complete.  This has
-# to allow for symbols that are up to CRASH_SERVER_FILE_LIMIT in size.
-UPLOAD_TIMEOUT = 30 * 60
+# The minimum average rate (in bytes per second) that we expect to maintain
+# when uploading symbols.  This has to allow for symbols that are up to
+# CRASH_SERVER_FILE_LIMIT in size.
+UPLOAD_MIN_RATE = CRASH_SERVER_FILE_LIMIT / (30 * 60)
+
+# The lowest timeout (in seconds) we'll allow.  If the server is overloaded,
+# then there might be a delay in setting up the connection, not just with the
+# transfer.  So even a small file might need a larger value.
+UPLOAD_MIN_TIMEOUT = 2 * 60
 
 
 # Sleep for 200ms in between uploads to avoid DoS'ing symbol server.
@@ -181,10 +187,13 @@ def SymUpload(upload_url, sym_item):
       poster.encode.MultipartParam.from_file('symbol_file', sym_file),
   )
 
+  # Scale the timeout based on the filesize.
+  timeout = max(os.path.getsize(sym_file) / UPLOAD_MIN_RATE, UPLOAD_MIN_TIMEOUT)
+
   data, headers = poster.encode.multipart_encode(fields)
   request = urllib2.Request(upload_url, data, headers)
   request.add_header('User-agent', 'chromite.upload_symbols')
-  urllib2.urlopen(request, timeout=UPLOAD_TIMEOUT)
+  urllib2.urlopen(request, timeout=timeout)
 
 
 def TestingSymUpload(upload_url, sym_item):
@@ -530,7 +539,7 @@ def WriteQueueToFile(listing, queue, relpath=None):
       f.write('%s\n' % path)
 
 
-def UploadSymbols(board=None, official=False, breakpad_dir=None,
+def UploadSymbols(board=None, official=False, server=None, breakpad_dir=None,
                   file_limit=DEFAULT_FILE_LIMIT, sleep=DEFAULT_SLEEP_DELAY,
                   upload_limit=None, sym_paths=None, failed_list=None,
                   root=None, retry=True, dedupe_namespace=None):
@@ -544,6 +553,7 @@ def UploadSymbols(board=None, official=False, breakpad_dir=None,
   Args:
     board: The board whose symbols we wish to upload
     official: Use the official symbol server rather than the staging one
+    server: Explicit server to post symbols to
     breakpad_dir: The full path to the breakpad directory where symbols live
     file_limit: The max file size of a symbol file before we try to strip it
     sleep: How long to sleep in between uploads
@@ -562,11 +572,14 @@ def UploadSymbols(board=None, official=False, breakpad_dir=None,
   # TODO(build): Delete this assert.
   assert isolateserver, 'Missing isolateserver import http://crbug.com/341152'
 
-  if official:
-    upload_url = OFFICIAL_UPLOAD_URL
+  if server is None:
+    if official:
+      upload_url = OFFICIAL_UPLOAD_URL
+    else:
+      cros_build_lib.Warning('unofficial builds upload to the staging server')
+      upload_url = STAGING_UPLOAD_URL
   else:
-    cros_build_lib.Warning('unofficial builds upload to the staging server')
-    upload_url = STAGING_UPLOAD_URL
+    upload_url = server
 
   if sym_paths:
     cros_build_lib.Info('uploading specified symbols to %s', upload_url)
@@ -769,6 +782,8 @@ def main(argv):
                       help='root directory for breakpad symbols')
   parser.add_argument('--official_build', action='store_true', default=False,
                       help='point to official symbol server')
+  parser.add_argument('--server', type=str, default=None,
+                      help='URI for custom symbol server')
   parser.add_argument('--regenerate', action='store_true', default=False,
                       help='regenerate all symbols')
   parser.add_argument('--upload-limit', type=int, default=None,
@@ -832,7 +847,7 @@ def main(argv):
         opts.board, breakpad_dir=opts.breakpad_root)
 
   ret += UploadSymbols(opts.board, official=opts.official_build,
-                       breakpad_dir=opts.breakpad_root,
+                       server=opts.server, breakpad_dir=opts.breakpad_root,
                        file_limit=opts.strip_cfi, sleep=DEFAULT_SLEEP_DELAY,
                        upload_limit=opts.upload_limit, sym_paths=opts.sym_paths,
                        failed_list=opts.failed_list,

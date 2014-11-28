@@ -10,9 +10,9 @@
 
 #include "base/command_line.h"
 #include "base/cpu.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
@@ -479,7 +479,8 @@ ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)
   tp.Privileges[0].Luid = privilege_luid;
   tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
   DWORD return_length;
-  if (!::AdjustTokenPrivileges(token_, FALSE, &tp, sizeof(TOKEN_PRIVILEGES),
+  if (!::AdjustTokenPrivileges(token_.Get(), FALSE, &tp,
+                               sizeof(TOKEN_PRIVILEGES),
                                &previous_privileges_, &return_length)) {
     token_.Close();
     return;
@@ -490,7 +491,7 @@ ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)
 
 ScopedTokenPrivilege::~ScopedTokenPrivilege() {
   if (is_enabled_ && previous_privileges_.PrivilegeCount != 0) {
-    ::AdjustTokenPrivileges(token_, FALSE, &previous_privileges_,
+    ::AdjustTokenPrivileges(token_.Get(), FALSE, &previous_privileges_,
                             sizeof(TOKEN_PRIVILEGES), NULL, NULL);
   }
 }

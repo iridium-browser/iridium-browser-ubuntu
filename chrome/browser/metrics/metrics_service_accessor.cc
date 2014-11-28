@@ -4,24 +4,11 @@
 
 #include "chrome/browser/metrics/metrics_service_accessor.h"
 
-#include "chrome/browser/browser_process.h"
 #include "components/metrics/metrics_service.h"
-#include "components/metrics/metrics_service_observer.h"
 
-// static
-void MetricsServiceAccessor::AddMetricsServiceObserver(
-    MetricsServiceObserver* observer) {
-  MetricsService* metrics_service = g_browser_process->metrics_service();
-  if (metrics_service)
-    metrics_service->AddObserver(observer);
-}
-
-void MetricsServiceAccessor::RemoveMetricsServiceObserver(
-    MetricsServiceObserver* observer) {
-  MetricsService* metrics_service = g_browser_process->metrics_service();
-  if (metrics_service)
-    metrics_service->RemoveObserver(observer);
-}
+// TODO(asvitkine): Remove when this class is moved to metrics namespace.
+using metrics::MetricsService;
+using metrics::SyntheticTrialGroup;
 
 // static
 bool MetricsServiceAccessor::RegisterSyntheticFieldTrial(

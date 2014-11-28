@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/scoped_native_library.h"
 
@@ -15,8 +15,7 @@ namespace shell {
 
 OutOfProcessDynamicServiceRunner::OutOfProcessDynamicServiceRunner(
     Context* context)
-    : context_(context),
-      keep_alive_(context) {
+    : context_(context) {
 }
 
 OutOfProcessDynamicServiceRunner::~OutOfProcessDynamicServiceRunner() {

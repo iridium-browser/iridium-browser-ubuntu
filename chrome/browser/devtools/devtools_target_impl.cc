@@ -31,15 +31,16 @@ using content::RenderViewHost;
 using content::WebContents;
 using content::WorkerService;
 
-namespace {
+const char DevToolsTargetImpl::kTargetTypeApp[] = "app";
+const char DevToolsTargetImpl::kTargetTypeBackgroundPage[] = "background_page";
+const char DevToolsTargetImpl::kTargetTypePage[] = "page";
+const char DevToolsTargetImpl::kTargetTypeWorker[] = "worker";
+const char DevToolsTargetImpl::kTargetTypeWebView[] = "webview";
+const char DevToolsTargetImpl::kTargetTypeIFrame[] = "iframe";
+const char DevToolsTargetImpl::kTargetTypeOther[] = "other";
+const char DevToolsTargetImpl::kTargetTypeServiceWorker[] = "service_worker";
 
-const char kTargetTypeApp[] = "app";
-const char kTargetTypeBackgroundPage[] = "background_page";
-const char kTargetTypePage[] = "page";
-const char kTargetTypeWorker[] = "worker";
-const char kTargetTypeWebView[] = "webview";
-const char kTargetTypeIFrame[] = "iframe";
-const char kTargetTypeOther[] = "other";
+namespace {
 
 // WebContentsTarget --------------------------------------------------------
 
@@ -48,8 +49,6 @@ class WebContentsTarget : public DevToolsTargetImpl {
   WebContentsTarget(WebContents* web_contents, bool is_tab);
 
   // DevToolsTargetImpl overrides:
-  virtual bool Activate() const OVERRIDE;
-  virtual bool Close() const OVERRIDE;
   virtual WebContents* GetWebContents() const OVERRIDE;
   virtual int GetTabId() const OVERRIDE;
   virtual std::string GetExtensionId() const OVERRIDE;
@@ -77,8 +76,6 @@ WebContentsTarget::WebContentsTarget(WebContents* web_contents, bool is_tab)
     return;
   }
 
-  set_title(base::UTF16ToUTF8(web_contents->GetTitle()));
-  set_url(web_contents->GetURL());
   content::NavigationController& controller = web_contents->GetController();
   content::NavigationEntry* entry = controller.GetActiveEntry();
   if (entry != NULL && entry->GetURL().is_valid())
@@ -130,22 +127,6 @@ WebContentsTarget::WebContentsTarget(WebContents* web_contents, bool is_tab)
       ExtensionIconSet::MATCH_BIGGER, false, NULL));
 }
 
-bool WebContentsTarget::Activate() const {
-  WebContents* web_contents = GetWebContents();
-  if (!web_contents)
-    return false;
-  web_contents->GetDelegate()->ActivateContents(web_contents);
-  return true;
-}
-
-bool WebContentsTarget::Close() const {
-  WebContents* web_contents = GetWebContents();
-  if (!web_contents)
-    return false;
-  web_contents->GetRenderViewHost()->ClosePage();
-  return true;
-}
-
 WebContents* WebContentsTarget::GetWebContents() const {
   return GetAgentHost()->GetWebContents();
 }
@@ -169,40 +150,24 @@ void WebContentsTarget::Inspect(Profile* profile) const {
 
 class WorkerTarget : public DevToolsTargetImpl {
  public:
-  explicit WorkerTarget(const WorkerService::WorkerInfo& worker_info);
-
-  // content::DevToolsTarget overrides:
-  virtual bool Close() const OVERRIDE;
+  explicit WorkerTarget(scoped_refptr<DevToolsAgentHost> agent_host);
 
   // DevToolsTargetImpl overrides:
   virtual void Inspect(Profile* profile) const OVERRIDE;
-
- private:
-  int process_id_;
-  int route_id_;
 };
 
-WorkerTarget::WorkerTarget(const WorkerService::WorkerInfo& worker)
-    : DevToolsTargetImpl(DevToolsAgentHost::GetForWorker(worker.process_id,
-                                                         worker.route_id)) {
-  set_type(kTargetTypeWorker);
-  set_title(base::UTF16ToUTF8(worker.name));
-  set_description(base::StringPrintf("Worker pid:%d",
-                      base::GetProcId(worker.handle)));
-  set_url(worker.url);
-
-  process_id_ = worker.process_id;
-  route_id_ = worker.route_id;
-}
-
-static void TerminateWorker(int process_id, int route_id) {
-  WorkerService::GetInstance()->TerminateWorker(process_id, route_id);
-}
-
-bool WorkerTarget::Close() const {
-  content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&TerminateWorker, process_id_, route_id_));
-  return true;
+WorkerTarget::WorkerTarget(scoped_refptr<DevToolsAgentHost> agent_host)
+    : DevToolsTargetImpl(agent_host) {
+  switch (agent_host->GetType()) {
+    case DevToolsAgentHost::TYPE_SHARED_WORKER:
+      set_type(kTargetTypeWorker);
+      break;
+    case DevToolsAgentHost::TYPE_SERVICE_WORKER:
+      set_type(kTargetTypeServiceWorker);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 void WorkerTarget::Inspect(Profile* profile) const {
@@ -218,7 +183,9 @@ DevToolsTargetImpl::~DevToolsTargetImpl() {
 
 DevToolsTargetImpl::DevToolsTargetImpl(
     scoped_refptr<DevToolsAgentHost> agent_host)
-    : agent_host_(agent_host) {
+    : agent_host_(agent_host),
+      title_(agent_host->GetTitle()),
+      url_(agent_host->GetURL()) {
 }
 
 std::string DevToolsTargetImpl::GetParentId() const {
@@ -263,11 +230,11 @@ bool DevToolsTargetImpl::IsAttached() const {
 }
 
 bool DevToolsTargetImpl::Activate() const {
-  return false;
+  return agent_host_->Activate();
 }
 
 bool DevToolsTargetImpl::Close() const {
-  return false;
+  return agent_host_->Close();
 }
 
 int DevToolsTargetImpl::GetTabId() const {
@@ -297,62 +264,36 @@ scoped_ptr<DevToolsTargetImpl> DevToolsTargetImpl::CreateForWebContents(
 }
 
 // static
-DevToolsTargetImpl::List DevToolsTargetImpl::EnumerateWebContentsTargets() {
+void DevToolsTargetImpl::EnumerateAllTargets(Callback callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   std::set<WebContents*> tab_web_contents;
   for (TabContentsIterator it; !it.done(); it.Next())
     tab_web_contents.insert(*it);
 
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DevToolsTargetImpl::List result;
-  std::vector<WebContents*> wc_list =
-      content::DevToolsAgentHost::GetInspectableWebContents();
-  for (std::vector<WebContents*>::iterator it = wc_list.begin();
-       it != wc_list.end();
-       ++it) {
-    bool is_tab = tab_web_contents.find(*it) != tab_web_contents.end();
-    result.push_back(new WebContentsTarget(*it, is_tab));
+  DevToolsAgentHost::List agents = DevToolsAgentHost::GetOrCreateAll();
+  for (DevToolsAgentHost::List::iterator it = agents.begin();
+       it != agents.end(); ++it) {
+    DevToolsAgentHost* agent_host = (*it).get();
+    switch (agent_host->GetType()) {
+      case DevToolsAgentHost::TYPE_WEB_CONTENTS:
+        if (WebContents* web_contents = agent_host->GetWebContents()) {
+          const bool is_tab =
+              tab_web_contents.find(web_contents) != tab_web_contents.end();
+          result.push_back(new WebContentsTarget(web_contents, is_tab));
+        }
+        break;
+      case DevToolsAgentHost::TYPE_SHARED_WORKER:
+        result.push_back(new WorkerTarget(agent_host));
+        break;
+      case DevToolsAgentHost::TYPE_SERVICE_WORKER:
+        result.push_back(new WorkerTarget(agent_host));
+        break;
+      default:
+        break;
+    }
   }
-  return result;
-}
 
-static void CreateWorkerTargets(
-    const std::vector<WorkerService::WorkerInfo>& worker_info,
-    DevToolsTargetImpl::Callback callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DevToolsTargetImpl::List result;
-  for (size_t i = 0; i < worker_info.size(); ++i) {
-    result.push_back(new WorkerTarget(worker_info[i]));
-  }
   callback.Run(result);
-}
-
-// static
-void DevToolsTargetImpl::EnumerateWorkerTargets(Callback callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&CreateWorkerTargets,
-                 WorkerService::GetInstance()->GetWorkers(),
-                 callback));
-}
-
-static void CollectAllTargets(
-    DevToolsTargetImpl::Callback callback,
-    const DevToolsTargetImpl::List& worker_targets) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DevToolsTargetImpl::List result =
-      DevToolsTargetImpl::EnumerateWebContentsTargets();
-  result.insert(result.begin(), worker_targets.begin(), worker_targets.end());
-  callback.Run(result);
-}
-
-// static
-void DevToolsTargetImpl::EnumerateAllTargets(Callback callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&DevToolsTargetImpl::EnumerateWorkerTargets,
-                 base::Bind(&CollectAllTargets, callback)));
 }

@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "content/public/test/mock_special_storage_policy.h"
@@ -16,13 +16,13 @@
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
+#include "storage/browser/quota/quota_database.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
-#include "webkit/browser/quota/quota_database.h"
 
-using quota::kStorageTypePersistent;
-using quota::kStorageTypeTemporary;
-using quota::QuotaDatabase;
+using storage::kStorageTypePersistent;
+using storage::kStorageTypeTemporary;
+using storage::QuotaDatabase;
 
 namespace content {
 namespace {

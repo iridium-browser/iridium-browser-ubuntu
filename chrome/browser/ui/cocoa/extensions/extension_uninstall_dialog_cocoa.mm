@@ -10,9 +10,8 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/grit/generated_resources.h"
 #include "extensions/common/extension.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
@@ -26,9 +25,7 @@ namespace {
 class ExtensionUninstallDialogCocoa
     : public extensions::ExtensionUninstallDialog {
  public:
-  ExtensionUninstallDialogCocoa(Profile* profile,
-                                gfx::NativeWindow parent,
-                                Delegate* delegate);
+  ExtensionUninstallDialogCocoa(Profile* profile, Delegate* delegate);
   virtual ~ExtensionUninstallDialogCocoa() OVERRIDE;
 
  private:
@@ -37,9 +34,8 @@ class ExtensionUninstallDialogCocoa
 
 ExtensionUninstallDialogCocoa::ExtensionUninstallDialogCocoa(
     Profile* profile,
-    gfx::NativeWindow parent,
     extensions::ExtensionUninstallDialog::Delegate* delegate)
-    : extensions::ExtensionUninstallDialog(profile, parent, delegate) {
+    : extensions::ExtensionUninstallDialog(profile, delegate) {
 }
 
 ExtensionUninstallDialogCocoa::~ExtensionUninstallDialogCocoa() {}
@@ -74,5 +70,5 @@ extensions::ExtensionUninstallDialog*
 extensions::ExtensionUninstallDialog::Create(Profile* profile,
                                              gfx::NativeWindow parent,
                                              Delegate* delegate) {
-  return new ExtensionUninstallDialogCocoa(profile, parent, delegate);
+  return new ExtensionUninstallDialogCocoa(profile, delegate);
 }

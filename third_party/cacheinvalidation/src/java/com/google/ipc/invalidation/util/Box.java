@@ -16,8 +16,6 @@
 
 package com.google.ipc.invalidation.util;
 
-import com.google.common.base.Supplier;
-
 /**
  * Container for a single arbitrary value. Useful when a nested callback needs
  * to modify a primitive type, which is ordinarily not possible as variables
@@ -26,7 +24,7 @@ import com.google.common.base.Supplier;
  * @param <T> Type of the value being boxed.
  *
  */
-public class Box<T> implements Supplier<T> {
+public class Box<T> {
 
   /** Contents of the box. */
   private T value;
@@ -34,14 +32,6 @@ public class Box<T> implements Supplier<T> {
   /** Constructs a box with the given initial {@code value}. */
   public Box(T value) {
     this.value = value;
-  }
-
-  /**
-   * Returns a supplier for the given value. Note that such a getter's internal value cannot be
-   * changed (by definition).
-   */
-  public static <T> Supplier<T> createSupplier(final T value) {
-    return Box.of(value);
   }
 
   /** Constructs a Box with {@code null} as the value. */
@@ -58,7 +48,6 @@ public class Box<T> implements Supplier<T> {
     this.value = objectValue;
   }
 
-  @Override
   public T get() {
     return value;
   }

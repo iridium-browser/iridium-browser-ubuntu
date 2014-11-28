@@ -30,9 +30,11 @@ bool ScopeToPrefName(ExtensionPrefsScope scope, std::string* result) {
 const char kAlertsInitialized[] = "extensions.alerts.initialized";
 const char kAllowedInstallSites[] = "extensions.allowed_install_sites";
 const char kAllowedTypes[] = "extensions.allowed_types";
+const char kAppFullscreenAllowed[] = "apps.fullscreen.allowed";
 const char kBookmarkAppCreationLaunchType[] =
     "extensions.bookmark_app_creation_launch_type";
 const char kExtensions[] = "extensions.settings";
+const char kExtensionManagement[] = "extensions.management";
 const char kInstallAllowList[] = "extensions.install.allowlist";
 const char kInstallDenyList[] = "extensions.install.denylist";
 const char kInstallForceList[] = "extensions.install.forcelist";

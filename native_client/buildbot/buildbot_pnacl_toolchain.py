@@ -65,7 +65,7 @@ def ToolchainBuildCmd(python_executable=None, sync=False, extra_flags=[]):
   # The path to the script is a relative path with forward slashes so it is
   # interpreted properly when it uses __file__ inside cygwin
   executable_args = ['toolchain_build/toolchain_build_pnacl.py',
-                     '--verbose', '--clobber', '--build-64bit-host',
+                     '--verbose', '--clobber',
                      '--install', toolchain_install_dir]
 
   if args.buildbot:
@@ -97,6 +97,14 @@ with buildbot_lib.Step('checkdeps', status):
       [sys.executable,
        os.path.join(NACL_DIR, 'tools', 'checkdeps', 'checkdeps.py')])
 
+
+if host_os != 'win':
+  with buildbot_lib.Step('update clang', status):
+    buildbot_lib.Command(
+        context,
+        [sys.executable,
+         os.path.join(
+             NACL_DIR, '..', 'tools', 'clang', 'scripts', 'update.py')])
 
 if host_os == 'win':
   # On windows, sync with Windows git/svn rather than cygwin git/svn
@@ -191,33 +199,36 @@ sys.stdout.flush()
 # On Linux we build all toolchain components (driven from this script), and then
 # call buildbot_pnacl.sh which builds the sandboxed translator and runs tests
 # for all the components.
-# For now, we only build the host toolchain components (binutils, llvm, driver)
-# but no target ibraries on targets other than Linux, so we can't run the SCons
+# On Mac we build the toolchain but not the sandboxed translator, and run the
+# same tests as the main waterfall bot (which also does not run the sandboxed
+# translator: see https://code.google.com/p/nativeclient/issues/detail?id=3856 )
+# On Windows we don't build the target libraries, so we can't run the SCons
 # tests (other than the gold_plugin_test) on those platforms yet.
 # For now full test coverage is only achieved on the main waterfall bots.
-# TODO(dschuff): enable building (but not uploading) or downloading of the
-# target libraries on non-linux so we can run more tests on the toolchain
-# buildbots.
-if host_os != 'linux':
+if host_os == 'win':
   sys.exit(0)
-
-# Now we run the PNaCl buildbot script. It in turn runs the PNaCl build.sh
-# script (currently only for the sandboxed translator) and runs scons tests.
-# TODO(dschuff): re-implement the test-running portion of buildbot_pnacl.sh
-# using buildbot_lib, and use them here and in the non-toolchain builder.
-buildbot_shell = os.path.join(NACL_DIR, 'buildbot', 'buildbot_pnacl.sh')
-
-# Generate flags for buildbot_pnacl.sh
-
-arch = 'x8664' if args.tests_arch == 'x86-64' else 'x8632'
-
-if args.buildbot:
-  trybot_mode = 'false'
+elif host_os == 'mac':
+  subprocess.check_call([sys.executable,
+                         os.path.join(NACL_DIR, 'buildbot','buildbot_pnacl.py'),
+                         'opt', '32', 'pnacl'])
 else:
-  trybot_mode = 'true'
+  # Now we run the PNaCl buildbot script. It in turn runs the PNaCl build.sh
+  # script (currently only for the sandboxed translator) and runs scons tests.
+  # TODO(dschuff): re-implement the test-running portion of buildbot_pnacl.sh
+  # using buildbot_lib, and use them here and in the non-toolchain builder.
+  buildbot_shell = os.path.join(NACL_DIR, 'buildbot', 'buildbot_pnacl.sh')
 
-platform_arg = 'mode-buildbot-tc-' + arch + '-linux'
+  # Generate flags for buildbot_pnacl.sh
 
-command = [bash, buildbot_shell, platform_arg,  trybot_mode]
-logging.info('Running: ' + ' '.join(command))
-subprocess.check_call(command)
+  arch = 'x8664' if args.tests_arch == 'x86-64' else 'x8632'
+
+  if args.buildbot:
+    trybot_mode = 'false'
+  else:
+    trybot_mode = 'true'
+
+  platform_arg = 'mode-buildbot-tc-' + arch + '-linux'
+
+  command = [bash, buildbot_shell, platform_arg,  trybot_mode]
+  logging.info('Running: ' + ' '.join(command))
+  subprocess.check_call(command)

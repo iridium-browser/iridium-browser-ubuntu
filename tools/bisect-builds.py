@@ -20,20 +20,29 @@ WEBKIT_BASE_URL = ('http://commondatastorage.googleapis.com'
 ASAN_BASE_URL = ('http://commondatastorage.googleapis.com'
                  '/chromium-browser-asan')
 
+# GS bucket name.
+GS_BUCKET_NAME = 'chrome-unsigned/desktop-W15K3Y'
+
+# Base URL for downloading official builds.
+GOOGLE_APIS_URL = 'commondatastorage.googleapis.com'
+
 # The base URL for official builds.
-OFFICIAL_BASE_URL = 'http://master.chrome.corp.google.com/official_builds'
+OFFICIAL_BASE_URL = 'http://%s/%s' % (GOOGLE_APIS_URL, GS_BUCKET_NAME)
 
 # URL template for viewing changelogs between revisions.
-CHANGELOG_URL = ('http://build.chromium.org'
-                 '/f/chromium/perf/dashboard/ui/changelog.html'
-                 '?url=/trunk/src&range=%d%%3A%d')
+CHANGELOG_URL = ('https://chromium.googlesource.com/chromium/src/+log/%s..%s')
+
+# URL to convert SVN revision to git hash.
+CRREV_URL = ('https://cr-rev.appspot.com/_ah/api/crrev/v1/redirect/')
 
 # URL template for viewing changelogs between official versions.
-OFFICIAL_CHANGELOG_URL = ('http://omahaproxy.appspot.com/changelog'
-                          '?old_version=%s&new_version=%s')
+OFFICIAL_CHANGELOG_URL = ('https://chromium.googlesource.com/chromium/'
+                          'src/+log/%s..%s?pretty=full')
 
 # DEPS file URL.
-DEPS_FILE = 'http://src.chromium.org/viewvc/chrome/trunk/src/DEPS?revision=%d'
+DEPS_FILE_OLD = ('http://src.chromium.org/viewvc/chrome/trunk/src/'
+                 'DEPS?revision=%d')
+DEPS_FILE_NEW = ('https://chromium.googlesource.com/chromium/src/+/%s/DEPS')
 
 # Blink changelogs URL.
 BLINK_CHANGELOG_URL = ('http://build.chromium.org'
@@ -58,8 +67,10 @@ GITHASH_TO_SVN_URL = {
 
 # Search pattern to be matched in the JSON output from
 # CHROMIUM_GITHASH_TO_SVN_URL to get the chromium revision (svn revision).
-CHROMIUM_SEARCH_PATTERN = (
+CHROMIUM_SEARCH_PATTERN_OLD = (
     r'.*git-svn-id: svn://svn.chromium.org/chrome/trunk/src@(\d+) ')
+CHROMIUM_SEARCH_PATTERN = (
+    r'Cr-Commit-Position: refs/heads/master@{#(\d+)}')
 
 # Search pattern to be matched in the json output from
 # BLINK_GITHASH_TO_SVN_URL to get the blink revision (svn revision).
@@ -71,8 +82,12 @@ SEARCH_PATTERN = {
     'blink': BLINK_SEARCH_PATTERN,
 }
 
+CREDENTIAL_ERROR_MESSAGE = ('You are attempting to access protected data with '
+                            'no configured credentials')
+
 ###############################################################################
 
+import httplib
 import json
 import optparse
 import os
@@ -127,10 +142,10 @@ class PathContext(object):
     #   _binary_name = The name of the executable to run.
     if self.platform in ('linux', 'linux64', 'linux-arm'):
       self._binary_name = 'chrome'
-    elif self.platform == 'mac':
+    elif self.platform in ('mac', 'mac64'):
       self.archive_name = 'chrome-mac.zip'
       self._archive_extract_dir = 'chrome-mac'
-    elif self.platform == 'win':
+    elif self.platform in ('win', 'win64'):
       self.archive_name = 'chrome-win32.zip'
       self._archive_extract_dir = 'chrome-win32'
       self._binary_name = 'chrome.exe'
@@ -139,18 +154,27 @@ class PathContext(object):
 
     if is_official:
       if self.platform == 'linux':
-        self._listing_platform_dir = 'precise32bit/'
-        self.archive_name = 'chrome-precise32bit.zip'
-        self._archive_extract_dir = 'chrome-precise32bit'
+        self._listing_platform_dir = 'precise32/'
+        self.archive_name = 'chrome-precise32.zip'
+        self._archive_extract_dir = 'chrome-precise32'
       elif self.platform == 'linux64':
-        self._listing_platform_dir = 'precise64bit/'
-        self.archive_name = 'chrome-precise64bit.zip'
-        self._archive_extract_dir = 'chrome-precise64bit'
+        self._listing_platform_dir = 'precise64/'
+        self.archive_name = 'chrome-precise64.zip'
+        self._archive_extract_dir = 'chrome-precise64'
       elif self.platform == 'mac':
         self._listing_platform_dir = 'mac/'
         self._binary_name = 'Google Chrome.app/Contents/MacOS/Google Chrome'
+      elif self.platform == 'mac64':
+        self._listing_platform_dir = 'mac64/'
+        self._binary_name = 'Google Chrome.app/Contents/MacOS/Google Chrome'
       elif self.platform == 'win':
         self._listing_platform_dir = 'win/'
+        self.archive_name = 'chrome-win.zip'
+        self._archive_extract_dir = 'chrome-win'
+      elif self.platform == 'win64':
+        self._listing_platform_dir = 'win64/'
+        self.archive_name = 'chrome-win64.zip'
+        self._archive_extract_dir = 'chrome-win64'
     else:
       if self.platform in ('linux', 'linux64', 'linux-arm'):
         self.archive_name = 'chrome-linux.zip'
@@ -318,6 +342,12 @@ class PathContext(object):
       result = search_pattern.search(message[len(message)-1])
       if result:
         return result.group(1)
+      else:
+        if depot == 'chromium':
+          result = re.search(CHROMIUM_SEARCH_PATTERN_OLD,
+                             message[len(message)-1])
+          if result:
+            return result.group(1)
     print 'Failed to get svn revision number for %s' % git_sha1
     raise ValueError
 
@@ -393,29 +423,67 @@ class PathContext(object):
   def GetOfficialBuildsList(self):
     """Gets the list of official build numbers between self.good_revision and
     self.bad_revision."""
+
+    def CheckDepotToolsInPath():
+      delimiter = ';' if sys.platform.startswith('win') else ':'
+      path_list = os.environ['PATH'].split(delimiter)
+      for path in path_list:
+        if path.find('depot_tools') != -1:
+          return path
+      return None
+
+    def RunGsutilCommand(args):
+      gsutil_path = CheckDepotToolsInPath()
+      if gsutil_path is None:
+        print ('Follow the instructions in this document '
+               'http://dev.chromium.org/developers/how-tos/install-depot-tools'
+               ' to install depot_tools and then try again.')
+        sys.exit(1)
+      gsutil_path = os.path.join(gsutil_path, 'third_party', 'gsutil', 'gsutil')
+      gsutil = subprocess.Popen([sys.executable, gsutil_path] + args,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=None)
+      stdout, stderr = gsutil.communicate()
+      if gsutil.returncode:
+        if (re.findall(r'status[ |=]40[1|3]', stderr) or
+            stderr.startswith(CREDENTIAL_ERROR_MESSAGE)):
+          print ('Follow these steps to configure your credentials and try'
+                 ' running the bisect-builds.py again.:\n'
+                 '  1. Run "python %s config" and follow its instructions.\n'
+                 '  2. If you have a @google.com account, use that account.\n'
+                 '  3. For the project-id, just enter 0.' % gsutil_path)
+          sys.exit(1)
+        else:
+          raise Exception('Error running the gsutil command: %s' % stderr)
+      return stdout
+
+    def GsutilList(bucket):
+      query = 'gs://%s/' % bucket
+      stdout = RunGsutilCommand(['ls', query])
+      return [url[len(query):].strip('/') for url in stdout.splitlines()]
+
     # Download the revlist and filter for just the range between good and bad.
     minrev = min(self.good_revision, self.bad_revision)
     maxrev = max(self.good_revision, self.bad_revision)
-    handle = urllib.urlopen(OFFICIAL_BASE_URL)
-    dirindex = handle.read()
-    handle.close()
-    build_numbers = re.findall(r'<a href="([0-9][0-9].*)/">', dirindex)
+    build_numbers = GsutilList(GS_BUCKET_NAME)
+    revision_re = re.compile(r'(\d\d\.\d\.\d{4}\.\d+)')
+    build_numbers = filter(lambda b: revision_re.search(b), build_numbers)
     final_list = []
-    i = 0
     parsed_build_numbers = [LooseVersion(x) for x in build_numbers]
+    connection = httplib.HTTPConnection(GOOGLE_APIS_URL)
     for build_number in sorted(parsed_build_numbers):
-      path = (OFFICIAL_BASE_URL + '/' + str(build_number) + '/' +
+      if build_number > maxrev:
+        break
+      if build_number < minrev:
+        continue
+      path = ('/' + GS_BUCKET_NAME + '/' + str(build_number) + '/' +
               self._listing_platform_dir + self.archive_name)
-      i = i + 1
-      try:
-        connection = urllib.urlopen(path)
-        connection.close()
-        if build_number > maxrev:
-          break
-        if build_number >= minrev:
-          final_list.append(str(build_number))
-      except urllib.HTTPError:
-        pass
+      connection.request('HEAD', path)
+      response = connection.getresponse()
+      if response.status == 200:
+        final_list.append(str(build_number))
+      response.read()
+    connection.close()
     return final_list
 
 def UnzipFilenameToDir(filename, directory):
@@ -657,7 +725,7 @@ def Bisect(context,
   cwd = os.getcwd()
 
   print 'Downloading list of known revisions...',
-  if not context.use_local_repo:
+  if not context.use_local_repo and not context.is_official:
     print '(use --use-local-repo for speed if you have a local checkout)'
   else:
     print
@@ -811,18 +879,28 @@ def Bisect(context,
   return (revlist[minrev], revlist[maxrev], context)
 
 
-def GetBlinkDEPSRevisionForChromiumRevision(rev):
+def GetBlinkDEPSRevisionForChromiumRevision(self, rev):
   """Returns the blink revision that was in REVISIONS file at
   chromium revision |rev|."""
-  # . doesn't match newlines without re.DOTALL, so this is safe.
-  blink_re = re.compile(r'webkit_revision\D*(\d+)')
-  url = urllib.urlopen(DEPS_FILE % rev)
-  m = blink_re.search(url.read())
-  url.close()
-  if m:
-    return int(m.group(1))
+
+  def _GetBlinkRev(url, blink_re):
+    m = blink_re.search(url.read())
+    url.close()
+    if m:
+      return m.group(1)
+
+  url = urllib.urlopen(DEPS_FILE_OLD % rev)
+  if url.getcode() == 200:
+    # . doesn't match newlines without re.DOTALL, so this is safe.
+    blink_re = re.compile(r'webkit_revision\D*(\d+)')
+    return int(_GetBlinkRev(url, blink_re))
   else:
-    raise Exception('Could not get Blink revision for Chromium rev %d' % rev)
+    url = urllib.urlopen(DEPS_FILE_NEW % GetGitHashFromSVNRevision(rev))
+    if url.getcode() == 200:
+      blink_re = re.compile(r'webkit_revision\D*\d+;\D*\d+;(\w+)')
+      blink_git_sha = _GetBlinkRev(url, blink_re)
+      return self.GetSVNRevisionFromGitHash(blink_git_sha, 'blink')
+  raise Exception('Could not get Blink revision for Chromium rev %d' % rev)
 
 
 def GetBlinkRevisionForChromiumRevision(context, rev):
@@ -862,7 +940,7 @@ def FixChromiumRevForBlink(revisions_final, revisions, self, rev):
   blink snapshots point to tip of tree blink.
   Note: The revisions_final variable might get modified to include
   additional revisions."""
-  blink_deps_rev = GetBlinkDEPSRevisionForChromiumRevision(rev)
+  blink_deps_rev = GetBlinkDEPSRevisionForChromiumRevision(self, rev)
 
   while (GetBlinkRevisionForChromiumRevision(self, rev) > blink_deps_rev):
     idx = revisions.index(rev)
@@ -887,6 +965,20 @@ def GetChromiumRevision(context, url):
     print 'Could not determine latest revision. This could be bad...'
     return 999999999
 
+def GetGitHashFromSVNRevision(svn_revision):
+  crrev_url = CRREV_URL + str(svn_revision)
+  url = urllib.urlopen(crrev_url)
+  if url.getcode() == 200:
+    data = json.loads(url.read())
+    if 'git_sha' in data:
+      return data['git_sha']
+
+def PrintChangeLog(min_chromium_rev, max_chromium_rev):
+  """Prints the changelog URL."""
+
+  print ('  ' + CHANGELOG_URL % (GetGitHashFromSVNRevision(min_chromium_rev),
+         GetGitHashFromSVNRevision(max_chromium_rev)))
+
 
 def main():
   usage = ('%prog [options] [-- chromium-options]\n'
@@ -907,7 +999,7 @@ def main():
            'Tip: add "-- --no-first-run" to bypass the first run prompts.')
   parser = optparse.OptionParser(usage=usage)
   # Strangely, the default help output doesn't include the choice list.
-  choices = ['mac', 'win', 'linux', 'linux64', 'linux-arm']
+  choices = ['mac', 'mac64', 'win', 'win64', 'linux', 'linux64', 'linux-arm']
             # linux-chromiumos lacks a continuous archive http://crbug.com/78158
   parser.add_option('-a', '--archive',
                     choices=choices,
@@ -1090,7 +1182,7 @@ def main():
     if opts.official_builds:
       print OFFICIAL_CHANGELOG_URL % (min_chromium_rev, max_chromium_rev)
     else:
-      print '  ' + CHANGELOG_URL % (min_chromium_rev, max_chromium_rev)
+      PrintChangeLog(min_chromium_rev, max_chromium_rev)
 
 
 if __name__ == '__main__':

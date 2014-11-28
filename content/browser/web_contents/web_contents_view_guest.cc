@@ -73,12 +73,8 @@ void WebContentsViewGuest::OnGuestInitialized(WebContentsView* parent_view) {
 
 ContextMenuParams WebContentsViewGuest::ConvertContextMenuParams(
     const ContextMenuParams& params) const {
-#if defined(USE_AURA)
-  // Context menu uses ScreenPositionClient::ConvertPointToScreen() in aura
-  // to calculate popup position. Guest's native view
-  // (platform_view_->GetNativeView()) is part of the embedder's view hierarchy,
-  // but is placed at (0, 0) w.r.t. the embedder's position. Therefore, |offset|
-  // is added to |params|.
+  // We need to add |offset| of the guest from the embedder to position the
+  // menu properly.
   gfx::Rect embedder_bounds;
   guest_->embedder_web_contents()->GetView()->GetContainerBounds(
       &embedder_bounds);
@@ -90,16 +86,18 @@ ContextMenuParams WebContentsViewGuest::ConvertContextMenuParams(
   params_in_embedder.x += offset.x();
   params_in_embedder.y += offset.y();
   return params_in_embedder;
-#else
-  return params;
-#endif
 }
 
 void WebContentsViewGuest::GetContainerBounds(gfx::Rect* out) const {
-  // We need embedder container's bounds to calculate our bounds.
-  guest_->embedder_web_contents()->GetView()->GetContainerBounds(out);
-  gfx::Point guest_coordinates = guest_->GetScreenCoordinates(gfx::Point());
-  out->Offset(guest_coordinates.x(), guest_coordinates.y());
+  if (guest_->embedder_web_contents()) {
+    // We need embedder container's bounds to calculate our bounds.
+    guest_->embedder_web_contents()->GetView()->GetContainerBounds(out);
+    gfx::Point guest_coordinates = guest_->GetScreenCoordinates(gfx::Point());
+    out->Offset(guest_coordinates.x(), guest_coordinates.y());
+  } else {
+    out->set_origin(gfx::Point());
+  }
+
   out->set_size(size_);
 }
 
@@ -119,14 +117,6 @@ gfx::Rect WebContentsViewGuest::GetViewBounds() const {
 }
 
 #if defined(OS_MACOSX)
-void WebContentsViewGuest::SetAllowOverlappingViews(bool overlapping) {
-  platform_view_->SetAllowOverlappingViews(overlapping);
-}
-
-bool WebContentsViewGuest::GetAllowOverlappingViews() const {
-  return platform_view_->GetAllowOverlappingViews();
-}
-
 void WebContentsViewGuest::SetAllowOtherViews(bool allow) {
   platform_view_->SetAllowOtherViews(allow);
 }

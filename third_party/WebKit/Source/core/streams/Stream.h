@@ -43,11 +43,12 @@ namespace blink {
 
 class ExecutionContext;
 
-class Stream FINAL : public RefCountedWillBeRefCountedGarbageCollected<Stream>, public ScriptWrappable, public ActiveDOMObject {
+class Stream FINAL : public RefCountedWillBeGarbageCollectedFinalized<Stream>, public ScriptWrappable, public ActiveDOMObject {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<Stream> create(ExecutionContext* context, const String& mediaType)
     {
-        RefPtrWillBeRawPtr<Stream> stream = adoptRefWillBeRefCountedGarbageCollected(new Stream(context, mediaType));
+        RefPtrWillBeRawPtr<Stream> stream = adoptRefWillBeNoop(new Stream(context, mediaType));
         stream->suspendIfNeeded();
         return stream.release();
     }

@@ -17,13 +17,14 @@ class GL_EXPORT GLImageIOSurface : public GLImage {
  public:
   explicit GLImageIOSurface(const gfx::Size& size);
 
-  bool Initialize(const gfx::GpuMemoryBufferHandle& handle);
+  bool Initialize(IOSurfaceRef io_surface);
 
   // Overridden from GLImage:
   virtual void Destroy(bool have_context) OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool BindTexImage(unsigned target) OVERRIDE;
   virtual void ReleaseTexImage(unsigned target) OVERRIDE {}
+  virtual bool CopyTexImage(unsigned target) OVERRIDE;
   virtual void WillUseTexImage() OVERRIDE {}
   virtual void DidUseTexImage() OVERRIDE {}
   virtual void WillModifyTexImage() OVERRIDE {}

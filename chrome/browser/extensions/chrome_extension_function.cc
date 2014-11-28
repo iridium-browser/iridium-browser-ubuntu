@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/chrome_extension_function.h"
 
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/profiles/profile.h"
@@ -92,7 +93,7 @@ ChromeUIThreadExtensionFunction::GetExtensionWindowController() {
   }
 
   return extensions::WindowControllerList::GetInstance()
-      ->CurrentWindowForFunction(this);
+      ->CurrentWindowForFunction(ChromeExtensionFunctionDetails(this));
 }
 
 content::WebContents*

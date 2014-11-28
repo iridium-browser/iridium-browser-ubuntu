@@ -20,7 +20,6 @@
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
 #include "jni/WebContentsDelegateAndroid_jni.h"
 #include "ui/base/window_open_disposition.h"
@@ -276,7 +275,6 @@ bool WebContentsDelegateAndroid::AddMessageToConsole(
 // navigation. So we only handle the first case and pass the source TabContents'
 // url to Java to update the UI.
 void WebContentsDelegateAndroid::UpdateTargetURL(WebContents* source,
-                                                 int32 page_id,
                                                  const GURL& url) {
   if (!url.is_empty())
     return;

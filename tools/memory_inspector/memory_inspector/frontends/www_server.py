@@ -23,10 +23,11 @@ import collections
 import datetime
 import dateutil.parser
 import glob
-import os
+import json
 import memory_inspector
 import mimetypes
-import json
+import os
+import posixpath
 import re
 import urlparse
 import uuid
@@ -581,9 +582,9 @@ def _LoadNheapFromStorage(args, req_vars):
 
   resp = {
       'cols': [
-          {'label': 'Total size [KB]', 'type':'number'},
-          {'label': 'Alloc size [B]', 'type':'number'},
-          {'label': 'Count', 'type':'number'},
+          {'label': 'Allocated', 'type':'number'},
+          {'label': 'Resident', 'type':'number'},
+          {'label': 'Flags', 'type':'number'},
           {'label': 'Stack Trace', 'type':'string'},
         ],
       'rows': []}
@@ -596,14 +597,14 @@ def _LoadNheapFromStorage(args, req_vars):
           frame.symbol and frame.symbol.source_info else frame.raw_address)
       strace += '<dd title="%s">%s</dd><dt>%s</dt>' % (
           cgi.escape(source_info),
-          cgi.escape(os.path.basename(source_info)),
+          cgi.escape(posixpath.basename(source_info)),
           cgi.escape(symbol_name))
     strace += '</dl>'
 
     resp['rows'] += [{'c': [
-        {'v': alloc.total_size, 'f': alloc.total_size / 1024},
-        {'v': alloc.size, 'f': None},
-        {'v': alloc.count, 'f': None},
+        {'v': alloc.size, 'f': _StrMem(alloc.size)},
+        {'v': alloc.resident_size, 'f': _StrMem(alloc.resident_size)},
+        {'v': alloc.flags, 'f': None},
         {'v': strace, 'f': None},
     ]}]
   return _HTTP_OK, [], resp
@@ -676,6 +677,7 @@ def _ConvertMmapToGTable(mmap):
           {'label': 'End', 'type':'string'},
           {'label': 'Length Kb', 'type':'number'},
           {'label': 'Prot', 'type':'string'},
+          {'label': 'RSS Kb', 'type':'number'},
           {'label': 'Priv. Dirty Kb', 'type':'number'},
           {'label': 'Priv. Clean Kb', 'type':'number'},
           {'label': 'Shared Dirty Kb', 'type':'number'},
@@ -691,6 +693,7 @@ def _ConvertMmapToGTable(mmap):
         {'v': '%08x' % entry.end, 'f': None},
         {'v': entry.len / 1024, 'f': None},
         {'v': entry.prot_flags, 'f': None},
+        {'v': entry.rss_bytes / 1024, 'f': None},
         {'v': entry.priv_dirty_bytes / 1024, 'f': None},
         {'v': entry.priv_clean_bytes / 1024, 'f': None},
         {'v': entry.shared_dirty_bytes / 1024, 'f': None},
@@ -717,11 +720,11 @@ def _GetCacheObject(obj_id):
 
 def _StrMem(nbytes):
   """Converts a number (of bytes) into a human readable string (kb, mb)."""
-  if nbytes < 2**10:
-    return '%d B' % nbytes
-  if nbytes < 2**20:
-    return '%.1f KB' % round(nbytes / 1024.0)
-  return '%.1f MB' % (nbytes / 1048576.0)
+  UNITS = ['B', 'K', 'M', 'G']
+  for unit in UNITS:
+    if abs(nbytes) < 1024.0 or unit == UNITS[-1]:
+      return ('%3.1f' % nbytes).replace('.0','') + ' ' + unit
+    nbytes /= 1024.0
 
 
 def _HttpRequestHandler(environ, start_response):

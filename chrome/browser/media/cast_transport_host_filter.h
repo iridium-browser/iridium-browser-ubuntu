@@ -34,12 +34,7 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
       int32 channel_id,
       const std::vector<media::cast::PacketEvent>& packet_events,
       const std::vector<media::cast::FrameEvent>& frame_events);
-  void SendRtt(int32 channel_id,
-               uint32 ssrc,
-               base::TimeDelta rtt,
-               base::TimeDelta avg_rtt,
-               base::TimeDelta min_rtt,
-               base::TimeDelta max_rtt);
+  void SendRtt(int32 channel_id, uint32 ssrc, base::TimeDelta rtt);
   void SendCastMessage(int32 channel_id,
                        uint32 ssrc,
                        const media::cast::RtcpCastMessage& cast_message);
@@ -54,26 +49,23 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
   void OnInitializeVideo(
       int32 channel_id,
       const media::cast::CastTransportRtpConfig& config);
-  void OnInsertCodedAudioFrame(
+  void OnInsertFrame(
       int32 channel_id,
-      const media::cast::EncodedFrame& audio_frame);
-  void OnInsertCodedVideoFrame(
-      int32 channel_id,
-      const media::cast::EncodedFrame& video_frame);
+      uint32 ssrc,
+      const media::cast::EncodedFrame& frame);
   void OnSendSenderReport(
       int32 channel_id,
       uint32 ssrc,
       base::TimeTicks current_time,
       uint32 current_time_as_rtp_timestamp);
-  void OnResendPackets(
-      int32 channel_id,
-      bool is_audio,
-      const media::cast::MissingFramesAndPacketsMap& missing_packets,
-      bool cancel_rtx_if_not_in_list,
-      base::TimeDelta dedupe_window);
+  void OnCancelSendingFrames(int32 channel_id, uint32 ssrc,
+                             const std::vector<uint32>& frame_ids);
+  void OnResendFrameForKickstart(int32 channel_id, uint32 ssrc,
+                                 uint32 frame_id);
   void OnNew(
       int32 channel_id,
-      const net::IPEndPoint& remote_end_point);
+      const net::IPEndPoint& remote_end_point,
+      const base::DictionaryValue& options);
   void OnDelete(int32 channel_id);
 
   IDMap<media::cast::CastTransportSender, IDMapOwnPointer> id_map_;

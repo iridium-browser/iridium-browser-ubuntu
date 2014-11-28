@@ -6,9 +6,9 @@
 
 #include "base/strings/string_util.h"
 #include "chrome/browser/history/top_sites_impl.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "grit/theme_resources.h"
 
 namespace history {
@@ -35,6 +35,28 @@ TopSites* TopSites::Create(Profile* profile, const base::FilePath& db_name) {
   TopSitesImpl* top_sites_impl = new TopSitesImpl(profile);
   top_sites_impl->Init(db_name);
   return top_sites_impl;
+}
+
+TopSites::TopSites() {
+}
+
+TopSites::~TopSites() {
+}
+
+void TopSites::AddObserver(TopSitesObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void TopSites::RemoveObserver(TopSitesObserver* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+void TopSites::NotifyTopSitesLoaded() {
+  FOR_EACH_OBSERVER(TopSitesObserver, observer_list_, TopSitesLoaded(this));
+}
+
+void TopSites::NotifyTopSitesChanged() {
+  FOR_EACH_OBSERVER(TopSitesObserver, observer_list_, TopSitesChanged(this));
 }
 
 }  // namespace history

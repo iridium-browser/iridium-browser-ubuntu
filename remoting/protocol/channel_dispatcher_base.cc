@@ -6,9 +6,9 @@
 
 #include "base/bind.h"
 #include "net/socket/stream_socket.h"
-#include "remoting/protocol/channel_factory.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_config.h"
+#include "remoting/protocol/stream_channel_factory.h"
 
 namespace remoting {
 namespace protocol {
@@ -44,7 +44,7 @@ void ChannelDispatcherBase::Init(Session* session,
 
   initialized_callback_ = callback;
 
-  channel_factory_->CreateStreamChannel(channel_name_, base::Bind(
+  channel_factory_->CreateChannel(channel_name_, base::Bind(
       &ChannelDispatcherBase::OnChannelReady, base::Unretained(this)));
 }
 
@@ -55,6 +55,7 @@ void ChannelDispatcherBase::OnChannelReady(
     return;
   }
 
+  channel_factory_ = NULL;
   channel_ = socket.Pass();
 
   OnInitialized();

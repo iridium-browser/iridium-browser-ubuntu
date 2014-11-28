@@ -67,15 +67,14 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   // Any actual seek started by renderer will be handled by browser in OnSeek().
   void OnSeekRequest(int player_id, const base::TimeDelta& time_to_seek);
 
-  // Pauses all video players manages by this class.
-  void PauseVideo();
-
   // Stops and releases every media managed by this class.
   void ReleaseAllMediaPlayers();
 
   // media::MediaPlayerManager overrides.
   virtual void OnTimeUpdate(
-      int player_id, base::TimeDelta current_time) OVERRIDE;
+      int player_id,
+      base::TimeDelta current_timestamp,
+      base::TimeTicks current_time_ticks) OVERRIDE;
   virtual void OnMediaMetadataChanged(
       int player_id,
       base::TimeDelta duration,
@@ -116,6 +115,8 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   virtual void OnSetPoster(int player_id, const GURL& poster);
   virtual void OnReleaseResources(int player_id);
   virtual void OnDestroyPlayer(int player_id);
+  virtual void OnRequestRemotePlayback(int player_id);
+  virtual void OnRequestRemotePlaybackControl(int player_id);
   virtual void ReleaseFullscreenPlayer(media::MediaPlayerAndroid* player);
 #if defined(VIDEO_HOLE)
   void OnNotifyExternalSurface(
@@ -161,9 +162,11 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   // constrained by hardware and memory limits.
   virtual void OnMediaResourcesRequested(int player_id);
 
-  // Similar to the above call, MediaPlayerAndroid must call this method when
-  // releasing all the decoding resources.
-  virtual void OnMediaResourcesReleased(int player_id);
+  // Called when a player releases all decoding resources.
+  void ReleaseMediaResources(int player_id);
+
+  // Releases the player. However, don't remove it from |players_|.
+  void ReleasePlayer(media::MediaPlayerAndroid* player);
 
 #if defined(VIDEO_HOLE)
   void OnRequestExternalSurface(int player_id, const gfx::RectF& rect);

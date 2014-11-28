@@ -1,0 +1,6 @@
+include_rules = [
+  "+athena/athena_export.h",
+  "+ui/aura",
+  "+ui/compositor",
+  "+ui/views",
+]

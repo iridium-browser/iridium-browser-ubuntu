@@ -44,12 +44,9 @@ Storage::Storage(LocalFrame* frame, PassOwnPtrWillBeRawPtr<StorageArea> storageA
 {
     ASSERT(m_frame);
     ASSERT(m_storageArea);
-    ScriptWrappable::init(this);
 }
 
-Storage::~Storage()
-{
-}
+DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(Storage);
 
 String Storage::anonymousIndexedGetter(unsigned index, ExceptionState& exceptionState)
 {
@@ -128,6 +125,7 @@ bool Storage::namedPropertyQuery(const AtomicString& name, ExceptionState& excep
 void Storage::trace(Visitor* visitor)
 {
     visitor->trace(m_storageArea);
+    DOMWindowProperty::trace(visitor);
 }
 
 }

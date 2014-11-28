@@ -67,7 +67,7 @@ class KernelProxy : protected KernelObject {
   virtual int open_resource(const char* file);
 
   // KernelHandle and FD allocation and manipulation functions.
-  virtual int open(const char* path, int open_flags);
+  virtual int open(const char* path, int open_flags, mode_t mode);
   virtual int close(int fd);
   virtual int dup(int fd);
   virtual int dup2(int fd, int newfd);
@@ -89,7 +89,6 @@ class KernelProxy : protected KernelObject {
   virtual int chown(const char* path, uid_t owner, gid_t group);
   virtual int fchown(int fd, uid_t owner, gid_t group);
   virtual int lchown(const char* path, uid_t owner, gid_t group);
-  virtual int utime(const char* filename, const struct utimbuf* times);
 
   // System calls that take a path as an argument: The kernel proxy will look
   // for the Node associated to the path. To find the node, the kernel proxy
@@ -108,7 +107,7 @@ class KernelProxy : protected KernelObject {
   virtual ssize_t read(int fd, void* buf, size_t nbyte);
   virtual ssize_t write(int fd, const void* buf, size_t nbyte);
 
-  virtual int fchmod(int fd, int prot);
+  virtual int fchmod(int fd, mode_t mode);
   virtual int fcntl(int fd, int request, va_list args);
   virtual int fstat(int fd, struct stat* buf);
   virtual int getdents(int fd, void* buf, unsigned int count);
@@ -118,6 +117,7 @@ class KernelProxy : protected KernelObject {
   virtual int fdatasync(int fd);
   virtual int isatty(int fd);
   virtual int ioctl(int fd, int request, va_list args);
+  virtual int futimens(int fd, const struct timespec times[2]);
 
   // lseek() relies on the filesystem's Stat() to determine whether or not the
   // file handle corresponding to fd is a directory
@@ -135,7 +135,7 @@ class KernelProxy : protected KernelObject {
   // access() uses the Filesystem's Stat().
   virtual int access(const char* path, int amode);
   virtual int readlink(const char* path, char* buf, size_t count);
-  virtual int utimes(const char* filename, const struct timeval times[2]);
+  virtual int utimens(const char* path, const struct timespec times[2]);
 
   virtual int link(const char* oldpath, const char* newpath);
   virtual int symlink(const char* oldpath, const char* newpath);
@@ -177,6 +177,13 @@ class KernelProxy : protected KernelObject {
                           const char* service,
                           const struct addrinfo* hints,
                           struct addrinfo** res);
+  virtual int getnameinfo(const struct sockaddr *sa,
+                          socklen_t salen,
+                          char *host,
+                          size_t hostlen,
+                          char *serv,
+                          size_t servlen,
+                          int flags);
   virtual int getpeername(int fd, struct sockaddr* addr, socklen_t* len);
   virtual int getsockname(int fd, struct sockaddr* addr, socklen_t* len);
   virtual int getsockopt(int fd,

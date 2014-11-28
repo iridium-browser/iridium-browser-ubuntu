@@ -267,7 +267,7 @@ void AwContents::SetAwAutofillClient(jobject client) {
 }
 
 AwContents::~AwContents() {
-  DCHECK(AwContents::FromWebContents(web_contents_.get()) == this);
+  DCHECK_EQ(this, AwContents::FromWebContents(web_contents_.get()));
   DCHECK(!hardware_renderer_.get());
   web_contents_->RemoveUserData(kAwContentsUserDataKey);
   if (find_helper_.get())
@@ -299,6 +299,10 @@ void AwContents::Destroy(JNIEnv* env, jobject obj) {
   // See b/15074651.
   AwContentsClientBridgeBase::Disassociate(web_contents_.get());
   contents_client_bridge_.reset();
+
+  // Do not wait until the WebContents are deleted asynchronously to clear
+  // the delegate and stop sending callbacks.
+  web_contents_->SetDelegate(NULL);
 
   // We do not delete AwContents immediately. Some applications try to delete
   // Webview in ShouldOverrideUrlLoading callback, which is a sync IPC from
@@ -773,6 +777,11 @@ void AwContents::UpdateParentDrawConstraints() {
   browser_view_renderer_.UpdateParentDrawConstraints();
 }
 
+void AwContents::DidSkipCommitFrame() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  browser_view_renderer_.DidSkipCommitFrame();
+}
+
 void AwContents::OnNewPicture() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   JNIEnv* env = AttachCurrentThread();
@@ -869,9 +878,6 @@ void AwContents::SetIsPaused(JNIEnv* env, jobject obj, bool paused) {
       ContentViewCore::FromWebContents(web_contents_.get());
   if (cvc) {
     cvc->PauseOrResumeGeolocation(paused);
-    if (paused) {
-      cvc->PauseVideo();
-    }
   }
 }
 

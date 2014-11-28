@@ -1,9 +1,10 @@
-#!/usr/bin/python
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Script to mount a built image and run tests on it."""
+
+from __future__ import print_function
 
 import logging
 import os
@@ -47,7 +48,7 @@ def FindImage(image_path):
     # Assume base image.
     image_file = os.path.join(image_path, constants.BASE_IMAGE_NAME + '.bin')
     if not os.path.exists(image_file):
-      raise ValueError('%s does not contain base image' % image_path)
+      raise ValueError('Cannot find base image %s' % image_file)
   elif os.path.isfile(image_path):
     image_file = image_path
   else:

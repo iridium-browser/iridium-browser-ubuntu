@@ -5,21 +5,19 @@
 #include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 
 #include "base/values.h"
-#include "chrome/browser/devtools/devtools_network_conditions.h"
-#include "chrome/browser/devtools/devtools_network_controller.h"
-#include "chrome/browser/devtools/devtools_protocol.h"
-#include "chrome/browser/devtools/devtools_protocol_constants.h"
+#include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_manager.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 
-ChromeDevToolsManagerDelegate::ChromeDevToolsManagerDelegate() {
+ChromeDevToolsManagerDelegate::ChromeDevToolsManagerDelegate()
+    : network_protocol_handler_(new DevToolsNetworkProtocolHandler()) {
 }
 
 ChromeDevToolsManagerDelegate::~ChromeDevToolsManagerDelegate() {
@@ -32,91 +30,50 @@ void ChromeDevToolsManagerDelegate::Inspect(
     // TODO(horo): Support other types of DevToolsAgentHost when necessary.
     NOTREACHED() << "Inspect() only supports workers.";
   }
-#if !defined(OS_ANDROID)
   if (Profile* profile = Profile::FromBrowserContext(browser_context))
     DevToolsWindow::OpenDevToolsWindowForWorker(profile, agent_host);
-#endif
 }
 
 base::DictionaryValue* ChromeDevToolsManagerDelegate::HandleCommand(
     content::DevToolsAgentHost* agent_host,
     base::DictionaryValue* command_dict) {
-  scoped_ptr<DevToolsProtocol::Command> command(
-       DevToolsProtocol::ParseCommand(command_dict));
-  if (!command)
-    return NULL;
-
-  const std::string method = command->method();
-  scoped_ptr<DevToolsProtocol::Response> response;
-
-  if (method == chrome::devtools::Network::emulateNetworkConditions::kName)
-    response = EmulateNetworkConditions(agent_host, command.get());
-
-  if (response)
-    return response->Serialize();
-  return NULL;
-}
-
-Profile* ChromeDevToolsManagerDelegate::GetProfile(
-    content::DevToolsAgentHost* agent_host) {
-  content::WebContents* web_contents = agent_host->GetWebContents();
-  if (!web_contents)
-    return NULL;
-  return Profile::FromBrowserContext(web_contents->GetBrowserContext());
-}
-
-scoped_ptr<DevToolsProtocol::Response>
-ChromeDevToolsManagerDelegate::EmulateNetworkConditions(
-    content::DevToolsAgentHost* agent_host,
-    DevToolsProtocol::Command* command) {
-  base::DictionaryValue* params = command->params();
-  namespace names = ::chrome::devtools::Network::emulateNetworkConditions;
-
-  bool offline = false;
-  if (!params || !params->GetBoolean(names::kParamOffline, &offline))
-    return command->InvalidParamResponse(names::kParamOffline);
-
-  double latency = 0.0;
-  if (!params->GetDouble(names::kParamLatency, &latency))
-    return command->InvalidParamResponse(names::kParamLatency);
-  if (latency < 0.0)
-    latency = 0.0;
-
-  double download_throughput = 0.0;
-  if (!params->GetDouble(names::kParamDownloadThroughput, &download_throughput))
-    return command->InvalidParamResponse(names::kParamDownloadThroughput);
-  if (download_throughput < 0.0)
-    download_throughput = 0.0;
-
-  double upload_throughput = 0.0;
-  if (!params->GetDouble(names::kParamUploadThroughput, &upload_throughput))
-    return command->InvalidParamResponse(names::kParamUploadThroughput);
-  if (upload_throughput < 0.0)
-    upload_throughput = 0.0;
-
-  scoped_ptr<DevToolsNetworkConditions> conditions(
-      new DevToolsNetworkConditions(
-          offline, latency, download_throughput, upload_throughput));
-
-  UpdateNetworkState(agent_host, conditions.Pass());
-  return command->SuccessResponse(NULL);
-}
-
-void ChromeDevToolsManagerDelegate::UpdateNetworkState(
-    content::DevToolsAgentHost* agent_host,
-    scoped_ptr<DevToolsNetworkConditions> conditions) {
-  Profile* profile = GetProfile(agent_host);
-  if (!profile)
-    return;
-  profile->GetDevToolsNetworkController()->SetNetworkState(
-      agent_host->GetId(), conditions.Pass());
+  return network_protocol_handler_->HandleCommand(agent_host, command_dict);
 }
 
 void ChromeDevToolsManagerDelegate::DevToolsAgentStateChanged(
     content::DevToolsAgentHost* agent_host,
     bool attached) {
-  scoped_ptr<DevToolsNetworkConditions> conditions;
-  if (attached)
-    conditions.reset(new DevToolsNetworkConditions());
-  UpdateNetworkState(agent_host, conditions.Pass());
+  network_protocol_handler_->DevToolsAgentStateChanged(agent_host, attached);
 }
+
+std::string ChromeDevToolsManagerDelegate::GetPageThumbnailData(
+    const GURL& url) {
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Profile* profile = (*it)->profile();
+    history::TopSites* top_sites = profile->GetTopSites();
+    if (!top_sites)
+      continue;
+    scoped_refptr<base::RefCountedMemory> data;
+    if (top_sites->GetPageThumbnail(url, false, &data))
+      return std::string(data->front_as<char>(), data->size());
+  }
+  return std::string();
+}
+
+scoped_ptr<content::DevToolsTarget>
+ChromeDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
+  chrome::NavigateParams params(ProfileManager::GetLastUsedProfile(),
+      url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+  params.disposition = NEW_FOREGROUND_TAB;
+  chrome::Navigate(&params);
+  if (!params.target_contents)
+    return scoped_ptr<content::DevToolsTarget>();
+  return scoped_ptr<content::DevToolsTarget>(
+      DevToolsTargetImpl::CreateForWebContents(params.target_contents, true));
+}
+
+void ChromeDevToolsManagerDelegate::EnumerateTargets(TargetCallback callback) {
+  DevToolsTargetImpl::EnumerateAllTargets(
+      *reinterpret_cast<DevToolsTargetImpl::Callback*>(&callback));
+}
+

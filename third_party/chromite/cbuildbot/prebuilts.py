@@ -4,6 +4,8 @@
 
 """cbuildbot logic for uploading prebuilts and managing binhosts."""
 
+from __future__ import print_function
+
 from datetime import datetime
 import glob
 import os
@@ -11,8 +13,8 @@ import os
 from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
-from chromite.cbuildbot import portage_utilities
 from chromite.lib import cros_build_lib
+from chromite.lib import portage_util
 
 _PREFLIGHT_BINHOST = 'PREFLIGHT_BINHOST'
 _CHROME_BINHOST = 'CHROME_BINHOST'
@@ -47,7 +49,7 @@ def _AddPackagesForPrebuilt(filename):
       for line in f:
         atom = line.split('#', 1)[0].strip()
         try:
-          cpv = portage_utilities.SplitCPV(atom)
+          cpv = portage_util.SplitCPV(atom)
         except ValueError:
           cros_build_lib.Warning('Could not split atom %r (line: %r)',
                                  atom, line)
@@ -135,7 +137,9 @@ def UploadPrebuilts(category, chrome_rev, private_bucket, buildroot, **kwargs):
     extra_args.extend(['--key', _FULL_BINHOST])
 
   if category == constants.CHROME_PFQ_TYPE:
-    extra_args.extend(['--packages=%s' % constants.CHROME_PN])
+    extra_args += ['--packages=%s' % x
+                   for x in [constants.CHROME_PN] +
+                            constants.OTHER_CHROME_PACKAGES]
 
   kwargs.setdefault('extra_args', []).extend(extra_args)
   return _UploadPrebuilts(buildroot=buildroot, **kwargs)

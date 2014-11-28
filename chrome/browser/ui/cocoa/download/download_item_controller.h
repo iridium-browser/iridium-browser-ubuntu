@@ -21,6 +21,10 @@ class DownloadItem;
 class PageNavigator;
 }
 
+namespace extensions {
+class ExperienceSamplingEvent;
+}
+
 namespace gfx {
 class FontList;
 }
@@ -30,7 +34,42 @@ class MenuModel;
 }
 
 // A controller class that manages one download item.
-
+//
+// The view hierarchy is as follows:
+//
+// DownloadItemController
+//  |
+//  |  A container that is showing one of its child views (progressView_ or
+//  |  dangerousDownloadView_) depending on whether the download is safe or not.
+//  |
+//  +-- progressView_ (instance of DownloadItemButton)
+//  |   |
+//  |   +-- cell_ (instance of DownloadItemCell)
+//  |
+//  +-- dangerousDownloadView_
+//      |
+//      |  Contains the dangerous download warning. Dependong on whether the
+//      |  download is dangerous (e.g. dangerous due to type of file), or
+//      |  malicious (e.g. downloaded from a known malware site) only one of
+//      |  dangerousButtonTweaker_ or maliciousButtonTweaker_ will be visible at
+//      |  one time.
+//      |
+//      +-- dangerousDownloadLabel_
+//      |
+//      +-- image_
+//      |
+//      +-- dangerousButtonTweaker_
+//      |
+//      |  Contains the 'Discard'/'Save' buttons for a dangerous download. This
+//      |  is a GTMWidthBasedTweaker that adjusts the width based on the text of
+//      |  buttons.
+//      |
+//      +-- maliciousButtonTweaker_
+//
+//         Contains the 'Discard' button and the drop down context menu button.
+//         This is a GTMWidthBasedTweaker that adjusts the width based on the
+//         text of the 'Discard' button.
+//
 @interface DownloadItemController : NSViewController {
  @private
   IBOutlet DownloadItemButton* progressView_;
@@ -67,10 +106,14 @@ class MenuModel;
   scoped_ptr<gfx::FontList> font_list_;
 
   // The state of this item.
-  enum DownoadItemState {
+  enum DownloadItemState {
     kNormal,
     kDangerous
   } state_;
+
+  // ExperienceSampling: This tracks dangerous/malicious downloads warning UI
+  // and the user's decisions about it.
+  scoped_ptr<extensions::ExperienceSamplingEvent> sampling_event_;
 };
 
 // Initialize controller for |downloadItem|.
@@ -118,4 +161,5 @@ class MenuModel;
 - (IBAction)discardDownload:(id)sender;
 - (IBAction)dismissMaliciousDownload:(id)sender;
 - (IBAction)showContextMenu:(id)sender;
+
 @end

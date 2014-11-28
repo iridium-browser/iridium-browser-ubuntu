@@ -445,6 +445,10 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Notifies this window and its parent hierarchy.
   void NotifyWindowVisibilityChangedUp(aura::Window* target, bool visible);
 
+  // Notifies this window and its child hierarchy of a transform applied to
+  // |source|.
+  void NotifyAncestorWindowTransformed(Window* source);
+
   // Invoked when the bounds of the window changes. This may be invoked directly
   // by us, or from the closure returned by PrepareForLayerBoundsChange() after
   // the bounds of the layer has changed. |old_bounds| is the previous bounds.
@@ -452,6 +456,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   // Overridden from ui::LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnDelegatedFrameDamage(
+      const gfx::Rect& damage_rect_in_dip) OVERRIDE;
   virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE;
 
   // Overridden from ui::EventTarget:

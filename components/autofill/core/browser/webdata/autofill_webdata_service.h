@@ -27,6 +27,7 @@ class MessageLoopProxy;
 namespace autofill {
 
 class AutofillChange;
+class AutofillEntry;
 class AutofillProfile;
 class AutofillWebDataBackend;
 class AutofillWebDataBackendImpl;
@@ -69,6 +70,8 @@ class AutofillWebDataService : public AutofillWebData,
   virtual void RemoveAutofillProfile(const std::string& guid) OVERRIDE;
   virtual WebDataServiceBase::Handle GetAutofillProfiles(
       WebDataServiceConsumer* consumer) OVERRIDE;
+  virtual void UpdateAutofillEntries(
+      const std::vector<AutofillEntry>& autofill_entries) OVERRIDE;
   virtual void AddCreditCard(const CreditCard& credit_card) OVERRIDE;
   virtual void UpdateCreditCard(const CreditCard& credit_card) OVERRIDE;
   virtual void RemoveCreditCard(const std::string& guid) OVERRIDE;
@@ -115,11 +118,11 @@ class AutofillWebDataService : public AutofillWebData,
   // The MessageLoopProxy that this class uses as its DB thread.
   scoped_refptr<base::MessageLoopProxy> db_thread_;
 
+  scoped_refptr<AutofillWebDataBackendImpl> autofill_backend_;
+
   // This factory is used on the UI thread. All vended weak pointers are
   // invalidated in ShutdownOnUIThread().
   base::WeakPtrFactory<AutofillWebDataService> weak_ptr_factory_;
-
-  scoped_refptr<AutofillWebDataBackendImpl> autofill_backend_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillWebDataService);
 };

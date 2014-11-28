@@ -13,7 +13,7 @@
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/browser/chromeos/file_system_provider/request_value.h"
 #include "net/base/io_buffer.h"
-#include "webkit/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/async_file_util.h"
 
 namespace base {
 class FilePath;
@@ -38,7 +38,7 @@ class WriteFile : public Operation {
             scoped_refptr<net::IOBuffer> buffer,
             int64 offset,
             int length,
-            const fileapi::AsyncFileUtil::StatusCallback& callback);
+            const storage::AsyncFileUtil::StatusCallback& callback);
   virtual ~WriteFile();
 
   // Operation overrides.
@@ -55,7 +55,7 @@ class WriteFile : public Operation {
   scoped_refptr<net::IOBuffer> buffer_;
   int64 offset_;
   int length_;
-  const fileapi::AsyncFileUtil::StatusCallback callback_;
+  const storage::AsyncFileUtil::StatusCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(WriteFile);
 };

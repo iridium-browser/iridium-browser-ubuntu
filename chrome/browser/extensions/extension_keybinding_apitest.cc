@@ -23,6 +23,7 @@
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/test/result_catcher.h"
 
 using content::WebContents;
 
@@ -51,8 +52,33 @@ class CommandsApiTest : public ExtensionApiTest {
   bool IsGrantedForTab(const Extension* extension,
                        const content::WebContents* web_contents) {
     return extension->permissions_data()->HasAPIPermissionForTab(
-        SessionID::IdForTab(web_contents), APIPermission::kTab);
+        SessionTabHelper::IdForTab(web_contents), APIPermission::kTab);
   }
+
+#if defined(OS_CHROMEOS)
+  void RunChromeOSConversionTest(const std::string& extension_path) {
+    // Setup the environment.
+    ASSERT_TRUE(test_server()->Start());
+    ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
+    ASSERT_TRUE(RunExtensionTest(extension_path)) << message_;
+    ui_test_utils::NavigateToURL(
+        browser(), test_server()->GetURL("files/extensions/test_file.txt"));
+
+    ResultCatcher catcher;
+
+    // Send all expected keys (Search+Shift+{Left, Up, Right, Down}).
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_LEFT, false, true, false, true));
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_UP, false, true, false, true));
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_RIGHT, false, true, false, true));
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_DOWN, false, true, false, true));
+
+    ASSERT_TRUE(catcher.GetNextResult());
+  }
+#endif  // OS_CHROMEOS
 };
 
 // Test the basic functionality of the Keybinding API:
@@ -700,5 +726,56 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest,
   EXPECT_TRUE(accelerator.IsShiftDown());
   EXPECT_TRUE(accelerator.IsAltDown());
 }
+
+//
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+// TODO(dtseng): Test times out on Chrome OS debug. See http://crbug.com/412456.
+#define MAYBE_ContinuePropagation DISABLED_ContinuePropagation
+#else
+#define MAYBE_ContinuePropagation ContinuePropagation
+#endif
+
+IN_PROC_BROWSER_TEST_F(CommandsApiTest, MAYBE_ContinuePropagation) {
+  // Setup the environment.
+  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
+  ASSERT_TRUE(RunExtensionTest("keybinding/continue_propagation")) << message_;
+  ui_test_utils::NavigateToURL(
+      browser(), test_server()->GetURL("files/extensions/test_file.txt"));
+
+  ResultCatcher catcher;
+
+  // Activate the shortcut (Ctrl+Shift+F). The page should capture the
+  // keystroke and not the extension since |onCommand| has no event listener
+  // initially.
+  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+      browser(), ui::VKEY_F, true, true, false, false));
+  ASSERT_TRUE(catcher.GetNextResult());
+
+  // Now, the extension should have added an |onCommand| event listener.
+  // Send the same key, but the |onCommand| listener should now receive it.
+  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+      browser(), ui::VKEY_F, true, true, false, false));
+  ASSERT_TRUE(catcher.GetNextResult());
+
+  // The extension should now have removed its |onCommand| event listener.
+  // Finally, the page should again receive the key.
+  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+      browser(), ui::VKEY_F, true, true, false, false));
+  ASSERT_TRUE(catcher.GetNextResult());
+}
+
+// Test is only applicable on Chrome OS.
+#if defined(OS_CHROMEOS)
+// http://crbug.com/410534
+#if defined(USE_OZONE)
+#define MAYBE_ChromeOSConversions DISABLED_ChromeOSConversions
+#else
+#define MAYBE_ChromeOSConversions ChromeOSConversions
+#endif
+IN_PROC_BROWSER_TEST_F(CommandsApiTest, MAYBE_ChromeOSConversions) {
+  RunChromeOSConversionTest("keybinding/chromeos_conversions");
+}
+#endif  // OS_CHROMEOS
 
 }  // namespace extensions

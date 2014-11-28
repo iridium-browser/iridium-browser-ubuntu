@@ -3,17 +3,17 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/common/switches.h"
+#include "extensions/test/extension_test_message_listener.h"
 
 class WindowControlsTest : public extensions::PlatformAppBrowserTest {
  protected:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableAppWindowControls);
+    command_line->AppendSwitch(extensions::switches::kEnableAppWindowControls);
   }
   content::WebContents* GetWebContentsForExtensionWindow(
       const extensions::Extension* extension);

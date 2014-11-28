@@ -11,7 +11,9 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chromeos/login/login_state.h"
+#include "chromeos/network/device_state.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
+#include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_util.h"
@@ -58,6 +60,10 @@ void NetworkConfigMessageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "networkConfig.getManagedProperties",
       base::Bind(&NetworkConfigMessageHandler::GetManagedProperties,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "networkConfig.getShillProperties",
+      base::Bind(&NetworkConfigMessageHandler::GetShillProperties,
                  base::Unretained(this)));
 }
 
@@ -146,9 +152,68 @@ void NetworkConfigMessageHandler::GetPropertiesSuccess(
   return_arg_list.AppendInteger(callback_id);
 
   base::DictionaryValue* network_properties = dictionary.DeepCopy();
+  // Set the 'ServicePath' property for debugging.
   network_properties->SetStringWithoutPathExpansion(
-      ::onc::network_config::kGUID, service_path);
+      "ServicePath", service_path);
+
   return_arg_list.Append(network_properties);
+  InvokeCallback(return_arg_list);
+}
+
+void NetworkConfigMessageHandler::GetShillProperties(
+    const base::ListValue* arg_list) {
+  int callback_id = 0;
+  std::string guid;
+  if (!arg_list->GetInteger(0, &callback_id) ||
+      !arg_list->GetString(1, &guid)) {
+    NOTREACHED();
+  }
+  std::string service_path;
+  if (!GetServicePathFromGuid(guid, &service_path)) {
+    scoped_ptr<base::DictionaryValue> error_data;
+    ErrorCallback(callback_id, "Error.InvalidNetworkGuid", error_data.Pass());
+    return;
+  }
+  NetworkHandler::Get()->network_configuration_handler()->GetProperties(
+      service_path,
+      base::Bind(&NetworkConfigMessageHandler::GetShillPropertiesSuccess,
+                 weak_ptr_factory_.GetWeakPtr(), callback_id),
+      base::Bind(&NetworkConfigMessageHandler::ErrorCallback,
+                 weak_ptr_factory_.GetWeakPtr(), callback_id));
+}
+
+void NetworkConfigMessageHandler::GetShillPropertiesSuccess(
+    int callback_id,
+    const std::string& service_path,
+    const base::DictionaryValue& dictionary) const {
+  scoped_ptr<base::DictionaryValue> dictionary_copy(dictionary.DeepCopy());
+  // Set the 'ServicePath' property for debugging.
+  dictionary_copy->SetStringWithoutPathExpansion("ServicePath", service_path);
+
+  // Get the device properties for debugging.
+  std::string device;
+  dictionary_copy->GetStringWithoutPathExpansion(
+      shill::kDeviceProperty, &device);
+  const DeviceState* device_state =
+      NetworkHandler::Get()->network_state_handler()->GetDeviceState(device);
+  if (device_state) {
+    base::DictionaryValue* device_dictionary =
+        device_state->properties().DeepCopy();
+    dictionary_copy->Set(shill::kDeviceProperty, device_dictionary);
+
+    // Convert IPConfig dictionary to a ListValue.
+    base::ListValue* ip_configs = new base::ListValue;
+    for (base::DictionaryValue::Iterator iter(device_state->ip_configs());
+         !iter.IsAtEnd(); iter.Advance()) {
+      ip_configs->Append(iter.value().DeepCopy());
+    }
+    device_dictionary->SetWithoutPathExpansion(
+        shill::kIPConfigsProperty, ip_configs);
+  }
+
+  base::ListValue return_arg_list;
+  return_arg_list.AppendInteger(callback_id);
+  return_arg_list.Append(dictionary_copy.release());
   InvokeCallback(return_arg_list);
 }
 

@@ -9,7 +9,7 @@
 #include "base/auto_reset.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -313,7 +313,7 @@ bool WebPluginDelegateProxy::Initialize(
       // shouldn't happen, since if we got here the plugin should exist) or the
       // plugin crashed on initialization.
       if (!info_.path.empty()) {
-        render_view_->main_render_frame()->PluginCrashed(
+        render_view_->GetMainRenderFrame()->PluginCrashed(
             info_.path, base::kNullProcessId);
         LOG(ERROR) << "Plug-in crashed on start";
 
@@ -487,7 +487,7 @@ void WebPluginDelegateProxy::OnChannelError() {
     plugin_->Invalidate();
   }
   if (channel_host_.get() && !channel_host_->expecting_shutdown()) {
-    render_view_->main_render_frame()->PluginCrashed(
+    render_view_->GetMainRenderFrame()->PluginCrashed(
         info_.path, channel_host_->peer_pid());
   }
 
@@ -923,13 +923,11 @@ void WebPluginDelegateProxy::OnNotifyIMEStatus(int input_type,
   if (!render_view_)
     return;
 
-  ViewHostMsg_TextInputState_Params p;
-  p.type = static_cast<ui::TextInputType>(input_type);
-  p.mode = ui::TEXT_INPUT_MODE_DEFAULT;
-  p.can_compose_inline = true;
-
-  render_view_->Send(new ViewHostMsg_TextInputStateChanged(
-      render_view_->routing_id(), p));
+  render_view_->Send(new ViewHostMsg_TextInputTypeChanged(
+      render_view_->routing_id(),
+      static_cast<ui::TextInputType>(input_type),
+      ui::TEXT_INPUT_MODE_DEFAULT,
+      true));
 
   ViewHostMsg_SelectionBounds_Params bounds_params;
   bounds_params.anchor_rect = bounds_params.focus_rect = caret_rect;

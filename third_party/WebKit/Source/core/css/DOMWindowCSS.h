@@ -39,6 +39,7 @@
 namespace blink {
 
 class DOMWindowCSS : public RefCountedWillBeGarbageCollected<DOMWindowCSS>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<DOMWindowCSS> create();
 
@@ -48,12 +49,9 @@ public:
     void trace(Visitor*) { }
 
 private:
-    DOMWindowCSS()
-    {
-        ScriptWrappable::init(this);
-    }
+    DOMWindowCSS() { }
 };
 
-}
+} // namespace blink
 
 #endif

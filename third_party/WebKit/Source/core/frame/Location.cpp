@@ -44,7 +44,11 @@ namespace blink {
 Location::Location(LocalFrame* frame)
     : DOMWindowProperty(frame)
 {
-    ScriptWrappable::init(this);
+}
+
+void Location::trace(Visitor* visitor)
+{
+    DOMWindowProperty::trace(visitor);
 }
 
 inline const KURL& Location::url() const

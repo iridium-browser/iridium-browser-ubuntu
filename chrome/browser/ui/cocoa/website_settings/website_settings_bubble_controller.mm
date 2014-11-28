@@ -13,7 +13,6 @@
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #import "chrome/browser/ui/browser_dialogs.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
@@ -23,15 +22,14 @@
 #include "chrome/browser/ui/website_settings/permission_menu_model.h"
 #include "chrome/browser/ui/website_settings/website_settings_utils.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
 #import "ui/base/cocoa/flipped_view.h"
@@ -520,10 +518,7 @@ NSColor* IdentityVerifiedTextColor() {
 // Handler for the link button to revoke user certificate decisions.
 - (void)resetCertificateDecisions:(id)sender {
   DCHECK(resetDecisionsButton_);
-  ChromeSSLHostStateDelegate* delegate =
-      presenter_->chrome_ssl_host_state_delegate();
-  DCHECK(delegate);
-  delegate->RevokeUserDecisionsHard(presenter_->site_url().host());
+  presenter_->OnRevokeSSLErrorBypassButtonPressed();
   [self close];
 }
 
@@ -531,7 +526,7 @@ NSColor* IdentityVerifiedTextColor() {
 - (void)showHelpPage:(id)sender {
   webContents_->OpenURL(content::OpenURLParams(
       GURL(chrome::kPageInfoHelpCenterURL), content::Referrer(),
-      NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK, false));
+      NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
 }
 
 // Create the contents of the Connection tab and add it to the given tab view.

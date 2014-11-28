@@ -32,6 +32,7 @@
 #define WebEmbeddedWorkerImpl_h
 
 #include "public/web/WebContentSecurityPolicy.h"
+#include "public/web/WebDevToolsAgentClient.h"
 #include "public/web/WebEmbeddedWorker.h"
 #include "public/web/WebEmbeddedWorkerStartData.h"
 #include "public/web/WebFrameClient.h"
@@ -41,12 +42,14 @@ namespace blink {
 class ServiceWorkerGlobalScopeProxy;
 class WebServiceWorkerNetworkProvider;
 class WebView;
+class WorkerInspectorProxy;
 class WorkerScriptLoader;
 class WorkerThread;
 
 class WebEmbeddedWorkerImpl FINAL
     : public WebEmbeddedWorker
-    , public WebFrameClient {
+    , public WebFrameClient
+    , public WebDevToolsAgentClient {
     WTF_MAKE_NONCOPYABLE(WebEmbeddedWorkerImpl);
 public:
     WebEmbeddedWorkerImpl(
@@ -64,10 +67,12 @@ public:
     virtual void resumeAfterDownload() OVERRIDE;
     virtual void terminateWorkerContext() OVERRIDE;
     virtual void resumeWorkerContext() OVERRIDE;
-    virtual void attachDevTools() OVERRIDE;
-    virtual void reattachDevTools(const WebString& savedState) OVERRIDE;
+    virtual void attachDevTools(const WebString& hostId) OVERRIDE;
+    virtual void reattachDevTools(const WebString& hostId, const WebString& savedState) OVERRIDE;
     virtual void detachDevTools() OVERRIDE;
     virtual void dispatchDevToolsMessage(const WebString&) OVERRIDE;
+
+    void postMessageToPageInspector(const WTF::String&);
 
 private:
     class Loader;
@@ -81,6 +86,12 @@ private:
         const WebURLResponse& redirectResponse) OVERRIDE;
     virtual void didFinishDocumentLoad(WebLocalFrame*) OVERRIDE;
 
+    // WebDevToolsAgentClient overrides.
+    virtual void sendMessageToInspectorFrontend(const WebString&) OVERRIDE;
+    virtual void saveAgentRuntimeState(const WebString&) OVERRIDE;
+    virtual void resumeStartup() OVERRIDE;
+
+    void startScriptLoader(WebLocalFrame*);
     void onScriptLoaderFinished();
     void startWorkerThread();
 
@@ -102,6 +113,7 @@ private:
     RefPtr<WorkerThread> m_workerThread;
     OwnPtr<LoaderProxy> m_loaderProxy;
     OwnPtr<ServiceWorkerGlobalScopeProxy> m_workerGlobalScopeProxy;
+    OwnPtr<WorkerInspectorProxy> m_workerInspectorProxy;
 
     // 'shadow page' - created to proxy loading requests from the worker.
     // Both WebView and WebFrame objects are close()'ed (where they're
@@ -112,11 +124,19 @@ private:
 
     bool m_askedToTerminate;
 
+    enum WaitingForDebuggerState {
+        WaitingForDebuggerBeforeLoadingScript,
+        WaitingForDebuggerAfterScriptLoaded,
+        NotWaitingForDebugger
+    };
+
     enum {
         DontPauseAfterDownload,
         DoPauseAfterDownload,
         IsPausedAfterDownload
     } m_pauseAfterDownloadState;
+
+    WaitingForDebuggerState m_waitingForDebuggerState;
 };
 
 } // namespace blink

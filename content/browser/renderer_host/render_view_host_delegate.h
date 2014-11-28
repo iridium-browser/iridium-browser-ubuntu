@@ -13,7 +13,6 @@
 #include "base/strings/string16.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/common/content_export.h"
-#include "content/public/common/page_transition_types.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "ui/base/window_open_disposition.h"
@@ -110,8 +109,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
                            int32 page_id,
                            const PageState& state) {}
 
-  // The destination URL has changed should be updated
-  virtual void UpdateTargetURL(int32 page_id, const GURL& url) {}
+  // The destination URL has changed should be updated.
+  virtual void UpdateTargetURL(const GURL& url) {}
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -282,6 +281,13 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // TODO(ajwong): Remove once the main frame RenderFrameHost is no longer
   // created by the RenderViewHost.
   virtual FrameTree* GetFrameTree();
+
+  // Optional state storage for if the Virtual Keyboard has been requested by
+  // this page or not. If it has, this can be used to suppress things like the
+  // link disambiguation dialog, which doesn't interact well with the virtual
+  // keyboard.
+  virtual void SetIsVirtualKeyboardRequested(bool requested) {}
+  virtual bool IsVirtualKeyboardRequested();
 
  protected:
   virtual ~RenderViewHostDelegate() {}

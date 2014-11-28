@@ -77,6 +77,26 @@ this.dumpSelectedProcessMmaps_ = function() {
   rootUi.showTab('mm');
 };
 
+this.showAndroidProvisionDialog_ = function() {
+  $("#android_provision_dialog").dialog({
+      modal: true,
+      width: '50em',
+       buttons: {
+        Continue: function() {
+          devices.initializeSelectedDevice(true);
+          $(this).dialog('close');
+          rootUi.showDialog(
+              'Wait device to complete reboot (~30 s) then retry.',
+              'Device rebooting');
+          processes.clear();
+        },
+        Cancel: function() {
+          $(this).dialog('close');
+        }
+      }
+  });
+};
+
 this.showTracingDialog_ = function() {
   if (!this.selProcUri_)
     return alert('Must select a process!');
@@ -92,13 +112,8 @@ this.startTracingSelectedProcess_ = function() {
   $('#ps-tracer-dialog').dialog('close');
 
   if (traceNativeHeap && !devices.getSelectedDevice().isNativeTracingEnabled) {
-    var shouldProvision = confirm('Native heap tracing is not enabled.\n' +
-        'Do you want to enable it (will cause a reboot on Android)?');
-    if (shouldProvision) {
-      devices.initializeSelectedDevice(true);
-      alert('Wait device to complete reboot and then retry.');
+      this.showAndroidProvisionDialog_();
       return;
-    }
   }
 
   var postArgs = {interval: $('#ps-tracer-period').val(),
@@ -287,6 +302,13 @@ this.redraw = function() {
     this.redrawDevStats_();
   else
     this.redrawPsStats_();
+};
+
+this.clear = function() {
+  this.stopSelectedProcessStats();
+  $('#device_tabs').tabs('option', 'active', 0);
+  this.psTableData_ = new google.visualization.DataTable();
+  this.redraw();
 };
 
 $(document).ready(this.onDomReady_.bind(this));

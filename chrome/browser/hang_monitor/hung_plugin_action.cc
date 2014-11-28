@@ -10,9 +10,9 @@
 #include "base/version.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/webplugininfo.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/win/hwnd_util.h"
 
@@ -83,10 +83,9 @@ bool HungPluginAction::OnHungWindowDetected(HWND hung_window,
   if (top_level_window_process_id != hung_window_process_id) {
     base::string16 plugin_name;
     base::string16 plugin_version;
-    GetPluginNameAndVersion(hung_window,
-                            top_level_window_process_id,
-                            &plugin_name,
-                            &plugin_version);
+
+    content::PluginService::GetInstance()->GetPluginInfoFromWindow(
+        hung_window, &plugin_name, &plugin_version);
     if (plugin_name.empty()) {
       plugin_name = l10n_util::GetStringUTF16(IDS_UNKNOWN_PLUGIN_NAME);
     } else if (kGTalkPluginName == plugin_name) {
@@ -158,30 +157,6 @@ void HungPluginAction::OnWindowResponsive(HWND window) {
                       reinterpret_cast<WNDENUMPROC>(DismissMessageBox),
                       NULL);
   }
-}
-
-bool HungPluginAction::GetPluginNameAndVersion(HWND plugin_window,
-                                               DWORD browser_process_id,
-                                               base::string16* plugin_name,
-                                               base::string16* plugin_version) {
-  DCHECK(plugin_name);
-  DCHECK(plugin_version);
-  HWND window_to_check = plugin_window;
-  while (NULL != window_to_check) {
-    DWORD process_id = 0;
-    GetWindowThreadProcessId(window_to_check, &process_id);
-    if (process_id == browser_process_id) {
-      // If we have reached a window the that belongs to the browser process
-      // we have gone too far.
-      return false;
-    }
-    if (content::PluginService::GetInstance()->GetPluginInfoFromWindow(
-            window_to_check, plugin_name, plugin_version)) {
-      return true;
-    }
-    window_to_check = GetParent(window_to_check);
-  }
-  return false;
 }
 
 // static

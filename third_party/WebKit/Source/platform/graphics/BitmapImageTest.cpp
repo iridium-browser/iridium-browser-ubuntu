@@ -72,6 +72,7 @@ public:
     void setCurrentFrame(size_t frame) { m_image->m_currentFrame = frame; }
     size_t frameDecodedSize(size_t frame) { return m_image->m_frames[frame].m_frameBytes; }
     size_t decodedFramesCount() const { return m_image->m_frames.size(); }
+    void resetDecoder() { return m_image->resetDecoder(); }
 
     void loadImage(const char* fileName)
     {
@@ -103,6 +104,11 @@ public:
     void advanceAnimation()
     {
         m_image->advanceAnimation(0);
+    }
+
+    PassRefPtr<Image> imageForDefaultFrame()
+    {
+        return m_image->imageForDefaultFrame();
     }
 
 protected:
@@ -185,21 +191,55 @@ TEST_F(BitmapImageTest, jpegHasColorProfile)
 {
     loadImage("/LayoutTests/fast/images/resources/icc-v2-gbr.jpg");
     EXPECT_EQ(1u, decodedFramesCount());
+    EXPECT_EQ(227700u, decodedSize());
     EXPECT_TRUE(m_image->hasColorProfile());
+
+    resetDecoder();
+    destroyDecodedData(true);
+
+    loadImage("/LayoutTests/fast/images/resources/green.jpg");
+    EXPECT_EQ(1u, decodedFramesCount());
+    EXPECT_EQ(1024u, decodedSize());
+    EXPECT_FALSE(m_image->hasColorProfile());
 }
 
 TEST_F(BitmapImageTest, pngHasColorProfile)
 {
     loadImage("/LayoutTests/fast/images/resources/palatted-color-png-gamma-one-color-profile.png");
     EXPECT_EQ(1u, decodedFramesCount());
+    EXPECT_EQ(65536u, decodedSize());
     EXPECT_TRUE(m_image->hasColorProfile());
+
+    resetDecoder();
+    destroyDecodedData(true);
+
+    loadImage("/LayoutTests/fast/images/resources/green.jpg");
+    EXPECT_EQ(1u, decodedFramesCount());
+    EXPECT_EQ(1024u, decodedSize());
+    EXPECT_FALSE(m_image->hasColorProfile());
 }
 
 TEST_F(BitmapImageTest, webpHasColorProfile)
 {
     loadImage("/LayoutTests/fast/images/resources/webp-color-profile-lossy.webp");
     EXPECT_EQ(1u, decodedFramesCount());
+    EXPECT_EQ(2560000u, decodedSize());
     EXPECT_TRUE(m_image->hasColorProfile());
+
+    destroyDecodedData(true);
+    resetDecoder();
+
+    loadImage("/LayoutTests/fast/images/resources/test.webp");
+    EXPECT_EQ(1u, decodedFramesCount());
+    EXPECT_EQ(65536u, decodedSize());
+    EXPECT_FALSE(m_image->hasColorProfile());
+}
+
+TEST_F(BitmapImageTest, icoHasWrongFrameDimensions)
+{
+    loadImage("/LayoutTests/fast/images/resources/wrong-frame-dimensions.ico");
+    // This call would cause crash without fix for 408026
+    imageForDefaultFrame();
 }
 
 #endif // USE(QCMSLIB)

@@ -13,10 +13,13 @@
 #include "base/values.h"
 #include "chrome/browser/notifications/notification_delegate.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
-#include "ui/gfx/image/image.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_types.h"
 #include "url/gurl.h"
+
+namespace gfx {
+class Image;
+}
 
 // Representation of a notification to be shown to the user.
 // On non-Ash platforms these are rendered as HTML, sometimes described by a
@@ -28,17 +31,6 @@ class Notification : public message_center::Notification {
   // creates an HTML representation using a data: URL for display.
   Notification(const GURL& origin_url,
                const GURL& icon_url,
-               const base::string16& title,
-               const base::string16& body,
-               blink::WebTextDirection dir,
-               const base::string16& display_source,
-               const base::string16& replace_id,
-               NotificationDelegate* delegate);
-
-  // Initializes a notification with text content and an icon image. Currently
-  // only used on Ash. Does not generate content_url_.
-  Notification(const GURL& origin_url,
-               const gfx::Image& icon,
                const base::string16& title,
                const base::string16& body,
                blink::WebTextDirection dir,
@@ -63,9 +55,6 @@ class Notification : public message_center::Notification {
   virtual ~Notification();
   Notification& operator=(const Notification& notification);
 
-  // The URL (may be data:) containing the contents for the notification.
-  const GURL& content_url() const { return content_url_; }
-
   // The origin URL of the script which requested the notification.
   const GURL& origin_url() const { return origin_url_; }
 
@@ -84,12 +73,6 @@ class Notification : public message_center::Notification {
 
   // Id of the delegate embedded inside this instance.
   std::string delegate_id() const { return delegate()->id(); }
-  int process_id() const { return delegate()->process_id(); }
-
-  content::WebContents* GetWebContents() const {
-    return delegate()->GetWebContents();
-  }
-  void DoneRendering() { delegate()->ReleaseRenderViewHost(); }
 
   NotificationDelegate* delegate() const { return delegate_.get(); }
 
@@ -101,19 +84,12 @@ class Notification : public message_center::Notification {
   // to have a non NULL RenderViewHost.
   GURL icon_url_;
 
-  // The URL of the HTML content of the toast (may be a data: URL for simple
-  // string-based notifications).
-  GURL content_url_;
-
   // The URLs of the button images for a rich notification.
   GURL button_one_icon_url_;
   GURL button_two_icon_url_;
 
   // The URL of a large image to be displayed for a a rich notification.
   GURL image_url_;
-
-  // The URL of a small image to be displayed for a a rich notification.
-  GURL small_image_url_;
 
   // The user-supplied replace ID for the notification.
   base::string16 replace_id_;

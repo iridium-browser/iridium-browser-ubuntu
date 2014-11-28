@@ -106,14 +106,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kSafeBrowsingDownloadFeedbackEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSafeBrowsingReportingEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
       prefs::kSafeBrowsingProceedAnywayDisabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -193,9 +185,9 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
+
   data_reduction_proxy::RegisterSyncableProfilePrefs(registry);
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
+
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_IOS)
   // Preferences related to the avatar bubble and user manager tutorials.
   registry->RegisterIntegerPref(

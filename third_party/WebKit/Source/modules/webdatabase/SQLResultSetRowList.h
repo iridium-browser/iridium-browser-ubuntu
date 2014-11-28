@@ -38,6 +38,7 @@
 namespace blink {
 
 class SQLResultSetRowList : public RefCountedWillBeGarbageCollectedFinalized<SQLResultSetRowList>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<SQLResultSetRowList> create() { return adoptRefWillBeNoop(new SQLResultSetRowList); }
     void trace(Visitor*) { }
@@ -51,15 +52,12 @@ public:
     unsigned length() const;
 
 private:
-    SQLResultSetRowList()
-    {
-        ScriptWrappable::init(this);
-    }
+    SQLResultSetRowList() { }
 
     Vector<String> m_columns;
     Vector<SQLValue> m_result;
 };
 
-}
+} // namespace blink
 
-#endif
+#endif // SQLResultSetRowList_h

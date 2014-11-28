@@ -77,7 +77,7 @@ static PassRefPtrWillBeRawPtr<AnimatableValue> createFromLength(const Length& le
     case FillAvailable:
     case FitContent:
         return AnimatableUnknown::create(CSSPrimitiveValue::create(length, 1));
-    case Undefined:
+    case MaxSizeNone:
         return AnimatableUnknown::create(CSSValueNone);
     case ExtendToZoom: // Does not apply to elements.
     case DeviceWidth:
@@ -323,9 +323,9 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
     case CSSPropertyWebkitBoxShadow:
         return AnimatableShadow::create(style.boxShadow());
     case CSSPropertyClip:
-        if (style.hasClip())
-            return createFromLengthBox(style.clip(), style);
-        return AnimatableUnknown::create(CSSPrimitiveValue::create(CSSValueAuto));
+        if (style.hasAutoClip())
+            return AnimatableUnknown::create(CSSPrimitiveValue::create(CSSValueAuto));
+        return createFromLengthBox(style.clip(), style);
     case CSSPropertyColor:
         return createFromColor(property, style);
     case CSSPropertyFillOpacity:

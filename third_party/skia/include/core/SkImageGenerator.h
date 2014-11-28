@@ -8,8 +8,8 @@
 #ifndef SkImageGenerator_DEFINED
 #define SkImageGenerator_DEFINED
 
-#include "SkImageInfo.h"
 #include "SkColor.h"
+#include "SkImageInfo.h"
 
 class SkBitmap;
 class SkData;
@@ -34,12 +34,6 @@ class SkImageGenerator;
  *  @return true iff successful.
  */
 SK_API bool SkInstallDiscardablePixelRef(SkImageGenerator*, SkBitmap* destination);
-
-/**
- *  Purges all unlocked discardable memory in Skia's global
- *  discardable memory pool.
- */
-SK_API void SkPurgeGlobalDiscardableMemoryPool();
 
 
 /**
@@ -127,7 +121,8 @@ public:
      *  associated YUV data into those planes of memory supplied by the caller. It should validate
      *  that the sizes match what it expected. If the sizes do not match, it should return false.
      */
-    bool getYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3]);
+    bool getYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
+                       SkYUVColorSpace* colorSpace);
 
 protected:
     virtual SkData* onRefEncodedData();
@@ -136,6 +131,8 @@ protected:
                              void* pixels, size_t rowBytes,
                              SkPMColor ctable[], int* ctableCount);
     virtual bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3]);
+    virtual bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
+                                 SkYUVColorSpace* colorSpace);
 };
 
 #endif  // SkImageGenerator_DEFINED

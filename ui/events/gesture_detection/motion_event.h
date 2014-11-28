@@ -40,8 +40,9 @@ class GESTURE_DETECTION_EXPORT MotionEvent {
     BUTTON_FORWARD = 1 << 4,
   };
 
-  // The implementer promises that |GetPointerId()| will never exceed this.
-  enum { MAX_POINTER_ID = 31 };
+  // The implementer promises that |GetPointerId()| will never exceed
+  // MAX_POINTER_ID.
+  enum { MAX_POINTER_ID = 31, MAX_TOUCH_POINT_COUNT = 12 };
 
   virtual ~MotionEvent() {}
 
@@ -57,9 +58,12 @@ class GESTURE_DETECTION_EXPORT MotionEvent {
   virtual float GetRawX(size_t pointer_index) const = 0;
   virtual float GetRawY(size_t pointer_index) const = 0;
   virtual float GetTouchMajor(size_t pointer_index) const = 0;
+  virtual float GetTouchMinor(size_t pointer_index) const = 0;
+  virtual float GetOrientation(size_t pointer_index) const = 0;
   virtual float GetPressure(size_t pointer_index) const = 0;
   virtual ToolType GetToolType(size_t pointer_index) const = 0;
   virtual int GetButtonState() const = 0;
+  virtual int GetFlags() const = 0;
   virtual base::TimeTicks GetEventTime() const = 0;
 
   // Optional historical data, default implementation provides an empty history.
@@ -75,14 +79,20 @@ class GESTURE_DETECTION_EXPORT MotionEvent {
   virtual scoped_ptr<MotionEvent> Clone() const = 0;
   virtual scoped_ptr<MotionEvent> Cancel() const = 0;
 
-  // Utility accessor methods for convenience.
   float GetX() const { return GetX(0); }
   float GetY() const { return GetY(0); }
   float GetRawX() const { return GetRawX(0); }
   float GetRawY() const { return GetRawY(0); }
   float GetRawOffsetX() const { return GetRawX() - GetX(); }
   float GetRawOffsetY() const { return GetRawY() - GetY(); }
+
   float GetTouchMajor() const { return GetTouchMajor(0); }
+  float GetTouchMinor() const { return GetTouchMinor(0); }
+
+  // Returns the orientation of the major axis clockwise from vertical, in
+  // radians. The return value lies in [-PI/2, PI/2].
+  float GetOrientation() const { return GetOrientation(0); }
+
   float GetPressure() const { return GetPressure(0); }
   ToolType GetToolType() const { return GetToolType(0); }
 

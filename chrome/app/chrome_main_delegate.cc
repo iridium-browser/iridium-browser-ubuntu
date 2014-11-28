@@ -35,15 +35,18 @@
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "components/component_updater/component_updater_paths.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
+#include "extensions/common/constants.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
 #include <atlbase.h>
 #include <malloc.h>
 #include <algorithm>
+#include "chrome/app/close_handle_hook_win.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/terminate_on_heap_corruption_experiment_win.h"
 #include "sandbox/win/src/sandbox.h"
@@ -57,15 +60,15 @@
 #include "chrome/browser/mac/relauncher.h"
 #include "chrome/common/mac/cfbundle_blocker.h"
 #include "chrome/common/mac/objc_zombie.h"
-#include "components/breakpad/app/breakpad_mac.h"
+#include "components/crash/app/breakpad_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
 
 #if defined(OS_POSIX)
 #include <locale.h>
 #include <signal.h>
-#include "chrome/app/chrome_breakpad_client.h"
-#include "components/breakpad/app/breakpad_client.h"
+#include "chrome/app/chrome_crash_reporter_client.h"
+#include "components/crash/app/crash_reporter_client.h"
 #endif
 
 #if !defined(DISABLE_NACL) && defined(OS_LINUX)
@@ -95,7 +98,7 @@
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "components/breakpad/app/breakpad_linux.h"
+#include "components/crash/app/breakpad_linux.h"
 #endif
 
 #if defined(OS_LINUX)
@@ -125,8 +128,8 @@ base::LazyInstance<chrome::ChromeContentPluginClient>
 #endif
 
 #if defined(OS_POSIX)
-base::LazyInstance<chrome::ChromeBreakpadClient>::Leaky
-    g_chrome_breakpad_client = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<chrome::ChromeCrashReporterClient>::Leaky
+    g_chrome_crash_client = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 extern int NaClMain(const content::MainFunctionParams&);
@@ -416,6 +419,8 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
     *exit_code = 1;
     return true;
   }
+
+  InstallCloseHandleHooks();
 #endif
 
   chrome::RegisterPathProvider();
@@ -425,6 +430,9 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 #if !defined(DISABLE_NACL) && defined(OS_LINUX)
   nacl::RegisterPathProvider();
 #endif
+
+  ContentSettingsPattern::SetNonWildcardDomainNonPortScheme(
+      extensions::kExtensionScheme);
 
 // No support for ANDROID yet as DiagnosticsController needs wchar support.
 // TODO(gspencer): That's not true anymore, or at least there are no w-string
@@ -633,7 +641,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
 #if defined(OS_POSIX)
-  breakpad::SetBreakpadClient(g_chrome_breakpad_client.Pointer());
+  crash_reporter::SetCrashReporterClient(g_chrome_crash_client.Pointer());
 #endif
 
 #if defined(OS_MACOSX)
@@ -836,6 +844,10 @@ void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
   // Android doesn't use InitChromeLogging, so we close the log file manually.
   logging::CloseLogFile();
 #endif  // !defined(OS_ANDROID)
+
+#if defined(OS_WIN)
+  RemoveCloseHandleHooks();
+#endif
 }
 
 #if defined(OS_MACOSX)

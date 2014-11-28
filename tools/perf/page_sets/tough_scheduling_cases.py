@@ -9,6 +9,9 @@ class ToughSchedulingCasesPage(page_module.Page):
 
   def __init__(self, url, page_set):
     super(ToughSchedulingCasesPage, self).__init__(url=url, page_set=page_set)
+    self.credentials_path = 'data/credentials.json'
+    self.user_agent_type = 'mobile'
+    self.archive_data_file = 'data/tough_scheduling_cases.json'
 
   def RunSmoothness(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
@@ -249,7 +252,8 @@ class Page16(ToughSchedulingCasesPage):
       url='file://tough_scheduling_cases/raf.html?heavy_first_frame',
       page_set=page_set)
 
-    self.synthetic_delays = {'cc.BeginMainFrame': {'target_duration': 0.15}}
+    self.synthetic_delays = {'cc.BeginMainFrame': {'target_duration': 0.15,
+                                                   'mode': 'oneshot'}}
 
 
 class Page17(ToughSchedulingCasesPage):
@@ -371,7 +375,11 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
   """ Tough scheduler latency test cases """
 
   def __init__(self):
-    super(ToughSchedulingCasesPageSet, self).__init__()
+    super(ToughSchedulingCasesPageSet, self).__init__(
+        credentials_path='data/credentials.json',
+        user_agent_type='mobile',
+        archive_data_file='data/tough_scheduling_cases.json',
+        bucket=page_set_module.INTERNAL_BUCKET)
 
     # Why: Simple scrolling baseline
     self.AddPage(ToughSchedulingCasesPage(
@@ -381,8 +389,10 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
     self.AddPage(Page2(self))
     self.AddPage(Page3(self))
     self.AddPage(Page4(self))
-    self.AddPage(Page5(self))
-    # self.AddPage(Page6(self)) Flaky crbug.com/368532
+    # Disabled until crbug.com/413829 is fixed.
+    # self.AddPage(Page5(self))
+    # Disabled because of crbug.com/413829 and flakiness crbug.com/368532
+    # self.AddPage(Page6(self))
     # Why: Touch handler scrolling baseline
     self.AddPage(ToughSchedulingCasesPage(
       'file://tough_scheduling_cases/touch_handler_scrolling.html',
@@ -401,8 +411,9 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
     self.AddPage(ToughSchedulingCasesPage(
       'file://tough_scheduling_cases/raf_canvas.html',
       self))
-    self.AddPage(Page13(self))
-    # Disabled for flakiness. See 368532
+    # Disabled until crbug.com/413829 is fixed.
+    # self.AddPage(Page13(self))
+    # Disabled because of crbug.com/413829 and flakiness crbug.com/368532
     # self.AddPage(Page14(self))
     self.AddPage(Page15(self))
     self.AddPage(Page16(self))
@@ -465,3 +476,10 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
       page_set=self))
     # Why: For measuring the latency of scroll-synchronized effects.
     self.AddPage(SynchronizedScrollOffsetPage(page_set=self))
+    # Why: Good examples of poor initial scrolling
+    self.AddPage(ToughSchedulingCasesPage(
+      'http://www.latimes.com',
+      self))
+    self.AddPage(ToughSchedulingCasesPage(
+      'http://m.espn.go.com/nhl/rankings',
+       self))

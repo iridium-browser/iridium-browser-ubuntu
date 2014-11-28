@@ -22,11 +22,9 @@
              what you're doing! -->
         <if expr="is_macosx">
           <include name="IDR_STATUS_TRAY_ICON" file="google_chrome/product_logo_22_mono.png" type="BINDATA" />
-          <include name="IDR_STATUS_TRAY_ICON_PRESSED" file="google_chrome/product_logo_22_mono_invert.png" type="BINDATA" />
         </if>
         <if expr="not is_macosx">
           <include name="IDR_STATUS_TRAY_ICON" file="google_chrome/product_logo_22.png" type="BINDATA" />
-          <include name="IDR_STATUS_TRAY_ICON_PRESSED" file="google_chrome/product_logo_22.png" type="BINDATA" />
         </if>
       </if>
       <if expr="not _google_chrome">
@@ -37,11 +35,9 @@
              what you're doing! -->
         <if expr="is_macosx">
           <include name="IDR_STATUS_TRAY_ICON" file="chromium/product_logo_22_mono.png" type="BINDATA" />
-          <include name="IDR_STATUS_TRAY_ICON_PRESSED" file="chromium/product_logo_22_mono_invert.png" type="BINDATA" />
         </if>
         <if expr="not is_macosx">
           <include name="IDR_STATUS_TRAY_ICON" file="chromium/product_logo_22.png" type="BINDATA" />
-          <include name="IDR_STATUS_TRAY_ICON_PRESSED" file="chromium/product_logo_22.png" type="BINDATA" />
         </if>
       </if>
       <if expr="is_win">
@@ -117,6 +113,11 @@
         <include name="IDR_APPS_FOLDER_32" file="mac/apps_folder_32.png" type="BINDATA" />
         <include name="IDR_APPS_FOLDER_OVERLAY_128" file="mac/apps_folder_overlay_128.png" type="BINDATA" />
         <include name="IDR_APPS_FOLDER_OVERLAY_512" file="mac/apps_folder_overlay_512.png" type="BINDATA" />
+      </if>
+      <if expr="chromeos">
+        <include name="IDR_FONT_ROBOTO_THIN" file="Roboto-Thin.ttf" type="BINDATA" />
+        <include name="IDR_FONT_ROBOTO_LIGHT" file="Roboto-Light.ttf" type="BINDATA" />
+        <include name="IDR_FONT_ROBOTO_BOLD" file="Roboto-Bold.ttf" type="BINDATA" />
       </if>
     </includes>
   </release>

@@ -114,6 +114,13 @@
         'SK_ARM_HAS_OPTIONAL_NEON',
       ],
     }],
+
+    # Enable feedback-directed optimisation for skia when building in android.
+    [ 'android_webview_build == 1', {
+      'aosp_build_settings': {
+        'LOCAL_FDO_SUPPORT': 'true',
+      },
+    }],
   ],
 
   'variables': {
@@ -130,11 +137,6 @@
           'skia_support_pdf': 1,
         }],
       ],
-      # TODO(scottmg): http://crbug.com/177306
-      'clang_warning_flags': [
-        # Don't warn about string->bool used in asserts.
-        '-Wstring-conversion',
-      ]
     },
     'skia_support_gpu': '<(skia_support_gpu)',
     'skia_support_pdf': '<(skia_support_pdf)',

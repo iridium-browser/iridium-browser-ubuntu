@@ -14,15 +14,15 @@
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/net_errors.h"
-#include "webkit/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_context.h"
 
-using webkit_blob::FileStreamReader;
+using storage::FileStreamReader;
 
 namespace {
 
 // Called on the IO thread.
 MTPDeviceAsyncDelegate* GetMTPDeviceDelegate(
-    const fileapi::FileSystemURL& url) {
+    const storage::FileSystemURL& url) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   return MTPDeviceMapService::GetInstance()->GetMTPDeviceAsyncDelegate(
       url.filesystem_id());
@@ -41,7 +41,9 @@ void CallInt64CompletionCallbackWithPlatformFileError(
 }
 
 void ReadBytes(
-    const fileapi::FileSystemURL& url, net::IOBuffer* buf, int64 offset,
+    const storage::FileSystemURL& url,
+    const scoped_refptr<net::IOBuffer>& buf,
+    int64 offset,
     int buf_len,
     const MTPDeviceAsyncDelegate::ReadBytesSuccessCallback& success_callback,
     const net::CompletionCallback& error_callback) {
@@ -53,7 +55,7 @@ void ReadBytes(
 
   delegate->ReadBytes(
       url.path(),
-      make_scoped_refptr(buf),
+      buf,
       offset,
       buf_len,
       success_callback,
@@ -63,8 +65,8 @@ void ReadBytes(
 }  // namespace
 
 MTPFileStreamReader::MTPFileStreamReader(
-    fileapi::FileSystemContext* file_system_context,
-    const fileapi::FileSystemURL& url,
+    storage::FileSystemContext* file_system_context,
+    const storage::FileSystemURL& url,
     int64 initial_offset,
     const base::Time& expected_modification_time,
     bool do_media_header_validation)
@@ -102,10 +104,16 @@ int MTPFileStreamReader::Read(net::IOBuffer* buf, int buf_len,
       header_buf_len = net::kMaxBytesToSniff;
     }
 
-    ReadBytes(url_, header_buf, 0, header_buf_len,
+    ReadBytes(url_,
+              header_buf.get(),
+              0,
+              header_buf_len,
               base::Bind(&MTPFileStreamReader::FinishValidateMediaHeader,
-                         weak_factory_.GetWeakPtr(), header_buf,
-                         make_scoped_refptr(buf), buf_len, callback),
+                         weak_factory_.GetWeakPtr(),
+                         header_buf,
+                         make_scoped_refptr(buf),
+                         buf_len,
+                         callback),
               callback);
     return net::ERR_IO_PENDING;
   }

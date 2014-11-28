@@ -27,6 +27,7 @@
 #include "chrome/browser/sync/glue/extension_backed_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_setting_data_type_controller.h"
+#include "chrome/browser/sync/glue/history_delete_directives_data_type_controller.h"
 #include "chrome/browser/sync/glue/local_device_info_provider_impl.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
 #include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
@@ -56,6 +57,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_manager_impl.h"
 #include "components/sync_driver/data_type_manager_observer.h"
+#include "components/sync_driver/device_info_data_type_controller.h"
 #include "components/sync_driver/generic_change_processor.h"
 #include "components/sync_driver/proxy_data_type_controller.h"
 #include "components/sync_driver/shared_change_processor.h"
@@ -106,6 +108,7 @@ using browser_sync::ChromeReportUnrecoverableError;
 using browser_sync::ExtensionBackedDataTypeController;
 using browser_sync::ExtensionDataTypeController;
 using browser_sync::ExtensionSettingDataTypeController;
+using browser_sync::HistoryDeleteDirectivesDataTypeController;
 using browser_sync::PasswordDataTypeController;
 using browser_sync::SearchEngineDataTypeController;
 using browser_sync::SessionDataTypeController;
@@ -120,6 +123,7 @@ using sync_driver::DataTypeErrorHandler;
 using sync_driver::DataTypeManager;
 using sync_driver::DataTypeManagerImpl;
 using sync_driver::DataTypeManagerObserver;
+using sync_driver::DeviceInfoDataTypeController;
 using sync_driver::ProxyDataTypeController;
 using sync_driver::SharedChangeProcessor;
 using sync_driver::UIDataTypeController;
@@ -183,6 +187,13 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
     syncer::ModelTypeSet disabled_types,
     syncer::ModelTypeSet enabled_types,
     ProfileSyncService* pss) {
+  // TODO(stanisc): can DEVICE_INFO be one of disabled datatypes?
+  pss->RegisterDataTypeController(new DeviceInfoDataTypeController(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+      base::Bind(&ChromeReportUnrecoverableError),
+      this,
+      pss->GetLocalDeviceInfoProvider()));
+
   // Autofill sync is enabled by default.  Register unless explicitly
   // disabled.
   if (!disabled_types.Has(syncer::AUTOFILL)) {
@@ -215,13 +226,10 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
 
   // Delete directive sync is enabled by default.  Register unless full history
   // sync is disabled.
-  if (!disabled_types.Has(syncer::HISTORY_DELETE_DIRECTIVES)) {
+  if (!disabled_types.Has(syncer::HISTORY_DELETE_DIRECTIVES) &&
+      !history_disabled) {
     pss->RegisterDataTypeController(
-        new UIDataTypeController(
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-            base::Bind(&ChromeReportUnrecoverableError),
-            syncer::HISTORY_DELETE_DIRECTIVES,
-            this));
+        new HistoryDeleteDirectivesDataTypeController(this, pss));
   }
 
   // Session sync is enabled by default.  Register unless explicitly disabled.
@@ -240,17 +248,19 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
 
   // Favicon sync is enabled by default. Register unless explicitly disabled.
   if (!disabled_types.Has(syncer::FAVICON_IMAGES) &&
-      !disabled_types.Has(syncer::FAVICON_TRACKING)) {
+      !disabled_types.Has(syncer::FAVICON_TRACKING) &&
+      !history_disabled) {
+    // crbug/384552. We disable error uploading for this data types for now.
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-            base::Bind(&ChromeReportUnrecoverableError),
+            base::Closure(),
             syncer::FAVICON_IMAGES,
             this));
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-            base::Bind(&ChromeReportUnrecoverableError),
+            base::Closure(),
             syncer::FAVICON_TRACKING,
             this));
   }
@@ -276,16 +286,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
   pss->RegisterDataTypeController(
       new SupervisedUserSyncDataTypeController(
           syncer::SUPERVISED_USER_SETTINGS,
-          this,
-          profile_));
-  pss->RegisterDataTypeController(
-      new SupervisedUserSyncDataTypeController(
-          syncer::SUPERVISED_USERS,
-          this,
-          profile_));
-  pss->RegisterDataTypeController(
-      new SupervisedUserSyncDataTypeController(
-          syncer::SUPERVISED_USER_SHARED_SETTINGS,
           this,
           profile_));
 #endif
@@ -399,6 +399,19 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
             this));
   }
 #endif
+
+#if defined(ENABLE_MANAGED_USERS)
+  pss->RegisterDataTypeController(
+      new SupervisedUserSyncDataTypeController(
+          syncer::SUPERVISED_USERS,
+          this,
+          profile_));
+  pss->RegisterDataTypeController(
+      new SupervisedUserSyncDataTypeController(
+          syncer::SUPERVISED_USER_SHARED_SETTINGS,
+          this,
+          profile_));
+#endif
 }
 
 DataTypeManager* ProfileSyncComponentsFactoryImpl::CreateDataTypeManager(
@@ -407,15 +420,13 @@ DataTypeManager* ProfileSyncComponentsFactoryImpl::CreateDataTypeManager(
     const DataTypeController::TypeMap* controllers,
     const sync_driver::DataTypeEncryptionHandler* encryption_handler,
     SyncBackendHost* backend,
-    DataTypeManagerObserver* observer,
-    sync_driver::FailedDataTypesHandler* failed_data_types_handler) {
+    DataTypeManagerObserver* observer) {
   return new DataTypeManagerImpl(base::Bind(ChromeReportUnrecoverableError),
                                  debug_info_listener,
                                  controllers,
                                  encryption_handler,
                                  backend,
-                                 observer,
-                                 failed_data_types_handler);
+                                 observer);
 }
 
 browser_sync::SyncBackendHost*
@@ -429,9 +440,9 @@ ProfileSyncComponentsFactoryImpl::CreateSyncBackendHost(
                                                sync_prefs, sync_folder);
 }
 
-scoped_ptr<browser_sync::LocalDeviceInfoProvider>
+scoped_ptr<sync_driver::LocalDeviceInfoProvider>
 ProfileSyncComponentsFactoryImpl::CreateLocalDeviceInfoProvider() {
-  return scoped_ptr<browser_sync::LocalDeviceInfoProvider>(
+  return scoped_ptr<sync_driver::LocalDeviceInfoProvider>(
       new browser_sync::LocalDeviceInfoProviderImpl());
 }
 
@@ -441,6 +452,10 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
      return base::WeakPtr<syncer::SyncableService>();
   }
   switch (type) {
+    case syncer::DEVICE_INFO:
+      return ProfileSyncServiceFactory::GetForProfile(profile_)
+          ->GetDeviceInfoSyncableService()
+          ->AsWeakPtr();
     case syncer::PREFERENCES:
       return PrefServiceSyncable::FromProfile(
           profile_)->GetSyncableService(syncer::PREFERENCES)->AsWeakPtr();
@@ -533,11 +548,11 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     }
     case syncer::PASSWORDS: {
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
-      password_manager::PasswordStore* password_store =
+      scoped_refptr<password_manager::PasswordStore> password_store =
           PasswordStoreFactory::GetForProfile(profile_,
                                               Profile::EXPLICIT_ACCESS);
-      return password_store ? password_store->GetPasswordSyncableService()
-                            : base::WeakPtr<syncer::SyncableService>();
+      return password_store.get() ? password_store->GetPasswordSyncableService()
+                                  : base::WeakPtr<syncer::SyncableService>();
 #else
       return base::WeakPtr<syncer::SyncableService>();
 #endif
@@ -591,13 +606,9 @@ OAuth2TokenService* TokenServiceProvider::GetTokenService() {
 
 scoped_ptr<syncer::AttachmentService>
 ProfileSyncComponentsFactoryImpl::CreateAttachmentService(
+    const scoped_refptr<syncer::AttachmentStore>& attachment_store,
     const syncer::UserShare& user_share,
     syncer::AttachmentService::Delegate* delegate) {
-
-  scoped_ptr<syncer::AttachmentStore> attachment_store(
-      new syncer::FakeAttachmentStore(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
-
   scoped_ptr<syncer::AttachmentUploader> attachment_uploader;
   scoped_ptr<syncer::AttachmentDownloader> attachment_downloader;
   // Only construct an AttachmentUploader and AttachmentDownload if we have sync
@@ -632,12 +643,20 @@ ProfileSyncComponentsFactoryImpl::CreateAttachmentService(
         token_service_provider);
   }
 
+  // It is important that the initial backoff delay is relatively large.  For
+  // whatever reason, the server may fail all requests for a short period of
+  // time.  When this happens we don't want to overwhelm the server with
+  // requests so we use a large initial backoff.
+  const base::TimeDelta initial_backoff_delay =
+      base::TimeDelta::FromMinutes(30);
+  const base::TimeDelta max_backoff_delay = base::TimeDelta::FromHours(4);
   scoped_ptr<syncer::AttachmentService> attachment_service(
-      new syncer::AttachmentServiceImpl(attachment_store.Pass(),
+      new syncer::AttachmentServiceImpl(attachment_store,
                                         attachment_uploader.Pass(),
                                         attachment_downloader.Pass(),
-                                        delegate));
-
+                                        delegate,
+                                        initial_backoff_delay,
+                                        max_backoff_delay));
   return attachment_service.Pass();
 }
 

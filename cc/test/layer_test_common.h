@@ -42,11 +42,9 @@ class LayerTestCommon {
   static void VerifyQuadsExactlyCoverRect(const QuadList& quads,
                                           const gfx::Rect& rect);
 
-  static void VerifyQuadsCoverRectWithOcclusion(
-      const QuadList& quads,
-      const gfx::Rect& rect,
-      const gfx::Rect& occluded,
-      size_t* partially_occluded_count);
+  static void VerifyQuadsAreOccluded(const QuadList& quads,
+                                     const gfx::Rect& occluded,
+                                     size_t* partially_occluded_count);
 
   class LayerImplTest {
    public:
@@ -109,7 +107,7 @@ class LayerTestCommon {
     void AppendQuadsWithOcclusion(LayerImpl* layer_impl,
                                   const gfx::Rect& occluded);
     void AppendQuadsForPassWithOcclusion(LayerImpl* layer_impl,
-                                         const RenderPass::Id& id,
+                                         const RenderPassId& id,
                                          const gfx::Rect& occluded);
     void AppendSurfaceQuadsWithOcclusion(RenderSurfaceImpl* surface_impl,
                                          const gfx::Rect& occluded);
@@ -126,6 +124,7 @@ class LayerTestCommon {
     const QuadList& quad_list() const { return render_pass_->quad_list; }
 
    private:
+    FakeLayerTreeHostClient client_;
     scoped_ptr<FakeLayerTreeHost> host_;
     scoped_ptr<LayerImpl> root_layer_impl_;
     scoped_ptr<RenderPass> render_pass_;

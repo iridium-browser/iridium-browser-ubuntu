@@ -114,7 +114,7 @@ TEST_F(VideoSendStreamTest, SupportsCName) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->rtp.c_name = kCName;
     }
 
@@ -152,7 +152,7 @@ TEST_F(VideoSendStreamTest, SupportsAbsoluteSendTime) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->rtp.extensions.push_back(
           RtpExtension(RtpExtension::kAbsSendTime, kAbsSendTimeExtensionId));
     }
@@ -193,7 +193,7 @@ TEST_F(VideoSendStreamTest, SupportsTransmissionTimeOffset) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->encoder_settings.encoder = &encoder_;
       send_config->rtp.extensions.push_back(
           RtpExtension(RtpExtension::kTOffset, kTOffsetExtensionId));
@@ -308,8 +308,6 @@ TEST_F(VideoSendStreamTest, SwapsI420VideoFrames) {
 }
 
 TEST_F(VideoSendStreamTest, SupportsFec) {
-  static const int kRedPayloadType = 118;
-  static const int kUlpfecPayloadType = 119;
   class FecObserver : public test::SendTest {
    public:
     FecObserver()
@@ -362,7 +360,7 @@ TEST_F(VideoSendStreamTest, SupportsFec) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->rtp.fec.red_payload_type = kRedPayloadType;
       send_config->rtp.fec.ulpfec_payload_type = kUlpfecPayloadType;
     }
@@ -442,7 +440,7 @@ void VideoSendStreamTest::TestNackRetransmission(
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->rtp.nack.rtp_history_ms = kNackRtpHistoryMs;
       send_config->rtp.rtx.payload_type = retransmit_payload_type_;
       if (retransmit_ssrc_ != kSendSsrcs[0])
@@ -483,8 +481,6 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
   static const uint32_t start = 90;
   static const uint32_t stop = 290;
 
-  static const int kRedPayloadType = 118;
-  static const int kUlpfecPayloadType = 119;
   // Observer that verifies that the expected number of packets and bytes
   // arrive for each frame size, from start_size to stop_size.
   class FrameFragmentationTest : public test::SendTest,
@@ -617,7 +613,7 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       if (use_fec_) {
         send_config->rtp.fec.red_payload_type = kRedPayloadType;
         send_config->rtp.fec.ulpfec_payload_type = kUlpfecPayloadType;
@@ -792,14 +788,14 @@ TEST_F(VideoSendStreamTest, SuspendBelowMinBitrate) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->rtp.nack.rtp_history_ms = kNackRtpHistoryMs;
       send_config->pre_encode_callback = this;
       send_config->suspend_below_min_bitrate = true;
-      int min_bitrate_bps = (*video_streams)[0].min_bitrate_bps;
+      int min_bitrate_bps = encoder_config->streams[0].min_bitrate_bps;
       set_low_remb_bps(min_bitrate_bps - 10000);
       int threshold_window = std::max(min_bitrate_bps / 10, 10000);
-      ASSERT_GT((*video_streams)[0].max_bitrate_bps,
+      ASSERT_GT(encoder_config->streams[0].max_bitrate_bps,
                 min_bitrate_bps + threshold_window + 5000);
       set_high_remb_bps(min_bitrate_bps + threshold_window + 5000);
     }
@@ -981,7 +977,7 @@ TEST_F(VideoSendStreamTest, ProducesStats) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       SetConfig(*send_config);
     }
 
@@ -1078,7 +1074,7 @@ TEST_F(VideoSendStreamTest, MinTransmitBitrateRespectsRemb) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->rtp.min_transmit_bitrate_bps = kMinTransmitBitrateBps;
     }
 
@@ -1137,8 +1133,8 @@ TEST_F(VideoSendStreamTest, CapturesTextureAndI420VideoFrames) {
   // Prepare five input frames. Send I420VideoFrame and TextureVideoFrame
   // alternatively.
   ScopedVector<I420VideoFrame> input_frames;
-  int width = static_cast<int>(video_streams_[0].width);
-  int height = static_cast<int>(video_streams_[0].height);
+  int width = static_cast<int>(encoder_config_.streams[0].width);
+  int height = static_cast<int>(encoder_config_.streams[0].height);
   webrtc::RefCountImpl<FakeNativeHandle>* handle1 =
       new webrtc::RefCountImpl<FakeNativeHandle>();
   webrtc::RefCountImpl<FakeNativeHandle>* handle2 =
@@ -1158,7 +1154,7 @@ TEST_F(VideoSendStreamTest, CapturesTextureAndI420VideoFrames) {
     send_stream_->Input()->SwapFrame(frame.get());
     // Do not send the next frame too fast, so the frame dropper won't drop it.
     if (i < input_frames.size() - 1)
-      SleepMs(1000 / video_streams_[0].max_framerate);
+      SleepMs(1000 / encoder_config_.streams[0].max_framerate);
     // Wait until the output frame is received before sending the next input
     // frame. Or the previous input frame may be replaced without delivering.
     observer.WaitOutputFrame();
@@ -1331,16 +1327,16 @@ TEST_F(VideoSendStreamTest, EncoderIsProperlyInitializedAndDestroyed) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->encoder_settings.encoder = this;
-      video_streams_ = *video_streams;
+      encoder_config_ = *encoder_config;
     }
 
     virtual void PerformTest() OVERRIDE {
       EXPECT_EQ(kEventSignaled, Wait())
           << "Timed out while waiting for Encode.";
       EXPECT_EQ(0u, num_releases());
-      stream_->ReconfigureVideoEncoder(video_streams_, NULL);
+      stream_->ReconfigureVideoEncoder(encoder_config_);
       EXPECT_EQ(0u, num_releases());
       stream_->Stop();
       // Encoder should not be released before destroying the VideoSendStream.
@@ -1358,7 +1354,7 @@ TEST_F(VideoSendStreamTest, EncoderIsProperlyInitializedAndDestroyed) {
     bool callback_registered_ GUARDED_BY(crit_);
     size_t num_releases_ GUARDED_BY(crit_);
     bool released_ GUARDED_BY(crit_);
-    std::vector<VideoStream> video_streams_;
+    VideoEncoderConfig encoder_config_;
   } test_encoder;
 
   RunBaseTest(&test_encoder);
@@ -1367,7 +1363,64 @@ TEST_F(VideoSendStreamTest, EncoderIsProperlyInitializedAndDestroyed) {
   EXPECT_EQ(1u, test_encoder.num_releases());
 }
 
+TEST_F(VideoSendStreamTest, EncoderSetupPropagatesCommonEncoderConfigValues) {
+  class VideoCodecConfigObserver : public test::SendTest,
+                                   public test::FakeEncoder {
+   public:
+    VideoCodecConfigObserver()
+        : SendTest(kDefaultTimeoutMs),
+          FakeEncoder(Clock::GetRealTimeClock()),
+          num_initializations_(0) {}
+
+   private:
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = this;
+      encoder_config_ = *encoder_config;
+    }
+
+    virtual void OnStreamsCreated(
+        VideoSendStream* send_stream,
+        const std::vector<VideoReceiveStream*>& receive_streams) OVERRIDE {
+      stream_ = send_stream;
+    }
+
+    virtual int32_t InitEncode(const VideoCodec* config,
+                               int32_t number_of_cores,
+                               uint32_t max_payload_size) OVERRIDE {
+      if (num_initializations_ == 0) {
+        // Verify default values.
+        EXPECT_EQ(kRealtimeVideo, config->mode);
+      } else {
+        // Verify that changed values are propagated.
+        EXPECT_EQ(kScreensharing, config->mode);
+      }
+      ++num_initializations_;
+      return FakeEncoder::InitEncode(config, number_of_cores, max_payload_size);
+    }
+
+    virtual void PerformTest() OVERRIDE {
+      EXPECT_EQ(1u, num_initializations_) << "VideoEncoder not initialized.";
+
+      encoder_config_.content_type = VideoEncoderConfig::kScreenshare;
+      stream_->ReconfigureVideoEncoder(encoder_config_);
+      EXPECT_EQ(2u, num_initializations_)
+          << "ReconfigureVideoEncoder did not reinitialize the encoder with "
+             "new encoder settings.";
+    }
+
+    size_t num_initializations_;
+    VideoSendStream* stream_;
+    VideoEncoderConfig encoder_config_;
+  } test;
+
+  RunBaseTest(&test);
+}
+
 TEST_F(VideoSendStreamTest, EncoderSetupPropagatesVp8Config) {
+  static const size_t kNumberOfTemporalLayers = 4;
   class VideoCodecConfigObserver : public test::SendTest,
                                    public test::FakeEncoder {
    public:
@@ -1382,11 +1435,17 @@ TEST_F(VideoSendStreamTest, EncoderSetupPropagatesVp8Config) {
     virtual void ModifyConfigs(
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
-        std::vector<VideoStream>* video_streams) OVERRIDE {
+        VideoEncoderConfig* encoder_config) OVERRIDE {
       send_config->encoder_settings.encoder = this;
       send_config->encoder_settings.payload_name = "VP8";
 
-      video_streams_ = *video_streams;
+      for (size_t i = 0; i < encoder_config->streams.size(); ++i) {
+        encoder_config->streams[i].temporal_layers.resize(
+            kNumberOfTemporalLayers);
+      }
+
+      encoder_config->encoder_specific_settings = &vp8_settings_;
+      encoder_config_ = *encoder_config;
     }
 
     virtual void OnStreamsCreated(
@@ -1399,6 +1458,20 @@ TEST_F(VideoSendStreamTest, EncoderSetupPropagatesVp8Config) {
                                int32_t number_of_cores,
                                uint32_t max_payload_size) OVERRIDE {
       EXPECT_EQ(kVideoCodecVP8, config->codecType);
+
+      // Check that the number of temporal layers has propagated properly to
+      // VideoCodec.
+      EXPECT_EQ(kNumberOfTemporalLayers,
+                config->codecSpecific.VP8.numberOfTemporalLayers);
+
+      for (unsigned char i = 0; i < config->numberOfSimulcastStreams; ++i) {
+        EXPECT_EQ(kNumberOfTemporalLayers,
+                  config->simulcastStream[i].numberOfTemporalLayers);
+      }
+
+      // Set expected temporal layers as they should have been set when
+      // reconfiguring the encoder and not match the set config.
+      vp8_settings_.numberOfTemporalLayers = kNumberOfTemporalLayers;
       EXPECT_EQ(0,
                 memcmp(&config->codecSpecific.VP8,
                        &vp8_settings_,
@@ -1411,26 +1484,23 @@ TEST_F(VideoSendStreamTest, EncoderSetupPropagatesVp8Config) {
       EXPECT_EQ(1u, num_initializations_) << "VideoEncoder not initialized.";
 
       vp8_settings_.denoisingOn = true;
-      stream_->ReconfigureVideoEncoder(video_streams_, &vp8_settings_);
+      stream_->ReconfigureVideoEncoder(encoder_config_);
       EXPECT_EQ(2u, num_initializations_)
           << "ReconfigureVideoEncoder did not reinitialize the encoder with "
              "new encoder settings.";
     }
 
-    int32_t Encode(
-        const I420VideoFrame& input_image,
-        const CodecSpecificInfo* codec_specific_info,
-        const std::vector<VideoFrameType>* frame_types) {
+    int32_t Encode(const I420VideoFrame& input_image,
+                   const CodecSpecificInfo* codec_specific_info,
+                   const std::vector<VideoFrameType>* frame_types) OVERRIDE {
       // Silently skip the encode, FakeEncoder::Encode doesn't produce VP8.
       return 0;
     }
 
-    virtual const void* GetEncoderSettings() OVERRIDE { return &vp8_settings_; }
-
     VideoCodecVP8 vp8_settings_;
     size_t num_initializations_;
     VideoSendStream* stream_;
-    std::vector<VideoStream> video_streams_;
+    VideoEncoderConfig encoder_config_;
   } test;
 
   RunBaseTest(&test);

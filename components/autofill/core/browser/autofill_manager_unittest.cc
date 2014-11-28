@@ -95,15 +95,13 @@ class TestPersonalDataManager : public PersonalDataManager {
     CreditCard* credit_card = GetCreditCardWithGUID(guid.c_str());
     if (credit_card) {
       credit_cards_.erase(
-          std::remove(credit_cards_.begin(), credit_cards_.end(), credit_card),
-          credit_cards_.end());
+          std::find(credit_cards_.begin(), credit_cards_.end(), credit_card));
     }
 
     AutofillProfile* profile = GetProfileWithGUID(guid.c_str());
     if (profile) {
       web_profiles_.erase(
-          std::remove(web_profiles_.begin(), web_profiles_.end(), profile),
-          web_profiles_.end());
+          std::find(web_profiles_.begin(), web_profiles_.end(), profile));
     }
   }
 
@@ -1475,6 +1473,81 @@ TEST_F(AutofillManagerTest, GetProfileSuggestionsFancyPhone) {
       expected_labels, expected_icons, expected_unique_ids);
 }
 
+TEST_F(AutofillManagerTest, GetProfileSuggestionsForPhonePrefixOrSuffix) {
+  // Set up our form data.
+  FormData form;
+  form.name = ASCIIToUTF16("MyForm");
+  form.origin = GURL("http://myform.com/form.html");
+  form.action = GURL("http://myform.com/submit.html");
+  form.user_submitted = true;
+
+  struct {
+    const char* const label;
+    const char* const name;
+    size_t max_length;
+    const char* const autocomplete_attribute;
+  } test_fields[] = {{"country code", "country_code", 1, "tel-country-code"},
+                     {"area code", "area_code", 3, "tel-area-code"},
+                     {"phone", "phone_prefix", 3, "tel-local-prefix"},
+                     {"-", "phone_suffix", 4, "tel-local-suffix"},
+                     {"Phone Extension", "ext", 5, "tel-extension"}};
+
+  FormFieldData field;
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_fields); ++i) {
+    test::CreateTestFormField(
+        test_fields[i].label, test_fields[i].name, "", "text", &field);
+    field.max_length = test_fields[i].max_length;
+    field.autocomplete_attribute = std::string();
+    form.fields.push_back(field);
+  }
+
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+
+  AutofillProfile* profile = new AutofillProfile;
+  profile->set_guid("00000000-0000-0000-0000-000000000104");
+  std::vector<base::string16> multi_values(2);
+  multi_values[0] = ASCIIToUTF16("1800FLOWERS");
+  multi_values[1] = ASCIIToUTF16("14158889999");
+
+  profile->SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, multi_values);
+  personal_data_.ClearAutofillProfiles();
+  autofill_manager_->AddProfile(profile);
+
+  const FormFieldData& phone_prefix = form.fields[2];
+  GetAutofillSuggestions(form, phone_prefix);
+  AutocompleteSuggestionsReturned(std::vector<base::string16>());
+  // Test that we sent the right prefix values to the external delegate.
+  base::string16 expected_prefix_values[] = {ASCIIToUTF16("356"),
+                                             ASCIIToUTF16("888")};
+  base::string16 expected_prefix_labels[] = {ASCIIToUTF16("1"),
+                                             ASCIIToUTF16("1")};
+  base::string16 expected_prefix_icons[] = {base::string16(), base::string16()};
+  int expected_unique_ids[] = {1, 2};
+  external_delegate_->CheckSuggestions(kDefaultPageID,
+                                       arraysize(expected_prefix_values),
+                                       expected_prefix_values,
+                                       expected_prefix_labels,
+                                       expected_prefix_icons,
+                                       expected_unique_ids);
+
+  const FormFieldData& phone_suffix = form.fields[3];
+  GetAutofillSuggestions(form, phone_suffix);
+  AutocompleteSuggestionsReturned(std::vector<base::string16>());
+  // Test that we sent the right suffix values to the external delegate.
+  base::string16 expected_suffix_values[] = {ASCIIToUTF16("9377"),
+                                             ASCIIToUTF16("9999")};
+  base::string16 expected_suffix_labels[] = {ASCIIToUTF16("1"),
+                                             ASCIIToUTF16("1")};
+  base::string16 expected_suffix_icons[] = {base::string16(), base::string16()};
+  external_delegate_->CheckSuggestions(kDefaultPageID,
+                                       arraysize(expected_suffix_values),
+                                       expected_suffix_values,
+                                       expected_suffix_labels,
+                                       expected_suffix_icons,
+                                       expected_unique_ids);
+}
+
 // Test that we correctly fill an address form.
 TEST_F(AutofillManagerTest, FillAddressForm) {
   // Set up our form data.
@@ -2779,6 +2852,30 @@ TEST_F(AutofillManagerTest, RemoveProfileVariant) {
   // http://crbug.com/124211
   EXPECT_TRUE(autofill_manager_->GetProfileWithGUID(guid.c_str()));
 }
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+TEST_F(AutofillManagerTest, AccessAddressBookPrompt) {
+  FormData form;
+  test::CreateTestAddressFormData(&form);
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+  FormFieldData& field = form.fields[0];
+  field.should_autocomplete = true;
+
+  // A profile already exists.
+  EXPECT_FALSE(
+      autofill_manager_->ShouldShowAccessAddressBookSuggestion(form, field));
+
+  // Remove all profiles.
+  personal_data_.ClearAutofillProfiles();
+  EXPECT_TRUE(
+      autofill_manager_->ShouldShowAccessAddressBookSuggestion(form, field));
+
+  field.should_autocomplete = false;
+  EXPECT_FALSE(
+      autofill_manager_->ShouldShowAccessAddressBookSuggestion(form, field));
+}
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 namespace {
 

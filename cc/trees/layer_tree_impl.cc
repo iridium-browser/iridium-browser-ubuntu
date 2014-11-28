@@ -17,6 +17,7 @@
 #include "cc/base/util.h"
 #include "cc/debug/devtools_instrumentation.h"
 #include "cc/debug/traced_value.h"
+#include "cc/input/page_scale_animation.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_iterator.h"
@@ -92,7 +93,11 @@ LayerTreeImpl::LayerTreeImpl(LayerTreeHostImpl* layer_tree_host_impl)
       needs_full_tree_sync_(true),
       next_activation_forces_redraw_(false),
       has_ever_been_drawn_(false),
-      render_surface_layer_list_id_(0) {
+      render_surface_layer_list_id_(0),
+      top_controls_layout_height_(0),
+      top_controls_content_offset_(0),
+      top_controls_delta_(0),
+      sent_top_controls_delta_(0) {
 }
 
 LayerTreeImpl::~LayerTreeImpl() {
@@ -200,10 +205,19 @@ void LayerTreeImpl::PushPropertiesTo(LayerTreeImpl* target_tree) {
 
   target_tree->PassSwapPromises(&swap_promise_list_);
 
+  target_tree->top_controls_layout_height_ = top_controls_layout_height_;
+  target_tree->top_controls_content_offset_ = top_controls_content_offset_;
+  target_tree->top_controls_delta_ =
+      target_tree->top_controls_delta_ -
+          target_tree->sent_top_controls_delta_;
+  target_tree->sent_top_controls_delta_ = 0.f;
+
   target_tree->SetPageScaleValues(
       page_scale_factor(), min_page_scale_factor(), max_page_scale_factor(),
       target_tree->page_scale_delta() / target_tree->sent_page_scale_delta());
   target_tree->set_sent_page_scale_delta(1);
+
+  target_tree->page_scale_animation_ = page_scale_animation_.Pass();
 
   if (page_scale_layer_ && inner_viewport_scroll_layer_) {
     target_tree->SetViewportLayersFromIds(
@@ -270,14 +284,6 @@ void LayerTreeImpl::SetCurrentlyScrollingLayer(LayerImpl* layer) {
 void LayerTreeImpl::ClearCurrentlyScrollingLayer() {
   SetCurrentlyScrollingLayer(NULL);
   scrolling_layer_id_from_previous_tree_ = 0;
-}
-
-float LayerTreeImpl::VerticalAdjust(const int clip_layer_id) const {
-  LayerImpl* container_layer = InnerViewportContainerLayer();
-  if (!container_layer || clip_layer_id != container_layer->id())
-    return 0.f;
-
-  return layer_tree_host_impl_->VerticalAdjust();
 }
 
 namespace {
@@ -355,12 +361,11 @@ void LayerTreeImpl::SetPageScaleValues(float page_scale_factor,
 }
 
 gfx::SizeF LayerTreeImpl::ScrollableViewportSize() const {
-  if (outer_viewport_scroll_layer_)
-    return layer_tree_host_impl_->UnscaledScrollableViewportSize();
-  else
-    return gfx::ScaleSize(
-        layer_tree_host_impl_->UnscaledScrollableViewportSize(),
-        1.0f / total_page_scale_factor());
+  if (!InnerViewportContainerLayer())
+    return gfx::SizeF();
+
+  return gfx::ScaleSize(InnerViewportContainerLayer()->bounds(),
+                        1.0f / total_page_scale_factor());
 }
 
 gfx::Rect LayerTreeImpl::RootScrollLayerDeviceViewportBounds() const {
@@ -384,6 +389,10 @@ void LayerTreeImpl::ApplySentScrollAndScaleDeltasFromAbortedCommit() {
   page_scale_factor_ *= sent_page_scale_delta_;
   page_scale_delta_ /= sent_page_scale_delta_;
   sent_page_scale_delta_ = 1.f;
+
+  top_controls_content_offset_ += sent_top_controls_delta_;
+  top_controls_delta_ -= sent_top_controls_delta_;
+  sent_top_controls_delta_ = 0.f;
 
   if (!root_layer())
     return;
@@ -465,7 +474,9 @@ bool LayerTreeImpl::UpdateDrawProperties() {
                  source_frame_number_);
     LayerImpl* page_scale_layer =
         page_scale_layer_ ? page_scale_layer_ : InnerViewportContainerLayer();
-    bool can_render_to_separate_surface = !resourceless_software_draw();
+    bool can_render_to_separate_surface =
+        (layer_tree_host_impl_->GetDrawMode() !=
+         DRAW_MODE_RESOURCELESS_SOFTWARE);
 
     ++render_surface_layer_list_id_;
     LayerTreeHostCommon::CalcDrawPropsImplInputs inputs(
@@ -499,6 +510,9 @@ bool LayerTreeImpl::UpdateDrawProperties() {
           settings().minimum_occlusion_tracking_size);
     }
 
+    bool resourceless_software_draw = (layer_tree_host_impl_->GetDrawMode() ==
+                                       DRAW_MODE_RESOURCELESS_SOFTWARE);
+
     // LayerIterator is used here instead of CallFunctionForSubtree to only
     // UpdateTilePriorities on layers that will be visible (and thus have valid
     // draw properties) and not because any ordering is required.
@@ -512,8 +526,15 @@ bool LayerTreeImpl::UpdateDrawProperties() {
         occlusion_tracker->EnterLayer(it);
 
       LayerImpl* layer = *it;
-      if (it.represents_itself())
-        layer->UpdateTiles(occlusion_tracker.get());
+      const Occlusion& occlusion_in_content_space =
+          occlusion_tracker ? occlusion_tracker->GetCurrentOcclusionForLayer(
+                                  layer->draw_transform())
+                            : Occlusion();
+
+      if (it.represents_itself()) {
+        layer->UpdateTiles(occlusion_in_content_space,
+                           resourceless_software_draw);
+      }
 
       if (!it.represents_contributing_render_surface()) {
         if (occlusion_tracker)
@@ -521,11 +542,14 @@ bool LayerTreeImpl::UpdateDrawProperties() {
         continue;
       }
 
-      if (layer->mask_layer())
-        layer->mask_layer()->UpdateTiles(occlusion_tracker.get());
-      if (layer->replica_layer() && layer->replica_layer()->mask_layer())
+      if (layer->mask_layer()) {
+        layer->mask_layer()->UpdateTiles(occlusion_in_content_space,
+                                         resourceless_software_draw);
+      }
+      if (layer->replica_layer() && layer->replica_layer()->mask_layer()) {
         layer->replica_layer()->mask_layer()->UpdateTiles(
-            occlusion_tracker.get());
+            occlusion_in_content_space, resourceless_software_draw);
+      }
 
       if (occlusion_tracker)
         occlusion_tracker->LeaveLayer(it);
@@ -694,11 +718,6 @@ MemoryHistory* LayerTreeImpl::memory_history() const {
   return layer_tree_host_impl_->memory_history();
 }
 
-bool LayerTreeImpl::resourceless_software_draw() const {
-  return layer_tree_host_impl_->GetDrawMode() ==
-         DRAW_MODE_RESOURCELESS_SOFTWARE;
-}
-
 gfx::Size LayerTreeImpl::device_viewport_size() const {
   return layer_tree_host_impl_->device_viewport_size();
 }
@@ -740,8 +759,8 @@ bool LayerTreeImpl::PinchGestureActive() const {
   return layer_tree_host_impl_->pinch_gesture_active();
 }
 
-base::TimeTicks LayerTreeImpl::CurrentFrameTimeTicks() const {
-  return layer_tree_host_impl_->CurrentFrameTimeTicks();
+BeginFrameArgs LayerTreeImpl::CurrentBeginFrameArgs() const {
+  return layer_tree_host_impl_->CurrentBeginFrameArgs();
 }
 
 base::TimeDelta LayerTreeImpl::begin_impl_frame_interval() const {
@@ -853,6 +872,11 @@ void LayerTreeImpl::AsValueInto(base::debug::TracedValue* state) const {
       continue;
     TracedValue::AppendIDRef(*it, state);
   }
+  state->EndArray();
+
+  state->BeginArray("swap_promise_trace_ids");
+  for (size_t i = 0; i < swap_promise_list_.size(); i++)
+    state->AppendDouble(swap_promise_list_[i]->TraceId());
   state->EndArray();
 }
 
@@ -970,7 +994,7 @@ void LayerTreeImpl::QueueSwapPromise(scoped_ptr<SwapPromise> swap_promise) {
 void LayerTreeImpl::PassSwapPromises(
     ScopedPtrVector<SwapPromise>* new_swap_promise) {
   swap_promise_list_.insert_and_take(swap_promise_list_.end(),
-                                     *new_swap_promise);
+                                     new_swap_promise);
   new_swap_promise->clear();
 }
 
@@ -1354,31 +1378,50 @@ void LayerTreeImpl::RegisterSelection(const LayerSelectionBound& start,
 }
 
 static ViewportSelectionBound ComputeViewportSelection(
-    const LayerSelectionBound& bound,
+    const LayerSelectionBound& layer_bound,
     LayerImpl* layer,
     float device_scale_factor) {
-  ViewportSelectionBound result;
-  result.type = bound.type;
+  ViewportSelectionBound viewport_bound;
+  viewport_bound.type = layer_bound.type;
 
-  if (!layer || bound.type == SELECTION_BOUND_EMPTY)
-    return result;
+  if (!layer || layer_bound.type == SELECTION_BOUND_EMPTY)
+    return viewport_bound;
 
-  gfx::RectF layer_scaled_rect = gfx::ScaleRect(
-      bound.layer_rect, layer->contents_scale_x(), layer->contents_scale_y());
-  gfx::RectF screen_rect = MathUtil::ProjectClippedRect(
-      layer->screen_space_transform(), layer_scaled_rect);
+  gfx::PointF layer_scaled_top = gfx::ScalePoint(layer_bound.edge_top,
+                                                 layer->contents_scale_x(),
+                                                 layer->contents_scale_y());
+  gfx::PointF layer_scaled_bottom = gfx::ScalePoint(layer_bound.edge_bottom,
+                                                    layer->contents_scale_x(),
+                                                    layer->contents_scale_y());
 
-  // The bottom left of the bound is used for visibility because 1) the bound
-  // edge rect is one-dimensional (no width), and 2) the bottom is the logical
+  bool clipped = false;
+  gfx::PointF screen_top = MathUtil::MapPoint(
+      layer->screen_space_transform(), layer_scaled_top, &clipped);
+  gfx::PointF screen_bottom = MathUtil::MapPoint(
+      layer->screen_space_transform(), layer_scaled_bottom, &clipped);
+
+  const float inv_scale = 1.f / device_scale_factor;
+  viewport_bound.edge_top = gfx::ScalePoint(screen_top, inv_scale);
+  viewport_bound.edge_bottom = gfx::ScalePoint(screen_bottom, inv_scale);
+
+  // The bottom edge point is used for visibility testing as it is the logical
   // focal point for bound selection handles (this may change in the future).
-  const gfx::PointF& visibility_point = screen_rect.bottom_left();
+  // Shifting the visibility point fractionally inward ensures that neighboring
+  // or logically coincident layers aligned to integral DPI coordinates will not
+  // spuriously occlude the bound.
+  gfx::Vector2dF visibility_offset = layer_scaled_top - layer_scaled_bottom;
+  visibility_offset.Scale(device_scale_factor / visibility_offset.Length());
+  gfx::PointF visibility_point = layer_scaled_bottom + visibility_offset;
+  if (visibility_point.x() <= 0)
+    visibility_point.set_x(visibility_point.x() + device_scale_factor);
+  visibility_point = MathUtil::MapPoint(
+      layer->screen_space_transform(), visibility_point, &clipped);
+
   float intersect_distance = 0.f;
-  result.visible = PointHitsLayer(layer, visibility_point, &intersect_distance);
+  viewport_bound.visible =
+      PointHitsLayer(layer, visibility_point, &intersect_distance);
 
-  screen_rect.Scale(1.f / device_scale_factor);
-  result.viewport_rect = screen_rect;
-
-  return result;
+  return viewport_bound;
 }
 
 void LayerTreeImpl::GetViewportSelection(ViewportSelectionBound* start,
@@ -1411,6 +1454,47 @@ void LayerTreeImpl::UnregisterPictureLayerImpl(PictureLayerImpl* layer) {
 
 void LayerTreeImpl::InputScrollAnimationFinished() {
   layer_tree_host_impl_->ScrollEnd();
+}
+
+BlockingTaskRunner* LayerTreeImpl::BlockingMainThreadTaskRunner() const {
+  return proxy()->blocking_main_thread_task_runner();
+}
+
+void LayerTreeImpl::SetPageScaleAnimation(const gfx::Vector2d& target_offset,
+                                          bool anchor_point,
+                                          float page_scale,
+                                          base::TimeDelta duration) {
+  if (!InnerViewportScrollLayer())
+    return;
+
+  gfx::Vector2dF scroll_total = TotalScrollOffset();
+  gfx::SizeF scaled_scrollable_size = ScrollableSize();
+  gfx::SizeF viewport_size = InnerViewportContainerLayer()->bounds();
+
+  // Easing constants experimentally determined.
+  scoped_ptr<TimingFunction> timing_function =
+      CubicBezierTimingFunction::Create(.8, 0, .3, .9).PassAs<TimingFunction>();
+
+  // TODO(miletus) : Pass in ScrollOffset.
+  page_scale_animation_ = PageScaleAnimation::Create(scroll_total,
+                                                     total_page_scale_factor(),
+                                                     viewport_size,
+                                                     scaled_scrollable_size,
+                                                     timing_function.Pass());
+
+  if (anchor_point) {
+    gfx::Vector2dF anchor(target_offset);
+    page_scale_animation_->ZoomWithAnchor(
+        anchor, page_scale, duration.InSecondsF());
+  } else {
+    gfx::Vector2dF scaled_target_offset = target_offset;
+    page_scale_animation_->ZoomTo(
+        scaled_target_offset, page_scale, duration.InSecondsF());
+  }
+}
+
+scoped_ptr<PageScaleAnimation> LayerTreeImpl::TakePageScaleAnimation() {
+  return page_scale_animation_.Pass();
 }
 
 }  // namespace cc

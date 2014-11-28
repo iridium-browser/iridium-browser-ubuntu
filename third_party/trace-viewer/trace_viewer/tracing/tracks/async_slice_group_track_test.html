@@ -23,7 +23,7 @@ tvcm.unittest.testSuite(function() { // @suppress longLineCheck
     var model = new tracing.TraceModel();
     var p1 = new Process(model, 1);
     var t1 = new Thread(p1, 1);
-    var g = new AsyncSliceGroup();
+    var g = new AsyncSliceGroup(t1);
     g.push(newAsyncSlice(0, 1, t1, t1));
     var track = new AsyncSliceGroupTrack(new tracing.TimelineViewport());
     track.group = g;
@@ -36,7 +36,7 @@ tvcm.unittest.testSuite(function() { // @suppress longLineCheck
     var model = new tracing.TraceModel();
     var p1 = new Process(model, 1);
     var t1 = new Thread(p1, 1);
-    var g = new AsyncSliceGroup();
+    var g = new AsyncSliceGroup(t1);
     g.push(newAsyncSlice(0, 1, t1, t1));
     g.push(newAsyncSlice(1, 1, t1, t1));
     var track = new AsyncSliceGroupTrack(new tracing.TimelineViewport());
@@ -52,7 +52,7 @@ tvcm.unittest.testSuite(function() { // @suppress longLineCheck
     var model = new tracing.TraceModel();
     var p1 = new Process(model, 1);
     var t1 = new Thread(p1, 1);
-    var g = new AsyncSliceGroup();
+    var g = new AsyncSliceGroup(t1);
 
     g.push(newAsyncSlice(0, 1, t1, t1));
     g.push(newAsyncSlice(0, 1.5, t1, t1));
@@ -75,7 +75,7 @@ tvcm.unittest.testSuite(function() { // @suppress longLineCheck
     var model = new tracing.TraceModel();
     var p1 = new Process(model, 1);
     var t1 = new Thread(p1, 1);
-    var g = new AsyncSliceGroup();
+    var g = new AsyncSliceGroup(t1);
     g.push(newAsyncSlice(0, 1, t1, t1));
     g.push(newAsyncSlice(0, 1.5, t1, t1));
     g.push(newAsyncSlice(1, 1.5, t1, t1));
@@ -97,7 +97,7 @@ tvcm.unittest.testSuite(function() { // @suppress longLineCheck
     var model = new tracing.TraceModel();
     var p1 = new Process(model, 1);
     var t1 = new Thread(p1, 1);
-    var g = new AsyncSliceGroup();
+    var g = new AsyncSliceGroup(t1);
 
     g.push(newAsyncSlice(0, 1, t1, t1));
     g.push(newAsyncSlice(0, 1.5, t1, t1));
@@ -114,30 +114,6 @@ tvcm.unittest.testSuite(function() { // @suppress longLineCheck
     assertEquals(g.slices[2].subSlices[0], subRows[0][1]);
     assertEquals(1, subRows[1].length);
     assertEquals(g.slices[1].subSlices[0], subRows[1][0]);
-  });
-
-  test('computeSubGroups_twoThreadSpecificSlices', function() {
-    var model = new tracing.TraceModel();
-    var p1 = new Process(model, 1);
-    var t1 = new Thread(p1, 1);
-    var t2 = new Thread(p1, 2);
-    var g = new AsyncSliceGroup();
-    g.push(newAsyncSlice(0, 1, t1, t1));
-    g.push(newAsyncSlice(0, 1, t2, t2));
-    var track = new AsyncSliceGroupTrack(new tracing.TimelineViewport());
-    track.group = g;
-    var subRows = track.subRows;
-
-    var subGroups = g.computeSubGroups();
-    assertEquals(2, subGroups.length);
-
-    assertEquals(g.name, subGroups[0].name);
-    assertEquals(1, subGroups[0].slices.length);
-    assertEquals(g.slices[0], subGroups[0].slices[0]);
-
-    assertEquals(g.name, subGroups[1].name);
-    assertEquals(1, subGroups[1].slices.length);
-    assertEquals(g.slices[1], subGroups[1].slices[0]);
   });
 });
 </script>

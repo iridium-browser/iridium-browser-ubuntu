@@ -117,7 +117,7 @@ bool ContentRendererClient::ShouldFork(blink::WebFrame* frame,
 
 bool ContentRendererClient::WillSendRequest(
     blink::WebFrame* frame,
-    PageTransition transition_type,
+    ui::PageTransition transition_type,
     const GURL& url,
     const GURL& first_party_for_cookies,
     GURL* new_url) {
@@ -188,6 +188,12 @@ bool ContentRendererClient::IsPluginAllowedToUseVideoDecodeAPI(
 
 bool ContentRendererClient::IsPluginAllowedToUseDevChannelAPIs() {
   return false;
+}
+
+BrowserPluginDelegate* ContentRendererClient::CreateBrowserPluginDelegate(
+    RenderFrame* render_frame,
+    const std::string& mime_type) {
+  return NULL;
 }
 
 }  // namespace content

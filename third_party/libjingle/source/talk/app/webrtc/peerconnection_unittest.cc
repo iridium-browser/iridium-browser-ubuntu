@@ -90,6 +90,7 @@ static const int kMaxWaitMs = 2000;
 // warnings.
 #if !defined(THREAD_SANITIZER)
 static const int kMaxWaitForStatsMs = 3000;
+static const int kMaxWaitForRembMs = 5000;
 #endif
 static const int kMaxWaitForFramesMs = 10000;
 static const int kEndAudioFrameCount = 3;
@@ -154,11 +155,11 @@ class PeerConnectionTestClientBase
   }
 
   void AddMediaStream(bool audio, bool video) {
-    std::string label = kStreamLabelBase +
+    std::string stream_label = kStreamLabelBase +
         rtc::ToString<int>(
             static_cast<int>(peer_connection_->local_streams()->count()));
     rtc::scoped_refptr<webrtc::MediaStreamInterface> stream =
-        peer_connection_factory_->CreateLocalMediaStream(label);
+        peer_connection_factory_->CreateLocalMediaStream(stream_label);
 
     if (audio && can_receive_audio()) {
       FakeConstraints constraints;
@@ -169,13 +170,13 @@ class PeerConnectionTestClientBase
           peer_connection_factory_->CreateAudioSource(&constraints);
       // TODO(perkj): Test audio source when it is implemented. Currently audio
       // always use the default input.
+      std::string label = stream_label + kAudioTrackLabelBase;
       rtc::scoped_refptr<webrtc::AudioTrackInterface> audio_track(
-          peer_connection_factory_->CreateAudioTrack(kAudioTrackLabelBase,
-                                                     source));
+          peer_connection_factory_->CreateAudioTrack(label, source));
       stream->AddTrack(audio_track);
     }
     if (video && can_receive_video()) {
-      stream->AddTrack(CreateLocalVideoTrack(label));
+      stream->AddTrack(CreateLocalVideoTrack(stream_label));
     }
 
     EXPECT_TRUE(peer_connection_->AddStream(stream, NULL));
@@ -368,6 +369,16 @@ class PeerConnectionTestClientBase
     return observer->BytesSent();
   }
 
+  int GetAvailableReceivedBandwidthStats() {
+    rtc::scoped_refptr<MockStatsObserver>
+        observer(new rtc::RefCountedObject<MockStatsObserver>());
+    EXPECT_TRUE(peer_connection_->GetStats(
+        observer, NULL, PeerConnectionInterface::kStatsOutputLevelStandard));
+    EXPECT_TRUE_WAIT(observer->called(), kMaxWaitMs);
+    int bw = observer->AvailableReceiveBandwidth();
+    return bw;
+  }
+
   int rendered_width() {
     EXPECT_FALSE(fake_video_renderers_.empty());
     return fake_video_renderers_.empty() ? 1 :
@@ -447,6 +458,12 @@ class PeerConnectionTestClientBase
   webrtc::PeerConnectionInterface* pc() {
     return peer_connection_.get();
   }
+  void StopVideoCapturers() {
+    for (std::vector<cricket::VideoCapturer*>::iterator it =
+        video_capturers_.begin(); it != video_capturers_.end(); ++it) {
+      (*it)->Stop();
+    }
+  }
 
  protected:
   explicit PeerConnectionTestClientBase(const std::string& id)
@@ -464,9 +481,8 @@ class PeerConnectionTestClientBase
     if (!allocator_factory_) {
       return false;
     }
-    audio_thread_.Start();
     fake_audio_capture_module_ = FakeAudioCaptureModule::Create(
-        &audio_thread_);
+        rtc::Thread::Current());
 
     if (fake_audio_capture_module_ == NULL) {
       return false;
@@ -529,21 +545,17 @@ class PeerConnectionTestClientBase
     FakeConstraints source_constraints = video_constraints_;
     source_constraints.SetMandatoryMaxFrameRate(10);
 
+    cricket::FakeVideoCapturer* fake_capturer =
+        new webrtc::FakePeriodicVideoCapturer();
+    video_capturers_.push_back(fake_capturer);
     rtc::scoped_refptr<webrtc::VideoSourceInterface> source =
         peer_connection_factory_->CreateVideoSource(
-            new webrtc::FakePeriodicVideoCapturer(),
-            &source_constraints);
+            fake_capturer, &source_constraints);
     std::string label = stream_label + kVideoTrackLabelBase;
     return peer_connection_factory_->CreateVideoTrack(label, source);
   }
 
   std::string id_;
-  // Separate thread for executing |fake_audio_capture_module_| tasks. Audio
-  // processing must not be performed on the same thread as signaling due to
-  // signaling time constraints and relative complexity of the audio pipeline.
-  // This is consistent with the video pipeline that us a a separate thread for
-  // encoding and decoding.
-  rtc::Thread audio_thread_;
 
   rtc::scoped_refptr<webrtc::PortAllocatorFactoryInterface>
       allocator_factory_;
@@ -569,6 +581,10 @@ class PeerConnectionTestClientBase
 
   // For remote peer communication.
   MessageReceiver* signaling_message_receiver_;
+
+  // Store references to the video capturers we've created, so that we can stop
+  // them, if required.
+  std::vector<cricket::VideoCapturer*> video_capturers_;
 };
 
 class JsepTestClient
@@ -591,7 +607,7 @@ class JsepTestClient
   }
   virtual void Negotiate(bool audio, bool video) {
     rtc::scoped_ptr<SessionDescriptionInterface> offer;
-    EXPECT_TRUE(DoCreateOffer(offer.use()));
+    ASSERT_TRUE(DoCreateOffer(offer.use()));
 
     if (offer->description()->GetContentByName("audio")) {
       offer->description()->GetContentByName("audio")->rejected = !audio;
@@ -1019,6 +1035,30 @@ class P2PTestConductor : public testing::Test {
     }
   }
 
+  // Wait until 'size' bytes of audio has been seen by the receiver, on the
+  // first audio stream.
+  void WaitForAudioData(int size) {
+    const int kMaxWaitForAudioDataMs = 10000;
+
+    StreamCollectionInterface* local_streams =
+        initializing_client()->local_streams();
+    ASSERT_GT(local_streams->count(), 0u);
+    ASSERT_GT(local_streams->at(0)->GetAudioTracks().size(), 0u);
+    MediaStreamTrackInterface* local_audio_track =
+        local_streams->at(0)->GetAudioTracks()[0];
+
+    // Wait until *any* audio has been received.
+    EXPECT_TRUE_WAIT(
+        receiving_client()->GetBytesReceivedStats(local_audio_track) > 0,
+        kMaxWaitForAudioDataMs);
+
+    // Wait until 'size' number of bytes have been received.
+    size += receiving_client()->GetBytesReceivedStats(local_audio_track);
+    EXPECT_TRUE_WAIT(
+        receiving_client()->GetBytesReceivedStats(local_audio_track) > size,
+        kMaxWaitForAudioDataMs);
+  }
+
   SignalingClass* initializing_client() { return initiating_client_.get(); }
   SignalingClass* receiving_client() { return receiving_client_.get(); }
 
@@ -1314,6 +1354,7 @@ TEST_F(JsepPeerConnectionP2PTestClient, RegisterDataChannelObserver) {
 
   // Unregister the existing observer.
   receiving_client()->data_channel()->UnregisterObserver();
+
   std::string data = "hello world";
   SendRtpData(initializing_client()->data_channel(), data);
 
@@ -1437,4 +1478,69 @@ TEST_F(JsepPeerConnectionP2PTestClient,
   EnableVideoDecoderFactory();
   LocalP2PTest();
 }
+
+// Test receive bandwidth stats with only audio enabled at receiver.
+TEST_F(JsepPeerConnectionP2PTestClient, ReceivedBweStatsAudio) {
+  ASSERT_TRUE(CreateTestClients());
+  receiving_client()->SetReceiveAudioVideo(true, false);
+  LocalP2PTest();
+
+  // Wait until we have received some audio data. Following REMB shoud be zero.
+  WaitForAudioData(10000);
+  EXPECT_EQ_WAIT(
+      receiving_client()->GetAvailableReceivedBandwidthStats(), 0,
+      kMaxWaitForRembMs);
+}
+
+// Test receive bandwidth stats with combined BWE.
+TEST_F(JsepPeerConnectionP2PTestClient, ReceivedBweStatsCombined) {
+  FakeConstraints setup_constraints;
+  setup_constraints.AddOptional(
+      MediaConstraintsInterface::kCombinedAudioVideoBwe, true);
+  ASSERT_TRUE(CreateTestClients(&setup_constraints, &setup_constraints));
+  initializing_client()->AddMediaStream(true, true);
+  initializing_client()->AddMediaStream(false, true);
+  initializing_client()->AddMediaStream(false, true);
+  initializing_client()->AddMediaStream(false, true);
+  LocalP2PTest();
+
+  // Run until a non-zero bw is reported.
+  EXPECT_TRUE_WAIT(receiving_client()->GetAvailableReceivedBandwidthStats() > 0,
+                   kMaxWaitForRembMs);
+
+  // Halt video capturers, then run until we have gotten some audio. Following
+  // REMB should be non-zero.
+  initializing_client()->StopVideoCapturers();
+  WaitForAudioData(10000);
+  EXPECT_TRUE_WAIT(
+      receiving_client()->GetAvailableReceivedBandwidthStats() > 0,
+      kMaxWaitForRembMs);
+}
+
+// Test receive bandwidth stats with 1 video, 3 audio streams but no combined
+// BWE.
+TEST_F(JsepPeerConnectionP2PTestClient, ReceivedBweStatsNotCombined) {
+  FakeConstraints setup_constraints;
+  setup_constraints.AddOptional(
+      MediaConstraintsInterface::kCombinedAudioVideoBwe, false);
+  ASSERT_TRUE(CreateTestClients(&setup_constraints, &setup_constraints));
+  initializing_client()->AddMediaStream(true, true);
+  initializing_client()->AddMediaStream(false, true);
+  initializing_client()->AddMediaStream(false, true);
+  initializing_client()->AddMediaStream(false, true);
+  LocalP2PTest();
+
+  // Run until a non-zero bw is reported.
+  EXPECT_TRUE_WAIT(receiving_client()->GetAvailableReceivedBandwidthStats() > 0,
+                   kMaxWaitForRembMs);
+
+  // Halt video capturers, then run until we have gotten some audio. Following
+  // REMB should be zero.
+  initializing_client()->StopVideoCapturers();
+  WaitForAudioData(10000);
+  EXPECT_EQ_WAIT(
+      receiving_client()->GetAvailableReceivedBandwidthStats(), 0,
+      kMaxWaitForRembMs);
+}
+
 #endif // if !defined(THREAD_SANITIZER)

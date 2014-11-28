@@ -358,7 +358,7 @@ cr.define('print_preview', function() {
       } else {
         offlineMessageId = 'offline';
       }
-      return localStrings.getString(offlineMessageId);
+      return loadTimeData.getString(offlineMessageId);
     },
 
     /**
@@ -400,9 +400,9 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * @param {?boolean} Whether the user has accepted the terms-of-service of
-     *     the print destination or {@code null} if a terms-of-service does not
-     *     apply.
+     * @param {?boolean} isTosAccepted Whether the user has accepted the
+     *     terms-of-service of the print destination or {@code null} if
+     *     a terms-of-service does not apply.
      */
     set isTosAccepted(isTosAccepted) {
       this.isTosAccepted_ = isTosAccepted;

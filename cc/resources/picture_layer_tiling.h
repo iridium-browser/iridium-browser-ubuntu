@@ -17,6 +17,7 @@
 #include "cc/base/tiling_data.h"
 #include "cc/resources/tile.h"
 #include "cc/resources/tile_priority.h"
+#include "cc/trees/occlusion.h"
 #include "ui/gfx/rect.h"
 
 namespace base {
@@ -27,8 +28,6 @@ class TracedValue;
 
 namespace cc {
 
-template <typename LayerType>
-class OcclusionTracker;
 class PictureLayerTiling;
 class PicturePileImpl;
 
@@ -237,14 +236,11 @@ class CC_EXPORT PictureLayerTiling {
 
   void Reset();
 
-  void UpdateTilePriorities(
-      WhichTree tree,
-      const gfx::Rect& visible_layer_rect,
-      float ideal_contents_scale,
-      double current_frame_time_in_seconds,
-      const OcclusionTracker<LayerImpl>* occlusion_tracker,
-      const LayerImpl* render_target,
-      const gfx::Transform& draw_transform);
+  void UpdateTilePriorities(WhichTree tree,
+                            const gfx::Rect& viewport_in_layer_space,
+                            float ideal_contents_scale,
+                            double current_frame_time_in_seconds,
+                            const Occlusion& occlusion_in_layer_space);
 
   // Copies the src_tree priority into the dst_tree priority for all tiles.
   // The src_tree priority is reset to the lowest priority possible.  This
@@ -258,8 +254,11 @@ class CC_EXPORT PictureLayerTiling {
   // while DidBecomeActive promotes pending priority on a similar set of tiles.
   void DidBecomeRecycled();
 
-  bool NeedsUpdateForFrameAtTime(double frame_time_in_seconds) {
-    return frame_time_in_seconds != last_impl_frame_time_in_seconds_;
+  bool NeedsUpdateForFrameAtTimeAndViewport(
+      double frame_time_in_seconds,
+      const gfx::Rect& viewport_in_layer_space) {
+    return frame_time_in_seconds != last_impl_frame_time_in_seconds_ ||
+           viewport_in_layer_space != last_viewport_in_layer_space_;
   }
 
   void GetAllTilesForTracing(std::set<const Tile*>* tiles) const;
@@ -300,7 +299,8 @@ class CC_EXPORT PictureLayerTiling {
   void SetLiveTilesRect(const gfx::Rect& live_tiles_rect);
   void VerifyLiveTilesRect();
   Tile* CreateTile(int i, int j, const PictureLayerTiling* twin_tiling);
-  void RemoveTileAt(int i, int j);
+  // Returns true if the Tile existed and was removed from the tiling.
+  bool RemoveTileAt(int i, int j, PictureLayerTiling* recycled_twin);
 
   // Computes a skewport. The calculation extrapolates the last visible
   // rect and the current visible rect to expand the skewport to where it
@@ -332,6 +332,7 @@ class CC_EXPORT PictureLayerTiling {
 
   // State saved for computing velocities based upon finite differences.
   double last_impl_frame_time_in_seconds_;
+  gfx::Rect last_viewport_in_layer_space_;
   gfx::Rect last_visible_rect_in_content_space_;
 
   // Iteration rects in content space

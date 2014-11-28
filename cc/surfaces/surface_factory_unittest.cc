@@ -56,7 +56,7 @@ class SurfaceFactoryTest : public testing::Test {
     }
     scoped_ptr<CompositorFrame> frame(new CompositorFrame);
     frame->delegated_frame_data = frame_data.Pass();
-    factory_.SubmitFrame(surface_id_, frame.Pass());
+    factory_.SubmitFrame(surface_id_, frame.Pass(), base::Closure());
   }
 
   void UnrefResources(ResourceProvider::ResourceId* ids_to_unref,
@@ -354,6 +354,22 @@ TEST_F(SurfaceFactoryTest, ResourceLifetime) {
                                         expected_returned_counts,
                                         arraysize(expected_returned_counts));
   }
+}
+
+// Tests shutting down the factory with a surface with outstanding refs still in
+// the map.
+TEST_F(SurfaceFactoryTest, DestroyWithResourceRefs) {
+  SurfaceId id(7);
+  factory_.Create(id, gfx::Size(1, 1));
+
+  scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+  TransferableResource resource;
+  resource.id = 1;
+  resource.mailbox_holder.texture_target = GL_TEXTURE_2D;
+  frame_data->resource_list.push_back(resource);
+  scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+  frame->delegated_frame_data = frame_data.Pass();
+  factory_.SubmitFrame(id, frame.Pass(), base::Closure());
 }
 
 }  // namespace

@@ -276,20 +276,22 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
     test_hooks_->DidBeginMainFrame();
   }
 
-  virtual void Animate(base::TimeTicks monotonic_time) OVERRIDE {
-    test_hooks_->Animate(monotonic_time);
+  virtual void BeginMainFrame(const BeginFrameArgs& args) OVERRIDE {
+    test_hooks_->BeginMainFrame(args);
   }
 
   virtual void Layout() OVERRIDE { test_hooks_->Layout(); }
 
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float scale) OVERRIDE {
-    test_hooks_->ApplyScrollAndScale(scroll_delta, scale);
+  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                   float scale,
+                                   float top_controls_delta) OVERRIDE {
+    test_hooks_->ApplyViewportDeltas(scroll_delta,
+                                     scale,
+                                     top_controls_delta);
   }
 
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback)
-      OVERRIDE {
-    return test_hooks_->CreateOutputSurface(fallback);
+  virtual void RequestNewOutputSurface(bool fallback) OVERRIDE {
+    test_hooks_->RequestNewOutputSurface(fallback);
   }
 
   virtual void DidInitializeOutputSurface() OVERRIDE {
@@ -310,14 +312,6 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
 
   virtual void DidCompleteSwapBuffers() OVERRIDE {
     test_hooks_->DidCompleteSwapBuffers();
-  }
-
-  virtual void ScheduleComposite() OVERRIDE {
-    test_hooks_->ScheduleComposite();
-  }
-
-  virtual void ScheduleAnimation() OVERRIDE {
-    test_hooks_->ScheduleAnimation();
   }
 
   virtual void DidPostSwapBuffers() OVERRIDE {}
@@ -394,7 +388,6 @@ LayerTreeTest::LayerTreeTest()
       end_when_begin_returns_(false),
       timed_out_(false),
       scheduled_(false),
-      schedule_when_set_visible_true_(false),
       started_(false),
       ended_(false),
       delegating_renderer_(false),
@@ -558,15 +551,6 @@ void LayerTreeTest::Timeout() {
   EndTest();
 }
 
-void LayerTreeTest::ScheduleComposite() {
-  if (!started_ || scheduled_)
-    return;
-  scheduled_ = true;
-  main_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&LayerTreeTest::DispatchComposite, main_thread_weak_ptr_));
-}
-
 void LayerTreeTest::RealEndTest() {
   if (layer_tree_host_ && !timed_out_ &&
       proxy()->MainFrameWillHappenForTesting()) {
@@ -619,16 +603,8 @@ void LayerTreeTest::DispatchSetNeedsRedrawRect(const gfx::Rect& damage_rect) {
 
 void LayerTreeTest::DispatchSetVisible(bool visible) {
   DCHECK(!proxy() || proxy()->IsMainThread());
-
-  if (!layer_tree_host_)
-    return;
-
-  layer_tree_host_->SetVisible(visible);
-
-  // If the LTH is being made visible and a previous ScheduleComposite() was
-  // deferred because the LTH was not visible, re-schedule the composite now.
-  if (layer_tree_host_->visible() && schedule_when_set_visible_true_)
-    ScheduleComposite();
+  if (layer_tree_host_)
+    layer_tree_host_->SetVisible(visible);
 }
 
 void LayerTreeTest::DispatchSetNextCommitForcesRedraw() {
@@ -636,24 +612,6 @@ void LayerTreeTest::DispatchSetNextCommitForcesRedraw() {
 
   if (layer_tree_host_)
     layer_tree_host_->SetNextCommitForcesRedraw();
-}
-
-void LayerTreeTest::DispatchComposite() {
-  scheduled_ = false;
-
-  if (!layer_tree_host_)
-    return;
-
-  // If the LTH is not visible, defer the composite until the LTH is made
-  // visible.
-  if (!layer_tree_host_->visible()) {
-    schedule_when_set_visible_true_ = true;
-    return;
-  }
-
-  schedule_when_set_visible_true_ = false;
-  base::TimeTicks now = gfx::FrameTime::Now();
-  layer_tree_host_->Composite(now);
 }
 
 void LayerTreeTest::RunTest(bool threaded,
@@ -708,6 +666,10 @@ void LayerTreeTest::RunTestWithImplSidePainting() {
   RunTest(true, false, true);
 }
 
+void LayerTreeTest::RequestNewOutputSurface(bool fallback) {
+  layer_tree_host_->SetOutputSurface(CreateOutputSurface(fallback));
+}
+
 scoped_ptr<OutputSurface> LayerTreeTest::CreateOutputSurface(bool fallback) {
   scoped_ptr<FakeOutputSurface> output_surface =
       CreateFakeOutputSurface(fallback);
@@ -728,8 +690,8 @@ scoped_ptr<FakeOutputSurface> LayerTreeTest::CreateFakeOutputSurface(
 }
 
 TestWebGraphicsContext3D* LayerTreeTest::TestContext() {
-  return static_cast<TestContextProvider*>(
-      output_surface_->context_provider().get())->TestContext3d();
+  return static_cast<TestContextProvider*>(output_surface_->context_provider())
+      ->TestContext3d();
 }
 
 int LayerTreeTest::LastCommittedSourceFrameNumber(LayerTreeHostImpl* impl)

@@ -30,6 +30,10 @@
 #include "media/cast/net/rtcp/rtcp_defines.h"
 #include "net/base/ip_endpoint.h"
 
+namespace base {
+class DictionaryValue;
+}  // namespace base
+
 namespace net {
 class NetLog;
 }  // namespace net
@@ -53,6 +57,7 @@ class CastTransportSender : public base::NonThreadSafe {
       net::NetLog* net_log,
       base::TickClock* clock,
       const net::IPEndPoint& remote_end_point,
+      scoped_ptr<base::DictionaryValue> options,
       const CastTransportStatusCallback& status_callback,
       const BulkRawEventsCallback& raw_events_callback,
       base::TimeDelta raw_events_callback_interval,
@@ -70,11 +75,9 @@ class CastTransportSender : public base::NonThreadSafe {
                                const RtcpCastMessageCallback& cast_message_cb,
                                const RtcpRttCallback& rtt_cb) = 0;
 
-  // The following two functions handle the encoded media frames (audio and
-  // video) to be processed.
-  // Frames will be encrypted, packetized and transmitted to the network.
-  virtual void InsertCodedAudioFrame(const EncodedFrame& audio_frame) = 0;
-  virtual void InsertCodedVideoFrame(const EncodedFrame& video_frame) = 0;
+  // Encrypt, packetize and transmit |frame|. |ssrc| must refer to a
+  // a channel already established with InitializeAudio / InitializeVideo.
+  virtual void InsertFrame(uint32 ssrc, const EncodedFrame& frame) = 0;
 
   // Sends a RTCP sender report to the receiver.
   // |ssrc| is the SSRC for this report.
@@ -85,19 +88,15 @@ class CastTransportSender : public base::NonThreadSafe {
       base::TimeTicks current_time,
       uint32 current_time_as_rtp_timestamp) = 0;
 
-  // Retransmission request.
-  // |missing_packets| includes the list of frames and packets in each
-  // frame to be re-transmitted.
-  // If |cancel_rtx_if_not_in_list| is used as an optimization to cancel
-  // pending re-transmission requests of packets not listed in
-  // |missing_packets|. If the requested packet(s) were sent recently
-  // (how long is specified by |dedupe_window|) then this re-transmit
-  // will be ignored.
-  virtual void ResendPackets(
-      bool is_audio,
-      const MissingFramesAndPacketsMap& missing_packets,
-      bool cancel_rtx_if_not_in_list,
-      base::TimeDelta dedupe_window) = 0;
+  // Cancels sending packets for the frames in the set.
+  // |ssrc| is the SSRC for the stream.
+  // |frame_ids| contains the IDs of the frames that will be cancelled.
+  virtual void CancelSendingFrames(uint32 ssrc,
+                                   const std::vector<uint32>& frame_ids) = 0;
+
+  // Resends a frame or part of a frame to kickstart. This is used when the
+  // stream appears to be stalled.
+  virtual void ResendFrameForKickstart(uint32 ssrc, uint32 frame_id) = 0;
 
   // Returns a callback for receiving packets for testing purposes.
   virtual PacketReceiverCallback PacketReceiverForTesting();

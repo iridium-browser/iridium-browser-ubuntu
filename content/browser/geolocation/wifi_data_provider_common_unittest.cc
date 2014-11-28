@@ -9,6 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "content/browser/geolocation/wifi_data_provider_common.h"
+#include "content/browser/geolocation/wifi_data_provider_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -67,13 +68,13 @@ class MessageLoopQuitter {
     CHECK(message_loop_to_quit_ != NULL);
   }
 
-  void OnWifiDataUpdate(WifiDataProvider* provider) {
+  void OnWifiDataUpdate() {
     // Provider should call back on client's thread.
     EXPECT_EQ(base::MessageLoop::current(), message_loop_to_quit_);
     message_loop_to_quit_->QuitNow();
   }
   base::MessageLoop* message_loop_to_quit_;
-  WifiDataProvider::WifiDataUpdateCallback callback_;
+  WifiDataProviderManager::WifiDataUpdateCallback callback_;
 };
 
 class WifiDataProviderCommonWithMock : public WifiDataProviderCommon {
@@ -101,7 +102,7 @@ class WifiDataProviderCommonWithMock : public WifiDataProviderCommon {
   DISALLOW_COPY_AND_ASSIGN(WifiDataProviderCommonWithMock);
 };
 
-WifiDataProviderImplBase* CreateWifiDataProviderCommonWithMock() {
+WifiDataProvider* CreateWifiDataProviderCommonWithMock() {
   return new WifiDataProviderCommonWithMock;
 }
 
@@ -181,7 +182,12 @@ TEST_F(GeolocationWifiDataProviderCommonTest, IntermittentWifi){
   main_message_loop_.Run();
 }
 
-TEST_F(GeolocationWifiDataProviderCommonTest, DoAnEmptyScan) {
+#if defined(OS_MACOSX)
+#define MAYBE_DoAnEmptyScan DISABLED_DoAnEmptyScan
+#else
+#define MAYBE_DoAnEmptyScan DoAnEmptyScan
+#endif
+TEST_F(GeolocationWifiDataProviderCommonTest, MAYBE_DoAnEmptyScan) {
   EXPECT_CALL(*wlan_api_, GetAccessPointData(_))
       .Times(AtLeast(1));
   EXPECT_CALL(*polling_policy_, PollingInterval())
@@ -194,7 +200,12 @@ TEST_F(GeolocationWifiDataProviderCommonTest, DoAnEmptyScan) {
   EXPECT_EQ(0, static_cast<int>(data.access_point_data.size()));
 }
 
-TEST_F(GeolocationWifiDataProviderCommonTest, DoScanWithResults) {
+#if defined(OS_MACOSX)
+#define MAYBE_DoScanWithResults DISABLED_DoScanWithResults
+#else
+#define MAYBE_DoScanWithResults DoScanWithResults
+#endif
+TEST_F(GeolocationWifiDataProviderCommonTest, MAYBE_DoScanWithResults) {
   EXPECT_CALL(*wlan_api_, GetAccessPointData(_))
       .Times(AtLeast(1));
   EXPECT_CALL(*polling_policy_, PollingInterval())
@@ -218,11 +229,12 @@ TEST_F(GeolocationWifiDataProviderCommonTest, DoScanWithResults) {
 
 TEST_F(GeolocationWifiDataProviderCommonTest, RegisterUnregister) {
   MessageLoopQuitter loop_quitter(&main_message_loop_);
-  WifiDataProvider::SetFactory(CreateWifiDataProviderCommonWithMock);
-  WifiDataProvider::Register(&loop_quitter.callback_);
+  WifiDataProviderManager::SetFactoryForTesting(
+      CreateWifiDataProviderCommonWithMock);
+  WifiDataProviderManager::Register(&loop_quitter.callback_);
   main_message_loop_.Run();
-  WifiDataProvider::Unregister(&loop_quitter.callback_);
-  WifiDataProvider::ResetFactory();
+  WifiDataProviderManager::Unregister(&loop_quitter.callback_);
+  WifiDataProviderManager::ResetFactoryForTesting();
 }
 
 }  // namespace content

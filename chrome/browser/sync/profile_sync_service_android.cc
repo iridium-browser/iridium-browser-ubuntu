@@ -22,6 +22,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/invalidation/object_id_invalidation_map.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/pref_names.h"
@@ -32,8 +33,8 @@
 #include "google/cacheinvalidation/types.pb.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "grit/generated_resources.h"
 #include "jni/ProfileSyncService_jni.h"
+#include "sync/internal_api/public/network_resources.h"
 #include "sync/internal_api/public/read_transaction.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -219,6 +220,12 @@ jboolean ProfileSyncServiceAndroid::IsFirstSetupInProgress(
   return sync_service_->FirstSetupInProgress();
 }
 
+jboolean ProfileSyncServiceAndroid::IsEncryptEverythingAllowed(
+    JNIEnv* env, jobject obj) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return sync_service_->EncryptEverythingAllowed();
+}
+
 jboolean ProfileSyncServiceAndroid::IsPassphraseRequired(JNIEnv* env, jobject) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return sync_service_->IsPassphraseRequired();
@@ -291,6 +298,13 @@ jboolean ProfileSyncServiceAndroid::HasExplicitPassphraseTime(
   return !passphrase_time.is_null();
 }
 
+jlong ProfileSyncServiceAndroid::GetExplicitPassphraseTime(
+        JNIEnv* env, jobject) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  base::Time passphrase_time = sync_service_->GetExplicitPassphraseTime();
+  return passphrase_time.ToJavaTime();
+}
+
 ScopedJavaLocalRef<jstring>
     ProfileSyncServiceAndroid::GetSyncEnterGooglePassphraseBodyWithDateText(
         JNIEnv* env, jobject) {
@@ -346,49 +360,9 @@ jboolean ProfileSyncServiceAndroid::IsSyncKeystoreMigrationDone(
 
 jlong ProfileSyncServiceAndroid::GetEnabledDataTypes(JNIEnv* env,
                                                      jobject obj) {
-  jlong model_type_selection = 0;
   syncer::ModelTypeSet types = sync_service_->GetActiveDataTypes();
   types.PutAll(syncer::ControlTypes());
-  if (types.Has(syncer::BOOKMARKS)) {
-    model_type_selection |= BOOKMARK;
-  }
-  if (types.Has(syncer::AUTOFILL)) {
-    model_type_selection |= AUTOFILL;
-  }
-  if (types.Has(syncer::AUTOFILL_PROFILE)) {
-    model_type_selection |= AUTOFILL_PROFILE;
-  }
-  if (types.Has(syncer::PASSWORDS)) {
-    model_type_selection |= PASSWORD;
-  }
-  if (types.Has(syncer::TYPED_URLS)) {
-    model_type_selection |= TYPED_URL;
-  }
-  if (types.Has(syncer::SESSIONS)) {
-    model_type_selection |= SESSION;
-  }
-  if (types.Has(syncer::HISTORY_DELETE_DIRECTIVES)) {
-    model_type_selection |= HISTORY_DELETE_DIRECTIVE;
-  }
-  if (types.Has(syncer::PROXY_TABS)) {
-    model_type_selection |= PROXY_TABS;
-  }
-  if (types.Has(syncer::FAVICON_IMAGES)) {
-    model_type_selection |= FAVICON_IMAGE;
-  }
-  if (types.Has(syncer::FAVICON_TRACKING)) {
-    model_type_selection |= FAVICON_TRACKING;
-  }
-  if (types.Has(syncer::DEVICE_INFO)) {
-    model_type_selection |= DEVICE_INFO;
-  }
-  if (types.Has(syncer::NIGORI)) {
-    model_type_selection |= NIGORI;
-  }
-  if (types.Has(syncer::EXPERIMENTS)) {
-    model_type_selection |= EXPERIMENTS;
-  }
-  return model_type_selection;
+  return ModelTypeSetToSelection(types);
 }
 
 void ProfileSyncServiceAndroid::SetPreferredDataTypes(
@@ -473,6 +447,74 @@ jlong ProfileSyncServiceAndroid::GetLastSyncedTimeForTest(
   // to to base::Time.
   return static_cast<jlong>(
       profile_->GetPrefs()->GetInt64(sync_driver::prefs::kSyncLastSyncedTime));
+}
+
+void ProfileSyncServiceAndroid::OverrideNetworkResourcesForTest(
+    JNIEnv* env,
+    jobject obj,
+    jlong network_resources) {
+  syncer::NetworkResources* resources =
+      reinterpret_cast<syncer::NetworkResources*>(network_resources);
+  sync_service_->OverrideNetworkResourcesForTest(
+      make_scoped_ptr<syncer::NetworkResources>(resources));
+}
+
+// static
+jlong ProfileSyncServiceAndroid::ModelTypeSetToSelection(
+    syncer::ModelTypeSet types) {
+  jlong model_type_selection = 0;
+  if (types.Has(syncer::BOOKMARKS)) {
+    model_type_selection |= BOOKMARK;
+  }
+  if (types.Has(syncer::AUTOFILL)) {
+    model_type_selection |= AUTOFILL;
+  }
+  if (types.Has(syncer::AUTOFILL_PROFILE)) {
+    model_type_selection |= AUTOFILL_PROFILE;
+  }
+  if (types.Has(syncer::PASSWORDS)) {
+    model_type_selection |= PASSWORD;
+  }
+  if (types.Has(syncer::TYPED_URLS)) {
+    model_type_selection |= TYPED_URL;
+  }
+  if (types.Has(syncer::SESSIONS)) {
+    model_type_selection |= SESSION;
+  }
+  if (types.Has(syncer::HISTORY_DELETE_DIRECTIVES)) {
+    model_type_selection |= HISTORY_DELETE_DIRECTIVE;
+  }
+  if (types.Has(syncer::PROXY_TABS)) {
+    model_type_selection |= PROXY_TABS;
+  }
+  if (types.Has(syncer::FAVICON_IMAGES)) {
+    model_type_selection |= FAVICON_IMAGE;
+  }
+  if (types.Has(syncer::FAVICON_TRACKING)) {
+    model_type_selection |= FAVICON_TRACKING;
+  }
+  if (types.Has(syncer::DEVICE_INFO)) {
+    model_type_selection |= DEVICE_INFO;
+  }
+  if (types.Has(syncer::NIGORI)) {
+    model_type_selection |= NIGORI;
+  }
+  if (types.Has(syncer::EXPERIMENTS)) {
+    model_type_selection |= EXPERIMENTS;
+  }
+  if (types.Has(syncer::SUPERVISED_USER_SETTINGS)) {
+    model_type_selection |= SUPERVISED_USER_SETTING;
+  }
+  return model_type_selection;
+}
+
+// static
+std::string ProfileSyncServiceAndroid::ModelTypeSelectionToStringForTest(
+    jlong model_type_selection) {
+  ScopedJavaLocalRef<jstring> string =
+      Java_ProfileSyncService_modelTypeSelectionToStringForTest(
+          AttachCurrentThread(), model_type_selection);
+  return ConvertJavaStringToUTF8(string);
 }
 
 void ProfileSyncServiceAndroid::NudgeSyncer(JNIEnv* env,

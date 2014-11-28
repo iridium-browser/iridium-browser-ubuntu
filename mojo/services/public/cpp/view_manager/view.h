@@ -12,6 +12,7 @@
 #include "mojo/public/cpp/bindings/array.h"
 #include "mojo/public/interfaces/application/service_provider.mojom.h"
 #include "mojo/services/public/cpp/view_manager/types.h"
+#include "mojo/services/public/interfaces/surfaces/surface_id.mojom.h"
 #include "mojo/services/public/interfaces/view_manager/view_manager_constants.mojom.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/rect.h"
@@ -20,6 +21,7 @@ class SkBitmap;
 
 namespace mojo {
 
+class BitmapUploader;
 class ServiceProviderImpl;
 class View;
 class ViewManager;
@@ -37,6 +39,8 @@ class View {
 
   // Destroys this view and all its children.
   void Destroy();
+
+  ViewManager* view_manager() { return manager_; }
 
   // Configuration.
   Id id() const { return id_; }
@@ -69,6 +73,8 @@ class View {
 
   View* GetChildById(Id id);
 
+  void SetSurfaceId(SurfaceIdPtr id);
+
   // TODO(beng): temporary only.
   void SetContents(const SkBitmap& contents);
   void SetColor(SkColor color);
@@ -99,6 +105,7 @@ class View {
   // Returns true if the order actually changed.
   bool LocalReorder(View* relative, OrderDirection direction);
   void LocalSetBounds(const gfx::Rect& old_bounds, const gfx::Rect& new_bounds);
+  void CreateBitmapUploader();
 
   ViewManager* manager_;
   Id id_;
@@ -108,6 +115,9 @@ class View {
   ObserverList<ViewObserver> observers_;
 
   gfx::Rect bounds_;
+  // TODO(jamesr): Temporary, remove when all clients are using surfaces
+  // directly.
+  scoped_ptr<BitmapUploader> bitmap_uploader_;
 
   DISALLOW_COPY_AND_ASSIGN(View);
 };

@@ -34,6 +34,7 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/html/HTMLOptGroupElement.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
@@ -80,6 +81,7 @@ void RenderMenuList::trace(Visitor* visitor)
 {
     visitor->trace(m_buttonText);
     visitor->trace(m_innerBlock);
+    visitor->trace(m_popup);
     RenderFlexibleBox::trace(visitor);
 }
 
@@ -425,7 +427,7 @@ void RenderMenuList::didSetSelectedIndex(int listIndex)
 
 void RenderMenuList::didUpdateActiveOption(int optionIndex)
 {
-    if (!AXObjectCache::accessibilityEnabled() || !document().existingAXObjectCache())
+    if (!document().existingAXObjectCache())
         return;
 
     if (m_lastActiveIndex == optionIndex)
@@ -595,6 +597,8 @@ int RenderMenuList::selectedIndex() const
 void RenderMenuList::popupDidHide()
 {
     m_popupIsVisible = false;
+    // Ensure the text is updated which wasn't updated when the popup is visible.
+    updateFromElement();
 }
 
 bool RenderMenuList::itemIsSeparator(unsigned listIndex) const

@@ -275,10 +275,6 @@ interface PPB_NaCl_Private {
   /* Reports that loading a nexe was aborted. */
   void ReportLoadAbort([in] PP_Instance instance);
 
-  /* Reports that the nexe has crashed. */
-  void NexeDidCrash([in] PP_Instance instance,
-                    [in] str_t crash_log);
-
   /* Performs internal setup when an instance is created. */
   void InstanceCreated([in] PP_Instance instance);
 
@@ -301,13 +297,6 @@ interface PPB_NaCl_Private {
 
   /* Returns the NaCl readiness status for this instance. */
   PP_NaClReadyState GetNaClReadyState([in] PP_Instance instance);
-
-  /* Returns the exit status of the plugin process. */
-  int32_t GetExitStatus([in] PP_Instance instance);
-
-  /* Sets the exit status of the plugin process. */
-  void SetExitStatus([in] PP_Instance instance,
-                     [in] int32_t exit_status);
 
   /* Logs the message via VLOG. */
   void Vlog([in] str_t message);
@@ -351,12 +340,6 @@ interface PPB_NaCl_Private {
   // of attributes supported by LLVM in its -mattr= option:
   //   http://llvm.org/docs/CommandGuide/llc.html#cmdoption-mattr
   PP_Var GetCpuFeatureAttrs();
-
-  /* Posts a message to the JavaScript object for the given instance.
-   * This method may be called on any thread.
-   */
-  void PostMessageToJavaScript([in] PP_Instance instance,
-                               [in] str_t message);
 
   /* Downloads the .nexe file at the given URL to a file, and sets |file_info|
    * to information for a handle to a file containing its contents.

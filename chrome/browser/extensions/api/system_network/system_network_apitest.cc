@@ -5,19 +5,20 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/extensions/api/system_network/system_network_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "extensions/browser/api/system_network/system_network_api.h"
+#include "extensions/common/test_util.h"
+#include "extensions/test/extension_test_message_listener.h"
 
 using extensions::Extension;
-using extensions::api::SystemNetworkGetNetworkInterfacesFunction;
-using extensions::api::system_network::NetworkInterface;
+using extensions::core_api::SystemNetworkGetNetworkInterfacesFunction;
+using extensions::core_api::system_network::NetworkInterface;
 
 namespace utils = extension_function_test_utils;
 
@@ -35,7 +36,8 @@ IN_PROC_BROWSER_TEST_F(SystemNetworkApiTest, SystemNetworkExtension) {
 IN_PROC_BROWSER_TEST_F(SystemNetworkApiTest, GetNetworkInterfaces) {
   scoped_refptr<SystemNetworkGetNetworkInterfacesFunction> socket_function(
       new SystemNetworkGetNetworkInterfacesFunction());
-  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension(
+      extensions::test_util::CreateEmptyExtension());
 
   socket_function->set_extension(empty_extension.get());
   socket_function->set_has_callback(true);

@@ -14,14 +14,16 @@ include_rules = [
   "+ui/base/resource",
 
   # Shell resources
-  "+grit/net_resources.h",
   "+grit/shell_resources.h",
 
   # The content_shell for aura must work with the views and aura
   "+ui/aura",
   "+ui/views",
 
-  "+components/breakpad",
+  "+components/crash",
+
+  # For enabling media related features.
+  "+media/base/media_switches.h",
 ]
 
 specific_include_rules = {

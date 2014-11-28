@@ -33,17 +33,18 @@
 
 #include "bindings/core/v8/WorkerScriptController.h"
 #include "core/dom/CrossThreadTask.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MessagePort.h"
 #include "core/events/MessageEvent.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "modules/push_messaging/PushEvent.h"
+#include "modules/serviceworkers/ExtendableEvent.h"
 #include "modules/serviceworkers/FetchEvent.h"
 #include "modules/serviceworkers/InstallEvent.h"
-#include "modules/serviceworkers/InstallPhaseEvent.h"
 #include "modules/serviceworkers/WaitUntilObserver.h"
-#include "platform/NotImplemented.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebServiceWorkerRequest.h"
 #include "public/web/WebSerializedScriptValue.h"
 #include "public/web/WebServiceWorkerContextClient.h"
@@ -53,9 +54,9 @@
 
 namespace blink {
 
-PassOwnPtr<ServiceWorkerGlobalScopeProxy> ServiceWorkerGlobalScopeProxy::create(WebEmbeddedWorkerImpl& embeddedWorker, ExecutionContext& executionContext, WebServiceWorkerContextClient& client)
+PassOwnPtr<ServiceWorkerGlobalScopeProxy> ServiceWorkerGlobalScopeProxy::create(WebEmbeddedWorkerImpl& embeddedWorker, Document& document, WebServiceWorkerContextClient& client)
 {
-    return adoptPtr(new ServiceWorkerGlobalScopeProxy(embeddedWorker, executionContext, client));
+    return adoptPtr(new ServiceWorkerGlobalScopeProxy(embeddedWorker, document, client));
 }
 
 ServiceWorkerGlobalScopeProxy::~ServiceWorkerGlobalScopeProxy()
@@ -65,7 +66,7 @@ ServiceWorkerGlobalScopeProxy::~ServiceWorkerGlobalScopeProxy()
 void ServiceWorkerGlobalScopeProxy::dispatchInstallEvent(int eventID)
 {
     ASSERT(m_workerGlobalScope);
-    RefPtr<WaitUntilObserver> observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Install, eventID);
+    WaitUntilObserver* observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Install, eventID);
     observer->willDispatchEvent();
     m_workerGlobalScope->dispatchEvent(InstallEvent::create(EventTypeNames::install, EventInit(), observer));
     observer->didDispatchEvent();
@@ -74,17 +75,22 @@ void ServiceWorkerGlobalScopeProxy::dispatchInstallEvent(int eventID)
 void ServiceWorkerGlobalScopeProxy::dispatchActivateEvent(int eventID)
 {
     ASSERT(m_workerGlobalScope);
-    RefPtr<WaitUntilObserver> observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Activate, eventID);
+    WaitUntilObserver* observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Activate, eventID);
     observer->willDispatchEvent();
-    m_workerGlobalScope->dispatchEvent(InstallPhaseEvent::create(EventTypeNames::activate, EventInit(), observer));
+    m_workerGlobalScope->dispatchEvent(ExtendableEvent::create(EventTypeNames::activate, EventInit(), observer));
     observer->didDispatchEvent();
 }
 
 void ServiceWorkerGlobalScopeProxy::dispatchFetchEvent(int eventID, const WebServiceWorkerRequest& webRequest)
 {
     ASSERT(m_workerGlobalScope);
-    RefPtr<RespondWithObserver> observer = RespondWithObserver::create(m_workerGlobalScope, eventID);
-    RefPtrWillBeRawPtr<Request> request = Request::create(webRequest);
+    RespondWithObserver* observer = RespondWithObserver::create(m_workerGlobalScope, eventID);
+    if (!RuntimeEnabledFeatures::serviceWorkerOnFetchEnabled()) {
+        observer->didDispatchEvent();
+        return;
+    }
+
+    Request* request = Request::create(m_workerGlobalScope, webRequest);
     RefPtrWillBeRawPtr<FetchEvent> fetchEvent(FetchEvent::create(observer, request));
     fetchEvent->setIsReload(webRequest.isReload());
     m_workerGlobalScope->dispatchEvent(fetchEvent.release());
@@ -109,7 +115,8 @@ void ServiceWorkerGlobalScopeProxy::dispatchPushEvent(int eventID, const WebStri
 void ServiceWorkerGlobalScopeProxy::dispatchSyncEvent(int eventID)
 {
     ASSERT(m_workerGlobalScope);
-    m_workerGlobalScope->dispatchEvent(Event::create(EventTypeNames::sync));
+    if (RuntimeEnabledFeatures::backgroundSyncEnabled())
+        m_workerGlobalScope->dispatchEvent(Event::create(EventTypeNames::sync));
     ServiceWorkerGlobalScopeClient::from(m_workerGlobalScope)->didHandleSyncEvent(eventID);
 }
 
@@ -125,12 +132,13 @@ void ServiceWorkerGlobalScopeProxy::reportConsoleMessage(PassRefPtrWillBeRawPtr<
 
 void ServiceWorkerGlobalScopeProxy::postMessageToPageInspector(const String& message)
 {
-    m_client.dispatchDevToolsMessage(message);
+    m_document.postInspectorTask(createCrossThreadTask(&WebEmbeddedWorkerImpl::postMessageToPageInspector, &m_embeddedWorker, message));
 }
 
 void ServiceWorkerGlobalScopeProxy::updateInspectorStateCookie(const String& message)
 {
-    m_client.saveDevToolsAgentState(message);
+    // The inspector cookie saving/restoring is controlled from the main thread.
+    // This method could be removed once shared workers are moved to the main thread inspection as well.
 }
 
 void ServiceWorkerGlobalScopeProxy::workerGlobalScopeStarted(WorkerGlobalScope* workerGlobalScope)
@@ -142,7 +150,7 @@ void ServiceWorkerGlobalScopeProxy::workerGlobalScopeStarted(WorkerGlobalScope* 
 
 void ServiceWorkerGlobalScopeProxy::workerGlobalScopeClosed()
 {
-    m_executionContext.postTask(createCrossThreadTask(&WebEmbeddedWorkerImpl::terminateWorkerContext, &m_embeddedWorker));
+    m_document.postTask(createCrossThreadTask(&WebEmbeddedWorkerImpl::terminateWorkerContext, &m_embeddedWorker));
 }
 
 void ServiceWorkerGlobalScopeProxy::willDestroyWorkerGlobalScope()
@@ -156,9 +164,9 @@ void ServiceWorkerGlobalScopeProxy::workerThreadTerminated()
     m_client.workerContextDestroyed();
 }
 
-ServiceWorkerGlobalScopeProxy::ServiceWorkerGlobalScopeProxy(WebEmbeddedWorkerImpl& embeddedWorker, ExecutionContext& executionContext, WebServiceWorkerContextClient& client)
+ServiceWorkerGlobalScopeProxy::ServiceWorkerGlobalScopeProxy(WebEmbeddedWorkerImpl& embeddedWorker, Document& document, WebServiceWorkerContextClient& client)
     : m_embeddedWorker(embeddedWorker)
-    , m_executionContext(executionContext)
+    , m_document(document)
     , m_client(client)
     , m_workerGlobalScope(0)
 {

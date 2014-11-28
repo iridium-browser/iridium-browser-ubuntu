@@ -275,43 +275,27 @@
 
 /* Bits for algorithm_mkey (key exchange algorithm) */
 #define SSL_kRSA		0x00000001L /* RSA key exchange */
-#define SSL_kDHr		0x00000002L /* DH cert, RSA CA cert */
-#define SSL_kDHd		0x00000004L /* DH cert, DSA CA cert */
-#define SSL_kEDH		0x00000008L /* tmp DH key no DH cert */
-#define SSL_kECDHr		0x00000010L /* ECDH cert, RSA CA cert */
-#define SSL_kECDHe		0x00000020L /* ECDH cert, ECDSA CA cert */
-#define SSL_kEECDH		0x00000040L /* ephemeral ECDH */
-#define SSL_kPSK		0x00000080L /* PSK */
-#define SSL_kSRP		0x00000100L /* SRP */
+#define SSL_kEDH		0x00000002L /* tmp DH key no DH cert */
+#define SSL_kEECDH		0x00000004L /* ephemeral ECDH */
+#define SSL_kPSK		0x00000008L /* PSK */
 
 /* Bits for algorithm_auth (server authentication) */
 #define SSL_aRSA		0x00000001L /* RSA auth */
-#define SSL_aDSS 		0x00000002L /* DSS auth */
-#define SSL_aNULL 		0x00000004L /* no auth (i.e. use ADH or AECDH) */
-#define SSL_aDH 		0x00000008L /* Fixed DH auth (kDHd or kDHr) */
-#define SSL_aECDH 		0x00000010L /* Fixed ECDH auth (kECDHe or kECDHr) */
-#define SSL_aECDSA              0x00000020L /* ECDSA auth*/
-#define SSL_aPSK                0x00000040L /* PSK auth */
+#define SSL_aNULL 		0x00000002L /* no auth (i.e. use ADH or AECDH) */
+#define SSL_aECDSA              0x00000004L /* ECDSA auth*/
+#define SSL_aPSK                0x00000008L /* PSK auth */
 
 
 /* Bits for algorithm_enc (symmetric encryption) */
-#define SSL_DES			0x00000001L
-#define SSL_3DES		0x00000002L
-#define SSL_RC4			0x00000004L
-#define SSL_RC2			0x00000008L
-#define SSL_IDEA		0x00000010L
-#define SSL_eNULL		0x00000020L
-#define SSL_AES128		0x00000040L
-#define SSL_AES256		0x00000080L
-#define SSL_CAMELLIA128		0x00000100L
-#define SSL_CAMELLIA256		0x00000200L
-#define SSL_SEED		0x00000400L
-#define SSL_AES128GCM		0x00000800L
-#define SSL_AES256GCM		0x00001000L
-#define SSL_CHACHA20POLY1305	0x00002000L
+#define SSL_3DES		0x00000001L
+#define SSL_RC4			0x00000002L
+#define SSL_AES128		0x00000004L
+#define SSL_AES256		0x00000008L
+#define SSL_AES128GCM		0x00000010L
+#define SSL_AES256GCM		0x00000020L
+#define SSL_CHACHA20POLY1305	0x00000040L
 
 #define SSL_AES        		(SSL_AES128|SSL_AES256|SSL_AES128GCM|SSL_AES256GCM)
-#define SSL_CAMELLIA		(SSL_CAMELLIA128|SSL_CAMELLIA256)
 
 
 /* Bits for algorithm_mac (symmetric authentication) */
@@ -324,7 +308,6 @@
 #define SSL_AEAD		0x00000010L
 
 /* Bits for algorithm_ssl (protocol version) */
-#define SSL_SSLV2		0x00000001L
 #define SSL_SSLV3		0x00000002L
 #define SSL_TLSV1		SSL_SSLV3	/* for now */
 #define SSL_TLSV1_2		0x00000004L
@@ -374,35 +357,11 @@
 #define SSL_CIPHER_ALGORITHM2_STATEFUL_AEAD (1<<28)
 
 /*
- * Export and cipher strength information. For each cipher we have to decide
- * whether it is exportable or not. This information is likely to change
- * over time, since the export control rules are no static technical issue.
- *
- * Independent of the export flag the cipher strength is sorted into classes.
- * SSL_EXP40 was denoting the 40bit US export limit of past times, which now
- * is at 56bit (SSL_EXP56). If the exportable cipher class is going to change
- * again (eg. to 64bit) the use of "SSL_EXP*" becomes blurred even more,
- * since SSL_EXP64 could be similar to SSL_LOW.
- * For this reason SSL_MICRO and SSL_MINI macros are included to widen the
- * namespace of SSL_LOW-SSL_HIGH to lower values. As development of speed
- * and ciphers goes, another extension to SSL_SUPER and/or SSL_ULTRA would
- * be possible.
+ * Cipher strength information.
  */
-#define SSL_EXP_MASK		0x00000003L
-#define SSL_STRONG_MASK		0x000001fcL
-
-#define SSL_NOT_EXP		0x00000001L
-#define SSL_EXPORT		0x00000002L
-
-#define SSL_STRONG_NONE		0x00000004L
-#define SSL_EXP40		0x00000008L
-#define SSL_MICRO		(SSL_EXP40)
-#define SSL_EXP56		0x00000010L
-#define SSL_MINI		(SSL_EXP56)
-#define SSL_LOW			0x00000020L
-#define SSL_MEDIUM		0x00000040L
-#define SSL_HIGH		0x00000080L
-#define SSL_FIPS		0x00000100L
+#define SSL_MEDIUM		0x00000001L
+#define SSL_HIGH		0x00000002L
+#define SSL_FIPS		0x00000004L
 
 /* we have used 000001ff - 23 bits left to go */
 
@@ -431,11 +390,8 @@
 /* Mostly for SSLv3 */
 #define SSL_PKEY_RSA_ENC	0
 #define SSL_PKEY_RSA_SIGN	1
-#define SSL_PKEY_DSA_SIGN	2
-#define SSL_PKEY_DH_RSA		3
-#define SSL_PKEY_DH_DSA		4
-#define SSL_PKEY_ECC            5
-#define SSL_PKEY_NUM		6
+#define SSL_PKEY_ECC            2
+#define SSL_PKEY_NUM		3
 
 /* SSL_kRSA <- RSA_ENC | (RSA_TMP & RSA_SIGN) |
  * 	    <- (EXPORT & (RSA_ENC | RSA_TMP) & RSA_SIGN)
@@ -454,14 +410,16 @@
 #define PENDING_SESSION -10000
 #define CERTIFICATE_SELECTION_PENDING -10001
 
-#ifndef OPENSSL_NO_EC
 /* From ECC-TLS draft, used in encoding the curve type in 
  * ECParameters
  */
 #define EXPLICIT_PRIME_CURVE_TYPE  1   
 #define EXPLICIT_CHAR2_CURVE_TYPE  2
 #define NAMED_CURVE_TYPE           3
-#endif  /* OPENSSL_NO_EC */
+
+/* Values for the |hash_message| parameter of |s->method->ssl_get_message|. */
+#define SSL_GET_MESSAGE_DONT_HASH_MESSAGE 0
+#define SSL_GET_MESSAGE_HASH_MESSAGE 1
 
 typedef struct cert_pkey_st
 	{
@@ -477,11 +435,9 @@ typedef struct cert_pkey_st
 	 */
 	int valid_flags;
 	} CERT_PKEY;
-/* Retrieve Suite B flags */
-#define tls1_suiteb(s)	(s->cert->cert_flags & SSL_CERT_FLAG_SUITEB_128_LOS)
-/* Uses to check strict mode: suite B modes are always strict */
+
 #define SSL_CERT_FLAGS_CHECK_TLS_STRICT \
-	(SSL_CERT_FLAG_SUITEB_128_LOS|SSL_CERT_FLAG_TLS_STRICT)
+	SSL_CERT_FLAG_TLS_STRICT
 
 typedef struct cert_st
 	{
@@ -500,17 +456,13 @@ typedef struct cert_st
 	unsigned long mask_a;
 	/* Client only */
 	unsigned long mask_ssl;
-#ifndef OPENSSL_NO_DH
 	DH *dh_tmp;
 	DH *(*dh_tmp_cb)(SSL *ssl,int is_export,int keysize);
-#endif
-#ifndef OPENSSL_NO_ECDH
 	EC_KEY *ecdh_tmp;
 	/* Callback for generating ephemeral ECDH keys */
 	EC_KEY *(*ecdh_tmp_cb)(SSL *ssl,int is_export,int keysize);
 	/* Select ECDH parameters automatically */
 	int ecdh_tmp_auto;
-#endif
 	/* Flags related to certificates */
 	unsigned int cert_flags;
 	CERT_PKEY pkeys[SSL_PKEY_NUM];
@@ -586,14 +538,8 @@ typedef struct sess_cert_st
 	 * so maybe we shouldn't even use the CERT_PKEY type here. */
 
 	RSA *peer_rsa_tmp; /* not used for SSL 2 */
-#ifndef OPENSSL_NO_DH
 	DH *peer_dh_tmp; /* not used for SSL 2 */
-#endif
-#ifndef OPENSSL_NO_ECDH
 	EC_KEY *peer_ecdh_tmp;
-#endif
-
-	int references; /* actually always 1 at the moment */
 	} SESS_CERT;
 /* Structure containing decoded values of signature algorithms extension */
 struct tls_sigalgs_st
@@ -692,7 +638,7 @@ struct ssl_aead_ctx_st
 
 
 extern SSL3_ENC_METHOD ssl3_undef_enc_method;
-extern SSL_CIPHER ssl3_ciphers[];
+extern const SSL_CIPHER ssl3_ciphers[];
 
 
 SSL_METHOD *ssl_bad_method(int ver);
@@ -710,9 +656,9 @@ const SSL_METHOD *func_name(void)  \
 	{ \
 	static const SSL_METHOD func_name##_data= { \
 		version, \
-		tls1_new, \
-		tls1_clear, \
-		tls1_free, \
+		ssl3_new, \
+		ssl3_clear, \
+		ssl3_free, \
 		s_accept, \
 		s_connect, \
 		ssl3_read, \
@@ -731,7 +677,6 @@ const SSL_METHOD *func_name(void)  \
 		ssl3_num_ciphers, \
 		ssl3_get_cipher, \
 		s_get_meth, \
-		tls1_default_timeout, \
 		&enc_data, \
 		ssl_undefined_void_function, \
 		ssl3_callback_ctrl, \
@@ -766,7 +711,6 @@ const SSL_METHOD *func_name(void)  \
 		ssl3_num_ciphers, \
 		ssl3_get_cipher, \
 		s_get_meth, \
-		ssl3_default_timeout, \
 		&SSLv3_enc_data, \
 		ssl_undefined_void_function, \
 		ssl3_callback_ctrl, \
@@ -780,9 +724,9 @@ const SSL_METHOD *func_name(void)  \
 	{ \
 	static const SSL_METHOD func_name##_data= { \
 	TLS1_2_VERSION, \
-	tls1_new, \
-	tls1_clear, \
-	tls1_free, \
+	ssl3_new, \
+	ssl3_clear, \
+	ssl3_free, \
 	s_accept, \
 	s_connect, \
 	ssl23_read, \
@@ -801,7 +745,6 @@ const SSL_METHOD *func_name(void)  \
 	ssl3_num_ciphers, \
 	ssl3_get_cipher, \
 	s_get_meth, \
-	ssl23_default_timeout, \
 	&TLSv1_2_enc_data, \
 	ssl_undefined_void_function, \
 	ssl3_callback_ctrl, \
@@ -837,7 +780,6 @@ const SSL_METHOD *func_name(void)  \
 		ssl3_num_ciphers, \
 		dtls1_get_cipher, \
 		s_get_meth, \
-		dtls1_default_timeout, \
 		&enc_data, \
 		ssl_undefined_void_function, \
 		ssl3_callback_ctrl, \
@@ -878,7 +820,6 @@ int ssl_cipher_get_evp_aead(const SSL_SESSION *s, const EVP_AEAD **aead);
 int ssl_cipher_get_evp(const SSL_SESSION *s,const EVP_CIPHER **enc,
 		       const EVP_MD **md,int *mac_pkey_type,int *mac_secret_size);
 int ssl_cipher_get_mac(const SSL_SESSION *s, const EVP_MD **md, int *mac_pkey_type, int *mac_secret_size);
-int ssl_get_handshake_digest(int i,long *mask,const EVP_MD **md);			   
 int ssl_get_handshake_digest(int i,long *mask,const EVP_MD **md);
 int ssl_cipher_get_cert_index(const SSL_CIPHER *c);
 int ssl_cipher_has_server_public_key(const SSL_CIPHER *cipher);
@@ -904,14 +845,13 @@ int ssl_cert_type(X509 *x,EVP_PKEY *pkey);
 void ssl_set_cert_masks(CERT *c, const SSL_CIPHER *cipher);
 STACK_OF(SSL_CIPHER) *ssl_get_ciphers_by_id(SSL *s);
 int ssl_verify_alarm_type(long type);
-void ssl_load_ciphers(void);
 int ssl_fill_hello_random(SSL *s, int server, unsigned char *field, int len);
 
 const SSL_CIPHER *ssl3_get_cipher_by_value(uint16_t value);
 uint16_t ssl3_get_cipher_value(const SSL_CIPHER *c);
 void ssl3_init_finished_mac(SSL *s);
 int ssl3_send_server_certificate(SSL *s);
-int ssl3_send_newsession_ticket(SSL *s);
+int ssl3_send_new_session_ticket(SSL *s);
 int ssl3_send_cert_status(SSL *s);
 int ssl3_get_finished(SSL *s,int state_a,int state_b);
 int ssl3_setup_key_block(SSL *s);
@@ -923,7 +863,20 @@ int ssl3_send_alert(SSL *s,int level, int desc);
 int ssl3_generate_master_secret(SSL *s, unsigned char *out,
 	unsigned char *p, int len);
 int ssl3_get_req_cert_type(SSL *s,unsigned char *p);
-long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok);
+long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int hash_message, int *ok);
+
+/* ssl3_hash_current_message incorporates the current handshake message into
+ * the handshake hash. */
+void ssl3_hash_current_message(SSL *s);
+
+/* ssl3_cert_verify_hash writes the CertificateVerify hash into the bytes
+ * pointed to by |out| and writes the number of bytes to |*out_len|. |out| must
+ * have room for EVP_MAX_MD_SIZE bytes. For TLS 1.2 and up, |*out_md| is used
+ * for the hash function, otherwise the hash function depends on the type of
+ * |pkey| and is written to |*out_md|. It returns one on success and zero on
+ * failure. */
+int ssl3_cert_verify_hash(SSL *s, uint8_t *out, size_t *out_len, const EVP_MD **out_md, EVP_PKEY *pkey);
+
 int ssl3_send_finished(SSL *s, int a, int b, const char *sender,int slen);
 int ssl3_num_ciphers(void);
 const SSL_CIPHER *ssl3_get_cipher(unsigned int u);
@@ -940,7 +893,7 @@ int ssl3_enc(SSL *s, int send_data);
 int n_ssl3_mac(SSL *ssl, unsigned char *md, int send_data);
 void ssl3_free_digest_list(SSL *s);
 unsigned long ssl3_output_cert_chain(SSL *s, CERT_PKEY *cpk);
-SSL_CIPHER *ssl3_choose_cipher(SSL *ssl,STACK_OF(SSL_CIPHER) *clnt,
+const SSL_CIPHER *ssl3_choose_cipher(SSL *ssl,STACK_OF(SSL_CIPHER) *clnt,
 			       struct ssl_cipher_preference_list_st *srvr);
 int	ssl3_setup_buffers(SSL *s);
 int	ssl3_setup_read_buffer(SSL *s);
@@ -965,7 +918,6 @@ int	ssl3_pending(const SSL *s);
 
 void ssl3_record_sequence_update(unsigned char *seq);
 int ssl3_do_change_cipher_spec(SSL *ssl);
-long ssl3_default_timeout(void );
 
 void ssl3_set_handshake_header(SSL *s, int htype, unsigned long len);
 int ssl3_handshake_write(SSL *s);
@@ -973,9 +925,7 @@ int ssl3_handshake_write(SSL *s);
 int ssl23_read(SSL *s, void *buf, int len);
 int ssl23_peek(SSL *s, void *buf, int len);
 int ssl23_write(SSL *s, const void *buf, int len);
-long ssl23_default_timeout(void );
 
-long tls1_default_timeout(void);
 int dtls1_do_write(SSL *s,int type);
 int ssl3_read_n(SSL *s, int n, int max, int extend);
 int dtls1_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek);
@@ -1001,8 +951,6 @@ void dtls1_clear_record_buffer(SSL *s);
 void dtls1_get_message_header(unsigned char *data, struct hm_header_st *msg_hdr);
 void dtls1_get_ccs_header(unsigned char *data, struct ccs_header_st *ccs_hdr);
 void dtls1_reset_seq_numbers(SSL *s, int rw);
-long dtls1_default_timeout(void);
-struct timeval* dtls1_get_timeout(SSL *s, struct timeval* timeleft);
 int dtls1_check_timeout_num(SSL *s);
 int dtls1_handle_timeout(SSL *s);
 const SSL_CIPHER *dtls1_get_cipher(unsigned int u);
@@ -1010,27 +958,24 @@ void dtls1_start_timer(SSL *s);
 void dtls1_stop_timer(SSL *s);
 int dtls1_is_timer_expired(SSL *s);
 void dtls1_double_timeout(SSL *s);
-int dtls1_send_newsession_ticket(SSL *s);
 unsigned int dtls1_min_mtu(void);
 
 /* some client-only functions */
-int ssl3_client_hello(SSL *s);
+int ssl3_send_client_hello(SSL *s);
 int ssl3_get_server_hello(SSL *s);
 int ssl3_get_certificate_request(SSL *s);
 int ssl3_get_new_session_ticket(SSL *s);
 int ssl3_get_cert_status(SSL *s);
 int ssl3_get_server_done(SSL *s);
-int ssl3_send_client_verify(SSL *s);
+int ssl3_send_cert_verify(SSL *s);
 int ssl3_send_client_certificate(SSL *s);
 int ssl_do_client_cert_cb(SSL *s, X509 **px509, EVP_PKEY **ppkey);
 int ssl3_send_client_key_exchange(SSL *s);
 int ssl3_get_server_key_exchange(SSL *s);
 int ssl3_get_server_certificate(SSL *s);
 int ssl3_check_cert_and_algorithm(SSL *s);
-# ifndef OPENSSL_NO_NEXTPROTONEG
 int ssl3_send_next_proto(SSL *s);
 int ssl3_send_channel_id(SSL *s);
-# endif
 
 int dtls1_client_hello(SSL *s);
 
@@ -1041,25 +986,16 @@ int ssl3_send_hello_request(SSL *s);
 int ssl3_send_server_key_exchange(SSL *s);
 int ssl3_send_certificate_request(SSL *s);
 int ssl3_send_server_done(SSL *s);
-int ssl3_check_client_hello(SSL *s);
 int ssl3_get_client_certificate(SSL *s);
 int ssl3_get_client_key_exchange(SSL *s);
 int ssl3_get_cert_verify(SSL *s);
-#ifndef OPENSSL_NO_NEXTPROTONEG
 int ssl3_get_next_proto(SSL *s);
 int ssl3_get_channel_id(SSL *s);
-#endif
 
 int ssl23_accept(SSL *s);
 int ssl23_connect(SSL *s);
 int ssl23_read_bytes(SSL *s, int n);
 int ssl23_write_bytes(SSL *s);
-
-int tls1_new(SSL *s);
-void tls1_free(SSL *s);
-void tls1_clear(SSL *s);
-long tls1_ctrl(SSL *s,int cmd, long larg, void *parg);
-long tls1_callback_ctrl(SSL *s,int cmd, void (*fp)(void));
 
 int dtls1_new(SSL *s);
 int	dtls1_accept(SSL *s);
@@ -1069,7 +1005,7 @@ void dtls1_clear(SSL *s);
 long dtls1_ctrl(SSL *s,int cmd, long larg, void *parg);
 int dtls1_shutdown(SSL *s);
 
-long dtls1_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok);
+long dtls1_get_message(SSL *s, int st1, int stn, int mt, long max, int hash_message, int *ok);
 int dtls1_get_record(SSL *s);
 int dtls1_dispatch_alert(SSL *s);
 int dtls1_enc(SSL *s, int snd);
@@ -1094,12 +1030,9 @@ int tls1_alert_code(int code);
 int ssl3_alert_code(int code);
 int ssl_ok(SSL *s);
 
-#ifndef OPENSSL_NO_ECDH
 int ssl_check_srvr_ecc_cert_and_alg(X509 *x, SSL *s);
-#endif
 
 char ssl_early_callback_init(struct ssl_early_callback_ctx *ctx);
-#ifndef OPENSSL_NO_EC
 int tls1_ec_curve_id2nid(uint16_t curve_id);
 uint16_t tls1_ec_nid2curve_id(int nid);
 
@@ -1122,7 +1055,6 @@ int tls1_set_curves(uint16_t **out_curve_ids, size_t *out_curve_ids_len,
 	const int *curves, size_t ncurves);
 
 int tls1_check_ec_tmp_key(SSL *s, unsigned long id);
-#endif /* OPENSSL_NO_EC */
 
 int tls1_shared_list(SSL *s,
 			const unsigned char *l1, size_t l1len,
@@ -1131,7 +1063,6 @@ int tls1_shared_list(SSL *s,
 unsigned char *ssl_add_clienthello_tlsext(SSL *s, unsigned char *buf, unsigned char *limit, size_t header_len);
 unsigned char *ssl_add_serverhello_tlsext(SSL *s, unsigned char *buf, unsigned char *limit); 
 int ssl_parse_clienthello_tlsext(SSL *s, CBS *cbs);
-int ssl_check_clienthello_tlsext_late(SSL *s);
 int ssl_parse_serverhello_tlsext(SSL *s, CBS *cbs);
 int ssl_prepare_clienthello_tlsext(SSL *s);
 int ssl_prepare_serverhello_tlsext(SSL *s);
@@ -1154,6 +1085,19 @@ int tls1_check_chain(SSL *s, X509 *x, EVP_PKEY *pk, STACK_OF(X509) *chain,
 								int idx);
 void tls1_set_cert_validity(SSL *s);
 
+/* ssl_ctx_log_rsa_client_key_exchange logs |premaster| to |ctx|, if logging is
+ * enabled. It returns one on success and zero on failure. The entry is
+ * identified by the first 8 bytes of |encrypted_premaster|. */
+int ssl_ctx_log_rsa_client_key_exchange(SSL_CTX *ctx,
+	const uint8_t *encrypted_premaster, size_t encrypted_premaster_len,
+	const uint8_t *premaster, size_t premaster_len);
+
+/* ssl_ctx_log_master_secret logs |master| to |ctx|, if logging is enabled. It
+ * returns one on success and zero on failure. The entry is identified by
+ * |client_random|. */
+int ssl_ctx_log_master_secret(SSL_CTX *ctx,
+	const uint8_t *client_random, size_t client_random_len,
+	const uint8_t *master, size_t master_len);
 
 int ssl3_can_cutthrough(const SSL *s);
 int ssl_get_max_version(const SSL *s);
@@ -1201,9 +1145,5 @@ void ssl3_cbc_digest_record(
 	const unsigned char *mac_secret,
 	unsigned mac_secret_length,
 	char is_sslv3);
-
-void tls_fips_digest_extra(
-	const EVP_CIPHER_CTX *cipher_ctx, EVP_MD_CTX *mac_ctx,
-	const unsigned char *data, size_t data_len, size_t orig_len);
 
 #endif

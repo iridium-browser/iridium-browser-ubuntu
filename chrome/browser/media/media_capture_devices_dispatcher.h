@@ -84,6 +84,26 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver,
       const content::MediaResponseCallback& callback,
       const extensions::Extension* extension);
 
+  // Checks if we have media access permission. Note that this only checks the
+  // settings and does not query the user.
+  bool CheckMediaAccessPermission(content::BrowserContext* browser_context,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type);
+
+  // Method called from WebCapturerDelegate implementations to check media
+  // access permission. Note that this does not query the user.
+  bool CheckMediaAccessPermission(content::WebContents* web_contents,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type);
+
+  // Same as above but for an |extension|, which may not be NULL.
+#if defined(ENABLE_EXTENSIONS)
+  bool CheckMediaAccessPermission(content::WebContents* web_contents,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type,
+                                  const extensions::Extension* extension);
+#endif
+
   // Helper to get the default devices which can be used by the media request.
   // Uses the first available devices if the default devices are not available.
   // If the return list is empty, it means there is no available device on the
@@ -123,15 +143,6 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver,
       content::MediaRequestState state) OVERRIDE;
   virtual void OnCreatingAudioStream(int render_process_id,
                                      int render_frame_id) OVERRIDE;
-  virtual void OnAudioStreamPlaying(
-      int render_process_id,
-      int render_frame_id,
-      int stream_id,
-      const ReadPowerAndClipCallback& power_read_callback) OVERRIDE;
-  virtual void OnAudioStreamStopped(
-      int render_process_id,
-      int render_frame_id,
-      int stream_id) OVERRIDE;
 
   scoped_refptr<MediaStreamCaptureIndicator> GetMediaStreamCaptureIndicator();
 

@@ -10,6 +10,8 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
@@ -33,7 +35,7 @@ public class NavigationTest extends ContentShellTestBase {
                 new Runnable() {
                     @Override
                     public void run() {
-                        contentViewCore.goBack();
+                        contentViewCore.getWebContents().getNavigationController().goBack();
                     }
                 });
     }
@@ -45,7 +47,7 @@ public class NavigationTest extends ContentShellTestBase {
                 new Runnable() {
                     @Override
                     public void run() {
-                        contentViewCore.reload(true);
+                        contentViewCore.getWebContents().getNavigationController().reload(true);
                     }
                 });
     }
@@ -66,26 +68,30 @@ public class NavigationTest extends ContentShellTestBase {
         loadUrl(contentViewCore, testCallbackHelperContainer, new LoadUrlParams(URL_6));
         loadUrl(contentViewCore, testCallbackHelperContainer, new LoadUrlParams(URL_7));
 
-        NavigationHistory history = contentViewCore.getDirectedNavigationHistory(false, 3);
+        NavigationHistory history = contentViewCore.getWebContents().getNavigationController()
+                .getDirectedNavigationHistory(false, 3);
         assertEquals(3, history.getEntryCount());
         assertEquals(URL_6, history.getEntryAtIndex(0).getUrl());
         assertEquals(URL_5, history.getEntryAtIndex(1).getUrl());
         assertEquals(URL_4, history.getEntryAtIndex(2).getUrl());
 
-        history = contentViewCore.getDirectedNavigationHistory(true, 3);
+        history = contentViewCore.getWebContents().getNavigationController()
+                .getDirectedNavigationHistory(true, 3);
         assertEquals(history.getEntryCount(), 0);
 
         goBack(contentViewCore, testCallbackHelperContainer);
         goBack(contentViewCore, testCallbackHelperContainer);
         goBack(contentViewCore, testCallbackHelperContainer);
 
-        history = contentViewCore.getDirectedNavigationHistory(false, 4);
+        history = contentViewCore.getWebContents().getNavigationController()
+                .getDirectedNavigationHistory(false, 4);
         assertEquals(3, history.getEntryCount());
         assertEquals(URL_3, history.getEntryAtIndex(0).getUrl());
         assertEquals(URL_2, history.getEntryAtIndex(1).getUrl());
         assertEquals(URL_1, history.getEntryAtIndex(2).getUrl());
 
-        history = contentViewCore.getDirectedNavigationHistory(true, 4);
+        history = contentViewCore.getWebContents().getNavigationController()
+                .getDirectedNavigationHistory(true, 4);
         assertEquals(3, history.getEntryCount());
         assertEquals(URL_5, history.getEntryAtIndex(0).getUrl());
         assertEquals(URL_6, history.getEntryAtIndex(1).getUrl());
@@ -100,12 +106,12 @@ public class NavigationTest extends ContentShellTestBase {
     @MediumTest
     @Feature({"Navigation"})
     public void testPageReload() throws Throwable {
-        final String HTML_LOADTIME = "<html><head>" +
+        final String htmlLoadTime = "<html><head>" +
                 "<script type=\"text/javascript\">var loadTimestamp = new Date().getTime();" +
                 "function getLoadtime() { return loadTimestamp; }</script></head></html>";
-        final String URL_LOADTIME = UrlUtils.encodeHtmlDataUri(HTML_LOADTIME);
+        final String urlLoadTime = UrlUtils.encodeHtmlDataUri(htmlLoadTime);
 
-        ContentShellActivity activity = launchContentShellWithUrl(URL_LOADTIME);
+        ContentShellActivity activity = launchContentShellWithUrl(urlLoadTime);
         waitForActiveShellToBeDoneLoading();
         ContentViewCore contentViewCore = activity.getActiveContentViewCore();
         TestCallbackHelperContainer testCallbackHelperContainer =

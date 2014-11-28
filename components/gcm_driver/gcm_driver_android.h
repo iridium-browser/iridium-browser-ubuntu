@@ -45,8 +45,12 @@ class GCMDriverAndroid : public GCMDriver {
 
   // GCMDriver implementation:
   virtual void OnSignedIn() OVERRIDE;
+  virtual void OnSignedOut() OVERRIDE;
   virtual void Purge() OVERRIDE;
   virtual void Enable() OVERRIDE;
+  virtual void AddConnectionObserver(GCMConnectionObserver* observer) OVERRIDE;
+  virtual void RemoveConnectionObserver(
+      GCMConnectionObserver* observer) OVERRIDE;
   virtual void Disable() OVERRIDE;
   virtual GCMClient* GetGCMClientForTesting() const OVERRIDE;
   virtual bool IsStarted() const OVERRIDE;
@@ -55,6 +59,9 @@ class GCMDriverAndroid : public GCMDriver {
                                 bool clear_logs) OVERRIDE;
   virtual void SetGCMRecording(const GetGCMStatisticsCallback& callback,
                                bool recording) OVERRIDE;
+  virtual void UpdateAccountMapping(
+      const AccountMapping& account_mapping) OVERRIDE;
+  virtual void RemoveAccountMapping(const std::string& account_id) OVERRIDE;
 
  protected:
   // GCMDriver implementation:

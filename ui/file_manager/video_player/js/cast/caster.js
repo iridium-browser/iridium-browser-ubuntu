@@ -10,27 +10,25 @@
 // cast extension. This line prevents an exception on using localStorage.
 window.__defineGetter__('localStorage', function() { return {}; });
 
-/**
- * @type {string}
- * @const
- */
-var CAST_COMMAND_LINE_FLAG = 'enable-video-player-chromecast-support';
-
 // THIS IS A TEST APP.
 // TODO(yoshiki): Fix this before launch.
 var APPLICATION_ID = '214CC863';
 
 util.addPageLoadHandler(function() {
-  chrome.commandLinePrivate.hasSwitch(CAST_COMMAND_LINE_FLAG, function(result) {
-    if (result)
-      initialize();
-  }.wrap());
+  initialize();
 }.wrap());
 
 /**
  * Starts initialization of cast-related feature.
  */
 function initialize() {
+  if (window.loadMockCastExtensionForTest) {
+    // If the test flag is set, the mock extension for test will be laoded by
+    // the test script. Sets the handler to wait for loading.
+    onLoadCastExtension(initializeApi);
+    return;
+  }
+
   CastExtensionDiscoverer.findInstalledExtension(function(foundId) {
     if (foundId)
       loadCastAPI(initializeApi);
@@ -40,7 +38,10 @@ function initialize() {
 }
 
 /**
- * Executes the given callback after the cast extension is initialized.
+ * Loads the cast API extention. If not install, the extension is installed
+ * in background before load. The cast API will load the cast SDK automatically.
+ * The given callback is executes after the cast SDK extension is initialized.
+ *
  * @param {function} callback Callback (executed asynchronously).
  * @param {boolean=} opt_secondTry Spericy try if it's second call after
  *     installation of Cast API extension.
@@ -59,7 +60,7 @@ function loadCastAPI(callback, opt_secondTry) {
     }
 
     // Installs the Google Cast API extension and retry loading.
-    chrome.fileBrowserPrivate.installWebstoreItem(
+    chrome.fileManagerPrivate.installWebstoreItem(
         'mafeflapfdfljijmlienjedomfjfmhpd',
         true,  // Don't use installation prompt.
         function() {
@@ -75,30 +76,35 @@ function loadCastAPI(callback, opt_secondTry) {
         }.wrap());
   }.wrap();
 
-  var onLoad = function() {
-    if(!chrome.cast || !chrome.cast.isAvailable) {
-      var checkTimer = setTimeout(function() {
-        console.error('Either "Google Cast API" or "Google Cast" extension ' +
-                      'seems not to be installed?');
-      }.wrap(), 5000);
-
-      window['__onGCastApiAvailable'] = function(loaded, errorInfo) {
-        clearTimeout(checkTimer);
-
-        if (loaded)
-          callback();
-        else
-          console.error('Google Cast extension load failed.', errorInfo);
-      }.wrap();
-    } else {
-      setTimeout(callback);  // Runs asynchronously.
-    }
-  }.wrap();
-
+  // Trys to load the cast API extention which is defined in manifest.json.
   script.src = '_modules/mafeflapfdfljijmlienjedomfjfmhpd/cast_sender.js';
   script.addEventListener('error', onError);
-  script.addEventListener('load', onLoad);
+  script.addEventListener('load', onLoadCastExtension.bind(null, callback));
   document.body.appendChild(script);
+}
+
+/**
+ * Loads the cast sdk extension.
+ * @param {function()} callback Callback (executed asynchronously).
+ */
+function onLoadCastExtension(callback) {
+  if(!chrome.cast || !chrome.cast.isAvailable) {
+    var checkTimer = setTimeout(function() {
+      console.error('Either "Google Cast API" or "Google Cast" extension ' +
+                    'seems not to be installed?');
+    }.wrap(), 5000);
+
+    window['__onGCastApiAvailable'] = function(loaded, errorInfo) {
+      clearTimeout(checkTimer);
+
+      if (loaded)
+        callback();
+      else
+        console.error('Google Cast extension load failed.', errorInfo);
+    }.wrap();
+  } else {
+    setTimeout(callback);  // Runs asynchronously.
+  }
 }
 
 /**

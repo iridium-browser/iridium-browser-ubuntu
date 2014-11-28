@@ -65,6 +65,7 @@
 #include "platform/Logging.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
+#include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "public/platform/Platform.h"
@@ -124,11 +125,16 @@ static ResourceLoadPriority loadPriority(Resource::Type type, const FetchRequest
     case Resource::Raw:
         return request.options().synchronousPolicy == RequestSynchronously ? ResourceLoadPriorityVeryHigh : ResourceLoadPriorityMedium;
     case Resource::Script:
+        // Async scripts do not block the parser so they get the lowest priority and can be
+        // loaded in parser order with images.
+        if (FetchRequest::LazyLoad == request.defer())
+            return ResourceLoadPriorityLow;
+        return ResourceLoadPriorityMedium;
     case Resource::Font:
     case Resource::ImportResource:
         return ResourceLoadPriorityMedium;
     case Resource::Image:
-        // We'll default images to VeryLow, and promote whatever is visible. This improves
+        // Default images to VeryLow, and promote whatever is visible. This improves
         // speed-index by ~5% on average, ~14% at the 99th percentile.
         return ResourceLoadPriorityVeryLow;
     case Resource::Media:
@@ -229,6 +235,19 @@ static WebURLRequest::RequestContext requestContextFromType(const ResourceFetche
     return WebURLRequest::RequestContextSubresource;
 }
 
+static ResourceRequestCachePolicy memoryCachePolicyToResourceRequestCachePolicy(
+    const CachePolicy policy) {
+    if (policy == CachePolicyVerify)
+        return UseProtocolCachePolicy;
+    if (policy == CachePolicyRevalidate)
+        return ReloadIgnoringCacheData;
+    if (policy == CachePolicyReload)
+        return ReloadBypassingCache;
+    if (policy == CachePolicyHistoryBuffer)
+        return ReturnCacheDataElseLoad;
+    return UseProtocolCachePolicy;
+}
+
 ResourceFetcher::ResourceFetcher(DocumentLoader* documentLoader)
     : m_document(nullptr)
     , m_documentLoader(documentLoader)
@@ -286,10 +305,12 @@ ResourcePtr<Resource> ResourceFetcher::fetchSynchronously(FetchRequest& request)
 
 ResourcePtr<ImageResource> ResourceFetcher::fetchImage(FetchRequest& request)
 {
+    if (request.resourceRequest().requestContext() == WebURLRequest::RequestContextUnspecified)
+        request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextImage);
     if (LocalFrame* f = frame()) {
         if (f->document()->pageDismissalEventBeingDispatched() != Document::NoDismissal) {
             KURL requestURL = request.resourceRequest().url();
-            if (requestURL.isValid() && canRequest(Resource::Image, requestURL, request.options(), request.forPreload(), request.originRestriction()))
+            if (requestURL.isValid() && canRequest(Resource::Image, request.resourceRequest(), requestURL, request.options(), request.forPreload(), request.originRestriction()))
                 PingLoader::loadImage(f, requestURL);
             return 0;
         }
@@ -418,78 +439,7 @@ void ResourceFetcher::preCacheSubstituteDataForMainResource(const FetchRequest& 
     memoryCache()->add(resource.get());
 }
 
-bool ResourceFetcher::checkInsecureContent(Resource::Type type, const KURL& url, MixedContentBlockingTreatment treatment) const
-{
-    if (treatment == TreatAsDefaultForType) {
-        switch (type) {
-        case Resource::XSLStyleSheet:
-            ASSERT(RuntimeEnabledFeatures::xsltEnabled());
-        case Resource::Script:
-        case Resource::SVGDocument:
-        case Resource::CSSStyleSheet:
-        case Resource::ImportResource:
-            // These resource can inject script into the current document (Script,
-            // XSL) or exfiltrate the content of the current document (CSS).
-            treatment = TreatAsActiveContent;
-            break;
-
-        case Resource::Font:
-        case Resource::TextTrack:
-            // These resources are passive, but mixed usage is low enough that we
-            // can block them in a mixed context.
-            treatment = TreatAsActiveContent;
-            break;
-
-        case Resource::Raw:
-        case Resource::Image:
-        case Resource::Media:
-            // These resources can corrupt only the frame's pixels.
-            treatment = TreatAsPassiveContent;
-            break;
-
-        case Resource::MainResource:
-        case Resource::LinkPrefetch:
-        case Resource::LinkSubresource:
-            // These cannot affect the current document.
-            treatment = TreatAsAlwaysAllowedContent;
-            break;
-        }
-    }
-    if (treatment == TreatAsActiveContent) {
-        if (LocalFrame* f = frame()) {
-            if (!f->loader().mixedContentChecker()->canRunInsecureContent(m_document->securityOrigin(), url))
-                return false;
-        }
-    } else if (treatment == TreatAsPassiveContent) {
-        if (LocalFrame* f = frame()) {
-            if (!f->loader().mixedContentChecker()->canDisplayInsecureContent(m_document->securityOrigin(), url))
-                return false;
-            if (MixedContentChecker::isMixedContent(f->document()->securityOrigin(), url) || MixedContentChecker::isMixedContent(toLocalFrame(frame()->tree().top())->document()->securityOrigin(), url)) {
-                switch (type) {
-                case Resource::Raw:
-                    UseCounter::count(f->document(), UseCounter::MixedContentRaw);
-                    break;
-
-                case Resource::Image:
-                    UseCounter::count(f->document(), UseCounter::MixedContentImage);
-                    break;
-
-                case Resource::Media:
-                    UseCounter::count(f->document(), UseCounter::MixedContentMedia);
-                    break;
-
-                default:
-                    ASSERT_NOT_REACHED();
-                }
-            }
-        }
-    } else {
-        ASSERT(treatment == TreatAsAlwaysAllowedContent);
-    }
-    return true;
-}
-
-bool ResourceFetcher::canRequest(Resource::Type type, const KURL& url, const ResourceLoaderOptions& options, bool forPreload, FetchRequest::OriginRestriction originRestriction) const
+bool ResourceFetcher::canRequest(Resource::Type type, const ResourceRequest& resourceRequest, const KURL& url, const ResourceLoaderOptions& options, bool forPreload, FetchRequest::OriginRestriction originRestriction) const
 {
     SecurityOrigin* securityOrigin = options.securityOrigin.get();
     if (!securityOrigin && document())
@@ -606,21 +556,36 @@ bool ResourceFetcher::canRequest(Resource::Type type, const KURL& url, const Res
             return false;
     }
 
-    // Last of all, check for insecure content. We do this last so that when
-    // folks block insecure content with a CSP policy, they don't get a warning.
+    // Measure the number of legacy URL schemes ('ftp://') and the number of embedded-credential
+    // ('http://user:password@...') resources embedded as subresources. in the hopes that we can
+    // block them at some point in the future.
+    if (resourceRequest.frameType() != WebURLRequest::FrameTypeTopLevel) {
+        if (SchemeRegistry::shouldTreatURLSchemeAsLegacy(url.protocol()) && !SchemeRegistry::shouldTreatURLSchemeAsLegacy(frame()->document()->securityOrigin()->protocol()))
+            UseCounter::count(frame()->document(), UseCounter::LegacyProtocolEmbeddedAsSubresource);
+        if (!url.user().isEmpty() || !url.pass().isEmpty())
+            UseCounter::count(frame()->document(), UseCounter::RequestedSubresourceWithEmbeddedCredentials);
+    }
+
+    // Last of all, check for mixed content. We do this last so that when
+    // folks block mixed content with a CSP policy, they don't get a warning.
     // They'll still get a warning in the console about CSP blocking the load.
 
-    // FIXME: Should we consider forPreload here?
-    if (!checkInsecureContent(type, url, options.mixedContentBlockingTreatment))
-        return false;
+    // If we're loading the main resource of a subframe, ensure that we check
+    // against the parent of the active frame, rather than the frame itself.
+    LocalFrame* effectiveFrame = frame();
+    if (resourceRequest.frameType() == WebURLRequest::FrameTypeNested) {
+        // FIXME: Deal with RemoteFrames.
+        if (frame()->tree().parent()->isLocalFrame())
+            effectiveFrame = toLocalFrame(frame()->tree().parent());
+    }
 
-    return true;
+    return !MixedContentChecker::shouldBlockFetch(effectiveFrame, resourceRequest, url);
 }
 
 bool ResourceFetcher::canAccessResource(Resource* resource, SecurityOrigin* sourceOrigin, const KURL& url) const
 {
     // Redirects can change the response URL different from one of request.
-    if (!canRequest(resource->type(), url, resource->options(), resource->isUnusedPreload(), FetchRequest::UseDefaultOriginRestrictionForType))
+    if (!canRequest(resource->type(), resource->resourceRequest(), url, resource->options(), resource->isUnusedPreload(), FetchRequest::UseDefaultOriginRestrictionForType))
         return false;
 
     if (!sourceOrigin && document())
@@ -700,7 +665,7 @@ ResourcePtr<Resource> ResourceFetcher::requestResource(Resource::Type type, Fetc
     if (!url.isValid())
         return 0;
 
-    if (!canRequest(type, url, request.options(), request.forPreload(), request.originRestriction()))
+    if (!canRequest(type, request.resourceRequest(), url, request.options(), request.forPreload(), request.originRestriction()))
         return 0;
 
     if (LocalFrame* f = frame())
@@ -847,7 +812,7 @@ ResourceRequestCachePolicy ResourceFetcher::resourceRequestCachePolicy(const Res
                 return ReturnCacheDataElseLoad;
             return UseProtocolCachePolicy;
         }
-        return mainResourceCachePolicy;
+        return memoryCachePolicyToResourceRequestCachePolicy(context().cachePolicy(m_document));
     }
     return UseProtocolCachePolicy;
 }
@@ -1321,9 +1286,11 @@ void ResourceFetcher::willSendRequest(unsigned long identifier, ResourceRequest&
 
 void ResourceFetcher::didReceiveResponse(const Resource* resource, const ResourceResponse& response)
 {
+    MixedContentChecker::checkMixedPrivatePublic(frame(), response.remoteIPAddress());
+
     // If the response is fetched via ServiceWorker, the original URL of the response could be different from the URL of the request.
     if (response.wasFetchedViaServiceWorker()) {
-        if (!canRequest(resource->type(), response.url(), resource->options(), false, FetchRequest::UseDefaultOriginRestrictionForType)) {
+        if (!canRequest(resource->type(), resource->resourceRequest(), response.url(), resource->options(), false, FetchRequest::UseDefaultOriginRestrictionForType)) {
             resource->loader()->cancel();
             context().dispatchDidFail(m_documentLoader, resource->identifier(), ResourceError(errorDomainBlinkInternal, 0, response.url().string(), "Unsafe attempt to load URL " + response.url().elidedString() + " fetched by a ServiceWorker."));
             return;
@@ -1414,7 +1381,7 @@ bool ResourceFetcher::isLoadedBy(ResourceLoaderHost* possibleOwner) const
 
 bool ResourceFetcher::canAccessRedirect(Resource* resource, ResourceRequest& request, const ResourceResponse& redirectResponse, ResourceLoaderOptions& options)
 {
-    if (!canRequest(resource->type(), request.url(), options, resource->isUnusedPreload(), FetchRequest::UseDefaultOriginRestrictionForType))
+    if (!canRequest(resource->type(), request, request.url(), options, resource->isUnusedPreload(), FetchRequest::UseDefaultOriginRestrictionForType))
         return false;
     if (options.corsEnabled == IsCORSEnabled) {
         SecurityOrigin* sourceOrigin = options.securityOrigin.get();
@@ -1501,7 +1468,7 @@ void ResourceFetcher::printPreloadStats()
 
 const ResourceLoaderOptions& ResourceFetcher::defaultResourceOptions()
 {
-    DEFINE_STATIC_LOCAL(ResourceLoaderOptions, options, (SniffContent, BufferData, AllowStoredCredentials, ClientRequestedCredentials, CheckContentSecurityPolicy, DocumentContext));
+    DEFINE_STATIC_LOCAL(ResourceLoaderOptions, options, (BufferData, AllowStoredCredentials, ClientRequestedCredentials, CheckContentSecurityPolicy, DocumentContext));
     return options;
 }
 

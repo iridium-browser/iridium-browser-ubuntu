@@ -142,6 +142,7 @@ component("aura") {
 }
 
 source_set("test_support") {
+  testonly = true
   sources = [
     "test/aura_test_base.cc",
     "test/aura_test_base.h",
@@ -171,11 +172,12 @@ source_set("test_support") {
     "test/window_test_api.h",
   ]
 
-  deps = [
+  public_deps = [
     ":aura",
+  ]
+  deps = [
     "//skia",
     "//testing/gtest",
-    "//ui/base",
     "//ui/base:test_support",
     "//ui/compositor:test_support",
     "//ui/events",
@@ -183,6 +185,7 @@ source_set("test_support") {
     "//ui/events:test_support",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/wm",
   ]
 
   if (is_win) {
@@ -208,6 +211,8 @@ source_set("test_support") {
 
 executable("demo") {
   output_name = "aura_demo"
+  testonly = true
+
   sources = [
     "demo/demo_main.cc",
   ]
@@ -225,6 +230,7 @@ executable("demo") {
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/gl",
   ]
 
   if (use_x11) {
@@ -236,16 +242,18 @@ executable("demo") {
 
 executable("bench") {
   output_name = "aura_bench"
+  testonly = true
+
   sources = [
     "bench/bench_main.cc",
   ]
 
   deps = [
-    ":aura",
     ":test_support",
     "//base",
     "//base:i18n",
     "//cc",
+    "//gpu/command_buffer/client:gles2_interface",
     "//skia",
     "//third_party/icu",
     "//ui/base",
@@ -254,6 +262,7 @@ executable("bench") {
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/gl",
   ]
 
   if (use_x11) {
@@ -274,18 +283,14 @@ test("unittests") {
   ]
 
   deps = [
-    ":aura",
     ":test_support",
     "//base/allocator",
     "//base/test:test_support",
     "//skia",
     "//testing/gtest",
-    "//ui/base",
     "//ui/base:test_support",
-    "//ui/compositor",
     "//ui/compositor:test_support",
-    "//ui/events",
-    "//ui/events:events_base",
+    "//ui/events:test_support",
     "//ui/events:gesture_detection",
     "//ui/gfx",
     "//ui/gfx/geometry",

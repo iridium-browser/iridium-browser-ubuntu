@@ -31,6 +31,7 @@ class Document;
 class ExceptionState;
 
 class DOMParser FINAL : public RefCountedWillBeGarbageCollected<DOMParser>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<DOMParser> create()
     {
@@ -42,12 +43,9 @@ public:
     void trace(Visitor*) { }
 
 private:
-    DOMParser()
-    {
-        ScriptWrappable::init(this);
-    }
+    DOMParser() { }
 };
 
-}
+} // namespace blink
 
-#endif // XMLSerializer.h
+#endif // DOMParser_h

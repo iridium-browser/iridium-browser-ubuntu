@@ -26,7 +26,7 @@
     "contextMenus",
     "echoPrivate",
     "fileBrowserHandler",
-    "fileBrowserPrivate",
+    "fileManagerPrivate",
     "fullscreen",
     "https://*.googleusercontent.com/",
     "https://docs.google.com/",
@@ -91,21 +91,6 @@
         "filesystem:*.mhtml",
         "filesystem:*.svg",
         "filesystem:*.txt"
-      ]
-    },
-    {
-      "id": "gallery",
-      "default_title": "__MSG_OPEN_ACTION__",
-      "default_icon": "common/images/file_types/200/image.png",
-      "file_filters": [
-        // Image formats
-        "filesystem:*.bmp",
-        "filesystem:*.gif",
-        "filesystem:*.ico",
-        "filesystem:*.jpg",
-        "filesystem:*.jpeg",
-        "filesystem:*.png",
-        "filesystem:*.webp"
       ]
     },
     {

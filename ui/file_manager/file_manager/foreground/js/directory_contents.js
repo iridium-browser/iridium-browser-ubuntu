@@ -131,7 +131,7 @@ DriveSearchContentScanner.prototype.scan = function(
     entriesCallback, successCallback, errorCallback) {
   var numReadEntries = 0;
   var readEntries = function(nextFeed) {
-    chrome.fileBrowserPrivate.searchDrive(
+    chrome.fileManagerPrivate.searchDrive(
         {query: this.query_, nextFeed: nextFeed},
         function(entries, nextFeed) {
           if (this.cancelled_) {
@@ -292,7 +292,7 @@ DriveMetadataSearchContentScanner.SearchType = Object.freeze({
  */
 DriveMetadataSearchContentScanner.prototype.scan = function(
     entriesCallback, successCallback, errorCallback) {
-  chrome.fileBrowserPrivate.searchDriveMetadata(
+  chrome.fileManagerPrivate.searchDriveMetadata(
       {query: '', types: this.searchType_, maxResults: 500},
       function(results) {
         if (this.cancelled_) {
@@ -319,7 +319,8 @@ DriveMetadataSearchContentScanner.prototype.scan = function(
  * When filters are changed, a 'changed' event is fired.
  *
  * @param {MetadataCache} metadataCache Metadata cache service.
- * @param {boolean} showHidden If files starting with '.' are shown.
+ * @param {boolean} showHidden If files starting with '.' or ending with
+ *     '.crdownlaod' are shown.
  * @constructor
  * @extends {cr.EventTarget}
  */
@@ -331,7 +332,7 @@ function FileFilter(metadataCache, showHidden) {
   this.metadataCache_ = metadataCache;
 
   /**
-   * @type Object.<string, Function>
+   * @type {Object.<string, Function>}
    * @private
    */
   this.filters_ = {};
@@ -371,10 +372,14 @@ FileFilter.prototype.removeFilter = function(name) {
  * @param {boolean} value If do not show hidden files.
  */
 FileFilter.prototype.setFilterHidden = function(value) {
+  var regexpCrdownloadExtension = /\.crdownload$/i;
   if (value) {
     this.addFilter(
         'hidden',
-        function(entry) { return entry.name.substr(0, 1) !== '.'; }
+        function(entry) {
+          return entry.name.substr(0, 1) !== '.' &&
+                 !regexpCrdownloadExtension.test(entry.name);
+        }
     );
   } else {
     this.removeFilter('hidden');
@@ -412,6 +417,7 @@ function FileListModel(metadataCache) {
   /**
    * Metadata cache.
    * @type {MetadataCache}
+   * @private
    */
   this.metadataCache_ = metadataCache;
 
@@ -566,6 +572,9 @@ DirectoryContents.prototype.clone = function() {
  */
 DirectoryContents.prototype.dispose = function() {
   this.context_.metadataCache.resizeBy(-this.lastSpaceInMetadataCache_);
+  // Though the lastSpaceInMetadataCache_ is not supposed to be referred after
+  // dispose(), keep it synced with requested cache size just in case.
+  this.lastSpaceInMetadataCache_ = 0;
 };
 
 /**
@@ -660,6 +669,53 @@ DirectoryContents.prototype.scan = function(refresh) {
   this.scanner_.scan(this.onNewEntries_.bind(this, refresh),
                      completionCallback.bind(this),
                      errorCallback.bind(this));
+};
+
+/**
+ * Adds/removes/updates items of file list.
+ * @param {Array.<Entry>} updatedEntries Entries of updated/added files.
+ * @param {Array.<string>} removedUrls URLs of removed files.
+ */
+DirectoryContents.prototype.update = function(updatedEntries, removedUrls) {
+  var removedMap = {};
+  for (var i = 0; i < removedUrls.length; i++) {
+    removedMap[removedUrls[i]] = true;
+  }
+
+  var updatedMap = {};
+  for (var i = 0; i < updatedEntries.length; i++) {
+    updatedMap[updatedEntries[i].toURL()] = updatedEntries[i];
+  }
+
+  var updatedList = [];
+  for (var i = 0; i < this.fileList_.length; i++) {
+    var url = this.fileList_.item(i).toURL();
+
+    if (url in removedMap) {
+      this.fileList_.splice(i, 1);
+      i--;
+      continue;
+    }
+
+    if (url in updatedMap) {
+      updatedList.push(updatedMap[url]);
+      delete updatedMap[url];
+    }
+  }
+
+  var addedList = [];
+  for (var url in updatedMap) {
+    addedList.push(updatedMap[url]);
+  }
+
+  if (removedUrls.length > 0)
+    this.fileList_.metadataCache_.clearByUrl(removedUrls, '*');
+
+  this.prefetchMetadata(updatedList, true, function() {
+    this.onNewEntries_(true, addedList);
+    this.onScanFinished_();
+    this.onScanCompleted_();
+  }.bind(this));
 };
 
 /**
@@ -810,7 +866,7 @@ DirectoryContents.prototype.onNewEntries_ = function(refresh, entries) {
  */
 DirectoryContents.prototype.prefetchMetadata =
     function(entries, refresh, callback) {
-  var TYPES = 'filesystem|drive';
+  var TYPES = 'filesystem|external';
   if (refresh)
     this.context_.metadataCache.getLatest(entries, TYPES, callback);
   else

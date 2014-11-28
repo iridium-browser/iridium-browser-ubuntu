@@ -19,20 +19,20 @@
 #include "content/public/browser/appcache_service.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
-#include "webkit/browser/quota/quota_manager_proxy.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
+
+namespace base {
+class FilePath;
+class SingleThreadTaskRunner;
+}  // namespace base
 
 namespace net {
 class URLRequestContext;
 }  // namespace net
 
-namespace base {
-class FilePath;
-class MessageLoopProxy;
-}
-
-namespace quota {
+namespace storage {
 class SpecialStoragePolicy;
-}
+}  // namespace storage
 
 namespace content {
 FORWARD_DECLARE_TEST(AppCacheServiceImplTest, ScheduleReinitialize);
@@ -78,12 +78,13 @@ class CONTENT_EXPORT AppCacheServiceImpl
   };
 
   // If not using quota management, the proxy may be NULL.
-  explicit AppCacheServiceImpl(quota::QuotaManagerProxy* quota_manager_proxy);
+  explicit AppCacheServiceImpl(storage::QuotaManagerProxy* quota_manager_proxy);
   virtual ~AppCacheServiceImpl();
 
-  void Initialize(const base::FilePath& cache_directory,
-                  base::MessageLoopProxy* db_thread,
-                  base::MessageLoopProxy* cache_thread);
+  void Initialize(
+      const base::FilePath& cache_directory,
+      const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
+      const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread);
 
   void AddObserver(Observer* observer) {
     observers_.AddObserver(observer);
@@ -149,12 +150,12 @@ class CONTENT_EXPORT AppCacheServiceImpl
     handler_factory_ = factory;
   }
 
-  quota::SpecialStoragePolicy* special_storage_policy() const {
+  storage::SpecialStoragePolicy* special_storage_policy() const {
     return special_storage_policy_.get();
   }
-  void set_special_storage_policy(quota::SpecialStoragePolicy* policy);
+  void set_special_storage_policy(storage::SpecialStoragePolicy* policy);
 
-  quota::QuotaManagerProxy* quota_manager_proxy() const {
+  storage::QuotaManagerProxy* quota_manager_proxy() const {
     return quota_manager_proxy_.get();
   }
 
@@ -196,14 +197,14 @@ class CONTENT_EXPORT AppCacheServiceImpl
   void Reinitialize();
 
   base::FilePath cache_directory_;
-  scoped_refptr<base::MessageLoopProxy> db_thread_;
-  scoped_refptr<base::MessageLoopProxy> cache_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> db_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> cache_thread_;
   AppCachePolicy* appcache_policy_;
   AppCacheQuotaClient* quota_client_;
   AppCacheExecutableHandlerFactory* handler_factory_;
   scoped_ptr<AppCacheStorage> storage_;
-  scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
-  scoped_refptr<quota::QuotaManagerProxy> quota_manager_proxy_;
+  scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy_;
   PendingAsyncHelpers pending_helpers_;
   BackendMap backends_;  // One 'backend' per child process.
   // Context for use during cache updates.

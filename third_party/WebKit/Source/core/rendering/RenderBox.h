@@ -31,7 +31,6 @@
 namespace blink {
 
 struct PaintInfo;
-class RenderLayerScrollableArea;
 
 enum SizeType { MainOrPreferredSize, MinSize, MaxSize };
 enum AvailableLogicalHeightType { ExcludeMarginBorderPadding, IncludeMarginBorderPadding };
@@ -67,7 +66,6 @@ public:
     // Set by RenderBox::updatePreviousBorderBoxSizeIfNeeded().
     LayoutSize m_previousBorderBoxSize;
 };
-
 
 class RenderBox : public RenderBoxModelObject {
 public:
@@ -196,7 +194,7 @@ public:
     // does include the intrinsic padding in the content box as this is what some callers expect (like getComputedStyle).
     LayoutRect computedCSSContentBoxRect() const { return LayoutRect(borderLeft() + computedCSSPaddingLeft(), borderTop() + computedCSSPaddingTop(), clientWidth() - computedCSSPaddingLeft() - computedCSSPaddingRight(), clientHeight() - computedCSSPaddingTop() - computedCSSPaddingBottom()); }
 
-    virtual void addFocusRingRects(Vector<IntRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer = 0) const OVERRIDE;
+    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const OVERRIDE;
 
     // Use this with caution! No type checking is done!
     RenderBox* previousSiblingBox() const;
@@ -219,8 +217,6 @@ public:
     virtual LayoutRect visualOverflowRect() const { return m_overflow ? m_overflow->visualOverflowRect() : borderBoxRect(); }
     LayoutUnit logicalLeftVisualOverflow() const { return style()->isHorizontalWritingMode() ? visualOverflowRect().x() : visualOverflowRect().y(); }
     LayoutUnit logicalRightVisualOverflow() const { return style()->isHorizontalWritingMode() ? visualOverflowRect().maxX() : visualOverflowRect().maxY(); }
-
-    LayoutRect overflowRectForPaintRejection() const;
 
     LayoutRect contentsVisualOverflowRect() const { return m_overflow ? m_overflow->contentsVisualOverflowRect() : LayoutRect(); }
 
@@ -321,13 +317,12 @@ public:
         m_marginBox.setEnd(styleToUse->writingMode(), styleToUse->direction(), value);
     }
 
-    // The following five functions are used to implement collapsing margins.
+    // The following functions are used to implement collapsing margins.
     // All objects know their maximal positive and negative margins.  The
     // formula for computing a collapsed margin is |maxPosMargin| - |maxNegmargin|.
     // For a non-collapsing box, such as a leaf element, this formula will simply return
     // the margin of the element.  Blocks override the maxMarginBefore and maxMarginAfter
     // methods.
-    enum MarginSign { PositiveMargin, NegativeMargin };
     virtual bool isSelfCollapsingBlock() const { return false; }
     virtual LayoutUnit collapsedMarginBefore() const { return marginBefore(); }
     virtual LayoutUnit collapsedMarginAfter() const { return marginAfter(); }
@@ -414,7 +409,7 @@ public:
     void deleteLineBoxWrapper();
 
     virtual LayoutRect clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const OVERRIDE;
-    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, ViewportConstrainedPosition, const PaintInvalidationState*) const OVERRIDE;
+    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const OVERRIDE;
     virtual void invalidatePaintForOverhangingFloats(bool paintAllDescendants);
 
     virtual LayoutUnit containingBlockLogicalWidthForContent() const OVERRIDE;
@@ -580,7 +575,7 @@ public:
     virtual void computeIntrinsicRatioInformation(FloatSize& /* intrinsicSize */, double& /* intrinsicRatio */) const { }
 
     IntSize scrolledContentOffset() const;
-    void applyCachedClipAndScrollOffsetForRepaint(LayoutRect& paintRect) const;
+    void applyCachedClipAndScrollOffsetForPaintInvalidation(LayoutRect& paintRect) const;
 
     virtual bool hasRelativeLogicalHeight() const;
 
@@ -623,39 +618,21 @@ public:
             removeFloatingOrPositionedChildFromBlockLists();
     }
 
+    bool backgroundHasOpaqueTopLayer() const;
+
 protected:
     virtual void willBeDestroyed() OVERRIDE;
+
 
     virtual void styleWillChange(StyleDifference, const RenderStyle& newStyle) OVERRIDE;
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle) OVERRIDE;
     virtual void updateFromStyle() OVERRIDE;
 
     // Returns false if it could not cheaply compute the extent (e.g. fixed background), in which case the returned rect may be incorrect.
-    bool getBackgroundPaintedExtent(LayoutRect&) const;
+    // FIXME: make this a const method once the RenderBox reference in BoxPainter is const.
+    bool getBackgroundPaintedExtent(LayoutRect&);
     virtual bool foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect, unsigned maxDepthToTest) const;
     virtual bool computeBackgroundIsKnownToBeObscured() OVERRIDE;
-
-    void paintBackground(const PaintInfo&, const LayoutRect&, const Color& backgroundColor, BackgroundBleedAvoidance = BackgroundBleedNone);
-
-    void paintFillLayer(const PaintInfo&, const Color&, const FillLayer&, const LayoutRect&, BackgroundBleedAvoidance, CompositeOperator, RenderObject* backgroundObject);
-    void paintFillLayers(const PaintInfo&, const Color&, const FillLayer&, const LayoutRect&, BackgroundBleedAvoidance = BackgroundBleedNone, CompositeOperator = CompositeSourceOver, RenderObject* backgroundObject = 0);
-
-    void paintMaskImages(const PaintInfo&, const LayoutRect&);
-    void paintBoxDecorationBackgroundWithRect(PaintInfo&, const LayoutPoint&, const LayoutRect&);
-
-    // Information extracted from RenderStyle for box painting.
-    // These are always needed during box painting and recomputing them takes time.
-    struct BoxDecorationData {
-        BoxDecorationData(const RenderStyle&);
-
-        Color backgroundColor;
-        bool hasBackground;
-        bool hasBorder;
-        bool hasAppearance;
-    };
-
-    BackgroundBleedAvoidance determineBackgroundBleedAvoidance(GraphicsContext*, const BoxDecorationData&) const;
-    bool backgroundHasOpaqueTopLayer() const;
 
     void computePositionedLogicalWidth(LogicalExtentComputedValues&) const;
 
@@ -664,10 +641,8 @@ protected:
 
     virtual bool shouldComputeSizeAsReplaced() const { return isReplaced() && !isInlineBlockOrInlineTable(); }
 
-    virtual void mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const OVERRIDE;
+    virtual void mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const OVERRIDE;
     virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const OVERRIDE;
-
-    void paintRootBoxFillLayers(const PaintInfo&);
 
     RenderObject* splitAnonymousBoxesAroundChild(RenderObject* beforeChild);
 
@@ -679,6 +654,7 @@ protected:
     virtual InvalidationReason getPaintInvalidationReason(const RenderLayerModelObject& paintInvalidationContainer,
         const LayoutRect& oldBounds, const LayoutPoint& oldPositionFromPaintInvalidationContainer,
         const LayoutRect& newBounds, const LayoutPoint& newPositionFromPaintInvalidationContainer) OVERRIDE;
+    virtual void incrementallyInvalidatePaint(const RenderLayerModelObject& paintInvalidationContainer, const LayoutRect& oldBounds, const LayoutRect& newBounds, const LayoutPoint& positionFromPaintInvalidationContainer) OVERRIDE;
 
     virtual void clearPaintInvalidationState(const PaintInvalidationState&) OVERRIDE;
 #if ENABLE(ASSERT)
@@ -686,14 +662,16 @@ protected:
 #endif
 
 private:
+    void invalidatePaintRectClippedByOldAndNewBounds(const RenderLayerModelObject& paintInvalidationContainer, const LayoutRect&, const LayoutRect& oldBounds, const LayoutRect& newBounds);
+
     void updateShapeOutsideInfoAfterStyleChange(const RenderStyle&, const RenderStyle* oldStyle);
     void updateGridPositionAfterStyleChange(const RenderStyle*);
 
     bool autoWidthShouldFitContent() const;
     void shrinkToFitWidth(const LayoutUnit availableSpace, const LayoutUnit logicalLeftValue, const LayoutUnit bordersPlusPadding, LogicalExtentComputedValues&) const;
 
-    // Returns true if we did a full repaint
-    bool repaintLayerRectsForImage(WrappedImagePtr, const FillLayer&, bool drawingBackground);
+    // Returns true if we queued up a paint invalidation.
+    bool paintInvalidationLayerRectsForImage(WrappedImagePtr, const FillLayer&, bool drawingBackground);
 
     bool skipContainingBlockForPercentHeightCalculation(const RenderBox* containingBlock) const;
 
@@ -731,6 +709,8 @@ private:
     }
 
     void savePreviousBorderBoxSizeIfNeeded();
+    LayoutSize computePreviousBorderBoxSize(const LayoutSize& previousBoundsSize) const;
+
     bool logicalHeightComputesAsNone(SizeType) const;
 
     virtual InvalidationReason invalidatePaintIfNeeded(const PaintInvalidationState&, const RenderLayerModelObject& newPaintInvalidationContainer) OVERRIDE FINAL;
@@ -744,6 +724,8 @@ private:
     // updateLogicalHeight. This is logicalHeight() before it is clamped to
     // min/max.
     mutable LayoutUnit m_intrinsicContentLogicalHeight;
+
+    void inflatePaintInvalidationRectForReflectionAndFilter(LayoutRect&) const;
 
 protected:
     LayoutBoxExtent m_marginBox;

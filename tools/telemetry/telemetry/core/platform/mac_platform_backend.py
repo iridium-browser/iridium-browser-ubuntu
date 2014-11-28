@@ -9,6 +9,7 @@ import time
 from telemetry import decorators
 from telemetry.core.platform import platform_backend
 from telemetry.core.platform import posix_platform_backend
+from telemetry.core.platform import process_statistic_timeline_data
 from telemetry.core.platform.power_monitor import powermetrics_power_monitor
 
 try:
@@ -46,13 +47,14 @@ class MacPlatformBackend(posix_platform_backend.PosixPlatformBackend):
     # Sometimes top won't return anything here, just ignore such cases -
     # crbug.com/354812 .
     if top_output[-2] != 'IDLEW':
-      return 0
+      return process_statistic_timeline_data.IdleWakeupTimelineData(pid, 0)
     # Numbers reported by top may have a '+' appended.
     wakeup_count = int(top_output[-1].strip('+ '))
-    return wakeup_count
+    return process_statistic_timeline_data.IdleWakeupTimelineData(pid,
+        wakeup_count)
 
   def GetCpuStats(self, pid):
-    """Return current cpu processing time of pid in seconds."""
+    """Returns a dict of cpu statistics for the process represented by |pid|."""
     class ProcTaskInfo(ctypes.Structure):
       """Struct for proc_pidinfo() call."""
       _fields_ = [("pti_virtual_size", ctypes.c_uint64),
@@ -100,7 +102,7 @@ class MacPlatformBackend(posix_platform_backend.PosixPlatformBackend):
     return {'TotalTime': time.time()}
 
   def GetSystemCommitCharge(self):
-    vm_stat = self._RunCommand(['vm_stat'])
+    vm_stat = self.RunCommand(['vm_stat'])
     for stat in vm_stat.splitlines():
       key, value = stat.split(':')
       if key == 'Pages active':
@@ -110,14 +112,14 @@ class MacPlatformBackend(posix_platform_backend.PosixPlatformBackend):
 
   @decorators.Cache
   def GetSystemTotalPhysicalMemory(self):
-    return int(self._RunCommand(['sysctl', '-n', 'hw.memsize']))
+    return int(self.RunCommand(['sysctl', '-n', 'hw.memsize']))
 
   def PurgeUnpinnedMemory(self):
     # TODO(pliard): Implement this.
     pass
 
   def GetMemoryStats(self, pid):
-    rss_vsz = self._GetPsOutput(['rss', 'vsz'], pid)
+    rss_vsz = self.GetPsOutput(['rss', 'vsz'], pid)
     if rss_vsz:
       rss, vsz = rss_vsz[0].split()
       return {'VM': 1024 * int(vsz),
@@ -141,6 +143,8 @@ class MacPlatformBackend(posix_platform_backend.PosixPlatformBackend):
       return platform_backend.MOUNTAINLION
     if os_version.startswith('13.'):
       return platform_backend.MAVERICKS
+    if os_version.startswith('14.'):
+      return platform_backend.YOSEMITE
 
     raise NotImplementedError('Unknown mac version %s.' % os_version)
 

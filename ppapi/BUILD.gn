@@ -20,6 +20,12 @@ source_set("ppapi_c") {
   sources = gypi_values.c_source_files
 }
 
+# Some targets need to depend on the PPAPI version only. This target exists so
+# they can include this header without header check warnings.
+source_set("ppapi_macros") {
+  sources = [ "c/pp_macros.h" ]
+}
+
 source_set("ppapi_cpp_objects") {
   sources = gypi_values.cpp_source_files
 
@@ -402,6 +408,9 @@ component("ppapi_shared") {
     "PPAPI_THUNK_IMPLEMENTATION",
   ]
 
+  public_deps = [
+    blink_target,
+  ]
   deps = [
     ":ppapi_c",
     "//base",
@@ -423,9 +432,6 @@ component("ppapi_shared") {
   } else if (is_win) {
     cflags = [ "/wd4267" ]  # size_t to int truncation.
   }
-
-  deps += [ blink_target ]
-  forward_dependent_configs_from = [ blink_target ]
 }
 
 source_set("ppapi_ipc") {
@@ -450,6 +456,8 @@ source_set("ppapi_ipc") {
     "proxy/serialized_var.h",
     "proxy/var_serialization_rules.h",
   ]
+
+  defines = [ "PPAPI_PROXY_IMPLEMENTATION" ]
 
   deps = [
     ":ppapi_c",
@@ -780,6 +788,7 @@ component("ppapi_host") {
 }
 
 static_library("ppapi_unittest_shared") {
+  testonly = true
   sources = [
     "proxy/ppapi_proxy_test.cc",
     "proxy/ppapi_proxy_test.h",

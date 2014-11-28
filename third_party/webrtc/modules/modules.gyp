@@ -69,6 +69,7 @@
           ],
           'dependencies': [
             'acm_receive_test',
+            'acm_send_test',
             'audio_coding_module',
             'audio_processing',
             'bitrate_controller',
@@ -103,7 +104,9 @@
           'sources': [
             'audio_coding/main/acm2/acm_opus_unittest.cc',
             'audio_coding/main/acm2/acm_receiver_unittest.cc',
+            'audio_coding/main/acm2/acm_receiver_unittest_oldapi.cc',
             'audio_coding/main/acm2/audio_coding_module_unittest.cc',
+            'audio_coding/main/acm2/audio_coding_module_unittest_oldapi.cc',
             'audio_coding/main/acm2/call_statistics_unittest.cc',
             'audio_coding/main/acm2/initial_delay_manager_unittest.cc',
             'audio_coding/main/acm2/nack_unittest.cc',
@@ -149,9 +152,11 @@
             'audio_coding/neteq/mock/mock_delay_peak_detector.h',
             'audio_coding/neteq/mock/mock_dtmf_buffer.h',
             'audio_coding/neteq/mock/mock_dtmf_tone_generator.h',
+            'audio_coding/neteq/mock/mock_expand.h',
             'audio_coding/neteq/mock/mock_external_decoder_pcm16b.h',
             'audio_coding/neteq/mock/mock_packet_buffer.h',
             'audio_coding/neteq/mock/mock_payload_splitter.h',
+            'audio_coding/neteq/tools/input_audio_file_unittest.cc',
             'audio_coding/neteq/tools/packet_unittest.cc',
             'audio_processing/aec/system_delay_unittest.cc',
             'audio_processing/aec/echo_cancellation_unittest.cc',
@@ -214,7 +219,6 @@
             'rtp_rtcp/source/rtp_packet_history_unittest.cc',
             'rtp_rtcp/source/rtp_payload_registry_unittest.cc',
             'rtp_rtcp/source/rtp_rtcp_impl_unittest.cc',
-            'rtp_rtcp/source/rtp_utility_unittest.cc',
             'rtp_rtcp/source/rtp_header_extension_unittest.cc',
             'rtp_rtcp/source/rtp_sender_unittest.cc',
             'rtp_rtcp/source/vp8_partition_aggregator_unittest.cc',
@@ -233,6 +237,7 @@
             'video_coding/main/interface/mock/mock_vcm_callbacks.h',
             'video_coding/main/source/decoding_state_unittest.cc',
             'video_coding/main/source/jitter_buffer_unittest.cc',
+            'video_coding/main/source/jitter_estimator_tests.cc',
             'video_coding/main/source/media_optimization_unittest.cc',
             'video_coding/main/source/receiver_unittest.cc',
             'video_coding/main/source/session_info_unittest.cc',
@@ -243,6 +248,7 @@
             'video_coding/main/source/qm_select_unittest.cc',
             'video_coding/main/source/test/stream_generator.cc',
             'video_coding/main/source/test/stream_generator.h',
+            'video_coding/utility/quality_scaler_unittest.cc',
             'video_processing/main/test/unit_test/brightness_detection_test.cc',
             'video_processing/main/test/unit_test/color_enhancement_test.cc',
             'video_processing/main/test/unit_test/content_metrics_test.cc',
@@ -293,9 +299,7 @@
                 '<(DEPTH)/third_party/libvpx/libvpx.gyp:libvpx',
               ],
             }],
-            # TODO(henrike): remove build_with_chromium==1 when the bots are
-            # using Chromium's buildbots.
-            ['build_with_chromium==1 and OS=="android"', {
+            ['OS=="android"', {
               'dependencies': [
                 '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
               ],
@@ -328,7 +332,6 @@
             '<@(audio_coding_defines)',
           ],
           'sources': [
-            'audio_coding/main/test/ACMTest.cc',
             'audio_coding/main/test/APITest.cc',
             'audio_coding/main/test/Channel.cc',
             'audio_coding/main/test/dual_stream_unittest.cc',
@@ -354,9 +357,7 @@
             'video_coding/codecs/vp8/test/vp8_impl_unittest.cc',
           ],
           'conditions': [
-            # TODO(henrike): remove build_with_chromium==1 when the bots are
-            # using Chromium's buildbots.
-            ['build_with_chromium==1 and OS=="android"', {
+            ['OS=="android"', {
               'dependencies': [
                 '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
               ],
@@ -365,9 +366,7 @@
         },
       ],
       'conditions': [
-        # TODO(henrike): remove build_with_chromium==1 when the bots are using
-        # Chromium's buildbots.
-        ['build_with_chromium==1 and OS=="android"', {
+        ['OS=="android"', {
           'targets': [
             {
               'target_name': 'modules_unittests_apk_target',

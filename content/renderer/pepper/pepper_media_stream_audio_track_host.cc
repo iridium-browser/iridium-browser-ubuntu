@@ -72,10 +72,10 @@ PepperMediaStreamAudioTrackHost::AudioSink::AudioSink(
       active_buffer_offset_(0),
       buffers_generation_(0),
       main_message_loop_proxy_(base::MessageLoopProxy::current()),
-      weak_factory_(this),
       number_of_buffers_(kDefaultNumberOfBuffers),
       bytes_per_second_(0),
-      user_buffer_duration_(kDefaultDuration) {}
+      user_buffer_duration_(kDefaultDuration),
+      weak_factory_(this) {}
 
 PepperMediaStreamAudioTrackHost::AudioSink::~AudioSink() {
   DCHECK_EQ(main_message_loop_proxy_, base::MessageLoopProxy::current());
@@ -242,7 +242,8 @@ void PepperMediaStreamAudioTrackHost::AudioSink::OnData(const int16* audio_data,
       buffer->sample_rate = static_cast<PP_AudioBuffer_SampleRate>(sample_rate);
       buffer->data_size = output_buffer_size_;
       buffer->number_of_channels = number_of_channels;
-      buffer->number_of_samples = buffer->data_size / bytes_per_frame;
+      buffer->number_of_samples = buffer->data_size * number_of_channels /
+          bytes_per_frame;
     }
     uint32_t buffer_bytes_remaining =
         buffer->data_size - active_buffer_offset_;

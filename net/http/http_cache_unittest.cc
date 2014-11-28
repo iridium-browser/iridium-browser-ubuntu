@@ -3652,12 +3652,44 @@ TEST(HttpCache, GET_Crazy416) {
   RemoveMockTransaction(&transaction);
 }
 
-// Tests that we don't cache partial responses that can't be validated.
+// Tests that we store partial responses that can't be validated, as they can
+// be used for requests that don't require revalidation.
 TEST(HttpCache, RangeGET_NoStrongValidators) {
   MockHttpCache cache;
   std::string headers;
 
-  // Attempt to write to the cache (40-49).
+  // Write to the cache (40-49).
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  AddMockTransaction(&transaction);
+  transaction.response_headers = "Content-Length: 10\n"
+                                 "Cache-Control: max-age=3600\n"
+                                 "ETag: w/\"foo\"\n";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  Verify206Response(headers, 40, 49);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Now verify that there's cached data.
+  RunTransactionTestWithResponse(cache.http_cache(), kRangeGET_TransactionOK,
+                                 &headers);
+
+  Verify206Response(headers, 40, 49);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&transaction);
+}
+
+// Tests failures to validate cache partial responses that lack strong
+// validators.
+TEST(HttpCache, RangeGET_NoValidation) {
+  MockHttpCache cache;
+  std::string headers;
+
+  // Write to the cache (40-49).
   MockTransaction transaction(kRangeGET_TransactionOK);
   AddMockTransaction(&transaction);
   transaction.response_headers = "Content-Length: 10\n"
@@ -3669,13 +3701,13 @@ TEST(HttpCache, RangeGET_NoStrongValidators) {
   EXPECT_EQ(0, cache.disk_cache()->open_count());
   EXPECT_EQ(1, cache.disk_cache()->create_count());
 
-  // Now verify that there's no cached data.
+  // Now verify that the cached data is not used.
   RunTransactionTestWithResponse(cache.http_cache(), kRangeGET_TransactionOK,
                                  &headers);
 
   Verify206Response(headers, 40, 49);
   EXPECT_EQ(2, cache.network_layer()->transaction_count());
-  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
   EXPECT_EQ(2, cache.disk_cache()->create_count());
 
   RemoveMockTransaction(&transaction);
@@ -6789,4 +6821,36 @@ TEST(HttpCache, ResourceFreshnessHeaderNotSent) {
   RunTransactionTest(cache.http_cache(), stale_while_revalidate_transaction);
 
   EXPECT_EQ(2, cache.network_layer()->transaction_count());
+}
+
+// Tests that we allow multiple simultaneous, non-overlapping transactions to
+// take place on a sparse entry.
+TEST(HttpCache, RangeGET_MultipleRequests) {
+  MockHttpCache cache;
+
+  // Create a transaction for bytes 0-9.
+  MockHttpRequest request(kRangeGET_TransactionOK);
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  transaction.request_headers = "Range: bytes = 0-9\r\n" EXTRA_HEADER;
+  transaction.data = "rg: 00-09 ";
+  AddMockTransaction(&transaction);
+
+  net::TestCompletionCallback callback;
+  scoped_ptr<net::HttpTransaction> trans;
+  int rv = cache.http_cache()->CreateTransaction(net::DEFAULT_PRIORITY, &trans);
+  EXPECT_EQ(net::OK, rv);
+  ASSERT_TRUE(trans.get());
+
+  // Start our transaction.
+  trans->Start(&request, callback.callback(), net::BoundNetLog());
+
+  // A second transaction on a different part of the file (the default
+  // kRangeGET_TransactionOK requests 40-49) should not be blocked by
+  // the already pending transaction.
+  RunTransactionTest(cache.http_cache(), kRangeGET_TransactionOK);
+
+  // Let the first transaction complete.
+  callback.WaitForResult();
+
+  RemoveMockTransaction(&transaction);
 }

@@ -70,10 +70,8 @@ class CONTENT_EXPORT RendererAccessibilityComplete
   void OnSetFocus(int acc_obj_id);
   void OnSetTextSelection(int acc_obj_id, int start_offset, int end_offset);
   void OnHitTest(gfx::Point point);
+  void OnReset(int reset_token);
   void OnFatalError();
-
-  // So we can queue up tasks to be executed later.
-  base::WeakPtrFactory<RendererAccessibilityComplete> weak_factory_;
 
   // Events from Blink are collected until they are ready to be
   // sent to the browser.
@@ -95,6 +93,13 @@ class CONTENT_EXPORT RendererAccessibilityComplete
 
   // Set if we are waiting for an accessibility event ack.
   bool ack_pending_;
+
+  // Nonzero if the browser requested we reset the accessibility state.
+  // We need to return this token in the next IPC.
+  int reset_token_;
+
+  // So we can queue up tasks to be executed later.
+  base::WeakPtrFactory<RendererAccessibilityComplete> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererAccessibilityComplete);
 };

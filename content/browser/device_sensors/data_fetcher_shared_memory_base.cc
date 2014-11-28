@@ -9,6 +9,7 @@
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "base/timer/timer.h"
+#include "content/common/device_sensors/device_light_hardware_buffer.h"
 #include "content/common/device_sensors/device_motion_hardware_buffer.h"
 #include "content/common/device_sensors/device_orientation_hardware_buffer.h"
 
@@ -22,6 +23,8 @@ static size_t GetConsumerSharedMemoryBufferSize(ConsumerType consumer_type) {
       return sizeof(DeviceMotionHardwareBuffer);
     case CONSUMER_TYPE_ORIENTATION:
       return sizeof(DeviceOrientationHardwareBuffer);
+    case CONSUMER_TYPE_LIGHT:
+      return sizeof(DeviceLightHardwareBuffer);
     default:
       NOTREACHED();
   }
@@ -104,8 +107,7 @@ DataFetcherSharedMemoryBase::DataFetcherSharedMemoryBase()
 }
 
 DataFetcherSharedMemoryBase::~DataFetcherSharedMemoryBase() {
-  StopFetchingDeviceData(CONSUMER_TYPE_MOTION);
-  StopFetchingDeviceData(CONSUMER_TYPE_ORIENTATION);
+  DCHECK_EQ(0u, started_consumers_);
 
   // make sure polling thread stops asap.
   if (polling_thread_)
@@ -161,6 +163,12 @@ bool DataFetcherSharedMemoryBase::StopFetchingDeviceData(
   started_consumers_ ^= consumer_type;
 
   return true;
+}
+
+void DataFetcherSharedMemoryBase::StopFetchingAllDeviceData() {
+  StopFetchingDeviceData(CONSUMER_TYPE_MOTION);
+  StopFetchingDeviceData(CONSUMER_TYPE_ORIENTATION);
+  StopFetchingDeviceData(CONSUMER_TYPE_LIGHT);
 }
 
 base::SharedMemoryHandle
@@ -239,6 +247,5 @@ base::MessageLoop* DataFetcherSharedMemoryBase::GetPollingMessageLoop() const {
 bool DataFetcherSharedMemoryBase::IsPollingTimerRunningForTesting() const {
   return polling_thread_ ? polling_thread_->IsTimerRunning() : false;
 }
-
 
 }  // namespace content

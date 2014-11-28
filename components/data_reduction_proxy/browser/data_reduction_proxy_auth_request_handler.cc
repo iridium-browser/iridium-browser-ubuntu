@@ -18,6 +18,7 @@
 #include "components/data_reduction_proxy/common/data_reduction_proxy_switches.h"
 #include "components/data_reduction_proxy/common/version.h"
 #include "crypto/random.h"
+#include "net/base/host_port_pair.h"
 #include "net/proxy/proxy_server.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
@@ -87,7 +88,7 @@ void DataReductionProxyAuthRequestHandler::GetChromiumBuildAndPatch(
 }
 
 void DataReductionProxyAuthRequestHandler::Init() {
-  InitAuthenticationOnUI(GetDefaultKey());
+  InitAuthentication(GetDefaultKey());
 }
 
 
@@ -124,11 +125,18 @@ void DataReductionProxyAuthRequestHandler::MaybeAddRequestHeader(
   DCHECK(network_task_runner_->BelongsToCurrentThread());
   if (!proxy_server.is_valid())
     return;
-  if (data_reduction_proxy_params_ &&
-      data_reduction_proxy_params_->IsDataReductionProxy(
-          proxy_server.host_port_pair(), NULL)) {
-    AddAuthorizationHeader(request_headers);
-  }
+  if (proxy_server.is_direct())
+    return;
+  MaybeAddRequestHeaderImpl(proxy_server.host_port_pair(),
+                            false,
+                            request_headers);
+}
+
+void DataReductionProxyAuthRequestHandler::MaybeAddProxyTunnelRequestHandler(
+    const net::HostPortPair& proxy_server,
+    net::HttpRequestHeaders* request_headers) {
+  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  MaybeAddRequestHeaderImpl(proxy_server, true, request_headers);
 }
 
 void DataReductionProxyAuthRequestHandler::AddAuthorizationHeader(
@@ -152,14 +160,6 @@ void DataReductionProxyAuthRequestHandler::AddAuthorizationHeader(
   if (!client_.empty())
     header_value += ", c=" + client_;
   headers->SetHeader(kChromeProxyHeader, header_value);
-}
-
-void DataReductionProxyAuthRequestHandler::InitAuthenticationOnUI(
-    const std::string& key) {
-  network_task_runner_->PostTask(FROM_HERE, base::Bind(
-      &DataReductionProxyAuthRequestHandler::InitAuthentication,
-      base::Unretained(this),
-      key));
 }
 
 void DataReductionProxyAuthRequestHandler::ComputeCredentials(
@@ -186,17 +186,22 @@ void DataReductionProxyAuthRequestHandler::ComputeCredentials(
 
 void DataReductionProxyAuthRequestHandler::InitAuthentication(
     const std::string& key) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  if (!network_task_runner_->BelongsToCurrentThread()) {
+    network_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DataReductionProxyAuthRequestHandler::InitAuthentication,
+                   base::Unretained(this),
+                   key));
+    return;
+  }
+
+  if (key.empty())
+    return;
+
   key_ = key;
   last_update_time_ = Now();
   ComputeCredentials(last_update_time_, &session_, &credentials_);
 }
-
-void DataReductionProxyAuthRequestHandler::SetKeyOnUI(const std::string& key) {
-  if (!key.empty())
-    InitAuthenticationOnUI(key);
-}
-
 
 std::string DataReductionProxyAuthRequestHandler::GetDefaultKey() const {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -207,6 +212,21 @@ std::string DataReductionProxyAuthRequestHandler::GetDefaultKey() const {
     key = SPDY_PROXY_AUTH_VALUE;
 #endif
   return key;
+}
+
+void DataReductionProxyAuthRequestHandler::MaybeAddRequestHeaderImpl(
+    const net::HostPortPair& proxy_server,
+    bool expect_ssl,
+    net::HttpRequestHeaders* request_headers) {
+  if (proxy_server.IsEmpty())
+    return;
+  if (data_reduction_proxy_params_ &&
+      data_reduction_proxy_params_->IsDataReductionProxy(proxy_server, NULL) &&
+      net::HostPortPair::FromURL(
+          data_reduction_proxy_params_->ssl_origin()).Equals(
+              proxy_server) == expect_ssl) {
+    AddAuthorizationHeader(request_headers);
+  }
 }
 
 }  // namespace data_reduction_proxy

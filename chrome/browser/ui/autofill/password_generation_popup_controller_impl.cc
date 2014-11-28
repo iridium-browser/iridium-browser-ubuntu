@@ -13,18 +13,18 @@
 #include "chrome/browser/ui/autofill/password_generation_popup_observer.h"
 #include "chrome/browser/ui/autofill/password_generation_popup_view.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/password_generator.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/rect_conversions.h"
@@ -156,7 +156,7 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
 
 int PasswordGenerationPopupControllerImpl::GetMinimumWidth() {
   // Minimum width in pixels.
-  const int minimum_width = 360;
+  const int minimum_width = 350;
 
   // If the width of the field is longer than the minimum, use that instead.
   return std::max(minimum_width,
@@ -213,12 +213,9 @@ void PasswordGenerationPopupControllerImpl::ViewDestroyed() {
 }
 
 void PasswordGenerationPopupControllerImpl::OnSavedPasswordsLinkClicked() {
-  Browser* browser =
-      chrome::FindBrowserWithWebContents(controller_common_.web_contents());
-  content::OpenURLParams params(
-      GURL(chrome::kPasswordManagerAccountDashboardURL), content::Referrer(),
-      NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK, false);
-  browser->OpenURL(params);
+  chrome::ShowSettingsSubPage(
+      chrome::FindBrowserWithWebContents(controller_common_.web_contents()),
+      chrome::kPasswordManagerSubPage);
 }
 
 void PasswordGenerationPopupControllerImpl::SetSelectionAtPoint(

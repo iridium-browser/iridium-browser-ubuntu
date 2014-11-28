@@ -14,6 +14,7 @@
 #include "nacl_io/log.h"
 #include "nacl_io/osmman.h"
 #include "nacl_io/ossocket.h"
+#include "nacl_io/ostime.h"
 #include "nacl_io/pepper_interface.h"
 #include "nacl_io/real_pepper_interface.h"
 
@@ -45,6 +46,21 @@ int ki_push_state_for_testing() {
   s_state.kp = NULL;
   s_state.ppapi = NULL;
   s_state.kp_owned = false;
+  return 0;
+}
+
+static void ki_pop_state() {
+  // Swap out the KernelProxy. This will normally reset the
+  // proxy to NULL, aside from in test code that has called
+  // ki_push_state_for_testing().
+  s_state = s_saved_state;
+  s_saved_state.kp = NULL;
+  s_saved_state.ppapi = NULL;
+  s_saved_state.kp_owned = false;
+}
+
+int ki_pop_state_for_testing() {
+  ki_pop_state();
   return 0;
 }
 
@@ -94,8 +110,12 @@ int ki_is_initialized() {
   return s_state.kp != NULL;
 }
 
-void ki_uninit() {
+int ki_uninit() {
   LOG_TRACE("ki_uninit");
+  assert(s_state.kp);
+  if (s_state.kp == NULL)
+    return 1;
+
   if (s_saved_state.kp == NULL)
     kernel_wrap_uninit();
 
@@ -103,18 +123,13 @@ void ki_uninit() {
   // until we've swapped it out.
   KernelInterceptState state_to_delete = s_state;
 
-  // Swap out the KernelProxy. This will normally reset the
-  // proxy to NULL, aside from in test code that has called
-  // ki_push_state_for_testing().
-  s_state = s_saved_state;
-  s_saved_state.kp = NULL;
-  s_saved_state.ppapi = NULL;
-  s_saved_state.kp_owned = false;
+  ki_pop_state();
 
   if (state_to_delete.kp_owned)
     delete state_to_delete.kp;
 
   delete state_to_delete.ppapi;
+  return 0;
 }
 
 nacl_io::KernelProxy* ki_get_proxy() {
@@ -134,15 +149,20 @@ void ki_exit(int status) {
 }
 
 char* ki_getcwd(char* buf, size_t size) {
-  // gtest uses getcwd in a static initializer. If we haven't initialized the
-  // kernel-intercept yet, just return ".".
+  // gtest uses getcwd in a static initializer and expects it to always
+  // succeed.  If we haven't initialized kernel-intercept yet, then try
+  // the IRT's getcwd, and fall back to just returning ".".
   if (!ki_is_initialized()) {
-    if (size < 2) {
-      errno = ERANGE;
-      return NULL;
+    int rtn = _real_getcwd(buf, size);
+    if (rtn != 0) {
+      if (rtn == ENOSYS) {
+        buf[0] = '.';
+        buf[1] = 0;
+      } else {
+        errno = rtn;
+        return NULL;
+      }
     }
-    buf[0] = '.';
-    buf[1] = 0;
     return buf;
   }
   return s_state.kp->getcwd(buf, size);
@@ -207,9 +227,9 @@ int ki_umount(const char* path) {
   return s_state.kp->umount(path);
 }
 
-int ki_open(const char* path, int oflag) {
+int ki_open(const char* path, int oflag, mode_t mode) {
   ON_NOSYS_RETURN(-1);
-  return s_state.kp->open(path, oflag);
+  return s_state.kp->open(path, oflag, mode);
 }
 
 int ki_pipe(int pipefds[2]) {
@@ -314,7 +334,24 @@ int ki_readlink(const char* path, char* buf, size_t count) {
 
 int ki_utimes(const char* path, const struct timeval times[2]) {
   ON_NOSYS_RETURN(-1);
-  return s_state.kp->utimes(path, times);
+  // Implement in terms of utimens.
+  struct timespec ts[2];
+  ts[0].tv_sec = times[0].tv_sec;
+  ts[0].tv_nsec = times[0].tv_usec * 1000;
+  ts[1].tv_sec = times[1].tv_sec;
+  ts[1].tv_nsec = times[1].tv_usec * 1000;
+  return s_state.kp->utimens(path, ts);
+}
+
+int ki_futimes(int fd, const struct timeval times[2]) {
+  ON_NOSYS_RETURN(-1);
+  // Implement in terms of futimens.
+  struct timespec ts[2];
+  ts[0].tv_sec = times[0].tv_sec;
+  ts[0].tv_nsec = times[0].tv_usec * 1000;
+  ts[1].tv_sec = times[1].tv_sec;
+  ts[1].tv_nsec = times[1].tv_usec * 1000;
+  return s_state.kp->futimens(fd, ts);
 }
 
 void* ki_mmap(void* addr,
@@ -364,7 +401,18 @@ int ki_lchown(const char* path, uid_t owner, gid_t group) {
 
 int ki_utime(const char* filename, const struct utimbuf* times) {
   ON_NOSYS_RETURN(-1);
-  return s_state.kp->utime(filename, times);
+  // Implement in terms of utimens.
+  struct timespec ts[2];
+  ts[0].tv_sec = times->actime;
+  ts[0].tv_nsec = 0;
+  ts[1].tv_sec = times->modtime;
+  ts[1].tv_nsec = 0;
+  return s_state.kp->utimens(filename, ts);
+}
+
+int ki_futimens(int fd, const struct timespec times[2]) {
+  ON_NOSYS_RETURN(-1);
+  return s_state.kp->futimens(fd, times);
 }
 
 int ki_poll(struct pollfd* fds, nfds_t nfds, int timeout) {
@@ -466,6 +514,18 @@ int ki_connect(int fd, const struct sockaddr* addr, socklen_t len) {
 struct hostent* ki_gethostbyname(const char* name) {
   ON_NOSYS_RETURN(NULL);
   return s_state.kp->gethostbyname(name);
+}
+
+int ki_getnameinfo(const struct sockaddr *sa,
+                   socklen_t salen,
+                   char *host,
+                   size_t hostlen,
+                   char *serv,
+                   size_t servlen,
+                   unsigned int flags) {
+  ON_NOSYS_RETURN(EAI_SYSTEM);
+  return s_state.kp->getnameinfo(sa, salen, host, hostlen, serv, servlen,
+                                 flags);
 }
 
 int ki_getaddrinfo(const char* node,

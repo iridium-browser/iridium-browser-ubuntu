@@ -186,32 +186,41 @@ WebInspector.ConsoleModel.evaluateCommandInConsole = function(executionContext, 
  * @param {boolean=} isOutdated
  * @param {!RuntimeAgent.ExecutionContextId=} executionContextId
  * @param {!ConsoleAgent.AsyncStackTrace=} asyncStackTrace
+ * @param {?string=} scriptId
  */
-WebInspector.ConsoleMessage = function(target, source, level, messageText, type, url, line, column, requestId, parameters, stackTrace, timestamp, isOutdated, executionContextId, asyncStackTrace)
+WebInspector.ConsoleMessage = function(target, source, level, messageText, type, url, line, column, requestId, parameters, stackTrace, timestamp, isOutdated, executionContextId, asyncStackTrace, scriptId)
 {
     this._target = target;
     this.source = source;
     this.level = level;
     this.messageText = messageText;
     this.type = type || WebInspector.ConsoleMessage.MessageType.Log;
-    this.url = url || null;
+    /** @type {string|undefined} */
+    this.url = url || undefined;
+    /** @type {number} */
     this.line = line || 0;
+    /** @type {number} */
     this.column = column || 0;
     this.parameters = parameters;
+    /** @type {!Array.<!ConsoleAgent.CallFrame>|undefined} */
     this.stackTrace = stackTrace;
     this.timestamp = timestamp || Date.now();
     this.isOutdated = isOutdated;
     this.executionContextId = executionContextId || 0;
     this.asyncStackTrace = asyncStackTrace;
+    this.scriptId = scriptId || null;
 
     this.request = requestId ? target.networkLog.requestForId(requestId) : null;
 
     if (this.request) {
-        this.stackTrace = this.request.initiator.stackTrace;
-        this.asyncStackTrace = this.request.initiator.asyncStackTrace;
-        if (this.request.initiator && this.request.initiator.url) {
-            this.url = this.request.initiator.url;
-            this.line = this.request.initiator.lineNumber;
+        var initiator = this.request.initiator();
+        if (initiator) {
+            this.stackTrace = initiator.stackTrace || undefined;
+            this.asyncStackTrace = initiator.asyncStackTrace;
+            if (initiator.url) {
+                this.url = initiator.url;
+                this.line = initiator.lineNumber || 0;
+            }
         }
     }
 }
@@ -297,7 +306,8 @@ WebInspector.ConsoleMessage.prototype = {
             this.timestamp,
             this.isOutdated,
             this.executionContextId,
-            this.asyncStackTrace);
+            this.asyncStackTrace,
+            this.scriptId);
     },
 
     /**
@@ -344,7 +354,8 @@ WebInspector.ConsoleMessage.prototype = {
             && (this.url === msg.url)
             && (this.messageText === msg.messageText)
             && (this.request === msg.request)
-            && (this.executionContextId === msg.executionContextId);
+            && (this.executionContextId === msg.executionContextId)
+            && (this.scriptId === msg.scriptId);
     },
 
     /**
@@ -477,7 +488,8 @@ WebInspector.ConsoleDispatcher.prototype = {
             payload.timestamp * 1000, // Convert to ms.
             this._console._enablingConsole,
             payload.executionContextId,
-            payload.asyncStackTrace);
+            payload.asyncStackTrace,
+            payload.scriptId);
         this._console.addMessage(consoleMessage);
     },
 

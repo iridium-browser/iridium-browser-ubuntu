@@ -8,7 +8,6 @@
 #include "chrome/browser/extensions/api/automation_internal/automation_util.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -18,6 +17,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/test/extension_test_message_listener.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -88,12 +88,7 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, TestRendererAccessibilityEnabled) {
   ASSERT_TRUE(tab->IsTreeOnlyAccessibilityModeForTesting());
 }
 
-#if defined(ADDRESS_SANITIZER)
-#define Maybe_SanityCheck DISABLED_SanityCheck
-#else
-#define Maybe_SanityCheck SanityCheck
-#endif
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, Maybe_SanityCheck) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, SanityCheck) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "sanity_check.html"))
       << message_;
@@ -110,38 +105,19 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, GetTreeByTabId) {
       << message_;
 }
 
-#if defined(OS_LINUX) && defined(ADDRESS_SANITIZER)
-// Failing on Linux ASan bot: http://crbug.com/391279
-#define MAYBE_Events DISABLED_Events
-#else
-#define MAYBE_Events Events
-#endif
-
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, MAYBE_Events) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, Events) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "events.html"))
       << message_;
 }
 
-#if defined(OS_LINUX) && defined(ADDRESS_SANITIZER)
-// Timing out on linux ASan bot: http://crbug.com/385701
-#define MAYBE_Actions DISABLED_Actions
-#else
-#define MAYBE_Actions Actions
-#endif
-
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, MAYBE_Actions) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, Actions) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "actions.html"))
       << message_;
 }
 
-#if defined(ADDRESS_SANITIZER)
-#define Maybe_Location DISABLED_Location
-#else
-#define Maybe_Location Location
-#endif
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, Maybe_Location) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, Location) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "location.html"))
       << message_;
@@ -154,13 +130,7 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, TabsAutomationBooleanPermissions) {
       << message_;
 }
 
-// See crbug.com/384673
-#if defined(ADDRESS_SANITIZER) || defined(OS_CHROMEOS) || defined(OS_LINUX)
-#define Maybe_TabsAutomationBooleanActions DISABLED_TabsAutomationBooleanActions
-#else
-#define Maybe_TabsAutomationBooleanActions TabsAutomationBooleanActions
-#endif
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, Maybe_TabsAutomationBooleanActions) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, TabsAutomationBooleanActions) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest(
           "automation/tests/tabs_automation_boolean", "actions.html"))
@@ -267,8 +237,8 @@ class TreeSerializationState {
                                                routing_id);
     std::vector<content::AXEventNotificationDetails> details;
     details.push_back(detail);
-    automation_util::DispatchAccessibilityEventsToAutomation(details,
-                                                             browser_context);
+    automation_util::DispatchAccessibilityEventsToAutomation(
+        details, browser_context, gfx::Vector2d());
   }
 
   // Notify the extension bindings to destroy the tree for the given tab

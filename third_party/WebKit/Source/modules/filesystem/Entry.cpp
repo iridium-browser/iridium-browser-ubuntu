@@ -46,30 +46,29 @@ namespace blink {
 Entry::Entry(DOMFileSystemBase* fileSystem, const String& fullPath)
     : EntryBase(fileSystem, fullPath)
 {
-    ScriptWrappable::init(this);
 }
 
-void Entry::getMetadata(PassOwnPtr<MetadataCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback)
+void Entry::getMetadata(MetadataCallback* successCallback, ErrorCallback* errorCallback)
 {
     m_fileSystem->getMetadata(this, successCallback, errorCallback);
 }
 
-void Entry::moveTo(DirectoryEntry* parent, const String& name, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback) const
+void Entry::moveTo(DirectoryEntry* parent, const String& name, EntryCallback* successCallback, ErrorCallback* errorCallback) const
 {
     m_fileSystem->move(this, parent, name, successCallback, errorCallback);
 }
 
-void Entry::copyTo(DirectoryEntry* parent, const String& name, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback) const
+void Entry::copyTo(DirectoryEntry* parent, const String& name, EntryCallback* successCallback, ErrorCallback* errorCallback) const
 {
     m_fileSystem->copy(this, parent, name, successCallback, errorCallback);
 }
 
-void Entry::remove(PassOwnPtr<VoidCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback) const
+void Entry::remove(VoidCallback* successCallback, ErrorCallback* errorCallback) const
 {
     m_fileSystem->remove(this, successCallback, errorCallback);
 }
 
-void Entry::getParent(PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback) const
+void Entry::getParent(EntryCallback* successCallback, ErrorCallback* errorCallback) const
 {
     m_fileSystem->getParent(this, successCallback, errorCallback);
 }

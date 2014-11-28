@@ -10,6 +10,7 @@
 
 #include "tools/gn/substitution_type.h"
 
+class BuildSettings;
 class Err;
 class ParseNode;
 class Value;
@@ -21,6 +22,10 @@ class SubstitutionPattern {
     Subrange();
     Subrange(SubstitutionType t, const std::string& l = std::string());
     ~Subrange();
+
+    inline bool operator==(const Subrange& other) const {
+      return type == other.type && literal == other.literal;
+    }
 
     SubstitutionType type;
 
@@ -36,12 +41,22 @@ class SubstitutionPattern {
   bool Parse(const Value& value, Err* err);
   bool Parse(const std::string& str, const ParseNode* origin, Err* err);
 
+  // Makes a pattern given a hardcoded string. Will assert if the string is
+  // not a valid pattern.
+  static SubstitutionPattern MakeForTest(const char* str);
+
   // Returns the pattern as a string with substitutions in them.
   std::string AsString() const;
 
   // Sets the bits in the given vector corresponding to the substitutions used
   // by this pattern. SUBSTITUTION_LITERAL is ignored.
-  void FillRequiredTypes(bool required_types[SUBSTITUTION_NUM_TYPES]) const;
+  void FillRequiredTypes(SubstitutionBits* bits) const;
+
+  // Checks whether this pattern resolves to something in the output directory
+  // for the given build settings. If not, returns false and fills in the given
+  // error.
+  bool IsInOutputDir(const BuildSettings* build_settings,
+                     Err* err) const;
 
   // Returns a vector listing the substitutions used by this pattern, not
   // counting SUBSTITUTION_LITERAL.
@@ -54,6 +69,7 @@ class SubstitutionPattern {
 
  private:
   std::vector<Subrange> ranges_;
+  const ParseNode* origin_;
 
   std::vector<SubstitutionType> required_types_;
 };

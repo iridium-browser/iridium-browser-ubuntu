@@ -36,6 +36,7 @@ class SVGScriptElement FINAL
     : public SVGElement
     , public SVGURIReference
     , public ScriptLoaderClient {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<SVGScriptElement> create(Document&, bool wasInsertedByParser);
 
@@ -54,6 +55,7 @@ private:
     virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
     virtual void didNotifySubtreeInsertionsToDocument() OVERRIDE;
     virtual void childrenChanged(const ChildrenChange&) OVERRIDE;
+    virtual void didMoveToNewDocument(Document& oldDocument) OVERRIDE;
 
     virtual void svgAttributeChanged(const QualifiedName&) OVERRIDE;
     virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
@@ -86,4 +88,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // SVGScriptElement_h

@@ -2,21 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-declare_args() {
-  # Tells icu to load an external data file rather than rely on the icudata
-  # being linked directly into the binary.
-  #
-  # This flag is a bit confusing. As of this writing, icu.gyp set the value to
-  # 0 but common.gypi sets the value to 1 for most platforms (and the 1 takes
-  # precedence).
-  #
-  # TODO(GYP) We'll probably need to enhance this logic to set the value to
-  # true or false in similar circumstances. Note that in the GYP build, some
-  # other projects access this variable. If we need to do a similar thing,
-  # we should probably make an icu config file (//third_party/icu/config.gni)
-  # with this flag in it rather than making it global.
-  icu_use_data_file = true
-}
+import("//third_party/icu/config.gni")
 
 # Meta target that includes both icuuc and icui18n. Most targets want both.
 # You can depend on the individually if you need to.
@@ -46,23 +32,25 @@ config("icu_config") {
 
 # Config used only by ICU code.
 config("icu_code") {
+  cflags = []
   if (is_win) {
     # Disable some compiler warnings.
-    cflags = [
+    cflags += [
       "/wd4005",  # Macro redefinition.
       "/wd4068",  # Unknown pragmas.
       "/wd4267",  # Conversion from size_t on 64-bits.
       "/wd4996",  # Deprecated functions.
     ]
   } else if (is_linux) {
-    cflags = [
+    cflags += [
       # Since ICU wants to internally use its own deprecated APIs, don't
       # complain about it.
       "-Wno-deprecated-declarations",
       "-Wno-unused-function",
     ]
-  } else if (is_clang) {
-    cflags = [
+  }
+  if (is_clang) {
+    cflags += [
       "-Wno-deprecated-declarations",
       "-Wno-logical-op-parentheses",
       "-Wno-tautological-compare",
@@ -254,15 +242,22 @@ component("icui18n") {
   ]
 
   configs += [ ":icu_code" ]
-  direct_dependent_configs = [ ":icu_config" ]
+  public_configs = [ ":icu_config" ]
 
+  cflags = []
+  if (is_android || is_linux) {
+    cflags += [
+      # ICU uses its own deprecated functions.
+      "-Wno-deprecated-declarations",
+    ]
+  }
   if (is_clang) {
     # uspoof.h has a U_NAMESPACE_USE macro. That's a bug,
     # the header should use U_NAMESPACE_BEGIN instead.
     # http://bugs.icu-project.org/trac/ticket/9054
     configs -= [ "//build/config/clang:extra_warnings" ]
 
-    cflags = [
+    cflags += [
       "-Wno-header-hygiene",
       # Looks like a real issue, see http://crbug.com/114660
       "-Wno-return-type-c-linkage",
@@ -461,7 +456,7 @@ component("icuuc") {
     "//build/config/compiler:no_chromium_code",
   ]
 
-  direct_dependent_configs = [ ":icu_config" ]
+  public_configs = [ ":icu_config" ]
 
   if (is_win || icu_use_data_file) {
     sources += [ "source/stubdata/stubdata.c" ]

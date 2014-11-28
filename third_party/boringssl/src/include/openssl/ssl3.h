@@ -340,23 +340,9 @@ typedef struct ssl3_buffer_st
 
 #define SSL3_FLAGS_NO_RENEGOTIATE_CIPHERS	0x0001
 #define SSL3_FLAGS_POP_BUFFER			0x0004
-#define TLS1_FLAGS_TLS_PADDING_BUG		0x0008
-#define TLS1_FLAGS_SKIP_CERT_VERIFY		0x0010
-#define TLS1_FLAGS_KEEP_HANDSHAKE		0x0020
 /* TODO(davidben): This flag can probably be merged into s3->change_cipher_spec
  * to something tri-state. (Normal / Expect CCS / Between CCS and Finished). */
 #define SSL3_FLAGS_EXPECT_CCS			0x0080
- 
-/* SSL3_FLAGS_SGC_RESTART_DONE is set when we
- * restart a handshake because of MS SGC and so prevents us
- * from restarting the handshake in a loop. It's reset on a
- * renegotiation, so effectively limits the client to one restart
- * per negotiation. This limits the possibility of a DDoS
- * attack where the client handshakes in a loop using SGC to
- * restart. Servers which permit renegotiation can still be
- * effected, but we can't prevent that.
- */
-#define SSL3_FLAGS_SGC_RESTART_DONE		0x0040
 
 #ifndef OPENSSL_NO_SSL_INTERN
 
@@ -434,9 +420,6 @@ typedef struct ssl3_state_st
 	 * established connection state in case of renegotiations.
 	 */
 	struct	{
-		/* actually only needs to be 16+20 */
-		unsigned char cert_verify_md[EVP_MAX_MD_SIZE*2];
-
 		/* actually only need to be 16+20 for SSLv3 and 12 for TLS */
 		unsigned char finish_md[EVP_MAX_MD_SIZE*2];
 		int finish_md_len;
@@ -448,13 +431,9 @@ typedef struct ssl3_state_st
 
 		/* used to hold the new cipher we are going to use */
 		const SSL_CIPHER *new_cipher;
-#ifndef OPENSSL_NO_DH
 		DH *dh;
-#endif
 
-#ifndef OPENSSL_NO_ECDH
 		EC_KEY *ecdh; /* holds short lived ECDH key */
-#endif
 
 		/* used when SSL_ST_FLUSH_DATA is entered */
 		int next_state;			
@@ -489,6 +468,11 @@ typedef struct ssl3_state_st
 		/* Server-only: cert_request is true if a client certificate was
 		 * requested. */
 		int cert_request;
+
+		/* certificate_status_expected is true if OCSP stapling was
+		 * negotiated and the server is expected to send a
+		 * CertificateStatus message. */
+		char certificate_status_expected;
 		} tmp;
 
         /* Connection binding to prevent renegotiation attacks */
@@ -498,10 +482,8 @@ typedef struct ssl3_state_st
         unsigned char previous_server_finished_len;
         int send_connection_binding; /* TODOEKR */
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
 	/* Set if we saw the Next Protocol Negotiation extension from our peer. */
 	int next_proto_neg_seen;
-#endif
 
 	/* ALPN information
 	 * (we are in the process of transitioning from NPN to ALPN.) */
@@ -564,10 +546,8 @@ typedef struct ssl3_state_st
 #define SSL3_ST_CW_CERT_VRFY_B		(0x191|SSL_ST_CONNECT)
 #define SSL3_ST_CW_CHANGE_A		(0x1A0|SSL_ST_CONNECT)
 #define SSL3_ST_CW_CHANGE_B		(0x1A1|SSL_ST_CONNECT)
-#ifndef OPENSSL_NO_NEXTPROTONEG
 #define SSL3_ST_CW_NEXT_PROTO_A		(0x200|SSL_ST_CONNECT)
 #define SSL3_ST_CW_NEXT_PROTO_B		(0x201|SSL_ST_CONNECT)
-#endif
 #define SSL3_ST_CW_CHANNEL_ID_A		(0x220|SSL_ST_CONNECT)
 #define SSL3_ST_CW_CHANNEL_ID_B		(0x221|SSL_ST_CONNECT)
 #define SSL3_ST_CW_FINISHED_A		(0x1B0|SSL_ST_CONNECT)
@@ -614,10 +594,8 @@ typedef struct ssl3_state_st
 #define SSL3_ST_SR_CERT_VRFY_A		(0x1A0|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_CERT_VRFY_B		(0x1A1|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_CHANGE		(0x1B0|SSL_ST_ACCEPT)
-#ifndef OPENSSL_NO_NEXTPROTONEG
 #define SSL3_ST_SR_NEXT_PROTO_A		(0x210|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_NEXT_PROTO_B		(0x211|SSL_ST_ACCEPT)
-#endif
 #define SSL3_ST_SR_CHANNEL_ID_A		(0x230|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_CHANNEL_ID_B		(0x231|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_FINISHED_A		(0x1C0|SSL_ST_ACCEPT)
@@ -647,9 +625,7 @@ typedef struct ssl3_state_st
 #define SSL3_MT_FINISHED			20
 #define SSL3_MT_CERTIFICATE_STATUS		22
 #define SSL3_MT_SUPPLEMENTAL_DATA		23
-#ifndef OPENSSL_NO_NEXTPROTONEG
 #define SSL3_MT_NEXT_PROTO			67
-#endif
 #define SSL3_MT_ENCRYPTED_EXTENSIONS		203
 #define DTLS1_MT_HELLO_VERIFY_REQUEST    3
 

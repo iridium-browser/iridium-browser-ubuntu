@@ -77,11 +77,6 @@ class ManagePasswordsUIController
   // Open a new tab, pointing to the password manager settings page.
   virtual void NavigateToPasswordManagerSettingsPage();
 
-  // Open a new tab, pointing to the Google manage passwords website.
-  // TODO(gcasto): Change this to navigate to account central once passwords
-  // are visible there. Currently goes to the Chrome support page.
-  virtual void NavigateToAccountCentralManagementPage();
-
   virtual const autofill::PasswordForm& PendingCredentials() const;
 
   // Set the state of the Omnibox icon, and possibly show the associated bubble
@@ -113,6 +108,7 @@ class ManagePasswordsUIController
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
 
   // We create copies of PasswordForm objects that come in with unclear lifetime
   // and store them in this vector as well as in |password_form_map_| to ensure

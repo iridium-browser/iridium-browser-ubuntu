@@ -19,8 +19,8 @@
 #include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/display/chromeos/test/test_display_snapshot.h"
-#include "ui/display/types/chromeos/display_mode.h"
-#include "ui/display/types/chromeos/native_display_delegate.h"
+#include "ui/display/types/display_mode.h"
+#include "ui/display/types/native_display_delegate.h"
 
 namespace ui {
 
@@ -131,36 +131,6 @@ class ActionLogger {
   std::string actions_;
 
   DISALLOW_COPY_AND_ASSIGN(ActionLogger);
-};
-
-class TestTouchscreenDelegate
-    : public DisplayConfigurator::TouchscreenDelegate {
- public:
-  // Ownership of |log| remains with the caller.
-  explicit TestTouchscreenDelegate(ActionLogger* log)
-      : log_(log),
-        configure_touchscreens_(false) {}
-  virtual ~TestTouchscreenDelegate() {}
-
-  void set_configure_touchscreens(bool state) {
-    configure_touchscreens_ = state;
-  }
-
-  // DisplayConfigurator::TouchscreenDelegate implementation:
-  virtual void AssociateTouchscreens(
-      DisplayConfigurator::DisplayStateList* outputs) OVERRIDE {
-    if (configure_touchscreens_) {
-      for (size_t i = 0; i < outputs->size(); ++i)
-        (*outputs)[i].touch_device_id = i + 1;
-    }
-  }
-
- private:
-  ActionLogger* log_;  // Not owned.
-
-  bool configure_touchscreens_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestTouchscreenDelegate);
 };
 
 class TestNativeDisplayDelegate : public NativeDisplayDelegate {
@@ -373,11 +343,8 @@ class DisplayConfiguratorTest : public testing::Test {
     log_.reset(new ActionLogger());
 
     native_display_delegate_ = new TestNativeDisplayDelegate(log_.get());
-    touchscreen_delegate_ = new TestTouchscreenDelegate(log_.get());
-    configurator_.SetDelegatesForTesting(
-        scoped_ptr<NativeDisplayDelegate>(native_display_delegate_),
-        scoped_ptr<DisplayConfigurator::TouchscreenDelegate>(
-            touchscreen_delegate_));
+    configurator_.SetDelegateForTesting(
+        scoped_ptr<NativeDisplayDelegate>(native_display_delegate_));
 
     configurator_.set_state_controller(&state_controller_);
     configurator_.set_mirroring_controller(&mirroring_controller_);
@@ -457,7 +424,6 @@ class DisplayConfiguratorTest : public testing::Test {
   TestObserver observer_;
   scoped_ptr<ActionLogger> log_;
   TestNativeDisplayDelegate* native_display_delegate_;  // not owned
-  TestTouchscreenDelegate* touchscreen_delegate_;       // not owned
   DisplayConfigurator::TestApi test_api_;
 
   TestDisplaySnapshot outputs_[2];
@@ -1211,12 +1177,41 @@ TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClients) {
   // Protections will be disabled only if no more clients request them.
   EXPECT_TRUE(configurator_.EnableContentProtection(
       client2, outputs_[1].display_id(), CONTENT_PROTECTION_METHOD_NONE));
-  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1], HDCP_STATE_DESIRED).c_str(),
-            log_->GetActionsAndClear());
+  EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
   EXPECT_TRUE(configurator_.EnableContentProtection(
       client1, outputs_[1].display_id(), CONTENT_PROTECTION_METHOD_NONE));
   EXPECT_EQ(GetSetHDCPStateAction(outputs_[1], HDCP_STATE_UNDESIRED).c_str(),
             log_->GetActionsAndClear());
+}
+
+TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClientsEnable) {
+  DisplayConfigurator::ContentProtectionClientId client1 =
+      configurator_.RegisterContentProtectionClient();
+  DisplayConfigurator::ContentProtectionClientId client2 =
+      configurator_.RegisterContentProtectionClient();
+  EXPECT_NE(client1, client2);
+
+  configurator_.Init(false);
+  configurator_.ForceInitialConfigure(0);
+  UpdateOutputs(2, true);
+  log_->GetActionsAndClear();
+
+  // Only enable once if HDCP is enabling.
+  EXPECT_TRUE(configurator_.EnableContentProtection(
+      client1, outputs_[1].display_id(), CONTENT_PROTECTION_METHOD_HDCP));
+  native_display_delegate_->set_hdcp_state(HDCP_STATE_DESIRED);
+  EXPECT_TRUE(configurator_.EnableContentProtection(
+      client2, outputs_[1].display_id(), CONTENT_PROTECTION_METHOD_HDCP));
+  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1], HDCP_STATE_DESIRED).c_str(),
+            log_->GetActionsAndClear());
+  native_display_delegate_->set_hdcp_state(HDCP_STATE_ENABLED);
+
+  // Don't enable again if HDCP is already active.
+  EXPECT_TRUE(configurator_.EnableContentProtection(
+      client1, outputs_[1].display_id(), CONTENT_PROTECTION_METHOD_HDCP));
+  EXPECT_TRUE(configurator_.EnableContentProtection(
+      client2, outputs_[1].display_id(), CONTENT_PROTECTION_METHOD_HDCP));
+  EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 }
 
 TEST_F(DisplayConfiguratorTest, HandleConfigureCrtcFailure) {
@@ -1237,8 +1232,6 @@ TEST_F(DisplayConfiguratorTest, HandleConfigureCrtcFailure) {
     outputs_[i].set_current_mode(modes[0]);
     outputs_[i].set_native_mode(modes[0]);
   }
-
-  configurator_.Init(false);
 
   // First test simply fails in MULTIPLE_DISPLAY_STATE_SINGLE mode. This is
   // probably unrealistic but we want to make sure any assumptions don't creep
@@ -1302,6 +1295,44 @@ TEST_F(DisplayConfiguratorTest, HandleConfigureCrtcFailure) {
                                    modes[0]->size().height() +
                                        DisplayConfigurator::kVerticalGap))
               .c_str(),
+          kUngrab,
+          NULL),
+      log_->GetActionsAndClear());
+}
+
+// Tests that power state requests are saved after failed configuration attempts
+// so they can be reused later: http://crosbug.com/p/31571
+TEST_F(DisplayConfiguratorTest, SaveDisplayPowerStateOnConfigFailure) {
+  // Start out with two displays in extended mode.
+  state_controller_.set_state(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED);
+  configurator_.Init(false);
+  configurator_.ForceInitialConfigure(0);
+  log_->GetActionsAndClear();
+
+  // Turn off the internal display, simulating docked mode.
+  EXPECT_TRUE(configurator_.SetDisplayPower(
+      chromeos::DISPLAY_POWER_INTERNAL_OFF_EXTERNAL_ON,
+      DisplayConfigurator::kSetDisplayPowerNoFlags));
+  log_->GetActionsAndClear();
+
+  // Make all subsequent configuration requests fail and try to turn the
+  // internal display back on.
+  native_display_delegate_->set_max_configurable_pixels(1);
+  EXPECT_FALSE(configurator_.SetDisplayPower(
+      chromeos::DISPLAY_POWER_ALL_ON,
+      DisplayConfigurator::kSetDisplayPowerNoFlags));
+  log_->GetActionsAndClear();
+
+  // Simulate the external display getting disconnected and check that the
+  // internal display is turned on (i.e. DISPLAY_POWER_ALL_ON is used) rather
+  // than the earlier DISPLAY_POWER_INTERNAL_OFF_EXTERNAL_ON state.
+  native_display_delegate_->set_max_configurable_pixels(0);
+  UpdateOutputs(1, true);
+  EXPECT_EQ(
+      JoinActions(
+          kGrab,
+          GetFramebufferAction(small_mode_.size(), &outputs_[0], NULL).c_str(),
+          GetCrtcAction(outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
           kUngrab,
           NULL),
       log_->GetActionsAndClear());

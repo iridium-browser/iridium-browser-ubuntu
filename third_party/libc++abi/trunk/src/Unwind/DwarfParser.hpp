@@ -49,6 +49,7 @@ public:
     int       dataAlignFactor;
     bool      isSignalFrame;
     bool      fdesHaveAugmentationData;
+    uint8_t   returnAddressRegister;
   };
 
   /// Information about an FDE (Frame Description Entry)
@@ -216,7 +217,7 @@ bool CFI_Parser<A>::findFDE(A &addressSpace, pint_t pc, pint_t ehSectionStart,
             if (cieInfo->fdesHaveAugmentationData) {
               pint_t augLen = (pint_t)addressSpace.getULEB128(p, nextCFI);
               pint_t endOfAug = p + augLen;
-              if (cieInfo->lsdaEncoding != 0) {
+              if (cieInfo->lsdaEncoding != DW_EH_PE_omit) {
                 // peek at value (without indirection).  Zero means no lsda
                 pint_t lsdaStart = p;
                 if (addressSpace.getEncodedP(
@@ -295,7 +296,9 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
   // parse data alignment factor
   cieInfo->dataAlignFactor = (int)addressSpace.getSLEB128(p, cieContentEnd);
   // parse return address register
-  addressSpace.getULEB128(p, cieContentEnd);
+  uint64_t raReg = addressSpace.getULEB128(p, cieContentEnd);
+  assert(raReg < 255 && "return address register too large");
+  cieInfo->returnAddressRegister = (uint8_t)raReg;
   // parse augmentation data based on augmentation string
   const char *result = NULL;
   if (addressSpace.get8(strStart) == 'z') {

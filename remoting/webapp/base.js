@@ -112,6 +112,23 @@ base.values = function(dict) {
     });
 };
 
+/**
+ * @type {boolean|undefined}
+ * @private
+ */
+base.isAppsV2_ = undefined;
+
+/**
+ * @return {boolean} True if this is a v2 app; false if it is a legacy app.
+ */
+base.isAppsV2 = function() {
+  if (base.isAppsV2_ === undefined) {
+    var manifest = chrome.runtime.getManifest();
+    base.isAppsV2_ =
+        Boolean(manifest && manifest.app && manifest.app.background);
+  }
+  return base.isAppsV2_;
+};
 
 /**
  * Joins the |url| with optional query parameters defined in |opt_params|
@@ -130,6 +147,95 @@ base.urlJoin = function(url, opt_params) {
                          encodeURIComponent(opt_params[key]));
   }
   return url + '?' + queryParameters.join('&');
+};
+
+/**
+ * Convert special characters (e.g. &, < and >) to HTML entities.
+ *
+ * @param {string} str
+ * @return {string}
+ */
+base.escapeHTML = function(str) {
+  var div = document.createElement('div');
+  div.appendChild(document.createTextNode(str));
+  return div.innerHTML;
+};
+
+/**
+ * Promise is a great tool for writing asynchronous code. However, the construct
+ *   var p = new promise(function init(resolve, reject) {
+ *     ... // code that fulfills the Promise.
+ *   });
+ * forces the Promise-resolving logic to reside in the |init| function
+ * of the constructor.  This is problematic when you need to resolve the
+ * Promise in a member function(which is quite common for event callbacks).
+ *
+ * base.Deferred comes to the rescue.  It encapsulates a Promise
+ * object and exposes member methods (resolve/reject) to fulfill it.
+ *
+ * Here are the recommended steps to follow when implementing an asynchronous
+ * function that returns a Promise:
+ * 1. Create a deferred object by calling
+ *      var deferred = new base.Deferred();
+ * 2. Call deferred.resolve() when the asynchronous operation finishes.
+ * 3. Call deferred.reject() when the asynchronous operation fails.
+ * 4. Return deferred.promise() to the caller so that it can subscribe
+ *    to status changes using the |then| handler.
+ *
+ * Sample Usage:
+ *  function myAsyncAPI() {
+ *    var deferred = new base.Deferred();
+ *    window.setTimeout(function() {
+ *      deferred.resolve();
+ *    }, 100);
+ *    return deferred.promise();
+ *  };
+ *
+ * @constructor
+ */
+base.Deferred = function() {
+  /**
+   * @type {?function(?=)}
+   * @private
+   */
+  this.resolve_ = null;
+
+  /**
+   * @type {?function(?)}
+   * @private
+   */
+  this.reject_ = null;
+
+  /**
+   * @type {Promise}
+   * @private
+   */
+  this.promise_ = new Promise(
+    /**
+     * @param {function(?=):void} resolve
+     * @param {function(?):void} reject
+     * @this {base.Deferred}
+     */
+    function(resolve, reject) {
+      this.resolve_ = resolve;
+      this.reject_ = reject;
+    }.bind(this)
+  );
+};
+
+/** @param {*} reason */
+base.Deferred.prototype.reject = function(reason) {
+  this.reject_(reason);
+};
+
+/** @param {*=} opt_value */
+base.Deferred.prototype.resolve = function(opt_value) {
+  this.resolve_(opt_value);
+};
+
+/** @return {Promise} */
+base.Deferred.prototype.promise = function() {
+  return this.promise_;
 };
 
 base.Promise = function() {};
@@ -291,3 +397,28 @@ base.EventSource.prototype = {
     });
   }
 };
+
+/**
+  * Converts UTF-8 string to ArrayBuffer.
+  *
+  * @param {string} string
+  * @return {ArrayBuffer}
+  */
+base.encodeUtf8 = function(string) {
+  var utf8String = unescape(encodeURIComponent(string));
+  var result = new Uint8Array(utf8String.length);
+  for (var i = 0; i < utf8String.length; i++)
+    result[i] = utf8String.charCodeAt(i);
+  return result.buffer;
+}
+
+/**
+  * Decodes UTF-8 string from ArrayBuffer.
+  *
+  * @param {ArrayBuffer} buffer
+  * @return {string}
+  */
+base.decodeUtf8 = function(buffer) {
+  return decodeURIComponent(
+      escape(String.fromCharCode.apply(null, new Uint8Array(buffer))));
+}

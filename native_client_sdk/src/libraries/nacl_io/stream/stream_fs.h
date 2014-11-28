@@ -54,8 +54,8 @@ class StreamFs : public Filesystem {
   // of a MountSocketWork object.
   static PP_CompletionCallback GetRunCompletion(Work* work);
 
-  virtual Error Access(const Path& path, int a_mode);
-  virtual Error Open(const Path& path, int o_flags, ScopedNode* out_node);
+  virtual Error OpenWithMode(const Path& path, int o_flags, mode_t mode,
+                             ScopedNode* out_node);
   virtual Error Unlink(const Path& path);
   virtual Error Mkdir(const Path& path, int permissions);
   virtual Error Rmdir(const Path& path);

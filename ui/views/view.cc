@@ -1324,7 +1324,7 @@ void View::PreferredSizeChanged() {
     parent_->ChildPreferredSizeChanged(this);
 }
 
-bool View::NeedsNotificationWhenVisibleBoundsChange() const {
+bool View::GetNeedsNotificationWhenVisibleBoundsChange() const {
   return false;
 }
 
@@ -1469,6 +1469,10 @@ void View::OnPaintLayer(gfx::Canvas* canvas) {
   if (!layer() || !layer()->fills_bounds_opaquely())
     canvas->DrawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
   PaintCommon(canvas, CullSet());
+}
+
+void View::OnDelegatedFrameDamage(
+    const gfx::Rect& damage_rect_in_dip) {
 }
 
 void View::OnDeviceScaleFactorChanged(float device_scale_factor) {
@@ -1929,7 +1933,7 @@ void View::BoundsChanged(const gfx::Rect& previous_bounds) {
     Layout();
   }
 
-  if (NeedsNotificationWhenVisibleBoundsChange())
+  if (GetNeedsNotificationWhenVisibleBoundsChange())
     OnVisibleBoundsChanged();
 
   // Notify interested Views that visible bounds within the root view may have
@@ -1944,7 +1948,7 @@ void View::BoundsChanged(const gfx::Rect& previous_bounds) {
 
 // static
 void View::RegisterChildrenForVisibleBoundsNotification(View* view) {
-  if (view->NeedsNotificationWhenVisibleBoundsChange())
+  if (view->GetNeedsNotificationWhenVisibleBoundsChange())
     view->RegisterForVisibleBoundsNotification();
   for (int i = 0; i < view->child_count(); ++i)
     RegisterChildrenForVisibleBoundsNotification(view->child_at(i));
@@ -1952,7 +1956,7 @@ void View::RegisterChildrenForVisibleBoundsNotification(View* view) {
 
 // static
 void View::UnregisterChildrenForVisibleBoundsNotification(View* view) {
-  if (view->NeedsNotificationWhenVisibleBoundsChange())
+  if (view->GetNeedsNotificationWhenVisibleBoundsChange())
     view->UnregisterForVisibleBoundsNotification();
   for (int i = 0; i < view->child_count(); ++i)
     UnregisterChildrenForVisibleBoundsNotification(view->child_at(i));

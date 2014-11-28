@@ -26,6 +26,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_event_log.h"
@@ -39,9 +41,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -338,6 +337,8 @@ void MobileSetupUIHTMLSource::GetPropertiesAndStartDataRequest(
   strings.SetString("ok_button",
                     l10n_util::GetStringUTF16(IDS_OK));
   webui::SetFontAndTextDirection(&strings);
+
+  webui::UseVersion2 version_2;
 
   // The webui differs based on whether the network is activated or not. If the
   // network is activated, the webui goes straight to portal. Otherwise the
@@ -638,7 +639,7 @@ MobileSetupUI::MobileSetupUI(content::WebUI* web_ui)
 void MobileSetupUI::DidCommitProvisionalLoadForFrame(
     content::RenderFrameHost* render_frame_host,
     const GURL& url,
-    content::PageTransition transition_type) {
+    ui::PageTransition transition_type) {
   if (render_frame_host->GetFrameName() != "paymentForm")
     return;
 

@@ -10,19 +10,21 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_update/google_update_idl.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/win/atl_module.h"
 #include "ui/views/widget/widget.h"
@@ -391,6 +393,12 @@ void GoogleUpdate::ReportResults(GoogleUpdateUpgradeResult results,
   // If there is an error, then error code must not be blank, and vice versa.
   DCHECK(results == UPGRADE_ERROR ? error_code != GOOGLE_UPDATE_NO_ERROR :
                                     error_code == GOOGLE_UPDATE_NO_ERROR);
+  UMA_HISTOGRAM_ENUMERATION(
+      "GoogleUpdate.UpgradeResult", results, NUM_UPGRADE_RESULTS);
+  if (results == UPGRADE_ERROR) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "GoogleUpdate.UpdateErrorCode", error_code, NUM_ERROR_CODES);
+  }
   if (listener_) {
     listener_->OnReportResults(
         results, error_code, error_message, version_available_);
@@ -404,6 +412,7 @@ bool GoogleUpdate::ReportFailure(HRESULT hr,
   DLOG(ERROR) << "Communication with Google Update failed: " << hr
               << " error: " << error_code
               << ", message: " << error_message.c_str();
+  UMA_HISTOGRAM_SPARSE_SLOWLY("GoogleUpdate.ErrorHresult", hr);
   main_loop->PostTask(
       FROM_HERE,
       base::Bind(&GoogleUpdate::ReportResults, this,

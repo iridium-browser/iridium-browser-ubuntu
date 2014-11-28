@@ -43,6 +43,7 @@
 
 namespace blink {
 
+class AXObject;
 class BeforeTextInsertedEvent;
 class Element;
 class Event;
@@ -92,6 +93,7 @@ public:
     virtual PassRefPtrWillBeRawPtr<HTMLFormElement> formForSubmission() const;
     virtual bool hasCustomFocusLogic() const;
     virtual void handleFocusEvent(Element* oldFocusedElement, FocusType);
+    virtual void handleFocusInEvent(Element* oldFocusedElement, FocusType);
     virtual void handleBlurEvent();
     virtual void subtreeHasChanged();
     virtual bool hasTouchEventHandler() const;
@@ -116,6 +118,7 @@ public:
     virtual void listAttributeTargetChanged();
     virtual void updateClearButtonVisibility();
     virtual void updatePlaceholderText();
+    virtual AXObject* popupRootAXObject();
 
 protected:
     InputTypeView(HTMLInputElement& element) : m_element(&element) { }

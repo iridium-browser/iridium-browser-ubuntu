@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "device/hid/hid_device_info.h"
 
@@ -20,10 +20,9 @@ class HidConnection;
 
 class HidService {
  public:
-  static HidService* Create(
-      scoped_refptr<base::MessageLoopProxy> ui_message_loop);
-
-  virtual ~HidService();
+  static HidService* GetInstance(
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
 
   // Enumerates and returns a list of device identifiers.
   virtual void GetDevices(std::vector<HidDeviceInfo>* devices);
@@ -41,14 +40,18 @@ class HidService {
   typedef std::map<HidDeviceId, HidDeviceInfo> DeviceMap;
 
   HidService();
+  virtual ~HidService();
 
   void AddDevice(const HidDeviceInfo& info);
   void RemoveDevice(const HidDeviceId& device_id);
-  const DeviceMap& GetDevicesNoEnumerate() const;
+
+  const DeviceMap& devices() const { return devices_; }
 
   base::ThreadChecker thread_checker_;
 
  private:
+  class Destroyer;
+
   DeviceMap devices_;
 
   DISALLOW_COPY_AND_ASSIGN(HidService);

@@ -29,6 +29,7 @@
 
 #include <math.h>
 
+#include "talk/media/base/executablehelpers.h"
 #include "talk/media/base/rtpdump.h"
 #include "talk/media/base/videocapturer.h"
 #include "talk/media/base/videoframe.h"
@@ -255,10 +256,15 @@ void VideoCapturerListener::OnFrameCaptured(VideoCapturer* capturer,
 // Returns the absolute path to a file in the testdata/ directory.
 std::string GetTestFilePath(const std::string& filename) {
   // Locate test data directory.
+#ifdef ENABLE_WEBRTC
+  rtc::Pathname path = rtc::GetExecutablePath();
+  EXPECT_FALSE(path.empty());
+  path.AppendPathname("../../talk/");
+#else
   rtc::Pathname path = testing::GetTalkDirectory();
   EXPECT_FALSE(path.empty());  // must be run from inside "talk"
-  path.AppendFolder("media");
-  path.AppendFolder("testdata");
+#endif
+  path.AppendFolder("media/testdata/");
   path.SetFilename(filename);
   return path.pathname();
 }

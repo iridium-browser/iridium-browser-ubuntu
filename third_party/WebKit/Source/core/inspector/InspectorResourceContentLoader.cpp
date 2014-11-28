@@ -145,7 +145,7 @@ void InspectorResourceContentLoader::start()
     checkDone();
 }
 
-void InspectorResourceContentLoader::ensureResourcesContentLoaded(PassOwnPtr<VoidCallback> callback)
+void InspectorResourceContentLoader::ensureResourcesContentLoaded(VoidCallback* callback)
 {
     if (!m_started)
         start();
@@ -154,6 +154,17 @@ void InspectorResourceContentLoader::ensureResourcesContentLoaded(PassOwnPtr<Voi
 }
 
 InspectorResourceContentLoader::~InspectorResourceContentLoader()
+{
+    ASSERT(m_resources.isEmpty());
+}
+
+void InspectorResourceContentLoader::trace(Visitor* visitor)
+{
+    visitor->trace(m_callbacks);
+    visitor->trace(m_page);
+}
+
+void InspectorResourceContentLoader::dispose()
 {
     stop();
 }
@@ -178,9 +189,9 @@ void InspectorResourceContentLoader::checkDone()
 {
     if (!hasFinished())
         return;
-    Vector<OwnPtr<VoidCallback> > callbacks;
+    PersistentHeapVectorWillBeHeapVector<Member<VoidCallback> > callbacks;
     callbacks.swap(m_callbacks);
-    for (Vector<OwnPtr<VoidCallback> >::const_iterator it = callbacks.begin(); it != callbacks.end(); ++it)
+    for (PersistentHeapVectorWillBeHeapVector<Member<VoidCallback> >::const_iterator it = callbacks.begin(); it != callbacks.end(); ++it)
         (*it)->handleEvent();
 }
 

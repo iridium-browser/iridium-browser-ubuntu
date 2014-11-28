@@ -6,10 +6,14 @@
 
 #include "cc/surfaces/display.h"
 
+#include "mojo/application/application_runner_chromium.h"
+#include "mojo/public/c/system/main.h"
+#include "mojo/services/surfaces/surfaces_service_impl.h"
+
 namespace mojo {
 
 SurfacesServiceApplication::SurfacesServiceApplication()
-    : next_id_namespace_(1u), display_(NULL) {
+    : next_id_namespace_(1u), display_(NULL), draw_timer_(false, false) {
 }
 
 SurfacesServiceApplication::~SurfacesServiceApplication() {
@@ -21,24 +25,29 @@ bool SurfacesServiceApplication::ConfigureIncomingConnection(
   return true;
 }
 
-void SurfacesServiceApplication::Create(ApplicationConnection* connection,
-                                        InterfaceRequest<Surface> request) {
-  BindToRequest(new SurfacesImpl(&manager_, next_id_namespace_++, this),
+void SurfacesServiceApplication::Create(
+    ApplicationConnection* connection,
+    InterfaceRequest<SurfacesService> request) {
+  BindToRequest(new SurfacesServiceImpl(&manager_, &next_id_namespace_, this),
                 &request);
 }
 
 void SurfacesServiceApplication::FrameSubmitted() {
-  if (display_)
-    display_->Draw();
+  if (!draw_timer_.IsRunning() && display_) {
+    draw_timer_.Start(FROM_HERE,
+                      base::TimeDelta::FromMilliseconds(17),
+                      base::Bind(base::IgnoreResult(&cc::Display::Draw),
+                                 base::Unretained(display_)));
+  }
 }
 
 void SurfacesServiceApplication::SetDisplay(cc::Display* display) {
   display_ = display;
 }
 
-// static
-ApplicationDelegate* ApplicationDelegate::Create() {
-  return new SurfacesServiceApplication;
-}
-
 }  // namespace mojo
+
+MojoResult MojoMain(MojoHandle shell_handle) {
+  mojo::ApplicationRunnerChromium runner(new mojo::SurfacesServiceApplication);
+  return runner.Run(shell_handle);
+}

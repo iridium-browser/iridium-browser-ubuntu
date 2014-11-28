@@ -15,9 +15,9 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/extensions/blacklist.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -33,6 +33,7 @@
 
 class ExtensionSyncService;
 class GURL;
+class HostContentSettingsMap;
 class Profile;
 
 namespace base {
@@ -175,7 +176,8 @@ class ExtensionService
     : public ExtensionServiceInterface,
       public extensions::ExternalProviderInterface::VisitorInterface,
       public content::NotificationObserver,
-      public extensions::Blacklist::Observer {
+      public extensions::Blacklist::Observer,
+      public extensions::ExtensionManagement::Observer {
  public:
   // Attempts to uninstall an extension from a given ExtensionService. Returns
   // true iff the target extension exists.
@@ -249,6 +251,9 @@ class ExtensionService
   virtual void OnExternalProviderReady(
       const extensions::ExternalProviderInterface* provider) OVERRIDE;
 
+  // ExtensionManagement::Observer implementation:
+  virtual void OnExtensionManagementSettingsChanged() OVERRIDE;
+
   // Initialize and start all installed extensions.
   void Init();
 
@@ -258,6 +263,9 @@ class ExtensionService
   // Reloads the specified extension, sending the onLaunched() event to it if it
   // currently has any window showing.
   // Allows noisy failures.
+  // NOTE: Reloading an extension can invalidate |extension_id| and Extension
+  // pointers for the given extension. Consider making a copy of |extension_id|
+  // first and retrieving a new Extension pointer afterwards.
   void ReloadExtension(const std::string& extension_id);
 
   // Suppresses noisy failures.
@@ -335,7 +343,8 @@ class ExtensionService
   void DidCreateRenderViewForBackgroundPage(extensions::ExtensionHost* host);
 
   // Changes sequenced task runner for crx installation tasks to |task_runner|.
-  void SetFileTaskRunnerForTesting(base::SequencedTaskRunner* task_runner);
+  void SetFileTaskRunnerForTesting(
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
 
   // Postpone installations so that we don't have to worry about race
   // conditions.
@@ -356,6 +365,10 @@ class ExtensionService
   // doesn't notify the user that the extension was terminated, if such a
   // notification is desired the calling code is responsible for doing that.
   void TerminateExtension(const std::string& extension_id);
+
+  // Register self and content settings API with the specified map.
+  void RegisterContentSettings(
+      HostContentSettingsMap* host_content_settings_map);
 
   // Adds/Removes update observers.
   void AddUpdateObserver(extensions::UpdateObserver* observer);
@@ -495,9 +508,6 @@ class ExtensionService
   // Called once all external providers are ready. Checks for unclaimed
   // external extensions.
   void OnAllExternalProvidersReady();
-
-  // Return true if the sync type of |extension| matches |type|.
-  void OnExtensionInstallPrefChanged();
 
   // Adds the given extension to the list of terminated extensions if
   // it is not already there and unloads it.
@@ -644,7 +654,6 @@ class ExtensionService
   OrphanedDevTools orphaned_dev_tools_;
 
   content::NotificationRegistrar registrar_;
-  PrefChangeRegistrar pref_change_registrar_;
 
   // Keeps track of loading and unloading component extensions.
   scoped_ptr<extensions::ComponentLoader> component_loader_;

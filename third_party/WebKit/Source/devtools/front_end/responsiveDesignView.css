@@ -5,8 +5,13 @@
  */
 
 .responsive-design {
-    overflow: hidden;
     position: relative;
+    background-color: rgb(0, 0, 0);
+    overflow: hidden;
+}
+
+.responsive-design-canvas {
+    pointer-events: none;
 }
 
 .responsive-design-sliders-container {
@@ -14,31 +19,46 @@
     overflow: visible;
 }
 
-.responsive-design-slider-width,
-.responsive-design-slider-height {
-    flex: none;
-    justify-content: center;
+.responsive-design-generic-outline-container {
+    position: absolute;
+    overflow: hidden;
+    top: 0;
+    left: 0;
+    right: -19px;
+    bottom: -19px;
 }
 
-.responsive-design-slider-thumb {
-    border: 1px solid rgb(231, 231, 231);
-    background-color: lightgray;
-    box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
-    background-repeat: no-repeat;
+.responsive-design-generic-outline {
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    right: 5px;
+    bottom: 5px;
+    border-radius: 8px;
+    background-color: rgb(51, 51, 51);
+    box-shadow: rgb(20, 20, 20) 3px 3px 4px;
+}
+
+.responsive-design-slider-width {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -14px;
+    width: 14px;
     display: flex;
-    justify-content: center;
     align-items: center;
-    flex: 0 1 100px;
+    justify-content: center;
 }
 
-.responsive-design-slider-width .responsive-design-slider-thumb {
-    border-radius: 0 3px 3px 0;
-    border-left: none;
-}
-
-.responsive-design-slider-height .responsive-design-slider-thumb {
-    border-radius: 0 0 3px 3px;
-    border-top: none;
+.responsive-design-slider-height {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .responsive-design-thumb-handle {
@@ -50,22 +70,77 @@
     transform: rotate(90deg);
 }
 
+.responsive-design-page-scale-container {
+    position: absolute !important;
+    top: 0;
+    right: 0;
+    padding: 10px;
+    background-color: rgba(0, 0, 0, 0.3);
+    align-items: center;
+}
+
+.responsive-design-page-scale-label {
+    display: block;
+    height: 20px;
+    margin: 0 4px;
+    padding-top: 3px;
+    color: white;
+    cursor: default !important;
+}
+
+.responsive-design-page-scale-container .responsive-design-page-scale-button.status-bar-item {
+    display: block;
+    width: 18px;
+    height: 18px;
+    border: 1px solid transparent;
+    border-radius: 2px;
+}
+
+.responsive-design-page-scale-container .responsive-design-page-scale-button.status-bar-item:not(:disabled):hover {
+    box-shadow: rgb(255, 255, 255) 0 0 3px;
+}
+
+.responsive-design-page-scale-container .responsive-design-page-scale-button.status-bar-item > .glyph {
+    background-color: rgb(180, 180, 180);
+    -webkit-mask-image: url(Images/responsiveDesign.png);
+    -webkit-mask-size: 112px 16px;
+    opacity: 1;
+}
+
+.responsive-design-page-scale-container .status-bar-item .glyph.shadow {
+    background-color: black !important;
+}
+
+@media (-webkit-min-device-pixel-ratio: 1.5) {
+    .responsive-design-page-scale-container .responsive-design-page-scale-button.status-bar-item > .glyph {
+        -webkit-mask-image: url(Images/responsiveDesign_2x.png);
+    }
+} /* media */
+
+.responsive-design-page-scale-increase > .glyph {
+    -webkit-mask-position: -81px 1px;
+}
+
+.responsive-design-page-scale-decrease > .glyph {
+    -webkit-mask-position: -97px 1px;
+}
+
 /* Toolbar */
 
 .responsive-design-toolbar {
     display: flex;
     flex: none;
-    background: linear-gradient(to bottom, rgb(64, 64, 64), rgb(58, 58, 58));
+    background: linear-gradient(to bottom, rgb(83, 81, 81), rgb(59, 59, 59));
     color: rgb(255, 255, 255);
     overflow: hidden;
-    border-bottom: 1px solid rgb(104, 104, 104);
+    border-bottom: 1px solid rgb(71, 71, 71);
 }
 
 .responsive-design-separator {
     flex: none;
-    width: 2px;
-    background-color: rgb(43, 43, 43);
-    margin: 2px;
+    width: 3px;
+    background-color: rgb(46, 46, 46);
+    border-right: 1px solid rgb(75, 75, 75);
 }
 
 .responsive-design-section {
@@ -75,7 +150,7 @@
     white-space: nowrap;
     align-items: stretch;
     justify-content: flex-start;
-    padding: 0 10px;
+    padding-top: 1px;
 }
 
 .responsive-design-section .status-bar-item .glyph.shadow {
@@ -83,15 +158,17 @@
 }
 
 
-.responsive-design-section-separator {
+.responsive-design-section-decorator {
     height: 2px;
+    margin-left: -2px;
+    margin-right: -1px;
+    position: relative;
 }
 
 .responsive-design-suite {
     display: flex;
     flex-direction: row;
-    padding-top: 2px;
-    padding-bottom: 2px;
+    padding: 2px 11px;
     color: rgb(180, 180, 180);
 }
 
@@ -103,7 +180,7 @@
     flex: none;
     width: 1px;
     background-color: rgb(43, 43, 43);
-    margin: 0 3px;
+    margin: 0 6px;
 }
 
 .responsive-design-suite > div:not(.responsive-design-suite-separator) {
@@ -186,15 +263,10 @@
 
 .responsive-design-toolbar select {
     height: 18px;
-    background-color: rgb(81, 81, 81);
+    background-color: rgb(87, 87, 87);
     border: 0;
     margin-left: 10px;
     line-height: 16px;
-}
-
-body.platform-mac .responsive-design-toolbar select {
-    position: relative;
-    top: 1px;
 }
 
 .responsive-design-toolbar input:focus {
@@ -206,7 +278,7 @@ body.platform-mac .responsive-design-toolbar select {
 .responsive-design-icon.status-bar-item > .glyph {
     background-color: rgb(180, 180, 180);
     -webkit-mask-image: url(Images/responsiveDesign.png);
-    -webkit-mask-size: 64px 16px;
+    -webkit-mask-size: 112px 16px;
 }
 
 .responsive-design-icon.status-bar-item {
@@ -214,7 +286,7 @@ body.platform-mac .responsive-design-toolbar select {
     width: 16px;
     height: 16px;
     position: relative;
-    top: 4px;
+    top: 3px;
 }
 
 .responsive-design-icon.status-bar-item:disabled .glyph {
@@ -255,6 +327,10 @@ body.platform-mac .responsive-design-toolbar select {
     border: 0;
 }
 
+.responsive-design-icon-swap {
+    margin-left: 1px;
+}
+
 .responsive-design-icon-swap.status-bar-item:hover > .glyph {
     background-color: rgb(255, 180, 0);
 }
@@ -266,7 +342,9 @@ body.platform-mac .responsive-design-toolbar select {
 /* Buttons section */
 
 .responsive-design-section-buttons {
-    padding: 0;
+    padding: 4px 0 0 0;
+    background: rgb(17, 17, 17);
+    border-right: 2px solid rgb(0, 0, 0);
 }
 
 .responsive-design-section-buttons .status-bar-item {
@@ -305,12 +383,13 @@ body.platform-mac .responsive-design-toolbar select {
 
 /* Device section */
 
-.responsive-design-section-device .responsive-design-section-separator {
+.responsive-design-section-device .responsive-design-section-decorator {
     background: linear-gradient(to bottom, rgb(255, 186, 68), rgb(255, 119, 0));
+    margin-left: 0;
 }
 
 .responsive-design-section-device select {
-    width: 180px;
+    width: 185px;
 }
 
 .responsive-design-section-device input[type='text'],
@@ -330,12 +409,13 @@ body.platform-mac .responsive-design-toolbar select {
 /* Network section */
 
 .responsive-design-section-network select {
-    width: 180px;
+    width: 185px;
 }
 
 .responsive-design-section-network input[type='text'] {
     width: 222px;
     margin-left: 5px;
+    text-overflow: ellipsis;
 }
 
 .responsive-design-section-network input[type='text'],
@@ -344,7 +424,7 @@ body.platform-mac .responsive-design-toolbar select {
     color: rgb(65, 175, 255);
 }
 
-.responsive-design-section-network .responsive-design-section-separator {
+.responsive-design-section-network .responsive-design-section-decorator {
     background: linear-gradient(to bottom, rgb(77, 170, 243), rgb(0, 130, 255));
 }
 
@@ -352,7 +432,7 @@ body.platform-mac .responsive-design-toolbar select {
 
 .responsive-design-warning {
     background-color: rgb(252, 234, 156);
-    color: #222;
+    color: rgb(34, 34, 34);
     position: absolute;
     left: 0;
     right: 0;
@@ -374,13 +454,10 @@ body.platform-mac .responsive-design-toolbar select {
     flex: none;
 }
 
-.responsive-design-ruler-glasspane {
-    position: absolute;
-    left: 0px;
-    right: 0px;
-    top: 0px;
-    background-color: transparent;
-    overflow: hidden;
+.responsive-design-warning .disable-warning {
+    margin-right: 5px;
+    text-decoration: underline;
+    cursor: pointer;
 }
 
 .responsive-design-toggle-media-inspector .glyph {
@@ -392,153 +469,97 @@ body.platform-mac .responsive-design-toolbar select {
     background-color: rgb(105, 194, 236) !important;
 }
 
-/* media */
+/* Media query inspector */
 
 .responsive-design-media-container {
-    flex: none;
+    position: absolute;
+    right: 0;
+    top: 0;
+    padding-bottom: 5px;
+    overflow: hidden;
 }
 
-.view.media-inspector-view {
-    overflow-y: auto;
-    overflow-x: hidden;
-    background-color: rgb(0, 0, 0);
-    max-height: 100px;
-}
-
-.media-inspector-view:not(.media-inspector-view-empty) {
-    border-bottom: 1px solid rgb(104, 104, 104);
-}
-
-.media-inspector-view::-webkit-scrollbar {
-    background: rgb(54, 54, 54);
-}
-
-.media-inspector-view::-webkit-scrollbar-thumb {
-    background: rgb(94, 94, 94);
-}
+/* Media query bars */
 
 .media-inspector-marker-container {
     position: relative;
-    margin: 2px 0 2px 0;
+    height: 14px;
+    margin: 2px 0;
 }
 
 .media-inspector-marker {
     position: absolute;
-    top: 0px;
-    bottom: 0px;
+    top: 1px;
+    bottom: 1px;
     white-space: nowrap;
+    border-radius: 2px;
 }
 
-.media-inspector-marker-container:hover {
-    background-color: rgb(32, 32, 32);
+.media-inspector-marker-inactive {
+    -webkit-filter: brightness(80%);
 }
 
-.media-inspector-marker-container:hover .media-inspector-marker {
-    -webkit-filter: brightness(125%);
+.media-inspector-marker:hover {
+    top: -1px;
+    bottom: -1px;
+    -webkit-filter: brightness(115%) !important;
 }
 
-.media-inspector-marker-container-max-width .media-inspector-marker {
-    background-color: rgba(111, 168, 220, 0.66);
-    border-right: 5px solid rgba(111, 168, 220, 0.86);
+.media-inspector-marker-max-width {
+    background: linear-gradient(to left, rgba(255, 255, 255, 0.27), rgba(0,0,0,0) 30px), linear-gradient(to bottom, rgb(72, 139, 249), rgb(26, 113, 233));
+    border-radius: 0 2px 2px 0;
+    border-right: 2px solid rgb(171, 207, 255);
 }
 
-.media-inspector-marker-container-min-max-width .media-inspector-marker {
-    background-color: rgba(100, 200, 0, 0.66);
-    border-left: 5px solid rgba(100, 200, 0, 0.86);
-    border-right: 5px solid rgba(100, 200, 0, 0.86);
+.media-inspector-marker-min-max-width {
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.27), rgba(0,0,0,0) 30px), linear-gradient(to left, rgba(255, 255, 255, 0.27), rgba(0,0,0,0) 30px), linear-gradient(to bottom, rgb(112, 174, 7), rgb(3, 131, 0));
+    border-radius: 2px;
+    border-left: 2px solid rgb(80, 226, 40);
+    border-right: 2px solid rgb(80, 226, 40);
 }
 
-.media-inspector-marker-container-min-width .media-inspector-marker {
-    background-color: rgba(225, 124, 0, 0.66);
-    border-left: 5px solid rgba(225, 124, 0, 0.86);
+.media-inspector-marker-min-max-width:hover {
+    z-index: 1;
 }
 
-.media-inspector-marker-container:not(.media-inspector-marker-container-max-width) .media-inspector-max-label-filler,
-.media-inspector-marker-container:not(.media-inspector-marker-container-max-width) .media-inspector-min-label-filler {
-    min-width: 50px;
+.media-inspector-marker-min-width {
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.27), rgba(0,0,0,0) 30px), linear-gradient(to bottom, rgb(222, 129, 30), rgb(204, 104, 31));
+    border-radius: 2px 0 0 2px;
+    border-left: 2px solid rgb(255, 181, 142);
 }
 
-.media-inspector-max-label-filler {
-    flex: auto;
+/* Media query labels */
+
+.media-inspector-marker:not(:hover) .media-inspector-marker-label-container {
+    display: none;
 }
 
-.media-inspector-min-label-filler {
-    display: flex;
-    justify-content: flex-end;
+.media-inspector-marker-label-container {
+    position: absolute;
+}
+
+.media-inspector-marker-label-container-left {
+    left: -2px;
+}
+
+.media-inspector-marker-label-container-right {
+    right: -2px;
 }
 
 .media-inspector-marker-label {
-    color: rgb(180, 180, 180);
-    position: relative;
-    text-shadow: 0px 0px 2px black;
-}
-
-.media-inspector-min-label {
-    padding-right: 11px;
-}
-
-.media-inspector-min-label::after {
+    color: rgb(230, 230, 230);
     position: absolute;
-    padding-left: 2px;
-    right: -1px;
-    height: 6px;
-    content: url(Images/graphLabelCalloutLeft.png);
-    -webkit-filter: invert(0.8);
-    box-sizing: border-box;
+    top: 1px;
+    bottom: 0;
+    font-size: 10px;
+    text-shadow: rgba(0, 0, 0, 0.6) 1px 1px;
+    pointer-events: none;
 }
 
-.media-inspector-max-label {
-    padding-left: 11px;
+.media-inspector-label-right {
+    right: 4px;
 }
 
-.media-inspector-max-label::before {
-    position: absolute;
-    padding-right: 2px;
-    left: -1px;
-    height: 6px;
-    content: url(Images/graphLabelCalloutRight.png);
-    -webkit-filter: invert(0.8);
-}
-
-.media-inspector-threshold-serif {
-    position: absolute;
-    top: 0px;
-    bottom: 0px;
-    width: 5px;
-    margin-left: -2px;
-}
-
-.media-inspector-threshold-serif::before {
-    content: ".";
-    color: transparent;
-    position: absolute;
-    left: 2px;
-    right: 2px;
-    top: 0px;
-    bottom: 0px;
-    border-left: 1px solid rgba(225, 124, 0, 0.86);
-    box-sizing: border-box;
-}
-
-.media-inspector-threshold-serif:hover {
-    background-color: rgba(225, 124, 0, 0.86);
-}
-
-.media-inspector-marker-highlight-1 {
-    -webkit-animation: media-inspector-animation-highlight-1 0.7s 1;
-}
-
-.media-inspector-marker-highlight-2 {
-    -webkit-animation: media-inspector-animation-highlight-2 0.7s 1;
-}
-
-
-@-webkit-keyframes media-inspector-animation-highlight-1 {
-    from { -webkit-filter: brightness(135%); }
-    to { -webkit-filter: brightness(100%); }
-}
-
-@-webkit-keyframes media-inspector-animation-highlight-2 {
-    from { -webkit-filter: brightness(135%); }
-    to { -webkit-filter: brightness(100%); }
+.media-inspector-label-left {
+    left: 4px;
 }

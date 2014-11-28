@@ -170,9 +170,11 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
                     buffer[softHyphen] = zeroWidthSpace;
 
                     // \n, \t, and nonbreaking space must render as a space.
-                    buffer[(int)'\n'] = ' ';
-                    buffer[(int)'\t'] = ' ';
-                    buffer[noBreakSpace] = ' ';
+                    buffer[newlineCharacter] = space;
+                    buffer[characterTabulation] = space;
+                    buffer[noBreakSpace] = space;
+                } else if (start == (arabicLetterMark & ~(GlyphPage::size - 1))) {
+                    buffer[arabicLetterMark - start] = zeroWidthSpace;
                 } else if (start == (leftToRightMark & ~(GlyphPage::size - 1))) {
                     // LRM, RLM, LRE, RLE, ZWNJ, ZWJ, and PDF must not render at all.
                     buffer[leftToRightMark - start] = zeroWidthSpace;
@@ -184,6 +186,16 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
                     buffer[zeroWidthNonJoiner - start] = zeroWidthSpace;
                     buffer[zeroWidthJoiner - start] = zeroWidthSpace;
                     buffer[popDirectionalFormatting - start] = zeroWidthSpace;
+                    buffer[activateArabicFormShaping - start] = zeroWidthSpace;
+                    buffer[activateSymmetricSwapping - start] = zeroWidthSpace;
+                    buffer[firstStrongIsolate - start] = zeroWidthSpace;
+                    buffer[inhibitArabicFormShaping - start] = zeroWidthSpace;
+                    buffer[inhibitSymmetricSwapping - start] = zeroWidthSpace;
+                    buffer[leftToRightIsolate - start] = zeroWidthSpace;
+                    buffer[nationalDigitShapes - start] = zeroWidthSpace;
+                    buffer[nominalDigitShapes - start] = zeroWidthSpace;
+                    buffer[popDirectionalIsolate - start] = zeroWidthSpace;
+                    buffer[rightToLeftIsolate - start] = zeroWidthSpace;
                 } else if (start == (objectReplacementCharacter & ~(GlyphPage::size - 1))) {
                     // Object replacement character must not render at all.
                     buffer[objectReplacementCharacter - start] = zeroWidthSpace;
@@ -383,41 +395,5 @@ void GlyphPageTreeNode::pruneFontData(const SimpleFontData* fontData, unsigned l
         it->value->pruneFontData(fontData, level);
 }
 
-#ifndef NDEBUG
-    void GlyphPageTreeNode::showSubtree()
-    {
-        Vector<char> indent(level());
-        indent.fill('\t', level());
-        indent.append(0);
-
-        GlyphPageTreeNodeMap::iterator end = m_children.end();
-        for (GlyphPageTreeNodeMap::iterator it = m_children.begin(); it != end; ++it) {
-            printf("%s\t%p %s\n", indent.data(), it->key, it->key->description().utf8().data());
-            it->value->showSubtree();
-        }
-        if (m_systemFallbackChild) {
-            printf("%s\t* fallback\n", indent.data());
-            m_systemFallbackChild->showSubtree();
-        }
-    }
-#endif
-
 } // namespace blink
 
-#ifndef NDEBUG
-void showGlyphPageTrees()
-{
-    printf("Page 0:\n");
-    showGlyphPageTree(0);
-    HashMap<int, blink::GlyphPageTreeNode*>::iterator end = blink::GlyphPageTreeNode::roots->end();
-    for (HashMap<int, blink::GlyphPageTreeNode*>::iterator it = blink::GlyphPageTreeNode::roots->begin(); it != end; ++it) {
-        printf("\nPage %d:\n", it->key);
-        showGlyphPageTree(it->key);
-    }
-}
-
-void showGlyphPageTree(unsigned pageNumber)
-{
-    blink::GlyphPageTreeNode::getRoot(pageNumber)->showSubtree();
-}
-#endif

@@ -655,7 +655,7 @@ class AudioManagerAndroid {
             // Use BluetoothManager to get the BluetoothAdapter for
             // Android 4.3 and above.
             BluetoothManager btManager =
-                    (BluetoothManager)mContext.getSystemService(
+                    (BluetoothManager) mContext.getSystemService(
                             Context.BLUETOOTH_SERVICE);
             btAdapter = btManager.getAdapter();
         } else {
@@ -1039,7 +1039,6 @@ class AudioManagerAndroid {
         logd("Android SDK: " + Build.VERSION.SDK_INT + ", " +
             "Release: " + Build.VERSION.RELEASE + ", " +
             "Brand: " + Build.BRAND + ", " +
-            "CPU_ABI: " + Build.CPU_ABI + ", " +
             "Device: " + Build.DEVICE + ", " +
             "Id: " + Build.ID + ", " +
             "Hardware: " + Build.HARDWARE + ", " +

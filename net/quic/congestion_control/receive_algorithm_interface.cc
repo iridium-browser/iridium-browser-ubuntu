@@ -5,7 +5,6 @@
 #include "net/quic/congestion_control/receive_algorithm_interface.h"
 
 #include "net/quic/congestion_control/tcp_receiver.h"
-#include "net/quic/congestion_control/timestamp_receiver.h"
 
 namespace net {
 
@@ -15,8 +14,6 @@ ReceiveAlgorithmInterface* ReceiveAlgorithmInterface::Create(
   switch (type) {
     case kTCP:
       return new TcpReceiver();
-    case kTimestamp:
-      return new TimestampReceiver();
   }
   return NULL;
 }

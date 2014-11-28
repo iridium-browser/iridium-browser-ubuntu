@@ -4,6 +4,7 @@
 
 [
     RuntimeEnabled=Geofencing,
+    SpecialWrapFor=CircularGeofencingRegion,
     NoInterfaceObject,
     GarbageCollected,
 ] interface GeofencingRegion {

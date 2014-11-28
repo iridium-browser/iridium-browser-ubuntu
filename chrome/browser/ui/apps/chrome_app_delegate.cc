@@ -7,6 +7,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/apps/scoped_keep_alive.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
@@ -18,9 +21,11 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+#include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -144,11 +149,17 @@ ChromeAppDelegate::NewWindowContentsDelegate::OpenURLFromTab(
   return NULL;
 }
 
-ChromeAppDelegate::ChromeAppDelegate()
-    : new_window_contents_delegate_(new NewWindowContentsDelegate()) {
+ChromeAppDelegate::ChromeAppDelegate(scoped_ptr<ScopedKeepAlive> keep_alive)
+    : keep_alive_(keep_alive.Pass()),
+      new_window_contents_delegate_(new NewWindowContentsDelegate()) {
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_APP_TERMINATING,
+                 content::NotificationService::AllSources());
 }
 
 ChromeAppDelegate::~ChromeAppDelegate() {
+  // Unregister now to prevent getting notified if |keep_alive_| is the last.
+  terminating_callback_.Reset();
 }
 
 void ChromeAppDelegate::DisableExternalOpenForTesting() {
@@ -166,10 +177,17 @@ void ChromeAppDelegate::InitWebContents(content::WebContents* web_contents) {
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
 #endif  // defined(ENABLE_FULL_PRINTING)
 #endif  // defined(ENABLE_PRINTING)
+  extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
+      web_contents);
 
   // Kiosk app supports zooming.
   if (chrome::IsRunningInForcedAppMode())
     ZoomController::CreateForWebContents(web_contents);
+}
+
+void ChromeAppDelegate::ResizeWebContents(content::WebContents* web_contents,
+                                          const gfx::Size& size) {
+  ::ResizeWebContents(web_contents, size);
 }
 
 content::WebContents* ChromeAppDelegate::OpenURLFromTab(
@@ -229,6 +247,16 @@ void ChromeAppDelegate::RequestMediaAccessPermission(
       web_contents, request, callback, extension);
 }
 
+bool ChromeAppDelegate::CheckMediaAccessPermission(
+    content::WebContents* web_contents,
+    const GURL& security_origin,
+    content::MediaStreamType type,
+    const extensions::Extension* extension) {
+  return MediaCaptureDevicesDispatcher::GetInstance()
+      ->CheckMediaAccessPermission(
+          web_contents, security_origin, type, extension);
+}
+
 int ChromeAppDelegate::PreferredIconSize() {
 #if defined(USE_ASH)
   return ash::kShelfSize;
@@ -251,4 +279,21 @@ void ChromeAppDelegate::SetWebContentsBlocked(
 bool ChromeAppDelegate::IsWebContentsVisible(
     content::WebContents* web_contents) {
   return platform_util::IsVisible(web_contents->GetNativeView());
+}
+
+void ChromeAppDelegate::SetTerminatingCallback(const base::Closure& callback) {
+  terminating_callback_ = callback;
+}
+
+void ChromeAppDelegate::Observe(int type,
+                                const content::NotificationSource& source,
+                                const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_APP_TERMINATING:
+      if (!terminating_callback_.is_null())
+        terminating_callback_.Run();
+      break;
+    default:
+      NOTREACHED() << "Received unexpected notification";
+  }
 }

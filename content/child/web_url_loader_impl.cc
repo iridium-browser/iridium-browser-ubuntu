@@ -17,6 +17,7 @@
 #include "content/child/request_extra_data.h"
 #include "content/child/request_info.h"
 #include "content/child/resource_dispatcher.h"
+#include "content/child/resource_loader_bridge.h"
 #include "content/child/sync_load_response.h"
 #include "content/child/web_url_request_util.h"
 #include "content/child/weburlresponse_extradata_impl.h"
@@ -30,6 +31,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/url_request/redirect_info.h"
+#include "net/url_request/url_request_data_job.h"
 #include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
 #include "third_party/WebKit/public/platform/WebHTTPLoadInfo.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
@@ -39,7 +41,6 @@
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
-#include "webkit/child/resource_loader_bridge.h"
 
 using base::Time;
 using base::TimeTicks;
@@ -57,7 +58,6 @@ using blink::WebURLLoader;
 using blink::WebURLLoaderClient;
 using blink::WebURLRequest;
 using blink::WebURLResponse;
-using webkit_glue::ResourceLoaderBridge;
 
 namespace content {
 
@@ -107,35 +107,6 @@ class HeaderFlattener : public WebHTTPHeaderVisitor {
   std::string buffer_;
   bool has_accept_header_;
 };
-
-// Extracts the information from a data: url.
-bool GetInfoFromDataURL(const GURL& url,
-                        ResourceResponseInfo* info,
-                        std::string* data,
-                        int* error_code) {
-  std::string mime_type;
-  std::string charset;
-  if (net::DataURL::Parse(url, &mime_type, &charset, data)) {
-    *error_code = net::OK;
-    // Assure same time for all time fields of data: URLs.
-    Time now = Time::Now();
-    info->load_timing.request_start = TimeTicks::Now();
-    info->load_timing.request_start_time = now;
-    info->request_time = now;
-    info->response_time = now;
-    info->headers = NULL;
-    info->mime_type.swap(mime_type);
-    info->charset.swap(charset);
-    info->security_info.clear();
-    info->content_length = data->length();
-    info->encoded_data_length = 0;
-
-    return true;
-  }
-
-  *error_code = net::ERR_INVALID_URL;
-  return false;
-}
 
 typedef ResourceDevToolsInfo::HeadersVector HeadersVector;
 
@@ -197,6 +168,37 @@ net::RequestPriority ConvertWebKitPriorityToNetPriority(
   }
 }
 
+// Extracts info from a data scheme URL into |info| and |data|. Returns net::OK
+// if successful. Returns a net error code otherwise. Exported only for testing.
+int GetInfoFromDataURL(const GURL& url,
+                       ResourceResponseInfo* info,
+                       std::string* data) {
+  // Assure same time for all time fields of data: URLs.
+  Time now = Time::Now();
+  info->load_timing.request_start = TimeTicks::Now();
+  info->load_timing.request_start_time = now;
+  info->request_time = now;
+  info->response_time = now;
+
+  std::string mime_type;
+  std::string charset;
+  scoped_refptr<net::HttpResponseHeaders> headers(
+      new net::HttpResponseHeaders(std::string()));
+  int result = net::URLRequestDataJob::BuildResponse(
+      url, &mime_type, &charset, data, headers.get());
+  if (result != net::OK)
+    return result;
+
+  info->headers = headers;
+  info->mime_type.swap(mime_type);
+  info->charset.swap(charset);
+  info->security_info.clear();
+  info->content_length = data->length();
+  info->encoded_data_length = 0;
+
+  return net::OK;
+}
+
 }  // namespace
 
 // WebURLLoaderImpl::Context --------------------------------------------------
@@ -244,7 +246,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   virtual ~Context() {}
 
   // We can optimize the handling of data URLs in most cases.
-  bool CanHandleDataURL(const GURL& url) const;
+  bool CanHandleDataURLRequestLocally() const;
   void HandleDataURL();
 
   WebURLLoaderImpl* loader_;
@@ -312,14 +314,13 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   request_ = request;  // Save the request.
 
   GURL url = request.url();
-  if (url.SchemeIs("data") && CanHandleDataURL(url)) {
+  if (CanHandleDataURLRequestLocally()) {
     if (sync_load_response) {
       // This is a sync load. Do the work now.
       sync_load_response->url = url;
-      std::string data;
-      GetInfoFromDataURL(sync_load_response->url, sync_load_response,
-                         &sync_load_response->data,
-                         &sync_load_response->error_code);
+      sync_load_response->error_code =
+          GetInfoFromDataURL(sync_load_response->url, sync_load_response,
+                             &sync_load_response->data);
     } else {
       base::MessageLoop::current()->PostTask(
           FROM_HERE, base::Bind(&Context::HandleDataURL, this));
@@ -395,6 +396,7 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   request_info.routing_id = request.requestorID();
   request_info.download_to_file = request.downloadToFile();
   request_info.has_user_gesture = request.hasUserGesture();
+  request_info.skip_service_worker = request.skipServiceWorker();
   request_info.extra_data = request.extraData();
   referrer_policy_ = request.referrerPolicy();
   request_info.referrer_policy = request.referrerPolicy();
@@ -484,6 +486,8 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
   new_request.setFirstPartyForCookies(
       redirect_info.new_first_party_for_cookies);
   new_request.setDownloadToFile(request_.downloadToFile());
+  new_request.setRequestContext(request_.requestContext());
+  new_request.setFrameType(request_.frameType());
 
   new_request.setHTTPReferrer(WebString::fromUTF8(redirect_info.new_referrer),
                               referrer_policy_);
@@ -656,8 +660,15 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
   }
 }
 
-bool WebURLLoaderImpl::Context::CanHandleDataURL(const GURL& url) const {
-  DCHECK(url.SchemeIs("data"));
+bool WebURLLoaderImpl::Context::CanHandleDataURLRequestLocally() const {
+  GURL url = request_.url();
+  if (!url.SchemeIs(url::kDataScheme))
+    return false;
+
+  // The fast paths for data URL, Start() and HandleDataURL(), don't support
+  // the downloadToFile option.
+  if (request_.downloadToFile())
+    return false;
 
   // Optimize for the case where we can handle a data URL locally.  We must
   // skip this for data URLs targetted at frames since those could trigger a
@@ -679,7 +690,7 @@ bool WebURLLoaderImpl::Context::CanHandleDataURL(const GURL& url) const {
     return true;
 
   std::string mime_type, unused_charset;
-  if (net::DataURL::Parse(url, &mime_type, &unused_charset, NULL) &&
+  if (net::DataURL::Parse(request_.url(), &mime_type, &unused_charset, NULL) &&
       net::IsSupportedMimeType(mime_type))
     return true;
 
@@ -688,10 +699,11 @@ bool WebURLLoaderImpl::Context::CanHandleDataURL(const GURL& url) const {
 
 void WebURLLoaderImpl::Context::HandleDataURL() {
   ResourceResponseInfo info;
-  int error_code;
   std::string data;
 
-  if (GetInfoFromDataURL(request_.url(), &info, &data, &error_code)) {
+  int error_code = GetInfoFromDataURL(request_.url(), &info, &data);
+
+  if (error_code == net::OK) {
     OnReceivedResponse(info);
     if (!data.empty())
       OnReceivedData(data.data(), data.size(), 0);
@@ -767,6 +779,13 @@ void WebURLLoaderImpl::PopulateURLResponse(const GURL& url,
   if (!info.load_timing.receive_headers_end.is_null()) {
     WebURLLoadTiming timing;
     PopulateURLLoadTiming(info.load_timing, &timing);
+    const TimeTicks kNullTicks;
+    timing.setServiceWorkerFetchStart(
+        (info.service_worker_fetch_start - kNullTicks).InSecondsF());
+    timing.setServiceWorkerFetchReady(
+        (info.service_worker_fetch_ready - kNullTicks).InSecondsF());
+    timing.setServiceWorkerFetchEnd(
+        (info.service_worker_fetch_end - kNullTicks).InSecondsF());
     response->setLoadTiming(timing);
   }
 

@@ -364,18 +364,7 @@ public:
     FX_FLOAT				m_TextX, m_TextY, m_TextLineX, m_TextLineY;
     FX_FLOAT				m_TextLeading, m_TextRise, m_TextHorzScale;
 };
-template <class ObjClass> class CPDF_CountedObject : public CFX_Object
-{
-public:
-    ObjClass	m_Obj;
-    FX_DWORD	m_nCount;
-};
-typedef CFX_MapPtrTemplate<CPDF_Dictionary*, CPDF_CountedObject<CPDF_Font*>*>		CPDF_FontMap;
-typedef CFX_MapPtrTemplate<CPDF_Object*, CPDF_CountedObject<CPDF_ColorSpace*>*>		CPDF_ColorSpaceMap;
-typedef CFX_MapPtrTemplate<CPDF_Object*, CPDF_CountedObject<CPDF_Pattern*>*>		CPDF_PatternMap;
-typedef CFX_MapPtrTemplate<FX_DWORD, CPDF_CountedObject<CPDF_Image*>*>				CPDF_ImageMap;
-typedef CFX_MapPtrTemplate<CPDF_Stream*, CPDF_CountedObject<CPDF_IccProfile*>*>		CPDF_IccProfileMap;
-typedef CFX_MapPtrTemplate<CPDF_Stream*, CPDF_CountedObject<CPDF_StreamAcc*>*>		CPDF_FontFileMap;
+
 template <class KeyType, class ValueType>
 KeyType PDF_DocPageData_FindValue(const CFX_MapPtrTemplate<KeyType, CPDF_CountedObject<ValueType>*> &map, ValueType findValue, CPDF_CountedObject<ValueType>*& findData)
 {
@@ -415,29 +404,34 @@ class CPDF_DocPageData : public CFX_Object
 public:
     CPDF_DocPageData(CPDF_Document *pPDFDoc);
     ~CPDF_DocPageData();
-    void					Clear(FX_BOOL bRelease = FALSE);
-    CPDF_Font*				GetFont(CPDF_Dictionary* pFontDict, FX_BOOL findOnly);
-    CPDF_Font*				GetStandardFont(FX_BSTR fontName, CPDF_FontEncoding* pEncoding);
-    void					ReleaseFont(CPDF_Dictionary* pFontDict);
-    CPDF_ColorSpace*		GetColorSpace(CPDF_Object* pCSObj, CPDF_Dictionary* pResources);
-    CPDF_ColorSpace*		GetCopiedColorSpace(CPDF_Object* pCSObj);
-    void					ReleaseColorSpace(CPDF_Object* pColorSpace);
-    CPDF_Pattern*			GetPattern(CPDF_Object* pPatternObj, FX_BOOL bShading, const CFX_AffineMatrix* matrix);
-    void					ReleasePattern(CPDF_Object* pPatternObj);
-    CPDF_Image*				GetImage(CPDF_Object* pImageStream);
-    void					ReleaseImage(CPDF_Object* pImageStream);
-    CPDF_IccProfile*		GetIccProfile(CPDF_Stream* pIccProfileStream, FX_INT32 nComponents);
-    void					ReleaseIccProfile(CPDF_Stream* pIccProfileStream, CPDF_IccProfile* pIccProfile);
-    CPDF_StreamAcc*			GetFontFileStreamAcc(CPDF_Stream* pFontStream);
-    void					ReleaseFontFileStreamAcc(CPDF_Stream* pFontStream, FX_BOOL bForce = FALSE);
-    CPDF_Document*			m_pPDFDoc;
-    CPDF_FontMap			m_FontMap;
-    CPDF_ColorSpaceMap		m_ColorSpaceMap;
-    CPDF_PatternMap			m_PatternMap;
-    CPDF_ImageMap			m_ImageMap;
-    CPDF_IccProfileMap		m_IccProfileMap;
-    CFX_MapByteStringToPtr	m_HashProfileMap;
-    CPDF_FontFileMap		m_FontFileMap;
+    void                        Clear(FX_BOOL bRelease = FALSE);
+    CPDF_Font*                  GetFont(CPDF_Dictionary* pFontDict, FX_BOOL findOnly);
+    CPDF_Font*                  GetStandardFont(FX_BSTR fontName, CPDF_FontEncoding* pEncoding);
+    void                        ReleaseFont(CPDF_Dictionary* pFontDict);
+    CPDF_ColorSpace*            GetColorSpace(CPDF_Object* pCSObj, CPDF_Dictionary* pResources);
+    CPDF_ColorSpace*            GetCopiedColorSpace(CPDF_Object* pCSObj);
+    void                        ReleaseColorSpace(CPDF_Object* pColorSpace);
+    CPDF_Pattern*               GetPattern(CPDF_Object* pPatternObj, FX_BOOL bShading, const CFX_AffineMatrix* matrix);
+    void                        ReleasePattern(CPDF_Object* pPatternObj);
+    CPDF_Image*                 GetImage(CPDF_Object* pImageStream);
+    void                        ReleaseImage(CPDF_Object* pImageStream);
+    CPDF_IccProfile*            GetIccProfile(CPDF_Stream* pIccProfileStream);
+    void                        ReleaseIccProfile(CPDF_Stream* pIccProfileStream, CPDF_IccProfile* pIccProfile);
+    CPDF_StreamAcc*             GetFontFileStreamAcc(CPDF_Stream* pFontStream);
+    void                        ReleaseFontFileStreamAcc(CPDF_Stream* pFontStream, FX_BOOL bForce = FALSE);
+    FX_BOOL                     IsForceClear() const {return m_bForceClear;}
+    CPDF_CountedColorSpace*     FindColorSpacePtr(CPDF_Object* pCSObj) const;
+    CPDF_CountedPattern*        FindPatternPtr(CPDF_Object* pPatternObj) const;
+
+    CPDF_Document*              m_pPDFDoc;
+    CPDF_FontMap                m_FontMap;
+    CPDF_ColorSpaceMap          m_ColorSpaceMap;
+    CPDF_PatternMap             m_PatternMap;
+    CPDF_ImageMap               m_ImageMap;
+    CPDF_IccProfileMap          m_IccProfileMap;
+    CFX_MapByteStringToPtr      m_HashProfileMap;
+    CPDF_FontFileMap            m_FontFileMap;
+    FX_BOOL                     m_bForceClear;
 };
 class CPDF_Function : public CFX_Object
 {
@@ -465,9 +459,11 @@ protected:
 class CPDF_IccProfile : public CFX_Object
 {
 public:
-    CPDF_IccProfile(FX_LPCBYTE pData, FX_DWORD dwSize, int nComponents);
+    CPDF_IccProfile(FX_LPCBYTE pData, FX_DWORD dwSize);
     ~CPDF_IccProfile();
+    FX_INT32 GetComponents() const { return m_nSrcComponents; }
     FX_BOOL					m_bsRGB;
+    FX_INT32                m_nSrcComponents;
     FX_LPVOID				m_pTransform;
 };
 class CPDF_DeviceCS : public CPDF_ColorSpace
@@ -492,6 +488,7 @@ public:
         return m_pBaseCS;
     }
     CPDF_ColorSpace*	m_pBaseCS;
+    CPDF_CountedColorSpace*	m_pCountedBaseCS;
 };
 #define	MAX_PAGE_OBJECTS_UNIFY_NAMING				4096
 class CPDF_ResourceNaming : public CFX_Object

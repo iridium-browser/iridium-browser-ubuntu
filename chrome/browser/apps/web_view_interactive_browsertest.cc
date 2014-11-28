@@ -2,14 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
@@ -24,46 +21,74 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/browser/guest_view/guest_view_manager_factory.h"
+#include "extensions/test/extension_test_message_listener.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/ime/composition_text.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
-using apps::AppWindow;
+using extensions::AppWindow;
 
 class TestGuestViewManager : public extensions::GuestViewManager {
  public:
-  explicit TestGuestViewManager(content::BrowserContext* context) :
-      GuestViewManager(context),
-      web_contents_(NULL) {}
+  explicit TestGuestViewManager(content::BrowserContext* context)
+      : GuestViewManager(context),
+        guest_add_count_(0),
+        guest_remove_count_(0),
+        web_contents_(NULL) {}
 
-  content::WebContents* WaitForGuestCreated() {
+  content::WebContents* WaitForGuestAdded() {
     if (web_contents_)
       return web_contents_;
 
-    message_loop_runner_ = new content::MessageLoopRunner;
-    message_loop_runner_->Run();
+    add_message_loop_runner_ = new content::MessageLoopRunner;
+    add_message_loop_runner_->Run();
     return web_contents_;
   }
+
+  // Waits so that at least |expected_remove_count| guests' creation
+  // has been seen by this manager.
+  void WaitForGuestRemoved(size_t expected_remove_count) {
+    if (guest_remove_count_ >= expected_remove_count)
+      return;
+
+    remove_message_loop_runner_ = new content::MessageLoopRunner;
+    remove_message_loop_runner_->Run();
+  }
+
+  size_t guest_add_count() { return guest_add_count_; }
 
  private:
   // GuestViewManager override:
   virtual void AddGuest(int guest_instance_id,
                         content::WebContents* guest_web_contents) OVERRIDE{
-    extensions::GuestViewManager::AddGuest(
-        guest_instance_id, guest_web_contents);
+    GuestViewManager::AddGuest(guest_instance_id, guest_web_contents);
     web_contents_ = guest_web_contents;
+    ++guest_add_count_;
 
-    if (message_loop_runner_)
-      message_loop_runner_->Quit();
+    if (add_message_loop_runner_.get())
+      add_message_loop_runner_->Quit();
   }
 
+  virtual void RemoveGuest(int guest_instance_id) OVERRIDE {
+    GuestViewManager::RemoveGuest(guest_instance_id);
+    ++guest_remove_count_;
+
+    if (remove_message_loop_runner_.get())
+      remove_message_loop_runner_->Quit();
+  }
+
+  size_t guest_add_count_;
+  size_t guest_remove_count_;
   content::WebContents* web_contents_;
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+  scoped_refptr<content::MessageLoopRunner> add_message_loop_runner_;
+  scoped_refptr<content::MessageLoopRunner> remove_message_loop_runner_;
 };
 
 // Test factory for creating test instances of GuestViewManager.
@@ -134,8 +159,8 @@ class WebViewInteractiveTest
   }
 
   gfx::NativeWindow GetPlatformAppWindow() {
-    const apps::AppWindowRegistry::AppWindowList& app_windows =
-        apps::AppWindowRegistry::Get(browser()->profile())->app_windows();
+    const extensions::AppWindowRegistry::AppWindowList& app_windows =
+        extensions::AppWindowRegistry::Get(browser()->profile())->app_windows();
     return (*app_windows.begin())->GetNativeWindow();
   }
 
@@ -259,7 +284,7 @@ class WebViewInteractiveTest
     ASSERT_TRUE(done_listener);
     ASSERT_TRUE(done_listener->WaitUntilSatisfied());
 
-    guest_web_contents_ = GetGuestViewManager()->WaitForGuestCreated();
+    guest_web_contents_ = GetGuestViewManager()->WaitForGuestAdded();
   }
 
   void RunTest(const std::string& app_name) {
@@ -334,7 +359,7 @@ class WebViewInteractiveTest
 
   class PopupCreatedObserver {
    public:
-    explicit PopupCreatedObserver()
+    PopupCreatedObserver()
         : initial_widget_count_(0),
           last_render_widget_host_(NULL),
           seen_new_widget_(false) {}
@@ -363,11 +388,11 @@ class WebViewInteractiveTest
         ScheduleWait();
       } else {
         // We are done.
-        if (message_loop_)
+        if (message_loop_.get())
           message_loop_->Quit();
       }
 
-      if (!message_loop_) {
+      if (!message_loop_.get()) {
         message_loop_ = new content::MessageLoopRunner;
         message_loop_->Run();
       }
@@ -524,9 +549,9 @@ class WebViewInteractiveTest
 // Disabled on Linux Aura because pointer lock does not work on Linux Aura.
 // crbug.com/341876
 
-#if defined(OS_LINUX) && !defined(USE_AURA)
-
-IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PointerLock) {
+#if defined(OS_LINUX)
+// flaky http://crbug.com/412086
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_PointerLock) {
   SetupTest("web_view/pointer_lock",
             "/extensions/platform_apps/web_view/pointer_lock/guest.html");
 
@@ -598,7 +623,29 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PointerLock) {
   }
 }
 
-#endif  // defined(OS_LINUX) && !defined(USE_AURA)
+// flaky http://crbug.com/412086
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_PointerLockFocus) {
+  SetupTest("web_view/pointer_lock_focus",
+            "/extensions/platform_apps/web_view/pointer_lock_focus/guest.html");
+
+  // Move the mouse over the Lock Pointer button.
+  ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(
+      gfx::Point(corner().x() + 75, corner().y() + 25)));
+
+  // Click the Lock Pointer button, locking the mouse to lockTarget.
+  // This will also change focus to another element
+  SendMouseClickWithListener(ui_controls::LEFT, "locked");
+
+  // Try to unlock the mouse now that the focus is outside of the BrowserPlugin
+  ExtensionTestMessageListener unlocked_listener("unlocked", false);
+  // Send a key press to unlock the mouse.
+  SendKeyPressToPlatformApp(ui::VKEY_ESCAPE);
+
+  // Wait for page to receive (successful) mouse unlock response.
+  ASSERT_TRUE(unlocked_listener.WaitUntilSatisfied());
+}
+
+#endif  // defined(OS_LINUX)
 
 // Tests that if a <webview> is focused before navigation then the guest starts
 // off focused.
@@ -694,7 +741,8 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommands) {
 }
 
 // Tests that guests receive edit commands and respond appropriately.
-IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommandsNoMenu) {
+// http://crbug.com/417892
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_EditCommandsNoMenu) {
   SetupTest("web_view/edit_commands_no_menu",
       "/extensions/platform_apps/web_view/edit_commands_no_menu/"
       "guest.html");
@@ -712,6 +760,13 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommandsNoMenu) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       NewWindow_AttachAfterOpenerDestroyed) {
+  TestHelper("testNewWindowAttachAfterOpenerDestroyed",
+             "web_view/newwindow",
+             NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
                        NewWindow_NewWindowNameTakesPrecedence) {
   TestHelper("testNewWindowNameTakesPrecedence",
              "web_view/newwindow",
@@ -720,13 +775,13 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
                        NewWindow_WebViewNameTakesPrecedence) {
-  TestHelper("testWebViewNameTakesPrecedence",
+  TestHelper("testNewWindowWebViewNameTakesPrecedence",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_NoName) {
-  TestHelper("testNoName",
+  TestHelper("testNewWindowNoName",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
 }
@@ -743,6 +798,12 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_Close) {
              NEEDS_TEST_SERVER);
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_DeferredAttachment) {
+  TestHelper("testNewWindowDeferredAttachment",
+             "web_view/newwindow",
+             NEEDS_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_ExecuteScript) {
   TestHelper("testNewWindowExecuteScript",
              "web_view/newwindow",
@@ -752,6 +813,13 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_ExecuteScript) {
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
                        NewWindow_DeclarativeWebRequest) {
   TestHelper("testNewWindowDeclarativeWebRequest",
+             "web_view/newwindow",
+             NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       NewWindow_DiscardAfterOpenerDestroyed) {
+  TestHelper("testNewWindowDiscardAfterOpenerDestroyed",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
 }
@@ -804,6 +872,19 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_OpenInNewTab) {
   ASSERT_TRUE(done_listener->WaitUntilSatisfied());
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       NewWindow_OpenerDestroyedWhileUnattached) {
+  TestHelper("testNewWindowOpenerDestroyedWhileUnattached",
+             "web_view/newwindow",
+             NEEDS_TEST_SERVER);
+  ASSERT_EQ(2u, GetGuestViewManager()->guest_add_count());
+
+  // We have two guests in this test, one is the intial one, the other
+  // is the newwindow one.
+  // Before the embedder goes away, both the guests should go away.
+  // This ensures that unattached guests are gone if opener is gone.
+  GetGuestViewManager()->WaitForGuestRemoved(2u);
+}
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ExecuteCode) {
   ASSERT_TRUE(RunPlatformAppTestWithArg(

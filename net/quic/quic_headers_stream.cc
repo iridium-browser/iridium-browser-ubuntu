@@ -137,6 +137,11 @@ class QuicHeadersStream::SpdyFramerVisitor
     CloseConnection("SPDY CONTINUATION frame received.");
   }
 
+  virtual bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) OVERRIDE {
+    CloseConnection("SPDY unknown frame received.");
+    return false;
+  }
+
   // SpdyFramerDebugVisitorInterface implementation
   virtual void OnSendCompressedFrame(SpdyStreamId stream_id,
                                      SpdyFrameType type,
@@ -174,7 +179,7 @@ QuicHeadersStream::QuicHeadersStream(QuicSession* session)
       spdy_framer_visitor_(new SpdyFramerVisitor(this)) {
   spdy_framer_.set_visitor(spdy_framer_visitor_.get());
   spdy_framer_.set_debug_visitor(spdy_framer_visitor_.get());
-  if (version() <= QUIC_VERSION_20) {
+  if (version() < QUIC_VERSION_21) {
     // Prior to QUIC_VERSION_21 the headers stream is not subject to any flow
     // control.
     DisableFlowControl();

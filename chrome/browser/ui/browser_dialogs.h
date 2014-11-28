@@ -98,28 +98,17 @@ void ShowProfileSigninConfirmationDialog(
     const std::string& username,
     ui::ProfileSigninConfirmationDelegate* delegate);
 
-
-// Shows the Desktop User Manager with the |profile_path_to_focus| user focused.
-void ShowUserManager(const base::FilePath& profile_path_to_focus);
-
-// Shows the Desktop User Manager with a specific |tutorial|.
-void ShowUserManagerWithTutorial(profiles::UserManagerTutorialMode tutorial);
-
-// Hides the User Manager.
-void HideUserManager();
-
 // Shows the Signed Certificate Timestamps viewer, to view the signed
 // certificate timestamps in |sct_ids_list|
 void ShowSignedCertificateTimestampsViewer(
     content::WebContents* web_contents,
     const content::SignedCertificateTimestampIDStatusList& sct_ids_list);
 
-#if !defined(OS_MACOSX)
 // Shows the ManagePasswords bubble for a particular |web_contents|.
-//
-// TODO(mkwst): Implement this feature on Mac: http://crbug.com/261628
 void ShowManagePasswordsBubble(content::WebContents* web_contents);
-#endif
+
+// Closes the bubble if it's shown for |web_contents|.
+void CloseManagePasswordsBubble(content::WebContents* web_contents);
 
 }  // namespace chrome
 

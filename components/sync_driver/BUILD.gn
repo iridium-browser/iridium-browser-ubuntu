@@ -18,12 +18,20 @@ static_library("sync_driver") {
     "data_type_manager_impl.cc",
     "data_type_manager_impl.h",
     "data_type_manager_observer.h",
-    "failed_data_types_handler.cc",
-    "failed_data_types_handler.h",
+    "data_type_status_table.cc",
+    "data_type_status_table.h",
+    "device_info.cc",
+    "device_info.h",
+    "device_info_data_type_controller.cc",
+    "device_info_data_type_controller.h",
+    "device_info_sync_service.cc",
+    "device_info_sync_service.h",
+    "device_info_tracker.h",
     "generic_change_processor.cc",
     "generic_change_processor.h",
     "generic_change_processor_factory.cc",
     "generic_change_processor_factory.h",
+    "local_device_info_provider.h",
     "model_association_manager.cc",
     "model_association_manager.h",
     "model_associator.h",
@@ -61,6 +69,7 @@ static_library("sync_driver") {
 }
 
 static_library("test_support") {
+  testonly = true
   sources = [
     "change_processor_mock.cc",
     "change_processor_mock.h",

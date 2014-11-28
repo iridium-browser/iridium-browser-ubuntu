@@ -68,15 +68,16 @@ class PerfControl(object):
     self._ForceAllCpusOnline(False)
 
   def _SetScalingGovernorInternal(self, value):
-    for cpu in range(self._num_cpu_cores):
-      scaling_governor_file = PerfControl._SCALING_GOVERNOR_FMT % cpu
-      if self._device.FileExists(scaling_governor_file):
-        logging.info('Writing scaling governor mode \'%s\' -> %s',
-                     value, scaling_governor_file)
-        self._device.WriteFile(scaling_governor_file, value, as_root=True)
+    cpu_cores = ' '.join([str(x) for x in range(self._num_cpu_cores)])
+    script = ('for CPU in %s; do\n'
+        '  FILE="/sys/devices/system/cpu/cpu$CPU/cpufreq/scaling_governor"\n'
+        '  test -e $FILE && echo %s > $FILE\n'
+        'done\n') % (cpu_cores, value)
+    logging.info('Setting scaling governor mode: %s', value)
+    self._device.RunShellCommand(script, as_root=True)
 
   def _AllCpusAreOnline(self):
-    for cpu in range(self._num_cpu_cores):
+    for cpu in range(1, self._num_cpu_cores):
       online_path = PerfControl._CPU_ONLINE_FMT % cpu
       # TODO(epenner): Investigate why file may be missing
       # (http://crbug.com/397118)

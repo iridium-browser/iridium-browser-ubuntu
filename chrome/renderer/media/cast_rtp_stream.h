@@ -42,6 +42,10 @@ struct CastRtpPayloadParams {
   // under this threshold.
   int max_latency_ms;
 
+  // Minimum latency.
+  // Default value (0) means use max_latency_ms.
+  int min_latency_ms;
+
   // RTP specific field to identify a stream.
   int ssrc;
 
@@ -155,9 +159,10 @@ class CastRtpStream {
   scoped_ptr<CastAudioSink> audio_sink_;
   scoped_ptr<CastVideoSink> video_sink_;
   CastRtpParams params_;
-  base::WeakPtrFactory<CastRtpStream> weak_factory_;
   base::Closure stop_callback_;
   ErrorCallback error_callback_;
+
+  base::WeakPtrFactory<CastRtpStream> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CastRtpStream);
 };

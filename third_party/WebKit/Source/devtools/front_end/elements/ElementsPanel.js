@@ -57,7 +57,6 @@ WebInspector.ElementsPanel = function()
         this.contentElement.classList.add("nowrap");
     WebInspector.settings.domWordWrap.addChangeListener(this._domWordWrapSettingChanged.bind(this));
 
-    this.contentElement.addEventListener("contextmenu", this._contextMenuEventFired.bind(this), true);
     this._splitView.sidebarElement().addEventListener("contextmenu", this._sidebarContextMenuEventFired.bind(this), false);
 
     var crumbsContainer = stackElement.createChild("div");
@@ -70,6 +69,8 @@ WebInspector.ElementsPanel = function()
     this.sidebarPanes.platformFonts = new WebInspector.PlatformFontsSidebarPane();
     this.sidebarPanes.computedStyle = new WebInspector.ComputedStyleSidebarPane();
     this.sidebarPanes.styles = new WebInspector.StylesSidebarPane(this.sidebarPanes.computedStyle, this._setPseudoClassForNode.bind(this));
+    this.sidebarPanes.styles.addEventListener(WebInspector.StylesSidebarPane.Events.SelectorEditingStarted, this._onEditingSelectorStarted.bind(this));
+    this.sidebarPanes.styles.addEventListener(WebInspector.StylesSidebarPane.Events.SelectorEditingEnded, this._onEditingSelectorEnded.bind(this));
 
     this._matchedStylesFilterBoxContainer = document.createElement("div");
     this._matchedStylesFilterBoxContainer.className = "sidebar-pane-filter-box";
@@ -111,17 +112,30 @@ WebInspector.ElementsPanel = function()
 }
 
 WebInspector.ElementsPanel.prototype = {
+    _onEditingSelectorStarted: function()
+    {
+        for (var i = 0; i < this._treeOutlines.length; ++i)
+            this._treeOutlines[i].setPickNodeMode(true);
+    },
+
+    _onEditingSelectorEnded: function()
+    {
+        for (var i = 0; i < this._treeOutlines.length; ++i)
+            this._treeOutlines[i].setPickNodeMode(false);
+    },
+
     /**
      * @param {!WebInspector.Target} target
      */
     targetAdded: function(target)
     {
-        var treeOutline = new WebInspector.ElementsTreeOutline(target, true, true, this._populateContextMenu.bind(this), this._setPseudoClassForNode.bind(this));
+        var treeOutline = new WebInspector.ElementsTreeOutline(target, true, true, this._setPseudoClassForNode.bind(this));
         treeOutline.wireToDOMModel();
         treeOutline.addEventListener(WebInspector.ElementsTreeOutline.Events.SelectedNodeChanged, this._selectedNodeChanged, this);
+        treeOutline.addEventListener(WebInspector.ElementsTreeOutline.Events.NodePicked, this._onNodePicked, this);
         treeOutline.addEventListener(WebInspector.ElementsTreeOutline.Events.ElementsTreeUpdated, this._updateBreadcrumbIfNeeded, this);
         this._treeOutlines.push(treeOutline);
-        this._targetToTreeOutline.put(target, treeOutline);
+        this._targetToTreeOutline.set(target, treeOutline);
 
         // Perform attach if necessary.
         if (this.isShowing())
@@ -251,6 +265,16 @@ WebInspector.ElementsPanel.prototype = {
             enabled: enable,
             state: pseudoClass
         });
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onNodePicked: function(event)
+    {
+        if (!this.sidebarPanes.styles.isEditingSelector())
+            return;
+        this.sidebarPanes.styles.updateEditingSelectorForNode(/** @type {!WebInspector.DOMNode} */(event.data));
     },
 
     /**
@@ -426,14 +450,6 @@ WebInspector.ElementsPanel.prototype = {
         }
     },
 
-    _contextMenuEventFired: function(event)
-    {
-        var contextMenu = new WebInspector.ContextMenu(event);
-        for (var i = 0; i < this._treeOutlines.length; ++i)
-            this._treeOutlines[i].populateContextMenu(contextMenu, event);
-        contextMenu.show();
-    },
-
     _domWordWrapSettingChanged: function(event)
     {
         if (event.data)
@@ -456,14 +472,6 @@ WebInspector.ElementsPanel.prototype = {
         this._searchableView.cancelSearch();
         WebInspector.inspectorView.setCurrentPanel(this);
         this.selectDOMNode(node, true);
-    },
-
-    _populateContextMenu: function(contextMenu, node)
-    {
-        // Add debbuging-related actions
-        contextMenu.appendSeparator();
-        var pane = WebInspector.domBreakpointsSidebarPane;
-        pane.populateNodeContextMenu(node, contextMenu);
     },
 
     /**
@@ -1265,10 +1273,18 @@ WebInspector.ElementsPanel.prototype = {
             && !(object instanceof WebInspector.DeferredDOMNode)) {
             return;
         }
+
+        // Add debbuging-related actions
+        if (object instanceof WebInspector.DOMNode) {
+            contextMenu.appendSeparator();
+            WebInspector.domBreakpointsSidebarPane.populateNodeContextMenu(object, contextMenu);
+        }
+
         // Skip adding "Reveal..." menu item for our own tree outline.
         if (this.element.isAncestor(/** @type {!Node} */ (event.target)))
             return;
         var commandCallback = WebInspector.Revealer.reveal.bind(WebInspector.Revealer, object);
+
         contextMenu.appendItem(WebInspector.useLowerCaseMenuTitles() ? "Reveal in Elements panel" : "Reveal in Elements Panel", commandCallback);
     },
 

@@ -40,6 +40,7 @@ struct vpx_codec_alg_priv {
   void                   *decrypt_state;
   vpx_image_t             img;
   int                     img_avail;
+  int                     flushed;
   int                     invert_tile_order;
   int                     frame_parallel_decode;  // frame-based threading.
 
@@ -57,28 +58,22 @@ static vpx_codec_err_t decoder_init(vpx_codec_ctx_t *ctx,
   (void)data;
 
   if (!ctx->priv) {
-    vpx_codec_alg_priv_t *alg_priv = vpx_memalign(32, sizeof(*alg_priv));
-    if (alg_priv == NULL)
+    vpx_codec_alg_priv_t *const priv = vpx_calloc(1, sizeof(*priv));
+    if (priv == NULL)
       return VPX_CODEC_MEM_ERROR;
 
-    vp9_zero(*alg_priv);
-
-    ctx->priv = (vpx_codec_priv_t *)alg_priv;
-    ctx->priv->sz = sizeof(*ctx->priv);
-    ctx->priv->iface = ctx->iface;
-    ctx->priv->alg_priv = alg_priv;
-    ctx->priv->alg_priv->si.sz = sizeof(ctx->priv->alg_priv->si);
+    ctx->priv = (vpx_codec_priv_t *)priv;
     ctx->priv->init_flags = ctx->init_flags;
-    ctx->priv->alg_priv->frame_parallel_decode =
-        (ctx->init_flags & VPX_CODEC_USE_FRAME_THREADING);
 
-    // Disable frame parallel decoding for now.
-    ctx->priv->alg_priv->frame_parallel_decode = 0;
+    priv->si.sz = sizeof(priv->si);
+    priv->flushed = 0;
+    priv->frame_parallel_decode =
+        (ctx->init_flags & VPX_CODEC_USE_FRAME_THREADING);
+    priv->frame_parallel_decode = 0;  // Disable for now
 
     if (ctx->config.dec) {
-      // Update the reference to the config structure to an internal copy.
-      ctx->priv->alg_priv->cfg = *ctx->config.dec;
-      ctx->config.dec = &ctx->priv->alg_priv->cfg;
+      priv->cfg = *ctx->config.dec;
+      ctx->config.dec = &priv->cfg;
     }
   }
 
@@ -94,6 +89,30 @@ static vpx_codec_err_t decoder_destroy(vpx_codec_alg_priv_t *ctx) {
   vpx_free(ctx);
 
   return VPX_CODEC_OK;
+}
+
+static int parse_bitdepth_colorspace_sampling(
+    BITSTREAM_PROFILE profile, struct vp9_read_bit_buffer *rb) {
+  const int sRGB = 7;
+  int colorspace;
+  if (profile >= PROFILE_2)
+    rb->bit_offset += 1;  // Bit-depth 10 or 12.
+  colorspace = vp9_rb_read_literal(rb, 3);
+  if (colorspace != sRGB) {
+    rb->bit_offset += 1;  // [16,235] (including xvycc) vs [0,255] range.
+    if (profile == PROFILE_1 || profile == PROFILE_3) {
+      rb->bit_offset += 2;  // subsampling x/y.
+      rb->bit_offset += 1;  // unused.
+    }
+  } else {
+    if (profile == PROFILE_1 || profile == PROFILE_3) {
+      rb->bit_offset += 1;  // unused
+    } else {
+      // RGB is only available in version 1.
+      return 0;
+    }
+  }
+  return 1;
 }
 
 static vpx_codec_err_t decoder_peek_si_internal(const uint8_t *data,
@@ -142,37 +161,24 @@ static vpx_codec_err_t decoder_peek_si_internal(const uint8_t *data,
     error_resilient = vp9_rb_read_bit(&rb);
 
     if (si->is_kf) {
-      const int sRGB = 7;
-      int colorspace;
-
       if (!vp9_read_sync_code(&rb))
         return VPX_CODEC_UNSUP_BITSTREAM;
 
-      if (profile > PROFILE_1)
-        rb.bit_offset += 1;  // Bit-depth 10 or 12
-      colorspace = vp9_rb_read_literal(&rb, 3);
-      if (colorspace != sRGB) {
-        rb.bit_offset += 1;  // [16,235] (including xvycc) vs [0,255] range
-        if (profile == PROFILE_1 || profile == PROFILE_3) {
-          rb.bit_offset += 2;  // subsampling x/y
-          rb.bit_offset += 1;  // unused
-        }
-      } else {
-        if (profile == PROFILE_1 || profile == PROFILE_3) {
-          rb.bit_offset += 1;  // unused
-        } else {
-          // RGB is only available in version 1
-          return VPX_CODEC_UNSUP_BITSTREAM;
-        }
-      }
+      if (!parse_bitdepth_colorspace_sampling(profile, &rb))
+        return VPX_CODEC_UNSUP_BITSTREAM;
       vp9_read_frame_size(&rb, (int *)&si->w, (int *)&si->h);
     } else {
       intra_only_flag = show_frame ? 0 : vp9_rb_read_bit(&rb);
+
       rb.bit_offset += error_resilient ? 0 : 2;  // reset_frame_context
 
       if (intra_only_flag) {
         if (!vp9_read_sync_code(&rb))
           return VPX_CODEC_UNSUP_BITSTREAM;
+        if (profile > PROFILE_0) {
+          if (!parse_bitdepth_colorspace_sampling(profile, &rb))
+            return VPX_CODEC_UNSUP_BITSTREAM;
+        }
         rb.bit_offset += REF_FRAMES;  // refresh_frame_flags
         vp9_read_frame_size(&rb, (int *)&si->w, (int *)&si->h);
       }
@@ -319,81 +325,6 @@ static vpx_codec_err_t decode_one(vpx_codec_alg_priv_t *ctx,
   return VPX_CODEC_OK;
 }
 
-static INLINE uint8_t read_marker(vpx_decrypt_cb decrypt_cb,
-                                  void *decrypt_state,
-                                  const uint8_t *data) {
-  if (decrypt_cb) {
-    uint8_t marker;
-    decrypt_cb(decrypt_state, data, &marker, 1);
-    return marker;
-  }
-  return *data;
-}
-
-static vpx_codec_err_t parse_superframe_index(const uint8_t *data,
-                                              size_t data_sz,
-                                              uint32_t sizes[8], int *count,
-                                              vpx_decrypt_cb decrypt_cb,
-                                              void *decrypt_state) {
-  // A chunk ending with a byte matching 0xc0 is an invalid chunk unless
-  // it is a super frame index. If the last byte of real video compression
-  // data is 0xc0 the encoder must add a 0 byte. If we have the marker but
-  // not the associated matching marker byte at the front of the index we have
-  // an invalid bitstream and need to return an error.
-
-  uint8_t marker;
-
-  assert(data_sz);
-  marker = read_marker(decrypt_cb, decrypt_state, data + data_sz - 1);
-  *count = 0;
-
-  if ((marker & 0xe0) == 0xc0) {
-    const uint32_t frames = (marker & 0x7) + 1;
-    const uint32_t mag = ((marker >> 3) & 0x3) + 1;
-    const size_t index_sz = 2 + mag * frames;
-
-    // This chunk is marked as having a superframe index but doesn't have
-    // enough data for it, thus it's an invalid superframe index.
-    if (data_sz < index_sz)
-      return VPX_CODEC_CORRUPT_FRAME;
-
-    {
-      const uint8_t marker2 = read_marker(decrypt_cb, decrypt_state,
-                                          data + data_sz - index_sz);
-
-      // This chunk is marked as having a superframe index but doesn't have
-      // the matching marker byte at the front of the index therefore it's an
-      // invalid chunk.
-      if (marker != marker2)
-        return VPX_CODEC_CORRUPT_FRAME;
-    }
-
-    {
-      // Found a valid superframe index.
-      uint32_t i, j;
-      const uint8_t *x = &data[data_sz - index_sz + 1];
-
-      // Frames has a maximum of 8 and mag has a maximum of 4.
-      uint8_t clear_buffer[32];
-      assert(sizeof(clear_buffer) >= frames * mag);
-      if (decrypt_cb) {
-        decrypt_cb(decrypt_state, x, clear_buffer, frames * mag);
-        x = clear_buffer;
-      }
-
-      for (i = 0; i < frames; ++i) {
-        uint32_t this_sz = 0;
-
-        for (j = 0; j < mag; ++j)
-          this_sz |= (*x++) << (j * 8);
-        sizes[i] = this_sz;
-      }
-      *count = frames;
-    }
-  }
-  return VPX_CODEC_OK;
-}
-
 static vpx_codec_err_t decoder_decode(vpx_codec_alg_priv_t *ctx,
                                       const uint8_t *data, unsigned int data_sz,
                                       void *user_priv, long deadline) {
@@ -403,11 +334,16 @@ static vpx_codec_err_t decoder_decode(vpx_codec_alg_priv_t *ctx,
   uint32_t frame_sizes[8];
   int frame_count;
 
-  if (data == NULL || data_sz == 0)
-    return VPX_CODEC_INVALID_PARAM;
+  if (data == NULL && data_sz == 0) {
+    ctx->flushed = 1;
+    return VPX_CODEC_OK;
+  }
 
-  res = parse_superframe_index(data, data_sz, frame_sizes, &frame_count,
-                               ctx->decrypt_cb, ctx->decrypt_state);
+  // Reset flushed when receiving a valid frame.
+  ctx->flushed = 0;
+
+  res = vp9_parse_superframe_index(data, data_sz, frame_sizes, &frame_count,
+                                   ctx->decrypt_cb, ctx->decrypt_state);
   if (res != VPX_CODEC_OK)
     return res;
 
@@ -501,6 +437,7 @@ static vpx_image_t *decoder_get_frame(vpx_codec_alg_priv_t *ctx,
     // call to get_frame.
     if (!(*iter)) {
       img = &ctx->img;
+      img->bit_depth = (int)ctx->pbi->common.bit_depth;
       *iter = img;
     }
   }
@@ -565,9 +502,9 @@ static vpx_codec_err_t ctrl_get_reference(vpx_codec_alg_priv_t *ctx,
   vp9_ref_frame_t *data = va_arg(args, vp9_ref_frame_t *);
 
   if (data) {
-    YV12_BUFFER_CONFIG* fb;
+    YV12_BUFFER_CONFIG* fb = get_ref_frame(&ctx->pbi->common, data->idx);
+    if (fb == NULL) return VPX_CODEC_ERROR;
 
-    vp9_get_reference_dec(ctx->pbi, data->idx, &fb);
     yuvconfig2image(&data->img, fb, NULL);
     return VPX_CODEC_OK;
   } else {
@@ -621,11 +558,10 @@ static vpx_codec_err_t ctrl_get_frame_corrupted(vpx_codec_alg_priv_t *ctx,
                                                 va_list args) {
   int *corrupted = va_arg(args, int *);
 
-  if (corrupted) {
-    if (ctx->pbi)
-      *corrupted = ctx->pbi->common.frame_to_show->corrupted;
-    else
-      return VPX_CODEC_ERROR;
+  if (corrupted != NULL && ctx->pbi != NULL) {
+    const YV12_BUFFER_CONFIG *const frame = ctx->pbi->common.frame_to_show;
+    if (frame == NULL) return VPX_CODEC_ERROR;
+    *corrupted = frame->corrupted;
     return VPX_CODEC_OK;
   } else {
     return VPX_CODEC_INVALID_PARAM;
@@ -645,6 +581,23 @@ static vpx_codec_err_t ctrl_get_display_size(vpx_codec_alg_priv_t *ctx,
       return VPX_CODEC_ERROR;
     }
     return VPX_CODEC_OK;
+  } else {
+    return VPX_CODEC_INVALID_PARAM;
+  }
+}
+
+static vpx_codec_err_t ctrl_get_bit_depth(vpx_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  unsigned int *const bit_depth = va_arg(args, unsigned int *);
+
+  if (bit_depth) {
+    if (ctx->pbi) {
+      const VP9_COMMON *const cm = &ctx->pbi->common;
+      *bit_depth = cm->bit_depth;
+      return VPX_CODEC_OK;
+    } else {
+      return VPX_CODEC_ERROR;
+    }
   } else {
     return VPX_CODEC_INVALID_PARAM;
   }
@@ -682,6 +635,7 @@ static vpx_codec_ctrl_fn_map_t decoder_ctrl_maps[] = {
   {VP8D_GET_FRAME_CORRUPTED,      ctrl_get_frame_corrupted},
   {VP9_GET_REFERENCE,             ctrl_get_reference},
   {VP9D_GET_DISPLAY_SIZE,         ctrl_get_display_size},
+  {VP9D_GET_BIT_DEPTH,            ctrl_get_bit_depth},
 
   { -1, NULL},
 };
@@ -697,8 +651,6 @@ CODEC_INTERFACE(vpx_codec_vp9_dx) = {
   decoder_init,       // vpx_codec_init_fn_t
   decoder_destroy,    // vpx_codec_destroy_fn_t
   decoder_ctrl_maps,  // vpx_codec_ctrl_fn_map_t
-  NOT_IMPLEMENTED,    // vpx_codec_get_mmap_fn_t
-  NOT_IMPLEMENTED,    // vpx_codec_set_mmap_fn_t
   { // NOLINT
     decoder_peek_si,    // vpx_codec_peek_si_fn_t
     decoder_get_si,     // vpx_codec_get_si_fn_t
@@ -707,12 +659,13 @@ CODEC_INTERFACE(vpx_codec_vp9_dx) = {
     decoder_set_fb_fn,  // vpx_codec_set_fb_fn_t
   },
   { // NOLINT
-    NOT_IMPLEMENTED,  // vpx_codec_enc_cfg_map_t
-    NOT_IMPLEMENTED,  // vpx_codec_encode_fn_t
-    NOT_IMPLEMENTED,  // vpx_codec_get_cx_data_fn_t
-    NOT_IMPLEMENTED,  // vpx_codec_enc_config_set_fn_t
-    NOT_IMPLEMENTED,  // vpx_codec_get_global_headers_fn_t
-    NOT_IMPLEMENTED,  // vpx_codec_get_preview_frame_fn_t
-    NOT_IMPLEMENTED   // vpx_codec_enc_mr_get_mem_loc_fn_t
+    0,
+    NULL,  // vpx_codec_enc_cfg_map_t
+    NULL,  // vpx_codec_encode_fn_t
+    NULL,  // vpx_codec_get_cx_data_fn_t
+    NULL,  // vpx_codec_enc_config_set_fn_t
+    NULL,  // vpx_codec_get_global_headers_fn_t
+    NULL,  // vpx_codec_get_preview_frame_fn_t
+    NULL   // vpx_codec_enc_mr_get_mem_loc_fn_t
   }
 };

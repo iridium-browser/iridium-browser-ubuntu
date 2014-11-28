@@ -5,15 +5,16 @@
 #include "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
 
 #include "base/logging.h"
-#include "chrome/browser/guest_view/web_view/web_view_guest.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
+#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/guest_view/guest_view_base.h"
 
 using web_modal::WebContentsModalDialogManager;
 using web_modal::NativeWebContentsModalDialog;
@@ -27,16 +28,17 @@ ConstrainedWindowMac::ConstrainedWindowMac(
       sheet_([sheet retain]),
       shown_(false) {
   DCHECK(web_contents);
-  extensions::WebViewGuest* web_view_guest =
-    extensions::WebViewGuest::FromWebContents(web_contents);
+  extensions::GuestViewBase* guest_view =
+      extensions::GuestViewBase::FromWebContents(web_contents);
   // For embedded WebContents, use the embedder's WebContents for constrained
   // window.
-  web_contents_ = web_view_guest && web_view_guest->embedder_web_contents() ?
-                      web_view_guest->embedder_web_contents() : web_contents;
+  web_contents_ = guest_view && guest_view->embedder_web_contents() ?
+                      guest_view->embedder_web_contents() : web_contents;
   DCHECK(sheet_.get());
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->ShowModalDialog(this);
+  web_modal::PopupManager* popup_manager =
+      web_modal::PopupManager::FromWebContents(web_contents_);
+  if (popup_manager)
+    popup_manager->ShowModalDialog(this, web_contents_);
 }
 
 ConstrainedWindowMac::~ConstrainedWindowMac() {

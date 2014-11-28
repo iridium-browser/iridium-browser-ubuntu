@@ -44,9 +44,9 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
           const std::string& debug_name) OVERRIDE;
   virtual scoped_refptr<StreamTextureFactory> CreateStreamTextureFactory(
       int view_id) OVERRIDE;
-  virtual blink::WebGraphicsContext3D* CreateOffscreenGraphicsContext3D(
-      const blink::WebGraphicsContext3D::Attributes& attributes) OVERRIDE;
-
+  virtual webkit::gpu::WebGraphicsContext3DImpl*
+      CreateOffscreenGraphicsContext3D(
+          const blink::WebGraphicsContext3D::Attributes& attributes) OVERRIDE;
 
   SynchronousInputEventFilter* synchronous_input_event_filter() {
     return &synchronous_input_event_filter_;
@@ -60,19 +60,19 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
 
   scoped_refptr<cc::ContextProvider>
       CreateOnscreenContextProviderForCompositorThread();
-  gpu::GLInProcessContext* GetShareContext();
 
  private:
   bool CanCreateMainThreadContext();
   scoped_refptr<StreamTextureFactorySynchronousImpl::ContextProvider>
       TryCreateStreamTextureFactory();
+  void RestoreContextOnMainThread();
 
   SynchronousInputEventFilter synchronous_input_event_filter_;
 
   scoped_refptr<gpu::InProcessCommandBuffer::Service> service_;
-  scoped_ptr<gpu::GLInProcessContext> share_context_;
-  scoped_refptr<StreamTextureFactorySynchronousImpl::ContextProvider>
-      video_context_provider_;
+
+  class VideoContextProvider;
+  scoped_refptr<VideoContextProvider> video_context_provider_;
 
   bool record_full_layer_;
 
@@ -80,6 +80,7 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
   // read on renderer main thread.
   base::Lock num_hardware_compositor_lock_;
   unsigned int num_hardware_compositors_;
+  scoped_refptr<base::MessageLoopProxy> main_thread_proxy_;
 };
 
 }  // namespace content

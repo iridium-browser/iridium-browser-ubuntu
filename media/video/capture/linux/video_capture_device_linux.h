@@ -12,7 +12,7 @@
 
 #include <string>
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/threading/thread.h"
 #include "media/video/capture/video_capture_device.h"
@@ -59,7 +59,7 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   // Called on the v4l2_thread_.
   void OnAllocateAndStart(int width,
                           int height,
-                          int frame_rate,
+                          float frame_rate,
                           scoped_ptr<Client> client);
   void OnStopAndDeAllocate();
   void OnCaptureTask();

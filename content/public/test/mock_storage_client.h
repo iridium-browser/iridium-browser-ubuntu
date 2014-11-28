@@ -13,16 +13,16 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "storage/browser/quota/quota_client.h"
 #include "url/gurl.h"
-#include "webkit/browser/quota/quota_client.h"
 
-namespace quota {
+namespace storage {
 class QuotaManagerProxy;
 }
 
-using quota::QuotaClient;
-using quota::QuotaManagerProxy;
-using quota::StorageType;
+using storage::QuotaClient;
+using storage::QuotaManagerProxy;
+using storage::StorageType;
 
 namespace content {
 
@@ -65,7 +65,7 @@ class MockStorageClient : public QuotaClient {
   virtual void DeleteOriginData(const GURL& origin,
                                 StorageType type,
                                 const DeletionCallback& callback) OVERRIDE;
-  virtual bool DoesSupport(quota::StorageType type) const OVERRIDE;
+  virtual bool DoesSupport(storage::StorageType type) const OVERRIDE;
 
  private:
   void RunGetOriginUsage(const GURL& origin_url,

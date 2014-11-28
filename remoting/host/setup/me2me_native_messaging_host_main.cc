@@ -6,15 +6,18 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/files/file.h"
 #include "base/i18n/icu_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread.h"
 #include "net/url_request/url_fetcher.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/url_request_context_getter.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/logging.h"
+#include "remoting/host/native_messaging/pipe_messaging_channel.h"
 #include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/setup/me2me_native_messaging_host.h"
 #include "remoting/host/usage_stats_consent.h"
@@ -84,6 +87,10 @@ int StartMe2MeNativeMessagingHost() {
   // IO thread is needed for the pairing registry and URL context getter.
   base::Thread io_thread("io_thread");
   io_thread.StartWithOptions(
+      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+
+  base::Thread file_thread("file_thread");
+  file_thread.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
 
   base::MessageLoopForUI message_loop;
@@ -174,9 +181,10 @@ int StartMe2MeNativeMessagingHost() {
 #error Not implemented.
 #endif
 
-  // OAuth client (for credential requests).
+  // OAuth client (for credential requests). IO thread is used for blocking
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter(
-      new URLRequestContextGetter(io_thread.message_loop_proxy()));
+      new URLRequestContextGetter(io_thread.task_runner(),
+                                  file_thread.task_runner()));
   scoped_ptr<OAuthClient> oauth_client(
       new OAuthClient(url_request_context_getter));
 
@@ -225,16 +233,16 @@ int StartMe2MeNativeMessagingHost() {
     return kInitializationFailed;
 
   pairing_registry = new PairingRegistry(
-      io_thread.message_loop_proxy(),
+      io_thread.task_runner(),
       delegate.PassAs<PairingRegistry::Delegate>());
 #else  // defined(OS_WIN)
   pairing_registry =
-      CreatePairingRegistry(io_thread.message_loop_proxy());
+      CreatePairingRegistry(io_thread.task_runner());
 #endif  // !defined(OS_WIN)
 
   // Set up the native messaging channel.
-  scoped_ptr<NativeMessagingChannel> channel(
-      new NativeMessagingChannel(read_file.Pass(), write_file.Pass()));
+  scoped_ptr<extensions::NativeMessagingChannel> channel(
+      new PipeMessagingChannel(read_file.Pass(), write_file.Pass()));
 
   // Create the native messaging host.
   scoped_ptr<Me2MeNativeMessagingHost> host(

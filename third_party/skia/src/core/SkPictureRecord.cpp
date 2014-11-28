@@ -12,6 +12,7 @@
 #include "SkPictureStateTree.h"
 #include "SkPixelRef.h"
 #include "SkRRect.h"
+#include "SkTextBlob.h"
 #include "SkTSearch.h"
 
 #define HEAP_BLOCK_SIZE 4096
@@ -59,6 +60,7 @@ SkPictureRecord::~SkPictureRecord() {
     SkSafeUnref(fStateTree);
     fFlattenableHeap.setBitmapStorage(NULL);
     fPictureRefs.unrefAll();
+    fTextBlobRefs.unrefAll();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -114,6 +116,7 @@ static inline size_t getPaintOffset(DrawType op, size_t opSize) {
         0,  // POP_CULL - no paint
         1,  // DRAW_PATCH - right after op code
         1,  // DRAW_PICTURE_MATRIX_PAINT - right after op code
+        1,  // DRAW_TEXT_BLOB- right after op code
     };
 
     SK_COMPILE_ASSERT(sizeof(gPaintOffsets) == LAST_DRAWTYPE_ENUM + 1,
@@ -187,7 +190,7 @@ void SkPictureRecord::recordSaveLayer(const SkRect* bounds, const SkPaint* paint
 
     // op + bool for 'bounds'
     size_t size = 2 * kUInt32Size;
-    if (NULL != bounds) {
+    if (bounds) {
         size += sizeof(*bounds); // + rect
     }
     // + paint index + flags
@@ -457,7 +460,13 @@ static bool remove_save_layer2(SkWriter32* writer, int32_t offset,
 }
 
 static bool is_drawing_op(DrawType op) {
-    return (op > CONCAT && op < ROTATE) || DRAW_DRRECT == op;
+
+    // FIXME: yuck. convert to a lookup table?
+    return (op > CONCAT && op < ROTATE)
+            || DRAW_DRRECT == op
+            || DRAW_PATCH == op
+            || DRAW_PICTURE_MATRIX_PAINT == op
+            || DRAW_TEXT_BLOB == op;
 }
 
 /*
@@ -549,12 +558,12 @@ static void apply_optimization_to_bbh(PictureRecordOptType opt, SkPictureStateTr
                                       SkBBoxHierarchy* boundingHierarchy) {
     switch (opt) {
     case kCollapseSaveLayer_OptType:
-        if (NULL != stateTree) {
+        if (stateTree) {
             stateTree->saveCollapsed();
         }
         break;
     case kRewind_OptType:
-        if (NULL != boundingHierarchy) {
+        if (boundingHierarchy) {
             boundingHierarchy->rewindInserts();
         }
         // Note: No need to touch the state tree for this to work correctly.
@@ -587,7 +596,7 @@ void SkPictureRecord::willRestore() {
     if (fOptsEnabled) {
         for (opt = 0; opt < SK_ARRAY_COUNT(gPictureRecordOpts); ++opt) {
             if (0 != (gPictureRecordOpts[opt].fFlags & kSkipIfBBoxHierarchy_Flag)
-                && NULL != fBoundingHierarchy) {
+                && fBoundingHierarchy) {
                 continue;
             }
             if ((*gPictureRecordOpts[opt].fProc)(&fWriter, fRestoreOffsetStack.top(), &fPaints)) {
@@ -779,7 +788,7 @@ size_t SkPictureRecord::recordClipRect(const SkRect& rect, SkRegion::Op op, bool
 
 void SkPictureRecord::onClipRRect(const SkRRect& rrect, SkRegion::Op op, ClipEdgeStyle edgeStyle) {
     this->recordClipRRect(rrect, op, kSoft_ClipEdgeStyle == edgeStyle);
-    this->updateClipConservativelyUsingBounds(rrect.getBounds(), op, false);
+    this->INHERITED::onClipRRect(rrect, op, edgeStyle);
 }
 
 size_t SkPictureRecord::recordClipRRect(const SkRRect& rrect, SkRegion::Op op, bool doAA) {
@@ -801,9 +810,7 @@ size_t SkPictureRecord::recordClipRRect(const SkRRect& rrect, SkRegion::Op op, b
 void SkPictureRecord::onClipPath(const SkPath& path, SkRegion::Op op, ClipEdgeStyle edgeStyle) {
     int pathID = this->addPathToHeap(path);
     this->recordClipPath(pathID, op, kSoft_ClipEdgeStyle == edgeStyle);
-
-    this->updateClipConservativelyUsingBounds(path.getBounds(), op,
-                                              path.isInverseFillType());
+    this->INHERITED::onClipPath(path, op, edgeStyle);
 }
 
 size_t SkPictureRecord::recordClipPath(int pathID, SkRegion::Op op, bool doAA) {
@@ -963,7 +970,7 @@ void SkPictureRecord::drawBitmapRectToRect(const SkBitmap& bitmap, const SkRect*
 
     // id + paint index + bitmap index + bool for 'src' + flags
     size_t size = 5 * kUInt32Size;
-    if (NULL != src) {
+    if (src) {
         size += sizeof(*src);   // + rect
     }
     size += sizeof(dst);        // + rect
@@ -1202,6 +1209,22 @@ void SkPictureRecord::onDrawTextOnPath(const void* text, size_t byteLength, cons
     this->validate(initialOffset, size);
 }
 
+void SkPictureRecord::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
+                                     const SkPaint& paint) {
+
+    // op + paint index + blob index + x/y
+    size_t size = 3 * kUInt32Size + 2 * sizeof(SkScalar);
+    size_t initialOffset = this->addDraw(DRAW_TEXT_BLOB, &size);
+    SkASSERT(initialOffset + getPaintOffset(DRAW_TEXT_BLOB, size) == fWriter.bytesWritten());
+
+    this->addPaint(paint);
+    this->addTextBlob(blob);
+    this->addScalar(x);
+    this->addScalar(y);
+
+    this->validate(initialOffset, size);
+}
+
 void SkPictureRecord::onDrawPicture(const SkPicture* picture, const SkMatrix* matrix,
                                     const SkPaint* paint) {
     // op + picture index
@@ -1239,7 +1262,7 @@ void SkPictureRecord::drawVertices(VertexMode vmode, int vertexCount,
     if (indexCount > 0) {
         flags |= DRAW_VERTICES_HAS_INDICES;
     }
-    if (NULL != xfer) {
+    if (xfer) {
         SkXfermode::Mode mode;
         if (xfer->asMode(&mode) && SkXfermode::kModulate_Mode != mode) {
             flags |= DRAW_VERTICES_HAS_XFER;
@@ -1293,15 +1316,15 @@ void SkPictureRecord::onDrawPatch(const SkPoint cubics[12], const SkColor colors
     // op + paint index + patch 12 control points + flag + patch 4 colors + 4 texture coordinates
     size_t size = 2 * kUInt32Size + SkPatchUtils::kNumCtrlPts * sizeof(SkPoint) + kUInt32Size;
     uint32_t flag = 0;
-    if (NULL != colors) {
+    if (colors) {
         flag |= DRAW_VERTICES_HAS_COLORS;
         size += SkPatchUtils::kNumCorners * sizeof(SkColor);
     }
-    if (NULL != texCoords) {
+    if (texCoords) {
         flag |= DRAW_VERTICES_HAS_TEXS;
         size += SkPatchUtils::kNumCorners * sizeof(SkPoint);
     }
-    if (NULL != xmode) {
+    if (xmode) {
         SkXfermode::Mode mode;
         if (xmode->asMode(&mode) && SkXfermode::kModulate_Mode != mode) {
             flag |= DRAW_VERTICES_HAS_XFER;
@@ -1316,10 +1339,10 @@ void SkPictureRecord::onDrawPatch(const SkPoint cubics[12], const SkColor colors
     this->addInt(flag);
     
     // write optional parameters
-    if (NULL != colors) {
+    if (colors) {
         fWriter.write(colors, SkPatchUtils::kNumCorners * sizeof(SkColor));
     }
-    if (NULL != texCoords) {
+    if (texCoords) {
         fWriter.write(texCoords, SkPatchUtils::kNumCorners * sizeof(SkPoint));
     }
     if (flag & DRAW_VERTICES_HAS_XFER) {
@@ -1406,7 +1429,7 @@ void SkPictureRecord::onPopCull() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-SkSurface* SkPictureRecord::onNewSurface(const SkImageInfo& info) {
+SkSurface* SkPictureRecord::onNewSurface(const SkImageInfo& info, const SkSurfaceProps&) {
     return NULL;
 }
 
@@ -1516,6 +1539,14 @@ void SkPictureRecord::addText(const void* text, size_t byteLength) {
     fContentInfo.onDrawText();
     addInt(SkToInt(byteLength));
     fWriter.writePad(text, byteLength);
+}
+
+void SkPictureRecord::addTextBlob(const SkTextBlob *blob) {
+    int index = fTextBlobRefs.count();
+    *fTextBlobRefs.append() = blob;
+    blob->ref();
+    // follow the convention of recording a 1-based index
+    this->addInt(index + 1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

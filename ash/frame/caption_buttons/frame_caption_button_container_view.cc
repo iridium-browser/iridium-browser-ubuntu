@@ -13,7 +13,6 @@
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/shell.h"
 #include "ash/wm/maximize_mode/maximize_mode_controller.h"
-#include "grit/ui_strings.h"  // Accessibility names
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
@@ -22,6 +21,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/point.h"
+#include "ui/strings/grit/ui_strings.h"  // Accessibility names
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -322,15 +322,6 @@ bool FrameCaptionButtonContainerView::ShouldSizeButtonBeVisible() const {
 
 void FrameCaptionButtonContainerView::ButtonPressed(views::Button* sender,
                                                     const ui::Event& event) {
-  // When shift-clicking, slow down animations for visual debugging.
-  // We used to do this via an event filter that looked for the shift key being
-  // pressed but this interfered with several normal keyboard shortcuts.
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> slow_duration_mode;
-  if (event.IsShiftDown()) {
-    slow_duration_mode.reset(new ui::ScopedAnimationDurationScaleMode(
-        ui::ScopedAnimationDurationScaleMode::SLOW_DURATION));
-  }
-
   // Abort any animations of the button icons.
   SetButtonsToNormal(ANIMATE_NO);
 
@@ -340,7 +331,7 @@ void FrameCaptionButtonContainerView::ButtonPressed(views::Button* sender,
     frame_->Minimize();
   } else if (sender == size_button_) {
     if (frame_->IsFullscreen()) {  // Can be clicked in immersive fullscreen.
-      frame_->SetFullscreen(false);
+      frame_->Restore();
       action = ash::UMA_WINDOW_MAXIMIZE_BUTTON_CLICK_EXIT_FULLSCREEN;
     } else if (frame_->IsMaximized()) {
       frame_->Restore();

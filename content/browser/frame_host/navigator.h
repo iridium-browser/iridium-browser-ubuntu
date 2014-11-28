@@ -11,6 +11,7 @@
 #include "ui/base/window_open_disposition.h"
 
 class GURL;
+struct FrameHostMsg_BeginNavigation_Params;
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 struct FrameHostMsg_DidFailProvisionalLoadWithError_Params;
 
@@ -24,6 +25,7 @@ class NavigationControllerImpl;
 class NavigationEntryImpl;
 class NavigatorDelegate;
 class RenderFrameHostImpl;
+struct NavigationBeforeCommitInfo;
 
 // Implementations of this interface are responsible for performing navigations
 // in a node of the FrameTree. Its lifetime is bound to all FrameTreeNode
@@ -36,7 +38,6 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
  public:
   // Returns the NavigationController associated with this Navigator.
   virtual NavigationController* GetController();
-
 
   // Notifications coming from the RenderFrameHosts ----------------------------
 
@@ -56,17 +57,6 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
       const GURL& url,
       int error_code,
       const base::string16& error_description) {}
-
-  // The RenderFrameHostImpl processed a redirect during a provisional load.
-  //
-  // TODO(creis): Remove this method and have the pre-rendering code listen to
-  // WebContentsObserver::DidGetRedirectForResourceRequest instead.
-  // See http://crbug.com/78512.
-  virtual void DidRedirectProvisionalLoad(
-      RenderFrameHostImpl* render_frame_host,
-      int32 page_id,
-      const GURL& source_url,
-      const GURL& target_url) {}
 
   // The RenderFrameHostImpl has committed a navigation.
   virtual void DidNavigate(
@@ -113,11 +103,17 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
       const GURL& url,
       const std::vector<GURL>& redirect_chain,
       const Referrer& referrer,
-      PageTransition page_transition,
+      ui::PageTransition page_transition,
       WindowOpenDisposition disposition,
       const GlobalRequestID& transferred_global_request_id,
       bool should_replace_current_entry,
       bool user_gesture) {}
+
+  // PlzNavigate
+  // Signal |render_frame_host| that a navigation is ready to commit (the
+  // response to the navigation request has been received).
+  virtual void CommitNavigation(RenderFrameHostImpl* render_frame_host,
+                                const NavigationBeforeCommitInfo& info) {};
 
  protected:
   friend class base::RefCounted<Navigator>;

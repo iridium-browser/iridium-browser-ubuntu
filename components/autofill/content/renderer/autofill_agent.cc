@@ -28,7 +28,6 @@
 #include "content/public/common/ssl_status.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_view.h"
-#include "grit/components_strings.h"
 #include "net/cert/cert_status_flags.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -246,6 +245,10 @@ void AutofillAgent::OrientationChangeEvent() {
   HidePopup();
 }
 
+void AutofillAgent::Resized() {
+  HidePopup();
+}
+
 void AutofillAgent::DidChangeScrollOffset(WebLocalFrame*) {
   HidePopup();
 }
@@ -315,13 +318,22 @@ void AutofillAgent::FormControlElementClicked(
 
   bool show_full_suggestion_list = element.isAutofilled() || was_focused;
   bool show_password_suggestions_only = !was_focused;
-  ShowSuggestions(element,
-                  true,
-                  false,
-                  true,
-                  false,
-                  show_full_suggestion_list,
-                  show_password_suggestions_only);
+
+  // TODO(gcasto): Remove after crbug.com/423464 has been fixed.
+  bool show_suggestions = true;
+#if defined(OS_ANDROID)
+  show_suggestions = was_focused;
+#endif
+
+  if (show_suggestions) {
+    ShowSuggestions(element,
+                    true,
+                    false,
+                    true,
+                    false,
+                    show_full_suggestion_list,
+                    show_password_suggestions_only);
+  }
 }
 
 void AutofillAgent::textFieldDidEndEditing(const WebInputElement& element) {
@@ -488,8 +500,10 @@ void AutofillAgent::OnClearPreviewedForm() {
 
 void AutofillAgent::OnFillFieldWithValue(const base::string16& value) {
   WebInputElement* input_element = toWebInputElement(&element_);
-  if (input_element)
+  if (input_element) {
     FillFieldWithValue(value, input_element);
+    input_element->setAutofilled(true);
+  }
 }
 
 void AutofillAgent::OnPreviewFieldWithValue(const base::string16& value) {
@@ -674,7 +688,6 @@ void AutofillAgent::FillFieldWithValue(const base::string16& value,
                                        WebInputElement* node) {
   did_set_node_text_ = true;
   node->setEditingValue(value.substr(0, node->maxLength()));
-  node->setAutofilled(true);
 }
 
 void AutofillAgent::PreviewFieldWithValue(const base::string16& value,

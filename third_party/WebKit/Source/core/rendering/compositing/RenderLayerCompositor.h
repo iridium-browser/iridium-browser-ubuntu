@@ -83,7 +83,7 @@ public:
     bool hasAcceleratedCompositing() const { return m_hasAcceleratedCompositing; }
     bool layerSquashingEnabled() const;
 
-    bool acceleratedCompositingForOverflowScrollEnabled() const;
+    bool preferCompositingToLCDTextEnabled() const;
 
     bool rootShouldAlwaysComposite() const;
 
@@ -173,8 +173,6 @@ public:
     bool inOverlayFullscreenVideo() const { return m_inOverlayFullscreenVideo; }
 
 private:
-    class OverlapMap;
-
 #if ENABLE(ASSERT)
     void assertNoUnresolvedDirtyBits();
 #endif
@@ -185,15 +183,8 @@ private:
 
     virtual bool isTrackingPaintInvalidations() const OVERRIDE;
 
-    // Whether the given RL needs to paint into its own separate backing (and hence would need its own CompositedLayerMapping).
-    bool needsOwnBacking(const RenderLayer*) const;
-
     void updateWithoutAcceleratedCompositing(CompositingUpdateType);
     void updateIfNeeded();
-
-    void computeCompositingRequirements(RenderLayer* ancestorLayer, RenderLayer*, OverlapMap&, struct CompositingRecursionData&, bool& descendantHas3DTransform, Vector<RenderLayer*>& unclippedDescendants, IntRect& absoluteDecendantBoundingBox);
-
-    bool hasAnyAdditionalCompositedLayers(const RenderLayer* rootLayer) const;
 
     void ensureRootLayer();
     void destroyRootLayer();

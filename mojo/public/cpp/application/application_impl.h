@@ -13,24 +13,6 @@
 #include "mojo/public/interfaces/application/application.mojom.h"
 #include "mojo/public/interfaces/application/shell.mojom.h"
 
-#if defined(WIN32)
-#if !defined(CDECL)
-#define CDECL __cdecl
-#endif
-#define APPLICATION_EXPORT __declspec(dllexport)
-#else
-#define CDECL
-#define APPLICATION_EXPORT __attribute__((visibility("default")))
-#endif
-
-// DSOs can either implement MojoMain directly or include
-// mojo_main_{standalone|chromium}.cc in their project and implement
-// ApplicationImpl::Create();
-// TODO(davemoore): Establish this as part of our SDK for third party mojo
-// application writers.
-extern "C" APPLICATION_EXPORT MojoResult CDECL MojoMain(
-    MojoHandle service_provider_handle);
-
 namespace mojo {
 
 class ApplicationDelegate;
@@ -70,12 +52,16 @@ class ApplicationDelegate;
 //
 class ApplicationImpl : public InterfaceImpl<Application> {
  public:
-  explicit ApplicationImpl(ApplicationDelegate* delegate);
   ApplicationImpl(ApplicationDelegate* delegate,
                   ScopedMessagePipeHandle shell_handle);
   ApplicationImpl(ApplicationDelegate* delegate,
                   MojoHandle shell_handle);
   virtual ~ApplicationImpl();
+
+  Shell* shell() const { return shell_.get(); }
+
+  // Returns any initial configuration arguments, passed by the Shell.
+  const Array<String>& args() { return args_; }
 
   // Establishes a new connection to an application. Caller does not own.
   ApplicationConnection* ConnectToApplication(const String& application_url);
@@ -89,36 +75,32 @@ class ApplicationImpl : public InterfaceImpl<Application> {
   }
 
  private:
-  class ShellPtrWatcher : public ErrorHandler {
-   public:
-    explicit ShellPtrWatcher(ApplicationImpl* impl);
-    virtual ~ShellPtrWatcher();
-    virtual void OnConnectionError() MOJO_OVERRIDE;
-   private:
-    ApplicationImpl* impl_;
-    MOJO_DISALLOW_COPY_AND_ASSIGN(ShellPtrWatcher);
-  };
-
-  friend MojoResult (::MojoMain)(MojoHandle);
+  class ShellPtrWatcher;
 
   void BindShell(ScopedMessagePipeHandle shell_handle);
-  void BindShell(MojoHandle shell_handle);
   void ClearConnections();
-  void OnShellError() { ClearConnections(); Terminate(); };
+  void OnShellError() {
+    ClearConnections();
+    Terminate();
+  };
 
   // Quits the main run loop for this application.
-  void Terminate();
+  static void Terminate();
 
   // Application implementation.
+  virtual void Initialize(Array<String> args) MOJO_OVERRIDE;
   virtual void AcceptConnection(const String& requestor_url,
                                 ServiceProviderPtr provider) MOJO_OVERRIDE;
 
   typedef std::vector<internal::ServiceRegistry*> ServiceRegistryList;
+
+  bool initialized_;
   ServiceRegistryList incoming_service_registries_;
   ServiceRegistryList outgoing_service_registries_;
   ApplicationDelegate* delegate_;
   ShellPtr shell_;
-  ShellPtrWatcher shell_watch_;
+  ShellPtrWatcher* shell_watch_;
+  Array<String> args_;
 
   MOJO_DISALLOW_COPY_AND_ASSIGN(ApplicationImpl);
 };

@@ -148,19 +148,19 @@ void DirectRenderer::DecideRenderPassAllocationsForFrame(
   if (!resource_provider_)
     return;
 
-  base::hash_map<RenderPass::Id, gfx::Size> render_passes_in_frame;
+  base::hash_map<RenderPassId, gfx::Size> render_passes_in_frame;
   for (size_t i = 0; i < render_passes_in_draw_order.size(); ++i)
-    render_passes_in_frame.insert(std::pair<RenderPass::Id, gfx::Size>(
+    render_passes_in_frame.insert(std::pair<RenderPassId, gfx::Size>(
         render_passes_in_draw_order[i]->id,
         RenderPassTextureSize(render_passes_in_draw_order[i])));
 
-  std::vector<RenderPass::Id> passes_to_delete;
-  base::ScopedPtrHashMap<RenderPass::Id, ScopedResource>::const_iterator
+  std::vector<RenderPassId> passes_to_delete;
+  base::ScopedPtrHashMap<RenderPassId, ScopedResource>::const_iterator
       pass_iter;
   for (pass_iter = render_pass_textures_.begin();
        pass_iter != render_pass_textures_.end();
        ++pass_iter) {
-    base::hash_map<RenderPass::Id, gfx::Size>::const_iterator it =
+    base::hash_map<RenderPassId, gfx::Size>::const_iterator it =
         render_passes_in_frame.find(pass_iter->first);
     if (it == render_passes_in_frame.end()) {
       passes_to_delete.push_back(pass_iter->first);
@@ -205,6 +205,7 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   DCHECK(root_render_pass);
 
   DrawingFrame frame;
+  frame.render_passes_in_draw_order = render_passes_in_draw_order;
   frame.root_render_pass = root_render_pass;
   frame.root_damage_rect = Capabilities().using_partial_swap
                                ? root_render_pass->damage_rect
@@ -370,7 +371,7 @@ void DirectRenderer::DrawRenderPass(DrawingFrame* frame,
   for (QuadList::ConstBackToFrontIterator it = quad_list.BackToFrontBegin();
        it != quad_list.BackToFrontEnd();
        ++it) {
-    const DrawQuad& quad = *(*it);
+    const DrawQuad& quad = *it;
     bool should_skip_quad = false;
 
     if (using_scissor_as_optimization) {
@@ -381,7 +382,7 @@ void DirectRenderer::DrawRenderPass(DrawingFrame* frame,
     }
 
     if (!should_skip_quad)
-      DoDrawQuad(frame, *it);
+      DoDrawQuad(frame, &quad);
   }
   FinishDrawingQuadList();
 }
@@ -408,14 +409,13 @@ bool DirectRenderer::UseRenderPass(DrawingFrame* frame,
                enlarge_pass_texture_amount_.y());
   if (!texture->id())
     texture->Allocate(
-        size, ResourceProvider::TextureUsageFramebuffer, RGBA_8888);
+        size, ResourceProvider::TextureHintImmutableFramebuffer, RGBA_8888);
   DCHECK(texture->id());
 
   return BindFramebufferToTexture(frame, texture, render_pass->output_rect);
 }
 
-bool DirectRenderer::HasAllocatedResourcesForTesting(RenderPass::Id id)
-    const {
+bool DirectRenderer::HasAllocatedResourcesForTesting(RenderPassId id) const {
   ScopedResource* texture = render_pass_textures_.get(id);
   return texture && texture->id();
 }

@@ -203,6 +203,7 @@ class COMPOSITOR_EXPORT Layer
   void SetBackgroundZoom(float zoom, int inset);
 
   // Set the shape of this layer.
+  SkRegion* alpha_shape() const { return alpha_shape_.get(); }
   void SetAlphaShape(scoped_ptr<SkRegion> region);
 
   // Invert the layer.
@@ -286,13 +287,10 @@ class COMPOSITOR_EXPORT Layer
   // Sets the layer's fill color.  May only be called for LAYER_SOLID_COLOR.
   void SetColor(SkColor color);
 
-  // Updates the nine patch layer's bitmap and aperture. May only be called for
-  // LAYER_NINE_PATCH.
-  void UpdateNinePatchLayerBitmap(const SkBitmap& bitmap,
-                                  const gfx::Rect& aperture);
-
-  // Updates the nine patch layer's border. May only be called for
-  // LAYER_NINE_PATCH.
+  // Updates the nine patch layer's bitmap, aperture and border. May only be
+  // called for LAYER_NINE_PATCH.
+  void UpdateNinePatchLayerBitmap(const SkBitmap& bitmap);
+  void UpdateNinePatchLayerAperture(const gfx::Rect& aperture);
   void UpdateNinePatchLayerBorder(const gfx::Rect& border);
 
   // Adds |invalid_rect| to the Layer's pending invalid rect and calls
@@ -318,6 +316,10 @@ class COMPOSITOR_EXPORT Layer
   // Notifies the layer that the device scale factor has changed.
   void OnDeviceScaleFactorChanged(float device_scale_factor);
 
+  // Notifies the layer that one of its children has received a new
+  // delegated frame.
+  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip);
+
   // Requets a copy of the layer's output as a texture or bitmap.
   void RequestCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request);
 
@@ -325,7 +327,6 @@ class COMPOSITOR_EXPORT Layer
   virtual void PaintContents(
       SkCanvas* canvas,
       const gfx::Rect& clip,
-      gfx::RectF* opaque,
       ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE;
   virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
   virtual bool FillsBoundsCompletely() const OVERRIDE;

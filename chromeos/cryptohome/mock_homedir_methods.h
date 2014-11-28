@@ -21,6 +21,10 @@ class CHROMEOS_EXPORT MockHomedirMethods : public HomedirMethods {
 
   void SetUp(bool success, MountError return_code);
 
+  MOCK_METHOD3(GetKeyDataEx,
+               void(const Identification& id,
+                    const std::string& label,
+                    const GetKeyDataCallback& callback));
   MOCK_METHOD3(CheckKeyEx,
                void(const Identification& id,
                     const Authorization& key,
@@ -53,6 +57,7 @@ class CHROMEOS_EXPORT MockHomedirMethods : public HomedirMethods {
   MountError return_code_;
 
   void DoCallback(const Callback& callback);
+  void DoGetDataCallback(const GetKeyDataCallback& callback);
   void DoMountCallback(const MountCallback& callback);
 
   DISALLOW_COPY_AND_ASSIGN(MockHomedirMethods);

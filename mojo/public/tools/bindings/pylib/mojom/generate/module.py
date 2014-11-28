@@ -144,15 +144,26 @@ class NamedValue(object):
         self.name)
 
 
+class BuiltinValue(object):
+  def __init__(self, value):
+    self.value = value
+
+
+class ConstantValue(NamedValue):
+  def __init__(self, module, parent_kind, constant):
+    NamedValue.__init__(self, module, parent_kind, constant.name)
+    self.constant = constant
+
+
 class EnumValue(NamedValue):
   def __init__(self, module, enum, field):
     NamedValue.__init__(self, module, enum.parent_kind, field.name)
-    self.enum_name = enum.name
+    self.enum = enum
 
   def GetSpec(self):
     return (self.namespace + '.' +
         (self.parent_kind and (self.parent_kind.name + '.') or "") +
-        self.enum_name + '.' + self.name)
+        self.enum.name + '.' + self.name)
 
 
 class Constant(object):
@@ -323,6 +334,10 @@ def IsBoolKind(kind):
   return kind.spec == BOOL.spec
 
 
+def IsFloatKind(kind):
+  return kind.spec == FLOAT.spec
+
+
 def IsStringKind(kind):
   return kind.spec == STRING.spec or kind.spec == NULLABLE_STRING.spec
 
@@ -372,8 +387,12 @@ def IsEnumKind(kind):
   return isinstance(kind, Enum)
 
 
+def IsReferenceKind(kind):
+  return isinstance(kind, ReferenceKind)
+
+
 def IsNullableKind(kind):
-  return isinstance(kind, ReferenceKind) and kind.is_nullable
+  return IsReferenceKind(kind) and kind.is_nullable
 
 
 def IsAnyArrayKind(kind):
@@ -400,3 +419,11 @@ def IsAnyHandleKind(kind):
 
 def IsMoveOnlyKind(kind):
   return IsObjectKind(kind) or IsAnyHandleKind(kind)
+
+
+def HasCallbacks(interface):
+  for method in interface.methods:
+    if method.response_parameters != None:
+      return True
+  return False
+

@@ -25,8 +25,8 @@
 #include "core/svg/SVGAnimateElement.h"
 
 #include "core/CSSPropertyNames.h"
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/StylePropertySet.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/dom/Document.h"
 #include "core/dom/QualifiedName.h"
 #include "core/svg/SVGAnimatedTypeAnimator.h"
@@ -37,7 +37,6 @@ namespace blink {
 SVGAnimateElement::SVGAnimateElement(const QualifiedName& tagName, Document& document)
     : SVGAnimationElement(tagName, document)
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<SVGAnimateElement> SVGAnimateElement::create(Document& document)

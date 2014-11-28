@@ -8,25 +8,6 @@ namespace variables {
 
 // Built-in variables ----------------------------------------------------------
 
-const char kComponentMode[] = "component_mode";
-const char kComponentMode_HelpShort[] =
-    "component_mode: [string] Specifies the meaning of the component() call.";
-const char kComponentMode_Help[] =
-    "component_mode: Specifies the meaning of the component() call.\n"
-    "\n"
-    "  This value is looked up whenever a \"component\" target type is\n"
-    "  encountered. The value controls whether the given target is a shared\n"
-    "  or a static library.\n"
-    "\n"
-    "  The initial value will be empty, which will cause a call to\n"
-    "  component() to throw an error. Typically this value will be set in the\n"
-    "  build config script.\n"
-    "\n"
-    "Possible values:\n"
-    "  - \"shared_library\"\n"
-    "  - \"source_set\"\n"
-    "  - \"static_library\"\n";
-
 const char kCpuArch[] = "cpu_arch";
 const char kCpuArch_HelpShort[] =
     "cpu_arch: [string] Current processor architecture.";
@@ -249,15 +230,15 @@ const char kTargetOutDir_Help[] =
     "     configs appear in the list.\n" \
     "  3. Those set on the \"all_dependent_configs\" on the target in order\n" \
     "     that the configs appear in the list.\n" \
-    "  4. Those set on the \"direct_dependent_configs\" on the target in\n" \
-    "     order that those configs appear in the list.\n" \
+    "  4. Those set on the \"public_configs\" on the target in order that\n" \
+    "     those configs appear in the list.\n" \
     "  5. all_dependent_configs pulled from dependencies, in the order of\n" \
     "     the \"deps\" list. This is done recursively. If a config appears\n" \
     "     more than once, only the first occurance will be used.\n" \
-    "  6. direct_dependent_configs pulled from dependencies, in the order\n" \
-    "     of the \"deps\" list. If a dependency has\n" \
-    "     \"forward_dependent_configs_from\", they will be applied\n" \
-    "     recursively.\n"
+    "  6. public_configs pulled from dependencies, in the order of the\n" \
+    "     \"deps\" list. If a dependency has " \
+              "\"forward_dependent_configs_from\",\n" \
+    "     or are public dependencies, they will be applied recursively.\n"
 
 const char kAllDependentConfigs[] = "all_dependent_configs";
 const char kAllDependentConfigs_HelpShort[] =
@@ -278,8 +259,43 @@ const char kAllDependentConfigs_Help[] =
     "  capability should generally only be used to add defines and include\n"
     "  directories necessary to compile a target's headers.\n"
     "\n"
-    "  See also \"direct_dependent_configs\".\n"
+    "  See also \"public_configs\".\n"
     COMMON_ORDERING_HELP;
+
+const char kAllowCircularIncludesFrom[] = "allow_circular_includes_from";
+const char kAllowCircularIncludesFrom_HelpShort[] =
+    "allow_circular_includes_from: [label list] Permit includes from deps.";
+const char kAllowCircularIncludesFrom_Help[] =
+    "allow_circular_includes_from: Permit includes from deps.\n"
+    "\n"
+    "  A list of target labels. Must be a subset of the target's \"deps\".\n"
+    "  These targets will be permitted to include headers from the current\n"
+    "  target despite the dependency going in the opposite direction.\n"
+    "\n"
+    "Tedious exposition\n"
+    "\n"
+    "  Normally, for a file in target A to include a file from target B,\n"
+    "  A must list B as a dependency. This invariant is enforced by the\n"
+    "  \"gn check\" command (and the --check flag to \"gn gen\").\n"
+    "\n"
+    "  Sometimes, two targets might be the same unit for linking purposes\n"
+    "  (two source sets or static libraries that would always be linked\n"
+    "  together in a final executable or shared library). In this case,\n"
+    "  you want A to be able to include B's headers, and B to include A's\n"
+    "  headers.\n"
+    "\n"
+    "  This list, if specified, lists which of the dependencies of the\n"
+    "  current target can include header files from the current target.\n"
+    "  That is, if A depends on B, B can only include headers from A if it is\n"
+    "  in A's allow_circular_includes_from list.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  source_set(\"a\") {\n"
+    "    deps = [ \":b\", \":c\" ]\n"
+    "    allow_circular_includes_from = [ \":b\" ]\n"
+    "    ...\n"
+    "  }\n";
 
 const char kArgs[] = "args";
 const char kArgs_HelpShort[] =
@@ -330,6 +346,56 @@ const char kCflagsObjCC_HelpShort[] =
     "cflags_objcc: [string list] Flags passed to the Objective C++ compiler.";
 const char* kCflagsObjCC_Help = kCommonCflagsHelp;
 
+const char kCheckIncludes[] = "check_includes";
+const char kCheckIncludes_HelpShort[] =
+    "check_includes: [boolean] Controls whether a target's files are checked.";
+const char kCheckIncludes_Help[] =
+    "check_includes: [boolean] Controls whether a target's files are checked.\n"
+    "\n"
+    "  When true (the default), the \"gn check\" command (as well as\n"
+    "  \"gn gen\" with the --check flag) will check this target's sources\n"
+    "  and headers for proper dependencies.\n"
+    "\n"
+    "  When false, the files in this target will be skipped by default.\n"
+    "  This does not affect other targets that depend on the current target,\n"
+    "  it just skips checking the includes of the current target's files.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  source_set(\"busted_includes\") {\n"
+    "    # This target's includes are messed up, exclude it from checking.\n"
+    "    check_includes = false\n"
+    "    ...\n"
+    "  }\n";
+
+const char kCompleteStaticLib[] = "complete_static_lib";
+const char kCompleteStaticLib_HelpShort[] =
+    "complete_static_lib: [boolean] Links all deps into a static library.";
+const char kCompleteStaticLib_Help[] =
+    "complete_static_lib: [boolean] Links all deps into a static library.\n"
+    "\n"
+    "  A static library normally doesn't include code from dependencies, but\n"
+    "  instead forwards the static libraries and source sets in its deps up\n"
+    "  the dependency chain until a linkable target (an executable or shared\n"
+    "  library) is reached. The final linkable target only links each static\n"
+    "  library once, even if it appears more than once in its dependency\n"
+    "  graph.\n"
+    "\n"
+    "  In some cases the static library might be the final desired output.\n"
+    "  For example, you may be producing a static library for distribution to\n"
+    "  third parties. In this case, the static library should include code\n"
+    "  for all dependencies in one complete package. Since GN does not unpack\n"
+    "  static libraries to forward their contents up the dependency chain,\n"
+    "  it is an error for complete static libraries to depend on other static\n"
+    "  libraries.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  static_library(\"foo\") {\n"
+    "    complete_static_lib = true\n"
+    "    deps = [ \"bar\" ]\n"
+    "  }\n";
+
 const char kConfigs[] = "configs";
 const char kConfigs_HelpShort[] =
     "configs: [label list] Configs applying to this target.";
@@ -370,14 +436,14 @@ const char kData_Help[] =
     "  these but it is envisioned that test data can be listed here for use\n"
     "  running automated tests.\n"
     "\n"
-    "  See also \"gn help inputs\" and \"gn help datadeps\", both of\n"
+    "  See also \"gn help inputs\" and \"gn help data_deps\", both of\n"
     "  which actually affect the build in concrete ways.\n";
 
-const char kDatadeps[] = "datadeps";
-const char kDatadeps_HelpShort[] =
-    "datadeps: [label list] Non-linked dependencies.";
-const char kDatadeps_Help[] =
-    "datadeps: Non-linked dependencies.\n"
+const char kDataDeps[] = "data_deps";
+const char kDataDeps_HelpShort[] =
+    "data_deps: [label list] Non-linked dependencies.";
+const char kDataDeps_Help[] =
+    "data_deps: Non-linked dependencies.\n"
     "\n"
     "  A list of target labels.\n"
     "\n"
@@ -393,7 +459,7 @@ const char kDatadeps_Help[] =
     "Example:\n"
     "  executable(\"foo\") {\n"
     "    deps = [ \"//base\" ]\n"
-    "    datadeps = [ \"//plugins:my_runtime_plugin\" ]\n"
+    "    data_deps = [ \"//plugins:my_runtime_plugin\" ]\n"
     "  }\n";
 
 const char kDefines[] = "defines";
@@ -445,42 +511,23 @@ const char kDepfile_Help[] =
 
 const char kDeps[] = "deps";
 const char kDeps_HelpShort[] =
-    "deps: [label list] Linked dependencies.";
+    "deps: [label list] Private linked dependencies.";
 const char kDeps_Help[] =
-    "deps: Linked dependencies.\n"
+    "deps: Private linked dependencies.\n"
     "\n"
     "  A list of target labels.\n"
     "\n"
-    "  Specifies dependencies of a target. Shared and dynamic libraries will\n"
-    "  be linked into the current target. Other target types that can't be\n"
-    "  linked (like actions and groups) listed in \"deps\" will be treated\n"
-    "  as \"datadeps\". Likewise, if the current target isn't linkable, then\n"
-    "  all deps will be treated as \"datadeps\".\n"
+    "  Specifies private dependencies of a target. Shared and dynamic\n"
+    "  libraries will be linked into the current target. Other target types\n"
+    "  that can't be linked (like actions and groups) listed in \"deps\" will\n"
+    "  be treated as \"data_deps\". Likewise, if the current target isn't\n"
+    "  linkable, then all deps will be treated as \"data_deps\".\n"
     "\n"
-    "  See also \"datadeps\".\n";
-
-const char kDirectDependentConfigs[] = "direct_dependent_configs";
-const char kDirectDependentConfigs_HelpShort[] =
-    "direct_dependent_configs: [label list] Configs to be forced on "
-    "dependents.";
-const char kDirectDependentConfigs_Help[] =
-    "direct_dependent_configs: Configs to be forced on dependents.\n"
+    "  These dependencies are private in that it does not grant dependent\n"
+    "  targets the ability to include headers from the dependency, and direct\n"
+    "  dependent configs are not forwarded.\n"
     "\n"
-    "  A list of config labels.\n"
-    "\n"
-    "  Targets directly referencing this one will have the configs listed in\n"
-    "  this variable added to them. These configs will also apply to the\n"
-    "  current target.\n"
-    "\n"
-    "  This addition happens in a second phase once a target and all of its\n"
-    "  dependencies have been resolved. Therefore, a target will not see\n"
-    "  these force-added configs in their \"configs\" variable while the\n"
-    "  script is running, and then can not be removed. As a result, this\n"
-    "  capability should generally only be used to add defines and include\n"
-    "  directories necessary to compile a target's headers.\n"
-    "\n"
-    "  See also \"all_dependent_configs\".\n"
-    COMMON_ORDERING_HELP;
+    "  See also \"public_deps\" and \"data_deps\".\n";
 
 const char kForwardDependentConfigsFrom[] = "forward_dependent_configs_from";
 const char kForwardDependentConfigsFrom_HelpShort[] =
@@ -490,19 +537,25 @@ const char kForwardDependentConfigsFrom_Help[] =
     "\n"
     "  A list of target labels.\n"
     "\n"
-    "  Exposes the direct_dependent_configs from a dependent target as\n"
-    "  direct_dependent_configs of the current one. Each label in this list\n"
+    "  Exposes the public_configs from a private dependent target as\n"
+    "  public_configs of the current one. Each label in this list\n"
     "  must also be in the deps.\n"
     "\n"
+    "  Generally you should use public_deps instead of this variable to\n"
+    "  express the concept of exposing a dependency as part of a target's\n"
+    "  public API. We're considering removing this variable.\n"
+    "\n"
+    "Discussion\n"
+    "\n"
     "  Sometimes you depend on a child library that exports some necessary\n"
-    "  configuration via direct_dependent_configs. If your target in turn\n"
-    "  exposes the child library's headers in its public headers, it might\n"
-    "  mean that targets that depend on you won't work: they'll be seeing the\n"
-    "  child library's code but not the necessary configuration. This list\n"
+    "  configuration via public_configs. If your target in turn exposes the\n"
+    "  child library's headers in its public headers, it might mean that\n"
+    "  targets that depend on you won't work: they'll be seeing the child\n"
+    "  library's code but not the necessary configuration. This list\n"
     "  specifies which of your deps' direct dependent configs to expose as\n"
     "  your own.\n"
     "\n"
-    "Examples:\n"
+    "Examples\n"
     "\n"
     "  If we use a given library \"a\" from our public headers:\n"
     "\n"
@@ -596,7 +649,7 @@ const char kLdflags_Help[] =
     "  ldflags are NOT pushed to dependents, so applying ldflags to source\n"
     "  sets or static libraries will be a no-op. If you want to apply ldflags\n"
     "  to dependent targets, put them in a config and set it in the\n"
-    "  all_dependent_configs or direct_dependent_configs.\n";
+    "  all_dependent_configs or public_configs.\n";
 
 #define COMMON_LIB_INHERITANCE_HELP \
     "\n" \
@@ -739,6 +792,76 @@ const char kPublic_Help[] =
     "  No files are public (no targets may include headers from this one):\n"
     "    public = []\n";
 
+const char kPublicConfigs[] = "public_configs";
+const char kPublicConfigs_HelpShort[] =
+    "public_configs: [label list] Configs applied to dependents.";
+const char kPublicConfigs_Help[] =
+    "public_configs: Configs to be applied on dependents.\n"
+    "\n"
+    "  A list of config labels.\n"
+    "\n"
+    "  Targets directly depending on this one will have the configs listed in\n"
+    "  this variable added to them. These configs will also apply to the\n"
+    "  current target.\n"
+    "\n"
+    "  This addition happens in a second phase once a target and all of its\n"
+    "  dependencies have been resolved. Therefore, a target will not see\n"
+    "  these force-added configs in their \"configs\" variable while the\n"
+    "  script is running, and then can not be removed. As a result, this\n"
+    "  capability should generally only be used to add defines and include\n"
+    "  directories necessary to compile a target's headers.\n"
+    "\n"
+    "  See also \"all_dependent_configs\".\n"
+    COMMON_ORDERING_HELP;
+
+const char kPublicDeps[] = "public_deps";
+const char kPublicDeps_HelpShort[] =
+    "public_deps: [label list] Declare public dependencies.";
+const char kPublicDeps_Help[] =
+    "public_deps: Declare public dependencies.\n"
+    "\n"
+    "  Public dependencies are like private dependencies (\"deps\") but\n"
+    "  additionally express that the current target exposes the listed deps\n"
+    "  as part of its public API.\n"
+    "\n"
+    "  This has two ramifications:\n"
+    "\n"
+    "    - public_configs that are part of the dependency are forwarded\n"
+    "      to direct dependents (this is the same as using\n"
+    "      forward_dependent_configs_from).\n"
+    "\n"
+    "    - public headers in the dependency are usable by dependents\n"
+    "      (includes do not require a direct dependency or visibility).\n"
+    "\n"
+    "Discussion\n"
+    "\n"
+    "  Say you have three targets: A -> B -> C. C's visibility may allow\n"
+    "  B to depend on it but not A. Normally, this would prevent A from\n"
+    "  including any headers from C, and C's public_configs would apply\n"
+    "  only to B.\n"
+    "\n"
+    "  If B lists C in its public_deps instead of regular deps, A will now\n"
+    "  inherit C's public_configs and the ability to include C's public\n"
+    "  headers.\n"
+    "\n"
+    "  Generally if you are writing a target B and you include C's headers\n"
+    "  as part of B's public headers, or targets depending on B should\n"
+    "  consider B and C to be part of a unit, you should use public_deps\n"
+    "  instead of deps.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  # This target can include files from \"c\" but not from\n"
+    "  # \"super_secret_implementation_details\".\n"
+    "  executable(\"a\") {\n"
+    "    deps = [ \":b\" ]\n"
+    "  }\n"
+    "\n"
+    "  shared_library(\"b\") {\n"
+    "    deps = [ \":super_secret_implementation_details\" ]\n"
+    "    public_deps = [ \":c\" ]\n"
+    "  }\n";
+
 const char kScript[] = "script";
 const char kScript_HelpShort[] =
     "script: [file name] Script file for actions.";
@@ -757,15 +880,37 @@ const char kSources_Help[] =
     "\n"
     "  A list of files relative to the current buildfile.\n";
 
+const char kTestonly[] = "testonly";
+const char kTestonly_HelpShort[] =
+    "testonly: [boolean] Declares a target must only be used for testing.";
+const char kTestonly_Help[] =
+    "testonly: Declares a target must only be used for testing.\n"
+    "\n"
+    "  Boolean. Defaults to false.\n"
+    "\n"
+    "  When a target is marked \"testonly = true\", it must only be depended\n"
+    "  on by other test-only targets. Otherwise, GN will issue an error\n"
+    "  that the depenedency is not allowed.\n"
+    "\n"
+    "  This feature is intended to prevent accidentally shipping test code\n"
+    "  in a final product.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  source_set(\"test_support\") {\n"
+    "    testonly = true\n"
+    "    ...\n"
+    "  }\n";
+
 const char kVisibility[] = "visibility";
 const char kVisibility_HelpShort[] =
     "visibility: [label list] A list of labels that can depend on a target.";
 const char kVisibility_Help[] =
     "visibility: A list of labels that can depend on a target.\n"
     "\n"
-    "  A label or a list of labels and label patterns that define which\n"
-    "  targets can depend on the current one. These permissions are checked\n"
-    "  via then \"check\" command (see \"gn help check\").\n"
+    "  A list of labels and label patterns that define which targets can\n"
+    "  depend on the current one. These permissions are checked via the\n"
+    "  \"check\" command (see \"gn help check\").\n"
     "\n"
     "  If visibility is not defined, it defaults to public (\"*\").\n"
     "\n"
@@ -778,44 +923,32 @@ const char kVisibility_Help[] =
     "  outside of any target, and the targets will inherit that scope and see\n"
     "  the definition.\n"
     "\n"
-    "Matching:\n"
+    "Patterns\n"
     "\n"
-    "  You can specify \"*\" but the inputs aren't general patterns. The\n"
-    "  following classes of patterns are supported:\n"
+    "  See \"gn help label_pattern\" for more details on what types of\n"
+    "  patterns are supported. If a toolchain is specified, only targets\n"
+    "  in that toolchain will be matched. If a toolchain is not specified on\n"
+    "  a pattern, targets in all toolchains will be matched.\n"
     "\n"
-    "   - Explicit (no wildcard):\n"
-    "       \"//foo/bar:baz\"\n"
-    "       \":baz\"\n"
-    "   - Wildcard target names:\n"
-    "       \"//foo/bar:*\" (any target in the //foo/bar/BUILD.gn file)\n"
-    "       \":*\"  (any target in the current build file)\n"
-    "   - Wildcard directory names (\"*\" is only supported at the end)\n"
-    "       \"*\"  (any target anywhere)\n"
-    "       \"//foo/bar/*\"  (any target in any subdir of //foo/bar)\n"
-    "       \"./*\"  (any target in the current build file or sub dirs)\n"
-    "\n"
-    "  The toolchain (normally an implicit part of a label) is ignored when\n"
-    "  checking visibility.\n"
-    "\n"
-    "Examples:\n"
+    "Examples\n"
     "\n"
     "  Only targets in the current buildfile (\"private\", the default):\n"
-    "    visibility = \":*\"\n"
+    "    visibility = [ \":*\" ]\n"
     "\n"
     "  No targets (used for targets that should be leaf nodes):\n"
     "    visibility = []\n"
     "\n"
     "  Any target (\"public\"):\n"
-    "    visibility = \"*\"\n"
+    "    visibility = [ \"*\" ]\n"
     "\n"
     "  All targets in the current directory and any subdirectory:\n"
-    "    visibility = \"./*\"\n"
+    "    visibility = [ \"./*\" ]\n"
     "\n"
     "  Any target in \"//bar/BUILD.gn\":\n"
-    "    visibility = \"//bar:*\"\n"
+    "    visibility = [ \"//bar:*\" ]\n"
     "\n"
     "  Any target in \"//bar/\" or any subdirectory thereof:\n"
-    "    visibility = \"//bar/*\"\n"
+    "    visibility = [ \"//bar/*\"\n ]"
     "\n"
     "  Just these specific targets:\n"
     "    visibility = [ \":mything\", \"//foo:something_else\" ]\n"
@@ -845,7 +978,6 @@ const VariableInfoMap& GetBuiltinVariables() {
     INSERT_VARIABLE(BuildCpuArch)
     INSERT_VARIABLE(BuildOs)
     INSERT_VARIABLE(CpuArch)
-    INSERT_VARIABLE(ComponentMode)
     INSERT_VARIABLE(CurrentToolchain)
     INSERT_VARIABLE(DefaultToolchain)
     INSERT_VARIABLE(Os)
@@ -863,18 +995,21 @@ const VariableInfoMap& GetTargetVariables() {
   static VariableInfoMap info_map;
   if (info_map.empty()) {
     INSERT_VARIABLE(AllDependentConfigs)
+    INSERT_VARIABLE(AllowCircularIncludesFrom)
     INSERT_VARIABLE(Args)
     INSERT_VARIABLE(Cflags)
     INSERT_VARIABLE(CflagsC)
     INSERT_VARIABLE(CflagsCC)
     INSERT_VARIABLE(CflagsObjC)
     INSERT_VARIABLE(CflagsObjCC)
+    INSERT_VARIABLE(CheckIncludes)
+    INSERT_VARIABLE(CompleteStaticLib)
     INSERT_VARIABLE(Configs)
     INSERT_VARIABLE(Data)
-    INSERT_VARIABLE(Datadeps)
+    INSERT_VARIABLE(DataDeps)
+    INSERT_VARIABLE(Defines)
     INSERT_VARIABLE(Depfile)
     INSERT_VARIABLE(Deps)
-    INSERT_VARIABLE(DirectDependentConfigs)
     INSERT_VARIABLE(ForwardDependentConfigsFrom)
     INSERT_VARIABLE(IncludeDirs)
     INSERT_VARIABLE(Inputs)
@@ -885,8 +1020,11 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(OutputName)
     INSERT_VARIABLE(Outputs)
     INSERT_VARIABLE(Public)
+    INSERT_VARIABLE(PublicConfigs)
+    INSERT_VARIABLE(PublicDeps)
     INSERT_VARIABLE(Script)
     INSERT_VARIABLE(Sources)
+    INSERT_VARIABLE(Testonly)
     INSERT_VARIABLE(Visibility)
   }
   return info_map;

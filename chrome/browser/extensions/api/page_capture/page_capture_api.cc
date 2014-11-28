@@ -7,9 +7,10 @@
 #include <limits>
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -23,7 +24,7 @@ using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
 using content::WebContents;
 using extensions::PageCaptureSaveAsMHTMLFunction;
-using webkit_blob::ShareableFileReference;
+using storage::ShareableFileReference;
 
 namespace SaveAsMHTML = extensions::api::page_capture::SaveAsMHTML;
 
@@ -43,7 +44,7 @@ PageCaptureSaveAsMHTMLFunction::PageCaptureSaveAsMHTMLFunction() {
 
 PageCaptureSaveAsMHTMLFunction::~PageCaptureSaveAsMHTMLFunction() {
   if (mhtml_file_.get()) {
-    webkit_blob::ShareableFileReference* to_release = mhtml_file_.get();
+    storage::ShareableFileReference* to_release = mhtml_file_.get();
     to_release->AddRef();
     mhtml_file_ = NULL;
     BrowserThread::ReleaseSoon(BrowserThread::IO, FROM_HERE, to_release);

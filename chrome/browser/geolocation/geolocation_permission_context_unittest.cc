@@ -10,19 +10,19 @@
 
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
+#include "base/id_map.h"
 #include "base/memory/scoped_vector.h"
-#include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/clock.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/content_settings/permission_request_id.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/common/permission_request_id.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,6 +32,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_renderer_host.h"
+#include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -179,8 +180,7 @@ void GeolocationPermissionContextTests::RequestGeolocationPermission(
       base::Bind(&GeolocationPermissionContextTests::PermissionResponse,
                  base::Unretained(this), id),
       cancel_callback);
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
-  base::RunLoop().RunUntilIdle();
+  content::RunAllBlockingPoolTasksUntilIdle();
 }
 
 void GeolocationPermissionContextTests::PermissionResponse(
@@ -218,7 +218,7 @@ void GeolocationPermissionContextTests::AddNewTab(const GURL& url) {
   content::WebContents* new_tab = content::WebContents::Create(
       content::WebContents::CreateParams(profile()));
   new_tab->GetController().LoadURL(
-      url, content::Referrer(), content::PAGE_TRANSITION_TYPED, std::string());
+      url, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   content::RenderViewHostTester::For(new_tab->GetRenderViewHost())->
       SendNavigate(extra_tabs_.size() + 1, url);
 

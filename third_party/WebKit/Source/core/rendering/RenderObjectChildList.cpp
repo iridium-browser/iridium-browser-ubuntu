@@ -29,6 +29,7 @@
 
 #include "core/accessibility/AXObjectCache.h"
 #include "core/rendering/RenderCounter.h"
+#include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderObject.h"
 #include "core/rendering/RenderView.h"
 #include "core/rendering/style/RenderStyle.h"
@@ -63,19 +64,15 @@ RenderObject* RenderObjectChildList::removeChildNode(RenderObject* owner, Render
         toRenderBox(oldChild)->removeFloatingOrPositionedChildFromBlockLists();
 
     {
-        // FIXME: We should not be allowing repaint during layout. crbug.com/336250
+        // FIXME: We should not be allowing paint invalidation during layout. crbug.com/336250
         AllowPaintInvalidationScope scoper(owner->frameView());
 
         // So that we'll get the appropriate dirty bit set (either that a normal flow child got yanked or
-        // that a positioned child got yanked). We also repaint, so that the area exposed when the child
-        // disappears gets repainted properly.
+        // that a positioned child got yanked). We also issue paint invalidations, so that the area exposed when the child
+        // disappears gets paint invalidated properly.
         if (!owner->documentBeingDestroyed() && notifyRenderer && oldChild->everHadLayout()) {
-            oldChild->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
-            // We only repaint |oldChild| if we have a RenderLayer as its visual overflow may not be tracked by its parent.
-            if (oldChild->isBody())
-                owner->view()->paintInvalidationForWholeRenderer();
-            else
-                oldChild->paintInvalidationForWholeRenderer();
+            oldChild->setNeedsLayoutAndPrefWidthsRecalc();
+            invalidatePaintOnRemoval(*oldChild);
         }
     }
 
@@ -170,6 +167,22 @@ void RenderObjectChildList::insertChildNode(RenderObject* owner, RenderObject* n
 
     if (AXObjectCache* cache = owner->document().axObjectCache())
         cache->childrenChanged(owner);
+}
+
+void RenderObjectChildList::invalidatePaintOnRemoval(const RenderObject& oldChild)
+{
+    if (!oldChild.isRooted())
+        return;
+    if (oldChild.isBody()) {
+        oldChild.view()->setShouldDoFullPaintInvalidation(true);
+        return;
+    }
+    if (oldChild.isText()) {
+        oldChild.parent()->setShouldDoFullPaintInvalidation(true);
+        return;
+    }
+    DisableCompositingQueryAsserts disabler;
+    oldChild.invalidatePaintUsingContainer(oldChild.containerForPaintInvalidation(), oldChild.previousPaintInvalidationRect(), InvalidationRendererRemoval);
 }
 
 } // namespace blink

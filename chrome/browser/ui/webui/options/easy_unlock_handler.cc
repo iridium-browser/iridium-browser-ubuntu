@@ -4,12 +4,14 @@
 
 #include "chrome/browser/ui/webui/options/easy_unlock_handler.h"
 
+#include <string>
+
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 
 namespace options {
 
@@ -67,7 +69,7 @@ void EasyUnlockHandler::OnTurnOffOperationStatusChanged() {
 void EasyUnlockHandler::SendTurnOffOperationStatus() {
   EasyUnlockService::TurnOffFlowStatus status =
       EasyUnlockService::Get(Profile::FromWebUI(web_ui()))
-          ->turn_off_flow_status();
+          ->GetTurnOffFlowStatus();
 
   // Translate status into JS UI state string. Note the translated string
   // should match UIState defined in easy_unlock_turn_off_overlay.js.

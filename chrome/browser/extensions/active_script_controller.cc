@@ -10,16 +10,18 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
+#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_id.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -58,8 +60,11 @@ bool ShouldRecordExtension(const Extension* extension) {
 ActiveScriptController::ActiveScriptController(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      enabled_(FeatureSwitch::scripts_require_action()->IsEnabled()) {
+      enabled_(FeatureSwitch::scripts_require_action()->IsEnabled()),
+      extension_registry_observer_(this) {
   CHECK(web_contents);
+  extension_registry_observer_.Add(
+      ExtensionRegistry::Get(web_contents->GetBrowserContext()));
 }
 
 ActiveScriptController::~ActiveScriptController() {
@@ -72,13 +77,7 @@ ActiveScriptController* ActiveScriptController::GetForWebContents(
   if (!web_contents)
     return NULL;
   TabHelper* tab_helper = TabHelper::FromWebContents(web_contents);
-  if (!tab_helper)
-    return NULL;
-  LocationBarController* location_bar_controller =
-      tab_helper->location_bar_controller();
-  // This should never be NULL.
-  DCHECK(location_bar_controller);
-  return location_bar_controller->active_script_controller();
+  return tab_helper ? tab_helper->active_script_controller() : NULL;
 }
 
 void ActiveScriptController::OnActiveTabPermissionGranted(
@@ -138,46 +137,13 @@ void ActiveScriptController::AlwaysRunOnVisibleOrigin(
   OnClicked(extension);
 }
 
-bool ActiveScriptController::HasActiveScriptAction(const Extension* extension) {
-  return enabled_ && active_script_actions_.count(extension->id()) > 0;
-}
-
-ExtensionAction* ActiveScriptController::GetActionForExtension(
-    const Extension* extension) {
-  if (!enabled_ || pending_requests_.count(extension->id()) == 0)
-    return NULL;  // No action for this extension.
-
-  ActiveScriptMap::iterator existing =
-      active_script_actions_.find(extension->id());
-  if (existing != active_script_actions_.end())
-    return existing->second.get();
-
-  linked_ptr<ExtensionAction> action(ExtensionActionManager::Get(
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext()))
-      ->GetBestFitAction(*extension, ActionInfo::TYPE_PAGE).release());
-  action->SetIsVisible(ExtensionAction::kDefaultTabId, true);
-
-  active_script_actions_[extension->id()] = action;
-  return action.get();
-}
-
-ExtensionAction::ShowAction ActiveScriptController::OnClicked(
-    const Extension* extension) {
+void ActiveScriptController::OnClicked(const Extension* extension) {
   DCHECK(ContainsKey(pending_requests_, extension->id()));
   RunPendingForExtension(extension);
-  return ExtensionAction::ACTION_NONE;
 }
 
-void ActiveScriptController::OnNavigated() {
-  LogUMA();
-  permitted_extensions_.clear();
-  pending_requests_.clear();
-}
-
-void ActiveScriptController::OnExtensionUnloaded(const Extension* extension) {
-  PendingRequestMap::iterator iter = pending_requests_.find(extension->id());
-  if (iter != pending_requests_.end())
-    pending_requests_.erase(iter);
+bool ActiveScriptController::WantsToRun(const Extension* extension) {
+  return enabled_ && pending_requests_.count(extension->id()) > 0;
 }
 
 PermissionsData::AccessType
@@ -196,7 +162,7 @@ ActiveScriptController::RequiresUserConsentForScriptInjection(
     return PermissionsData::ACCESS_ALLOWED;
 
   GURL url = web_contents()->GetVisibleURL();
-  int tab_id = SessionID::IdForTab(web_contents());
+  int tab_id = SessionTabHelper::IdForTab(web_contents());
   switch (type) {
     case UserScript::CONTENT_SCRIPT:
       return extension->permissions_data()->GetContentScriptAccess(
@@ -219,8 +185,10 @@ void ActiveScriptController::RequestScriptInjection(
 
   // If this was the first entry, notify the location bar that there's a new
   // icon.
-  if (list.size() == 1u)
-    LocationBarController::NotifyChange(web_contents());
+  if (list.size() == 1u) {
+    ExtensionActionAPI::Get(web_contents()->GetBrowserContext())->
+        NotifyPageActionsChanged(web_contents());
+  }
 }
 
 void ActiveScriptController::RunPendingForExtension(
@@ -262,14 +230,15 @@ void ActiveScriptController::RunPendingForExtension(
   }
 
   // Inform the location bar that the action is now gone.
-  LocationBarController::NotifyChange(web_contents());
+  ExtensionActionAPI::Get(web_contents()->GetBrowserContext())->
+      NotifyPageActionsChanged(web_contents());
 }
 
 void ActiveScriptController::OnRequestScriptInjectionPermission(
     const std::string& extension_id,
     UserScript::InjectionType script_type,
     int64 request_id) {
-  if (!Extension::IdIsValid(extension_id)) {
+  if (!crx_file::id_util::IdIsValid(extension_id)) {
     NOTREACHED() << "'" << extension_id << "' is not a valid id.";
     return;
   }
@@ -325,16 +294,6 @@ void ActiveScriptController::PermitScriptInjection(int64 request_id) {
   }
 }
 
-bool ActiveScriptController::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ActiveScriptController, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestScriptInjectionPermission,
-                        OnRequestScriptInjectionPermission)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
 void ActiveScriptController::LogUMA() const {
   UMA_HISTOGRAM_COUNTS_100(
       "Extensions.ActiveScriptController.ShownActiveScriptsOnPage",
@@ -349,6 +308,39 @@ void ActiveScriptController::LogUMA() const {
     UMA_HISTOGRAM_COUNTS_100(
         "Extensions.ActiveScriptController.DeniedExtensions",
         pending_requests_.size());
+  }
+}
+
+bool ActiveScriptController::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(ActiveScriptController, message)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestScriptInjectionPermission,
+                        OnRequestScriptInjectionPermission)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void ActiveScriptController::DidNavigateMainFrame(
+    const content::LoadCommittedDetails& details,
+    const content::FrameNavigateParams& params) {
+  if (details.is_in_page)
+    return;
+
+  LogUMA();
+  permitted_extensions_.clear();
+  pending_requests_.clear();
+}
+
+void ActiveScriptController::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    UnloadedExtensionInfo::Reason reason) {
+  PendingRequestMap::iterator iter = pending_requests_.find(extension->id());
+  if (iter != pending_requests_.end()) {
+    pending_requests_.erase(iter);
+    ExtensionActionAPI::Get(web_contents()->GetBrowserContext())->
+        NotifyPageActionsChanged(web_contents());
   }
 }
 

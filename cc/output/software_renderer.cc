@@ -20,9 +20,7 @@
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/quads/tile_draw_quad.h"
-#include "cc/resources/raster_worker_pool.h"
 #include "skia/ext/opacity_draw_filter.h"
-#include "third_party/skia/include/core/SkBitmapDevice.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
@@ -34,45 +32,7 @@
 #include "ui/gfx/transform.h"
 
 namespace cc {
-
 namespace {
-
-class OnDemandRasterTaskImpl : public Task {
- public:
-  OnDemandRasterTaskImpl(PicturePileImpl* picture_pile,
-                         SkCanvas* canvas,
-                         gfx::Rect content_rect,
-                         float contents_scale)
-      : picture_pile_(picture_pile),
-        canvas_(canvas),
-        content_rect_(content_rect),
-        contents_scale_(contents_scale) {
-    DCHECK(picture_pile_);
-    DCHECK(canvas_);
-  }
-
-  // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {
-    TRACE_EVENT0("cc", "OnDemandRasterTaskImpl::RunOnWorkerThread");
-
-    PicturePileImpl* picture_pile = picture_pile_->GetCloneForDrawingOnThread(
-        RasterWorkerPool::GetPictureCloneIndexForCurrentThread());
-    DCHECK(picture_pile);
-
-    picture_pile->RasterDirect(canvas_, content_rect_, contents_scale_, NULL);
-  }
-
- protected:
-  virtual ~OnDemandRasterTaskImpl() {}
-
- private:
-  PicturePileImpl* picture_pile_;
-  SkCanvas* canvas_;
-  const gfx::Rect content_rect_;
-  const float contents_scale_;
-
-  DISALLOW_COPY_AND_ASSIGN(OnDemandRasterTaskImpl);
-};
 
 static inline bool IsScalarNearlyInteger(SkScalar scalar) {
   return SkScalarNearlyZero(scalar - SkScalarRoundToScalar(scalar));
@@ -128,7 +88,6 @@ SoftwareRenderer::SoftwareRenderer(RendererClient* client,
   capabilities_.allow_partial_texture_updates = true;
   capabilities_.using_partial_swap = true;
 
-  capabilities_.using_map_image = true;
   capabilities_.using_shared_memory_resources = true;
 
   capabilities_.allow_rasterize_on_demand = true;
@@ -293,9 +252,10 @@ void SoftwareRenderer::DoDrawQuad(DrawingFrame* frame, const DrawQuad* quad) {
     current_paint_.setFilterLevel(SkPaint::kLow_FilterLevel);
   }
 
-  if (quad->ShouldDrawWithBlending()) {
+  if (quad->ShouldDrawWithBlending() ||
+      quad->shared_quad_state->blend_mode != SkXfermode::kSrcOver_Mode) {
     current_paint_.setAlpha(quad->opacity() * 255);
-    current_paint_.setXfermodeMode(SkXfermode::kSrcOver_Mode);
+    current_paint_.setXfermodeMode(quad->shared_quad_state->blend_mode);
   } else {
     current_paint_.setXfermodeMode(SkXfermode::kSrc_Mode);
   }
@@ -389,13 +349,8 @@ void SoftwareRenderer::DrawPictureQuad(const DrawingFrame* frame,
   TRACE_EVENT0("cc",
                "SoftwareRenderer::DrawPictureQuad");
 
-  // Create and run on-demand raster task for tile.
-  scoped_refptr<Task> on_demand_raster_task(
-      new OnDemandRasterTaskImpl(quad->picture_pile,
-                                 current_canvas_,
-                                 quad->content_rect,
-                                 quad->contents_scale));
-  client_->RunOnDemandRasterTask(on_demand_raster_task.get());
+  quad->picture_pile->RasterDirect(
+      current_canvas_, quad->content_rect, quad->contents_scale, NULL);
 
   current_canvas_->setDrawFilter(NULL);
 }
@@ -531,7 +486,7 @@ void SoftwareRenderer::DrawRenderPassQuad(const DrawingFrame* frame,
     if (filter) {
       SkImageInfo info = SkImageInfo::MakeN32Premul(
           content_texture->size().width(), content_texture->size().height());
-      if (filter_bitmap.allocPixels(info)) {
+      if (filter_bitmap.tryAllocPixels(info)) {
         SkCanvas canvas(filter_bitmap);
         SkPaint paint;
         paint.setImageFilter(filter.get());
@@ -589,7 +544,7 @@ void SoftwareRenderer::DrawRenderPassQuad(const DrawingFrame* frame,
     current_paint_.setRasterizer(mask_rasterizer.get());
     current_canvas_->drawRect(dest_visible_rect, current_paint_);
   } else {
-    // TODO(skaslev): Apply background filters and blend with content
+    // TODO(skaslev): Apply background filters
     current_canvas_->drawRect(dest_visible_rect, current_paint_);
   }
 }

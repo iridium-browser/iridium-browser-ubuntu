@@ -10,7 +10,7 @@
 #include "base/files/file.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/utility_process_host_client.h"
-#include "webkit/browser/fileapi/copy_or_move_file_validator.h"
+#include "storage/browser/fileapi/copy_or_move_file_validator.h"
 
 namespace content {
 class UtilityProcessHost;
@@ -26,7 +26,7 @@ class SafeAudioVideoChecker : public content::UtilityProcessHostClient {
   // Takes responsibility for closing |file|.
   SafeAudioVideoChecker(
       base::File file,
-      const fileapi::CopyOrMoveFileValidator::ResultCallback& callback);
+      const storage::CopyOrMoveFileValidator::ResultCallback& callback);
 
   // Must be called on the IO thread.
   void Start();
@@ -55,7 +55,7 @@ class SafeAudioVideoChecker : public content::UtilityProcessHostClient {
 
   base::File file_;
 
-  const fileapi::CopyOrMoveFileValidator::ResultCallback callback_;
+  const storage::CopyOrMoveFileValidator::ResultCallback callback_;
 
   base::WeakPtr<content::UtilityProcessHost> utility_process_host_;
 

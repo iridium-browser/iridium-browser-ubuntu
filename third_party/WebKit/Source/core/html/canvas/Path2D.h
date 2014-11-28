@@ -40,7 +40,9 @@
 namespace blink {
 
 class Path2D FINAL : public RefCountedWillBeGarbageCollectedFinalized<Path2D>, public CanvasPathMethods, public ScriptWrappable {
-    WTF_MAKE_NONCOPYABLE(Path2D); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    DEFINE_WRAPPERTYPEINFO();
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(Path2D);
 public:
     static PassRefPtrWillBeRawPtr<Path2D> create() { return adoptRefWillBeNoop(new Path2D); }
     static PassRefPtrWillBeRawPtr<Path2D> create(const String& pathData) { return adoptRefWillBeNoop(new Path2D(pathData)); }
@@ -65,30 +67,21 @@ public:
     void trace(Visitor*) { }
 
 private:
-    Path2D() : CanvasPathMethods()
-    {
-        ScriptWrappable::init(this);
-    }
+    Path2D() : CanvasPathMethods() { }
 
     Path2D(const Path& path)
-        : CanvasPathMethods(path)
-    {
-        ScriptWrappable::init(this);
-    }
+        : CanvasPathMethods(path) { }
 
     Path2D(Path2D* path)
-        : CanvasPathMethods(path->path())
-    {
-        ScriptWrappable::init(this);
-    }
+        : CanvasPathMethods(path->path()) { }
 
     Path2D(const String& pathData)
         : CanvasPathMethods()
     {
-        ScriptWrappable::init(this);
         buildPathFromString(pathData, m_path);
     }
 };
 
-}
-#endif
+} // namespace blink
+
+#endif // Path2D_h

@@ -47,14 +47,9 @@
 
 namespace blink {
 
-class AnimationParseContext;
-class CSSBorderImageSliceValue;
-class CSSPrimitiveValue;
 class CSSSelectorList;
 class CSSValue;
 class CSSValueList;
-class CSSBasicShape;
-class CSSBasicShapeInset;
 class Document;
 class Element;
 class ImmutableStylePropertySet;
@@ -63,12 +58,10 @@ class MediaQuerySet;
 class MutableStylePropertySet;
 class StyleColor;
 class StyleKeyframe;
-class StylePropertyShorthand;
 class StyleRuleBase;
 class StyleRuleKeyframes;
 class StyleKeyframe;
 class StyleSheetContents;
-class UseCounter;
 
 // FIXME: This class is shared with CSSTokenizer so should we rename it to CSSSourceLocation?
 struct CSSParserLocation {
@@ -91,19 +84,15 @@ public:
     PassRefPtrWillBeRawPtr<StyleRuleBase> parseRule(StyleSheetContents*, const String&);
     PassRefPtrWillBeRawPtr<StyleKeyframe> parseKeyframeRule(StyleSheetContents*, const String&);
     bool parseSupportsCondition(const String&);
+    static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, const CSSParserContext&);
     static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, CSSParserMode, StyleSheetContents*);
     static bool parseColor(RGBA32& color, const String&, bool strict = false);
     static StyleColor colorFromRGBColorString(const String&);
     static bool parseSystemColor(RGBA32& color, const String&);
-    static PassRefPtrWillBeRawPtr<CSSValueList> parseFontFaceValue(const AtomicString&);
-    static PassRefPtrWillBeRawPtr<CSSValue> parseAnimationTimingFunctionValue(const String&);
     bool parseDeclaration(MutableStylePropertySet*, const String&, CSSParserObserver*, StyleSheetContents* contextStyleSheet);
     static PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> parseInlineStyleDeclaration(const String&, Element*);
-    PassRefPtrWillBeRawPtr<MediaQuerySet> parseMediaQueryList(const String&);
     PassOwnPtr<Vector<double> > parseKeyframeKeyList(const String&);
     bool parseAttributeMatchType(CSSSelector::AttributeMatchType&, const String&);
-
-    static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, const Document&);
 
     bool parseValue(CSSPropertyID, bool important);
     void parseSelector(const String&, CSSSelectorList&);
@@ -183,7 +172,6 @@ public:
     RawPtrWillBeMember<StyleSheetContents> m_styleSheet;
     RefPtrWillBeMember<StyleRuleBase> m_rule;
     RefPtrWillBeMember<StyleKeyframe> m_keyframe;
-    RefPtrWillBeMember<MediaQuerySet> m_mediaList;
     OwnPtr<CSSParserValueList> m_valueList;
     bool m_supportsCondition;
 
@@ -211,7 +199,6 @@ public:
     void startRuleBody();
     void startProperty();
     void endProperty(bool isImportantFound, bool isPropertyParsed, CSSParserError = NoCSSError);
-    void startEndUnknownRule();
 
     void endInvalidRuleHeader();
     void reportError(const CSSParserLocation&, CSSParserError = GeneralCSSError);

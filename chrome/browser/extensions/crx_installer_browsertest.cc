@@ -2,28 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/crx_installer.h"
+
 #include "base/at_exit.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/fake_safe_browsing_database_manager.h"
+#include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/notification_types.h"
@@ -32,7 +37,6 @@
 #include "extensions/common/file_util.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/switches.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -231,23 +235,22 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
   }
 };
 
-#if defined(OS_CHROMEOS)
-#define MAYBE_Whitelisting DISABLED_Whitelisting
-#else
-#define MAYBE_Whitelisting Whitelisting
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, MAYBE_Whitelisting) {
+// This test is skipped on ChromeOS because it requires the NPAPI,
+// which is not available on that platform.
+#if !defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, Whitelisting) {
   std::string id = "hdgllgikmikobbofgnabhfimcfoopgnd";
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
+  ExtensionRegistry* registry = ExtensionRegistry::Get(
+      browser()->profile());
 
   // Even whitelisted extensions with NPAPI should not prompt.
   scoped_refptr<MockPromptProxy> mock_prompt =
       CreateMockPromptProxyForBrowser(browser());
   InstallWithPrompt("uitest/plugins", id, mock_prompt);
   EXPECT_FALSE(mock_prompt->confirmation_requested());
-  EXPECT_TRUE(service->GetExtensionById(id, false));
+  EXPECT_TRUE(registry->enabled_extensions().GetByID(id));
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
                        GalleryInstallGetsExperimental) {
@@ -275,14 +278,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, PlatformAppCrx) {
       test_data_dir_.AppendASCII("minimal_platform_app.crx"), 1));
 }
 
-// http://crbug.com/136397
-#if defined(OS_CHROMEOS)
-#define MAYBE_PackAndInstallExtension DISABLED_PackAndInstallExtension
-#else
-#define MAYBE_PackAndInstallExtension PackAndInstallExtension
-#endif
-IN_PROC_BROWSER_TEST_F(
-    ExtensionCrxInstallerTest, MAYBE_PackAndInstallExtension) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, PackAndInstallExtension) {
   if (!FeatureSwitch::easy_off_store_install()->IsEnabled())
     return;
 
@@ -336,14 +332,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DoNotGrantScopes) {
                                                           false));
 }
 
-// Off-store install cannot yet be disabled on Aura.
-#if defined(USE_AURA)
-#define MAYBE_AllowOffStore DISABLED_AllowOffStore
-#else
-#define MAYBE_AllowOffStore AllowOffStore
-#endif
-// Crashy: http://crbug.com/140893
-IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DISABLED_AllowOffStore) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, AllowOffStore) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
   const bool kTestData[] = {false, true};
@@ -363,8 +352,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DISABLED_AllowOffStore) {
     }
 
     crx_installer->InstallCrx(test_data_dir_.AppendASCII("good.crx"));
-    EXPECT_EQ(kTestData[i],
-              WaitForExtensionInstall()) << kTestData[i];
+    // The |mock_prompt| will quit running the loop once the |crx_installer|
+    // is done.
+    content::RunMessageLoop();
     EXPECT_EQ(kTestData[i], mock_prompt->did_succeed());
     EXPECT_EQ(kTestData[i], mock_prompt->confirmation_requested()) <<
         kTestData[i];
@@ -385,16 +375,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, HiDpiThemeTest) {
   ASSERT_TRUE(InstallExtension(crx_path, 1));
 
   const std::string extension_id("gllekhaobjnhgeagipipnkpmmmpchacm");
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
-  ASSERT_TRUE(service);
+  ExtensionRegistry* registry = ExtensionRegistry::Get(
+      browser()->profile());
   const extensions::Extension* extension =
-     service->GetExtensionById(extension_id, false);
+     registry->enabled_extensions().GetByID(extension_id);
   ASSERT_TRUE(extension);
   EXPECT_EQ(extension_id, extension->id());
 
   UninstallExtension(extension_id);
-  EXPECT_FALSE(service->GetExtensionById(extension_id, false));
+  EXPECT_FALSE(registry->enabled_extensions().GetByID(extension_id));
 }
 
 // See http://crbug.com/315299.
@@ -412,12 +401,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
       browser()->profile());
   ExtensionService* service = extension_system->extension_service();
   ASSERT_TRUE(service);
+  ExtensionRegistry* registry = ExtensionRegistry::Get(
+      browser()->profile());
+  ASSERT_TRUE(registry);
 
   // Install version 1 of the test extension. This extension does not have
   // a background page but does have a browser action.
   ASSERT_TRUE(InstallExtension(crx_path.AppendASCII("v1.crx"), 1));
   const extensions::Extension* extension =
-     service->GetExtensionById(extension_id, false);
+     registry->enabled_extensions().GetByID(extension_id);
   ASSERT_TRUE(extension);
   ASSERT_EQ(extension_id, extension->id());
   ASSERT_EQ("1.0", extension->version()->GetString());
@@ -440,7 +432,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
       extension_id, crx_path.AppendASCII("v2.crx"), 0));
 
   ASSERT_EQ(1u, service->delayed_installs()->size());
-  extension = service->GetExtensionById(extension_id, false);
+  extension = registry->enabled_extensions().GetByID(extension_id);
   ASSERT_EQ("1.0", extension->version()->GetString());
 
   // Make the extension idle again by closing the popup. This should not trigger
@@ -456,14 +448,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
   // this install should succeed.
   ASSERT_TRUE(UpdateExtensionWaitForIdle(
       extension_id, crx_path.AppendASCII("v3.crx"), 0));
-  extension = service->GetExtensionById(extension_id, false);
+  extension = registry->enabled_extensions().GetByID(extension_id);
   ASSERT_EQ("3.0", extension->version()->GetString());
 
   // The version 2 delayed install should be cleaned up, and finishing
   // delayed extension installation shouldn't break anything.
   ASSERT_EQ(0u, service->delayed_installs()->size());
   service->MaybeFinishDelayedInstallations();
-  extension = service->GetExtensionById(extension_id, false);
+  extension = registry->enabled_extensions().GetByID(extension_id);
   ASSERT_EQ("3.0", extension->version()->GetString());
 }
 
@@ -534,18 +526,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, InstallToSharedLocation) {
 
   std::string extension_id = extension->id();
   UninstallExtension(extension_id);
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
-  EXPECT_FALSE(service->GetExtensionById(extension_id, false));
+  ExtensionRegistry* registry = ExtensionRegistry::Get(
+      browser()->profile());
+  EXPECT_FALSE(registry->enabled_extensions().GetByID(extension_id));
 
-  // In the worst case you need to repeat this up to 3 times to make sure that
-  // all pending tasks we sent from UI thread to task runner and back to UI.
-  for (int i = 0; i < 3; i++) {
-    // Wait for background task completion that sends replay to UI thread.
-    content::BrowserThread::GetBlockingPool()->FlushForTesting();
-    // Wait for UI thread task completion.
-    base::RunLoop().RunUntilIdle();
-  }
+  content::RunAllBlockingPoolTasksUntilIdle();
 
   EXPECT_FALSE(base::PathExists(extension_path));
 }
@@ -576,6 +561,44 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, ManagementPolicy) {
 
   base::FilePath crx_path = test_data_dir_.AppendASCII("crx_installer/v1.crx");
   EXPECT_FALSE(InstallExtension(crx_path, 0));
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, WithheldElevationCheck) {
+  // Enable consent flag and install extension. The <all_hosts> permission will
+  // be withheld.
+  scoped_ptr<FeatureSwitch::ScopedOverride> enable_scripts_switch(
+      new FeatureSwitch::ScopedOverride(
+          FeatureSwitch::scripts_require_action(), true));
+
+  const char kManifest[] =
+      "{"
+      "  \"name\": \"Withheld test\","
+      "  \"version\": \"1.0\","
+      "  \"permissions\": ["
+      "    \"http://*/*\""
+      "  ],"
+      "  \"manifest_version\": 2"
+      "}";
+  TestExtensionDir dir;
+  dir.WriteManifest(kManifest);
+  base::FilePath crx_path = dir.Pack();
+  EXPECT_FALSE(crx_path.empty());
+  const Extension* extension = InstallExtension(crx_path, 1);
+  EXPECT_TRUE(base::PathExists(extension->path()));
+
+  std::string extension_id = extension->id();
+  ExtensionRegistry* registry = ExtensionRegistry::Get(
+      browser()->profile());
+  EXPECT_TRUE(registry->enabled_extensions().GetByID(extension_id));
+
+  // Disable consent flag and reinstall extension. It should now be disabled
+  // because previously withheld permissions are now being requested.
+  enable_scripts_switch.reset();
+  extension = InstallExtension(crx_path, -1);
+  EXPECT_FALSE(registry->enabled_extensions().GetByID(extension_id));
+  EXPECT_TRUE(registry->disabled_extensions().GetByID(extension_id));
+  EXPECT_TRUE(ExtensionPrefs::Get(browser()->profile())->GetDisableReasons(
+      extension_id) & Extension::DISABLE_PERMISSIONS_INCREASE);
 }
 
 }  // namespace extensions

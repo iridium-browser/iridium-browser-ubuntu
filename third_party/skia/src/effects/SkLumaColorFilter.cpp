@@ -11,10 +11,10 @@
 #include "SkString.h"
 
 #if SK_SUPPORT_GPU
-#include "gl/GrGLEffect.h"
-#include "gl/GrGLShaderBuilder.h"
+#include "gl/GrGLProcessor.h"
+#include "gl/builders/GrGLProgramBuilder.h"
 #include "GrContext.h"
-#include "GrTBackendEffectFactory.h"
+#include "GrTBackendProcessorFactory.h"
 #endif
 
 void SkLumaColorFilter::filterSpan(const SkPMColor src[], int count,
@@ -41,16 +41,17 @@ SkColorFilter* SkLumaColorFilter::Create() {
     return SkNEW(SkLumaColorFilter);
 }
 
-SkLumaColorFilter::SkLumaColorFilter()
-    : INHERITED() {
+SkLumaColorFilter::SkLumaColorFilter() : INHERITED() {}
+
+#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
+SkLumaColorFilter::SkLumaColorFilter(SkReadBuffer& buffer) : INHERITED(buffer) {}
+#endif
+
+SkFlattenable* SkLumaColorFilter::CreateProc(SkReadBuffer&) {
+    return SkNEW(SkLumaColorFilter);
 }
 
-SkLumaColorFilter::SkLumaColorFilter(SkReadBuffer& buffer)
-    : INHERITED(buffer) {
-}
-
-void SkLumaColorFilter::flatten(SkWriteBuffer&) const {
-}
+void SkLumaColorFilter::flatten(SkWriteBuffer&) const {}
 
 #ifndef SK_IGNORE_TO_STRING
 void SkLumaColorFilter::toString(SkString* str) const {
@@ -59,17 +60,17 @@ void SkLumaColorFilter::toString(SkString* str) const {
 #endif
 
 #if SK_SUPPORT_GPU
-class LumaColorFilterEffect : public GrEffect {
+class LumaColorFilterEffect : public GrFragmentProcessor {
 public:
-    static GrEffect* Create() {
-        GR_CREATE_STATIC_EFFECT(gLumaEffect, LumaColorFilterEffect, ());
+    static GrFragmentProcessor* Create() {
+        GR_CREATE_STATIC_FRAGMENT_PROCESSOR(gLumaEffect, LumaColorFilterEffect, ());
         return SkRef(gLumaEffect);
     }
 
     static const char* Name() { return "Luminance-to-Alpha"; }
 
-    virtual const GrBackendEffectFactory& getFactory() const SK_OVERRIDE {
-        return GrTBackendEffectFactory<LumaColorFilterEffect>::getInstance();
+    virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE {
+        return GrTBackendFragmentProcessorFactory<LumaColorFilterEffect>::getInstance();
     }
 
     virtual void getConstantColorComponents(GrColor* color,
@@ -79,18 +80,18 @@ public:
         *validFlags = kRGB_GrColorComponentFlags;
     }
 
-    class GLEffect : public GrGLEffect {
+    class GLProcessor : public GrGLFragmentProcessor {
     public:
-        GLEffect(const GrBackendEffectFactory& factory,
-                 const GrDrawEffect&)
+        GLProcessor(const GrBackendProcessorFactory& factory,
+                    const GrProcessor&)
         : INHERITED(factory) {
         }
 
-        static void GenKey(const GrDrawEffect&, const GrGLCaps&, GrEffectKeyBuilder* b) {}
+        static void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder* b) {}
 
-        virtual void emitCode(GrGLShaderBuilder* builder,
-                              const GrDrawEffect&,
-                              const GrEffectKey&,
+        virtual void emitCode(GrGLProgramBuilder* builder,
+                              const GrFragmentProcessor&,
+                              const GrProcessorKey&,
                               const char* outputColor,
                               const char* inputColor,
                               const TransformedCoordsArray&,
@@ -99,27 +100,28 @@ public:
                 inputColor = "vec4(1)";
             }
 
-            builder->fsCodeAppendf("\tfloat luma = dot(vec3(%f, %f, %f), %s.rgb);\n",
+            GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            fsBuilder->codeAppendf("\tfloat luma = dot(vec3(%f, %f, %f), %s.rgb);\n",
                                    SK_ITU_BT709_LUM_COEFF_R,
                                    SK_ITU_BT709_LUM_COEFF_G,
                                    SK_ITU_BT709_LUM_COEFF_B,
                                    inputColor);
-            builder->fsCodeAppendf("\t%s = vec4(0, 0, 0, luma);\n",
+            fsBuilder->codeAppendf("\t%s = vec4(0, 0, 0, luma);\n",
                                    outputColor);
 
         }
 
     private:
-        typedef GrGLEffect INHERITED;
+        typedef GrGLFragmentProcessor INHERITED;
     };
 
 private:
-    virtual bool onIsEqual(const GrEffect&) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE {
         return true;
     }
 };
 
-GrEffect* SkLumaColorFilter::asNewEffect(GrContext*) const {
+GrFragmentProcessor* SkLumaColorFilter::asFragmentProcessor(GrContext*) const {
     return LumaColorFilterEffect::Create();
 }
 #endif

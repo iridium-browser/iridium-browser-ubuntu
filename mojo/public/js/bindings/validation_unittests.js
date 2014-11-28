@@ -3,14 +3,32 @@
 // found in the LICENSE file.
 
 define([
+    "console",
     "file",
     "gin/test/expect",
     "mojo/public/interfaces/bindings/tests/validation_test_interfaces.mojom",
     "mojo/public/js/bindings/buffer",
     "mojo/public/js/bindings/codec",
+    "mojo/public/js/bindings/connection",
+    "mojo/public/js/bindings/connector",
+    "mojo/public/js/bindings/core",
     "mojo/public/js/bindings/tests/validation_test_input_parser",
+    "mojo/public/js/bindings/router",
     "mojo/public/js/bindings/validator",
-  ], function(file, expect, testInterface, buffer, codec, parser, validator) {
+], function(console,
+            file,
+            expect,
+            testInterface,
+            buffer,
+            codec,
+            connection,
+            connector,
+            core,
+            parser,
+            router,
+            validator) {
+
+  var noError = validator.validationError.NONE;
 
   function checkTestMessageParser() {
     function TestMessageParserFailure(message, input) {
@@ -162,7 +180,7 @@ define([
     return null;
   }
 
-  function getMessageTestFiles() {
+  function getMessageTestFiles(key) {
     var sourceRoot = file.getSourceRootDirectory();
     expect(sourceRoot).not.toBeNull();
 
@@ -172,17 +190,14 @@ define([
     expect(testFiles).not.toBeNull();
     expect(testFiles.length).toBeGreaterThan(0);
 
-   // The ".data" pathnames with the extension removed.
-   var testPathNames = testFiles.filter(function(s) {
-     return s.substr(-5) == ".data";
-   }).map(function(s) {
-     return testDir + s.slice(0, -5);
-   });
-
-   // For now, just checking the message header tests.
-   return testPathNames.filter(function(s) {
-     return s.indexOf("_msghdr_") != -1;
-   });
+    // The matching ".data" pathnames with the extension removed.
+    return testFiles.filter(function(s) {
+      return s.substr(-5) == ".data";
+    }).map(function(s) {
+      return testDir + s.slice(0, -5);
+    }).filter(function(s) {
+      return s.indexOf(key) != -1;
+    });
   }
 
   function readTestMessage(filename) {
@@ -197,21 +212,91 @@ define([
     return contents.trim();
   }
 
-  function testValidateMessageHeader() {
-    var testFiles = getMessageTestFiles();
+  function checkValidationResult(testFile, err) {
+    var actualResult = (err === noError) ? "PASS" : err;
+    var expectedResult = readTestExpected(testFile);
+    if (actualResult != expectedResult)
+      console.log("[Test message validation failed: " + testFile + " ]");
+    expect(actualResult).toEqual(expectedResult);
+  }
+
+  function testMessageValidation(key, filters) {
+    var testFiles = getMessageTestFiles(key);
     expect(testFiles.length).toBeGreaterThan(0);
 
     for (var i = 0; i < testFiles.length; i++) {
+      // TODO(hansmuller): Temporarily skipping array pointer overflow tests.
+      if (testFiles[i].indexOf("overflow") != -1) {
+        console.log("[Skipping " + testFiles[i] + "]");
+        continue;
+      }
+
       var testMessage = readTestMessage(testFiles[i]);
-      // TODO(hansmuller): add the message handles.
-      var message = new codec.Message(testMessage.buffer);
-      var actualResult = new validator.Validator(message).validateMessage();
-      var expectedResult = readTestExpected(testFiles[i]);
-      expect(actualResult).toEqual(expectedResult);
+      var handles = new Array(testMessage.handleCount);
+      var message = new codec.Message(testMessage.buffer, handles);
+      var messageValidator = new validator.Validator(message);
+
+      var err = messageValidator.validateMessageHeader();
+      for (var j = 0; err === noError && j < filters.length; ++j)
+        err = filters[j](messageValidator);
+
+      checkValidationResult(testFiles[i], err);
     }
   }
 
-  testValidateMessageHeader();
+  function testConformanceMessageValidation() {
+    testMessageValidation("conformance_", [
+        testInterface.ConformanceTestInterfaceStub.prototype.validator]);
+  }
+
+  function testNotImplementedMessageValidation() {
+    testMessageValidation("not_implemented_", [
+        testInterface.ConformanceTestInterfaceStub.prototype.validator]);
+  }
+
+  function testIntegratedMessageValidation() {
+    var testFiles = getMessageTestFiles("integration_");
+    expect(testFiles.length).toBeGreaterThan(0);
+
+    for (var i = 0; i < testFiles.length; i++) {
+      // TODO(hansmuller): Temporarily skipping array pointer overflow tests.
+      if (testFiles[i].indexOf("overflow") != -1) {
+        console.log("[Skipping " + testFiles[i] + "]");
+        continue;
+      }
+
+      var testMessage = readTestMessage(testFiles[i]);
+      var handles = new Array(testMessage.handleCount);
+      var testMessagePipe = new core.createMessagePipe();
+      expect(testMessagePipe.result).toBe(core.RESULT_OK);
+
+      var writeMessageValue = core.writeMessage(
+          testMessagePipe.handle0,
+          new Uint8Array(testMessage.buffer.arrayBuffer),
+          new Array(testMessage.handleCount),
+          core.WRITE_MESSAGE_FLAG_NONE);
+      expect(writeMessageValue).toBe(core.RESULT_OK);
+
+      var testConnection = new connection.TestConnection(
+          testMessagePipe.handle1,
+          testInterface.IntegrationTestInterface1Stub,
+          testInterface.IntegrationTestInterface2Proxy);
+
+      var validationError = noError;
+      testConnection.router_.validationErrorHandler = function(err) {
+        validationError = err;
+      }
+
+      testConnection.router_.connector_.deliverMessage();
+      checkValidationResult(testFiles[i], validationError);
+
+      testConnection.close();
+      expect(core.close(testMessagePipe.handle0)).toBe(core.RESULT_OK);
+    }
+  }
+
   expect(checkTestMessageParser()).toBeNull();
+  testConformanceMessageValidation();
+  testIntegratedMessageValidation();
   this.result = "PASS";
 });

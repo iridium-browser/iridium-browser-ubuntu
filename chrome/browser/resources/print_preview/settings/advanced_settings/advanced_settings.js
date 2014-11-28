@@ -29,7 +29,7 @@ cr.define('print_preview', function() {
 
     /** @private {!print_preview.SearchBox} */
     this.searchBox_ = new print_preview.SearchBox(
-        localStrings.getString('advancedSettingsSearchBoxPlaceholder'));
+        loadTimeData.getString('advancedSettingsSearchBoxPlaceholder'));
     this.addChild(this.searchBox_);
 
     /** @private {print_preview.Destination} */
@@ -37,6 +37,15 @@ cr.define('print_preview', function() {
 
     /** @private {!Array.<!print_preview.AdvancedSettingsItem>} */
     this.items_ = [];
+  };
+
+  /**
+   * CSS classes used by the component.
+   * @enum {string}
+   * @private
+   */
+  AdvancedSettings.Classes_ = {
+    EXTRA_PADDING: 'advanced-settings-item-extra-padding'
   };
 
   AdvancedSettings.prototype = {
@@ -50,7 +59,7 @@ cr.define('print_preview', function() {
       assert(!this.destination_);
       this.destination_ = destination;
       this.getChildElement('.advanced-settings-title').textContent =
-          localStrings.getStringF('advancedSettingsDialogTitle',
+          loadTimeData.getStringF('advancedSettingsDialogTitle',
                                   this.destination_.displayName);
       this.setIsVisible(true);
       this.renderSettings_();
@@ -64,6 +73,11 @@ cr.define('print_preview', function() {
           this.getChildElement('#cancel-button'),
           'click',
           this.cancel.bind(this));
+
+      this.tracker.add(
+          this.getChildElement('#done-button'),
+          'click',
+          this.onApplySettings_.bind(this));
 
       this.tracker.add(
           this.searchBox_,
@@ -83,8 +97,7 @@ cr.define('print_preview', function() {
         this.metrics_.record(print_preview.Metrics.PrintSettingsUiBucket.
             ADVANCED_SETTINGS_DIALOG_SHOWN);
       } else {
-        this.searchBox_.setQuery(null);
-        this.filterLists_(null);
+        this.resetSearch_();
         this.destination_ = null;
       }
     },
@@ -93,6 +106,14 @@ cr.define('print_preview', function() {
     onCancelInternal: function() {
       this.metrics_.record(print_preview.Metrics.PrintSettingsUiBucket.
           ADVANCED_SETTINGS_DIALOG_CANCELED);
+    },
+
+    /** @override */
+    onEnterPressedInternal: function() {
+      var doneButton = this.getChildElement('#done-button');
+      if (!doneButton.disabled)
+        doneButton.click();
+      return !doneButton.disabled;
     },
 
     /**
@@ -114,6 +135,20 @@ cr.define('print_preview', function() {
      * @private
      */
     filterLists_: function(query) {
+      var atLeastOneMatch = false;
+      var lastVisibleItemWithBubble = null;
+      this.items_.forEach(function(item) {
+        item.updateSearchQuery(query);
+        if (getIsVisible(item.getElement()))
+          atLeastOneMatch = true;
+        if (item.searchBubbleShown)
+          lastVisibleItemWithBubble = item;
+      });
+      setIsVisible(
+          this.getChildElement('.no-settings-match-hint'), !atLeastOneMatch);
+      setIsVisible(
+          this.getChildElement('.' + AdvancedSettings.Classes_.EXTRA_PADDING),
+          !!lastVisibleItemWithBubble);
     },
 
     /**
@@ -136,25 +171,32 @@ cr.define('print_preview', function() {
       }.bind(this));
       this.items_ = [];
 
-      var vendorCapabilities =
-          this.destination_ &&
-          this.destination_.capabilities &&
-          this.destination_.capabilities.printer &&
-          this.destination_.capabilities.printer.vendor_capability;
+      var extraPadding =
+          this.getChildElement('.' + AdvancedSettings.Classes_.EXTRA_PADDING);
+      if (extraPadding)
+        extraPadding.parentNode.removeChild(extraPadding);
+
+      var vendorCapabilities = this.printTicketStore_.vendorItems.capability;
       if (!vendorCapabilities)
         return;
 
       var availableHeight = this.getAvailableContentHeight_();
       var containerEl = this.getChildElement('.settings-area');
       containerEl.style.maxHeight = availableHeight + 'px';
+      var settingsEl = this.getChildElement('.settings');
 
       vendorCapabilities.forEach(function(capability) {
         var item = new print_preview.AdvancedSettingsItem(
             this.eventTarget_, this.printTicketStore_, capability);
         this.addChild(item);
-        item.render(this.getChildElement('.settings'));
+        item.render(settingsEl);
         this.items_.push(item);
       }.bind(this));
+
+      extraPadding = document.createElement('div');
+      extraPadding.classList.add(AdvancedSettings.Classes_.EXTRA_PADDING);
+      extraPadding.hidden = true;
+      settingsEl.appendChild(extraPadding);
     },
 
     /**
@@ -164,7 +206,23 @@ cr.define('print_preview', function() {
      * @private
      */
     onSearch_: function(evt) {
-      this.filterLists_(evt.query);
+      this.filterLists_(evt.queryRegExp);
+    },
+
+    /**
+     * Called when current settings selection need to be stored in the ticket.
+     * @private
+     */
+    onApplySettings_: function(evt) {
+      this.setIsVisible(false);
+
+      var values = {};
+      this.items_.forEach(function(item) {
+        if (item.isModified())
+          values[item.id] = item.selectedValue;
+      }.bind(this));
+
+      this.printTicketStore_.vendorItems.updateValue(values);
     }
   };
 

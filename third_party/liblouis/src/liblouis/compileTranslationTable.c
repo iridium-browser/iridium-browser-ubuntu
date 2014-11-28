@@ -35,6 +35,7 @@ Library
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/stat.h>
 //#include <unistd.h>
 
 #include "louis.h"
@@ -50,18 +51,11 @@ Library
 
 #include <shlobj.h>
 
-static void
-noMemory (void)
-{
-  printf ("Insufficient memory: %s", strerror (errno), "\n");
-  exit (3);
-}
-
 static void *
 reallocWrapper (void *address, size_t size)
 {
   if (!(address = realloc (address, size)) && size)
-    noMemory ();
+    outOfMemory ();
   return address;
 }
 
@@ -70,12 +64,13 @@ strdupWrapper (const char *string)
 {
   char *address = strdup (string);
   if (!address)
-    noMemory ();
+    outOfMemory ();
   return address;
 }
 
+
 char *EXPORT_CALL
-lou_getProgramPath (void)
+lou_getProgramPath ()
 {
   char *path = NULL;
   HMODULE handle;
@@ -96,7 +91,6 @@ lou_getProgramPath (void)
 	      {
 		printf ("GetModuleFileName\n");
 		exit (3);
-		3;
 	      }
 
 	    if (length < size)
@@ -134,6 +128,13 @@ lou_getProgramPath (void)
 #endif
 /* End of MS contribution */
 
+void
+outOfMemory ()
+{
+  logMessage(LOG_FATAL, "liblouis: Insufficient memory\n");
+  exit (3);
+}
+
 /* The folowing variables and functions make it possible to specify the 
 * path on which all tables for liblouis and all files for liblouisutdml, 
 * in their proper directories, will be found.
@@ -161,53 +162,6 @@ lou_getDataPath ()
 
 /* End of dataPath code.*/
 
-static char tablePath[MAXSTRING];
-static FILE *logFile = NULL;
-static char initialLogFileName[256];
-
-void EXPORT_CALL
-lou_logFile (const char *fileName)
-{
-  if (fileName == NULL || fileName[0] == 0)
-    return;
-  if (initialLogFileName[0] == 0)
-    strcpy (initialLogFileName, fileName);
-  logFile = fopen (fileName, "wb");
-  if (logFile == NULL && initialLogFileName[0] != 0)
-    logFile = fopen (initialLogFileName, "wb");
-  if (logFile == NULL)
-    {
-      fprintf (stderr, "Cannot open log file %s\n", fileName);
-      logFile = stderr;
-    }
-}
-
-void EXPORT_CALL
-lou_logPrint (char *format, ...)
-{
-#ifndef __SYMBIAN32__
-  va_list argp;
-  if (format == NULL)
-    return;
-  if (logFile == NULL && initialLogFileName[0] != 0)
-    logFile = fopen (initialLogFileName, "wb");
-  if (logFile == NULL)
-  logFile = stderr;
-  va_start (argp, format);
-  vfprintf (logFile, format, argp);
-  fprintf (logFile, "\n");
-  va_end (argp);
-#endif
-}
-
-void EXPORT_CALL
-lou_logEnd (void)
-{
-  if (logFile != NULL)
-    fclose (logFile);
-  logFile = NULL;
-}
-
 static int
 eqasc2uni (const unsigned char *a, const widechar * b, const int len)
 {
@@ -230,6 +184,15 @@ static int warningCount;
 static TranslationTableHeader *table;
 static TranslationTableOffset tableSize;
 static TranslationTableOffset tableUsed;
+
+typedef struct
+{
+  void *next;
+  void *table;
+  int tableListLength;
+  char tableList[1];
+} ChainEntry;
+static ChainEntry *tableChain = NULL;
 
 static const char *characterClassNames[] = {
   "space",
@@ -654,7 +617,16 @@ getToken (FileInfo * nested, CharsString * result, const char *description)
     nested->linepos++;
   result->length = 0;
   while (nested->line[nested->linepos] && nested->line[nested->linepos] > 32)
+    {
+    int maxlen = MAXSTRING;
+    if (result->length >= maxlen)
+    {
+    compileError (nested, "more than %d characters (bytes)", maxlen);
+    return 0;
+    }
+    else
     result->chars[result->length++] = nested->line[nested->linepos++];
+    }
   if (!result->length)
     {
       /* Not enough tokens */
@@ -685,16 +657,16 @@ compileError (FileInfo * nested, char *format, ...)
   va_list arguments;
   va_start (arguments, format);
 #ifdef _WIN32
-  (void) _vsnprintf (buffer, sizeof (buffer), format, arguments);
+  _vsnprintf (buffer, sizeof (buffer), format, arguments);
 #else
-  (void) vsnprintf (buffer, sizeof (buffer), format, arguments);
+  vsnprintf (buffer, sizeof (buffer), format, arguments);
 #endif
   va_end (arguments);
   if (nested)
-    lou_logPrint ("%s:%d: error: %s", nested->fileName,
+    logMessage (LOG_ERROR, "%s:%d: error: %s", nested->fileName,
 		  nested->lineNumber, buffer);
   else
-    lou_logPrint ("error: %s", buffer);
+    logMessage (LOG_ERROR, "error: %s", buffer);
   errorCount++;
 #endif
 }
@@ -707,16 +679,16 @@ compileWarning (FileInfo * nested, char *format, ...)
   va_list arguments;
   va_start (arguments, format);
 #ifdef _WIN32
-  (void) _vsnprintf (buffer, sizeof (buffer), format, arguments);
+  _vsnprintf (buffer, sizeof (buffer), format, arguments);
 #else
-  (void) vsnprintf (buffer, sizeof (buffer), format, arguments);
+  vsnprintf (buffer, sizeof (buffer), format, arguments);
 #endif
   va_end (arguments);
   if (nested)
-    lou_logPrint ("%s:%d: warning: %s", nested->fileName,
+    logMessage (LOG_WARN, "%s:%d: warning: %s", nested->fileName,
 		  nested->lineNumber, buffer);
   else
-    lou_logPrint ("warning: %s", buffer);
+    logMessage (LOG_WARN, "warning: %s", buffer);
   warningCount++;
 #endif
 }
@@ -737,9 +709,16 @@ allocateSpaceInTable (FileInfo * nested, TranslationTableOffset * offset,
       if (!newTable)
 	{
 	  compileError (nested, "Not enough memory for translation table.");
-	  return 0;
+	  outOfMemory ();
 	}
       memset (((unsigned char *) newTable) + tableSize, 0, size - tableSize);
+      /* update references to the old table */
+      {
+	ChainEntry *entry;
+	for (entry = tableChain; entry != NULL; entry = entry->next)
+	  if (entry->table == table)
+	    entry->table = (TranslationTableHeader *) newTable;
+      }
       table = (TranslationTableHeader *) newTable;
       tableSize = size;
     }
@@ -772,7 +751,7 @@ allocateHeader (FileInfo * nested)
       if (table != NULL)
 	free (table);
       table = NULL;
-      return 0;
+      outOfMemory ();
     }
   memset (table, 0, startSize);
   tableSize = startSize;
@@ -1109,7 +1088,7 @@ add_0_single (FileInfo * nested)
 }
 
 static void
-add_0_multiple (void)
+add_0_multiple ()
 {
 /*direction = 0 newRule->charslen > 1*/
   TranslationTableRule *currentRule = NULL;
@@ -1166,7 +1145,7 @@ add_1_single (FileInfo * nested)
 }
 
 static void
-add_1_multiple (void)
+add_1_multiple ()
 {
 /*direction = 1, newRule->dotslen > 1*/
   TranslationTableRule *currentRule = NULL;
@@ -1326,7 +1305,9 @@ addCharacterClass (FileInfo * nested, const widechar * name, int length)
   struct CharacterClass *class;
   if (characterClassAttribute)
     {
-      if ((class = malloc (sizeof (*class) + CHARSIZE * (length - 1))))
+      if (!(class = malloc (sizeof (*class) + CHARSIZE * (length - 1))))
+	outOfMemory ();
+      else
 	{
 	  memset (class, 0, sizeof (*class));
 	  memcpy (class->name, name, CHARSIZE * (class->length = length));
@@ -1342,7 +1323,7 @@ addCharacterClass (FileInfo * nested, const widechar * name, int length)
 }
 
 static void
-deallocateCharacterClasses (void)
+deallocateCharacterClasses ()
 {
   while (characterClasses)
     {
@@ -1354,7 +1335,7 @@ deallocateCharacterClasses (void)
 }
 
 static int
-allocateCharacterClasses (void)
+allocateCharacterClasses ()
 {
 /*Allocate memory for predifined character classes */
   int k = 0;
@@ -1484,7 +1465,6 @@ parseChars (FileInfo * nested, CharsString * result, CharsString * token)
 	{
 	  if (ch == '\\')
 	    {			/* escape sequence */
-	      int ok = 1;
 	      switch (ch = token->chars[in])
 		{
 		case '\\':
@@ -1531,7 +1511,6 @@ parseChars (FileInfo * nested, CharsString * result, CharsString * token)
 		    not32:
 		      compileError (nested,
 				    "liblouis has not been compiled for 32-bit Unicode");
-		      ok = 0;
 		      break;
 		    }
 		  if (token->length - in > 5)
@@ -1552,7 +1531,6 @@ parseChars (FileInfo * nested, CharsString * result, CharsString * token)
 		  break;
 		default:
 		  compileError (nested, "invalid escape sequence '\\%c'", ch);
-		  ok = 0;
 		  break;
 		}
 	      in++;
@@ -1567,7 +1545,7 @@ parseChars (FileInfo * nested, CharsString * result, CharsString * token)
 	}
       lastOutSize = out;
       lastIn = in;
-      for (numBytes = MAXBYTES - 1; numBytes >= 0; numBytes--)
+      for (numBytes = MAXBYTES - 1; numBytes > 0; numBytes--)
 	if (ch >= first0Bit[numBytes])
 	  break;
       utf32 = ch & (0XFF - first0Bit[numBytes]);
@@ -1616,7 +1594,6 @@ extParseChars (const char *inString, widechar * outString)
     }
   for (k = 0; k < result.length; k++)
     outString[k] = result.chars[k];
-  outString[k] = 0;
   return result.length;
 }
 
@@ -1814,19 +1791,7 @@ getCharacterClass (FileInfo * nested, const struct CharacterClass **class)
   return 0;
 }
 
-static int compileFile (const char *fileName);
-
-static int
-includeFile (FileInfo * nested, CharsString * includedFile)
-{
-/*Implement include opcode*/
-  int k;
-  char includeThis[MAXSTRING];
-  for (k = 0; k < includedFile->length; k++)
-    includeThis[k] = (char) includedFile->chars[k];
-  includeThis[k] = 0;
-  return compileFile (includeThis);
-}
+static int includeFile (FileInfo * nested, CharsString * includedFile);
 
 struct RuleName
 {
@@ -1860,7 +1825,7 @@ addRuleName (FileInfo * nested, CharsString * name)
 			   (name->length - 1))))
     {
       compileError (nested, "not enough memory");
-      return 0;
+      outOfMemory ();
     }
   memset (nameRule, 0, sizeof (*nameRule));
   for (k = 0; k < name->length; k++)
@@ -1883,7 +1848,7 @@ addRuleName (FileInfo * nested, CharsString * name)
 }
 
 static void
-deallocateRuleNames (void)
+deallocateRuleNames ()
 {
   while (ruleNames)
     {
@@ -2246,8 +2211,7 @@ passAddName (CharsString * name, int var)
       (curname =
        malloc (sizeof (*curname) + CHARSIZE * (augmentedName.length - 1))))
     {
-      compileError (passNested, "not enough memory");
-      return 0;
+      outOfMemory ();
     }
   memset (curname, 0, sizeof (*curname));
   for (k = 0; k < augmentedName.length; k++)
@@ -3522,10 +3486,11 @@ hyphenStringHash (const CharsString * s)
 }
 
 static HyphenHashTab *
-hyphenHashNew (void)
+hyphenHashNew ()
 {
   HyphenHashTab *hashTab;
-  hashTab = malloc (sizeof (HyphenHashTab));
+  if (!(hashTab = malloc (sizeof (HyphenHashTab))))
+    outOfMemory ();
   memset (hashTab, 0, sizeof (HyphenHashTab));
   return hashTab;
 }
@@ -3552,9 +3517,12 @@ hyphenHashInsert (HyphenHashTab * hashTab, const CharsString * key, int val)
   int i, j;
   HyphenHashEntry *e;
   i = hyphenStringHash (key) % HYPHENHASHSIZE;
-  e = malloc (sizeof (HyphenHashEntry));
+  if (!(e = malloc (sizeof (HyphenHashEntry))))
+    outOfMemory ();
   e->next = hashTab->entries[i];
   e->key = malloc ((key->length + 1) * CHARSIZE);
+  if (!e->key)
+    outOfMemory ();
   e->key->length = key->length;
   for (j = 0; j < key->length; j++)
     e->key->chars[j] = key->chars[j];
@@ -3591,9 +3559,10 @@ hyphenGetNewState (HyphenDict * dict, HyphenHashTab * hashTab, const
   hyphenHashInsert (hashTab, string, dict->numStates);
   /* predicate is true if dict->numStates is a power of two */
   if (!(dict->numStates & (dict->numStates - 1)))
-    dict->states = realloc (dict->states,
-			    (dict->numStates << 1) *
+    dict->states = realloc (dict->states, (dict->numStates << 1) *
 			    sizeof (HyphenationState));
+  if (!dict->states)
+    outOfMemory ();
   dict->states[dict->numStates].hyphenPattern = 0;
   dict->states[dict->numStates].fallbackState = DEFAULTSTATE;
   dict->states[dict->numStates].numTrans = 0;
@@ -3640,6 +3609,8 @@ compileHyphenation (FileInfo * nested, CharsString * encoding)
   hashTab = hyphenHashNew ();
   dict.numStates = 1;
   dict.states = malloc (sizeof (HyphenationState));
+  if (!dict.states)
+    outOfMemory ();
   dict.states[0].hyphenPattern = 0;
   dict.states[0].fallbackState = DEFAULTSTATE;
   dict.states[0].numTrans = 0;
@@ -4459,7 +4430,7 @@ lou_readCharFromFile (const char *fileName, int *mode)
       nested.lineNumber = 0;
       if (!(nested.in = fopen (nested.fileName, "r")))
 	{
-	  lou_logPrint ("Cannot open file '%s'", nested.fileName);
+	  logMessage (LOG_ERROR, "Cannot open file '%s'", nested.fileName);
 	  *mode = 1;
 	  return EOF;
 	}
@@ -4477,130 +4448,6 @@ lou_readCharFromFile (const char *fileName, int *mode)
       *mode = 1;
     }
   return ch;
-}
-
-static int fileCount = 0;
-static FILE *
-findTable (const char *tableName)
-{
-/* Search paths for tables */
-  FILE *tableFile;
-  char *pathList;
-  char pathEnd[2];
-  char trialPath[MAXSTRING];
-  if (tableName == NULL || tableName[0] == 0)
-    return NULL;
-  strcpy (trialPath, tablePath);
-  strcat (trialPath, tableName);
-  if ((tableFile = fopen (trialPath, "rb")))
-    return tableFile;
-  pathEnd[0] = DIR_SEP;
-  pathEnd[1] = 0;
-  /* See if table is on environment path LOUIS_TABLEPATH */
-  pathList = getenv ("LOUIS_TABLEPATH");
-  if (pathList)
-    while (1)
-      {
-	int k;
-	int listLength;
-	int currentListPos = 0;
-	listLength = strlen (pathList);
-	for (k = 0; k < listLength; k++)
-	  if (pathList[k] == ',')
-	    break;
-	if (k == listLength || k == 0)
-	  {			/* Only one file */
-	    strcpy (trialPath, pathList);
-	    strcat (trialPath, pathEnd);
-	    strcat (trialPath, tableName);
-	    if ((tableFile = fopen (trialPath, "rb")))
-	      break;
-	  }
-	else
-	  {			/* Compile a list of files */
-	    strncpy (trialPath, pathList, k);
-	    trialPath[k] = 0;
-	    strcat (trialPath, pathEnd);
-	    strcat (trialPath, tableName);
-	    currentListPos = k + 1;
-	    if ((tableFile = fopen (trialPath, "rb")))
-	      break;
-	    while (currentListPos < listLength)
-	      {
-		for (k = currentListPos; k < listLength; k++)
-		  if (pathList[k] == ',')
-		    break;
-		strncpy (trialPath,
-			 &pathList[currentListPos], k - currentListPos);
-		trialPath[k - currentListPos] = 0;
-		strcat (trialPath, pathEnd);
-		strcat (trialPath, tableName);
-		if ((tableFile = fopen (trialPath, "rb")))
-		  currentListPos = k + 1;
-		break;
-	      }
-	  }
-	break;
-      }
-  if (tableFile)
-    return tableFile;
-  /* See if table in current directory or on a path in 
-   * the table name*/
-  if ((tableFile = fopen (tableName, "rb")))
-    return tableFile;
-/* See if table on dataPath. */
-  pathList = lou_getDataPath ();
-  if (pathList)
-    {
-      strcpy (trialPath, pathList);
-      strcat (trialPath, pathEnd);
-#ifdef _WIN32
-      strcat (trialPath, "liblouis\\tables\\");
-#else
-      strcat (trialPath, "liblouis/tables/");
-#endif
-      strcat (trialPath, tableName);
-      if ((tableFile = fopen (trialPath, "rb")))
-	return tableFile;
-    }
-  /* See if table on installed or program path. */
-#ifdef _WIN32
-  strcpy (trialPath, lou_getProgramPath ());
-  strcat (trialPath, "\\share\\liblouss\\tables\\");
-#else
-  strcpy (trialPath, TABLESDIR);
-  strcat (trialPath, pathEnd);
-#endif
-  strcat (trialPath, tableName);
-  if ((tableFile = fopen (trialPath, "rb")))
-    return tableFile;
-  return NULL;
-}
-
-static int
-compileFile (const char *fileName)
-{
-/*Compile a table file */
-  FileInfo nested;
-  fileCount++;
-  nested.fileName = fileName;
-  nested.encoding = noEncoding;
-  nested.status = 0;
-  nested.lineNumber = 0;
-  if ((nested.in = findTable (fileName)))
-    {
-      while (getALine (&nested))
-	compileRule (&nested);
-      fclose (nested.in);
-    }
-  else
-    {
-      if (fileCount > 1)
-	lou_logPrint ("Cannot open table '%s'", nested.fileName);
-      errorCount++;
-      return 0;
-    }
-  return 1;
 }
 
 static int
@@ -4642,7 +4489,7 @@ makeDoubleRule (TranslationTableOpcode opcode, TranslationTableOffset
 }
 
 static int
-setDefaults (void)
+setDefaults ()
 {
   if (!table->lenBeginCaps)
     table->lenBeginCaps = 2;
@@ -4663,82 +4510,281 @@ setDefaults (void)
   return 1;
 }
 
+/* =============== *
+ * TABLE RESOLVING *
+ * =============== *
+ *
+ * A table resolver is a function that resolves a `tableList` path against a
+ * `base` path, and returns the resolved table(s) as a list of absolute file
+ * paths.
+ *
+ * The function must have the following signature:
+ *
+ *     char ** (const char * tableList, const char * base)
+ *
+ * In general, `tableList` is a path in the broad sense. The default
+ * implementation accepts only *file* paths. But another implementation could
+ * for instance handle URI's. `base` is always a file path however.
+ *
+ * The idea is to give other programs that use liblouis the ability to define
+ * their own table resolver (in C, Java, Python, etc.) when the default
+ * resolver is not satisfying. (see also lou_registerTableResolver)
+ *
+ */
+
+/**
+ * Resolve a single (sub)table.
+ * 
+ * Tries to resolve `table` against `base` if base is an absolute path. If
+ * that fails, searches `searchPath`.
+ *
+ */
 static char *
-doLang2table (const char *tableList)
+resolveSubtable (const char *table, const char *base, const char *searchPath)
 {
-  static char newList[MAXSTRING];
-  int k;
-  char buffer[MAXSTRING];
-  FILE *l2t;
-  char *langCode;
-  int langCodeLen;
-  if (tableList == NULL || *tableList == 0)
+  char *tableFile;
+  static struct stat info;
+  
+  if (table == NULL || table[0] == '\0')
     return NULL;
-  strcpy (newList, tableList);
-  for (k = strlen (newList) - 1; k >= 0 && newList[k] != '='; k--);
-  if (newList[k] != '=')
-    return newList;
-  fileCount = 1;
-  errorCount = 1;
-  newList[k] = 0;
-  strcpy (buffer, newList);
-  langCode = &newList[k + 1];
-  langCodeLen = strlen (langCode);
-  strcat (buffer, "lang2table");
-  l2t = fopen (buffer, "r");
-  if (l2t == NULL)
-    return NULL;
-  while ((fgets (buffer, sizeof (buffer) - 2, l2t)))
+  tableFile = (char *) malloc (MAXSTRING * sizeof(char));
+  
+  //
+  // First try to resolve against base
+  //
+  if (base)
     {
-      char *codeInFile;
-      int codeInFileLen;
-      char *tableInFile;
-      for (k = 0; buffer[k] < 32; k++);
-      if (buffer[k] == '#' || buffer[k] < 32)
-	continue;
-      codeInFile = &buffer[k];
-      codeInFileLen = k;
-      while (buffer[k] > 32)
-	k++;
-      codeInFileLen = k - codeInFileLen;
-      codeInFile[codeInFileLen] = 0;
-      if (!
-	  (codeInFileLen == langCodeLen
-	   && strcasecmp (langCode, codeInFile) == 0))
-	continue;
-      while (buffer[k] < 32)
-	k++;
-      tableInFile = &buffer[k];
-      while (buffer[k] > 32)
-	k++;
-      buffer[k] = 0;
-      strcat (newList, tableInFile);
-      fclose (l2t);
-      fileCount = 0;
-      errorCount = 0;
-      return newList;
+      int k;
+      strcpy (tableFile, base);
+      for (k = strlen (tableFile); k >= 0 && tableFile[k] != DIR_SEP; k--)
+	;
+      tableFile[++k] = '\0';
+      strcat (tableFile, table);
+      if (stat (tableFile, &info) == 0 && !(info.st_mode & S_IFDIR))
+	return tableFile;
     }
-  fclose (l2t);
+  
+  //
+  // It could be an absolute path, or a path relative to the current working
+  // directory
+  //
+  strcpy (tableFile, table);
+  if (stat (tableFile, &info) == 0 && !(info.st_mode & S_IFDIR))
+    return tableFile;
+  
+  //
+  // Then search `LOUIS_TABLEPATH`, `dataPath` and `programPath`
+  //
+  if (searchPath[0] != '\0')
+    {
+      char *dir;
+      int last;
+      char *cp;
+      char *searchPath_copy = strdup (searchPath + 1);
+      for (dir = searchPath_copy; ; dir = cp + 1)
+	{
+	  for (cp = dir; *cp != '\0' && *cp != ','; cp++)
+	    ;
+	  last = (*cp == '\0');
+	  *cp = '\0';
+	  if (dir == cp)
+	    dir = ".";
+	  sprintf (tableFile, "%s%c%s", dir, DIR_SEP, table);
+	  if (stat (tableFile, &info) == 0 && !(info.st_mode & S_IFDIR)) 
+	    {
+	      free(searchPath_copy);
+	      return tableFile;
+	    }
+	  if (last)
+	    break;
+	}
+      free(searchPath_copy);
+    }
+  free (tableFile);
   return NULL;
 }
 
-static void *
-compileTranslationTable (const char *tl)
+/**
+ * The default table resolver
+ *
+ * Tries to resolve tableList against base. The search path is set to
+ * `LOUIS_TABLEPATH`, `dataPath` and `programPath` (in that order).
+ *
+ * @param table A file path, may be absolute or relative. May be a list of
+ *              tables separated by comma's. In that case, the first table
+ *              is used as the base for the other subtables.
+ * @param base A file path or directory path, or NULL.
+ * @return The file paths of the resolved subtables, or NULL if the table
+ *         could not be resolved.
+ *
+ */
+static char **
+defaultTableResolver (const char *tableList, const char *base)
 {
-/*compile source tables into a table in memory */
-  const char *tableList;
+  char searchPath[MAXSTRING];
+  char **tableFiles;
+  char *subTable;
+  char *tableList_copy;
+  char *cp;
+  char *path;
+  int last;
   int k;
-  char mainTable[MAXSTRING];
-  char subTable[MAXSTRING];
-  int listLength;
-  int currentListPos = 0;
-  errorCount = 0;
-  warningCount = 0;
-  fileCount = 0;
+  
+  /* Set up search path */
+  cp = searchPath;
+  path = getenv ("LOUIS_TABLEPATH");
+  if (path != NULL && path[0] != '\0')
+    cp += sprintf (cp, ",%s", path);
+  path = lou_getDataPath ();
+  if (path != NULL && path[0] != '\0')
+    cp += sprintf (cp, ",%s%c%s%c%s", path, DIR_SEP, "liblouis", DIR_SEP,
+		   "tables");
+#ifdef _WIN32
+  path = lou_getProgramPath ();
+  if (path != NULL && path[0] != '\0')
+    cp += sprintf (cp, ",%s%s", path, "\\share\\liblouis\\tables");
+#else
+  cp += sprintf (cp, ",%s", TABLESDIR);
+#endif
+  
+  /* Count number of subtables in table list */
+  k = 0;
+  for (cp = (char *)tableList; *cp != '\0'; cp++)
+    if (*cp == ',')
+      k++;
+  tableFiles = (char **) malloc ((k + 2) * sizeof(char *));
+  
+  /* Resolve subtables */
+  k = 0;
+  tableList_copy = strdup (tableList);
+  for (subTable = tableList_copy; ; subTable = cp + 1)
+    {
+      for (cp = subTable; *cp != '\0' && *cp != ','; cp++);
+      last = (*cp == '\0');
+      *cp = '\0';
+      if (!(tableFiles[k++] = resolveSubtable (subTable, base, searchPath)))
+	{
+	  logMessage (LOG_ERROR, "Cannot resolve table '%s'", subTable);
+	  free(tableList_copy);
+	  free (tableFiles);
+	  return NULL;
+	}
+      if (k == 1)
+	base = subTable;
+      if (last)
+	break;
+    }
+  free(tableList_copy);
+  tableFiles[k] = NULL;
+  return tableFiles;
+}
+
+static char ** (* tableResolver) (const char *tableList, const char *base) =
+  &defaultTableResolver;
+
+static char **
+resolveTable (const char *tableList, const char *base)
+{
+  return (*tableResolver) (tableList, base);
+}
+
+/**
+ * Register a new table resolver. Overrides the default resolver.
+ *
+ * @param resolver The new resolver as a function pointer.
+ *
+ */
+void EXPORT_CALL
+lou_registerTableResolver (char ** (* resolver) (const char *tableList, const char *base))
+{
+  tableResolver = resolver;
+}
+
+static int fileCount = 0;
+
+/**
+ * Compile a single file
+ *
+ */
+static int
+compileFile (const char *fileName)
+{
+  FileInfo nested;
+  fileCount++;
+  nested.fileName = fileName;
+  nested.encoding = noEncoding;
+  nested.status = 0;
+  nested.lineNumber = 0;
+  if ((nested.in = fopen (nested.fileName, "rb")))
+    {
+      while (getALine (&nested))
+	compileRule (&nested);
+      fclose (nested.in);
+      return 1;
+    }
+  else
+    logMessage (LOG_ERROR, "Cannot open table '%s'", nested.fileName);
+  errorCount++;
+  return 0;
+}
+
+/** 
+ * Free a char** array 
+ */
+static void 
+free_tablefiles(char **tables) {
+  char **table;
+  if (!tables) return;
+  for (table = tables; *table; table++)
+    free(*table);
+  free(tables);
+}
+
+/**
+ * Implement include opcode
+ *
+ */
+static int
+includeFile (FileInfo * nested, CharsString * includedFile)
+{
+  int k;
+  char includeThis[MAXSTRING];
+  char **tableFiles;
+  int rv;
+  for (k = 0; k < includedFile->length; k++)
+    includeThis[k] = (char) includedFile->chars[k];
+  includeThis[k] = 0;
+  tableFiles = resolveTable (includeThis, nested->fileName);
+  if (tableFiles == NULL)
+    {
+      errorCount++;
+      return 0;
+    }
+  if (tableFiles[1] != NULL)
+    {
+      errorCount++;
+      free_tablefiles(tableFiles);
+      logMessage (LOG_ERROR, "Table list not supported in include statement: 'include %s'", includeThis);
+      return 0;
+    }
+  rv = compileFile (*tableFiles);
+  free_tablefiles(tableFiles);
+  return rv;
+}
+
+/**
+ * Compile source tables into a table in memory
+ *
+ */
+static void *
+compileTranslationTable (const char *tableList)
+{
+  char **tableFiles;
+  char **subTable;
+  errorCount = warningCount = fileCount = 0;
   table = NULL;
   characterClasses = NULL;
   ruleNames = NULL;
-  tableList = doLang2table (tl);
   if (tableList == NULL)
     return NULL;
   if (!opcodeLengths[0])
@@ -4748,60 +4794,33 @@ compileTranslationTable (const char *tl)
 	opcodeLengths[opcode] = strlen (opcodeNames[opcode]);
     }
   allocateHeader (NULL);
-  /*Compile things that are necesary for the proper operation of 
+  /* Compile things that are necesary for the proper operation of 
      liblouis or liblouisxml or liblouisutdml */
   compileString ("space \\s 0");
   compileString ("noback sign \\x0000 0");
   compileString ("space \\x00a0 a unbreakable space");
   compileString ("space \\x001b 1b escape");
   compileString ("space \\xffff 123456789abcdef ENDSEGMENT");
-  listLength = strlen (tableList);
-  for (k = currentListPos; k < listLength; k++)
-    if (tableList[k] == ',')
-      break;
-  if (k == listLength)
-    {				/* Only one file */
-      strcpy (tablePath, tableList);
-      for (k = strlen (tablePath); k >= 0; k--)
-	if (tablePath[k] == '\\' || tablePath[k] == '/')
-	  break;
-      strcpy (mainTable, &tablePath[k + 1]);
-      tablePath[++k] = 0;
-      if (!compileFile (mainTable))
-	goto cleanup;
+  
+  /* Compile all subtables in the list */
+  if (!(tableFiles = resolveTable (tableList, NULL)))
+    {
+      errorCount++;
+      goto cleanup;
     }
-  else
-    {				/* Compile a list of files */
-      currentListPos = k + 1;
-      strncpy (tablePath, tableList, k);
-      tablePath[k] = 0;
-      for (k = strlen (tablePath); k >= 0; k--)
-	if (tablePath[k] == '\\' || tablePath[k] == '/')
-	  break;
-      strcpy (mainTable, &tablePath[k + 1]);
-      tablePath[++k] = 0;
-      if (!compileFile (mainTable))
-	goto cleanup;
-      while (currentListPos < listLength)
-	{
-	  for (k = currentListPos; k < listLength; k++)
-	    if (tableList[k] == ',')
-	      break;
-	  strncpy (subTable, &tableList[currentListPos], k - currentListPos);
-	  subTable[k - currentListPos] = 0;
-	  if (!compileFile (subTable))
-	    goto cleanup;
-	  currentListPos = k + 1;
-	}
-    }
-/*Clean up after compiling files*/
+  for (subTable = tableFiles; *subTable; subTable++)
+    if (!compileFile (*subTable))
+      goto cleanup;
+  
+/* Clean up after compiling files */
 cleanup:
+  free_tablefiles(tableFiles);
   if (characterClasses)
     deallocateCharacterClasses ();
   if (ruleNames)
     deallocateRuleNames ();
   if (warningCount)
-    lou_logPrint ("%d warnings issued", warningCount);
+    logMessage (LOG_WARN, "%d warnings issued", warningCount);
   if (!errorCount)
     {
       setDefaults ();
@@ -4810,8 +4829,7 @@ cleanup:
     }
   else
     {
-      if (!(errorCount == 1 && fileCount == 1))
-	lou_logPrint ("%d errors found.", errorCount);
+      logMessage (LOG_ERROR, "%d errors found.", errorCount);
       if (table)
 	free (table);
       table = NULL;
@@ -4819,14 +4837,6 @@ cleanup:
   return (void *) table;
 }
 
-typedef struct
-{
-  void *next;
-  void *table;
-  int tableListLength;
-  char tableList[1];
-} ChainEntry;
-static ChainEntry *tableChain = NULL;
 static ChainEntry *lastTrans = NULL;
 static void *
 getTable (const char *tableList)
@@ -4872,6 +4882,8 @@ getTable (const char *tableList)
       /*Add a new entry to the table chain. */
       int entrySize = sizeof (ChainEntry) + tableListLen;
       ChainEntry *newEntry = malloc (entrySize);
+      if (!newEntry)
+	outOfMemory ();
       if (tableChain == NULL)
 	tableChain = newEntry;
       else
@@ -4899,109 +4911,13 @@ getLastTableList ()
 void *EXPORT_CALL
 lou_getTable (const char *tableList)
 {
-/* Search paths for tables and keep track of compiled tables. */
   void *table = NULL;
-  char *pathList;
-  char pathEnd[2];
-  char trialPath[MAXSTRING];
   if (tableList == NULL || tableList[0] == 0)
     return NULL;
   errorCount = fileCount = 0;
-  pathEnd[0] = DIR_SEP;
-  pathEnd[1] = 0;
-  /* See if table is on environment path LOUIS_TABLEPATH */
-  pathList = getenv ("LOUIS_TABLEPATH");
-  if (pathList)
-    while (1)
-      {
-	int k;
-	int listLength;
-	int currentListPos = 0;
-	listLength = strlen (pathList);
-	for (k = 0; k < listLength; k++)
-	  if (pathList[k] == ',')
-	    break;
-	if (k == listLength || k == 0)
-	  {			/* Only one file */
-	    strcpy (trialPath, pathList);
-	    strcat (trialPath, pathEnd);
-	    strcat (trialPath, tableList);
-	    table = getTable (trialPath);
-	    if (table)
-	      break;
-	  }
-	else
-	  {			/* Compile a list of files */
-	    strncpy (trialPath, pathList, k);
-	    trialPath[k] = 0;
-	    strcat (trialPath, pathEnd);
-	    strcat (trialPath, tableList);
-	    currentListPos = k + 1;
-	    table = getTable (trialPath);
-	    if (table)
-	      break;
-	    while (currentListPos < listLength)
-	      {
-		for (k = currentListPos; k < listLength; k++)
-		  if (pathList[k] == ',')
-		    break;
-		strncpy (trialPath,
-			 &pathList[currentListPos], k - currentListPos);
-		trialPath[k - currentListPos] = 0;
-		strcat (trialPath, pathEnd);
-		strcat (trialPath, tableList);
-		table = getTable (trialPath);
-		currentListPos = k + 1;
-		if (table)
-		  break;
-	      }
-	  }
-	break;
-      }
+  table = getTable (tableList);
   if (!table)
-    {
-      /* See if table in current directory or on a path in 
-       * the table name*/
-      if (errorCount > 0 && (!(errorCount == 1 && fileCount == 1)))
-        return NULL;
-      table = getTable (tableList);
-    }
-  if (!table)
-    {
-/* See if table on dataPath. */
-      if (errorCount > 0 && (!(errorCount == 1 && fileCount == 1)))
-        return NULL;
-      pathList = lou_getDataPath ();
-      if (pathList)
-	{
-	  strcpy (trialPath, pathList);
-	  strcat (trialPath, pathEnd);
-#ifdef _WIN32
-	  strcat (trialPath, "liblouis\\tables\\");
-#else
-	  strcat (trialPath, "liblouis/tables/");
-#endif
-	  strcat (trialPath, tableList);
-	  table = getTable (trialPath);
-	}
-    }
-  if (!table)
-    {
-      /* See if table on installed or program path. */
-      if (errorCount > 0 && (!(errorCount == 1 && fileCount == 1)))
-        return NULL;
-#ifdef _WIN32
-      strcpy (trialPath, lou_getProgramPath ());
-      strcat (trialPath, "\\share\\liblouss\\tables\\");
-#else
-      strcpy (trialPath, TABLESDIR);
-      strcat (trialPath, pathEnd);
-#endif
-      strcat (trialPath, tableList);
-      table = getTable (trialPath);
-    }
-  if (!table)
-    lou_logPrint ("%s could not be found", tableList);
+    logMessage (LOG_ERROR, "%s could not be found", tableList);
   return table;
 }
 
@@ -5032,6 +4948,8 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 	  if (typebuf != NULL)
 	    free (typebuf);
 	  typebuf = malloc ((destmax + 4) * sizeof (unsigned short));
+	  if (!typebuf)
+	    outOfMemory ();
 	  sizeTypebuf = destmax;
 	}
       return typebuf;
@@ -5041,6 +4959,8 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 	  if (destSpacing != NULL)
 	    free (destSpacing);
 	  destSpacing = malloc (destmax + 4);
+	  if (!destSpacing)
+	    outOfMemory ();
 	  sizeDestSpacing = destmax;
 	}
       return destSpacing;
@@ -5050,6 +4970,8 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 	  if (passbuf1 != NULL)
 	    free (passbuf1);
 	  passbuf1 = malloc ((destmax + 4) * CHARSIZE);
+	  if (!passbuf1)
+	    outOfMemory ();
 	  sizePassbuf1 = destmax;
 	}
       return passbuf1;
@@ -5059,6 +4981,8 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 	  if (passbuf2 != NULL)
 	    free (passbuf2);
 	  passbuf2 = malloc ((destmax + 4) * CHARSIZE);
+	  if (!passbuf2)
+	    outOfMemory ();
 	  sizePassbuf2 = destmax;
 	}
       return passbuf2;
@@ -5074,6 +4998,8 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 	    if (srcMapping != NULL)
 	      free (srcMapping);
 	    srcMapping = malloc ((mapSize + 4) * sizeof (int));
+	    if (!srcMapping)
+	      outOfMemory ();
 	    sizeSrcMapping = mapSize;
 	  }
       }
@@ -5090,6 +5016,8 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 	    if (prevSrcMapping != NULL)
 	      free (prevSrcMapping);
 	    prevSrcMapping = malloc ((mapSize + 4) * sizeof (int));
+	    if (!prevSrcMapping)
+	      outOfMemory ();
 	    sizePrevSrcMapping = mapSize;
 	  }
       }
@@ -5100,12 +5028,11 @@ liblouis_allocMem (AllocBuf buffer, int srcmax, int destmax)
 }
 
 void EXPORT_CALL
-lou_free (void)
+lou_free ()
 {
   ChainEntry *currentEntry;
   ChainEntry *previousEntry;
-  if (logFile != NULL)
-    fclose (logFile);
+  closeLogFile();
   if (tableChain != NULL)
     {
       currentEntry = tableChain;
@@ -5154,7 +5081,7 @@ lou_version ()
 }
 
 int EXPORT_CALL
-lou_charSize (void)
+lou_charSize ()
 {
   return CHARSIZE;
 }
@@ -5210,6 +5137,6 @@ lou_getTablePaths ()
 void
 debugHook ()
 {
-  char *hook = "debug hook\n";
-  printf (hook);
+  char *hook = "debug hook";
+  printf ("%s\n", hook);
 }

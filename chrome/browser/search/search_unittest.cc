@@ -253,7 +253,7 @@ TEST_F(SearchTest, ProcessIsolation) {
         << test.description;
 
     EXPECT_EQ(test.same_site_instance,
-              start_site_instance == contents->GetSiteInstance())
+              start_site_instance.get() == contents->GetSiteInstance())
         << test.description;
     EXPECT_EQ(test.same_site_instance,
               start_rvh == contents->GetRenderViewHost())
@@ -291,7 +291,7 @@ TEST_F(SearchTest, ProcessIsolation_RendererInitiated) {
     content::NavigationController::LoadURLParams load_params(
         GURL(test.end_url));
     load_params.is_renderer_initiated = true;
-    load_params.transition_type = content::PAGE_TRANSITION_LINK;
+    load_params.transition_type = ui::PAGE_TRANSITION_LINK;
 
     controller->LoadURLWithParams(load_params);
     CommitPendingLoad(controller);
@@ -299,7 +299,7 @@ TEST_F(SearchTest, ProcessIsolation_RendererInitiated) {
         << test.description;
 
     EXPECT_EQ(test.same_site_instance,
-              start_site_instance == contents->GetSiteInstance())
+              start_site_instance.get() == contents->GetSiteInstance())
         << test.description;
     EXPECT_EQ(test.same_site_instance,
               start_rvh == contents->GetRenderViewHost())
@@ -356,7 +356,7 @@ TEST_F(SearchTest, InstantNTPCustomNavigationEntry) {
     controller.SetTransientEntry(
         controller.CreateNavigationEntry(GURL("chrome://blank"),
                                          content::Referrer(),
-                                         content::PAGE_TRANSITION_LINK,
+                                         ui::PAGE_TRANSITION_LINK,
                                          false,
                                          std::string(),
                                          contents->GetBrowserContext()));

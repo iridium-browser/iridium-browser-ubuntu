@@ -49,13 +49,18 @@ class CONTENT_EXPORT RenderViewDevToolsAgentHost
   virtual void DisconnectWebContents() OVERRIDE;
   virtual void ConnectWebContents(WebContents* web_contents) OVERRIDE;
   virtual WebContents* GetWebContents() OVERRIDE;
+  virtual Type GetType() OVERRIDE;
+  virtual std::string GetTitle() OVERRIDE;
+  virtual GURL GetURL() OVERRIDE;
+  virtual bool Activate() OVERRIDE;
+  virtual bool Close() OVERRIDE;
 
  private:
   friend class DevToolsAgentHost;
   virtual ~RenderViewDevToolsAgentHost();
 
   // IPCDevToolsAgentHost overrides.
-  virtual void DispatchOnInspectorBackend(const std::string& message) OVERRIDE;
+  virtual void DispatchProtocolMessage(const std::string& message) OVERRIDE;
   virtual void SendMessageToAgent(IPC::Message* msg) OVERRIDE;
   virtual void OnClientAttached() OVERRIDE;
   virtual void OnClientDetached() OVERRIDE;
@@ -70,6 +75,7 @@ class CONTENT_EXPORT RenderViewDevToolsAgentHost
                                  RenderFrameHost* render_frame_host) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidAttachInterstitialPage() OVERRIDE;
+  virtual void DidDetachInterstitialPage() OVERRIDE;
 
   // NotificationObserver overrides:
   virtual void Observe(int type,

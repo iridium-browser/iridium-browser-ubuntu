@@ -39,7 +39,6 @@
 
 namespace blink {
 
-class HostWindow;
 class Scrollbar;
 
 class PLATFORM_EXPORT ScrollView : public Widget, public ScrollableArea {
@@ -56,10 +55,7 @@ public:
 
     virtual void notifyPageThatContentAreaWillPaint() const;
 
-    // NOTE: This should only be called by the overriden setScrollOffset from ScrollableArea.
-    virtual void scrollTo(const IntSize& newOffset);
-
-    // The window thats hosts the ScrollView. The ScrollView will communicate scrolls and repaints to the
+    // The window that hosts the ScrollView. The ScrollView will communicate scrolls and repaints to the
     // host window in the window's coordinate space.
     virtual HostWindow* hostWindow() const = 0;
 
@@ -101,13 +97,8 @@ public:
     virtual void setCanHaveScrollbars(bool);
     bool canHaveScrollbars() const { return horizontalScrollbarMode() != ScrollbarAlwaysOff || verticalScrollbarMode() != ScrollbarAlwaysOff; }
 
-    // By default you only receive paint events for the area that is visible. In the case of using a
-    // tiled backing store, this function can be set, so that the view paints the entire contents.
-    bool paintsEntireContents() const { return m_paintsEntireContents; }
-    void setPaintsEntireContents(bool);
-
     // By default, paint events are clipped to the visible area.  If set to
-    // false, paint events are no longer clipped.  paintsEntireContents() implies !clipsRepaints().
+    // false, paint events are no longer clipped.
     bool clipsPaintInvalidations() const { return m_clipsRepaints; }
     void setClipsRepaints(bool);
 
@@ -119,8 +110,6 @@ public:
     // included.
     virtual IntRect visibleContentRect(IncludeScrollbarsInRect = ExcludeScrollbars) const OVERRIDE;
     IntSize visibleSize() const { return visibleContentRect().size(); }
-    virtual int visibleWidth() const OVERRIDE FINAL { return visibleContentRect().width(); }
-    virtual int visibleHeight() const OVERRIDE FINAL { return visibleContentRect().height(); }
 
     // visibleContentRect().size() is computed from unscaledVisibleContentSize() divided by the value of visibleContentScaleFactor.
     // For the main frame, visibleContentScaleFactor is equal to the page's pageScaleFactor; it's 1 otherwise.
@@ -205,7 +194,8 @@ public:
     virtual void setFrameRect(const IntRect&) OVERRIDE;
 
     // For platforms that need to hit test scrollbars from within the engine's event handlers (like Win32).
-    Scrollbar* scrollbarAtPoint(const IntPoint& windowPoint);
+    Scrollbar* scrollbarAtWindowPoint(const IntPoint& windowPoint);
+    Scrollbar* scrollbarAtViewPoint(const IntPoint& viewPoint);
 
     virtual IntPoint convertChildToSelf(const Widget* child, const IntPoint& point) const OVERRIDE
     {
@@ -259,6 +249,9 @@ public:
 protected:
     ScrollView();
 
+    // NOTE: This should only be called by the overriden setScrollOffset from ScrollableArea.
+    virtual void scrollTo(const IntSize& newOffset);
+
     virtual void contentRectangleForPaintInvalidation(const IntRect&);
     virtual void paintContents(GraphicsContext*, const IntRect& damageRect) = 0;
 
@@ -273,8 +266,8 @@ protected:
     virtual void invalidateScrollCornerRect(const IntRect&) OVERRIDE;
 
     virtual void scrollContentsIfNeeded();
-    // Scroll the content by blitting the pixels.
-    virtual bool scrollContentsFastPath(const IntSize& scrollDelta, const IntRect& rectToScroll);
+    // Scroll the content by via the compositor.
+    virtual bool scrollContentsFastPath(const IntSize& scrollDelta) { return true; }
     // Scroll the content by invalidating everything.
     virtual void scrollContentsSlowPath(const IntRect& updateRect);
 
@@ -305,9 +298,15 @@ protected:
         TemporaryChange<bool> m_scope;
     };
 
+    virtual bool scrollbarsDisabled() const { return false; }
+
 private:
     bool adjustScrollbarExistence(ComputeScrollbarExistenceOption = FirstPass);
     void adjustScrollbarOpacity();
+    // FIXME(bokan): setScrollOffset, setScrollPosition, scrollTo, scrollToOffsetWithoutAnimation,
+    // notifyScrollPositionChanged...there's too many ways to scroll this class. This needs
+    // some cleanup.
+    void setScrollOffsetFromUpdateScrollbars(const IntSize&);
 
     RefPtr<Scrollbar> m_horizontalScrollbar;
     RefPtr<Scrollbar> m_verticalScrollbar;
@@ -332,7 +331,6 @@ private:
     IntPoint m_panScrollIconPoint;
     bool m_drawPanScrollIcon;
 
-    bool m_paintsEntireContents;
     bool m_clipsRepaints;
 
     void init();

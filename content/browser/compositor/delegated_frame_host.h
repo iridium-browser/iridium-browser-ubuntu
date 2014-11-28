@@ -14,6 +14,7 @@
 #include "content/browser/renderer_host/delegated_frame_evictor.h"
 #include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/browser/render_process_host.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
@@ -46,7 +47,6 @@ class CONTENT_EXPORT DelegatedFrameHostClient {
   virtual ui::Compositor* GetCompositor() const = 0;
   virtual ui::Layer* GetLayer() = 0;
   virtual RenderWidgetHostImpl* GetHost() = 0;
-  virtual void SchedulePaintInRect(const gfx::Rect& damage_rect_in_dip) = 0;
   virtual bool IsVisible() = 0;
   virtual scoped_ptr<ResizeLock> CreateResizeLock(
       bool defer_compositor_lock) = 0;
@@ -98,11 +98,10 @@ class CONTENT_EXPORT DelegatedFrameHost
   gfx::Size GetRequestedRendererSize() const;
   void AddedToWindow();
   void RemovingFromWindow();
-  void CopyFromCompositingSurface(
-      const gfx::Rect& src_subrect,
-      const gfx::Size& output_size,
-      const base::Callback<void(bool, const SkBitmap&)>& callback,
-      const SkColorType color_type);
+  void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
+                                  const gfx::Size& output_size,
+                                  CopyFromCompositingSurfaceCallback& callback,
+                                  const SkColorType color_type);
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
@@ -123,7 +122,7 @@ class CONTENT_EXPORT DelegatedFrameHost
   }
   bool ShouldCreateResizeLockForTesting() { return ShouldCreateResizeLock(); }
   bool ReleasedFrontLockActiveForTesting() const {
-    return !!released_front_lock_;
+    return !!released_front_lock_.get();
   }
 
  private:

@@ -12,6 +12,8 @@
 #include "cc/layers/texture_layer.h"
 #include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
 
+class GURL;
+
 namespace blink {
 class WebBatteryStatus;
 class WebDeviceMotionData;
@@ -20,6 +22,8 @@ class WebGamepad;
 class WebGamepads;
 class WebLayer;
 struct WebSize;
+class WebView;
+class WebURLResponse;
 }
 
 namespace content {
@@ -45,8 +49,13 @@ void EnableRendererLayoutTestMode();
 void EnableWebTestProxyCreation(
     const base::Callback<void(RenderView*, WebTestProxyBase*)>& callback);
 
+typedef base::Callback<void(const blink::WebURLResponse& response,
+                            const std::string& data)> FetchManifestCallback;
+void FetchManifest(blink::WebView* view, const GURL& url,
+                   const FetchManifestCallback&);
+
 // Sets gamepad provider to be used for layout tests.
-void SetMockGamepadProvider(RendererGamepadProvider* provider);
+void SetMockGamepadProvider(scoped_ptr<RendererGamepadProvider> provider);
 
 // Sets a double that should be used when registering
 // a listener through WebKitPlatformSupport::setDeviceLightListener().

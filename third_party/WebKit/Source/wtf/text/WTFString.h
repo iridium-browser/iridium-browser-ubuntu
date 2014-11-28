@@ -123,15 +123,6 @@ public:
     String(StringImpl* impl) : m_impl(impl) { }
     String(PassRefPtr<StringImpl> impl) : m_impl(impl) { }
 
-#if COMPILER_SUPPORTS(CXX_RVALUE_REFERENCES)
-    // We have to declare the copy constructor and copy assignment operator as well, otherwise
-    // they'll be implicitly deleted by adding the move constructor and move assignment operator.
-    String(const String& other) : m_impl(other.m_impl) { }
-    String(String&& other) : m_impl(other.m_impl.release()) { }
-    String& operator=(const String& other) { m_impl = other.m_impl; return *this; }
-    String& operator=(String&& other) { m_impl = other.m_impl.release(); return *this; }
-#endif
-
     void swap(String& o) { m_impl.swap(o.m_impl); }
 
     template<typename CharType>
@@ -664,6 +655,7 @@ template<> struct DefaultHash<String> {
 
 // Shared global empty string.
 WTF_EXPORT const String& emptyString();
+WTF_EXPORT const String& emptyString16Bit();
 WTF_EXPORT extern const String& xmlnsWithColon;
 
 } // namespace WTF
@@ -676,6 +668,7 @@ using WTF::StrictUTF8Conversion;
 using WTF::StrictUTF8ConversionReplacingUnpairedSurrogatesWithFFFD;
 using WTF::String;
 using WTF::emptyString;
+using WTF::emptyString16Bit;
 using WTF::append;
 using WTF::appendNumber;
 using WTF::charactersAreAllASCII;

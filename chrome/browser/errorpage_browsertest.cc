@@ -24,6 +24,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/google/core/browser/google_util.h"
@@ -36,14 +37,13 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "content/test/net/url_request_failed_job.h"
-#include "content/test/net/url_request_mock_http_job.h"
-#include "grit/generated_resources.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/http/failing_http_transaction_factory.h"
 #include "net/http/http_cache.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/url_request/url_request_failed_job.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_filter.h"
@@ -55,7 +55,7 @@
 
 using content::BrowserThread;
 using content::NavigationController;
-using content::URLRequestFailedJob;
+using net::URLRequestFailedJob;
 using net::URLRequestTestJob;
 
 namespace {
@@ -215,9 +215,12 @@ class LinkDoctorInterceptor : public net::URLRequestInterceptor {
 
     base::FilePath root_http;
     PathService::Get(chrome::DIR_TEST_DATA, &root_http);
-    return new content::URLRequestMockHTTPJob(
-        request, network_delegate,
-        root_http.AppendASCII("mock-link-doctor.json"));
+    return new net::URLRequestMockHTTPJob(
+        request,
+        network_delegate,
+        root_http.AppendASCII("mock-link-doctor.json"),
+        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
+            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
   }
 
   void WaitForRequests(int requests_to_wait_for) {
@@ -276,8 +279,10 @@ void InstallMockInterceptors(
   // Add a mock for the search engine the error page will use.
   base::FilePath root_http;
   PathService::Get(chrome::DIR_TEST_DATA, &root_http);
-  content::URLRequestMockHTTPJob::AddHostnameToFileHandler(
-      search_url.host(), root_http.AppendASCII("title3.html"));
+  net::URLRequestMockHTTPJob::AddHostnameToFileHandler(
+      search_url.host(),
+      root_http.AppendASCII("title3.html"),
+      BrowserThread::GetBlockingPool());
 }
 
 class ErrorPageTest : public InProcessBrowserTest {
@@ -300,7 +305,7 @@ class ErrorPageTest : public InProcessBrowserTest {
   void NavigateToFileURL(const base::FilePath::StringType& file_path) {
     ui_test_utils::NavigateToURL(
         browser(),
-        content::URLRequestMockHTTPJob::GetMockUrl(base::FilePath(file_path)));
+        net::URLRequestMockHTTPJob::GetMockUrl(base::FilePath(file_path)));
   }
 
   // Navigates to the given URL and waits for |num_navigations| to occur, and
@@ -700,7 +705,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_DoClickLink) {
 // navigation corrections.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_Basic) {
   NavigateToURLAndWaitForTitle(
-      content::URLRequestMockHTTPJob::GetMockUrl(
+      net::URLRequestMockHTTPJob::GetMockUrl(
           base::FilePath(FILE_PATH_LITERAL("iframe_dns_error.html"))),
       "Blah",
       1);
@@ -814,7 +819,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_JavaScript) {
 // 404 page.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, Page404) {
   NavigateToURLAndWaitForTitle(
-      content::URLRequestMockHTTPJob::GetMockUrl(
+      net::URLRequestMockHTTPJob::GetMockUrl(
           base::FilePath(FILE_PATH_LITERAL("page404.html"))),
       "SUCCESS",
       1);
@@ -969,10 +974,10 @@ class ErrorPageNavigationCorrectionsFailTest : public ErrorPageTest {
   // Adds a filter that causes all correction service requests to fail with
   // ERR_ADDRESS_UNREACHABLE.
   //
-  // Also adds the content::URLRequestFailedJob filter.
+  // Also adds the net::URLRequestFailedJob filter.
   static void AddFilters() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    content::URLRequestFailedJob::AddUrlHandler();
+    URLRequestFailedJob::AddUrlHandler();
 
     net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
         google_util::LinkDoctorBaseURL(),
@@ -1071,7 +1076,7 @@ class ErrorPageForIDNTest : public InProcessBrowserTest {
  private:
   static void AddFilters() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    content::URLRequestFailedJob::AddUrlHandlerForHostname(kHostname);
+    URLRequestFailedJob::AddUrlHandlerForHostname(kHostname);
   }
 
   static void RemoveFilters() {

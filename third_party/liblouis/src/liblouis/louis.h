@@ -533,14 +533,16 @@ extern "C"
   int other_translate (const char *trantab, const widechar
 		       * inbuf,
 		       int *inlen, widechar * outbuf, int *outlen,
-		       char *typeform, char *spacing, int *outputPos, int
+		       formtype *typeform, char *spacing, int 
+		       *outputPos, int
 		       *inputPos, int *cursorPos, int mode);
 
 /*Call wrappers for other translators */
   int other_backTranslate (const char *trantab, const widechar
 			   * inbuf,
 			   int *inlen, widechar * outbuf, int *outlen,
-			   char *typeform, char *spacing, int *outputPos, int
+			   formtype *typeform, char *spacing, int 
+			   *outputPos, int
 			   *inputPos, int *cursorPos, int mode);
 /*Call wrappers for other back-translators.*/
 
@@ -549,10 +551,26 @@ extern "C"
   int other_charToDots (const char *trantab, const widechar
 			* inbuf, widechar * outbuf, int length, int mode);
 
+  int trace_translate (const char* tableList, const widechar* inbuf,
+                       int* inlen, widechar* outbuf, int* outlen,
+                       formtype* typeform, char* spacing, int* 
+                       outputPos,
+                       int* inputPos, int* cursorPos,
+                       const TranslationTableRule** rules, int* rulesLen,
+                       int mode);
+
   char * getLastTableList();
   void debugHook ();
-/* Can be inserted in code to be ulsed as a breakpoint in gdb */
+/* Can be inserted in code to be used as a breakpoint in gdb */
+void outOfMemory ();
+/* Priknts an out-of-memory message and exits*/
 
+void logWidecharBuf(logLevels level, const char *msg, const widechar *wbuf, int wlen);
+/* Helper for logging a widechar buffer */
+
+void logMessage(logLevels level, const char *format, ...);
+void closeLogFile();
+/* Function for closing loggin file */
 #ifdef __cplusplus
 }
 #endif				/* __cplusplus */

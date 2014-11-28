@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/app_sync_data.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
@@ -39,6 +38,8 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
+#include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/result_catcher.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/sync_change_processor_wrapper_for_test.h"
 #include "sync/api/sync_error_factory_mock.h"
@@ -54,12 +55,21 @@ using extensions::ExtensionRegistry;
 using extensions::ExtensionRegistryObserver;
 using extensions::ExtensionSystem;
 using extensions::Manifest;
+using extensions::ResultCatcher;
 
 namespace {
 
 namespace alarms = extensions::api::alarms;
 
 const char kPowerTestApp[] = "ephemeral_apps/power";
+
+// Enabling sync causes these tests to be flaky on Windows. Disable sync so that
+// everything else can be tested. See crbug.com/401028
+#if defined(OS_WIN)
+const bool kEnableSync = false;
+#else
+const bool kEnableSync = true;
+#endif
 
 typedef std::vector<message_center::Notifier*> NotifierList;
 
@@ -189,10 +199,8 @@ void EphemeralAppTestBase::SetUpCommandLine(base::CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
 
   // Make event pages get suspended immediately.
-  command_line->AppendSwitchASCII(
-      extensions::switches::kEventPageIdleTime, "10");
-  command_line->AppendSwitchASCII(
-      extensions::switches::kEventPageSuspendingTime, "10");
+  extensions::ProcessManager::SetEventPageIdleTimeForTesting(1);
+  extensions::ProcessManager::SetEventPageSuspendingTimeForTesting(1);
 
   // Enable ephemeral apps flag.
   command_line->AppendSwitch(switches::kEnableEphemeralApps);
@@ -301,7 +309,7 @@ void EphemeralAppTestBase::DisableEphemeralApp(
 
 void EphemeralAppTestBase::CloseApp(const std::string& app_id) {
   EXPECT_EQ(1U, GetAppWindowCountForApp(app_id));
-  apps::AppWindow* app_window = GetFirstAppWindowForApp(app_id);
+  extensions::AppWindow* app_window = GetFirstAppWindowForApp(app_id);
   ASSERT_TRUE(app_window);
   CloseAppWindow(app_window);
 }
@@ -505,6 +513,9 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
   }
 
   void InitSyncService() {
+    if (!kEnableSync)
+      return;
+
     ExtensionSyncService* sync_service = ExtensionSyncService::Get(profile());
     sync_service->MergeDataAndStartSyncing(
         syncer::APPS,
@@ -530,6 +541,9 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
   }
 
   void VerifySyncChange(const AppSyncData* sync_change, bool expect_enabled) {
+    if (!kEnableSync)
+      return;
+
     ASSERT_TRUE(sync_change);
     EXPECT_TRUE(sync_change->page_ordinal().IsValid());
     EXPECT_TRUE(sync_change->app_launch_ordinal().IsValid());
@@ -595,7 +609,7 @@ IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest,
   ASSERT_TRUE(receiver);
 
   // Verify that messages are received while the app is running.
-  ExtensionApiTest::ResultCatcher result_catcher;
+  ResultCatcher result_catcher;
   LoadAndLaunchPlatformApp("ephemeral_apps/messaging_sender_success",
                            "Launched");
   EXPECT_TRUE(result_catcher.GetNextResult());
@@ -915,16 +929,8 @@ IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest,
 // permanently install an ephemeral app. However, there may be cases where an
 // install occurs through the usual route of installing from the Web Store (due
 // to race conditions). Ensure that the app is still installed correctly.
-#if defined(OS_WIN)
-// Disabled on Windows due to failures. See crbug.com/401028
-#define MAYBE_ReplaceEphemeralAppWithInstalledApp \
-    DISABLED_ReplaceEphemeralAppWithInstalledApp
-#else
-#define MAYBE_ReplaceEphemeralAppWithInstalledApp \
-    ReplaceEphemeralAppWithInstalledApp
-#endif
 IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest,
-                       MAYBE_ReplaceEphemeralAppWithInstalledApp) {
+                       ReplaceEphemeralAppWithInstalledApp) {
   InitSyncService();
 
   const Extension* app = InstallAndLaunchEphemeralApp(kNotificationsTestApp);
@@ -946,16 +952,8 @@ IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest,
 
 // This is similar to ReplaceEphemeralAppWithInstalledApp, but installs will
 // be delayed until the app is idle.
-#if defined(OS_WIN)
-// Disabled on Windows due to failures. See crbug.com/401028
-#define MAYBE_ReplaceEphemeralAppWithDelayedInstalledApp \
-    DISABLED_ReplaceEphemeralAppWithDelayedInstalledApp
-#else
-#define MAYBE_ReplaceEphemeralAppWithDelayedInstalledApp \
-    ReplaceEphemeralAppWithDelayedInstalledApp
-#endif
 IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest,
-                       MAYBE_ReplaceEphemeralAppWithDelayedInstalledApp) {
+                       ReplaceEphemeralAppWithDelayedInstalledApp) {
   InitSyncService();
   const Extension* app = InstallAndLaunchEphemeralApp(kNotificationsTestApp);
   ASSERT_TRUE(app);

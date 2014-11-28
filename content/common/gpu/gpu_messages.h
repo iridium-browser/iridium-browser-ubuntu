@@ -61,6 +61,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(media::VideoFrame::Format,
 IPC_ENUM_TRAITS_MIN_MAX_VALUE(media::VideoCodecProfile,
                               media::VIDEO_CODEC_PROFILE_MIN,
                               media::VIDEO_CODEC_PROFILE_MAX)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(gpu::CollectInfoResult,
+                              gpu::kCollectInfoNone,
+                              gpu::kCollectInfoFatalFailure)
 
 IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
   IPC_STRUCT_MEMBER(int32, share_group_id)
@@ -154,8 +157,14 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo::GPUDevice)
   IPC_STRUCT_TRAITS_MEMBER(device_string)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(media::VideoEncodeAccelerator::SupportedProfile)
+  IPC_STRUCT_TRAITS_MEMBER(profile)
+  IPC_STRUCT_TRAITS_MEMBER(max_resolution)
+  IPC_STRUCT_TRAITS_MEMBER(max_framerate_numerator)
+  IPC_STRUCT_TRAITS_MEMBER(max_framerate_denominator)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
-  IPC_STRUCT_TRAITS_MEMBER(finalized)
   IPC_STRUCT_TRAITS_MEMBER(initialization_time)
   IPC_STRUCT_TRAITS_MEMBER(optimus)
   IPC_STRUCT_TRAITS_MEMBER(amd_switchable)
@@ -184,9 +193,13 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(direct_rendering)
   IPC_STRUCT_TRAITS_MEMBER(sandboxed)
   IPC_STRUCT_TRAITS_MEMBER(process_crash_count)
+  IPC_STRUCT_TRAITS_MEMBER(basic_info_state)
+  IPC_STRUCT_TRAITS_MEMBER(context_info_state)
 #if defined(OS_WIN)
+  IPC_STRUCT_TRAITS_MEMBER(dx_diagnostics_info_state)
   IPC_STRUCT_TRAITS_MEMBER(dx_diagnostics)
 #endif
+  IPC_STRUCT_TRAITS_MEMBER(video_encode_accelerator_supported_profiles)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(gpu::Capabilities)
@@ -194,6 +207,7 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::Capabilities)
   IPC_STRUCT_TRAITS_MEMBER(egl_image_external)
   IPC_STRUCT_TRAITS_MEMBER(texture_format_bgra8888)
   IPC_STRUCT_TRAITS_MEMBER(texture_format_etc1)
+  IPC_STRUCT_TRAITS_MEMBER(texture_format_etc1_npot)
   IPC_STRUCT_TRAITS_MEMBER(texture_rectangle)
   IPC_STRUCT_TRAITS_MEMBER(iosurface)
   IPC_STRUCT_TRAITS_MEMBER(texture_usage)
@@ -518,14 +532,11 @@ IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_WaitForGetOffsetInRange,
 
 // Asynchronously synchronize the put and get offsets of both processes.
 // Caller passes its current put offset. Current state (including get offset)
-// is returned in shared memory.
-IPC_MESSAGE_ROUTED2(GpuCommandBufferMsg_AsyncFlush,
+// is returned in shared memory. The input latency info for the current
+// frame is also sent to the GPU process.
+IPC_MESSAGE_ROUTED3(GpuCommandBufferMsg_AsyncFlush,
                     int32 /* put_offset */,
-                    uint32 /* flush_count */)
-
-// Sends information about the latency of the current frame to the GPU
-// process.
-IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetLatencyInfo,
+                    uint32 /* flush_count */,
                     std::vector<ui::LatencyInfo> /* latency_info */)
 
 // Asynchronously process any commands known to the GPU process. This is only

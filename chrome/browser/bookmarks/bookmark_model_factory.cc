@@ -22,7 +22,6 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/omnibox/omnibox_field_trial.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -59,8 +58,7 @@ KeyedService* BookmarkModelFactory::BuildServiceInstanceFor(
   Profile* profile = static_cast<Profile*>(context);
   ChromeBookmarkClient* bookmark_client =
       ChromeBookmarkClientFactory::GetForProfile(profile);
-  BookmarkModel* bookmark_model = new BookmarkModel(
-      bookmark_client, OmniboxFieldTrial::BookmarksIndexURLsValue());
+  BookmarkModel* bookmark_model = new BookmarkModel(bookmark_client);
   bookmark_client->Init(bookmark_model);
   bookmark_model->Load(profile->GetPrefs(),
                        profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
@@ -69,9 +67,8 @@ KeyedService* BookmarkModelFactory::BuildServiceInstanceFor(
                            ->GetBookmarkTaskRunner(),
                        content::BrowserThread::GetMessageLoopProxyForThread(
                            content::BrowserThread::UI));
-#if !defined(OS_ANDROID)
   bool register_bookmark_undo_service_as_observer = true;
-#if !defined(OS_IOS)
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
   register_bookmark_undo_service_as_observer =
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBookmarkUndo);
@@ -80,7 +77,6 @@ KeyedService* BookmarkModelFactory::BuildServiceInstanceFor(
     bookmark_model->AddObserver(
         BookmarkUndoServiceFactory::GetForProfile(profile));
   }
-#endif  // !defined(OS_ANDROID)
   return bookmark_model;
 }
 
@@ -90,11 +86,11 @@ void BookmarkModelFactory::RegisterProfilePrefs(
   // will cause a deadlock (see http://crbug.com/97955).  If we truly
   // want to sync the expanded state of folders, it should be part of
   // bookmark sync itself (i.e., a property of the sync folder nodes).
-  registry->RegisterListPref(prefs::kBookmarkEditorExpandedNodes,
+  registry->RegisterListPref(bookmarks::prefs::kBookmarkEditorExpandedNodes,
                              new base::ListValue,
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterListPref(
-      prefs::kManagedBookmarks,
+      bookmarks::prefs::kManagedBookmarks,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 

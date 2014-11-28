@@ -7,12 +7,15 @@
 #include <map>
 
 #include "base/lazy_instance.h"
+#include "content/child/webmessageportchannel_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/swapped_out_messages.h"
+#include "content/common/view_messages.h"
 #include "content/renderer/child_frame_compositing_helper.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
 namespace content {
@@ -39,16 +42,10 @@ RenderFrameProxy* RenderFrameProxy::CreateProxyToReplaceFrame(
   scoped_ptr<RenderFrameProxy> proxy(
       new RenderFrameProxy(routing_id, frame_to_replace->GetRoutingID()));
 
-  blink::WebRemoteFrame* web_frame = NULL;
-  if (frame_to_replace->GetWebFrame()->parent() &&
-      frame_to_replace->GetWebFrame()->parent()->isWebRemoteFrame()) {
-    blink::WebRemoteFrame* parent_web_frame =
-        frame_to_replace->GetWebFrame()->parent()->toWebRemoteFrame();
-    web_frame = parent_web_frame->createRemoteChild("", proxy.get());
-  } else {
-    web_frame = blink::WebRemoteFrame::create(proxy.get());
-  }
-
+  // When a RenderFrame is replaced by a RenderProxy, the WebRemoteFrame should
+  // always come from WebRemoteFrame::create and a call to WebFrame::swap must
+  // follow later.
+  blink::WebRemoteFrame* web_frame = blink::WebRemoteFrame::create(proxy.get());
   proxy->Init(web_frame, frame_to_replace->render_view());
   return proxy.release();
 }
@@ -143,7 +140,7 @@ void RenderFrameProxy::Init(blink::WebRemoteFrame* web_frame,
 }
 
 void RenderFrameProxy::DidCommitCompositorFrame() {
-  if (compositing_helper_)
+  if (compositing_helper_.get())
     compositing_helper_->DidCommitCompositorFrame();
 }
 
@@ -152,9 +149,9 @@ bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(RenderFrameProxy, msg)
     IPC_MESSAGE_HANDLER(FrameMsg_DeleteProxy, OnDeleteProxy)
     IPC_MESSAGE_HANDLER(FrameMsg_ChildFrameProcessGone, OnChildFrameProcessGone)
-    IPC_MESSAGE_HANDLER(FrameMsg_BuffersSwapped, OnBuffersSwapped)
     IPC_MESSAGE_HANDLER_GENERIC(FrameMsg_CompositorFrameSwapped,
                                 OnCompositorFrameSwapped(msg))
+    IPC_MESSAGE_HANDLER(FrameMsg_DisownOpener, OnDisownOpener)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -187,23 +184,8 @@ void RenderFrameProxy::OnDeleteProxy() {
 }
 
 void RenderFrameProxy::OnChildFrameProcessGone() {
-  if (compositing_helper_)
+  if (compositing_helper_.get())
     compositing_helper_->ChildFrameGone();
-}
-
-void RenderFrameProxy::OnBuffersSwapped(
-    const FrameMsg_BuffersSwapped_Params& params) {
-  if (!compositing_helper_) {
-    compositing_helper_ =
-        ChildFrameCompositingHelper::CreateForRenderFrameProxy(this);
-    compositing_helper_->EnableCompositing(true);
-  }
-  compositing_helper_->OnBuffersSwapped(
-      params.size,
-      params.mailbox,
-      params.gpu_route_id,
-      params.gpu_host_id,
-      web_frame()->view()->deviceScaleFactor());
 }
 
 void RenderFrameProxy::OnCompositorFrameSwapped(const IPC::Message& message) {
@@ -214,7 +196,7 @@ void RenderFrameProxy::OnCompositorFrameSwapped(const IPC::Message& message) {
   scoped_ptr<cc::CompositorFrame> frame(new cc::CompositorFrame);
   param.a.frame.AssignTo(frame.get());
 
-  if (!compositing_helper_) {
+  if (!compositing_helper_.get()) {
     compositing_helper_ =
         ChildFrameCompositingHelper::CreateForRenderFrameProxy(this);
     compositing_helper_->EnableCompositing(true);
@@ -224,6 +206,76 @@ void RenderFrameProxy::OnCompositorFrameSwapped(const IPC::Message& message) {
                                                 param.a.output_surface_id,
                                                 param.a.producing_host_id,
                                                 param.a.shared_memory_handle);
+}
+
+void RenderFrameProxy::OnDisownOpener() {
+  // TODO(creis): We should only see this for main frames for now.  To support
+  // disowning the opener on subframes, we will need to move WebContentsImpl's
+  // opener_ to FrameTreeNode.
+  CHECK(!web_frame_->parent());
+
+  // When there is a RenderFrame for this proxy, tell it to disown its opener.
+  // TODO(creis): Remove this when we only have WebRemoteFrames and make sure
+  // they know they have an opener.
+  RenderFrameImpl* render_frame =
+      RenderFrameImpl::FromRoutingID(frame_routing_id_);
+  if (render_frame) {
+    if (render_frame->GetWebFrame()->opener())
+      render_frame->GetWebFrame()->setOpener(NULL);
+    return;
+  }
+
+  if (web_frame_->opener())
+    web_frame_->setOpener(NULL);
+}
+
+void RenderFrameProxy::postMessageEvent(
+    blink::WebLocalFrame* source_frame,
+    blink::WebRemoteFrame* target_frame,
+    blink::WebSecurityOrigin target_origin,
+    blink::WebDOMMessageEvent event) {
+  DCHECK(!web_frame_ || web_frame_ == target_frame);
+
+  ViewMsg_PostMessage_Params params;
+  params.is_data_raw_string = false;
+  params.data = event.data().toString();
+  params.source_origin = event.origin();
+  if (!target_origin.isNull())
+    params.target_origin = target_origin.toString();
+
+  blink::WebMessagePortChannelArray channels = event.releaseChannels();
+  if (!channels.isEmpty()) {
+    std::vector<int> message_port_ids(channels.size());
+     // Extract the port IDs from the channel array.
+     for (size_t i = 0; i < channels.size(); ++i) {
+       WebMessagePortChannelImpl* webchannel =
+           static_cast<WebMessagePortChannelImpl*>(channels[i]);
+       message_port_ids[i] = webchannel->message_port_id();
+       webchannel->QueueMessages();
+       DCHECK_NE(message_port_ids[i], MSG_ROUTING_NONE);
+     }
+     params.message_port_ids = message_port_ids;
+  }
+
+  // Include the routing ID for the source frame (if one exists), which the
+  // browser process will translate into the routing ID for the equivalent
+  // frame in the target process.
+  params.source_routing_id = MSG_ROUTING_NONE;
+  if (source_frame) {
+    RenderViewImpl* source_view =
+        RenderViewImpl::FromWebView(source_frame->view());
+    if (source_view)
+      params.source_routing_id = source_view->routing_id();
+  }
+
+  Send(new ViewHostMsg_RouteMessageEvent(render_view_->GetRoutingID(), params));
+}
+
+void RenderFrameProxy::initializeChildFrame(
+    const blink::WebRect& frame_rect,
+    float scale_factor) {
+  Send(new FrameHostMsg_InitializeChildFrame(
+      routing_id_, frame_rect, scale_factor));
 }
 
 }  // namespace

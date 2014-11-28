@@ -16,6 +16,8 @@ group("resources") {
 grit("devtools_resources") {
   source = "$root_gen_dir/devtools/devtools_resources.grd"
 
+  # TOOD(brettw) remove this so the output file goes into the target_gen_dir,
+  # but keep this for not for GYP compat.
   output_dir = "$root_gen_dir/webkit"
   outputs = [
     "grit/devtools_resources.h",
@@ -35,7 +37,7 @@ grit("devtools_resources") {
 }
 
 action("gen_devtools_protocol_constants") {
-  visibility = ":devtools_protocol_constants"
+  visibility = [ ":devtools_protocol_constants" ]
 
   script = "//content/public/browser/devtools_protocol_constants_generator.py"
 
@@ -55,6 +57,6 @@ action("gen_devtools_protocol_constants") {
 }
 
 source_set("devtools_protocol_constants") {
-  visibility = ":resources"
+  visibility = [ ":resources" ]
   sources = get_target_outputs(":gen_devtools_protocol_constants")
 }

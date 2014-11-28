@@ -40,6 +40,9 @@ inline AudioNodeOutput::AudioNodeOutput(AudioNode* node, unsigned numberOfChanne
     , m_desiredNumberOfChannels(numberOfChannels)
     , m_isInPlace(false)
     , m_isEnabled(true)
+#if ENABLE_ASSERT
+    , m_didCallDispose(false)
+#endif
     , m_renderingFanOutCount(0)
     , m_renderingParamFanOutCount(0)
 {
@@ -48,18 +51,24 @@ inline AudioNodeOutput::AudioNodeOutput(AudioNode* node, unsigned numberOfChanne
     m_internalBus = AudioBus::create(numberOfChannels, AudioNode::ProcessingSizeInFrames);
 }
 
-PassOwnPtrWillBeRawPtr<AudioNodeOutput> AudioNodeOutput::create(AudioNode* node, unsigned numberOfChannels)
+AudioNodeOutput* AudioNodeOutput::create(AudioNode* node, unsigned numberOfChannels)
 {
-    return adoptPtrWillBeNoop(new AudioNodeOutput(node, numberOfChannels));
+    return new AudioNodeOutput(node, numberOfChannels);
 }
 
 void AudioNodeOutput::trace(Visitor* visitor)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_node);
     visitor->trace(m_inputs);
     visitor->trace(m_params);
+}
+
+void AudioNodeOutput::dispose()
+{
+#if ENABLE_ASSERT
+    m_didCallDispose = true;
 #endif
+    context()->removeMarkedAudioNodeOutput(this);
 }
 
 void AudioNodeOutput::setNumberOfChannels(unsigned numberOfChannels)
@@ -73,6 +82,7 @@ void AudioNodeOutput::setNumberOfChannels(unsigned numberOfChannels)
         // If we're in the audio thread then we can take care of it right away (we should be at the very start or end of a rendering quantum).
         updateNumberOfChannels();
     } else {
+        ASSERT(!m_didCallDispose);
         // Let the context take care of it in the audio thread in the pre and post render tasks.
         context()->markAudioNodeOutputDirty(this);
     }
@@ -212,9 +222,9 @@ void AudioNodeOutput::disable()
     ASSERT(context()->isGraphOwner());
 
     if (m_isEnabled) {
+        m_isEnabled = false;
         for (InputsIterator i = m_inputs.begin(); i != m_inputs.end(); ++i)
             i->key->disable(*this);
-        m_isEnabled = false;
     }
 }
 
@@ -223,9 +233,9 @@ void AudioNodeOutput::enable()
     ASSERT(context()->isGraphOwner());
 
     if (!m_isEnabled) {
+        m_isEnabled = true;
         for (InputsIterator i = m_inputs.begin(); i != m_inputs.end(); ++i)
             i->key->enable(*this);
-        m_isEnabled = true;
     }
 }
 

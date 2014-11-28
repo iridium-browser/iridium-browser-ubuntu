@@ -44,7 +44,6 @@ HTMLProgressElement::HTMLProgressElement(Document& document)
     : LabelableElement(progressTag, document)
     , m_value(nullptr)
 {
-    ScriptWrappable::init(this);
     UseCounter::count(document, UseCounter::ProgressElement);
 }
 
@@ -144,7 +143,7 @@ void HTMLProgressElement::didElementStateChange()
         bool wasDeterminate = render->isDeterminate();
         render->updateFromElement();
         if (wasDeterminate != isDeterminate())
-            didAffectSelector(AffectedSelectorIndeterminate);
+            pseudoStateChanged(CSSSelector::PseudoIndeterminate);
     }
 }
 

@@ -56,6 +56,7 @@ enum {
 };
 
 class HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLAnchorElement> create(Document&);
 
@@ -92,6 +93,8 @@ protected:
     virtual bool supportsFocus() const OVERRIDE;
 
 private:
+    virtual bool shouldHaveFocusAppearance() const OVERRIDE FINAL;
+    virtual void dispatchFocusEvent(Element* oldFocusedElement, FocusType) OVERRIDE;
     virtual bool isMouseFocusable() const OVERRIDE;
     virtual bool isKeyboardFocusable() const OVERRIDE;
     virtual void defaultEventHandler(Event*) OVERRIDE FINAL;
@@ -108,6 +111,7 @@ private:
 
     uint32_t m_linkRelations;
     mutable LinkHash m_cachedVisitedLinkHash;
+    bool m_wasFocusedByMouse;
 };
 
 inline LinkHash HTMLAnchorElement::visitedLinkHash() const

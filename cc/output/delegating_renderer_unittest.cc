@@ -95,19 +95,17 @@ class DelegatingRendererTestResources : public DelegatingRendererTest {
     frame->render_passes.clear();
     frame->render_passes_by_id.clear();
 
-    TestRenderPass* child_pass = AddRenderPass(
-        &frame->render_passes,
-        RenderPass::Id(2, 1),
-        gfx::Rect(3, 3, 10, 10),
-        gfx::Transform());
-    child_pass->AppendOneOfEveryQuadType(
-        host_impl->resource_provider(), RenderPass::Id(0, 0));
+    TestRenderPass* child_pass = AddRenderPass(&frame->render_passes,
+                                               RenderPassId(2, 1),
+                                               gfx::Rect(3, 3, 10, 10),
+                                               gfx::Transform());
+    child_pass->AppendOneOfEveryQuadType(host_impl->resource_provider(),
+                                         RenderPassId(0, 0));
 
-    TestRenderPass* pass = AddRenderPass(
-        &frame->render_passes,
-        RenderPass::Id(1, 1),
-        gfx::Rect(3, 3, 10, 10),
-        gfx::Transform());
+    TestRenderPass* pass = AddRenderPass(&frame->render_passes,
+                                         RenderPassId(1, 1),
+                                         gfx::Rect(3, 3, 10, 10),
+                                         gfx::Transform());
     pass->AppendOneOfEveryQuadType(
         host_impl->resource_provider(), child_pass->id);
     return draw_result;
@@ -126,13 +124,12 @@ class DelegatingRendererTestResources : public DelegatingRendererTest {
     ASSERT_TRUE(last_frame.delegated_frame_data);
 
     EXPECT_EQ(2u, last_frame.delegated_frame_data->render_pass_list.size());
-    // Each render pass has 10 resources in it. And the root render pass has a
+    // Each render pass has 11 resources in it. And the root render pass has a
     // mask resource used when drawing the child render pass, as well as its
-    // replica (it's added twice). The number 10 may change if
+    // replica (it's added twice). The number 11 may change if
     // AppendOneOfEveryQuadType() is updated, and the value here should be
     // updated accordingly.
-    EXPECT_EQ(
-        22u, last_frame.delegated_frame_data->resource_list.size());
+    EXPECT_EQ(24u, last_frame.delegated_frame_data->resource_list.size());
 
     EndTest();
   }

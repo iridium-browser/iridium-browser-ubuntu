@@ -60,7 +60,6 @@ namespace blink {
 class FontCacheClient;
 class FontFaceCreationParams;
 class FontPlatformData;
-class FontData;
 class FontDescription;
 class OpenTypeVerticalData;
 class SimpleFontData;
@@ -105,8 +104,10 @@ public:
     bool useSubpixelPositioning() const { return s_useSubpixelPositioning; }
     SkFontMgr* fontManager() { return m_fontManager.get(); }
     static bool useDirectWrite() { return s_useDirectWrite; }
+    static float deviceScaleFactor() { return s_deviceScaleFactor; }
     static void setUseDirectWrite(bool useDirectWrite) { s_useDirectWrite = useDirectWrite; }
     static void setDirectWriteFactory(IDWriteFactory* factory) { s_directWriteFactory = factory; }
+    static void setDeviceScaleFactor(float deviceScaleFactor) { s_deviceScaleFactor = deviceScaleFactor; }
     static void setUseSubpixelPositioning(bool useSubpixelPositioning) { s_useSubpixelPositioning = useSubpixelPositioning; }
     static void addSideloadedFontForTesting(SkTypeface*);
 #endif
@@ -163,8 +164,9 @@ private:
     OwnPtr<SkFontMgr> m_fontManager;
     static bool s_useDirectWrite;
     static IDWriteFactory* s_directWriteFactory;
+    static float s_deviceScaleFactor;
     static bool s_useSubpixelPositioning;
-    static HashMap<String, SkTypeface*>* s_sideloadedFonts;
+    static HashMap<String, RefPtr<SkTypeface> >* s_sideloadedFonts;
 #endif
 
 #if OS(MACOSX) || OS(ANDROID)

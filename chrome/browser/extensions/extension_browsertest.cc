@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -69,6 +69,13 @@ ExtensionBrowserTest::ExtensionBrowserTest()
       override_prompt_for_external_extensions_(
           FeatureSwitch::prompt_for_external_extensions(),
           false),
+#if defined(OS_WIN)
+      user_desktop_override_(base::DIR_USER_DESKTOP),
+      common_desktop_override_(base::DIR_COMMON_DESKTOP),
+      user_quick_launch_override_(base::DIR_USER_QUICK_LAUNCH),
+      start_menu_override_(base::DIR_START_MENU),
+      common_start_menu_override_(base::DIR_COMMON_START_MENU),
+#endif
       profile_(NULL) {
   EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
 }

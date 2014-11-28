@@ -21,15 +21,16 @@ public class BindingsTestUtils {
     /**
      * {@link MessageReceiver} that records any message it receives.
      */
-    public static class RecordingMessageReceiver implements MessageReceiver {
+    public static class RecordingMessageReceiver extends SideEffectFreeCloseable
+            implements MessageReceiver {
 
-        public final List<MessageWithHeader> messages = new ArrayList<MessageWithHeader>();
+        public final List<Message> messages = new ArrayList<Message>();
 
         /**
-         * @see MessageReceiver#accept(MessageWithHeader)
+         * @see MessageReceiver#accept(Message)
          */
         @Override
-        public boolean accept(MessageWithHeader message) {
+        public boolean accept(Message message) {
             messages.add(message);
             return true;
         }
@@ -41,15 +42,14 @@ public class BindingsTestUtils {
     public static class RecordingMessageReceiverWithResponder extends RecordingMessageReceiver
             implements MessageReceiverWithResponder {
 
-        public final List<Pair<MessageWithHeader, MessageReceiver>> messagesWithReceivers =
-                new ArrayList<Pair<MessageWithHeader, MessageReceiver>>();
+        public final List<Pair<Message, MessageReceiver>> messagesWithReceivers =
+                new ArrayList<Pair<Message, MessageReceiver>>();
 
         /**
-         * @see MessageReceiverWithResponder#acceptWithResponder(MessageWithHeader,
-         *      MessageReceiver)
+         * @see MessageReceiverWithResponder#acceptWithResponder(Message, MessageReceiver)
          */
         @Override
-        public boolean acceptWithResponder(MessageWithHeader message, MessageReceiver responder) {
+        public boolean acceptWithResponder(Message message, MessageReceiver responder) {
             messagesWithReceivers.add(Pair.create(message, responder));
             return true;
         }
@@ -60,21 +60,29 @@ public class BindingsTestUtils {
      */
     public static class CapturingErrorHandler implements ConnectionErrorHandler {
 
-        public MojoException exception = null;
+        private MojoException mLastMojoException = null;
 
         /**
          * @see ConnectionErrorHandler#onConnectionError(MojoException)
          */
         @Override
         public void onConnectionError(MojoException e) {
-            exception = e;
+            mLastMojoException = e;
         }
+
+        /**
+         * Returns the last recorded exception.
+         */
+        public MojoException getLastMojoException() {
+            return mLastMojoException;
+        }
+
     }
 
     /**
-     * Creates a new valid {@link MessageWithHeader}.
+     * Creates a new valid {@link Message}. The message will have a valid header.
      */
-    public static MessageWithHeader newRandomMessageWithHeader(int size) {
+    public static Message newRandomMessage(int size) {
         assert size > 16;
         ByteBuffer message = TestUtils.newRandomBuffer(size);
         int[] headerAsInts = { 16, 2, 0, 0 };
@@ -82,6 +90,6 @@ public class BindingsTestUtils {
             message.putInt(4 * i, headerAsInts[i]);
         }
         message.position(0);
-        return new MessageWithHeader(new Message(message, new ArrayList<Handle>()));
+        return new Message(message, new ArrayList<Handle>());
     }
 }

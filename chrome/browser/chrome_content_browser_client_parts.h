@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/memory/scoped_vector.h"
-#include "webkit/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_context.h"
 
 namespace base {
 class CommandLine;
@@ -25,7 +25,7 @@ class SiteInstance;
 struct WebPreferences;
 }
 
-namespace fileapi {
+namespace storage {
 class FileSystemBackend;
 }
 
@@ -42,10 +42,6 @@ class ChromeContentBrowserClientParts {
   virtual void RenderProcessWillLaunch(content::RenderProcessHost* host) {}
   virtual void SiteInstanceGotProcess(content::SiteInstance* site_instance) {}
   virtual void SiteInstanceDeleting(content::SiteInstance* site_instance) {}
-  virtual void WorkerProcessCreated(content::SiteInstance* site_instance,
-                                    int worker_process_id) {}
-  virtual void WorkerProcessTerminated(content::SiteInstance* site_instance,
-                                       int worker_process_id) {}
   virtual void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                                    const GURL& url,
                                    content::WebPreferences* web_prefs) {}
@@ -53,11 +49,11 @@ class ChromeContentBrowserClientParts {
   virtual void GetAdditionalAllowedSchemesForFileSystem(
       std::vector<std::string>* additional_allowed_schemes) {}
   virtual void GetURLRequestAutoMountHandlers(
-      std::vector<fileapi::URLRequestAutoMountHandler>* handlers) {}
+      std::vector<storage::URLRequestAutoMountHandler>* handlers) {}
   virtual void GetAdditionalFileSystemBackends(
       content::BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      ScopedVector<fileapi::FileSystemBackend>* additional_backends) {}
+      ScopedVector<storage::FileSystemBackend>* additional_backends) {}
 
   // Append extra switches to |command_line| for |process|. If |process| is not
   // NULL, then neither is |profile|.

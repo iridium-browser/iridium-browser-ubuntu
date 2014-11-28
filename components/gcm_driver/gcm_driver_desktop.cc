@@ -11,78 +11,19 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "components/gcm_driver/gcm_app_handler.h"
+#include "components/gcm_driver/gcm_channel_status_syncer.h"
 #include "components/gcm_driver/gcm_client_factory.h"
+#include "components/gcm_driver/gcm_delayed_task_controller.h"
 #include "components/gcm_driver/system_encryptor.h"
+#include "google_apis/gcm/engine/account_mapping.h"
 #include "net/base/ip_endpoint.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace gcm {
-
-namespace {
-
-// Empty string is reserved for the default app handler.
-const char kDefaultAppHandler[] = "";
-
-}  // namespace
-
-// Helper class to save tasks to run until we're ready to execute them.
-class GCMDriverDesktop::DelayedTaskController {
- public:
-  DelayedTaskController();
-  ~DelayedTaskController();
-
-  // Adds a task that will be invoked once we're ready.
-  void AddTask(const base::Closure& task);
-
-  // Sets ready status. It is ready only when check-in is completed and
-  // the GCMClient is fully initialized.
-  void SetReady();
-
-  // Returns true if it is ready to perform tasks.
-  bool CanRunTaskWithoutDelay() const;
-
- private:
-  void RunTasks();
-
-  // Flag that indicates that GCM is ready.
-  bool ready_;
-
-  std::vector<base::Closure> delayed_tasks_;
-
-  DISALLOW_COPY_AND_ASSIGN(DelayedTaskController);
-};
-
-GCMDriverDesktop::DelayedTaskController::DelayedTaskController()
-    : ready_(false) {
-}
-
-GCMDriverDesktop::DelayedTaskController::~DelayedTaskController() {
-}
-
-void GCMDriverDesktop::DelayedTaskController::AddTask(
-    const base::Closure& task) {
-  delayed_tasks_.push_back(task);
-}
-
-void GCMDriverDesktop::DelayedTaskController::SetReady() {
-  ready_ = true;
-  RunTasks();
-}
-
-bool GCMDriverDesktop::DelayedTaskController::CanRunTaskWithoutDelay() const {
-  return ready_;
-}
-
-void GCMDriverDesktop::DelayedTaskController::RunTasks() {
-  DCHECK(ready_);
-
-  for (size_t i = 0; i < delayed_tasks_.size(); ++i)
-    delayed_tasks_[i].Run();
-  delayed_tasks_.clear();
-}
 
 class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
  public:
@@ -110,7 +51,8 @@ class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
       const GCMClient::SendErrorDetails& send_error_details) OVERRIDE;
   virtual void OnSendAcknowledged(const std::string& app_id,
                                   const std::string& message_id) OVERRIDE;
-  virtual void OnGCMReady() OVERRIDE;
+  virtual void OnGCMReady(
+      const std::vector<AccountMapping>& account_mappings) OVERRIDE;
   virtual void OnActivityRecorded() OVERRIDE;
   virtual void OnConnected(const net::IPEndPoint& ip_endpoint) OVERRIDE;
   virtual void OnDisconnected() OVERRIDE;
@@ -136,6 +78,8 @@ class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
 
   void SetAccountsForCheckin(
       const std::map<std::string, std::string>& account_tokens);
+  void UpdateAccountMapping(const AccountMapping& account_mapping);
+  void RemoveAccountMapping(const std::string& account_id);
 
   // For testing purpose. Can be called from UI thread. Use with care.
   GCMClient* gcm_client_for_testing() const { return gcm_client_.get(); }
@@ -259,10 +203,12 @@ void GCMDriverDesktop::IOWorker::OnSendAcknowledged(
           &GCMDriverDesktop::SendAcknowledged, service_, app_id, message_id));
 }
 
-void GCMDriverDesktop::IOWorker::OnGCMReady() {
+void GCMDriverDesktop::IOWorker::OnGCMReady(
+    const std::vector<AccountMapping>& account_mappings) {
   ui_thread_->PostTask(
       FROM_HERE,
-      base::Bind(&GCMDriverDesktop::GCMClientReady, service_));
+      base::Bind(
+          &GCMDriverDesktop::GCMClientReady, service_, account_mappings));
 }
 
 void GCMDriverDesktop::IOWorker::OnActivityRecorded() {
@@ -369,21 +315,48 @@ void GCMDriverDesktop::IOWorker::SetAccountsForCheckin(
     gcm_client_->SetAccountsForCheckin(account_tokens);
 }
 
+void GCMDriverDesktop::IOWorker::UpdateAccountMapping(
+    const AccountMapping& account_mapping) {
+  DCHECK(io_thread_->RunsTasksOnCurrentThread());
+
+  if (gcm_client_.get())
+    gcm_client_->UpdateAccountMapping(account_mapping);
+}
+
+void GCMDriverDesktop::IOWorker::RemoveAccountMapping(
+    const std::string& account_id) {
+  DCHECK(io_thread_->RunsTasksOnCurrentThread());
+
+  if (gcm_client_.get())
+    gcm_client_->RemoveAccountMapping(account_id);
+}
+
 GCMDriverDesktop::GCMDriverDesktop(
     scoped_ptr<GCMClientFactory> gcm_client_factory,
     const GCMClient::ChromeBuildInfo& chrome_build_info,
+    const std::string& channel_status_request_url,
+    const std::string& user_agent,
+    PrefService* prefs,
     const base::FilePath& store_path,
     const scoped_refptr<net::URLRequestContextGetter>& request_context,
     const scoped_refptr<base::SequencedTaskRunner>& ui_thread,
     const scoped_refptr<base::SequencedTaskRunner>& io_thread,
     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
-    : signed_in_(false),
+    : gcm_channel_status_syncer_(
+          new GCMChannelStatusSyncer(this,
+                                     prefs,
+                                     channel_status_request_url,
+                                     user_agent,
+                                     request_context)),
+      signed_in_(false),
       gcm_started_(false),
       gcm_enabled_(true),
       connected_(false),
       ui_thread_(ui_thread),
       io_thread_(io_thread),
       weak_ptr_factory_(this) {
+  gcm_enabled_ = gcm_channel_status_syncer_->gcm_enabled();
+
   // Create and initialize the GCMClient. Note that this does not initiate the
   // GCM check-in.
   io_worker_.reset(new IOWorker(ui_thread, io_thread));
@@ -404,6 +377,12 @@ GCMDriverDesktop::~GCMDriverDesktop() {
 void GCMDriverDesktop::Shutdown() {
   DCHECK(ui_thread_->RunsTasksOnCurrentThread());
   GCMDriver::Shutdown();
+
+  // Dispose the syncer in order to release the reference to
+  // URLRequestContextGetter that needs to be done before IOThread gets
+  // deleted.
+  gcm_channel_status_syncer_.reset();
+
   io_thread_->DeleteSoon(FROM_HERE, io_worker_.release());
 }
 
@@ -412,13 +391,18 @@ void GCMDriverDesktop::OnSignedIn() {
   EnsureStarted();
 }
 
+void GCMDriverDesktop::OnSignedOut() {
+  signed_in_ = false;
+
+  // When sign-in enforcement is not dropped, we will stop the GCM connection
+  // when the user signs out.
+  if (!GCMDriver::IsAllowedForAllUsers())
+    Stop();
+}
+
 void GCMDriverDesktop::Purge() {
   DCHECK(ui_thread_->RunsTasksOnCurrentThread());
 
-  // We still proceed with the check-out logic even if the check-in is not
-  // initiated in the current session. This will make sure that all the
-  // persisted data written previously will get purged.
-  signed_in_ = false;
   RemoveCachedData();
 
   io_thread_->PostTask(FROM_HERE,
@@ -440,8 +424,19 @@ void GCMDriverDesktop::RemoveAppHandler(const std::string& app_id) {
   GCMDriver::RemoveAppHandler(app_id);
 
   // Stops the GCM service when no app intends to consume it.
-  if (app_handlers().empty())
+  if (app_handlers().empty()) {
     Stop();
+    gcm_channel_status_syncer_->Stop();
+  }
+}
+
+void GCMDriverDesktop::AddConnectionObserver(GCMConnectionObserver* observer) {
+  connection_observer_list_.AddObserver(observer);
+}
+
+void GCMDriverDesktop::RemoveConnectionObserver(
+    GCMConnectionObserver* observer) {
+  connection_observer_list_.RemoveObserver(observer);
 }
 
 void GCMDriverDesktop::Enable() {
@@ -605,6 +600,27 @@ void GCMDriverDesktop::SetGCMRecording(const GetGCMStatisticsCallback& callback,
                  recording));
 }
 
+void GCMDriverDesktop::UpdateAccountMapping(
+    const AccountMapping& account_mapping) {
+  DCHECK(ui_thread_->RunsTasksOnCurrentThread());
+
+  io_thread_->PostTask(
+      FROM_HERE,
+      base::Bind(&GCMDriverDesktop::IOWorker::UpdateAccountMapping,
+                 base::Unretained(io_worker_.get()),
+                 account_mapping));
+}
+
+void GCMDriverDesktop::RemoveAccountMapping(const std::string& account_id) {
+  DCHECK(ui_thread_->RunsTasksOnCurrentThread());
+
+  io_thread_->PostTask(
+      FROM_HERE,
+      base::Bind(&GCMDriverDesktop::IOWorker::RemoveAccountMapping,
+                 base::Unretained(io_worker_.get()),
+                 account_id));
+}
+
 void GCMDriverDesktop::SetAccountsForCheckin(
     const std::map<std::string, std::string>& account_tokens) {
   DCHECK(ui_thread_->RunsTasksOnCurrentThread());
@@ -622,8 +638,14 @@ GCMClient::Result GCMDriverDesktop::EnsureStarted() {
   if (gcm_started_)
     return GCMClient::SUCCESS;
 
-  if (!gcm_enabled_)
+  if (!gcm_enabled_) {
+    // Poll for channel status in order to find out when it is re-enabled when
+    // GCM is currently disabled.
+    if (GCMDriver::IsAllowedForAllUsers())
+      gcm_channel_status_syncer_->EnsureStarted();
+
     return GCMClient::GCM_DISABLED;
+  }
 
   // Have any app requested the service?
   if (app_handlers().empty())
@@ -634,7 +656,14 @@ GCMClient::Result GCMDriverDesktop::EnsureStarted() {
     return GCMClient::NOT_SIGNED_IN;
 
   DCHECK(!delayed_task_controller_);
-  delayed_task_controller_.reset(new DelayedTaskController);
+  delayed_task_controller_.reset(new GCMDelayedTaskController);
+
+  // Polling for channel status is only needed when GCM is supported for all
+  // users.
+  if (GCMDriver::IsAllowedForAllUsers())
+    gcm_channel_status_syncer_->EnsureStarted();
+
+  UMA_HISTOGRAM_BOOLEAN("GCM.UserSignedIn", signed_in_);
 
   // Note that we need to pass weak pointer again since the existing weak
   // pointer in IOWorker might have been invalidated when check-out occurs.
@@ -704,7 +733,8 @@ void GCMDriverDesktop::SendAcknowledged(const std::string& app_id,
   GetAppHandler(app_id)->OnSendAcknowledged(app_id, message_id);
 }
 
-void GCMDriverDesktop::GCMClientReady() {
+void GCMDriverDesktop::GCMClientReady(
+    const std::vector<AccountMapping>& account_mappings) {
   DCHECK(ui_thread_->RunsTasksOnCurrentThread());
 
   delayed_task_controller_->SetReady();
@@ -719,13 +749,9 @@ void GCMDriverDesktop::OnConnected(const net::IPEndPoint& ip_endpoint) {
   if (!gcm_started_)
     return;
 
-  const GCMAppHandlerMap& app_handler_map = app_handlers();
-  for (GCMAppHandlerMap::const_iterator iter = app_handler_map.begin();
-       iter != app_handler_map.end(); ++iter) {
-    iter->second->OnConnected(ip_endpoint);
-  }
-
-  GetAppHandler(kDefaultAppHandler)->OnConnected(ip_endpoint);
+  FOR_EACH_OBSERVER(GCMConnectionObserver,
+                    connection_observer_list_,
+                    OnConnected(ip_endpoint));
 }
 
 void GCMDriverDesktop::OnDisconnected() {
@@ -737,13 +763,8 @@ void GCMDriverDesktop::OnDisconnected() {
   if (!gcm_started_)
     return;
 
-  const GCMAppHandlerMap& app_handler_map = app_handlers();
-  for (GCMAppHandlerMap::const_iterator iter = app_handler_map.begin();
-       iter != app_handler_map.end(); ++iter) {
-    iter->second->OnDisconnected();
-  }
-
-  GetAppHandler(kDefaultAppHandler)->OnDisconnected();
+  FOR_EACH_OBSERVER(
+      GCMConnectionObserver, connection_observer_list_, OnDisconnected());
 }
 
 void GCMDriverDesktop::GetGCMStatisticsFinished(

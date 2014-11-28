@@ -16,19 +16,19 @@
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/bookmark_provider.h"
 #include "chrome/browser/autocomplete/builtin_provider.h"
+#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/autocomplete/keyword_provider.h"
-#include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/autocomplete/shortcuts_provider.h"
 #include "chrome/browser/autocomplete/zero_suggest_provider.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "components/omnibox/keyword_provider.h"
 #include "components/omnibox/omnibox_field_trial.h"
+#include "components/omnibox/search_provider.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -209,7 +209,9 @@ AutocompleteController::AutocompleteController(
   }
 #endif
   if (provider_types & AutocompleteProvider::TYPE_SEARCH) {
-    search_provider_ = new SearchProvider(this, template_url_service, profile);
+    search_provider_ = new SearchProvider(
+        this, template_url_service, scoped_ptr<AutocompleteProviderClient>(
+            new ChromeAutocompleteProviderClient(profile)));
     providers_.push_back(search_provider_);
   }
   if (provider_types & AutocompleteProvider::TYPE_SHORTCUTS)
@@ -263,7 +265,7 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
 
     // Call Start() on ZeroSuggestProvider with an INVALID AutocompleteInput
     // to clear out zero-suggest |matches_|.
-    if (*i == zero_suggest_provider_)
+    if (i->get() == zero_suggest_provider_)
       (*i)->Start(AutocompleteInput(), minimal_changes);
     else
       (*i)->Start(input_, minimal_changes);
@@ -335,7 +337,7 @@ void AutocompleteController::StartZeroSuggest(const AutocompleteInput& input) {
   // AutocompleteInput to clear out cached |matches_|, which ensures that
   // they aren't used with zero suggest.
   for (Providers::iterator i(providers_.begin()); i != providers_.end(); ++i) {
-    if (*i == zero_suggest_provider_)
+    if (i->get() == zero_suggest_provider_)
       (*i)->Start(input, false);
     else
       (*i)->Start(AutocompleteInput(), false);

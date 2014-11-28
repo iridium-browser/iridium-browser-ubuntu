@@ -82,9 +82,6 @@ prepunc ` 6-236
 always @ 4-1
 always \\ 456-16
 always | 456-1256
-repeated \s 0
-repeated \x00a0 0
-repeated \t 0
 always \s-\s 36-36
 always ... 3-3-3
 always .\s.\s. 3-3-3 . . .
@@ -872,5 +869,5 @@ endword 't 3-2345
 endword 've 3-1236-15
 always -com =
 endword -to = pointed-to resource
-include corrections.ctb
+include corrections.cti
 

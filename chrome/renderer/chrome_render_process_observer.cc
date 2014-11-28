@@ -10,7 +10,7 @@
 #include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
@@ -28,7 +28,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/common/variations/variations_util.h"
 #include "chrome/renderer/content_settings_observer.h"
-#include "chrome/renderer/extensions/extension_localization_peer.h"
 #include "chrome/renderer/security_filter_peer.h"
 #include "content/public/child/resource_dispatcher_delegate.h"
 #include "content/public/renderer/render_thread.h"
@@ -48,6 +47,10 @@
 #include "base/win/iat_patch_function.h"
 #endif
 
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/renderer/extensions/extension_localization_peer.h"
+#endif
+
 using blink::WebCache;
 using blink::WebRuntimeFeatures;
 using blink::WebSecurityPolicy;
@@ -57,7 +60,6 @@ using content::RenderThread;
 namespace {
 
 const int kCacheStatsDelayMS = 2000;
-const size_t kUnitializedCacheCapacity = UINT_MAX;
 
 class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
  public:
@@ -92,8 +94,12 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
       content::RequestPeer* current_peer,
       const std::string& mime_type,
       const GURL& url) OVERRIDE {
+#if defined(ENABLE_EXTENSIONS)
     return ExtensionLocalizationPeer::CreateExtensionLocalizationPeer(
         current_peer, RenderThread::Get(), mime_type, url);
+#else
+    return NULL;
+#endif
   }
 
  private:
@@ -248,11 +254,7 @@ bool ChromeRenderProcessObserver::is_incognito_process_ = false;
 ChromeRenderProcessObserver::ChromeRenderProcessObserver(
     ChromeContentRendererClient* client)
     : client_(client),
-      clear_cache_pending_(false),
-      webkit_initialized_(false),
-      pending_cache_min_dead_capacity_(0),
-      pending_cache_max_dead_capacity_(0),
-      pending_cache_capacity_(kUnitializedCacheCapacity) {
+      webkit_initialized_(false) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
@@ -261,6 +263,11 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
 
   if (command_line.HasSwitch(switches::kEnableShowModalDialog))
     WebRuntimeFeatures::enableShowModalDialog(true);
+
+  if (command_line.HasSwitch(switches::kJavaScriptHarmony)) {
+    std::string flag("--harmony");
+    v8::V8::SetFlagsFromString(flag.c_str(), static_cast<int>(flag.size()));
+  }
 
   RenderThread* thread = RenderThread::Get();
   resource_delegate_.reset(new RendererResourceDelegate());
@@ -305,8 +312,6 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderProcessObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsIncognitoProcess,
                         OnSetIsIncognitoProcess)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetCacheCapacities, OnSetCacheCapacities)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_ClearCache, OnClearCache)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetFieldTrialGroup, OnSetFieldTrialGroup)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetV8HeapStats, OnGetV8HeapStats)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetCacheResourceStats,
@@ -320,12 +325,6 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
 
 void ChromeRenderProcessObserver::WebKitInitialized() {
   webkit_initialized_ = true;
-  if (pending_cache_capacity_ != kUnitializedCacheCapacity) {
-    WebCache::setCapacities(pending_cache_min_dead_capacity_,
-                            pending_cache_max_dead_capacity_,
-                            pending_cache_capacity_);
-  }
-
   // chrome-native: is a scheme used for placeholder navigations that allow
   // UIs to be drawn with platform native widgets instead of HTML.  These pages
   // should not be accessible, and should also be treated as empty documents
@@ -354,28 +353,6 @@ void ChromeRenderProcessObserver::OnSetContentSettingRules(
   content_setting_rules_ = rules;
 }
 
-void ChromeRenderProcessObserver::OnSetCacheCapacities(size_t min_dead_capacity,
-                                                       size_t max_dead_capacity,
-                                                       size_t capacity) {
-  if (!webkit_initialized_) {
-    pending_cache_min_dead_capacity_ = min_dead_capacity;
-    pending_cache_max_dead_capacity_ = max_dead_capacity;
-    pending_cache_capacity_ = capacity;
-    return;
-  }
-
-  WebCache::setCapacities(
-      min_dead_capacity, max_dead_capacity, capacity);
-}
-
-void ChromeRenderProcessObserver::OnClearCache(bool on_navigation) {
-  if (on_navigation || !webkit_initialized_) {
-    clear_cache_pending_ = true;
-  } else {
-    WebCache::clear();
-  }
-}
-
 void ChromeRenderProcessObserver::OnGetCacheResourceStats() {
   WebCache::ResourceTypeStats stats;
   if (webkit_initialized_)
@@ -398,13 +375,6 @@ void ChromeRenderProcessObserver::OnSetFieldTrialGroup(
 
 void ChromeRenderProcessObserver::OnGetV8HeapStats() {
   HeapStatisticsCollector::Instance()->InitiateCollection();
-}
-
-void ChromeRenderProcessObserver::ExecutePendingClearCache() {
-  if (clear_cache_pending_ && webkit_initialized_) {
-    clear_cache_pending_ = false;
-    WebCache::clear();
-  }
 }
 
 const RendererContentSettingRules*

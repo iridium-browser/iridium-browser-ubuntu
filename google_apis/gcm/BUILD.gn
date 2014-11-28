@@ -45,28 +45,33 @@ component("gcm") {
 
   defines = [ "GCM_IMPLEMENTATION" ]
 
-  deps = [
+  public_deps = [
     ":proto",
+  ]
+  deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
     "//net",
     "//third_party/leveldatabase",
     "//url",
   ]
-
-  forward_dependent_configs_from = [ ":proto" ]
 }
 
 proto_library("proto") {
-  visibility = ":*"
+  visibility = [ ":*" ]
   sources = [
     "protocol/android_checkin.proto",
     "protocol/checkin.proto",
     "protocol/mcs.proto",
   ]
+
+  cc_generator_options = "dllexport_decl=GCM_EXPORT:"
+  cc_include = "google_apis/gcm/base/gcm_export.h"
+  defines = [ "GCM_IMPLEMENTATION" ]
 }
 
 static_library("test_support") {
+  testonly = true
   sources = [
     "base/fake_encryptor.cc",
     "base/fake_encryptor.h",
@@ -78,17 +83,18 @@ static_library("test_support") {
     "monitoring/fake_gcm_stats_recorder.h",
   ]
 
-  deps = [
+  public_deps = [
     ":gcm",
+  ]
+  deps = [
     "//base",
     "//testing/gtest",
   ]
-
-  forward_dependent_configs_from = [ ":gcm" ]
 }
 
 # A standalone MCS (mobile connection server) client.
 executable("mcs_probe") {
+  testonly = true
   sources = [
     "tools/mcs_probe.cc",
   ]

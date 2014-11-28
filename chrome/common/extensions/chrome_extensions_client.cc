@@ -4,20 +4,23 @@
 
 #include "chrome/common/extensions/chrome_extensions_client.h"
 
+#include "base/command_line.h"
+#include "base/strings/string_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/common/extensions/chrome_manifest_handlers.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/features/chrome_channel_feature_filter.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/common_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/common/url_constants.h"
-#include "extensions/common/api/generated_schemas.h"
 #include "extensions/common/common_manifest_handlers.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_api.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/features/api_feature.h"
 #include "extensions/common/features/base_feature_provider.h"
 #include "extensions/common/features/feature_provider.h"
@@ -36,13 +39,23 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
+// TODO(thestig): Remove these #defines. This file should not be built when
+// extensions are disabled.
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/grit/extensions_api_resources.h"
+#include "extensions/common/api/generated_schemas.h"
 #endif
 
 namespace extensions {
 
 namespace {
+
+// TODO(battre): Delete the HTTP URL once the blacklist is downloaded via HTTPS.
+const char kExtensionBlocklistUrlPrefix[] =
+    "http://www.gstatic.com/chrome/extensions/blacklist";
+const char kExtensionBlocklistHttpsUrlPrefix[] =
+    "https://www.gstatic.com/chrome/extensions/blacklist";
 
 const char kThumbsWhiteListedExtension[] = "khopmbdjffemhegeeobelklnbglcdgfh";
 
@@ -72,7 +85,9 @@ void ChromeExtensionsClient::Initialize() {
   // thread runs in-process.
   if (!ManifestHandler::IsRegistrationFinalized()) {
     RegisterCommonManifestHandlers();
+#if defined(ENABLE_EXTENSIONS)
     RegisterChromeManifestHandlers();
+#endif
     ManifestHandler::FinalizeRegistration();
   }
 
@@ -98,6 +113,10 @@ void ChromeExtensionsClient::Initialize() {
 const PermissionMessageProvider&
 ChromeExtensionsClient::GetPermissionMessageProvider() const {
   return permission_message_provider_;
+}
+
+const std::string ChromeExtensionsClient::GetProductName() {
+  return l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
 }
 
 scoped_ptr<FeatureProvider> ChromeExtensionsClient::CreateFeatureProvider(
@@ -215,18 +234,26 @@ bool ChromeExtensionsClient::IsScriptableURL(
 
 bool ChromeExtensionsClient::IsAPISchemaGenerated(
     const std::string& name) const {
+#if defined(ENABLE_EXTENSIONS)
   // Test from most common to least common.
   return api::GeneratedSchemas::IsGenerated(name) ||
          core_api::GeneratedSchemas::IsGenerated(name);
+#else
+  return false;
+#endif
 }
 
 base::StringPiece ChromeExtensionsClient::GetAPISchema(
     const std::string& name) const {
+#if defined(ENABLE_EXTENSIONS)
   // Test from most common to least common.
   if (api::GeneratedSchemas::IsGenerated(name))
     return api::GeneratedSchemas::Get(name);
 
   return core_api::GeneratedSchemas::Get(name);
+#else
+  return base::StringPiece();
+#endif
 }
 
 void ChromeExtensionsClient::RegisterAPISchemaResources(
@@ -247,8 +274,6 @@ void ChromeExtensionsClient::RegisterAPISchemaResources(
   api->RegisterSchemaResource("inputMethodPrivate",
                               IDR_EXTENSION_API_JSON_INPUTMETHODPRIVATE);
   api->RegisterSchemaResource("pageAction", IDR_EXTENSION_API_JSON_PAGEACTION);
-  api->RegisterSchemaResource("pageActions",
-                              IDR_EXTENSION_API_JSON_PAGEACTIONS);
   api->RegisterSchemaResource("privacy", IDR_EXTENSION_API_JSON_PRIVACY);
   api->RegisterSchemaResource("processes", IDR_EXTENSION_API_JSON_PROCESSES);
   api->RegisterSchemaResource("proxy", IDR_EXTENSION_API_JSON_PROXY);
@@ -268,6 +293,35 @@ void ChromeExtensionsClient::RegisterAPISchemaResources(
 bool ChromeExtensionsClient::ShouldSuppressFatalErrors() const {
   // Suppress fatal errors only on beta and stable channels.
   return GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV;
+}
+
+std::string ChromeExtensionsClient::GetWebstoreBaseURL() const {
+  std::string gallery_prefix = extension_urls::kChromeWebstoreBaseURL;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppsGalleryURL))
+    gallery_prefix = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kAppsGalleryURL);
+  if (EndsWith(gallery_prefix, "/", true))
+    gallery_prefix = gallery_prefix.substr(0, gallery_prefix.length() - 1);
+  return gallery_prefix;
+}
+
+std::string ChromeExtensionsClient::GetWebstoreUpdateURL() const {
+  CommandLine* cmdline = CommandLine::ForCurrentProcess();
+  if (cmdline->HasSwitch(switches::kAppsGalleryUpdateURL))
+    return cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL);
+  else
+    return extension_urls::GetDefaultWebstoreUpdateUrl().spec();
+}
+
+bool ChromeExtensionsClient::IsBlacklistUpdateURL(const GURL& url) const {
+  // The extension blacklist URL is returned from the update service and
+  // therefore not determined by Chromium. If the location of the blacklist file
+  // ever changes, we need to update this function. A DCHECK in the
+  // ExtensionUpdater ensures that we notice a change. This is the full URL
+  // of a blacklist:
+  // http://www.gstatic.com/chrome/extensions/blacklist/l_0_0_0_7.txt
+  return StartsWithASCII(url.spec(), kExtensionBlocklistUrlPrefix, true) ||
+         StartsWithASCII(url.spec(), kExtensionBlocklistHttpsUrlPrefix, true);
 }
 
 // static

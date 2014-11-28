@@ -76,10 +76,10 @@ NativeWidgetAura::NativeWidgetAura(internal::NativeWidgetDelegate* delegate)
     : delegate_(delegate),
       window_(new aura::Window(this)),
       ownership_(Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET),
-      close_widget_factory_(this),
       destroying_(false),
       cursor_(gfx::kNullCursor),
-      saved_window_state_(ui::SHOW_STATE_DEFAULT) {
+      saved_window_state_(ui::SHOW_STATE_DEFAULT),
+      close_widget_factory_(this) {
   aura::client::SetFocusChangeObserver(window_, this);
   aura::client::SetActivationChangeObserver(window_, this);
 }
@@ -143,12 +143,9 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
     }
   }
 
-  // Set properties before addeing to the parent so that its layout manager
-  // sees the correct values.
-  window_->SetProperty(aura::client::kCanMaximizeKey,
-                       GetWidget()->widget_delegate()->CanMaximize());
-  window_->SetProperty(aura::client::kCanResizeKey,
-                       GetWidget()->widget_delegate()->CanResize());
+  // Set properties before adding to the parent so that its layout manager sees
+  // the correct values.
+  OnSizeConstraintsChanged();
 
   if (parent) {
     parent->AddChild(window_);
@@ -700,6 +697,13 @@ bool NativeWidgetAura::IsTranslucentWindowOpacitySupported() const {
   return true;
 }
 
+void NativeWidgetAura::OnSizeConstraintsChanged() {
+  window_->SetProperty(aura::client::kCanMaximizeKey,
+                       GetWidget()->widget_delegate()->CanMaximize());
+  window_->SetProperty(aura::client::kCanResizeKey,
+                       GetWidget()->widget_delegate()->CanResize());
+}
+
 void NativeWidgetAura::RepostNativeEvent(gfx::NativeEvent native_event) {
   OnEvent(native_event);
 }
@@ -856,7 +860,10 @@ void NativeWidgetAura::OnKeyEvent(ui::KeyEvent* event) {
   // and the window may be invisible by that time.
   if (!window_->IsVisible())
     return;
-  GetWidget()->GetInputMethod()->DispatchKeyEvent(*event);
+  InputMethod* input_method = GetWidget()->GetInputMethod();
+  if (!input_method)
+    return;
+  input_method->DispatchKeyEvent(*event);
   if (switches::IsTextInputFocusManagerEnabled()) {
     FocusManager* focus_manager = GetWidget()->GetFocusManager();
     delegate_->OnKeyEvent(event);

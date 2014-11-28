@@ -18,6 +18,7 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.ContentViewCore;
@@ -43,6 +44,7 @@ public class ImeTest extends ContentShellTestBase {
             "<input id=\"input_text\" type=\"text\" /><br/>" +
             "<input id=\"input_radio\" type=\"radio\" style=\"width:50px;height:50px\" />" +
             "<br/><textarea id=\"textarea\" rows=\"4\" cols=\"20\"></textarea>" +
+            "<br/><p><span id=\"plain_text\">This is Plain Text One</span></p>" +
             "</form></body></html>");
 
     private TestAdapterInputConnection mConnection;
@@ -158,7 +160,91 @@ public class ImeTest extends ContentShellTestBase {
         copy(mImeAdapter);
         assertWaitForKeyboardStatus(true);
         assertEquals(11, Selection.getSelectionEnd(mContentViewCore.getEditableForTest()));
-        assertEquals(11, Selection.getSelectionEnd(mContentViewCore.getEditableForTest()));
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testImeNotDismissedAfterCutSelection() throws Exception {
+        commitText(mConnection, "Sample Text", 1);
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1,
+                "Sample Text", 11, 11, -1, -1);
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForSelectActionBarStatus(true);
+        assertWaitForKeyboardStatus(true);
+        cut(mImeAdapter);
+        assertWaitForKeyboardStatus(true);
+        assertWaitForSelectActionBarStatus(false);
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testImeNotShownOnLongPressingEmptyInput() throws Exception {
+        DOMUtils.focusNode(mContentViewCore, "input_radio");
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(false);
+        commitText(mConnection, "Sample Text", 1);
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(true);
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testSelectActionBarShownOnLongPressingInput() throws Exception {
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForSelectActionBarStatus(false);
+        commitText(mConnection, "Sample Text", 1);
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForSelectActionBarStatus(true);
+    }
+
+    /*
+    @SmallTest
+    @Feature({"TextInput"})
+    */
+    @DisabledTest
+    public void testSelectActionBarClearedOnTappingInput() throws Exception {
+        commitText(mConnection, "Sample Text", 1);
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(true);
+        assertWaitForSelectActionBarStatus(true);
+        DOMUtils.clickNode(this, mContentViewCore, "input_text");
+        assertWaitForSelectActionBarStatus(false);
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testSelectActionBarClearedOnTappingOutsideInput() throws Exception {
+        commitText(mConnection, "Sample Text", 1);
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(true);
+        assertWaitForSelectActionBarStatus(true);
+        DOMUtils.clickNode(this, mContentViewCore, "input_radio");
+        assertWaitForKeyboardStatus(false);
+        assertWaitForSelectActionBarStatus(false);
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testImeNotShownOnLongPressingDifferentEmptyInputs() throws Exception {
+        DOMUtils.focusNode(mContentViewCore, "input_radio");
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(false);
+        DOMUtils.longPressNode(this, mContentViewCore, "textarea");
+        assertWaitForKeyboardStatus(false);
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testImeStaysOnLongPressingDifferentNonEmptyInputs() throws Exception {
+        DOMUtils.focusNode(mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(true);
+        commitText(mConnection, "Sample Text", 1);
+        DOMUtils.focusNode(mContentViewCore, "textarea");
+        commitText(mConnection, "Sample Text", 1);
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        assertWaitForKeyboardStatus(true);
+        DOMUtils.longPressNode(this, mContentViewCore, "textarea");
+        assertWaitForKeyboardStatus(true);
     }
 
     @SmallTest
@@ -232,8 +318,11 @@ public class ImeTest extends ContentShellTestBase {
         assertWaitForKeyboardStatus(true);
     }
 
+    /*
     @SmallTest
     @Feature({"TextInput", "Main"})
+    */
+    @DisabledTest
     public void testFinishComposingText() throws Throwable {
         DOMUtils.focusNode(mContentViewCore, "input_radio");
         assertWaitForKeyboardStatus(false);
@@ -309,8 +398,11 @@ public class ImeTest extends ContentShellTestBase {
         assertTrue(ev.isShiftPressed());
     }
 
+    /*
     @SmallTest
     @Feature({"TextInput", "Main"})
+    */
+    @DisabledTest
     public void testKeyCodesWhileComposingText() throws Throwable {
         DOMUtils.focusNode(mContentViewCore, "textarea");
         assertWaitForKeyboardStatus(true);
@@ -379,8 +471,11 @@ public class ImeTest extends ContentShellTestBase {
         assertEquals("", mConnection.getTextBeforeCursor(9, 0));
     }
 
+    /*
     @SmallTest
     @Feature({"TextInput", "Main"})
+    */
+    @DisabledTest
     public void testKeyCodesWhileSwipingText() throws Throwable {
         DOMUtils.focusNode(mContentViewCore, "textarea");
         assertWaitForKeyboardStatus(true);
@@ -515,8 +610,11 @@ public class ImeTest extends ContentShellTestBase {
         setComposingRegion(mConnection, 9, 0);
     }
 
+    /*
     @SmallTest
     @Feature({"TextInput", "Main"})
+    */
+    @DisabledTest
     public void testEnterKeyEventWhileComposingText() throws Throwable {
         DOMUtils.focusNode(mContentViewCore, "input_radio");
         assertWaitForKeyboardStatus(false);
@@ -568,6 +666,48 @@ public class ImeTest extends ContentShellTestBase {
         assertEquals(KeyEvent.KEYCODE_H, mImeAdapter.mLastSyntheticKeyCode);
     }
 
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testPastePopupShowOnLongPress() throws Throwable {
+        commitText(mConnection, "hello", 1);
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hello", 5, 5, -1, -1);
+
+        selectAll(mImeAdapter);
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "hello", 0, 5, -1, -1);
+
+        cut(mImeAdapter);
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 0, "", 0, 0, -1, -1);
+
+        DOMUtils.longPressNode(this, mContentViewCore, "input_text");
+        final PastePopupMenu pastePopup = mContentViewCore.getPastePopupForTest();
+        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return pastePopup.isShowing();
+            }
+        }));
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testTextHandlesPreservedWithDpadNavigation() throws Throwable {
+        DOMUtils.longPressNode(this, mContentViewCore, "plain_text");
+        assertWaitForSelectActionBarStatus(true);
+        assertTrue(mContentViewCore.hasSelection());
+
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                final KeyEvent downKeyEvent = new KeyEvent(
+                        KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN);
+                mImeAdapter.dispatchKeyEvent(downKeyEvent);
+            }
+        });
+
+        assertWaitForSelectActionBarStatus(true);
+        assertTrue(mContentViewCore.hasSelection());
+    }
+
     private void performGo(final AdapterInputConnection inputConnection,
             TestCallbackHelperContainer testCallbackHelperContainer) throws Throwable {
         handleBlockingCallbackAction(
@@ -586,6 +726,16 @@ public class ImeTest extends ContentShellTestBase {
             public boolean isSatisfied() {
                 return show == getImeAdapter().mIsShowWithoutHideOutstanding &&
                         (!show || getAdapterInputConnection() != null);
+            }
+        }));
+    }
+
+    private void assertWaitForSelectActionBarStatus(
+            final boolean show) throws InterruptedException {
+        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return show == mContentViewCore.isSelectActionBarShowing();
             }
         }));
     }

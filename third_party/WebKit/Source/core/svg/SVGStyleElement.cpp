@@ -23,6 +23,7 @@
 #include "config.h"
 #include "core/svg/SVGStyleElement.h"
 
+#include "core/MediaTypeNames.h"
 #include "core/css/CSSStyleSheet.h"
 #include "wtf/StdLibExtras.h"
 
@@ -33,7 +34,6 @@ inline SVGStyleElement::SVGStyleElement(Document& document, bool createdByParser
     , StyleElement(&document, createdByParser)
     , m_svgLoadEventTimer(this, &SVGElement::svgLoadEventTimerFired)
 {
-    ScriptWrappable::init(this);
 }
 
 SVGStyleElement::~SVGStyleElement()
@@ -76,9 +76,8 @@ void SVGStyleElement::setType(const AtomicString& type)
 
 const AtomicString& SVGStyleElement::media() const
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, defaultValue, ("all", AtomicString::ConstructFromLiteral));
     const AtomicString& n = fastGetAttribute(SVGNames::mediaAttr);
-    return n.isNull() ? defaultValue : n;
+    return n.isNull() ? MediaTypeNames::all : n;
 }
 
 void SVGStyleElement::setMedia(const AtomicString& media)

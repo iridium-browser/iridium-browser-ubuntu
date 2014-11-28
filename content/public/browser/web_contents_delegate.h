@@ -15,7 +15,6 @@
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_type.h"
 #include "content/public/common/media_stream_request.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -145,7 +144,6 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Notification that the target URL has changed.
   virtual void UpdateTargetURL(WebContents* source,
-                               int32 page_id,
                                const GURL& url) {}
 
   // Notification that there was a mouse event, along with the absolute
@@ -163,8 +161,11 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool CanOverscrollContent() const;
 
   // Callback that allows vertical overscroll activies to be communicated to the
-  // delegate.
+  // delegate. |delta_y| is the total amount of overscroll.
   virtual void OverscrollUpdate(int delta_y) {}
+
+  // Invoked when a vertical overscroll completes.
+  virtual void OverscrollComplete() {}
 
   // Return the rect where to display the resize corner, if any, otherwise
   // an empty rect.
@@ -443,6 +444,13 @@ class CONTENT_EXPORT WebContentsDelegate {
       WebContents* web_contents,
       const MediaStreamRequest& request,
       const MediaResponseCallback& callback);
+
+  // Checks if we have permission to access the microphone or camera. Note that
+  // this does not query the user. |type| must be MEDIA_DEVICE_AUDIO_CAPTURE
+  // or MEDIA_DEVICE_VIDEO_CAPTURE.
+  virtual bool CheckMediaAccessPermission(WebContents* web_contents,
+                                          const GURL& security_origin,
+                                          MediaStreamType type);
 
   // Requests permission to access the PPAPI broker. The delegate should return
   // true and call the passed in |callback| with the result, or return false

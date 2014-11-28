@@ -29,6 +29,7 @@
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
+#include "core/InputTypeNames.h"
 #include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransfer.h"
 #include "core/clipboard/DataTransferAccessPolicy.h"
@@ -117,8 +118,8 @@ static PlatformMouseEvent createMouseEvent(DragData* dragData)
     bool metaKey = static_cast<bool>(keyState & PlatformEvent::MetaKey);
 
     return PlatformMouseEvent(dragData->clientPosition(), dragData->globalPosition(),
-                              LeftButton, PlatformEvent::MouseMoved, 0, shiftKey, ctrlKey, altKey,
-                              metaKey, currentTime());
+        LeftButton, PlatformEvent::MouseMoved, 0, shiftKey, ctrlKey, altKey,
+        metaKey, PlatformMouseEvent::RealOrIndistinguishable, currentTime());
 }
 
 static PassRefPtrWillBeRawPtr<DataTransfer> createDraggingDataTransfer(DataTransferAccessPolicy policy, DragData* dragData)
@@ -238,7 +239,7 @@ bool DragController::performDrag(DragData* dragData)
     ASSERT(dragData);
     m_documentUnderMouse = m_page->deprecatedLocalMainFrame()->documentAtPoint(dragData->clientPosition());
     if ((m_dragDestinationAction & DragDestinationActionDHTML) && m_documentIsHandlingDrag) {
-        RefPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
+        RefPtrWillBeRawPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
         bool preventedDefault = false;
         if (mainFrame->view()) {
             // Sending an event can result in the destruction of the view and part.
@@ -302,7 +303,7 @@ static HTMLInputElement* asFileInput(Node* node)
 {
     ASSERT(node);
     for (; node; node = node->shadowHost()) {
-        if (isHTMLInputElement(*node) && toHTMLInputElement(node)->isFileUpload())
+        if (isHTMLInputElement(*node) && toHTMLInputElement(node)->type() == InputTypeNames::file)
             return toHTMLInputElement(node);
     }
     return 0;
@@ -459,7 +460,7 @@ bool DragController::concludeEditDrag(DragData* dragData)
     Element* element = elementUnderMouse(m_documentUnderMouse.get(), point);
     if (!element)
         return false;
-    RefPtr<LocalFrame> innerFrame = element->ownerDocument()->frame();
+    RefPtrWillBeRawPtr<LocalFrame> innerFrame = element->ownerDocument()->frame();
     ASSERT(innerFrame);
 
     if (m_page->dragCaretController().hasCaret() && !dispatchTextInputEventFor(innerFrame.get(), dragData))
@@ -589,11 +590,11 @@ bool DragController::tryDHTMLDrag(DragData* dragData, DragOperation& operation)
 {
     ASSERT(dragData);
     ASSERT(m_documentUnderMouse);
-    RefPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
-    RefPtr<FrameView> viewProtector = mainFrame->view();
-    if (!viewProtector)
+    RefPtrWillBeRawPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
+    if (!mainFrame->view())
         return false;
 
+    RefPtr<FrameView> viewProtector(mainFrame->view());
     DataTransferAccessPolicy policy = m_documentUnderMouse->securityOrigin()->isLocal() ? DataTransferReadable : DataTransferTypesReadable;
     RefPtrWillBeRawPtr<DataTransfer> dataTransfer = createDraggingDataTransfer(policy, dragData);
     DragOperation srcOpMask = dragData->draggingSourceOperationMask();
@@ -720,23 +721,6 @@ static void prepareDataTransferForImageDrag(LocalFrame* source, DataTransfer* da
     dataTransfer->declareAndWriteDragImage(node, !linkURL.isEmpty() ? linkURL : imageURL, label);
 }
 
-static ShadowRoot::ShadowRootType treeScopeType(const TreeScope& scope)
-{
-    // Treat document like an author shadow root.
-    if (scope.rootNode().isDocumentNode())
-        return ShadowRoot::AuthorShadowRoot;
-    return toShadowRoot(scope.rootNode()).type();
-}
-
-static bool containsExcludingUserAgentShadowTrees(const Node& dragSrc, Node* dragOrigin)
-{
-    if (!dragOrigin)
-        return false;
-    if (treeScopeType(dragSrc.treeScope()) != treeScopeType(dragOrigin->treeScope()))
-        return false;
-    return dragSrc.containsIncludingShadowDOM(dragOrigin);
-}
-
 bool DragController::populateDragDataTransfer(LocalFrame* src, const DragState& state, const IntPoint& dragOrigin)
 {
     ASSERT(dragTypeIsValid(state.m_dragType));
@@ -747,7 +731,7 @@ bool DragController::populateDragDataTransfer(LocalFrame* src, const DragState& 
     HitTestResult hitTestResult = src->eventHandler().hitTestResultAtPoint(dragOrigin);
     // FIXME: Can this even happen? I guess it's possible, but should verify
     // with a layout test.
-    if (!containsExcludingUserAgentShadowTrees(*state.m_dragSrc, hitTestResult.innerNode())) {
+    if (!state.m_dragSrc->containsIncludingShadowDOM(hitTestResult.innerNode())) {
         // The original node being dragged isn't under the drag origin anymore... maybe it was
         // hidden or moved out from under the cursor. Regardless, we don't want to start a drag on
         // something that's not actually under the drag origin.
@@ -865,7 +849,7 @@ bool DragController::startDrag(LocalFrame* src, const DragState& state, const Pl
         return false;
 
     HitTestResult hitTestResult = src->eventHandler().hitTestResultAtPoint(dragOrigin);
-    if (!containsExcludingUserAgentShadowTrees(*state.m_dragSrc, hitTestResult.innerNode())) {
+    if (!state.m_dragSrc->containsIncludingShadowDOM(hitTestResult.innerNode())) {
         // The original node being dragged isn't under the drag origin anymore... maybe it was
         // hidden or moved out from under the cursor. Regardless, we don't want to start a drag on
         // something that's not actually under the drag origin.
@@ -944,12 +928,13 @@ void DragController::doSystemDrag(DragImage* image, const IntPoint& dragLocation
     m_didInitiateDrag = true;
     m_dragInitiator = frame->document();
     // Protect this frame and view, as a load may occur mid drag and attempt to unload this frame
-    RefPtr<LocalFrame> frameProtector = m_page->deprecatedLocalMainFrame();
-    RefPtr<FrameView> viewProtector = frameProtector->view();
-    m_client->startDrag(image, viewProtector->rootViewToContents(frame->view()->contentsToRootView(dragLocation)),
-        viewProtector->rootViewToContents(frame->view()->contentsToRootView(eventPos)), dataTransfer, frameProtector.get(), forLink);
+    RefPtrWillBeRawPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
+    RefPtr<FrameView> mainFrameView = mainFrame->view();
+
+    m_client->startDrag(image, mainFrameView->rootViewToContents(frame->view()->contentsToRootView(dragLocation)),
+        mainFrameView->rootViewToContents(frame->view()->contentsToRootView(eventPos)), dataTransfer, frame, forLink);
     // DragClient::startDrag can cause our Page to dispear, deallocating |this|.
-    if (!frameProtector->page())
+    if (!frame->page())
         return;
 
     cleanupAfterSystemDrag();

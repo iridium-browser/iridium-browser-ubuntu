@@ -6,8 +6,8 @@
 #include <cert.h>
 #include <pk11pub.h>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -69,7 +69,7 @@ class ClientCertResolverTest : public testing::Test {
             base::Callback<void(crypto::ScopedPK11Slot)>())));
     test_nssdb_->SetSlowTaskRunnerForTest(message_loop_.message_loop_proxy());
 
-    DBusThreadManager::InitializeWithStub();
+    DBusThreadManager::Initialize();
     service_test_ =
         DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
     profile_test_ =
@@ -100,7 +100,7 @@ class ClientCertResolverTest : public testing::Test {
  protected:
   void StartCertLoader() {
     cert_loader_->StartWithNSSDB(test_nssdb_.get());
-    if (test_client_cert_) {
+    if (test_client_cert_.get()) {
       int slot_id = 0;
       const std::string pkcs11_id =
           CertLoader::GetPkcs11IdAndSlotForCert(*test_client_cert_, &slot_id);
@@ -136,10 +136,12 @@ class ClientCertResolverTest : public testing::Test {
     net::CertificateList client_cert_list;
     scoped_refptr<net::CryptoModule> module(
         net::CryptoModule::CreateFromHandle(private_slot_.get()));
-    ASSERT_EQ(
-        net::OK,
-        test_nssdb_->ImportFromPKCS12(
-            module, pkcs12_data, base::string16(), false, &client_cert_list));
+    ASSERT_EQ(net::OK,
+              test_nssdb_->ImportFromPKCS12(module.get(),
+                                            pkcs12_data,
+                                            base::string16(),
+                                            false,
+                                            &client_cert_list));
     ASSERT_TRUE(!client_cert_list.empty());
     test_client_cert_ = client_cert_list[0];
   }

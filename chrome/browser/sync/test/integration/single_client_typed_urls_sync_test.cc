@@ -3,12 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_vector.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/typed_urls_helper.h"
+#include "components/history/core/browser/history_types.h"
 
 using sync_integration_test_util::AwaitCommitActivityCompletion;
 using typed_urls_helper::AddUrlToHistory;
@@ -100,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientTypedUrlsSyncTest, DeleteNonTyped) {
 
   GURL new_url(kSanityHistoryUrl);
   // Add a non-typed URL.
-  AddUrlToHistoryWithTransition(0, new_url, content::PAGE_TRANSITION_LINK,
+  AddUrlToHistoryWithTransition(0, new_url, ui::PAGE_TRANSITION_LINK,
                                 history::SOURCE_BROWSED);
 
   urls = GetTypedUrlsFromClient(0);

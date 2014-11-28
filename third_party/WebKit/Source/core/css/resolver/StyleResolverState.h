@@ -40,7 +40,6 @@ namespace blink {
 
 class CSSAnimationUpdate;
 class FontDescription;
-class StyleRule;
 
 class StyleResolverState {
     STACK_ALLOCATED();
@@ -75,9 +74,6 @@ public:
     void setParentStyle(PassRefPtr<RenderStyle> parentStyle) { m_parentStyle = parentStyle; }
     const RenderStyle* parentStyle() const { return m_parentStyle.get(); }
     RenderStyle* parentStyle() { return m_parentStyle.get(); }
-
-    void setCurrentRule(StyleRule* currentRule) { m_currentRule = currentRule; }
-    const StyleRule* currentRule() const { return m_currentRule; }
 
     // FIXME: These are effectively side-channel "out parameters" for the various
     // map functions. When we map from CSS to style objects we use this state object
@@ -163,8 +159,6 @@ private:
     // a back-pointer to this object.
     CSSToStyleMap m_styleMap;
     Vector<AtomicString> m_contentAttrValues;
-
-    RawPtrWillBeMember<StyleRule> m_currentRule;
 };
 
 } // namespace blink

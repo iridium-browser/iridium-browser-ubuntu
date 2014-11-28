@@ -5,16 +5,22 @@
 #include "net/quic/quic_per_connection_packet_writer.h"
 
 #include "net/quic/quic_server_packet_writer.h"
-#include "net/quic/quic_types.h"
 
 namespace net {
 
 QuicPerConnectionPacketWriter::QuicPerConnectionPacketWriter(
-    QuicServerPacketWriter* writer)
-    : weak_factory_(this), writer_(writer) {
+    QuicServerPacketWriter* shared_writer,
+    QuicConnection* connection)
+    : shared_writer_(shared_writer),
+      connection_(connection),
+      weak_factory_(this){
 }
 
 QuicPerConnectionPacketWriter::~QuicPerConnectionPacketWriter() {
+}
+
+QuicPacketWriter* QuicPerConnectionPacketWriter::shared_writer() const {
+  return shared_writer_;
 }
 
 WriteResult QuicPerConnectionPacketWriter::WritePacket(
@@ -22,7 +28,7 @@ WriteResult QuicPerConnectionPacketWriter::WritePacket(
     size_t buf_len,
     const IPAddressNumber& self_address,
     const IPEndPoint& peer_address) {
-  return writer_->WritePacketWithCallback(
+  return shared_writer_->WritePacketWithCallback(
       buffer,
       buf_len,
       self_address,
@@ -32,19 +38,21 @@ WriteResult QuicPerConnectionPacketWriter::WritePacket(
 }
 
 bool QuicPerConnectionPacketWriter::IsWriteBlockedDataBuffered() const {
-  return writer_->IsWriteBlockedDataBuffered();
+  return shared_writer_->IsWriteBlockedDataBuffered();
 }
 
 bool QuicPerConnectionPacketWriter::IsWriteBlocked() const {
-  return writer_->IsWriteBlocked();
+  return shared_writer_->IsWriteBlocked();
 }
 
 void QuicPerConnectionPacketWriter::SetWritable() {
-  writer_->SetWritable();
+  shared_writer_->SetWritable();
 }
 
 void QuicPerConnectionPacketWriter::OnWriteComplete(WriteResult result) {
-  connection_->OnPacketSent(result);
+  if (result.status == WRITE_STATUS_ERROR) {
+    connection_->OnWriteError(result.error_code);
+  }
 }
 
 }  // namespace net

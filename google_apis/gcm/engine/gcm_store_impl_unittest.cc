@@ -532,7 +532,6 @@ TEST_F(GCMStoreImplTest, AccountMapping) {
   account_mapping1.access_token = "account_token1";
   account_mapping1.status = AccountMapping::ADDING;
   account_mapping1.status_change_timestamp = base::Time();
-  account_mapping1.last_message_type = AccountMapping::MSG_ADD;
   account_mapping1.last_message_id = "message_1";
 
   AccountMapping account_mapping2;
@@ -542,7 +541,6 @@ TEST_F(GCMStoreImplTest, AccountMapping) {
   account_mapping2.status = AccountMapping::REMOVING;
   account_mapping2.status_change_timestamp =
       base::Time::FromInternalValue(1305734521259935LL);
-  account_mapping2.last_message_type = AccountMapping::MSG_REMOVE;
   account_mapping2.last_message_id = "message_2";
 
   gcm_store->AddAccountMapping(
@@ -560,27 +558,23 @@ TEST_F(GCMStoreImplTest, AccountMapping) {
   PumpLoop();
 
   EXPECT_EQ(2UL, load_result->account_mappings.size());
-  GCMStore::AccountMappingMap::iterator iter =
+  GCMStore::AccountMappings::iterator iter =
       load_result->account_mappings.begin();
-  EXPECT_EQ("account_id_1", iter->first);
-  EXPECT_EQ(account_mapping1.account_id, iter->second.account_id);
-  EXPECT_EQ(account_mapping1.email, iter->second.email);
-  EXPECT_TRUE(iter->second.access_token.empty());
-  EXPECT_EQ(AccountMapping::ADDING, iter->second.status);
+  EXPECT_EQ(account_mapping1.account_id, iter->account_id);
+  EXPECT_EQ(account_mapping1.email, iter->email);
+  EXPECT_TRUE(iter->access_token.empty());
+  EXPECT_EQ(AccountMapping::ADDING, iter->status);
   EXPECT_EQ(account_mapping1.status_change_timestamp,
-            iter->second.status_change_timestamp);
-  EXPECT_EQ(account_mapping1.last_message_type, iter->second.last_message_type);
-  EXPECT_EQ(account_mapping1.last_message_id, iter->second.last_message_id);
+            iter->status_change_timestamp);
+  EXPECT_EQ(account_mapping1.last_message_id, iter->last_message_id);
   ++iter;
-  EXPECT_EQ("account_id_2", iter->first);
-  EXPECT_EQ(account_mapping2.account_id, iter->second.account_id);
-  EXPECT_EQ(account_mapping2.email, iter->second.email);
-  EXPECT_TRUE(iter->second.access_token.empty());
-  EXPECT_EQ(AccountMapping::REMOVING, iter->second.status);
+  EXPECT_EQ(account_mapping2.account_id, iter->account_id);
+  EXPECT_EQ(account_mapping2.email, iter->email);
+  EXPECT_TRUE(iter->access_token.empty());
+  EXPECT_EQ(AccountMapping::REMOVING, iter->status);
   EXPECT_EQ(account_mapping2.status_change_timestamp,
-            iter->second.status_change_timestamp);
-  EXPECT_EQ(account_mapping2.last_message_type, iter->second.last_message_type);
-  EXPECT_EQ(account_mapping2.last_message_id, iter->second.last_message_id);
+            iter->status_change_timestamp);
+  EXPECT_EQ(account_mapping2.last_message_id, iter->last_message_id);
 
   gcm_store->RemoveAccountMapping(
       account_mapping1.account_id,
@@ -594,15 +588,13 @@ TEST_F(GCMStoreImplTest, AccountMapping) {
 
   EXPECT_EQ(1UL, load_result->account_mappings.size());
   iter = load_result->account_mappings.begin();
-  EXPECT_EQ("account_id_2", iter->first);
-  EXPECT_EQ(account_mapping2.account_id, iter->second.account_id);
-  EXPECT_EQ(account_mapping2.email, iter->second.email);
-  EXPECT_TRUE(iter->second.access_token.empty());
-  EXPECT_EQ(AccountMapping::REMOVING, iter->second.status);
+  EXPECT_EQ(account_mapping2.account_id, iter->account_id);
+  EXPECT_EQ(account_mapping2.email, iter->email);
+  EXPECT_TRUE(iter->access_token.empty());
+  EXPECT_EQ(AccountMapping::REMOVING, iter->status);
   EXPECT_EQ(account_mapping2.status_change_timestamp,
-            iter->second.status_change_timestamp);
-  EXPECT_EQ(account_mapping2.last_message_type, iter->second.last_message_type);
-  EXPECT_EQ(account_mapping2.last_message_id, iter->second.last_message_id);
+            iter->status_change_timestamp);
+  EXPECT_EQ(account_mapping2.last_message_id, iter->last_message_id);
 }
 
 // When the database is destroyed, all database updates should fail. At the

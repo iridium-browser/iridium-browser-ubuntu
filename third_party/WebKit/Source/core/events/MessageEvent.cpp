@@ -30,6 +30,7 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/custom/V8ArrayBufferCustom.h"
 
 namespace blink {
 
@@ -45,7 +46,6 @@ MessageEventInit::MessageEventInit()
 MessageEvent::MessageEvent()
     : m_dataType(DataTypeScriptValue)
 {
-    ScriptWrappable::init(this);
 }
 
 MessageEvent::MessageEvent(const AtomicString& type, const MessageEventInit& initializer)
@@ -56,7 +56,6 @@ MessageEvent::MessageEvent(const AtomicString& type, const MessageEventInit& ini
     , m_source(isValidSource(initializer.source.get()) ? initializer.source : nullptr)
     , m_ports(adoptPtrWillBeNoop(new MessagePortArray(initializer.ports)))
 {
-    ScriptWrappable::init(this);
     ASSERT(isValidSource(m_source.get()));
 }
 
@@ -68,7 +67,6 @@ MessageEvent::MessageEvent(const String& origin, const String& lastEventId, Pass
     , m_source(source)
     , m_ports(ports)
 {
-    ScriptWrappable::init(this);
     ASSERT(isValidSource(m_source.get()));
 }
 
@@ -81,7 +79,6 @@ MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String&
     , m_source(source)
     , m_ports(ports)
 {
-    ScriptWrappable::init(this);
     if (m_dataAsSerializedScriptValue)
         m_dataAsSerializedScriptValue->registerMemoryAllocatedWithCurrentScriptContext();
     ASSERT(isValidSource(m_source.get()));
@@ -96,7 +93,6 @@ MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String&
     , m_source(source)
     , m_channels(channels)
 {
-    ScriptWrappable::init(this);
     if (m_dataAsSerializedScriptValue)
         m_dataAsSerializedScriptValue->registerMemoryAllocatedWithCurrentScriptContext();
     ASSERT(isValidSource(m_source.get()));
@@ -108,7 +104,6 @@ MessageEvent::MessageEvent(const String& data, const String& origin)
     , m_dataAsString(data)
     , m_origin(origin)
 {
-    ScriptWrappable::init(this);
 }
 
 MessageEvent::MessageEvent(PassRefPtrWillBeRawPtr<Blob> data, const String& origin)
@@ -117,7 +112,6 @@ MessageEvent::MessageEvent(PassRefPtrWillBeRawPtr<Blob> data, const String& orig
     , m_dataAsBlob(data)
     , m_origin(origin)
 {
-    ScriptWrappable::init(this);
 }
 
 MessageEvent::MessageEvent(PassRefPtr<ArrayBuffer> data, const String& origin)
@@ -126,7 +120,6 @@ MessageEvent::MessageEvent(PassRefPtr<ArrayBuffer> data, const String& origin)
     , m_dataAsArrayBuffer(data)
     , m_origin(origin)
 {
-    ScriptWrappable::init(this);
 }
 
 MessageEvent::~MessageEvent()
@@ -192,6 +185,30 @@ void MessageEvent::trace(Visitor* visitor)
     visitor->trace(m_ports);
 #endif
     Event::trace(visitor);
+}
+
+v8::Handle<v8::Object> MessageEvent::associateWithWrapper(const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate)
+{
+    Event::associateWithWrapper(wrapperType, wrapper, isolate);
+
+    // Ensures a wrapper is created for the data to return now so that V8 knows how
+    // much memory is used via the wrapper. To keep the wrapper alive, it's set to
+    // the wrapper of the MessageEvent as a hidden value.
+    switch (dataType()) {
+    case MessageEvent::DataTypeScriptValue:
+    case MessageEvent::DataTypeSerializedScriptValue:
+        break;
+    case MessageEvent::DataTypeString:
+        V8HiddenValue::setHiddenValue(isolate, wrapper, V8HiddenValue::stringData(isolate), v8String(isolate, dataAsString()));
+        break;
+    case MessageEvent::DataTypeBlob:
+        break;
+    case MessageEvent::DataTypeArrayBuffer:
+        V8HiddenValue::setHiddenValue(isolate, wrapper, V8HiddenValue::arrayBufferData(isolate), toV8(dataAsArrayBuffer(), wrapper, isolate));
+        break;
+    }
+
+    return wrapper;
 }
 
 } // namespace blink

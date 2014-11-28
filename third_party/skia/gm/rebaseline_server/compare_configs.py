@@ -15,7 +15,7 @@ import logging
 import time
 
 # Must fix up PYTHONPATH before importing from within Skia
-import fix_pythonpath  # pylint: disable=W0611
+import rs_fixpypath  # pylint: disable=W0611
 
 # Imports from within Skia
 from py.utils import url_utils
@@ -151,7 +151,8 @@ class ConfigComparisons(results.BaseComparisons):
             try:
               image_pair = imagepair.ImagePair(
                   image_diff_db=self._image_diff_db,
-                  base_url=gm_json.GM_ACTUALS_ROOT_HTTP_URL,
+                  imageA_base_url=gm_json.GM_ACTUALS_ROOT_HTTP_URL,
+                  imageB_base_url=gm_json.GM_ACTUALS_ROOT_HTTP_URL,
                   imageA_relative_url=configA_image_relative_url,
                   imageB_relative_url=configB_image_relative_url,
                   extra_columns=extra_columns_dict)

@@ -7,8 +7,8 @@
 #include <pk11pub.h>
 #include <secmodt.h>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
@@ -71,7 +71,7 @@ scoped_refptr<X509Certificate> ImportClientCertAndKeyFromFile(
 
   scoped_refptr<X509Certificate> cert(ImportCertFromFile(dir, cert_filename));
 
-  if (!cert) {
+  if (!cert.get()) {
     LOG(ERROR) << "Failed to parse cert from file " << cert_filename;
     return NULL;
   }

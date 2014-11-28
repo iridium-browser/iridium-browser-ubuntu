@@ -15,16 +15,19 @@
  */
 package com.google.ipc.invalidation.external.client.contrib;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
-import com.google.ipc.invalidation.ticl.ProtoConverter;
+import com.google.ipc.invalidation.ticl.ProtoWrapperConverter;
 import com.google.ipc.invalidation.ticl.TiclExponentialBackoffDelayGenerator;
-import com.google.protobuf.ByteString;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.AndroidListenerState;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.AndroidListenerState.RetryRegistrationState;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.RegistrationCommand;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.StartCommand;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.AndroidListenerState;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.AndroidListenerState.RetryRegistrationState;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.RegistrationCommand;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.StartCommand;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.util.Bytes;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -34,55 +37,38 @@ import java.util.Map.Entry;
  */
 class AndroidListenerProtos {
 
-  /** Creates a register command for the given objects and client. */
-  static RegistrationCommand newRegisterCommand(ByteString clientId, Iterable<ObjectId> objectIds) {
-    final boolean isRegister = true;
-    return newRegistrationCommand(clientId, objectIds, isRegister);
-  }
-
-  /** Creates an unregister command for the given objects and client. */
-  static RegistrationCommand newUnregisterCommand(ByteString clientId,
-      Iterable<ObjectId> objectIds) {
-    final boolean isRegister = false;
-    return newRegistrationCommand(clientId, objectIds, isRegister);
-  }
-
   /** Creates a retry register command for the given object and client. */
-  static RegistrationCommand newDelayedRegisterCommand(ByteString clientId, ObjectId objectId) {
+  static RegistrationCommand newDelayedRegisterCommand(Bytes clientId, ObjectId objectId) {
     final boolean isRegister = true;
     return newDelayedRegistrationCommand(clientId, objectId, isRegister);
   }
 
   /** Creates a retry unregister command for the given object and client. */
-  static RegistrationCommand newDelayedUnregisterCommand(ByteString clientId, ObjectId objectId) {
+  static RegistrationCommand newDelayedUnregisterCommand(Bytes clientId, ObjectId objectId) {
     final boolean isRegister = false;
     return newDelayedRegistrationCommand(clientId, objectId, isRegister);
   }
 
   /** Creates proto for {@link AndroidListener} state. */
-  static AndroidListenerState newAndroidListenerState(ByteString clientId, int requestCodeSeqNum,
+  static AndroidListenerState newAndroidListenerState(Bytes clientId, int requestCodeSeqNum,
       Map<ObjectId, TiclExponentialBackoffDelayGenerator> delayGenerators,
-      Iterable<ObjectId> desiredRegistrations) {
-    AndroidListenerState.Builder builder = AndroidListenerState.newBuilder()
-        .setClientId(clientId)
-        .setRequestCodeSeqNum(requestCodeSeqNum);
-    for (ObjectId objectId : desiredRegistrations) {
-      builder.addRegistration(ProtoConverter.convertToObjectIdProto(objectId));
-    }
+      Collection<ObjectId> desiredRegistrations) {
+    ArrayList<RetryRegistrationState> retryRegistrationState =
+        new ArrayList<RetryRegistrationState>(delayGenerators.size());
     for (Entry<ObjectId, TiclExponentialBackoffDelayGenerator> entry : delayGenerators.entrySet()) {
-      builder.addRetryRegistrationState(
+      retryRegistrationState.add(
           newRetryRegistrationState(entry.getKey(), entry.getValue()));
     }
-    return builder.build();
+    return AndroidListenerState.create(
+        ProtoWrapperConverter.convertToObjectIdProtoCollection(desiredRegistrations),
+        retryRegistrationState, clientId, requestCodeSeqNum);
   }
 
   /** Creates proto for retry registration state. */
   static RetryRegistrationState newRetryRegistrationState(ObjectId objectId,
       TiclExponentialBackoffDelayGenerator delayGenerator) {
-    return RetryRegistrationState.newBuilder()
-        .setObjectId(ProtoConverter.convertToObjectIdProto(objectId))
-        .setExponentialBackoffState(delayGenerator.marshal())
-        .build();
+    return RetryRegistrationState.create(ProtoWrapperConverter.convertToObjectIdProto(objectId),
+        delayGenerator.marshal());
   }
 
   /** Returns {@code true} iff the given proto is valid. */
@@ -101,36 +87,23 @@ class AndroidListenerProtos {
   }
 
   /** Creates start command proto. */
-  static StartCommand newStartCommand(int clientType, ByteString clientName,
+  static StartCommand newStartCommand(int clientType, Bytes clientName,
       boolean allowSuppression) {
-    return StartCommand.newBuilder()
-        .setClientType(clientType)
-        .setClientName(clientName)
-        .setAllowSuppression(allowSuppression)
-        .build();
+    return StartCommand.create(clientType, clientName, allowSuppression);
   }
 
-  private static RegistrationCommand newRegistrationCommand(ByteString clientId,
+  static RegistrationCommand newRegistrationCommand(Bytes clientId,
       Iterable<ObjectId> objectIds, boolean isRegister) {
-    RegistrationCommand.Builder builder = RegistrationCommand.newBuilder()
-        .setIsRegister(isRegister)
-        .setClientId(clientId)
-        .setIsDelayed(false);
-    for (ObjectId objectId : objectIds) {
-      Preconditions.checkNotNull(objectId);
-      builder.addObjectId(ProtoConverter.convertToObjectIdProto(objectId));
-    }
-    return builder.build();
+    return RegistrationCommand.create(isRegister,
+        ProtoWrapperConverter.convertToObjectIdProtoCollection(objectIds), clientId,
+        /* isDelayed */ false);
   }
 
-  private static RegistrationCommand newDelayedRegistrationCommand(ByteString clientId,
+  private static RegistrationCommand newDelayedRegistrationCommand(Bytes clientId,
       ObjectId objectId, boolean isRegister) {
-    return RegistrationCommand.newBuilder()
-        .setIsRegister(isRegister)
-        .addObjectId(ProtoConverter.convertToObjectIdProto(objectId))
-        .setClientId(clientId)
-        .setIsDelayed(true)
-        .build();
+    List<ObjectIdP> objectIds = new ArrayList<ObjectIdP>(1);
+    objectIds.add(ProtoWrapperConverter.convertToObjectIdProto(objectId));
+    return RegistrationCommand.create(isRegister, objectIds, clientId, /* isDelayed */ true);
   }
 
   // Prevent instantiation.

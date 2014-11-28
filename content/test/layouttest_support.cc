@@ -6,10 +6,12 @@
 
 #include "base/callback.h"
 #include "base/lazy_instance.h"
+#include "cc/blink/web_layer_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/gpu/image_transport_surface.h"
 #include "content/public/common/page_state.h"
-#include "content/renderer/compositor_bindings/web_layer_impl.h"
+#include "content/public/renderer/renderer_gamepad_provider.h"
+#include "content/renderer/fetchers/manifest_fetcher.h"
 #include "content/renderer/history_entry.h"
 #include "content/renderer/history_serialization.h"
 #include "content/renderer/render_frame_impl.h"
@@ -24,9 +26,10 @@
 #include "third_party/WebKit/public/platform/WebDeviceOrientationData.h"
 #include "third_party/WebKit/public/platform/WebGamepads.h"
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebView.h"
 
 #if defined(OS_MACOSX)
-#include "content/browser/renderer_host/popup_menu_helper_mac.h"
+#include "content/browser/frame_host/popup_menu_helper_mac.h"
 #endif
 
 using blink::WebBatteryStatus;
@@ -81,9 +84,30 @@ void EnableWebTestProxyCreation(
   RenderFrameImpl::InstallCreateHook(CreateWebFrameTestProxy);
 }
 
-void SetMockGamepadProvider(RendererGamepadProvider* provider) {
+void FetchManifestDoneCallback(
+    scoped_ptr<ManifestFetcher> fetcher,
+    const FetchManifestCallback& callback,
+    const blink::WebURLResponse& response,
+    const std::string& data) {
+  // |fetcher| will be autodeleted here as it is going out of scope.
+  callback.Run(response, data);
+}
+
+void FetchManifest(blink::WebView* view, const GURL& url,
+                   const FetchManifestCallback& callback) {
+  scoped_ptr<ManifestFetcher> fetcher(new ManifestFetcher(url));
+
+  fetcher->Start(view->mainFrame(),
+    base::Bind(&FetchManifestDoneCallback,
+               base::Passed(&fetcher),
+               callback));
+}
+
+void SetMockGamepadProvider(scoped_ptr<RendererGamepadProvider> provider) {
   RenderThreadImpl::current()->webkit_platform_support()->
-      set_gamepad_provider(provider);
+      SetPlatformEventObserverForTesting(
+          blink::WebPlatformEventGamepad,
+          provider.PassAs<PlatformEventObserverBase>());
 }
 
 void SetMockDeviceLightData(const double data) {
@@ -100,7 +124,8 @@ void SetMockDeviceOrientationData(const WebDeviceOrientationData& data) {
 }
 
 void MockBatteryStatusChanged(const WebBatteryStatus& status) {
-  RendererWebKitPlatformSupportImpl::MockBatteryStatusChangedForTesting(status);
+  RenderThreadImpl::current()->webkit_platform_support()->
+    MockBatteryStatusChangedForTesting(status);
 }
 
 void EnableRendererLayoutTestMode() {
@@ -141,6 +166,12 @@ void SetDeviceScaleFactor(RenderView* render_view, float factor) {
 }
 
 void SetDeviceColorProfile(RenderView* render_view, const std::string& name) {
+  if (name == "reset") {
+    static_cast<RenderViewImpl*>(render_view)->
+        ResetDeviceColorProfileForTesting();
+    return;
+  }
+
   std::vector<char> color_profile;
 
   struct TestColorProfile {
@@ -353,7 +384,7 @@ std::string DumpBackForwardList(std::vector<PageState>& page_state,
 }
 
 blink::WebLayer* InstantiateWebLayer(scoped_refptr<cc::TextureLayer> layer) {
-  return new WebLayerImpl(layer);
+  return new cc_blink::WebLayerImpl(layer);
 }
 
 }  // namespace content

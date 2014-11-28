@@ -4,8 +4,8 @@
 
 #include "remoting/host/win/elevated_controller.h"
 
-#include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -16,6 +16,7 @@
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
 #include "remoting/host/branding.h"
+#include "remoting/host/host_config.h"
 #include "remoting/host/usage_stats_consent.h"
 #include "remoting/host/verify_config_window_win.h"
 #include "remoting/host/win/core_resource.h"
@@ -50,16 +51,15 @@ const char kUnprivilegedConfigFileSecurityDescriptor[] =
     "O:BAG:BAD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GR;;;AU)";
 
 // Configuration keys.
-const char kHostId[] = "host_id";
-const char kXmppLogin[] = "xmpp_login";
-const char kHostOwner[] = "host_owner";
-const char kHostSecretHash[] = "host_secret_hash";
 
 // The configuration keys that cannot be specified in UpdateConfig().
-const char* const kReadonlyKeys[] = { kHostId, kHostOwner, kXmppLogin };
+const char* const kReadonlyKeys[] = {
+  kHostIdConfigPath, kHostOwnerConfigPath, kHostOwnerEmailConfigPath,
+  kXmppLoginConfigPath };
 
 // The configuration keys whose values may be read by GetConfig().
-const char* const kUnprivilegedConfigKeys[] = { kHostId, kXmppLogin };
+const char* const kUnprivilegedConfigKeys[] = {
+  kHostIdConfigPath, kXmppLoginConfigPath };
 
 // Determines if the client runs in the security context that allows performing
 // administrative tasks (i.e. the user belongs to the adminstrators group and
@@ -114,7 +114,7 @@ HRESULT ReadConfig(const base::FilePath& filename,
 
   scoped_ptr<char[]> buffer(new char[kMaxConfigFileSize]);
   DWORD size = kMaxConfigFileSize;
-  if (!::ReadFile(file, &buffer[0], size, &size, NULL)) {
+  if (!::ReadFile(file.Get(), &buffer[0], size, &size, NULL)) {
     DWORD error = GetLastError();
     PLOG(ERROR) << "Failed to read '" << filename.value() << "'";
     return HRESULT_FROM_WIN32(error);
@@ -177,7 +177,8 @@ HRESULT WriteConfigFileToTemp(const base::FilePath& filename,
   }
 
   DWORD written;
-  if (!WriteFile(file, content, static_cast<DWORD>(length), &written, NULL)) {
+  if (!WriteFile(file.Get(), content, static_cast<DWORD>(length), &written,
+                 NULL)) {
     DWORD error = GetLastError();
     PLOG(ERROR) << "Failed to write to '" << filename.value() << "'";
     return HRESULT_FROM_WIN32(error);
@@ -219,14 +220,16 @@ HRESULT WriteConfig(const char* content, size_t length, HWND owner_window) {
     return E_FAIL;
   }
   std::string email;
-  if (!config_dict->GetString(kHostOwner, &email)) {
-    if (!config_dict->GetString(kXmppLogin, &email)) {
-      return E_FAIL;
+  if (!config_dict->GetString(kHostOwnerEmailConfigPath, &email)) {
+    if (!config_dict->GetString(kHostOwnerConfigPath, &email)) {
+      if (!config_dict->GetString(kXmppLoginConfigPath, &email)) {
+        return E_FAIL;
+      }
     }
   }
   std::string host_id, host_secret_hash;
-  if (!config_dict->GetString(kHostId, &host_id) ||
-      !config_dict->GetString(kHostSecretHash, &host_secret_hash)) {
+  if (!config_dict->GetString(kHostIdConfigPath, &host_id) ||
+      !config_dict->GetString(kHostSecretHashConfigPath, &host_secret_hash)) {
     return E_FAIL;
   }
 
@@ -372,7 +375,7 @@ STDMETHODIMP ElevatedController::StartDaemon() {
   }
 
   // Change the service start type to 'auto'.
-  if (!::ChangeServiceConfigW(service,
+  if (!::ChangeServiceConfigW(service.Get(),
                               SERVICE_NO_CHANGE,
                               SERVICE_AUTO_START,
                               SERVICE_NO_CHANGE,
@@ -390,7 +393,7 @@ STDMETHODIMP ElevatedController::StartDaemon() {
   }
 
   // Start the service.
-  if (!StartService(service, 0, NULL)) {
+  if (!StartService(service.Get(), 0, NULL)) {
     DWORD error = GetLastError();
     if (error != ERROR_SERVICE_ALREADY_RUNNING) {
       PLOG(ERROR) << "Failed to start the '" << kWindowsServiceName
@@ -411,7 +414,7 @@ STDMETHODIMP ElevatedController::StopDaemon() {
   }
 
   // Change the service start type to 'manual'.
-  if (!::ChangeServiceConfigW(service,
+  if (!::ChangeServiceConfigW(service.Get(),
                               SERVICE_NO_CHANGE,
                               SERVICE_DEMAND_START,
                               SERVICE_NO_CHANGE,
@@ -430,7 +433,7 @@ STDMETHODIMP ElevatedController::StopDaemon() {
 
   // Stop the service.
   SERVICE_STATUS status;
-  if (!ControlService(service, SERVICE_CONTROL_STOP, &status)) {
+  if (!ControlService(service.Get(), SERVICE_CONTROL_STOP, &status)) {
     DWORD error = GetLastError();
     if (error != ERROR_SERVICE_NOT_ACTIVE) {
       PLOG(ERROR) << "Failed to stop the '" << kWindowsServiceName
@@ -513,7 +516,7 @@ HRESULT ElevatedController::OpenService(ScopedScHandle* service_out) {
   DWORD desired_access = SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS |
                          SERVICE_START | SERVICE_STOP;
   ScopedScHandle service(
-      ::OpenServiceW(scmanager, kWindowsServiceName, desired_access));
+      ::OpenServiceW(scmanager.Get(), kWindowsServiceName, desired_access));
   if (!service.IsValid()) {
     error = GetLastError();
     PLOG(ERROR) << "Failed to open to the '" << kWindowsServiceName

@@ -70,8 +70,9 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
   layer->AppendQuads(render_pass.get(), occlusion_tracker, &data);
 
   ASSERT_EQ(render_pass->quad_list.size(), 1U);
-  EXPECT_EQ(SolidColorDrawQuad::MaterialCast(render_pass->quad_list[0])->color,
-            test_color);
+  EXPECT_EQ(
+      SolidColorDrawQuad::MaterialCast(render_pass->quad_list.front())->color,
+      test_color);
 }
 
 TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
@@ -99,9 +100,9 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   layer->AppendQuads(render_pass.get(), occlusion_tracker, &data);
 
   ASSERT_EQ(render_pass->quad_list.size(), 1U);
-  EXPECT_EQ(
-      opacity,
-      SolidColorDrawQuad::MaterialCast(render_pass->quad_list[0])->opacity());
+  EXPECT_EQ(opacity,
+            SolidColorDrawQuad::MaterialCast(render_pass->quad_list.front())
+                ->opacity());
 }
 
 TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
@@ -115,12 +116,13 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
   scoped_refptr<Layer> root = Layer::Create();
   root->AddChild(layer);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  FakeLayerTreeHostClient client(FakeLayerTreeHostClient::DIRECT_3D);
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create(&client);
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
   LayerTreeHostCommon::CalcDrawPropsMainInputsForTesting inputs(
-      root, gfx::Size(500, 500), &render_surface_layer_list);
+      root.get(), gfx::Size(500, 500), &render_surface_layer_list);
   LayerTreeHostCommon::CalculateDrawProperties(&inputs);
 
   EXPECT_FALSE(layer->contents_opaque());
@@ -147,7 +149,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
 
     ASSERT_EQ(render_pass->quad_list.size(), 1U);
     EXPECT_EQ(visible_content_rect.ToString(),
-              render_pass->quad_list[0]->opaque_rect.ToString());
+              render_pass->quad_list.front()->opaque_rect.ToString());
   }
 
   EXPECT_TRUE(layer->contents_opaque());
@@ -174,7 +176,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
 
     ASSERT_EQ(render_pass->quad_list.size(), 1U);
     EXPECT_EQ(gfx::Rect().ToString(),
-              render_pass->quad_list[0]->opaque_rect.ToString());
+              render_pass->quad_list.front()->opaque_rect.ToString());
   }
 }
 
@@ -218,11 +220,8 @@ TEST(SolidColorLayerImplTest, Occlusion) {
     impl.AppendQuadsWithOcclusion(solid_color_layer_impl, occluded);
 
     size_t partially_occluded_count = 0;
-    LayerTestCommon::VerifyQuadsCoverRectWithOcclusion(
-        impl.quad_list(),
-        gfx::Rect(layer_size),
-        occluded,
-        &partially_occluded_count);
+    LayerTestCommon::VerifyQuadsAreOccluded(
+        impl.quad_list(), occluded, &partially_occluded_count);
     // 4 quads are completely occluded, 8 are partially occluded.
     EXPECT_EQ(16u - 4u, impl.quad_list().size());
     EXPECT_EQ(8u, partially_occluded_count);

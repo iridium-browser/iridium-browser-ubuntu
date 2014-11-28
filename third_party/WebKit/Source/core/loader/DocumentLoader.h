@@ -33,6 +33,7 @@
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/fetch/ResourcePtr.h"
+#include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/DocumentLoadTiming.h"
 #include "core/loader/DocumentWriter.h"
 #include "core/loader/NavigationAction.h"
@@ -47,23 +48,15 @@ namespace blink {
 class WebThreadedDataReceiver;
 }
 
-namespace WTF {
-class SchedulePair;
-}
-
 namespace blink {
     class ApplicationCacheHost;
-    class ArchiveResource;
     class ArchiveResourceCollection;
     class ResourceFetcher;
-    class ContentFilter;
-    class FormState;
+    class DocumentInit;
     class LocalFrame;
     class FrameLoader;
     class MHTMLArchive;
-    class Page;
     class ResourceLoader;
-    class SharedBuffer;
 
     class DocumentLoader : public RefCounted<DocumentLoader>, private RawResourceClient {
         WTF_MAKE_FAST_ALLOCATED;
@@ -80,7 +73,7 @@ namespace blink {
 
         unsigned long mainResourceIdentifier() const;
 
-        void replaceDocument(const String& source, Document*);
+        void replaceDocumentWhileExecutingJavaScriptURL(const DocumentInit&, const String& source, Document*);
 
         const AtomicString& mimeType() const;
 
@@ -135,13 +128,15 @@ namespace blink {
         void clearRedirectChain();
         void appendRedirect(const KURL&);
 
+        PassRefPtr<ContentSecurityPolicy> releaseContentSecurityPolicy() { return m_contentSecurityPolicy.release(); }
+
     protected:
         DocumentLoader(LocalFrame*, const ResourceRequest&, const SubstituteData&);
 
         Vector<KURL> m_redirectChain;
 
     private:
-        static PassRefPtrWillBeRawPtr<DocumentWriter> createWriterFor(LocalFrame*, const Document* ownerDocument, const KURL&, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch);
+        static PassRefPtrWillBeRawPtr<DocumentWriter> createWriterFor(const Document* ownerDocument, const DocumentInit&, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch);
 
         void ensureWriter(const AtomicString& mimeType, const KURL& overridingURL = KURL());
         void endWriting(DocumentWriter*);
@@ -164,6 +159,7 @@ namespace blink {
         void willSendRequest(ResourceRequest&, const ResourceResponse&);
         void finishedLoading(double finishTime);
         void mainReceivedError(const ResourceError&);
+        void cancelLoadAfterXFrameOptionsOrCSPDenied(const ResourceResponse&);
         virtual void redirectReceived(Resource*, ResourceRequest&, const ResourceResponse&) OVERRIDE FINAL;
         virtual void updateRequest(Resource*, const ResourceRequest&) OVERRIDE FINAL;
         virtual void responseReceived(Resource*, const ResourceResponse&) OVERRIDE FINAL;
@@ -218,7 +214,9 @@ namespace blink {
         double m_timeOfLastDataReceived;
 
         friend class ApplicationCacheHost;  // for substitute resource delivery
-        OwnPtr<ApplicationCacheHost> m_applicationCacheHost;
+        OwnPtrWillBePersistent<ApplicationCacheHost> m_applicationCacheHost;
+
+        RefPtr<ContentSecurityPolicy> m_contentSecurityPolicy;
     };
 }
 

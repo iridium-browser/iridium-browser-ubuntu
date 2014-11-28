@@ -13,6 +13,8 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/fake_account_tracker_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -38,10 +40,16 @@ class ProfileChooserControllerTest : public CocoaProfileTest {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser()->profile());
 
+    AccountTrackerServiceFactory::GetInstance()->SetTestingFactory(
+        browser()->profile(), FakeAccountTrackerService::Build);
+
     TestingProfile::TestingFactories factories;
     factories.push_back(
         std::make_pair(ProfileOAuth2TokenServiceFactory::GetInstance(),
                        BuildFakeProfileOAuth2TokenService));
+    factories.push_back(
+        std::make_pair(AccountTrackerServiceFactory::GetInstance(),
+                       FakeAccountTrackerService::Build));
     testing_profile_manager()->
         CreateTestingProfile("test1", scoped_ptr<PrefServiceSyncable>(),
                              base::ASCIIToUTF16("Test 1"), 0, std::string(),
@@ -343,6 +351,11 @@ TEST_F(ProfileChooserControllerTest, AccountManagementLayout) {
   // Sign in the first profile.
   ProfileInfoCache* cache = testing_profile_manager()->profile_info_cache();
   cache->SetUserNameOfProfileAtIndex(0, base::ASCIIToUTF16(kEmail));
+
+  // Mark that we are using the profile name on purpose, so that we don't
+  // fallback to testing the algorithm that chooses which default name
+  // should be used.
+  cache->SetProfileIsUsingDefaultNameAtIndex(0, false);
 
   // Set up the signin manager and the OAuth2Tokens.
   Profile* profile = browser()->profile();

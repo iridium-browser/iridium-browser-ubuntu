@@ -35,10 +35,11 @@ class AudioParam;
 class ExceptionState;
 
 class DelayNode FINAL : public AudioBasicProcessorNode {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<DelayNode> create(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
+    static DelayNode* create(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
     {
-        return adoptRefWillBeNoop(new DelayNode(context, sampleRate, maxDelayTime, exceptionState));
+        return adoptRefCountedGarbageCollectedWillBeNoop(new DelayNode(context, sampleRate, maxDelayTime, exceptionState));
     }
 
     AudioParam* delayTime();

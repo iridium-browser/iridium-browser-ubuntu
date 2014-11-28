@@ -13,7 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -99,11 +99,6 @@ class DownloadRequestLimiter
     }
     size_t download_count() const {
       return download_count_;
-    }
-
-    // Promote protected accessor to public.
-    content::WebContents* web_contents() const {
-      return content::WebContentsObserver::web_contents();
     }
 
     // content::WebContentsObserver overrides.

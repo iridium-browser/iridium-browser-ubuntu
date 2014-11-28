@@ -19,6 +19,20 @@ extern "C" {
 #endif
 
 #if CONFIG_FP_MB_STATS
+
+#define FPMB_DCINTRA_MASK 0x01
+
+#define FPMB_MOTION_ZERO_MASK 0x02
+#define FPMB_MOTION_LEFT_MASK 0x04
+#define FPMB_MOTION_RIGHT_MASK 0x08
+#define FPMB_MOTION_UP_MASK 0x10
+#define FPMB_MOTION_DOWN_MASK 0x20
+
+#define FPMB_ERROR_SMALL_MASK 0x40
+#define FPMB_ERROR_LARGE_MASK 0x80
+#define FPMB_ERROR_SMALL_TH 2000
+#define FPMB_ERROR_LARGE_TH 48000
+
 typedef struct {
   uint8_t *mb_stats_start;
   uint8_t *mb_stats_end;
@@ -79,8 +93,6 @@ typedef struct {
   double modified_error_min;
   double modified_error_max;
   double modified_error_left;
-  double kf_intra_err_min;
-  double gf_intra_err_min;
 
 #if CONFIG_FP_MB_STATS
   uint8_t *frame_mb_stats_buf;
@@ -96,6 +108,7 @@ typedef struct {
   int sr_update_lag;
 
   int kf_zeromotion_pct;
+  int last_kfgroup_zeromotion_pct;
   int gf_zeromotion_pct;
 
   int active_worst_quality;
@@ -107,7 +120,7 @@ struct VP9_COMP;
 
 void vp9_init_first_pass(struct VP9_COMP *cpi);
 void vp9_rc_get_first_pass_params(struct VP9_COMP *cpi);
-void vp9_first_pass(struct VP9_COMP *cpi);
+void vp9_first_pass(struct VP9_COMP *cpi, const struct lookahead_entry *source);
 void vp9_end_first_pass(struct VP9_COMP *cpi);
 
 void vp9_init_second_pass(struct VP9_COMP *cpi);

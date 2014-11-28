@@ -229,7 +229,17 @@ void PluginInstance::PostMessage(PP_Instance instance, PP_Var message) {
 int32_t PluginInstance::RegisterMessageHandler(
     PP_Instance instance,
     void* user_data,
-    const PPP_MessageHandler_0_1* handler,
+    const PPP_MessageHandler_0_2* handler,
+    PP_Resource message_loop) {
+  NOTIMPLEMENTED();
+  return PP_ERROR_FAILED;
+}
+
+// TODO(dmichael): Remove this. crbug.com/414398
+int32_t PluginInstance::RegisterMessageHandler_1_1_Deprecated(
+    PP_Instance instance,
+    void* user_data,
+    const PPP_MessageHandler_0_1_Deprecated* handler,
     PP_Resource message_loop) {
   NOTIMPLEMENTED();
   return PP_ERROR_FAILED;
@@ -310,6 +320,12 @@ void PluginInstance::PromiseResolvedWithSession(PP_Instance instance,
   NOTIMPLEMENTED();
 }
 
+void PluginInstance::PromiseResolvedWithKeyIds(PP_Instance instance,
+                                               uint32 promise_id,
+                                               PP_Var key_ids_var) {
+  NOTIMPLEMENTED();
+}
+
 void PluginInstance::PromiseRejected(PP_Instance instance,
                                      uint32 promise_id,
                                      PP_CdmExceptionCode exception_code,
@@ -322,6 +338,18 @@ void PluginInstance::SessionMessage(PP_Instance instance,
                                     PP_Var web_session_id_var,
                                     PP_Var message_var,
                                     PP_Var destination_url_var) {
+  NOTIMPLEMENTED();
+}
+
+void PluginInstance::SessionKeysChange(PP_Instance instance,
+                                       PP_Var web_session_id_var,
+                                       PP_Bool has_additional_usable_key) {
+  NOTIMPLEMENTED();
+}
+
+void PluginInstance::SessionExpirationChange(PP_Instance instance,
+                                             PP_Var web_session_id_var,
+                                             PP_Time new_expiry_time) {
   NOTIMPLEMENTED();
 }
 

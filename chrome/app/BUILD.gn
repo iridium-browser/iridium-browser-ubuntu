@@ -9,6 +9,7 @@ import("//tools/grit/grit_rule.gni")
 grit("generated_resources") {
   source = "generated_resources.grd"
   output_dir = "$root_gen_dir/chrome"
+  use_qualified_include = true
   outputs = [
     "grit/generated_resources.h",
     "generated_resources_am.pak",
@@ -71,7 +72,7 @@ grit("generated_resources") {
 # GYP version: chrome/chrome_resources.gyp:chrome_strings_map
 action("make_generated_resources_map") {
   # Targets should depend on generated_resources_map instead.
-  visibility = ":generated_resources_map"
+  visibility = [ ":generated_resources_map" ]
 
   script = "//chrome/browser/metrics/variations/generate_resources_map.py"
 
@@ -96,6 +97,7 @@ source_set("generated_resources_map") {
 grit("google_chrome_strings") {
   source = "google_chrome_strings.grd"
   output_dir = "$root_gen_dir/chrome"
+  use_qualified_include = true
   outputs = [
     "grit/google_chrome_strings.h",
     "google_chrome_strings_am.pak",
@@ -160,6 +162,7 @@ grit("google_chrome_strings") {
 grit("chromium_strings") {
   source = "chromium_strings.grd"
   output_dir = "$root_gen_dir/chrome"
+  use_qualified_include = true
   outputs = [
     "grit/chromium_strings.h",
     "chromium_strings_am.pak",
@@ -217,4 +220,36 @@ grit("chromium_strings") {
     "chromium_strings_zh-CN.pak",
     "chromium_strings_zh-TW.pak",
   ]
+}
+
+source_set("test_support") {
+  testonly = true
+  visibility = [ "//chrome/test:test_support" ]
+
+  sources = [
+    "chrome_main_delegate.cc",
+    "chrome_main_delegate.h",
+    "close_handle_hook_win.cc",
+    "close_handle_hook_win.h",
+  ]
+
+  deps = [
+    "//base",
+    "//chrome/browser",
+    "//chrome/common",
+    "//chrome/plugin",
+    "//chrome/renderer",
+    "//chrome/utility",
+    "//content/public/app:both",
+    "//content/public/common",
+    "//ui/base",
+  ]
+
+  if (is_mac) {
+    sources += [
+      "chrome_breakpad_client.cc",
+      "chrome_breakpad_client_mac.mm",
+      "chrome_main_mac.mm",
+    ]
+  }
 }

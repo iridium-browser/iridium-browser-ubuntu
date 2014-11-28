@@ -44,6 +44,7 @@
 #include "ash/wm/status_area_layout_manager.h"
 #include "ash/wm/system_background_controller.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
+#include "ash/wm/virtual_keyboard_container_layout_manager.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
@@ -274,27 +275,23 @@ void RootWindowController::CreateForSecondaryDisplay(AshWindowTreeHost* host) {
   controller->Init(RootWindowController::SECONDARY, false /* first run */);
 }
 
-void RootWindowController::CreateForVirtualKeyboardDisplay(
-    AshWindowTreeHost* host) {
-  RootWindowController* controller = new RootWindowController(host);
-  controller->Init(RootWindowController::VIRTUAL_KEYBOARD,
-                   false /* first run */);
-}
-
 // static
 RootWindowController* RootWindowController::ForShelf(
     const aura::Window* window) {
+  CHECK(Shell::HasInstance());
   return GetRootWindowController(window->GetRootWindow());
 }
 
 // static
 RootWindowController* RootWindowController::ForWindow(
     const aura::Window* window) {
+  CHECK(Shell::HasInstance());
   return GetRootWindowController(window->GetRootWindow());
 }
 
 // static
 RootWindowController* RootWindowController::ForTargetRootWindow() {
+  CHECK(Shell::HasInstance());
   return GetRootWindowController(Shell::GetTargetRootWindow());
 }
 
@@ -640,13 +637,11 @@ void RootWindowController::ActivateKeyboard(
     return;
   }
   DCHECK(keyboard_controller);
-  if (!keyboard::IsKeyboardUsabilityExperimentEnabled()) {
-    keyboard_controller->AddObserver(shelf()->shelf_layout_manager());
-    keyboard_controller->AddObserver(panel_layout_manager_);
-    keyboard_controller->AddObserver(docked_layout_manager_);
-    keyboard_controller->AddObserver(workspace_controller_->layout_manager());
-    Shell::GetInstance()->delegate()->VirtualKeyboardActivated(true);
-  }
+  keyboard_controller->AddObserver(shelf()->shelf_layout_manager());
+  keyboard_controller->AddObserver(panel_layout_manager_);
+  keyboard_controller->AddObserver(docked_layout_manager_);
+  keyboard_controller->AddObserver(workspace_controller_->layout_manager());
+  Shell::GetInstance()->delegate()->VirtualKeyboardActivated(true);
   aura::Window* parent = GetContainer(
       kShellWindowId_VirtualKeyboardParentContainer);
   DCHECK(parent);
@@ -672,17 +667,15 @@ void RootWindowController::DeactivateKeyboard(
         kShellWindowId_VirtualKeyboardParentContainer);
     DCHECK(parent);
     parent->RemoveChild(keyboard_container);
-    if (!keyboard::IsKeyboardUsabilityExperimentEnabled()) {
-      // Virtual keyboard may be deactivated while still showing, notify all
-      // observers that keyboard bounds changed to 0 before remove them.
-      keyboard_controller->NotifyKeyboardBoundsChanging(gfx::Rect());
-      keyboard_controller->RemoveObserver(shelf()->shelf_layout_manager());
-      keyboard_controller->RemoveObserver(panel_layout_manager_);
-      keyboard_controller->RemoveObserver(docked_layout_manager_);
-      keyboard_controller->RemoveObserver(
-          workspace_controller_->layout_manager());
-      Shell::GetInstance()->delegate()->VirtualKeyboardActivated(false);
-    }
+    // Virtual keyboard may be deactivated while still showing, notify all
+    // observers that keyboard bounds changed to 0 before remove them.
+    keyboard_controller->NotifyKeyboardBoundsChanging(gfx::Rect());
+    keyboard_controller->RemoveObserver(shelf()->shelf_layout_manager());
+    keyboard_controller->RemoveObserver(panel_layout_manager_);
+    keyboard_controller->RemoveObserver(docked_layout_manager_);
+    keyboard_controller->RemoveObserver(
+        workspace_controller_->layout_manager());
+    Shell::GetInstance()->delegate()->VirtualKeyboardActivated(false);
   }
 }
 
@@ -720,14 +713,6 @@ void RootWindowController::Init(RootWindowType root_window_type,
   ash_host_->AsWindowTreeHost()->SetCursor(ui::kCursorPointer);
   CreateContainersInRootWindow(root_window);
 
-  if (root_window_type == VIRTUAL_KEYBOARD) {
-    aura::Window* virtual_keyboard_parent_container = GetContainer(
-        kShellWindowId_VirtualKeyboardParentContainer);
-    virtual_keyboard_parent_container->SetBounds(root_window->bounds());
-    shell->InitKeyboard();
-    return;
-  }
-
   CreateSystemBackground(first_run_after_boot);
 
   InitLayoutManagers();
@@ -742,8 +727,7 @@ void RootWindowController::Init(RootWindowType root_window_type,
 
   if (root_window_type == PRIMARY) {
     root_window_layout()->OnWindowResized();
-    if (!keyboard::IsKeyboardUsabilityExperimentEnabled())
-      shell->InitKeyboard();
+    shell->InitKeyboard();
   } else {
     root_window_layout()->OnWindowResized();
     ash_host_->AsWindowTreeHost()->Show();
@@ -1018,6 +1002,17 @@ void RootWindowController::CreateContainersInRootWindow(
   SetUsesScreenCoordinates(settings_bubble_container);
   DescendantShouldStayInSameRootWindow(settings_bubble_container);
 
+  aura::Window* virtual_keyboard_parent_container =
+      CreateContainer(kShellWindowId_VirtualKeyboardParentContainer,
+                      "VirtualKeyboardParentContainer",
+                      lock_screen_related_containers);
+  wm::SetSnapsChildrenToPhysicalPixelBoundary(
+      virtual_keyboard_parent_container);
+  virtual_keyboard_parent_container->SetLayoutManager(
+      new VirtualKeyboardContainerLayoutManager(
+          virtual_keyboard_parent_container));
+  SetUsesScreenCoordinates(virtual_keyboard_parent_container);
+
   aura::Window* menu_container = CreateContainer(
       kShellWindowId_MenuContainer,
       "MenuContainer",
@@ -1040,14 +1035,6 @@ void RootWindowController::CreateContainersInRootWindow(
       lock_screen_related_containers);
   wm::SetSnapsChildrenToPhysicalPixelBoundary(overlay_container);
   SetUsesScreenCoordinates(overlay_container);
-
-  aura::Window* virtual_keyboard_parent_container = CreateContainer(
-      kShellWindowId_VirtualKeyboardParentContainer,
-      "VirtualKeyboardParentContainer",
-      root_window);
-  wm::SetSnapsChildrenToPhysicalPixelBoundary(
-      virtual_keyboard_parent_container);
-  SetUsesScreenCoordinates(virtual_keyboard_parent_container);
 
 #if defined(OS_CHROMEOS)
   aura::Window* mouse_cursor_container = CreateContainer(

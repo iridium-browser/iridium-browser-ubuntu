@@ -37,6 +37,7 @@
 #include "core/inspector/ConsoleAPITypes.h"
 #include "core/inspector/InjectedScript.h"
 #include "core/inspector/InspectorBaseAgent.h"
+#include "core/inspector/PromiseTracker.h"
 #include "core/inspector/ScriptBreakpoint.h"
 #include "core/inspector/ScriptDebugListener.h"
 #include "wtf/Forward.h"
@@ -47,6 +48,7 @@
 
 namespace blink {
 
+class ConsoleMessage;
 class Document;
 class Event;
 class EventListener;
@@ -97,7 +99,7 @@ public:
 
     bool isPaused();
     bool runningNestedMessageLoop();
-    void addConsoleAPIMessageToConsole(MessageType, MessageLevel, const String&, ScriptState*, PassRefPtrWillBeRawPtr<ScriptArguments>, unsigned long);
+    void addMessageToConsole(ConsoleMessage*);
 
     String preprocessEventListener(LocalFrame*, const String& source, const String& url, const String& functionName);
     PassOwnPtr<ScriptSourceCode> preprocess(LocalFrame*, const ScriptSourceCode&);
@@ -120,6 +122,7 @@ public:
     virtual void restartFrame(ErrorString*, const String& callFrameId, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::CallFrame> >& newCallFrames, RefPtr<JSONObject>& result, RefPtr<TypeBuilder::Debugger::StackTrace>& asyncStackTrace) OVERRIDE FINAL;
     virtual void getScriptSource(ErrorString*, const String& scriptId, String* scriptSource) OVERRIDE FINAL;
     virtual void getFunctionDetails(ErrorString*, const String& functionId, RefPtr<TypeBuilder::Debugger::FunctionDetails>&) OVERRIDE FINAL;
+    virtual void getCollectionEntries(ErrorString*, const String& objectId, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::CollectionEntry> >&) OVERRIDE FINAL;
     virtual void pause(ErrorString*) OVERRIDE FINAL;
     virtual void resume(ErrorString*) OVERRIDE FINAL;
     virtual void stepOver(ErrorString*) OVERRIDE FINAL;
@@ -141,8 +144,12 @@ public:
     virtual void runScript(ErrorString*, const TypeBuilder::Debugger::ScriptId&, const int* executionContextId, const String* objectGroup, const bool* doNotPauseOnExceptionsAndMuteConsole, RefPtr<TypeBuilder::Runtime::RemoteObject>& result, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) OVERRIDE;
     virtual void setOverlayMessage(ErrorString*, const String*) OVERRIDE;
     virtual void setVariableValue(ErrorString*, int in_scopeNumber, const String& in_variableName, const RefPtr<JSONObject>& in_newValue, const String* in_callFrame, const String* in_functionObjectId) OVERRIDE FINAL;
-    virtual void skipStackFrames(ErrorString*, const String* pattern) OVERRIDE FINAL;
+    virtual void skipStackFrames(ErrorString*, const String* pattern, const bool* skipContentScripts) OVERRIDE FINAL;
     virtual void setAsyncCallStackDepth(ErrorString*, int depth) OVERRIDE FINAL;
+    virtual void enablePromiseTracker(ErrorString*) OVERRIDE FINAL;
+    virtual void disablePromiseTracker(ErrorString*) OVERRIDE FINAL;
+    virtual void getPromises(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::PromiseDetails> >& promises) OVERRIDE FINAL;
+    virtual void getPromiseById(ErrorString*, int promiseId, const String* objectGroup, RefPtr<TypeBuilder::Runtime::RemoteObject>& promise) OVERRIDE FINAL;
 
     void schedulePauseOnNextStatement(InspectorFrontend::Debugger::Reason::Enum breakReason, PassRefPtr<JSONObject> data);
     void didInstallTimer(ExecutionContext*, int timerId, int timeout, bool singleShot);
@@ -157,7 +164,7 @@ public:
     void didRemoveEvent(EventTarget*, Event*);
     void willHandleEvent(EventTarget*, Event*, EventListener*, bool useCapture);
     void didHandleEvent();
-    void willLoadXHR(XMLHttpRequest*, ThreadableLoaderClient*, const AtomicString& method, const KURL&, bool async, FormData* body, const HTTPHeaderMap& headers, bool includeCrendentials);
+    void willLoadXHR(XMLHttpRequest*, ThreadableLoaderClient*, const AtomicString& method, const KURL&, bool async, PassRefPtr<FormData> body, const HTTPHeaderMap& headers, bool includeCrendentials);
     void didDispatchXHRLoadendEvent(XMLHttpRequest*);
     void didEnqueueMutationRecord(ExecutionContext*, MutationObserver*);
     void didClearAllMutationRecords(ExecutionContext*, MutationObserver*);
@@ -183,6 +190,10 @@ public:
         virtual void debuggerWasDisabled() = 0;
         virtual void stepInto() = 0;
         virtual void didPause() = 0;
+        virtual bool canPauseOnPromiseEvent() = 0;
+        virtual void didCreatePromise() = 0;
+        virtual void didResolvePromise() = 0;
+        virtual void didRejectPromise() = 0;
     };
     void setListener(Listener* listener) { m_listener = listener; }
 
@@ -224,7 +235,10 @@ private:
     PassRefPtr<TypeBuilder::Debugger::StackTrace> currentAsyncStackTrace();
 
     virtual void didParseSource(const String& scriptId, const Script&, CompileResult) OVERRIDE FINAL;
+    virtual bool v8AsyncTaskEventsEnabled() const OVERRIDE FINAL;
     virtual void didReceiveV8AsyncTaskEvent(ExecutionContext*, const String& eventType, const String& eventName, int id) OVERRIDE FINAL;
+    virtual bool v8PromiseEventsEnabled() const OVERRIDE FINAL;
+    virtual void didReceiveV8PromiseEvent(ScriptState*, v8::Handle<v8::Object> promise, v8::Handle<v8::Value> parentPromise, int status) OVERRIDE FINAL;
 
     void setPauseOnExceptionsImpl(ErrorString*, int);
 
@@ -236,9 +250,9 @@ private:
 
     String sourceMapURLForScript(const Script&, CompileResult);
 
-    PassRefPtrWillBeRawPtr<JavaScriptCallFrame> topCallFrameSkipUnknownSources();
-    String scriptURL(JavaScriptCallFrame*);
-    AsyncCallStackTracker& asyncCallStackTracker() { return *m_asyncCallStackTracker; };
+    PassRefPtrWillBeRawPtr<JavaScriptCallFrame> topCallFrameSkipUnknownSources(String* scriptURL, bool* isBlackboxed);
+    AsyncCallStackTracker& asyncCallStackTracker() const { return *m_asyncCallStackTracker; };
+    PromiseTracker& promiseTracker() const { return *m_promiseTracker; }
 
     typedef HashMap<String, Script> ScriptsMap;
     typedef HashMap<String, Vector<String> > BreakpointIdToDebugServerBreakpointIdsMap;
@@ -263,8 +277,10 @@ private:
     int m_skippedStepInCount;
     int m_minFrameCountForSkip;
     bool m_skipAllPauses;
+    bool m_skipContentScripts;
     OwnPtr<ScriptRegexp> m_cachedSkipStackRegExp;
     OwnPtrWillBeMember<AsyncCallStackTracker> m_asyncCallStackTracker;
+    OwnPtrWillBeMember<PromiseTracker> m_promiseTracker;
 };
 
 } // namespace blink

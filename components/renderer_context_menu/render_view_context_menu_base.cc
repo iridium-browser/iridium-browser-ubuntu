@@ -15,10 +15,6 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/menu_item.h"
-#include "extensions/browser/extension_host.h"
-#include "extensions/browser/extension_system.h"
-#include "extensions/browser/view_type_utils.h"
-#include "extensions/common/extension.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 
 using blink::WebContextMenuData;
@@ -366,7 +362,7 @@ RenderFrameHost* RenderViewContextMenuBase::GetRenderFrameHost() {
 void RenderViewContextMenuBase::OpenURL(
     const GURL& url, const GURL& referring_url,
     WindowOpenDisposition disposition,
-    content::PageTransition transition) {
+    ui::PageTransition transition) {
   content::Referrer referrer = content::Referrer::SanitizeForRequest(
       url,
       content::Referrer(referring_url.GetAsReferrer(),

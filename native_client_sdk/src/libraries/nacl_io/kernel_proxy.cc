@@ -104,17 +104,17 @@ Error KernelProxy::Init(PepperInterface* ppapi) {
 
   // Open the first three in order to get STDIN, STDOUT, STDERR
   int fd;
-  fd = open("/dev/stdin", O_RDONLY);
+  fd = open("/dev/stdin", O_RDONLY, 0);
   assert(fd == 0);
   if (fd < 0)
     rtn = errno;
 
-  fd = open("/dev/stdout", O_WRONLY);
+  fd = open("/dev/stdout", O_WRONLY, 0);
   assert(fd == 1);
   if (fd < 0)
     rtn = errno;
 
-  fd = open("/dev/stderr", O_WRONLY);
+  fd = open("/dev/stderr", O_WRONLY, 0);
   assert(fd == 2);
   if (fd < 0)
     rtn = errno;
@@ -199,11 +199,11 @@ int KernelProxy::open_resource(const char* path) {
   return AllocateFD(handle, path);
 }
 
-int KernelProxy::open(const char* path, int open_flags) {
+int KernelProxy::open(const char* path, int open_flags, mode_t mode) {
   ScopedFilesystem fs;
   ScopedNode node;
 
-  Error error = AcquireFsAndNode(path, open_flags, &fs, &node);
+  Error error = AcquireFsAndNode(path, open_flags, mode, &fs, &node);
   if (error) {
     errno = error;
     return -1;
@@ -324,7 +324,7 @@ char* KernelProxy::getwd(char* buf) {
 }
 
 int KernelProxy::chmod(const char* path, mode_t mode) {
-  int fd = KernelProxy::open(path, O_RDONLY);
+  int fd = open(path, O_RDONLY, mode);
   if (-1 == fd)
     return -1;
 
@@ -342,10 +342,6 @@ int KernelProxy::fchown(int fd, uid_t owner, gid_t group) {
 }
 
 int KernelProxy::lchown(const char* path, uid_t owner, gid_t group) {
-  return 0;
-}
-
-int KernelProxy::utime(const char* filename, const struct utimbuf* times) {
   return 0;
 }
 
@@ -388,7 +384,7 @@ int KernelProxy::rmdir(const char* path) {
 }
 
 int KernelProxy::stat(const char* path, struct stat* buf) {
-  int fd = open(path, O_RDONLY);
+  int fd = open(path, O_RDONLY, 0);
   if (-1 == fd)
     return -1;
 
@@ -680,6 +676,23 @@ int KernelProxy::ioctl(int fd, int request, va_list args) {
   return 0;
 }
 
+int KernelProxy::futimens(int fd, const struct timespec times[2]) {
+  ScopedKernelHandle handle;
+  Error error = AcquireHandle(fd, &handle);
+  if (error) {
+    errno = error;
+    return -1;
+  }
+
+  error = handle->node()->Futimens(times);
+  if (error) {
+    errno = error;
+    return -1;
+  }
+
+  return 0;
+}
+
 off_t KernelProxy::lseek(int fd, off_t offset, int whence) {
   ScopedKernelHandle handle;
   Error error = AcquireHandle(fd, &handle);
@@ -718,7 +731,7 @@ int KernelProxy::unlink(const char* path) {
 }
 
 int KernelProxy::truncate(const char* path, off_t len) {
-  int fd = KernelProxy::open(path, O_WRONLY);
+  int fd = open(path, O_WRONLY, 0);
   if (-1 == fd)
     return -1;
 
@@ -786,10 +799,15 @@ int KernelProxy::remove(const char* path) {
   return 0;
 }
 
-// TODO(noelallen): Needs implementation.
-int KernelProxy::fchmod(int fd, int mode) {
+int KernelProxy::fchmod(int fd, mode_t mode) {
   ScopedKernelHandle handle;
   Error error = AcquireHandle(fd, &handle);
+  if (error) {
+    errno = error;
+    return -1;
+  }
+
+  error = handle->node()->Fchmod(mode);
   if (error) {
     errno = error;
     return -1;
@@ -843,20 +861,18 @@ int KernelProxy::fcntl(int fd, int request, va_list args) {
 }
 
 int KernelProxy::access(const char* path, int amode) {
-  ScopedFilesystem fs;
-  Path rel;
+  struct stat buf;
+  int rtn = stat(path, &buf);
+  if (rtn != 0)
+    return rtn;
 
-  Error error = AcquireFsAndRelPath(path, &fs, &rel);
-  if (error) {
-    errno = error;
+  if (((amode & R_OK) && !(buf.st_mode & S_IREAD)) ||
+      ((amode & W_OK) && !(buf.st_mode & S_IWRITE)) ||
+      ((amode & X_OK) && !(buf.st_mode & S_IEXEC))) {
+    errno = EACCES;
     return -1;
   }
 
-  error = fs->Access(rel, amode);
-  if (error) {
-    errno = error;
-    return -1;
-  }
   return 0;
 }
 
@@ -866,10 +882,14 @@ int KernelProxy::readlink(const char* path, char* buf, size_t count) {
   return -1;
 }
 
-int KernelProxy::utimes(const char* filename, const struct timeval times[2]) {
-  LOG_TRACE("utimes is not implemented.");
-  errno = EINVAL;
-  return -1;
+int KernelProxy::utimens(const char* path, const struct timespec times[2]) {
+  int fd = open(path, O_RDONLY, 0);
+  if (-1 == fd)
+    return -1;
+
+  int result = futimens(fd, times);
+  close(fd);
+  return result;
 }
 
 // TODO(noelallen): Needs implementation.
@@ -1354,6 +1374,17 @@ int KernelProxy::getaddrinfo(const char* node,
                              const struct addrinfo* hints,
                              struct addrinfo** res) {
   return host_resolver_.getaddrinfo(node, service, hints, res);
+}
+
+int KernelProxy::getnameinfo(const struct sockaddr *sa,
+                             socklen_t salen,
+                             char *host,
+                             size_t hostlen,
+                             char *serv,
+                             size_t servlen,
+                             int flags) {
+  return host_resolver_.getnameinfo(sa, salen, host, hostlen, serv, servlen,
+                                    flags);
 }
 
 struct hostent* KernelProxy::gethostbyname(const char* name) {

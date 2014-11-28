@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu_controller.h"
 
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/extensions/active_script_controller.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -20,17 +21,19 @@
 #include "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/uninstall_reason.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
+#include "extensions/common/extension_urls.h"
+#include "extensions/common/manifest_handlers/options_page_info.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 using content::OpenURLParams;
@@ -78,6 +81,7 @@ class AsyncUninstaller : public extensions::ExtensionUninstallDialog::Delegate {
 
 @interface ExtensionActionContextMenuController ()
 - (void)onExtensionName:(id)sender;
+- (void)onAlwaysRun:(id)sender;
 - (void)onOptions:(id)sender;
 - (void)onUninstall:(id)sender;
 - (void)onHide:(id)sender;
@@ -113,13 +117,26 @@ class AsyncUninstaller : public extensions::ExtensionUninstallDialog::Delegate {
   // Separator.
   [menu addItem:[NSMenuItem separatorItem]];
 
+  // Always Run. Only displayed if there is an active script injection action.
+  content::WebContents* activeTab =
+      browser_->tab_strip_model()->GetActiveWebContents();
+  if (activeTab &&
+      extensions::ActiveScriptController::GetForWebContents(activeTab)
+          ->WantsToRun(extension_)) {
+    item = [menu addItemWithTitle:
+                l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_ALWAYS_RUN)
+                           action:@selector(onAlwaysRun:)
+                    keyEquivalent:@""];
+    [item setTarget:self];
+  }
+
   // Options.
   item = [menu addItemWithTitle:
               l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_OPTIONS_MENU_ITEM)
                          action:@selector(onOptions:)
                   keyEquivalent:@""];
   [item setTarget:self];
-  [item setEnabled:extensions::ManifestURL::GetOptionsPage(
+  [item setEnabled:extensions::OptionsPageInfo::GetOptionsPage(
       extension_).spec().length() > 0];
 
 
@@ -163,18 +180,26 @@ class AsyncUninstaller : public extensions::ExtensionUninstallDialog::Delegate {
 }
 
 - (void)onExtensionName:(id)sender {
-  GURL url(std::string(extension_urls::kGalleryBrowsePrefix) +
-           std::string("/detail/") + extension_->id());
+  GURL url(extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
   OpenURLParams params(url,
                        Referrer(),
                        NEW_FOREGROUND_TAB,
-                       content::PAGE_TRANSITION_LINK,
+                       ui::PAGE_TRANSITION_LINK,
                        false);
   browser_->OpenURL(params);
 }
 
+- (void)onAlwaysRun:(id)sender {
+  content::WebContents* activeTab =
+      browser_->tab_strip_model()->GetActiveWebContents();
+  if (activeTab) {
+    extensions::ActiveScriptController::GetForWebContents(activeTab)
+        ->AlwaysRunOnVisibleOrigin(extension_);
+  }
+}
+
 - (void)onOptions:(id)sender {
-  DCHECK(!extensions::ManifestURL::GetOptionsPage(extension_).is_empty());
+  DCHECK(!extensions::OptionsPageInfo::GetOptionsPage(extension_).is_empty());
   extensions::ExtensionTabUtil::OpenOptionsPage(extension_, browser_);
 }
 

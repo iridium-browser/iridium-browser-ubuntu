@@ -26,6 +26,7 @@
 #include "core/page/FocusType.h"
 #include "platform/Cursor.h"
 #include "platform/HostWindow.h"
+#include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 
 namespace blink {
@@ -46,7 +47,6 @@ class Page;
 class PopupMenu;
 class PopupMenuClient;
 class PopupOpeningObserver;
-class SearchPopupMenu;
 
 struct DateTimeChooserParameters;
 struct ViewportDescription;
@@ -63,7 +63,6 @@ public:
     // HostWindow methods.
     virtual void invalidateContentsAndRootView(const IntRect&) OVERRIDE;
     virtual void invalidateContentsForSlowScroll(const IntRect&) OVERRIDE;
-    virtual void scroll() OVERRIDE;
     virtual IntRect rootViewToScreen(const IntRect&) const OVERRIDE;
     virtual blink::WebScreenInfo screenInfo() const OVERRIDE;
 
@@ -126,7 +125,7 @@ public:
     void dispatchViewportPropertiesDidChange(const ViewportDescription&) const;
 
     bool hasOpenedPopup() const;
-    PassRefPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) const;
+    PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) const;
 
     void registerPopupOpeningObserver(PopupOpeningObserver*);
     void unregisterPopupOpeningObserver(PopupOpeningObserver*);

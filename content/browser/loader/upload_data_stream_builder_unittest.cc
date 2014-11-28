@@ -6,8 +6,8 @@
 
 #include <algorithm>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
@@ -16,13 +16,13 @@
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
 #include "net/base/upload_file_element_reader.h"
+#include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
-#include "webkit/browser/blob/blob_storage_context.h"
 
-using webkit_blob::BlobData;
-using webkit_blob::BlobDataHandle;
-using webkit_blob::BlobStorageContext;
+using storage::BlobData;
+using storage::BlobDataHandle;
+using storage::BlobStorageContext;
 
 namespace content {
 namespace {
@@ -105,7 +105,7 @@ TEST(UploadDataStreamBuilderTest, ResolveBlobAndCreateUploadDataStream) {
     const std::string blob_id0("id-0");
     scoped_refptr<BlobData> blob_data(new BlobData(blob_id0));
     scoped_ptr<BlobDataHandle> handle1 =
-        blob_storage_context.AddFinishedBlob(blob_data);
+        blob_storage_context.AddFinishedBlob(blob_data.get());
 
     const std::string blob_id1("id-1");
     blob_data = new BlobData(blob_id1);
@@ -113,7 +113,7 @@ TEST(UploadDataStreamBuilderTest, ResolveBlobAndCreateUploadDataStream) {
     blob_data->AppendFile(
         base::FilePath(FILE_PATH_LITERAL("BlobFile.txt")), 0, 20, time1);
     scoped_ptr<BlobDataHandle> handle2 =
-        blob_storage_context.AddFinishedBlob(blob_data);
+        blob_storage_context.AddFinishedBlob(blob_data.get());
 
     // Setup upload data elements for comparison.
     ResourceRequestBody::Element blob_element1, blob_element2;

@@ -63,7 +63,7 @@ FileTasks.VIDEO_PLAYER_ID = 'jcgeabjmjgoblfofpppfkcoakmfobdko';
  * @return {string} URL
  */
 FileTasks.createWebStoreLink = function(extension, mimeType) {
-  if (!extension)
+  if (!extension || FileTasks.EXECUTABLE_EXTENSIONS.indexOf(extension) !== -1)
     return FileTasks.CHROME_WEB_STORE_URL;
 
   if (extension[0] === '.')
@@ -84,15 +84,17 @@ FileTasks.createWebStoreLink = function(extension, mimeType) {
  * Complete the initialization.
  *
  * @param {Array.<Entry>} entries List of file entries.
+ * @param {Array.<string>=} opt_mimeTypes Mime-type specified for each entries.
  */
 FileTasks.prototype.init = function(entries, opt_mimeTypes) {
   this.entries_ = entries;
   this.mimeTypes_ = opt_mimeTypes || [];
 
   // TODO(mtomasz): Move conversion from entry to url to custom bindings.
+  // crbug.com/345527.
   var urls = util.entriesToURLs(entries);
   if (urls.length > 0)
-    chrome.fileBrowserPrivate.getFileTasks(urls, this.onTasks_.bind(this));
+    chrome.fileManagerPrivate.getFileTasks(urls, this.onTasks_.bind(this));
 };
 
 /**
@@ -135,7 +137,8 @@ FileTasks.UMA_INDEX_KNOWN_EXTENSIONS_ = Object.freeze([
   '.m4a', '.m4v', '.mid', '.mkv', '.mov', '.mp3', '.mp4', '.mpg', '.odf',
   '.odp', '.ods', '.odt', '.oga', '.ogg', '.ogv', '.pdf', '.png', '.ppt',
   '.pptx', '.ra', '.ram', '.rar', '.rm', '.rtf', '.wav', '.webm', '.webp',
-  '.wma', '.wmv', '.xls', '.xlsx',
+  '.wma', '.wmv', '.xls', '.xlsx', '.crdownload', '.crx', '.dmg', '.exe',
+  '.html', 'htm', '.jar', '.ps', '.torrent', '.txt', '.zip',
 ]);
 
 /**
@@ -192,9 +195,7 @@ FileTasks.isInternalTask_ = function(taskId) {
   return (appId === chrome.runtime.id &&
           taskType === 'file' &&
           (actionId === 'play' ||
-           actionId === 'mount-archive' ||
-           actionId === 'gallery' ||
-           actionId === 'gallery-video'));
+           actionId === 'mount-archive'));
 };
 
 /**
@@ -236,10 +237,6 @@ FileTasks.prototype.processTasks_ = function(tasks) {
       } else if (taskParts[2] === 'mount-archive') {
         task.iconType = 'archive';
         task.title = loadTimeData.getString('MOUNT_ARCHIVE');
-      } else if (taskParts[2] === 'gallery' ||
-                 taskParts[2] === 'gallery-video') {
-        task.iconType = 'image';
-        task.title = loadTimeData.getString('ACTION_OPEN');
       } else if (taskParts[2] === 'open-hosted-generic') {
         if (this.entries_.length > 1)
           task.iconType = 'generic';
@@ -333,6 +330,7 @@ FileTasks.prototype.executeDefaultInternal_ = function(entries, opt_callback) {
     var titleMessageId;
     switch (extension) {
       case '.exe':
+      case '.msi':
         textMessageId = 'NO_ACTION_FOR_EXECUTABLE';
         break;
       case '.dmg':
@@ -401,10 +399,11 @@ FileTasks.prototype.executeDefaultInternal_ = function(entries, opt_callback) {
   }.bind(this);
 
   this.checkAvailability_(function() {
-    // TODO(mtomasz): Pass entries instead.
+    // TODO(mtomasz): Move conversion from entry to url to custom bindings.
+    // crbug.com/345527.
     var urls = util.entriesToURLs(entries);
     var taskId = chrome.runtime.id + '|file|view-in-browser';
-    chrome.fileBrowserPrivate.executeTask(taskId, urls, onViewFiles);
+    chrome.fileManagerPrivate.executeTask(taskId, urls, onViewFiles);
   }.bind(this));
 };
 
@@ -435,9 +434,10 @@ FileTasks.prototype.executeInternal_ = function(taskId, entries) {
       var taskParts = taskId.split('|');
       this.executeInternalTask_(taskParts[2], entries);
     } else {
-      // TODO(mtomasz): Pass entries instead.
+      // TODO(mtomasz): Move conversion from entry to url to custom bindings.
+      // crbug.com/345527.
       var urls = util.entriesToURLs(entries);
-      chrome.fileBrowserPrivate.executeTask(taskId, urls, function(result) {
+      chrome.fileManagerPrivate.executeTask(taskId, urls, function(result) {
         if (result !== 'message_sent')
           return;
         util.isTeleported(window).then(function(teleported) {
@@ -473,7 +473,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
       VolumeManagerCommon.DriveConnectionType.OFFLINE;
 
   if (fm.isOnDrive() && isDriveOffline) {
-    fm.metadataCache_.get(entries, 'drive', function(props) {
+    fm.metadataCache_.get(entries, 'external', function(props) {
       if (areAll(props, 'availableOffline')) {
         callback();
         return;
@@ -482,15 +482,15 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
       fm.alert.showHtml(
           loadTimeData.getString('OFFLINE_HEADER'),
           props[0].hosted ?
-            loadTimeData.getStringF(
-                entries.length === 1 ?
-                    'HOSTED_OFFLINE_MESSAGE' :
-                    'HOSTED_OFFLINE_MESSAGE_PLURAL') :
-            loadTimeData.getStringF(
-                entries.length === 1 ?
-                    'OFFLINE_MESSAGE' :
-                    'OFFLINE_MESSAGE_PLURAL',
-                loadTimeData.getString('OFFLINE_COLUMN_LABEL')));
+              loadTimeData.getStringF(
+                  entries.length === 1 ?
+                      'HOSTED_OFFLINE_MESSAGE' :
+                      'HOSTED_OFFLINE_MESSAGE_PLURAL') :
+              loadTimeData.getStringF(
+                  entries.length === 1 ?
+                      'OFFLINE_MESSAGE' :
+                      'OFFLINE_MESSAGE_PLURAL',
+                  loadTimeData.getString('OFFLINE_COLUMN_LABEL')));
     });
     return;
   }
@@ -499,7 +499,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
       VolumeManagerCommon.DriveConnectionType.METERED;
 
   if (fm.isOnDrive() && isOnMetered) {
-    fm.metadataCache_.get(entries, 'drive', function(driveProps) {
+    fm.metadataCache_.get(entries, 'external', function(driveProps) {
       if (areAll(driveProps, 'availableWhenMetered')) {
         callback();
         return;
@@ -543,25 +543,20 @@ FileTasks.prototype.executeInternalTask_ = function(id, entries) {
       // in the directory.
       entries = fm.getAllEntriesInCurrentDirectory().filter(FileType.isAudio);
     }
-    // TODO(mtomasz): Pass entries instead.
+    // TODO(mtomasz): Move conversion from entry to url to custom bindings.
+    // crbug.com/345527.
     var urls = util.entriesToURLs(entries);
     var position = urls.indexOf(selectedEntry.toURL());
-    chrome.fileBrowserPrivate.getProfiles(function(profiles,
-                                                   currentId,
-                                                   displayedId) {
-      fm.backgroundPage.launchAudioPlayer({items: urls, position: position},
-                                          displayedId);
-    });
+    chrome.fileManagerPrivate.getProfiles(
+        function(profiles, currentId, displayedId) {
+          fm.backgroundPage.launchAudioPlayer(
+              {items: urls, position: position}, displayedId);
+        });
     return;
   }
 
   if (id === 'mount-archive') {
     this.mountArchivesInternal_(entries);
-    return;
-  }
-
-  if (id === 'gallery' || id === 'gallery-video') {
-    this.openGalleryInternal_(entries);
     return;
   }
 
@@ -590,12 +585,13 @@ FileTasks.prototype.mountArchivesInternal_ = function(entries) {
   var tracker = fm.directoryModel.createDirectoryChangeTracker();
   tracker.start();
 
-  // TODO(mtomasz): Pass Entries instead of URLs.
+  // TODO(mtomasz): Move conversion from entry to url to custom bindings.
+  // crbug.com/345527.
   var urls = util.entriesToURLs(entries);
-  fm.resolveSelectResults_(urls, function(resolvedURLs) {
-    for (var index = 0; index < resolvedURLs.length; ++index) {
-      // TODO(mtomasz): Pass Entry instead of URL.
-      fm.volumeManager.mountArchive(resolvedURLs[index],
+  for (var index = 0; index < urls.length; ++index) {
+    // TODO(mtomasz): Pass Entry instead of URL.
+    fm.volumeManager.mountArchive(
+        urls[index],
         function(volumeInfo) {
           if (tracker.hasChanged) {
             tracker.stop();
@@ -617,106 +613,8 @@ FileTasks.prototype.mountArchivesInternal_ = function(entries) {
           var namePos = path.lastIndexOf('/');
           fm.alert.show(strf('ARCHIVE_MOUNT_FAILED',
                              path.substr(namePos + 1), error));
-        }.bind(null, resolvedURLs[index]));
-      }
-  });
-};
-
-/**
- * Open the Gallery.
- *
- * @param {Array.<Entry>} entries List of selected entries.
- */
-FileTasks.prototype.openGallery = function(entries) {
-  FileTasks.recordViewingFileTypeUMA_(entries);
-  this.openGalleryInternal_(entries);
-};
-
-/**
- * The core implementation to open the Gallery.
- *
- * @param {Array.<Entry>} entries List of selected entries.
- * @private
- */
-FileTasks.prototype.openGalleryInternal_ = function(entries) {
-  var fm = this.fileManager_;
-
-  var allEntries =
-      fm.getAllEntriesInCurrentDirectory().filter(FileType.isImageOrVideo);
-
-  var galleryFrame = fm.document_.createElement('iframe');
-  galleryFrame.className = 'overlay-pane';
-  galleryFrame.scrolling = 'no';
-  galleryFrame.setAttribute('webkitallowfullscreen', true);
-
-  if (this.params_ && this.params_.gallery) {
-    // Remove the Gallery state from the location, we do not need it any more.
-    // TODO(mtomasz): Consider keeping the selection path.
-    util.updateAppState(
-        null, /* keep current directory */
-        '', /* remove current selection */
-        '' /* remove search. */);
+        }.bind(null, urls[index]));
   }
-
-  var savedAppState = JSON.parse(JSON.stringify(window.appState));
-  var savedTitle = document.title;
-
-  // Push a temporary state which will be replaced every time the selection
-  // changes in the Gallery and popped when the Gallery is closed.
-  util.updateAppState();
-
-  var onBack = function(selectedEntries) {
-    fm.directoryModel.selectEntries(selectedEntries);
-    fm.closeFilePopup();  // Will call Gallery.unload.
-    window.appState = savedAppState;
-    util.saveAppState();
-    document.title = savedTitle;
-  };
-
-  var onAppRegionChanged = function(visible) {
-    fm.onFilePopupAppRegionChanged(visible);
-  };
-
-  galleryFrame.onload = function() {
-    galleryFrame.contentWindow.ImageUtil.metrics = metrics;
-
-    // TODO(haruki): isOnReadonlyDirectory() only checks the permission for the
-    // root. We should check more granular permission to know whether the file
-    // is writable or not.
-    var readonly = fm.isOnReadonlyDirectory();
-    var currentDir = fm.getCurrentDirectoryEntry();
-    var downloadsVolume = fm.volumeManager.getCurrentProfileVolumeInfo(
-            VolumeManagerCommon.RootType.DOWNLOADS);
-    var downloadsDir = downloadsVolume && downloadsVolume.fileSystem.root;
-
-    // TODO(mtomasz): Pass Entry instead of localized name. Conversion to a
-    //     display string should be done in gallery.js.
-    var readonlyDirName = null;
-    if (readonly && currentDir)
-      readonlyDirName = util.getEntryLabel(fm.volumeManager, currentDir);
-
-    var context = {
-      // We show the root label in readonly warning (e.g. archive name).
-      readonlyDirName: readonlyDirName,
-      curDirEntry: currentDir,
-      saveDirEntry: readonly ? downloadsDir : null,
-      searchResults: fm.directoryModel.isSearching(),
-      metadataCache: fm.metadataCache_,
-      pageState: this.params_,
-      appWindow: chrome.app.window.current(),
-      onBack: onBack,
-      onClose: fm.onClose.bind(fm),
-      onMaximize: fm.onMaximize.bind(fm),
-      onMinimize: fm.onMinimize.bind(fm),
-      onAppRegionChanged: onAppRegionChanged,
-      loadTimeData: fm.backgroundPage.background.stringData
-    };
-    galleryFrame.contentWindow.Gallery.open(
-        context, fm.volumeManager, allEntries, entries);
-  }.bind(this);
-
-  galleryFrame.src = 'gallery.html';
-  fm.openFilePopup(galleryFrame, fm.updateTitle_.bind(fm));
 };
 
 /**
@@ -748,7 +646,7 @@ FileTasks.prototype.display_ = function(combobutton) {
 
     combobutton.addSeparator();
     var changeDefaultMenuItem = combobutton.addDropDownItem({
-        label: loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM')
+      label: loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM')
     });
     changeDefaultMenuItem.classList.add('change-default');
   }

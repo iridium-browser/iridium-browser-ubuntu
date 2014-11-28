@@ -71,13 +71,6 @@ public:
     // isDetached also checks for null, so it's safe to just call isDetached.
     BLINK_EXPORT bool isDetached() const;
 
-    // Static methods for enabling accessibility.
-    BLINK_EXPORT static void enableAccessibility();
-    BLINK_EXPORT static bool accessibilityEnabled();
-
-    // Temporary: this flag will only be toggleable until Chromium has it on by default.
-    BLINK_EXPORT static void enableInlineTextBoxAccessibility();
-
     BLINK_EXPORT int axID() const;
 
     // Update layout on the underlying tree, and return true if this object is

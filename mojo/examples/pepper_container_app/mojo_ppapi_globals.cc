@@ -44,6 +44,10 @@ class MojoPpapiGlobals::MainThreadMessageLoopResource
     return main_thread_message_loop_.get();
   }
 
+  virtual bool CurrentlyHandlingBlockingMessage() OVERRIDE {
+    return false;
+  }
+
   // ppapi::thunk::PPB_MessageLoop_API implementation.
   virtual int32_t AttachToCurrentThread() OVERRIDE {
     NOTIMPLEMENTED();
@@ -155,7 +159,7 @@ PP_Module MojoPpapiGlobals::GetModuleForInstance(PP_Instance instance) {
 
 ppapi::MessageLoopShared* MojoPpapiGlobals::GetCurrentMessageLoop() {
   if (base::MessageLoopProxy::current().get() == GetMainThreadMessageLoop()) {
-    if (!main_thread_message_loop_resource_) {
+    if (!main_thread_message_loop_resource_.get()) {
       main_thread_message_loop_resource_ = new MainThreadMessageLoopResource(
           GetMainThreadMessageLoop());
     }

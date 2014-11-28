@@ -5,7 +5,7 @@
 #include <iostream>
 #include <sstream>
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "tools/gn/err.h"
@@ -60,7 +60,7 @@ Value RunWriteFile(Scope* scope,
   SourceFile source_file = cur_dir.ResolveRelativeFile(args[0].string_value());
   if (!EnsureStringIsInOutputDir(
           scope->settings()->build_settings()->build_dir(),
-          source_file.value(), args[0], err))
+          source_file.value(), args[0].origin(), err))
     return Value();
 
   // Compute output.

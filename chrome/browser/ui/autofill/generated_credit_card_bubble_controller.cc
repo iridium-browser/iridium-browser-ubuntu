@@ -19,11 +19,12 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -91,10 +92,10 @@ void GeneratedCreditCardBubbleController::DidNavigateMainFrame(
 
   // Don't destory the bubble due to reloads, form submits, or redirects right
   // after the dialog succeeds. Merchants often navigate to a confirmation page.
-  content::PageTransition transition = details.entry->GetTransitionType();
-  if (transition == content::PAGE_TRANSITION_FORM_SUBMIT ||
-      transition == content::PAGE_TRANSITION_RELOAD ||
-      content::PageTransitionIsRedirect(transition)) {
+  ui::PageTransition transition = details.entry->GetTransitionType();
+  if (transition == ui::PAGE_TRANSITION_FORM_SUBMIT ||
+      transition == ui::PAGE_TRANSITION_RELOAD ||
+      ui::PageTransitionIsRedirect(transition)) {
     return;
   }
 
@@ -137,7 +138,7 @@ void GeneratedCreditCardBubbleController::OnLinkClicked() {
   chrome::NavigateParams params(
       chrome::FindBrowserWithWebContents(web_contents()),
       GURL(kWalletGeneratedCardLearnMoreLink),
-      content::PAGE_TRANSITION_AUTO_BOOKMARK);
+      ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = NEW_FOREGROUND_TAB;
   chrome::Navigate(&params);
 

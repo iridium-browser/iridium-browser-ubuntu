@@ -10,11 +10,12 @@
 
 #include "base/logging.h"
 #include "base/strings/sys_string_conversions.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/ui_strings.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/strings/grit/ui_strings.h"
 
 struct UILocalizerResourceMap {
   const char* const name;

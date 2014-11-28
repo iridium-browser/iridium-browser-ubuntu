@@ -13,6 +13,8 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_test_base.h"
 #include "ipc/ipc_test_channel_listener.h"
+#include "ipc/mojo/ipc_channel_mojo_host.h"
+#include "ipc/mojo/ipc_channel_mojo_readers.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
@@ -55,34 +57,13 @@ class ListenerThatExpectsOK : public IPC::Listener {
   bool received_ok_;
 };
 
-class ListenerThatShouldBeNeverCalled : public IPC::Listener {
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    NOTREACHED();
-    return true;
-  }
-
-  virtual void OnChannelError() OVERRIDE {
-    NOTREACHED();
-  }
-
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE {
-    NOTREACHED();
-  }
-
-  virtual void OnBadMessageReceived(const IPC::Message& message) OVERRIDE {
-    NOTREACHED();
-  }
-};
-
 class ChannelClient {
  public:
   explicit ChannelClient(IPC::Listener* listener, const char* name) {
-    scoped_ptr<IPC::Channel> bootstrap(IPC::Channel::CreateClient(
-        IPCTestBase::GetChannelName(name),
-        &never_called_));
-    channel_ = IPC::ChannelMojo::Create(
-        bootstrap.Pass(), IPC::Channel::MODE_CLIENT, listener,
-        main_message_loop_.message_loop_proxy());
+    channel_ = IPC::ChannelMojo::Create(NULL,
+                                        IPCTestBase::GetChannelName(name),
+                                        IPC::Channel::MODE_CLIENT,
+                                        listener);
   }
 
   void Connect() {
@@ -92,31 +73,31 @@ class ChannelClient {
   IPC::ChannelMojo* channel() const { return channel_.get(); }
 
  private:
-  scoped_ptr<IPC::ChannelMojo> channel_;
-  ListenerThatShouldBeNeverCalled never_called_;
   base::MessageLoopForIO main_message_loop_;
+  scoped_ptr<IPC::ChannelMojo> channel_;
 };
 
 class IPCChannelMojoTest : public IPCTestBase {
- public:
-  void CreateMojoChannel(IPC::Listener* listener);
-
  protected:
-  virtual void SetUp() OVERRIDE {
-    IPCTestBase::SetUp();
+  virtual scoped_ptr<IPC::ChannelFactory> CreateChannelFactory(
+      const IPC::ChannelHandle& handle,
+      base::TaskRunner* runner) OVERRIDE {
+    host_.reset(new IPC::ChannelMojoHost(task_runner()));
+    return IPC::ChannelMojo::CreateServerFactory(host_->channel_delegate(),
+                                                 handle);
   }
 
-  ListenerThatShouldBeNeverCalled never_called_;
+  virtual bool DidStartClient() OVERRIDE {
+    bool ok = IPCTestBase::DidStartClient();
+    DCHECK(ok);
+    host_->OnClientLaunched(client_process());
+    return ok;
+  }
+
+ private:
+  scoped_ptr<IPC::ChannelMojoHost> host_;
 };
 
-
-void IPCChannelMojoTest::CreateMojoChannel(IPC::Listener* listener) {
-  CreateChannel(&never_called_);
-  scoped_ptr<IPC::Channel> mojo_channel = IPC::ChannelMojo::Create(
-      ReleaseChannel(), IPC::Channel::MODE_SERVER, listener,
-      io_thread_task_runner()).PassAs<IPC::Channel>();
-  SetChannel(mojo_channel.PassAs<IPC::Channel>());
-}
 
 class TestChannelListenerWithExtraExpectations
     : public IPC::TestChannelListener {
@@ -142,7 +123,7 @@ TEST_F(IPCChannelMojoTest, ConnectedFromClient) {
 
   // Set up IPC channel and start client.
   TestChannelListenerWithExtraExpectations listener;
-  CreateMojoChannel(&listener);
+  CreateChannel(&listener);
   listener.Init(sender());
   ASSERT_TRUE(ConnectChannel());
   ASSERT_TRUE(StartClient());
@@ -178,6 +159,107 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(IPCChannelMojoTestClient) {
   return 0;
 }
 
+class ListenerExpectingErrors : public IPC::Listener {
+ public:
+  ListenerExpectingErrors()
+      : has_error_(false) {
+  }
+
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE {
+    base::MessageLoop::current()->Quit();
+  }
+
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+    return true;
+  }
+
+  virtual void OnChannelError() OVERRIDE {
+    has_error_ = true;
+    base::MessageLoop::current()->Quit();
+  }
+
+  bool has_error() const { return has_error_; }
+
+ private:
+  bool has_error_;
+};
+
+
+class IPCChannelMojoErrorTest : public IPCTestBase {
+ protected:
+  virtual scoped_ptr<IPC::ChannelFactory> CreateChannelFactory(
+      const IPC::ChannelHandle& handle,
+      base::TaskRunner* runner) OVERRIDE {
+    host_.reset(new IPC::ChannelMojoHost(task_runner()));
+    return IPC::ChannelMojo::CreateServerFactory(host_->channel_delegate(),
+                                                 handle);
+  }
+
+  virtual bool DidStartClient() OVERRIDE {
+    bool ok = IPCTestBase::DidStartClient();
+    DCHECK(ok);
+    host_->OnClientLaunched(client_process());
+    return ok;
+  }
+
+ private:
+  scoped_ptr<IPC::ChannelMojoHost> host_;
+};
+
+class ListenerThatQuits : public IPC::Listener {
+ public:
+  ListenerThatQuits() {
+  }
+
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+    return true;
+  }
+
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE {
+    base::MessageLoop::current()->Quit();
+  }
+};
+
+// A long running process that connects to us.
+MULTIPROCESS_IPC_TEST_CLIENT_MAIN(IPCChannelMojoErraticTestClient) {
+  ListenerThatQuits listener;
+  ChannelClient client(&listener, "IPCChannelMojoErraticTestClient");
+  client.Connect();
+
+  base::MessageLoop::current()->Run();
+
+  return 0;
+}
+
+TEST_F(IPCChannelMojoErrorTest, SendFailWithPendingMessages) {
+  Init("IPCChannelMojoErraticTestClient");
+
+  // Set up IPC channel and start client.
+  ListenerExpectingErrors listener;
+  CreateChannel(&listener);
+  ASSERT_TRUE(ConnectChannel());
+
+  // This matches a value in mojo/system/constants.h
+  const int kMaxMessageNumBytes = 4 * 1024 * 1024;
+  std::string overly_large_data(kMaxMessageNumBytes, '*');
+  // This messages are queued as pending.
+  for (size_t i = 0; i < 10; ++i) {
+    IPC::TestChannelListener::SendOneMessage(
+        sender(), overly_large_data.c_str());
+  }
+
+  ASSERT_TRUE(StartClient());
+  base::MessageLoop::current()->Run();
+
+  this->channel()->Close();
+
+  EXPECT_TRUE(WaitForClientShutdown());
+  EXPECT_TRUE(listener.has_error());
+
+  DestroyChannel();
+}
+
+
 #if defined(OS_POSIX)
 class ListenerThatExpectsFile : public IPC::Listener {
  public:
@@ -188,10 +270,11 @@ class ListenerThatExpectsFile : public IPC::Listener {
 
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     PickleIterator iter(message);
-    base::FileDescriptor desc;
-    EXPECT_TRUE(message.ReadFileDescriptor(&iter, &desc));
+
+    base::ScopedFD fd;
+    EXPECT_TRUE(message.ReadFile(&iter, &fd));
+    base::File file(fd.release());
     std::string content(GetSendingFileContent().size(), ' ');
-    base::File file(desc.fd);
     file.Read(0, &content[0], content.size());
     EXPECT_EQ(content, GetSendingFileContent());
     base::MessageLoop::current()->Quit();
@@ -220,8 +303,7 @@ class ListenerThatExpectsFile : public IPC::Listener {
     file.Flush();
     IPC::Message* message = new IPC::Message(
         0, 2, IPC::Message::PRIORITY_NORMAL);
-    message->WriteFileDescriptor(
-        base::FileDescriptor(file.TakePlatformFile(), false));
+    message->WriteFile(base::ScopedFD(file.TakePlatformFile()));
     ASSERT_TRUE(sender->Send(message));
   }
 
@@ -236,7 +318,7 @@ TEST_F(IPCChannelMojoTest, SendPlatformHandle) {
   Init("IPCChannelMojoTestSendPlatformHandleClient");
 
   ListenerThatExpectsOK listener;
-  CreateMojoChannel(&listener);
+  CreateChannel(&listener);
   ASSERT_TRUE(ConnectChannel());
   ASSERT_TRUE(StartClient());
 

@@ -208,10 +208,22 @@ TEST(BoringSSL, PKCS7) {
   TestSimple("pkcs7_test");
 }
 
+TEST(BoringSSL, PKCS12) {
+  TestSimple("pkcs12_test");
+}
+
 TEST(BoringSSL, ExampleMul) {
   TestSimple("example_mul");
 }
 
 TEST(BoringSSL, ExampleSign) {
   TestSimple("example_sign");
+}
+
+TEST(BoringSSL, SSL) {
+  TestSimple("ssl_test");
+}
+
+TEST(BoringSSL, PQueue) {
+  TestSimple("pqueue_test");
 }

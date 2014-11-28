@@ -43,9 +43,11 @@
 
 namespace blink {
 
+class ConsoleMessage;
 class ScriptArguments;
 
 class ConsoleBase : public RefCountedWillBeGarbageCollectedFinalized<ConsoleBase>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     void debug(ScriptState*, PassRefPtrWillBeRawPtr<ScriptArguments>);
     void error(ScriptState*, PassRefPtrWillBeRawPtr<ScriptArguments>);
@@ -77,10 +79,13 @@ public:
 
 protected:
     virtual ExecutionContext* context() = 0;
-    virtual void reportMessageToClient(MessageLevel, const String& message, PassRefPtrWillBeRawPtr<ScriptCallStack>) = 0;
+    virtual void reportMessageToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>) = 0;
 
 private:
     void internalAddMessage(MessageType, MessageLevel, ScriptState*, PassRefPtrWillBeRawPtr<ScriptArguments>, bool acceptNoArguments = false, bool printTrace = false);
+
+    HashCountedSet<String> m_counts;
+    HashMap<String, double> m_times;
 };
 
 } // namespace blink

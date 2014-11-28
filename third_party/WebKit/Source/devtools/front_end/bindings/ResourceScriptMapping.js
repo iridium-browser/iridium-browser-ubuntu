@@ -66,6 +66,10 @@ WebInspector.ResourceScriptMapping.prototype = {
         var scriptFile = this.scriptFile(uiSourceCode);
         if (scriptFile && ((scriptFile.hasDivergedFromVM() && !scriptFile.isMergingToVM()) || scriptFile.isDivergingFromVM()))
             return null;
+        var lineNumber = debuggerModelLocation.lineNumber - (script.isInlineScriptWithSourceURL() ? script.lineOffset : 0);
+        var columnNumber = debuggerModelLocation.columnNumber || 0;
+        if (script.isInlineScriptWithSourceURL() && !lineNumber && columnNumber)
+            columnNumber -= script.columnOffset;
         return uiSourceCode.uiLocation(debuggerModelLocation.lineNumber, debuggerModelLocation.columnNumber || 0);
     },
 
@@ -79,7 +83,10 @@ WebInspector.ResourceScriptMapping.prototype = {
     {
         var scripts = this._scriptsForUISourceCode(uiSourceCode);
         console.assert(scripts.length);
-        return this._debuggerModel.createRawLocation(scripts[0], lineNumber, columnNumber);
+        var script = scripts[0];
+        if (script.isInlineScriptWithSourceURL())
+            return this._debuggerModel.createRawLocation(script, lineNumber + script.lineOffset, lineNumber ? columnNumber : columnNumber + script.columnOffset);
+        return this._debuggerModel.createRawLocation(script, lineNumber, columnNumber);
     },
 
     /**
@@ -132,7 +139,7 @@ WebInspector.ResourceScriptMapping.prototype = {
     _setScriptFile: function(uiSourceCode, scriptFile)
     {
         if (scriptFile)
-            this._uiSourceCodeToScriptFile.put(uiSourceCode, scriptFile);
+            this._uiSourceCodeToScriptFile.set(uiSourceCode, scriptFile);
         else
             this._uiSourceCodeToScriptFile.remove(uiSourceCode);
     },

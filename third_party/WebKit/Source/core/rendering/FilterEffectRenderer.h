@@ -61,12 +61,13 @@ public:
     GraphicsContext* beginFilterEffect(GraphicsContext* oldContext);
     GraphicsContext* applyFilterEffect();
 
-    const LayoutRect& repaintRect() const { return m_repaintRect; }
+    const LayoutRect& paintInvalidationRect() const { return m_paintInvalidationRect; }
 private:
     GraphicsContext* m_savedGraphicsContext;
     RenderLayer* m_renderLayer;
 
-    LayoutRect m_repaintRect;
+    LayoutRect m_paintInvalidationRect;
+    FloatRect m_filterBoxRect;
     bool m_haveFilterEffect;
 };
 

@@ -16,13 +16,13 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/resource_var.h"
 #include "ppapi/shared_impl/scoped_pp_var.h"
+#include "storage/common/fileapi/file_system_util.h"
 #include "third_party/WebKit/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 #include "third_party/WebKit/public/web/WebDOMFileSystem.h"
 #include "third_party/WebKit/public/web/WebDOMMediaStreamTrack.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "webkit/common/fileapi/file_system_util.h"
 
 using ppapi::ResourceVar;
 
@@ -57,23 +57,23 @@ PP_FileSystemType WebFileSystemTypeToPPAPI(blink::WebFileSystem::Type type) {
   }
 }
 
-// Converts a fileapi::FileSystemType to a blink::WebFileSystemType.
+// Converts a storage::FileSystemType to a blink::WebFileSystemType.
 // Returns true on success, false if |type| does not correspond to a
 // WebFileSystemType.
 bool FileApiFileSystemTypeToWebFileSystemType(
-    fileapi::FileSystemType type,
+    storage::FileSystemType type,
     blink::WebFileSystemType* result_type) {
   switch (type) {
-    case fileapi::kFileSystemTypeTemporary:
+    case storage::kFileSystemTypeTemporary:
       *result_type = blink::WebFileSystemTypeTemporary;
       return true;
-    case fileapi::kFileSystemTypePersistent:
+    case storage::kFileSystemTypePersistent:
       *result_type = blink::WebFileSystemTypePersistent;
       return true;
-    case fileapi::kFileSystemTypeIsolated:
+    case storage::kFileSystemTypeIsolated:
       *result_type = blink::WebFileSystemTypeIsolated;
       return true;
-    case fileapi::kFileSystemTypeExternal:
+    case storage::kFileSystemTypeExternal:
       *result_type = blink::WebFileSystemTypeExternal;
       return true;
     default:
@@ -126,11 +126,11 @@ bool ResourceHostToDOMFileSystem(
     v8::Handle<v8::Value>* dom_file_system) {
   GURL root_url = file_system_host->GetRootUrl();
   GURL origin;
-  fileapi::FileSystemType type;
+  storage::FileSystemType type;
   base::FilePath virtual_path;
-  fileapi::ParseFileSystemSchemeURL(root_url, &origin, &type, &virtual_path);
+  storage::ParseFileSystemSchemeURL(root_url, &origin, &type, &virtual_path);
 
-  std::string name = fileapi::GetFileSystemName(origin, type);
+  std::string name = storage::GetFileSystemName(origin, type);
   blink::WebFileSystemType blink_type;
   if (!FileApiFileSystemTypeToWebFileSystemType(type, &blink_type))
     return false;

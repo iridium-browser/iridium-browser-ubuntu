@@ -55,10 +55,15 @@ bool RendererMediaPlayerManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_DidExitFullscreen, OnDidExitFullscreen)
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_DidMediaPlayerPlay, OnPlayerPlay)
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_DidMediaPlayerPause, OnPlayerPause)
-    IPC_MESSAGE_HANDLER(MediaPlayerMsg_PauseVideo, OnPauseVideo)
+    IPC_MESSAGE_HANDLER(MediaPlayerMsg_RemoteRouteAvailabilityChanged,
+                        OnRemoteRouteAvailabilityChanged)
   IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+void RendererMediaPlayerManager::WasHidden() {
+  ReleaseVideoResources();
 }
 
 void RendererMediaPlayerManager::Initialize(
@@ -112,6 +117,15 @@ void RendererMediaPlayerManager::ReleaseResources(int player_id) {
 
 void RendererMediaPlayerManager::DestroyPlayer(int player_id) {
   Send(new MediaPlayerHostMsg_DestroyMediaPlayer(routing_id(), player_id));
+}
+
+void RendererMediaPlayerManager::RequestRemotePlayback(int player_id) {
+  Send(new MediaPlayerHostMsg_RequestRemotePlayback(routing_id(), player_id));
+}
+
+void RendererMediaPlayerManager::RequestRemotePlaybackControl(int player_id) {
+  Send(new MediaPlayerHostMsg_RequestRemotePlaybackControl(routing_id(),
+                                                           player_id));
 }
 
 void RendererMediaPlayerManager::OnMediaMetadataChanged(
@@ -168,11 +182,13 @@ void RendererMediaPlayerManager::OnVideoSizeChanged(int player_id,
     player->OnVideoSizeChanged(width, height);
 }
 
-void RendererMediaPlayerManager::OnTimeUpdate(int player_id,
-                                              base::TimeDelta current_time) {
+void RendererMediaPlayerManager::OnTimeUpdate(
+    int player_id,
+    base::TimeDelta current_timestamp,
+    base::TimeTicks current_time_ticks) {
   WebMediaPlayerAndroid* player = GetMediaPlayer(player_id);
   if (player)
-    player->OnTimeUpdate(current_time);
+    player->OnTimeUpdate(current_timestamp, current_time_ticks);
 }
 
 void RendererMediaPlayerManager::OnMediaPlayerReleased(int player_id) {
@@ -224,8 +240,12 @@ void RendererMediaPlayerManager::OnRequestFullscreen(int player_id) {
     player->OnRequestFullscreen();
 }
 
-void RendererMediaPlayerManager::OnPauseVideo() {
-  ReleaseVideoResources();
+void RendererMediaPlayerManager::OnRemoteRouteAvailabilityChanged(
+    int player_id,
+    bool routes_available) {
+  WebMediaPlayerAndroid* player = GetMediaPlayer(player_id);
+  if (player)
+    player->OnRemoteRouteAvailabilityChanged(routes_available);
 }
 
 void RendererMediaPlayerManager::EnterFullscreen(int player_id,

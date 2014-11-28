@@ -137,8 +137,7 @@ void GetExtensionKeyboardEventFromKeyEvent(
   ext_event->type = (event.type() == ui::ET_KEY_RELEASED) ? "keyup" : "keydown";
 
   std::string dom_code = event.code();
-  if (dom_code ==
-      ui::KeycodeConverter::GetInstance()->InvalidKeyboardEventCode())
+  if (dom_code == ui::KeycodeConverter::InvalidKeyboardEventCode())
     dom_code = ui::KeyboardCodeToDomKeycode(event.key_code());
   ext_event->code = dom_code;
   ext_event->key_code = static_cast<int>(event.key_code());
@@ -163,8 +162,6 @@ InputMethodEngine::InputMethodEngine()
 }
 
 InputMethodEngine::~InputMethodEngine() {
-  if (start_time_.ToInternalValue())
-    RecordHistogram("WorkingTime", (end_time_ - start_time_).InSeconds());
 }
 
 void InputMethodEngine::Initialize(
@@ -175,15 +172,6 @@ void InputMethodEngine::Initialize(
   // TODO(komatsu): It is probably better to set observer out of Initialize.
   observer_ = observer.Pass();
   extension_id_ = extension_id;
-}
-
-void InputMethodEngine::RecordHistogram(const char* name, int count) {
-  std::string histo_name = base::StringPrintf(
-      "InputMethod.%s.%s", name, active_component_id_.c_str());
-  base::HistogramBase* counter = base::Histogram::FactoryGet(
-      histo_name, 0, 1000000, 50, base::HistogramBase::kNoFlags);
-  if (counter)
-    counter->Add(count);
 }
 
 const std::string& InputMethodEngine::GetActiveComponentId() const {
@@ -271,13 +259,12 @@ bool InputMethodEngine::CommitText(int context_id, const char* text,
 
   IMEBridge::Get()->GetInputContextHandler()->CommitText(text);
 
-  // Records times for using input method.
-  if (!start_time_.ToInternalValue())
-    start_time_ = base::Time::Now();
-  end_time_ = base::Time::Now();
-  // Records histograms for counts of commits and committed characters.
-  RecordHistogram("Commit", 1);
-  RecordHistogram("CommitCharacter", GetUtf8StringLength(text));
+  // Records histograms for committed characters.
+  if (!composition_text_->text().empty()) {
+    size_t len = GetUtf8StringLength(text);
+    UMA_HISTOGRAM_CUSTOM_COUNTS("InputMethod.CommitLength",
+                                len, 1, 25, 25);
+  }
   return true;
 }
 
@@ -327,6 +314,7 @@ bool InputMethodEngine::SendKeyEvents(
     if (details.dispatcher_destroyed)
       break;
   }
+
   return true;
 }
 
@@ -507,6 +495,7 @@ void InputMethodEngine::HideInputView() {
 
 void InputMethodEngine::EnableInputView() {
   keyboard::SetOverrideContentUrl(input_method::InputMethodManager::Get()
+                                      ->GetActiveIMEState()
                                       ->GetCurrentInputMethod()
                                       .input_view_url());
   keyboard::KeyboardController* keyboard_controller =
@@ -573,18 +562,11 @@ void InputMethodEngine::Enable(const std::string& component_id) {
   FocusIn(IMEEngineHandlerInterface::InputContext(
       current_input_type_, ui::TEXT_INPUT_MODE_DEFAULT));
   EnableInputView();
-
-  start_time_ = base::Time();
-  end_time_ = base::Time();
-  RecordHistogram("Enable", 1);
 }
 
 void InputMethodEngine::Disable() {
   active_component_id_.clear();
   observer_->OnDeactivated(active_component_id_);
-
-  if (start_time_.ToInternalValue())
-    RecordHistogram("WorkingTime", (end_time_ - start_time_).InSeconds());
 }
 
 void InputMethodEngine::PropertyActivate(const std::string& property_name) {

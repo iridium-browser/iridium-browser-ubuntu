@@ -18,11 +18,13 @@
 #include "content/browser/compositor/browser_compositor_output_surface.h"
 #include "content/browser/compositor/browser_compositor_output_surface_proxy.h"
 #include "content/browser/compositor/gpu_browser_compositor_output_surface.h"
+#include "content/browser/compositor/gpu_surfaceless_browser_compositor_output_surface.h"
 #include "content/browser/compositor/onscreen_display_client.h"
 #include "content/browser/compositor/reflector_impl.h"
 #include "content/browser/compositor/software_browser_compositor_output_surface.h"
 #include "content/browser/compositor/surface_display_output_surface.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
+#include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -67,8 +69,8 @@ struct GpuProcessTransportFactory::PerCompositorData {
 };
 
 GpuProcessTransportFactory::GpuProcessTransportFactory()
-    : callback_factory_(this),
-      next_surface_id_namespace_(1u) {
+    : next_surface_id_namespace_(1u),
+      callback_factory_(this) {
   output_surface_proxy_ = new BrowserCompositorOutputSurfaceProxy(
       &output_surface_map_);
 #if defined(OS_CHROMEOS)
@@ -81,10 +83,8 @@ GpuProcessTransportFactory::GpuProcessTransportFactory()
     compositor_thread_.reset(new base::Thread("Browser Compositor"));
     compositor_thread_->Start();
   }
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kUseSurfaces)) {
+  if (UseSurfacesEnabled())
     surface_manager_ = make_scoped_ptr(new cc::SurfaceManager);
-  }
 }
 
 GpuProcessTransportFactory::~GpuProcessTransportFactory() {
@@ -159,9 +159,10 @@ scoped_ptr<cc::OutputSurface> GpuProcessTransportFactory::CreateOutputSurface(
         "Compositor");
   }
 
-  UMA_HISTOGRAM_BOOLEAN("Aura.CreatedGpuBrowserCompositor", !!context_provider);
+  UMA_HISTOGRAM_BOOLEAN("Aura.CreatedGpuBrowserCompositor",
+                        !!context_provider.get());
 
-  if (context_provider) {
+  if (context_provider.get()) {
     scoped_refptr<base::SingleThreadTaskRunner> compositor_thread_task_runner =
         GetCompositorMessageLoop();
     if (!compositor_thread_task_runner.get())
@@ -173,30 +174,34 @@ scoped_ptr<cc::OutputSurface> GpuProcessTransportFactory::CreateOutputSurface(
         compositor_thread_task_runner.get());
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kUseSurfaces)) {
+  if (UseSurfacesEnabled()) {
     // This gets a bit confusing. Here we have a ContextProvider configured to
     // render directly to this widget. We need to make an OnscreenDisplayClient
     // associated with this context, then return a SurfaceDisplayOutputSurface
     // set up to draw to the display's surface.
     cc::SurfaceManager* manager = surface_manager_.get();
-    scoped_ptr<cc::OutputSurface> software_surface;
-    if (!context_provider) {
-      software_surface =
+    scoped_ptr<cc::OutputSurface> display_surface;
+    if (!context_provider.get()) {
+      display_surface =
           make_scoped_ptr(new SoftwareBrowserCompositorOutputSurface(
               output_surface_proxy_,
               CreateSoftwareOutputDevice(compositor),
               per_compositor_data_[compositor]->surface_id,
               &output_surface_map_,
               compositor->vsync_manager()));
+    } else {
+      display_surface = make_scoped_ptr(new GpuBrowserCompositorOutputSurface(
+          context_provider,
+          per_compositor_data_[compositor]->surface_id,
+          &output_surface_map_,
+          compositor->vsync_manager(),
+          CreateOverlayCandidateValidator(compositor->widget())));
     }
     scoped_ptr<OnscreenDisplayClient> display_client(new OnscreenDisplayClient(
-        context_provider, software_surface.Pass(), manager));
-    // TODO(jamesr): Need to set up filtering for the
-    // GpuHostMsg_UpdateVSyncParameters message.
+        display_surface.Pass(), manager, compositor->task_runner()));
 
     scoped_refptr<cc::ContextProvider> offscreen_context_provider;
-    if (context_provider) {
+    if (context_provider.get()) {
       offscreen_context_provider = ContextProviderCommandBuffer::Create(
           GpuProcessTransportFactory::CreateOffscreenCommandBufferContext(),
           "Offscreen-Compositor");
@@ -205,6 +210,7 @@ scoped_ptr<cc::OutputSurface> GpuProcessTransportFactory::CreateOutputSurface(
         new SurfaceDisplayOutputSurface(manager,
           next_surface_id_namespace_++,
           offscreen_context_provider));
+    display_client->set_surface_output_surface(output_surface.get());
     output_surface->set_display(display_client->display());
     data->display_client = display_client.Pass();
     return output_surface.PassAs<cc::OutputSurface>();
@@ -226,13 +232,26 @@ scoped_ptr<cc::OutputSurface> GpuProcessTransportFactory::CreateOutputSurface(
     return surface.PassAs<cc::OutputSurface>();
   }
 
-  scoped_ptr<BrowserCompositorOutputSurface> surface(
-      new GpuBrowserCompositorOutputSurface(
-          context_provider,
-          per_compositor_data_[compositor]->surface_id,
-          &output_surface_map_,
-          compositor->vsync_manager(),
-          CreateOverlayCandidateValidator(compositor->widget())));
+  scoped_ptr<BrowserCompositorOutputSurface> surface;
+#if defined(USE_OZONE)
+  if (ui::SurfaceFactoryOzone::GetInstance()->CanShowPrimaryPlaneAsOverlay()) {
+    surface.reset(new GpuSurfacelessBrowserCompositorOutputSurface(
+        context_provider,
+        per_compositor_data_[compositor]->surface_id,
+        &output_surface_map_,
+        compositor->vsync_manager(),
+        CreateOverlayCandidateValidator(compositor->widget()),
+        GL_RGB8_OES));
+  }
+#endif
+  if (!surface)
+    surface.reset(new GpuBrowserCompositorOutputSurface(
+        context_provider,
+        per_compositor_data_[compositor]->surface_id,
+        &output_surface_map_,
+        compositor->vsync_manager(),
+        CreateOverlayCandidateValidator(compositor->widget())));
+
   if (data->reflector.get())
     data->reflector->ReattachToOutputSurfaceFromMainThread(surface.get());
 
@@ -305,7 +324,7 @@ ui::ContextFactory* GpuProcessTransportFactory::GetContextFactory() {
 base::MessageLoopProxy* GpuProcessTransportFactory::GetCompositorMessageLoop() {
   if (!compositor_thread_)
     return NULL;
-  return compositor_thread_->message_loop_proxy();
+  return compositor_thread_->message_loop_proxy().get();
 }
 
 gfx::GLSurfaceHandle GpuProcessTransportFactory::GetSharedSurfaceHandle() {
@@ -369,7 +388,7 @@ GpuProcessTransportFactory::SharedMainThreadContextProvider() {
       GpuProcessTransportFactory::CreateOffscreenCommandBufferContext(),
       "Offscreen-MainThread");
 
-  if (shared_main_thread_contexts_) {
+  if (shared_main_thread_contexts_.get()) {
     shared_main_thread_contexts_->SetLostContextCallback(
         base::Bind(&GpuProcessTransportFactory::
                         OnLostMainThreadSharedContextInsideCallback,
@@ -414,7 +433,7 @@ GpuProcessTransportFactory::CreateContextCommon(int surface_id) {
       CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
   scoped_refptr<GpuChannelHost> gpu_channel_host(
       BrowserGpuChannelHostFactory::instance()->EstablishGpuChannelSync(cause));
-  if (!gpu_channel_host) {
+  if (!gpu_channel_host.get()) {
     LOG(ERROR) << "Failed to establish GPU channel.";
     return scoped_ptr<WebGraphicsContext3DCommandBufferImpl>();
   }

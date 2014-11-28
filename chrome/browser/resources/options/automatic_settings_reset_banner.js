@@ -12,6 +12,7 @@ cr.define('options', function() {
    * AutomaticSettingsResetBanner class
    * Provides encapsulated handling of the Reset Profile Settings banner.
    * @constructor
+   * @extends {options.SettingsBannerBase}
    */
   function AutomaticSettingsResetBanner() {}
 
@@ -24,12 +25,12 @@ cr.define('options', function() {
      * Initializes the banner's event handlers.
      */
     initialize: function() {
-      this.showMetricName_ = 'AutomaticSettingsReset_WebUIBanner_BannerShown';
+      this.showMetricName = 'AutomaticSettingsReset_WebUIBanner_BannerShown';
 
-      this.dismissNativeCallbackName_ =
+      this.dismissNativeCallbackName =
           'onDismissedAutomaticSettingsResetBanner';
 
-      this.setVisibilibyDomElement_ = $('automatic-settings-reset-banner');
+      this.visibilityDomElement = $('automatic-settings-reset-banner');
 
       $('automatic-settings-reset-banner-close').onclick = function(event) {
         chrome.send('metricsHandler:recordAction',
@@ -49,14 +50,14 @@ cr.define('options', function() {
     },
   };
 
-  // Forward public APIs to private implementations.
+  // Forward public APIs to protected implementations.
   [
     'show',
     'dismiss',
   ].forEach(function(name) {
     AutomaticSettingsResetBanner[name] = function() {
       var instance = AutomaticSettingsResetBanner.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
+      return instance[name].apply(instance, arguments);
     };
   });
 

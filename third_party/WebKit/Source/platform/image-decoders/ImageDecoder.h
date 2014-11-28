@@ -36,16 +36,14 @@
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
 #include "wtf/RefPtr.h"
-#include "wtf/text/WTFString.h"
 #include "wtf/Vector.h"
+#include "wtf/text/WTFString.h"
 
 #if USE(QCMSLIB)
 #include "qcms.h"
-#if OS(MACOSX)
-#include <ApplicationServices/ApplicationServices.h>
-#include "wtf/RetainPtr.h"
 #endif
-#endif
+
+typedef Vector<char> ColorProfile;
 
 namespace blink {
 
@@ -53,8 +51,8 @@ namespace blink {
 class PLATFORM_EXPORT ImagePlanes {
 public:
     ImagePlanes();
+    ImagePlanes(void* planes[3], size_t rowBytes[3]);
 
-    void set(void* planes[3], size_t rowBytes[3]);
     void* plane(int);
     size_t rowBytes(int) const;
 
@@ -69,6 +67,8 @@ private:
 class PLATFORM_EXPORT ImageDecoder {
     WTF_MAKE_NONCOPYABLE(ImageDecoder); WTF_MAKE_FAST_ALLOCATED;
 public:
+    enum SizeType { ActualSize, SizeForMemoryAllocation };
+
     static const size_t noDecodedImageByteLimit = blink::Platform::noDecodedImageByteLimit;
 
     ImageDecoder(ImageSource::AlphaOption alphaOption, ImageSource::GammaAndColorProfileOption gammaAndColorProfileOption, size_t maxDecodedBytes)
@@ -102,10 +102,12 @@ public:
         m_isAllDataReceived = allDataReceived;
     }
 
-    // Lazily-decodes enough of the image to get the size (if possible).
-    // FIXME: Right now that has to be done by each subclass; factor the
-    // decode call out and use it here.
     virtual bool isSizeAvailable()
+    {
+        return !m_failed && m_sizeAvailable;
+    }
+
+    bool isSizeAvailable() const
     {
         return !m_failed && m_sizeAvailable;
     }
@@ -118,7 +120,7 @@ public:
 
     // Decoders which support YUV decoding can override this to
     // give potentially different sizes per component.
-    virtual IntSize decodedYUVSize(int component) const { return decodedSize(); }
+    virtual IntSize decodedYUVSize(int component, SizeType) const { return decodedSize(); }
 
     // This will only differ from size() for ICO (where each frame is a
     // different icon) or other formats where different frames are different
@@ -196,27 +198,15 @@ public:
         OutputDeviceProfile()
             : m_outputDeviceProfile(0)
         {
-            // FIXME: Add optional ICCv4 support.
-#if OS(MACOSX)
-            RetainPtr<CGColorSpaceRef> monitorColorSpace(AdoptCF, CGDisplayCopyColorSpace(CGMainDisplayID()));
-            CFDataRef iccProfile(CGColorSpaceCopyICCProfile(monitorColorSpace.get()));
-            if (iccProfile) {
-                size_t length = CFDataGetLength(iccProfile);
-                const unsigned char* systemProfile = CFDataGetBytePtr(iccProfile);
-                m_outputDeviceProfile = qcms_profile_from_memory(systemProfile, length);
-                CFRelease(iccProfile);
-            }
-#else
-            // FIXME: add support for multiple monitors.
-            ColorProfile profile;
-            screenColorProfile(profile);
+            ColorProfile profile = screenColorProfile();
             if (!profile.isEmpty())
                 m_outputDeviceProfile = qcms_profile_from_memory(profile.data(), profile.size());
-#endif
+
             if (m_outputDeviceProfile && qcms_profile_is_bogus(m_outputDeviceProfile)) {
                 qcms_profile_release(m_outputDeviceProfile);
                 m_outputDeviceProfile = 0;
             }
+
             if (!m_outputDeviceProfile)
                 m_outputDeviceProfile = qcms_profile_sRGB();
             if (m_outputDeviceProfile)
@@ -226,6 +216,17 @@ public:
         qcms_profile* profile() const { return m_outputDeviceProfile; }
 
     private:
+        static ColorProfile screenColorProfile()
+        {
+            // FIXME: Add optional ICCv4 support and support for multiple monitors.
+            WebVector<char> profile;
+            Platform::current()->screenColorProfile(&profile);
+
+            ColorProfile colorProfile;
+            colorProfile.append(profile.data(), profile.size());
+            return colorProfile;
+        }
+
         qcms_profile* m_outputDeviceProfile;
     };
 
@@ -270,9 +271,9 @@ public:
         m_frameBufferCache[0].setMemoryAllocator(allocator);
     }
 
-    virtual bool YUVDecoding() const { return false; }
+    virtual bool canDecodeToYUV() const { return false; }
     virtual bool decodeToYUV() { return false; }
-    virtual void setImagePlanes(OwnPtr<ImagePlanes>&) { }
+    virtual void setImagePlanes(PassOwnPtr<ImagePlanes>) { }
 
 protected:
     // Calculates the most recent frame whose image data may be needed in

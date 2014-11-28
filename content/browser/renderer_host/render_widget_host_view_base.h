@@ -39,7 +39,6 @@ struct AccessibilityHostMsg_EventParams;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 struct ViewHostMsg_SelectionBounds_Params;
-struct ViewHostMsg_TextInputState_Params;
 
 namespace media {
 class VideoFrame;
@@ -58,6 +57,12 @@ class WebCursor;
 struct DidOverscrollParams;
 struct NativeWebKeyboardEvent;
 struct WebPluginGeometry;
+
+// TODO(Sikugu): Though we have the return status of the result here,
+// we should add the reason for failure as a new parameter to handle cases
+// efficiently.
+typedef const base::Callback<void(bool, const SkBitmap&)>
+    CopyFromCompositingSurfaceCallback;
 
 // Basic implementation shared by concrete RenderWidgetHostView subclasses.
 class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
@@ -121,9 +126,8 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // The size of the view's backing surface in non-DPI-adjusted pixels.
   virtual gfx::Size GetPhysicalBackingSize() const;
 
-  // The height of the physical backing surface that is overdrawn opaquely in
-  // the browser, for example by an on-screen-keyboard (in DPI-adjusted pixels).
-  virtual float GetOverdrawBottomHeight() const;
+  // The amount that the viewport size given to Blink is shrunk by the URL-bar.
+  virtual float GetTopControlsLayoutHeight() const;
 
   // Called prior to forwarding input event messages to the renderer, giving
   // the view a chance to perform in-process event filtering or processing.
@@ -218,8 +222,9 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   virtual void SetIsLoading(bool is_loading) = 0;
 
   // Updates the type of the input method attached to the view.
-  virtual void TextInputStateChanged(
-      const ViewHostMsg_TextInputState_Params& params) = 0;
+  virtual void TextInputTypeChanged(ui::TextInputType type,
+                                    ui::TextInputMode mode,
+                                    bool can_compose_inline) = 0;
 
   // Cancel the ongoing composition of the input method attached to the view.
   virtual void ImeCancelComposition() = 0;
@@ -249,9 +254,6 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   virtual void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) = 0;
 
-  // Notifies the view that the scroll offset has changed.
-  virtual void ScrollOffsetChanged() = 0;
-
   // Copies the contents of the compositing surface, providing a new SkBitmap
   // result via an asynchronously-run |callback|. |src_subrect| is specified in
   // layer space coordinates for the current platform (e.g., DIP for Aura/Mac,
@@ -262,7 +264,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      const base::Callback<void(bool, const SkBitmap&)>& callback,
+      CopyFromCompositingSurfaceCallback& callback,
       const SkColorType color_type) = 0;
 
   // Copies the contents of the compositing surface, populating the given
@@ -333,10 +335,12 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
                                                   size_t start_offset,
                                                   size_t end_offset) {};
 
-#if defined(OS_ANDROID)
-  virtual void ShowDisambiguationPopup(const gfx::Rect& target_rect,
+#if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS) || defined(USE_AURA)
+  virtual void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
                                        const SkBitmap& zoomed_bitmap) = 0;
+#endif
 
+#if defined(OS_ANDROID)
   // Instructs the view to not drop the surface even when the view is hidden.
   virtual void LockCompositingSurface() = 0;
   virtual void UnlockCompositingSurface() = 0;

@@ -2,13 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(engedy): AutomaticSettingsResetBanner is the sole class to derive from
-// SettingsBannerBase. Refactor this into automatic_settings_reset_banner.js.
-
 cr.define('options', function() {
 
   /**
    * Base class for banners that appear at the top of the settings page.
+   * @constructor
    */
   function SettingsBannerBase() {}
 
@@ -35,26 +33,29 @@ cr.define('options', function() {
 
     /**
      * Metric name to send when a show event occurs.
+     * @protected
      */
-    showMetricName_: '',
+    showMetricName: '',
 
     /**
      * Name of the native callback invoked when the banner is dismised.
+     * @protected
      */
-    dismissNativeCallbackName_: '',
+    dismissNativeCallbackName: '',
 
     /**
      * DOM element whose visibility is set when setVisibility_ is called.
+     * @protected
      */
-    setVisibilibyDomElement_: null,
+    visibilityDomElement: null,
 
     /**
      * Called by the native code to show the banner if needed.
-     * @private
+     * @protected
      */
-    show_: function() {
+    show: function() {
       if (!this.hadBeenDismissed_) {
-        chrome.send('metricsHandler:recordAction', [this.showMetricName_]);
+        chrome.send('metricsHandler:recordAction', [this.showMetricName]);
         this.setVisibility_(true);
       }
     },
@@ -63,10 +64,10 @@ cr.define('options', function() {
      * Called when the banner should be closed as a result of something taking
      * place on the WebUI page, i.e. when its close button is pressed, or when
      * the confirmation dialog for the profile settings reset feature is opened.
-     * @private
+     * @protected
      */
-    dismiss_: function() {
-      chrome.send(this.dismissNativeCallbackName_);
+    dismiss: function() {
+      chrome.send(this.dismissNativeCallbackName);
       this.hadBeenDismissed_ = true;
       this.setVisibility_(false);
     },
@@ -77,9 +78,8 @@ cr.define('options', function() {
      * @private
      */
     setVisibility_: function(show) {
-      this.setVisibilibyDomElement_.hidden = !show;
+      this.visibilityDomElement.hidden = !show;
     },
-
   };
 
   // Export

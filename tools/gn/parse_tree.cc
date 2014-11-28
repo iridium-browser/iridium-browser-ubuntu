@@ -16,13 +16,21 @@
 namespace {
 
 std::string IndentFor(int value) {
-  std::string ret;
-  for (int i = 0; i < value; i++)
-    ret.append(" ");
-  return ret;
+  return std::string(value, ' ');
 }
 
 }  // namespace
+
+Comments::Comments() {
+}
+
+Comments::~Comments() {
+}
+
+void Comments::ReverseSuffix() {
+  for (int i = 0, j = static_cast<int>(suffix_.size() - 1); i < j; ++i, --j)
+    std::swap(suffix_[i], suffix_[j]);
+}
 
 ParseNode::ParseNode() {
 }
@@ -39,6 +47,34 @@ const IdentifierNode* ParseNode::AsIdentifier() const { return NULL; }
 const ListNode* ParseNode::AsList() const { return NULL; }
 const LiteralNode* ParseNode::AsLiteral() const { return NULL; }
 const UnaryOpNode* ParseNode::AsUnaryOp() const { return NULL; }
+const BlockCommentNode* ParseNode::AsBlockComment() const { return NULL; }
+
+Comments* ParseNode::comments_mutable() {
+  if (!comments_)
+    comments_.reset(new Comments);
+  return comments_.get();
+}
+
+void ParseNode::PrintComments(std::ostream& out, int indent) const {
+  if (comments_) {
+    std::string ind = IndentFor(indent + 1);
+    for (std::vector<Token>::const_iterator i(comments_->before().begin());
+         i != comments_->before().end();
+         ++i) {
+      out << ind << "+BEFORE_COMMENT(\"" << i->value() << "\")\n";
+    }
+    for (std::vector<Token>::const_iterator i(comments_->suffix().begin());
+         i != comments_->suffix().end();
+         ++i) {
+      out << ind << "+SUFFIX_COMMENT(\"" << i->value() << "\")\n";
+    }
+    for (std::vector<Token>::const_iterator i(comments_->after().begin());
+         i != comments_->after().end();
+         ++i) {
+      out << ind << "+AFTER_COMMENT(\"" << i->value() << "\")\n";
+    }
+  }
+}
 
 // AccessorNode ---------------------------------------------------------------
 
@@ -77,6 +113,7 @@ Err AccessorNode::MakeErrorDescribing(const std::string& msg,
 
 void AccessorNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "ACCESSOR\n";
+  PrintComments(out, indent);
   out << IndentFor(indent + 1) << base_.value() << "\n";
   if (index_)
     index_->Print(out, indent + 1);
@@ -192,6 +229,7 @@ Err BinaryOpNode::MakeErrorDescribing(const std::string& msg,
 
 void BinaryOpNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "BINARY(" << op_.value() << ")\n";
+  PrintComments(out, indent);
   left_->Print(out, indent + 1);
   right_->Print(out, indent + 1);
 }
@@ -241,6 +279,7 @@ Err BlockNode::MakeErrorDescribing(const std::string& msg,
 
 void BlockNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "BLOCK\n";
+  PrintComments(out, indent);
   for (size_t i = 0; i < statements_.size(); i++)
     statements_[i]->Print(out, indent + 1);
 }
@@ -317,6 +356,7 @@ Err ConditionNode::MakeErrorDescribing(const std::string& msg,
 
 void ConditionNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "CONDITION\n";
+  PrintComments(out, indent);
   condition_->Print(out, indent + 1);
   if_true_->Print(out, indent + 1);
   if (if_false_)
@@ -340,6 +380,8 @@ Value FunctionCallNode::Execute(Scope* scope, Err* err) const {
 }
 
 LocationRange FunctionCallNode::GetRange() const {
+  if (function_.type() == Token::INVALID)
+    return LocationRange();  // This will be null in some tests.
   if (block_)
     return function_.range().Union(block_->GetRange());
   return function_.range().Union(args_->GetRange());
@@ -352,6 +394,7 @@ Err FunctionCallNode::MakeErrorDescribing(const std::string& msg,
 
 void FunctionCallNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "FUNCTION(" << function_.value() << ")\n";
+  PrintComments(out, indent);
   args_->Print(out, indent + 1);
   if (block_)
     block_->Print(out, indent + 1);
@@ -396,6 +439,7 @@ Err IdentifierNode::MakeErrorDescribing(const std::string& msg,
 
 void IdentifierNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "IDENTIFIER(" << value_.value() << ")\n";
+  PrintComments(out, indent);
 }
 
 // ListNode -------------------------------------------------------------------
@@ -414,14 +458,16 @@ const ListNode* ListNode::AsList() const {
 Value ListNode::Execute(Scope* scope, Err* err) const {
   Value result_value(this, Value::LIST);
   std::vector<Value>& results = result_value.list_value();
-  results.resize(contents_.size());
+  results.reserve(contents_.size());
 
   for (size_t i = 0; i < contents_.size(); i++) {
     const ParseNode* cur = contents_[i];
-    results[i] = cur->Execute(scope, err);
+    if (cur->AsBlockComment())
+      continue;
+    results.push_back(cur->Execute(scope, err));
     if (err->has_error())
       return Value();
-    if (results[i].type() == Value::NONE) {
+    if (results.back().type() == Value::NONE) {
       *err = cur->MakeErrorDescribing(
           "This does not evaluate to a value.",
           "I can't do something with nothing.");
@@ -442,6 +488,7 @@ Err ListNode::MakeErrorDescribing(const std::string& msg,
 
 void ListNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "LIST\n";
+  PrintComments(out, indent);
   for (size_t i = 0; i < contents_.size(); i++)
     contents_[i]->Print(out, indent + 1);
 }
@@ -497,6 +544,7 @@ Err LiteralNode::MakeErrorDescribing(const std::string& msg,
 
 void LiteralNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "LITERAL(" << value_.value() << ")\n";
+  PrintComments(out, indent);
 }
 
 // UnaryOpNode ----------------------------------------------------------------
@@ -529,5 +577,36 @@ Err UnaryOpNode::MakeErrorDescribing(const std::string& msg,
 
 void UnaryOpNode::Print(std::ostream& out, int indent) const {
   out << IndentFor(indent) << "UNARY(" << op_.value() << ")\n";
+  PrintComments(out, indent);
   operand_->Print(out, indent + 1);
+}
+
+// BlockCommentNode ------------------------------------------------------------
+
+BlockCommentNode::BlockCommentNode() {
+}
+
+BlockCommentNode::~BlockCommentNode() {
+}
+
+const BlockCommentNode* BlockCommentNode::AsBlockComment() const {
+  return this;
+}
+
+Value BlockCommentNode::Execute(Scope* scope, Err* err) const {
+  return Value();
+}
+
+LocationRange BlockCommentNode::GetRange() const {
+  return comment_.range();
+}
+
+Err BlockCommentNode::MakeErrorDescribing(const std::string& msg,
+                                          const std::string& help) const {
+  return Err(comment_, msg, help);
+}
+
+void BlockCommentNode::Print(std::ostream& out, int indent) const {
+  out << IndentFor(indent) << "BLOCK_COMMENT(" << comment_.value() << ")\n";
+  PrintComments(out, indent);
 }

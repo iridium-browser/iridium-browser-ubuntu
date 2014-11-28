@@ -205,7 +205,6 @@ public class MediaDrmBridge {
             if (MediaCrypto.isCryptoSchemeSupported(mSchemeUUID)) {
                 final byte[] mediaCryptoSession = mMediaCryptoSession.array();
                 mMediaCrypto = new MediaCrypto(mSchemeUUID, mediaCryptoSession);
-                assert mMediaCrypto != null;
                 Log.d(TAG, "MediaCrypto successfully created!");
                 mSessionIds.put(mMediaCryptoSession, INVALID_SESSION_ID);
                 // Notify the native code that MediaCrypto is ready.
@@ -776,12 +775,12 @@ public class MediaDrmBridge {
     private class MediaDrmListener implements MediaDrm.OnEventListener {
         @Override
         public void onEvent(
-                MediaDrm mediaDrm, byte[] session_array, int event, int extra, byte[] data) {
-            if (session_array == null) {
+                MediaDrm mediaDrm, byte[] sessionArray, int event, int extra, byte[] data) {
+            if (sessionArray == null) {
                 Log.e(TAG, "MediaDrmListener: Null session.");
                 return;
             }
-            ByteBuffer session = ByteBuffer.wrap(session_array);
+            ByteBuffer session = ByteBuffer.wrap(sessionArray);
             if (!sessionExists(session)) {
                 Log.e(TAG, "MediaDrmListener: Invalid session.");
                 return;

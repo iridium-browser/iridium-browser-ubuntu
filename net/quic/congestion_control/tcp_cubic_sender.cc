@@ -88,19 +88,19 @@ void TcpCubicSender::OnIncomingQuicCongestionFeedbackFrame(
 void TcpCubicSender::OnCongestionEvent(
     bool rtt_updated,
     QuicByteCount bytes_in_flight,
-    const CongestionMap& acked_packets,
-    const CongestionMap& lost_packets) {
+    const CongestionVector& acked_packets,
+    const CongestionVector& lost_packets) {
   if (rtt_updated && InSlowStart() &&
       hybrid_slow_start_.ShouldExitSlowStart(rtt_stats_->latest_rtt(),
                                              rtt_stats_->min_rtt(),
                                              congestion_window_)) {
     slowstart_threshold_ = congestion_window_;
   }
-  for (CongestionMap::const_iterator it = lost_packets.begin();
+  for (CongestionVector::const_iterator it = lost_packets.begin();
        it != lost_packets.end(); ++it) {
     OnPacketLost(it->first, bytes_in_flight);
   }
-  for (CongestionMap::const_iterator it = acked_packets.begin();
+  for (CongestionVector::const_iterator it = acked_packets.begin();
        it != acked_packets.end(); ++it) {
     OnPacketAcked(it->first, it->second.bytes_sent, bytes_in_flight);
   }
@@ -170,11 +170,8 @@ bool TcpCubicSender::OnPacketSent(QuicTime /*sent_time*/,
   }
 
   prr_out_ += bytes;
-  if (largest_sent_sequence_number_ < sequence_number) {
-    // TODO(rch): Ensure that packets are really sent in order.
-    // DCHECK_LT(largest_sent_sequence_number_, sequence_number);
-    largest_sent_sequence_number_ = sequence_number;
-  }
+  DCHECK_LT(largest_sent_sequence_number_, sequence_number);
+  largest_sent_sequence_number_ = sequence_number;
   hybrid_slow_start_.OnPacketSent(sequence_number);
   return true;
 }
@@ -335,7 +332,7 @@ QuicTime::Delta TcpCubicSender::PrrTimeUntilSend(
     QuicByteCount bytes_in_flight) const {
   DCHECK(InRecovery());
   // Return QuicTime::Zero In order to ensure limited transmit always works.
-  if (prr_out_ == 0) {
+  if (prr_out_ == 0 || bytes_in_flight < kMaxSegmentSize) {
     return QuicTime::Delta::Zero();
   }
   if (SendWindow() > bytes_in_flight) {

@@ -53,7 +53,7 @@ class Sender;
 #define EXTENSION_FUNCTION_VALIDATE(test) \
   do {                                    \
     if (!(test)) {                        \
-      bad_message_ = true;                \
+      this->bad_message_ = true;          \
       return ValidationFailure(this);     \
     }                                     \
   } while (0)
@@ -64,7 +64,7 @@ class Sender;
 #define EXTENSION_FUNCTION_ERROR(error) \
   do {                                  \
     error_ = error;                     \
-    bad_message_ = true;                \
+    this->bad_message_ = true;          \
     return ValidationFailure(this);     \
   } while (0)
 
@@ -213,7 +213,8 @@ class ExtensionFunction
   void set_profile_id(void* profile_id) { profile_id_ = profile_id; }
   void* profile_id() const { return profile_id_; }
 
-  void set_extension(const extensions::Extension* extension) {
+  void set_extension(
+      const scoped_refptr<const extensions::Extension>& extension) {
     extension_ = extension;
   }
   const extensions::Extension* extension() const { return extension_.get(); }
@@ -552,7 +553,7 @@ class AsyncExtensionFunction : public UIThreadExtensionFunction {
   // Deprecated: Override UIThreadExtensionFunction and implement Run() instead.
   //
   // AsyncExtensionFunctions implement this method. Return true to indicate that
-  // nothing has gone wrong yet; SendResponse must be called later. Return true
+  // nothing has gone wrong yet; SendResponse must be called later. Return false
   // to respond immediately with an error.
   virtual bool RunAsync() = 0;
 

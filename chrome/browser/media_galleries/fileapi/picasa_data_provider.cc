@@ -9,15 +9,15 @@
 #include "base/basictypes.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/media_galleries/fileapi/file_path_watcher_util.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/browser/media_galleries/fileapi/safe_picasa_album_table_reader.h"
 #include "chrome/browser/media_galleries/fileapi/safe_picasa_albums_indexer.h"
 #include "chrome/browser/media_galleries/imported_media_gallery_registry.h"
-#include "webkit/browser/fileapi/file_system_operation_context.h"
-#include "webkit/browser/fileapi/file_system_url.h"
+#include "storage/browser/fileapi/file_system_operation_context.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 namespace picasa {
 
@@ -142,7 +142,7 @@ void PicasaDataProvider::OnTempDirChanged(const base::FilePath& temp_dir_path,
 void PicasaDataProvider::DoRefreshIfNecessary() {
   DCHECK(state_ != INVALID_DATA_STATE);
   DCHECK(state_ != ALBUMS_IMAGES_FRESH_STATE);
-  DCHECK(!(album_table_reader_ && albums_indexer_));
+  DCHECK(!(album_table_reader_.get() && albums_indexer_.get()));
 
   if (album_list_ready_callbacks_.empty() &&
       albums_index_ready_callbacks_.empty()) {
@@ -150,7 +150,7 @@ void PicasaDataProvider::DoRefreshIfNecessary() {
   }
 
   if (state_ == STALE_DATA_STATE) {
-    if (album_table_reader_)
+    if (album_table_reader_.get())
       return;
     album_table_reader_ =
         new SafePicasaAlbumTableReader(AlbumTableFiles(database_path_));
@@ -160,7 +160,7 @@ void PicasaDataProvider::DoRefreshIfNecessary() {
                    album_table_reader_));
   } else {
     DCHECK(state_ == LIST_OF_ALBUMS_AND_FOLDERS_FRESH_STATE);
-    if (albums_indexer_)
+    if (albums_indexer_.get())
       return;
     albums_indexer_ = new SafePicasaAlbumsIndexer(album_map_, folder_map_);
     albums_indexer_->Start(base::Bind(&PicasaDataProvider::OnAlbumsIndexerDone,
@@ -176,7 +176,7 @@ void PicasaDataProvider::OnAlbumTableReaderDone(
     const std::vector<AlbumInfo>& folders) {
   DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
   // If the reader has already been deemed stale, ignore the result.
-  if (reader != album_table_reader_)
+  if (reader.get() != album_table_reader_.get())
     return;
   album_table_reader_ = NULL;
 
@@ -209,7 +209,7 @@ void PicasaDataProvider::OnAlbumsIndexerDone(
     const picasa::AlbumImagesMap& albums_images) {
   DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
   // If the indexer has already been deemed stale, ignore the result.
-  if (indexer != albums_indexer_)
+  if (indexer.get() != albums_indexer_.get())
     return;
   albums_indexer_ = NULL;
 

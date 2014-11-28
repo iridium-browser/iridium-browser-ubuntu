@@ -18,7 +18,6 @@ static_library("ui") {
   sources = []
   defines = []
   libs = []
-  forward_dependent_configs_from = []
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
@@ -27,6 +26,10 @@ static_library("ui") {
   # However, this means browser_ui and browser should more or less
   # have the same dependencies. Once browser_ui is untangled from
   # browser, then we can clean up these dependencies.
+  public_deps = [
+    "//components/dom_distiller/core",
+    "//sync",
+  ]
   deps = [
     # NOTE: New dependencies should generally be added in the OS!="ios"
     # dependencies block below, rather than here.
@@ -38,11 +41,9 @@ static_library("ui") {
     "//chrome/app/theme:theme_resources",
     "//chrome/browser/history:in_memory_url_index_cache_proto",
     "//chrome/browser/net:cert_logger_proto",
-    "//chrome/browser/ui/views",
     "//chrome/common",
     "//chrome/common/net",
     "//components/auto_login_parser",
-    "//components/dom_distiller/core",
     "//components/dom_distiller/webui",
     "//components/feedback/proto",
     "//components/invalidation",
@@ -55,7 +56,6 @@ static_library("ui") {
     "//content/public/common",
     "//crypto",
     "//skia",
-    "//sync",
     "//third_party/cacheinvalidation",
     "//third_party/icu",
     "//third_party/libusb",
@@ -73,42 +73,35 @@ static_library("ui") {
     "//ui/strings",
   ]
 
-  forward_dependent_configs_from = [
-    "//components/dom_distiller/core",
-    "//sync",
-  ]
-
   if (!is_ios) {
     sources += rebase_path(gypi_values.chrome_browser_ui_non_ios_sources,
                            ".", "//chrome")
     deps += [
-      "//chrome/browser/performance_monitor",
+      "//chrome/browser/devtools",
+      "//chrome/browser/ui/views",
       "//chrome/browser/ui/webui/omnibox:mojo_bindings",
-      "//chrome/common/extensions/api:api",
+      "//chrome/installer/util",
       "//components/autofill/content/browser:risk_proto",
+      "//components/power",
       "//device/bluetooth",
       "//device/nfc",
       "//media",
       "//mojo/system",
       "//net:net_with_v8",
+      "//storage/browser",
+      "//storage/common",
       "//third_party/WebKit/public:resources",
       "//third_party/adobe/flash:flapper_version_h",
       "//third_party/expat",
       "//third_party/hunspell",
       "//third_party/leveldatabase",
       "//third_party/npapi",
+      "//third_party/libjingle",
       "//third_party/re2",
       "//ui/compositor",
       "//ui/surface",
       "//ui/web_dialogs",
       "//v8",
-      "//webkit/browser:storage",
-      "//webkit/common",
-      "//webkit/common:storage",
-      "//webkit/glue/resources",
-      #'debugger',  TODO(GYP)
-      #'installer_util',  TODO(GYP)
-      #'../third_party/libjingle/libjingle.gyp:libjingle',  TODO(GYP)
     ]
     # TODO(GYP)
     #'defines': [
@@ -187,7 +180,10 @@ static_library("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_ash_sources,
                            ".", "//chrome")
     deps += [
+      "//ash",
       "//ash:ash_with_content",
+      "//ash/strings",
+      "//components/user_manager",
     ]
     if (!is_chromeos) {
       sources += rebase_path(gypi_values.chrome_browser_ui_ash_non_chromeos,
@@ -217,10 +213,10 @@ static_library("ui") {
   }
   if (use_aura && !use_ozone && is_desktop_linux) {
     deps += [
+      "//build/config/linux:gio",
       # gtk2 is the only component that can interact with gtk2 in our new
       # world.
-      #'browser/ui/libgtk2ui/libgtk2ui.gyp:gtk2ui',  TODO(GYP)
-      "//build/config/linux:gio",
+      "//chrome/browser/ui/libgtk2ui",
     ]
   }
   if (is_win || is_mac || is_desktop_linux) {
@@ -264,9 +260,9 @@ static_library("ui") {
 
   if (is_android) {
     deps += [
+      "//chrome/browser:jni_headers",
       "//crypto:platform",
       #'../components/components.gyp:web_contents_delegate_android',  TODO(GYP)
-      #'chrome_browser_jni_headers',  TODO(GYP)
     ]
     deps -= [
       "//chrome/browser/ui/views",
@@ -276,6 +272,8 @@ static_library("ui") {
     ]
     sources += rebase_path(gypi_values.chrome_browser_ui_android_sources,
                            ".", "//chrome")
+
+    defines += [ "CHROME_BUILD_ID=" + android_chrome_build_id ]
   } else {  # Non-Android.
     sources += rebase_path(gypi_values.chrome_browser_ui_non_android_sources,
                            ".", "//chrome")
@@ -309,28 +307,22 @@ static_library("ui") {
   if (is_win) {
     sources += rebase_path(gypi_values.chrome_browser_ui_win_sources,
                            ".", "//chrome")
+    public_deps += [
+      "//ui/views",
+      "//ui/views/controls/webview",
+    ]
     deps += [
+      "//chrome/installer/util:strings",
       "//third_party/wtl",
       "//third_party/iaccessible2",
       "//third_party/isimpledom",
       "//ui/app_list",
-      "//ui/views",
-      "//ui/views/controls/webview",
-      #'installer_util_strings',  TODO(GYP)
       #'metro_utils',  TODO(GYP)
       #'../google_update/google_update.gyp:google_update',  TODO(GYP)
     ]
-    forward_dependent_configs_from += [
-      "//ui/views",
-      "//ui/views/controls/webview",
-    ]
   } else {  # 'OS!="win"
     if (toolkit_views) {
-      deps += [
-        "//ui/views",
-        "//ui/views/controls/webview",
-      ]
-      forward_dependent_configs_from += [
+      public_deps += [
         "//ui/views",
         "//ui/views/controls/webview",
       ]
@@ -378,7 +370,11 @@ static_library("ui") {
     }
   }
   if (enable_extensions) {
-    deps += [ "//chrome/browser/extensions" ]
+    deps += [
+      "//chrome/browser/extensions",
+      "//chrome/common/extensions/api",
+      "//chrome/common/extensions/api:api_registration",
+    ]
     sources += rebase_path(gypi_values.chrome_browser_ui_extensions_sources,
                            ".", "//chrome")
   }
@@ -418,4 +414,48 @@ if (is_mac) {
                          root_build_dir,
                          "//chrome")
   }
+}
+
+# In GYP this is part of test_support_common.
+source_set("test_support") {
+  testonly = true
+
+  sources = [
+    "browser.h",
+    "cocoa/find_bar/find_bar_host_unittest_util_cocoa.mm",
+    "cocoa/run_loop_testing.h",
+    "cocoa/run_loop_testing.mm",
+    "find_bar/find_bar_host_unittest_util.h",
+    "fullscreen/fullscreen_controller_state_test.cc",
+    "fullscreen/fullscreen_controller_state_test.h",
+    "fullscreen/fullscreen_controller_state_tests.h",
+    "fullscreen/fullscreen_controller_test.cc",
+    "fullscreen/fullscreen_controller_test.h",
+    "login/login_prompt_test_utils.cc",
+    "login/login_prompt_test_utils.h",
+    "passwords/manage_passwords_ui_controller_mock.cc",
+    "passwords/manage_passwords_ui_controller_mock.h",
+    "pdf/pdf_browsertest_base.cc",
+    "pdf/pdf_browsertest_base.h",
+    "test/test_confirm_bubble_model.cc",
+    "test/test_confirm_bubble_model.h",
+    "views/find_bar_host_unittest_util_views.cc",
+    "website_settings/mock_permission_bubble_request.cc",
+    "website_settings/mock_permission_bubble_request.h",
+  ]
+
+  public_deps = [
+    ":ui",
+  ]
+  deps = [
+    "//chrome/app/theme:theme_resources",
+    "//chrome/browser",
+    "//content/public/browser",
+    "//content/public/common",
+    "//content/test:test_support",
+    "//net:test_support",
+    "//skia",
+    "//testing/gtest",
+    "//ui/base",
+  ]
 }

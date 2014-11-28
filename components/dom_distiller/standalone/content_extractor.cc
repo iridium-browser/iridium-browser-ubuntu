@@ -143,6 +143,8 @@ std::string GetReadableArticleString(
     output << "Page " << i << std::endl;
     output << "URL: " << page.url() << std::endl;
     output << "Content: " << page.html() << std::endl;
+    if (page.has_debug_info() && page.debug_info().has_log())
+      output << "Log: " << page.debug_info().log() << std::endl;
   }
   return output.str();
 }
@@ -203,6 +205,7 @@ class ContentExtractionRequest : public ViewRequestDelegate {
   virtual void OnArticleReady(const DistilledArticleProto* article_proto)
       OVERRIDE {
     article_proto_ = article_proto;
+    CHECK(article_proto->pages_size()) << "Failed extracting " << url_;
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         finished_callback_);

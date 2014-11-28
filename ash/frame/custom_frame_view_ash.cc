@@ -151,6 +151,8 @@ class CustomFrameViewAsh::HeaderView
 
   void UpdateAvatarIcon();
 
+  void SizeConstraintsChanged();
+
   // views::View:
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
@@ -200,10 +202,8 @@ CustomFrameViewAsh::HeaderView::HeaderView(views::Widget* frame)
       avatar_icon_(NULL),
       caption_button_container_(NULL),
       fullscreen_visible_fraction_(0) {
-  // Unfortunately, there is no views::WidgetDelegate::CanMinimize(). Assume
-  // that the window frame can be minimized if it can be maximized.
   FrameCaptionButtonContainerView::MinimizeAllowed minimize_allowed =
-      frame_->widget_delegate()->CanMaximize() ?
+      frame_->widget_delegate()->CanMinimize() ?
           FrameCaptionButtonContainerView::MINIMIZE_ALLOWED :
           FrameCaptionButtonContainerView::MINIMIZE_DISALLOWED;
   caption_button_container_ = new FrameCaptionButtonContainerView(frame_,
@@ -211,7 +211,7 @@ CustomFrameViewAsh::HeaderView::HeaderView(views::Widget* frame)
   caption_button_container_->UpdateSizeButtonVisibility();
   AddChildView(caption_button_container_);
 
-  header_painter_->Init(frame_, this, NULL, caption_button_container_);
+  header_painter_->Init(frame_, this, caption_button_container_);
   UpdateAvatarIcon();
 
   Shell::GetInstance()->AddShellObserver(this);
@@ -250,7 +250,6 @@ void CustomFrameViewAsh::HeaderView::UpdateAvatarIcon() {
       Shell::GetInstance()->session_state_delegate();
   aura::Window* window = frame_->GetNativeView();
   bool show = delegate->ShouldShowAvatar(window);
-  int icon_size = 0;
   if (!show) {
     if (!avatar_icon_)
       return;
@@ -266,9 +265,14 @@ void CustomFrameViewAsh::HeaderView::UpdateAvatarIcon() {
       AddChildView(avatar_icon_);
     }
     avatar_icon_->SetImage(image);
-    icon_size = image.width();
   }
-  header_painter_->UpdateWindowIcon(avatar_icon_, icon_size);
+  header_painter_->UpdateLeftHeaderView(avatar_icon_);
+  Layout();
+}
+
+void CustomFrameViewAsh::HeaderView::SizeConstraintsChanged() {
+  caption_button_container_->ResetWindowControls();
+  caption_button_container_->UpdateSizeButtonVisibility();
   Layout();
 }
 
@@ -489,6 +493,10 @@ void CustomFrameViewAsh::UpdateWindowIcon() {
 
 void CustomFrameViewAsh::UpdateWindowTitle() {
   header_view_->SchedulePaintForTitle();
+}
+
+void CustomFrameViewAsh::SizeConstraintsChanged() {
+  header_view_->SizeConstraintsChanged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -5,6 +5,8 @@
 
 """Test the cros_build_lib module."""
 
+from __future__ import print_function
+
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
@@ -19,6 +21,7 @@ import itertools
 import logging
 import mox
 import signal
+import socket
 import StringIO
 import time
 import __builtin__
@@ -38,6 +41,15 @@ import mock
 
 # pylint: disable=W0212,R0904
 
+class RunCommandErrorStrTest(cros_test_lib.TestCase):
+  """Test that RunCommandError __str__ works as expected."""
+
+  def testNonUTF8Characters(self):
+    """Test that non-UTF8 characters do not kill __str__"""
+    result = cros_build_lib.RunCommand(['ls', '/does/not/exist'],
+                                        error_code_ok=True)
+    rce = cros_build_lib.RunCommandError('\x81', result)
+    str(rce)
 
 class CmdToStrTest(cros_test_lib.TestCase):
   """Test the CmdToStr function."""
@@ -351,7 +363,6 @@ class TestRunCommand(cros_test_lib.MoxTestCase):
     """
     cmd = 'test cmd'
 
-
     with self._SetupPopen(['/bin/bash', '-c', cmd],
                           ignore_sigint=ignore_sigint) as proc:
       proc.communicate(None).AndReturn((self.output, self.error))
@@ -503,37 +514,27 @@ class TestRunCommandLogging(cros_test_lib.TempDirTestCase):
 
   @_ForceLoggingLevel
   def testLogStdoutToFile(self):
-    # Make mox happy.
     log = os.path.join(self.tempdir, 'output')
     ret = cros_build_lib.RunCommand(
-        ['python', '-c', 'print "monkeys"'], log_stdout_to_file=log)
+        ['echo', 'monkeys'], log_stdout_to_file=log)
     self.assertEqual(osutils.ReadFile(log), 'monkeys\n')
-    self.assertTrue(ret.output is None)
-    self.assertTrue(ret.error is None)
-
-    # Validate dumb api usage.
-    ret = cros_build_lib.RunCommand(
-        ['python', '-c', 'import sys;print "monkeys2"'],
-        log_stdout_to_file=log, redirect_stdout=True)
-    self.assertTrue(ret.output is None)
-    self.assertEqual(osutils.ReadFile(log), 'monkeys2\n')
+    self.assertIs(ret.output, None)
+    self.assertIs(ret.error, None)
 
     os.unlink(log)
     ret = cros_build_lib.RunCommand(
-        ['python', '-c', 'import sys;print >> sys.stderr, "monkeys3"'],
+        ['sh', '-c', 'echo monkeys3 >&2'],
         log_stdout_to_file=log, redirect_stderr=True)
     self.assertEqual(ret.error, 'monkeys3\n')
-    self.assertTrue(os.path.exists(log))
-    self.assertEqual(os.stat(log).st_size, 0)
+    self.assertExists(log)
+    self.assertEqual(os.path.getsize(log), 0)
 
     os.unlink(log)
     ret = cros_build_lib.RunCommand(
-        ['python', '-u', '-c',
-         'import sys;print "monkeys4"\nprint >> sys.stderr, "monkeys5"\n'],
+        ['sh', '-c', 'echo monkeys4; echo monkeys5 >&2'],
         log_stdout_to_file=log, combine_stdout_stderr=True)
-    self.assertTrue(ret.output is None)
-    self.assertTrue(ret.error is None)
-
+    self.assertIs(ret.output, None)
+    self.assertIs(ret.error, None)
     self.assertEqual(osutils.ReadFile(log), 'monkeys4\nmonkeys5\n')
 
 
@@ -717,23 +718,6 @@ class TestListFiles(cros_test_lib.TempDirTestCase):
       self.assertEqual(err.errno, errno.ENOENT)
 
 
-@contextlib.contextmanager
-def SetTimeZone(tz):
-  """Temporarily set the timezone to the specified value.
-
-  This is needed because cros_test_lib.TestCase doesn't call time.tzset()
-  after resetting the environment.
-  """
-  old_environ = os.environ.copy()
-  try:
-    os.environ['TZ'] = tz
-    time.tzset()
-    yield
-  finally:
-    osutils.SetEnvironment(old_environ)
-    time.tzset()
-
-
 class HelperMethodSimpleTests(cros_test_lib.TestCase):
   """Tests for various helper methods without using mox."""
 
@@ -765,7 +749,7 @@ class HelperMethodSimpleTests(cros_test_lib.TestCase):
   def testUserDateTime(self):
     """Test with a raw time value."""
     expected = 'Mon, 16 Jun 1980 05:03:20 -0700 (PDT)'
-    with SetTimeZone('US/Pacific'):
+    with cros_test_lib.SetTimeZone('US/Pacific'):
       timeval = 330005000
       self.assertEqual(cros_build_lib.UserDateTimeFormat(timeval=timeval),
                        expected)
@@ -773,7 +757,7 @@ class HelperMethodSimpleTests(cros_test_lib.TestCase):
   def testUserDateTimeDateTime(self):
     """Test with a datetime object."""
     expected = 'Mon, 16 Jun 1980 00:00:00 -0700 (PDT)'
-    with SetTimeZone('US/Pacific'):
+    with cros_test_lib.SetTimeZone('US/Pacific'):
       timeval = datetime.datetime(1980, 6, 16)
       self.assertEqual(cros_build_lib.UserDateTimeFormat(timeval=timeval),
                        expected)
@@ -781,7 +765,7 @@ class HelperMethodSimpleTests(cros_test_lib.TestCase):
   def testUserDateTimeDateTimeInWinter(self):
     """Test that we correctly switch from PDT to PST."""
     expected = 'Wed, 16 Jan 1980 00:00:00 -0800 (PST)'
-    with SetTimeZone('US/Pacific'):
+    with cros_test_lib.SetTimeZone('US/Pacific'):
       timeval = datetime.datetime(1980, 1, 16)
       self.assertEqual(cros_build_lib.UserDateTimeFormat(timeval=timeval),
                        expected)
@@ -789,7 +773,7 @@ class HelperMethodSimpleTests(cros_test_lib.TestCase):
   def testUserDateTimeDateTimeInEST(self):
     """Test that we correctly switch from PDT to EST."""
     expected = 'Wed, 16 Jan 1980 00:00:00 -0500 (EST)'
-    with SetTimeZone('US/Eastern'):
+    with cros_test_lib.SetTimeZone('US/Eastern'):
       timeval = datetime.datetime(1980, 1, 16)
       self.assertEqual(cros_build_lib.UserDateTimeFormat(timeval=timeval),
                        expected)
@@ -974,17 +958,10 @@ class TestManifestCheckout(cros_test_lib.TempDirTestCase):
     self.assertEqual('default', git.GetCurrentBranch(manifest))
     self.assertEqual('master', func(repo_root))
 
-    # TODO(ferringb): convert this over to assertRaises2
     def assertExcept(message, **kwargs):
       reconfig(**kwargs)
-      try:
-        func(repo_root)
-        assert "Testing for %s, an exception wasn't thrown." % (message,)
-      except OSError as e:
-        self.assertEqual(e.errno, errno.ENOENT)
-        self.assertTrue(message in str(e),
-                        msg="Couldn't find string %r in error message %r"
-                        % (message, str(e)))
+      self.assertRaises2(OSError, func, repo_root, ex_msg=message,
+                         check_attrs={'errno': errno.ENOENT})
 
     # No merge target means the configuration isn't usable, period.
     assertExcept("git tracking configuration for that branch is broken",
@@ -1260,6 +1237,35 @@ qlen 1000
     self.rc.assertCommandContains(['ip', 'addr', 'show', 'scope', 'global'])
 
 
+class TestGetHostname(cros_test_lib.MockTestCase):
+  """Tests GetHostName & GetHostDomain functionality."""
+
+  def setUp(self):
+    self.gethostname_mock = self.PatchObject(
+        socket, 'gethostname', return_value='m!!n')
+    self.gethostbyaddr_mock = self.PatchObject(
+        socket, 'gethostbyaddr', return_value=(
+            'm!!n.google.com', ('cow', 'bar',), ('127.0.0.1.a',)))
+
+  def testGetHostNameNonQualified(self):
+    """Verify non-qualified behavior"""
+    self.assertEqual(cros_build_lib.GetHostName(), 'm!!n')
+
+  def testGetHostNameFullyQualified(self):
+    """Verify fully qualified behavior"""
+    self.assertEqual(cros_build_lib.GetHostName(fully_qualified=True),
+                     'm!!n.google.com')
+
+  def testGetHostNameBadDns(self):
+    """Do not fail when the user's dns is bad"""
+    self.gethostbyaddr_mock.side_effect = socket.gaierror('should be caught')
+    self.assertEqual(cros_build_lib.GetHostName(), 'm!!n')
+
+  def testGetHostDomain(self):
+    """Verify basic behavior"""
+    self.assertEqual(cros_build_lib.GetHostDomain(), 'google.com')
+
+
 class TestGetChrootVersion(cros_test_lib.MockTestCase):
   """Tests GetChrootVersion functionality."""
 
@@ -1384,7 +1390,7 @@ class CollectionTest(cros_test_lib.TestCase):
 class GetImageDiskPartitionInfoTests(RunCommandTestCase):
   """Tests the GetImageDiskPartitionInfo function."""
 
-  SAMPLE_OUTPUT = """/foo/chromiumos_qemu_image.bin:3360MB:file:512:512:gpt:;
+  SAMPLE_PARTED = """/foo/chromiumos_qemu_image.bin:3360MB:file:512:512:gpt:;
 11:0.03MB:8.42MB:8.39MB::RWFW:;
 6:8.42MB:8.42MB:0.00MB::KERN-C:;
 7:8.42MB:8.42MB:0.00MB::ROOT-C:;
@@ -1399,10 +1405,74 @@ class GetImageDiskPartitionInfoTests(RunCommandTestCase):
 1:4440MB:7661MB:3221MB:ext4:STATE:;
 """
 
-  def setUp(self):
-    self.rc.AddCmdResult(partial_mock.Ignore(), output=self.SAMPLE_OUTPUT)
+  SAMPLE_CGPT = """
+       start        size    part  contents
+           0           1          PMBR (Boot GUID: 88FB7EB8-2B3F-B943-B933-\
+EEC571FFB6E1)
+           1           1          Pri GPT header
+           2          32          Pri GPT table
+     1921024     2097152       1  Label: "STATE"
+                                  Type: Linux data
+                                  UUID: EEBD83BE-397E-BD44-878B-0DDDD5A5C510
+       20480       32768       2  Label: "KERN-A"
+                                  Type: ChromeOS kernel
+                                  UUID: 7007C2F3-08E5-AB40-A4BC-FF5B01F5460D
+                                  Attr: priority=15 tries=15 successful=1
+     1101824      819200       3  Label: "ROOT-A"
+                                  Type: ChromeOS rootfs
+                                  UUID: F4C5C3AD-027F-894B-80CD-3DEC57932948
+       53248       32768       4  Label: "KERN-B"
+                                  Type: ChromeOS kernel
+                                  UUID: C85FB478-404C-8741-ADB8-11312A35880D
+                                  Attr: priority=0 tries=0 successful=0
+      282624      819200       5  Label: "ROOT-B"
+                                  Type: ChromeOS rootfs
+                                  UUID: A99F4231-1EC3-C542-AC0C-DF3729F5DB07
+       16448           1       6  Label: "KERN-C"
+                                  Type: ChromeOS kernel
+                                  UUID: 81F0E336-FAC9-174D-A08C-864FE627B637
+                                  Attr: priority=0 tries=0 successful=0
+       16449           1       7  Label: "ROOT-C"
+                                  Type: ChromeOS rootfs
+                                  UUID: 9E127FCA-30C1-044E-A5F2-DF74E6932692
+       86016       32768       8  Label: "OEM"
+                                  Type: Linux data
+                                  UUID: 72986347-A37C-684F-9A19-4DBAF41C55A9
+       16450           1       9  Label: "reserved"
+                                  Type: ChromeOS reserved
+                                  UUID: BA85A0A7-1850-964D-8EF8-6707AC106C3A
+       16451           1      10  Label: "reserved"
+                                  Type: ChromeOS reserved
+                                  UUID: 16C9EC9B-50FA-DD46-98DC-F781360817B4
+          64       16384      11  Label: "RWFW"
+                                  Type: ChromeOS firmware
+                                  UUID: BE8AECB9-4F78-7C44-8F23-5A9273B7EC8F
+      249856       32768      12  Label: "EFI-SYSTEM"
+                                  Type: EFI System Partition
+                                  UUID: 88FB7EB8-2B3F-B943-B933-EEC571FFB6E1
+     4050847          32          Sec GPT table
+     4050879           1          Sec GPT header
+"""
+
+  def testCgpt(self):
+    """Tests that we can list all partitions with `cgpt` correctly."""
+    self.PatchObject(cros_build_lib, 'IsInsideChroot', return_value=True)
+    self.rc.AddCmdResult(partial_mock.Ignore(), output=self.SAMPLE_CGPT)
+    partitions = cros_build_lib.GetImageDiskPartitionInfo('...', unit='B')
+    self.assertEqual(partitions['STATE'].start, 983564288)
+    self.assertEqual(partitions['STATE'].size, 1073741824)
+    self.assertEqual(partitions['STATE'].number, 1)
+    self.assertEqual(partitions['STATE'].name, 'STATE')
+    self.assertEqual(partitions['EFI-SYSTEM'].start, 249856 * 512)
+    self.assertEqual(partitions['EFI-SYSTEM'].size, 32768 * 512)
+    self.assertEqual(partitions['EFI-SYSTEM'].number, 12)
+    self.assertEqual(partitions['EFI-SYSTEM'].name, 'EFI-SYSTEM')
+    # Because "reserved" is duplicated, we only have 11 key-value pairs.
+    self.assertEqual(11, len(partitions))
 
   def testNormalPath(self):
+    self.PatchObject(cros_build_lib, 'IsInsideChroot', return_value=False)
+    self.rc.AddCmdResult(partial_mock.Ignore(), output=self.SAMPLE_PARTED)
     partitions = cros_build_lib.GetImageDiskPartitionInfo('_ignored')
     # Because "reserved" is duplicated, we only have 11 key-value pairs.
     self.assertEqual(11, len(partitions))
@@ -1410,6 +1480,8 @@ class GetImageDiskPartitionInfoTests(RunCommandTestCase):
     self.assertEqual(2147, partitions['ROOT-A'].size)
 
   def testKeyedByNumber(self):
+    self.PatchObject(cros_build_lib, 'IsInsideChroot', return_value=False)
+    self.rc.AddCmdResult(partial_mock.Ignore(), output=self.SAMPLE_PARTED)
     partitions = cros_build_lib.GetImageDiskPartitionInfo(
         '_ignored', key_selector='number'
     )
@@ -1419,7 +1491,7 @@ class GetImageDiskPartitionInfoTests(RunCommandTestCase):
     self.assertEqual('reserved', partitions[9].name)
     self.assertEqual('reserved', partitions[10].name)
 
-  def testChangeUnit(self):
+  def testChangeUnitOutsideChroot(self):
 
     def changeUnit(unit):
       cros_build_lib.GetImageDiskPartitionInfo('_ignored', unit)
@@ -1427,9 +1499,27 @@ class GetImageDiskPartitionInfoTests(RunCommandTestCase):
           ['-m', '_ignored', 'unit', unit, 'print'],
       )
 
+    self.PatchObject(cros_build_lib, 'IsInsideChroot', return_value=False)
+    self.rc.AddCmdResult(partial_mock.Ignore(), output=self.SAMPLE_PARTED)
     # We must use 2-char units here because the mocked output is in 'MB'.
     changeUnit('MB')
     changeUnit('KB')
+
+  def testChangeUnitInsideChroot(self):
+    self.PatchObject(cros_build_lib, 'IsInsideChroot', return_value=True)
+    self.rc.AddCmdResult(partial_mock.Ignore(), output=self.SAMPLE_CGPT)
+    partitions = cros_build_lib.GetImageDiskPartitionInfo('_ignored', 'B')
+    self.assertEqual(partitions['STATE'].start, 983564288)
+    self.assertEqual(partitions['STATE'].size, 1073741824)
+    partitions = cros_build_lib.GetImageDiskPartitionInfo('_ignored', 'KB')
+    self.assertEqual(partitions['STATE'].start, 983564288 / 1000.0)
+    self.assertEqual(partitions['STATE'].size, 1073741824 / 1000.0)
+    partitions = cros_build_lib.GetImageDiskPartitionInfo('_ignored', 'MB')
+    self.assertEqual(partitions['STATE'].start, 983564288 / 10.0**6)
+    self.assertEqual(partitions['STATE'].size, 1073741824 / 10.0**6)
+
+    self.assertRaises(KeyError, cros_build_lib.GetImageDiskPartitionInfo,
+                      '_ignored', 'PB')
 
 
 if __name__ == '__main__':

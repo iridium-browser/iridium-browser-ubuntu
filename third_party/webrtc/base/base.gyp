@@ -25,11 +25,46 @@
   ],
   'targets': [
     {
+      # Temporary target until Chromium's
+      # src/third_party/libjingle/libjingle.gyp is updated to use rtc_base.
+      # TODO(kjellander): Remove when r7140 is rolled into Chromium's DEPS.
       'target_name': 'webrtc_base',
+      'type': 'none',
+      'dependencies': [
+        'rtc_base',
+      ],
+    },
+    {
+      # The subset of rtc_base approved for use outside of libjingle.
+      'target_name': 'rtc_base_approved',
       'type': 'static_library',
+      'sources': [
+        'checks.cc',
+        'checks.h',
+        'exp_filter.cc',
+        'exp_filter.h',
+        'md5.cc',
+        'md5.h',
+        'md5digest.h',
+        'platform_file.cc',
+        'platform_file.h',
+        'stringencode.cc',
+        'stringencode.h',
+        'stringutils.cc',
+        'stringutils.h',
+        'thread_annotations.h',
+        'timeutils.cc',
+        'timeutils.h',
+      ],
+    },
+    {
+      'target_name': 'rtc_base',
+      'type': 'static_library',
+      'dependencies': [
+        'rtc_base_approved',
+      ],
       'defines': [
         'FEATURE_ENABLE_SSL',
-        'GTEST_RELATIVE_PATH',
         'LOGGING=1',
         'USE_WEBRTC_DEV_BRANCH',
       ],
@@ -66,11 +101,9 @@
         'byteorder.h',
         'callback.h',
         'callback.h.pump',
-        'checks.cc',
-        'checks.h',
+        'constructormagic.h',
         'common.cc',
         'common.h',
-        'constructormagic.h',
         'cpumonitor.cc',
         'cpumonitor.h',
         'crc32.cc',
@@ -85,8 +118,6 @@
         'diskcache_win32.h',
         'event.cc',
         'event.h',
-        'exp_filter.cc',
-        'exp_filter.h',
         'filelock.cc',
         'filelock.h',
         'fileutils.cc',
@@ -127,8 +158,6 @@
         'linux.h',
         'linuxfdwalk.c',
         'linuxfdwalk.h',
-        'linuxwindowpicker.cc',
-        'linuxwindowpicker.h',
         'linked_ptr.h',
         'logging.cc',
         'logging.h',
@@ -147,9 +176,6 @@
         'macwindowpicker.cc',
         'macwindowpicker.h',
         'mathutils.h',
-        'md5.cc',
-        'md5.h',
-        'md5digest.h',
         'messagedigest.cc',
         'messagedigest.h',
         'messagehandler.cc',
@@ -168,20 +194,7 @@
         'nethelpers.h',
         'network.cc',
         'network.h',
-        'nssidentity.cc',
-        'nssidentity.h',
-        'nssstreamadapter.cc',
-        'nssstreamadapter.h',
         'nullsocketserver.h',
-        'openssl.h',
-        'openssladapter.cc',
-        'openssladapter.h',
-        'openssldigest.cc',
-        'openssldigest.h',
-        'opensslidentity.cc',
-        'opensslidentity.h',
-        'opensslstreamadapter.cc',
-        'opensslstreamadapter.h',
         'optionsfile.cc',
         'optionsfile.h',
         'pathutils.cc',
@@ -254,10 +267,6 @@
         'stream.cc',
         'stream.h',
         'stringdigest.h',
-        'stringencode.cc',
-        'stringencode.h',
-        'stringutils.cc',
-        'stringutils.h',
         'systeminfo.cc',
         'systeminfo.h',
         'task.cc',
@@ -273,8 +282,6 @@
         'thread_checker.h',
         'thread_checker_impl.cc',
         'thread_checker_impl.h',
-        'timeutils.cc',
-        'timeutils.h',
         'timing.cc',
         'timing.h',
         'transformadapter.cc',
@@ -311,13 +318,15 @@
         'winping.h',
         'worker.cc',
         'worker.h',
+        'x11windowpicker.cc',
+        'x11windowpicker.h',
         '../overrides/webrtc/base/basictypes.h',
         '../overrides/webrtc/base/constructormagic.h',
         '../overrides/webrtc/base/logging.cc',
         '../overrides/webrtc/base/logging.h',
         '../overrides/webrtc/base/win32socketinit.cc',
       ],
-      # TODO(henrike): issue 3307, make webrtc_base build without disabling
+      # TODO(henrike): issue 3307, make rtc_base build without disabling
       # these flags.
       'cflags!': [
         '-Wextra',
@@ -332,7 +341,6 @@
         ],
         'defines': [
           'FEATURE_ENABLE_SSL',
-          'GTEST_RELATIVE_PATH',
         ],
       },
       'include_dirs': [
@@ -381,8 +389,8 @@
             'libdbusglibsymboltable.h',
             'linuxfdwalk.c',
             'linuxfdwalk.h',
-            'linuxwindowpicker.cc',
-            'linuxwindowpicker.h',
+            'x11windowpicker.cc',
+            'x11windowpicker.h',
             'logging.cc',
             'logging.h',
             'macasyncsocket.cc',
@@ -402,7 +410,6 @@
             'natsocketfactory.h',
             'nattypes.cc',
             'nattypes.h',
-            'openssl.h',
             'optionsfile.cc',
             'optionsfile.h',
             'posix.cc',
@@ -445,12 +452,10 @@
           ],
           'defines': [
             'NO_MAIN_THREAD_WRAPPING',
-            'SSL_USE_NSS',
           ],
           'direct_dependent_settings': {
             'defines': [
               'NO_MAIN_THREAD_WRAPPING',
-              'SSL_USE_NSS',
             ],
           },
         }, {
@@ -490,6 +495,17 @@
               'HAVE_OPENSSL_SSL_H',
             ],
           },
+          'sources': [
+            'openssl.h',
+            'openssladapter.cc',
+            'openssladapter.h',
+            'openssldigest.cc',
+            'openssldigest.h',
+            'opensslidentity.cc',
+            'opensslidentity.h',
+            'opensslstreamadapter.cc',
+            'opensslstreamadapter.h',
+          ],
           'conditions': [
             ['build_ssl==1', {
               'dependencies': [
@@ -502,18 +518,43 @@
             }],
           ],
         }, {
-          'defines': [
-            'SSL_USE_NSS',
-            'HAVE_NSS_SSL_H',
-            'SSL_USE_NSS_RNG',
+          'sources': [
+            'nssidentity.cc',
+            'nssidentity.h',
+            'nssstreamadapter.cc',
+            'nssstreamadapter.h',
           ],
-          'direct_dependent_settings': {
-            'defines': [
-              'SSL_USE_NSS',
-              'HAVE_NSS_SSL_H',
-              'SSL_USE_NSS_RNG',
-            ],
-          },
+          'conditions': [
+            ['use_legacy_ssl_defaults!=1', {
+              'defines': [
+                'SSL_USE_NSS',
+                'HAVE_NSS_SSL_H',
+                'SSL_USE_NSS_RNG',
+              ],
+              'direct_dependent_settings': {
+                'defines': [
+                  'SSL_USE_NSS',
+                  'HAVE_NSS_SSL_H',
+                  'SSL_USE_NSS_RNG',
+                ],
+              },
+            }],
+            ['OS=="mac" or OS=="ios" or OS=="win"', {
+              'conditions': [
+                ['build_ssl==1', {
+                  'dependencies': [
+                    '<(DEPTH)/net/third_party/nss/ssl.gyp:libssl',
+                    '<(DEPTH)/third_party/nss/nss.gyp:nspr',
+                    '<(DEPTH)/third_party/nss/nss.gyp:nss',
+                  ],
+                }, {
+                  'include_dirs': [
+                    '<(ssl_root)',
+                  ],
+                }],
+              ],
+            }],
+          ],
         }],
         ['OS == "android"', {
           'defines': [
@@ -531,16 +572,20 @@
             ],
           },
         }, {
-          'defines': [
-            'HAVE_NSS_SSL_H'
-            'SSL_USE_NSS_RNG',
+          'conditions': [
+            ['use_legacy_ssl_defaults!=1', {
+              'defines': [
+                'HAVE_NSS_SSL_H',
+                'SSL_USE_NSS_RNG',
+              ],
+              'direct_dependent_settings': {
+                'defines': [
+                  'HAVE_NSS_SSL_H',
+                  'SSL_USE_NSS_RNG',
+                ],
+              },
+            }],
           ],
-          'direct_dependent_settings': {
-            'defines': [
-              'HAVE_NSS_SSL_H'
-              'SSL_USE_NSS_RNG',
-            ],
-          },
           'sources!': [
             'ifaddrs-android.cc',
             'ifaddrs-android.h',
@@ -557,19 +602,8 @@
               ],
             },
           },
-           'conditions': [
-            ['build_ssl==1', {
-              'dependencies': [
-                '<(DEPTH)/net/third_party/nss/ssl.gyp:libssl',
-              ]
-            }, {
-              'include_dirs': [
-                '<(ssl_root)',
-              ],
-            }],
-          ],
         }],
-        ['OS=="linux"', {
+        ['use_x11 == 1', {
           'link_settings': {
             'libraries': [
               '-ldl',
@@ -578,6 +612,19 @@
               '-lX11',
               '-lXcomposite',
               '-lXrender',
+            ],
+          },
+        }, {
+          'sources!': [
+            'x11windowpicker.cc',
+            'x11windowpicker.h',
+          ],
+        }],
+        ['OS=="linux"', {
+          'link_settings': {
+            'libraries': [
+              '-ldl',
+              '-lrt',
             ],
           },
           'conditions': [
@@ -602,17 +649,9 @@
             'libdbusglibsymboltable.cc',
             'libdbusglibsymboltable.h',
             'linuxfdwalk.c',
-            'linuxwindowpicker.cc',
-            'linuxwindowpicker.h',
           ],
         }],
         ['OS=="mac"', {
-          'link_settings': {
-            'libraries': [
-              '$(SDKROOT)/usr/lib/libcrypto.dylib',
-              '$(SDKROOT)/usr/lib/libssl.dylib',
-            ],
-          },
           'all_dependent_settings': {
             'link_settings': {
               'xcode_settings': {
@@ -712,38 +751,10 @@
             'scoped_autorelease_pool.mm',
           ],
         }],
-        ['OS=="ios"', {
-          'sources!': [
-            'openssl.h',
-            'openssladapter.cc',
-            'openssladapter.h',
-            'openssldigest.cc',
-            'openssldigest.h',
-            'opensslidentity.cc',
-            'opensslidentity.h',
-            'opensslstreamadapter.cc',
-            'opensslstreamadapter.h',
-          ],
-        }],
         ['OS!="linux" and OS!="android"', {
           'sources!': [
             'linux.cc',
             'linux.h',
-          ],
-        }],
-        ['OS == "mac" or OS == "ios" or OS == "win"', {
-          'conditions': [
-            ['build_ssl==1', {
-              'dependencies': [
-                '<(DEPTH)/net/third_party/nss/ssl.gyp:libssl',
-                '<(DEPTH)/third_party/nss/nss.gyp:nspr',
-                '<(DEPTH)/third_party/nss/nss.gyp:nss',
-              ],
-            }, {
-              'include_dirs': [
-                '<(ssl_root)',
-              ],
-            }],
           ],
         }],
         ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {

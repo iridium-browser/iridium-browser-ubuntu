@@ -5,10 +5,12 @@
 #include "chrome/browser/extensions/extension_test_notification_observer.h"
 
 #include "base/callback_list.h"
+#include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -21,19 +23,15 @@ using extensions::Extension;
 
 namespace {
 
-bool HasExtensionPageActionCountReachedTarget(LocationBarTesting* location_bar,
-                                              int target_page_action_count) {
-  VLOG(1) << "Number of page actions: " << location_bar->PageActionCount();
-  return location_bar->PageActionCount() == target_page_action_count;
-}
+// A callback that returns true if the condition has been met and takes no
+// arguments.
+typedef base::Callback<bool(void)> ConditionCallback;
 
-bool HasExtensionPageActionVisibilityReachedTarget(
-    LocationBarTesting* location_bar,
-    int target_visible_page_action_count) {
-  VLOG(1) << "Number of visible page actions: "
-          << location_bar->PageActionVisibleCount();
-  return location_bar->PageActionVisibleCount() ==
-         target_visible_page_action_count;
+bool HasPageActionVisibilityReachedTarget(
+    Browser* browser, size_t target_visible_page_action_count) {
+  return extensions::extension_action_test_util::GetVisiblePageActionCount(
+      browser->tab_strip_model()->GetActiveWebContents()) ==
+      target_visible_page_action_count;
 }
 
 bool HaveAllExtensionRenderViewHostsFinishedLoading(
@@ -48,7 +46,13 @@ bool HaveAllExtensionRenderViewHostsFinishedLoading(
   return true;
 }
 
-class NotificationSet : public content::NotificationObserver {
+}  // namespace
+
+////////////////////////////////////////////////////////////////////////////////
+// ExtensionTestNotificationObserver::NotificationSet
+
+class ExtensionTestNotificationObserver::NotificationSet
+    : public content::NotificationObserver {
  public:
   void Add(int type, const content::NotificationSource& source);
   void Add(int type);
@@ -69,52 +73,25 @@ class NotificationSet : public content::NotificationObserver {
   base::CallbackList<void()> callback_list_;
 };
 
-void NotificationSet::Add(
+void ExtensionTestNotificationObserver::NotificationSet::Add(
     int type,
     const content::NotificationSource& source) {
   notification_registrar_.Add(this, type, source);
 }
 
-void NotificationSet::Add(int type) {
+void ExtensionTestNotificationObserver::NotificationSet::Add(int type) {
   Add(type, content::NotificationService::AllSources());
 }
 
-void NotificationSet::Observe(
+void ExtensionTestNotificationObserver::NotificationSet::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   callback_list_.Notify();
 }
 
-void MaybeQuit(content::MessageLoopRunner* runner,
-               const base::Callback<bool(void)>& condition) {
-  if (condition.Run())
-    runner->Quit();
-}
-
-void WaitForCondition(
-    const base::Callback<bool(void)>& condition,
-    NotificationSet* notification_set) {
-  if (condition.Run())
-    return;
-
-  scoped_refptr<content::MessageLoopRunner> runner(
-      new content::MessageLoopRunner);
-  scoped_ptr<base::CallbackList<void()>::Subscription> subscription =
-      notification_set->callback_list().Add(
-          base::Bind(&MaybeQuit, base::Unretained(runner.get()), condition));
-  runner->Run();
-}
-
-void WaitForCondition(
-    const base::Callback<bool(void)>& condition,
-    int type) {
-  NotificationSet notification_set;
-  notification_set.Add(type);
-  WaitForCondition(condition, &notification_set);
-}
-
-}  // namespace
+////////////////////////////////////////////////////////////////////////////////
+// ExtensionTestNotificationObserver
 
 ExtensionTestNotificationObserver::ExtensionTestNotificationObserver(
     Browser* browser)
@@ -149,25 +126,14 @@ void ExtensionTestNotificationObserver::WaitForNotification(
       notification_type, content::NotificationService::AllSources()).Wait();
 }
 
-bool ExtensionTestNotificationObserver::WaitForPageActionCountChangeTo(
-    int count) {
-  LocationBarTesting* location_bar =
-      browser_->window()->GetLocationBar()->GetLocationBarForTesting();
-  WaitForCondition(
-      base::Bind(
-          &HasExtensionPageActionCountReachedTarget, location_bar, count),
-      extensions::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED);
-  return true;
-}
-
 bool ExtensionTestNotificationObserver::WaitForPageActionVisibilityChangeTo(
     int count) {
-  LocationBarTesting* location_bar =
-      browser_->window()->GetLocationBar()->GetLocationBarForTesting();
+  extensions::ExtensionActionAPI::Get(GetProfile())->AddObserver(this);
   WaitForCondition(
-      base::Bind(
-          &HasExtensionPageActionVisibilityReachedTarget, location_bar, count),
-      extensions::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED);
+      base::Bind(&HasPageActionVisibilityReachedTarget, browser_, count),
+      NULL);
+  extensions::ExtensionActionAPI::Get(GetProfile())->
+      RemoveObserver(this);
   return true;
 }
 
@@ -287,4 +253,37 @@ void ExtensionTestNotificationObserver::Observe(
       NOTREACHED();
       break;
   }
+}
+
+void ExtensionTestNotificationObserver::OnPageActionsUpdated(
+    content::WebContents* web_contents) {
+  MaybeQuit();
+}
+
+void ExtensionTestNotificationObserver::WaitForCondition(
+    const ConditionCallback& condition,
+    NotificationSet* notification_set) {
+  if (condition.Run())
+    return;
+  condition_ = condition;
+
+  scoped_refptr<content::MessageLoopRunner> runner(
+      new content::MessageLoopRunner);
+  quit_closure_ = runner->QuitClosure();
+
+  scoped_ptr<base::CallbackList<void()>::Subscription> subscription;
+  if (notification_set) {
+    subscription = notification_set->callback_list().Add(
+        base::Bind(&ExtensionTestNotificationObserver::MaybeQuit,
+                   base::Unretained(this)));
+  }
+  runner->Run();
+
+  condition_.Reset();
+  quit_closure_.Reset();
+}
+
+void ExtensionTestNotificationObserver::MaybeQuit() {
+  if (condition_.Run())
+    quit_closure_.Run();
 }

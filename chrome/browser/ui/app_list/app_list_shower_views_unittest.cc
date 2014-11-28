@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/app_list/app_list_shower_views.h"
 
 #include "base/files/file_path.h"
+#include "chrome/browser/apps/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_shower_delegate.h"
-#include "chrome/browser/ui/app_list/scoped_keep_alive.h"
 #include "chrome/browser/ui/app_list/test/fake_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -75,8 +75,8 @@ class AppListShowerUnitTest : public testing::Test,
     return make_scoped_ptr(new FakeProfile(name));
   }
 
-  // AppListCreatorDelegate:
-  virtual AppListControllerDelegate* GetControllerDelegateForCreate() OVERRIDE {
+  // AppListShowerDelegate:
+  virtual AppListViewDelegate* GetViewDelegateForCreate() OVERRIDE {
     return NULL;
   }
 

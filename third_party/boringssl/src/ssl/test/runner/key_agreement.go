@@ -70,8 +70,13 @@ func (ka rsaKeyAgreement) processServerKeyExchange(config *Config, clientHello *
 
 func (ka rsaKeyAgreement) generateClientKeyExchange(config *Config, clientHello *clientHelloMsg, cert *x509.Certificate) ([]byte, *clientKeyExchangeMsg, error) {
 	preMasterSecret := make([]byte, 48)
-	preMasterSecret[0] = byte(clientHello.vers >> 8)
-	preMasterSecret[1] = byte(clientHello.vers)
+	vers := clientHello.vers
+	if config.Bugs.RsaClientKeyExchangeVersion != 0 {
+		vers = config.Bugs.RsaClientKeyExchangeVersion
+	}
+	vers = versionToWire(vers, clientHello.isDTLS)
+	preMasterSecret[0] = byte(vers >> 8)
+	preMasterSecret[1] = byte(vers)
 	_, err := io.ReadFull(config.rand(), preMasterSecret[2:])
 	if err != nil {
 		return nil, nil, err
@@ -82,10 +87,14 @@ func (ka rsaKeyAgreement) generateClientKeyExchange(config *Config, clientHello 
 		return nil, nil, err
 	}
 	ckx := new(clientKeyExchangeMsg)
-	ckx.ciphertext = make([]byte, len(encrypted)+2)
-	ckx.ciphertext[0] = byte(len(encrypted) >> 8)
-	ckx.ciphertext[1] = byte(len(encrypted))
-	copy(ckx.ciphertext[2:], encrypted)
+	if clientHello.vers != VersionSSL30 && !config.Bugs.SSL3RSAKeyExchange {
+		ckx.ciphertext = make([]byte, len(encrypted)+2)
+		ckx.ciphertext[0] = byte(len(encrypted) >> 8)
+		ckx.ciphertext[1] = byte(len(encrypted))
+		copy(ckx.ciphertext[2:], encrypted)
+	} else {
+		ckx.ciphertext = encrypted
+	}
 	return preMasterSecret, ckx, nil
 }
 

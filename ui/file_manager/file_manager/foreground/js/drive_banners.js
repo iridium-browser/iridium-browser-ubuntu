@@ -41,20 +41,21 @@ function FileListBannerController(
   chrome.storage.onChanged.addListener(this.onStorageChange_.bind(this));
   this.welcomeHeaderCounter_ = WELCOME_HEADER_COUNTER_LIMIT;
   this.warningDismissedCounter_ = 0;
-  chrome.storage.local.get([WELCOME_HEADER_COUNTER_KEY, WARNING_DISMISSED_KEY],
-                         function(values) {
-    this.welcomeHeaderCounter_ =
-        parseInt(values[WELCOME_HEADER_COUNTER_KEY]) || 0;
-    this.warningDismissedCounter_ =
-        parseInt(values[WARNING_DISMISSED_KEY]) || 0;
-  }.bind(this));
+  chrome.storage.local.get(
+      [WELCOME_HEADER_COUNTER_KEY, WARNING_DISMISSED_KEY],
+      function(values) {
+        this.welcomeHeaderCounter_ =
+            parseInt(values[WELCOME_HEADER_COUNTER_KEY]) || 0;
+        this.warningDismissedCounter_ =
+            parseInt(values[WARNING_DISMISSED_KEY]) || 0;
+      }.bind(this));
 
   this.authFailedBanner_ =
       this.document_.querySelector('#drive-auth-failed-warning');
   var authFailedText = this.authFailedBanner_.querySelector('.drive-text');
   authFailedText.innerHTML = util.htmlUnescape(str('DRIVE_NOT_REACHED'));
   authFailedText.querySelector('a').addEventListener('click', function(e) {
-    chrome.fileBrowserPrivate.logoutUserForReauthentication();
+    chrome.fileManagerPrivate.logoutUserForReauthentication();
     e.preventDefault();
   });
   this.maybeShowAuthFailBanner_();
@@ -215,7 +216,7 @@ FileListBannerController.prototype.prepareAndShowWelcomeBanner_ =
  * @private
  */
 FileListBannerController.prototype.showLowDriveSpaceWarning_ =
-      function(show, sizeStats) {
+    function(show, sizeStats) {
   var box = this.document_.querySelector('#volume-space-warning');
 
   // Avoid showing two banners.
@@ -347,7 +348,7 @@ FileListBannerController.prototype.checkSpaceAndMaybeShowWelcomeBanner_ =
     group.add(function(onCompleted) {
       // Current directory must be set, since this code is called after
       // scanning is completed. However, the volumeInfo may be gone.
-      chrome.fileBrowserPrivate.getSizeStats(
+      chrome.fileManagerPrivate.getSizeStats(
           driveVolume.volumeId,
           function(result) {
             if (result && result.totalSize >= offerSize * 1024 * 1024 * 1024)
@@ -435,10 +436,10 @@ FileListBannerController.prototype.onDirectoryChanged_ = function(event) {
   if (isLowSpaceWarningTarget !==
       this.isLowSpaceWarningTarget_(previousRootVolume)) {
     if (isLowSpaceWarningTarget) {
-      chrome.fileBrowserPrivate.onDirectoryChanged.addListener(
+      chrome.fileManagerPrivate.onDirectoryChanged.addListener(
           this.privateOnDirectoryChangedBound_);
     } else {
-      chrome.fileBrowserPrivate.onDirectoryChanged.removeListener(
+      chrome.fileManagerPrivate.onDirectoryChanged.removeListener(
           this.privateOnDirectoryChangedBound_);
     }
   }
@@ -471,7 +472,7 @@ FileListBannerController.prototype.isLowSpaceWarningTarget_ =
 
 /**
  * Callback which is invoked when the file system has been changed.
- * @param {Object} event chrome.fileBrowserPrivate.onDirectoryChanged event.
+ * @param {Object} event chrome.fileManagerPrivate.onDirectoryChanged event.
  * @private
  */
 FileListBannerController.prototype.privateOnDirectoryChanged_ = function(
@@ -520,7 +521,7 @@ FileListBannerController.prototype.maybeShowLowSpaceWarning_ = function(
   if (!volume.fileSystem)
     return;
 
-  chrome.fileBrowserPrivate.getSizeStats(
+  chrome.fileManagerPrivate.getSizeStats(
       volume.volumeId,
       function(sizeStats) {
         var currentVolume = this.volumeManager_.getVolumeInfo(

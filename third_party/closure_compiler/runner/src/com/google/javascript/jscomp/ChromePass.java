@@ -37,6 +37,7 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
     private static final String CR_EXPORT_PATH = "cr.exportPath";
     private static final String OBJECT_DEFINE_PROPERTY = "Object.defineProperty";
     private static final String CR_DEFINE_PROPERTY = "cr.defineProperty";
+    private static final String CR_MAKE_PUBLIC = "cr.makePublic";
 
     private static final String CR_DEFINE_COMMON_EXPLANATION = "It should be called like this:"
             + " cr.define('name.space', function() '{ ... return {Export: Internal}; }');";
@@ -67,6 +68,19 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
                     "Invalid cr.PropertyKind passed to cr.defineProperty(): expected ATTR,"
                     + " BOOL_ATTR or JS, found \"{0}\".");
 
+    static final DiagnosticType CR_MAKE_PUBLIC_HAS_NO_JSDOC =
+            DiagnosticType.error("JSC_CR_MAKE_PUBLIC_HAS_NO_JSDOC",
+                    "Private method exported by cr.makePublic() has no JSDoc.");
+
+    static final DiagnosticType CR_MAKE_PUBLIC_MISSED_DECLARATION =
+            DiagnosticType.error("JSC_CR_MAKE_PUBLIC_MISSED_DECLARATION",
+                    "Method \"{1}_\" exported by cr.makePublic() on \"{0}\" has no declaration.");
+
+    static final DiagnosticType CR_MAKE_PUBLIC_INVALID_SECOND_ARGUMENT =
+            DiagnosticType.error("JSC_CR_MAKE_PUBLIC_INVALID_SECOND_ARGUMENT",
+                    "Invalid second argument passed to cr.makePublic(): should be array of " +
+                    "strings.");
+
     public ChromePass(AbstractCompiler compiler) {
         this.compiler = compiler;
         // The global variable "cr" is declared in ui/webui/resources/js/cr.js.
@@ -92,6 +106,10 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
                     callee.matchesQualifiedName(CR_DEFINE_PROPERTY)) {
                 visitPropertyDefinition(node, parent);
                 compiler.reportCodeChange();
+            } else if (callee.matchesQualifiedName(CR_MAKE_PUBLIC)) {
+                if (visitMakePublic(node, parent)) {
+                    compiler.reportCodeChange();
+                }
             }
         }
     }
@@ -138,6 +156,98 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
         JSDocInfoBuilder builder = new JSDocInfoBuilder(false);
         builder.recordType(new JSTypeExpression(type, ""));
         target.setJSDocInfo(builder.build(target));
+    }
+
+    private boolean visitMakePublic(Node call, Node exprResult) {
+        boolean changesMade = false;
+        Node scope = exprResult.getParent();
+        String className = call.getChildAtIndex(1).getQualifiedName();
+        String prototype = className  + ".prototype";
+        Node methods = call.getChildAtIndex(2);
+
+        if (methods == null || !methods.isArrayLit()) {
+            compiler.report(JSError.make(exprResult, CR_MAKE_PUBLIC_INVALID_SECOND_ARGUMENT));
+            return changesMade;
+        }
+
+        Set<String> methodNames = new HashSet<>();
+        for (Node methodName: methods.children()) {
+            if (!methodName.isString()) {
+                compiler.report(JSError.make(methodName, CR_MAKE_PUBLIC_INVALID_SECOND_ARGUMENT));
+                return changesMade;
+            }
+            methodNames.add(methodName.getString());
+        }
+
+        for (Node child: scope.children()) {
+            if (isAssignmentToPrototype(child, prototype)) {
+                Node objectLit = child.getFirstChild().getChildAtIndex(1);
+                for (Node stringKey : objectLit.children()) {
+                    String field = stringKey.getString();
+                    changesMade |= maybeAddPublicDeclaration(field, methodNames, className,
+                                                             stringKey, scope, exprResult);
+                }
+            } else if (isAssignmentToPrototypeMethod(child, prototype)) {
+                Node assignNode = child.getFirstChild();
+                String qualifiedName = assignNode.getFirstChild().getQualifiedName();
+                String field = qualifiedName.substring(qualifiedName.lastIndexOf('.') + 1);
+                changesMade |= maybeAddPublicDeclaration(field, methodNames, className,
+                                                         assignNode, scope, exprResult);
+            } else if (isDummyPrototypeMethodDeclaration(child, prototype)) {
+                String qualifiedName = child.getFirstChild().getQualifiedName();
+                String field = qualifiedName.substring(qualifiedName.lastIndexOf('.') + 1);
+                changesMade |= maybeAddPublicDeclaration(field, methodNames, className,
+                                                         child.getFirstChild(), scope, exprResult);
+            }
+        }
+
+        for (String missedDeclaration : methodNames) {
+            compiler.report(JSError.make(exprResult, CR_MAKE_PUBLIC_MISSED_DECLARATION, className,
+                    missedDeclaration));
+        }
+
+        return changesMade;
+    }
+
+    private boolean isAssignmentToPrototype(Node node, String prototype) {
+        Node assignNode;
+        return node.isExprResult() && (assignNode = node.getFirstChild()).isAssign() &&
+                assignNode.getFirstChild().getQualifiedName().equals(prototype);
+    }
+
+    private boolean isAssignmentToPrototypeMethod(Node node, String prototype) {
+        Node assignNode;
+        return node.isExprResult() && (assignNode = node.getFirstChild()).isAssign() &&
+                assignNode.getFirstChild().getQualifiedName().startsWith(prototype + ".");
+    }
+
+    private boolean isDummyPrototypeMethodDeclaration(Node node, String prototype) {
+        Node getPropNode;
+        return node.isExprResult() && (getPropNode = node.getFirstChild()).isGetProp() &&
+                getPropNode.getQualifiedName().startsWith(prototype + ".");
+    }
+
+    private boolean maybeAddPublicDeclaration(String field, Set<String> publicAPIStrings,
+            String className, Node jsDocSourceNode, Node scope, Node exprResult) {
+        boolean changesMade = false;
+        if (field.endsWith("_")) {
+            String publicName = field.substring(0, field.length() - 1);
+            if (publicAPIStrings.contains(publicName)) {
+                Node methodDeclaration = NodeUtil.newQualifiedNameNode(
+                        compiler.getCodingConvention(), className + "." + publicName);
+                if (jsDocSourceNode.getJSDocInfo() != null) {
+                    methodDeclaration.setJSDocInfo(jsDocSourceNode.getJSDocInfo());
+                    scope.addChildBefore(
+                            IR.exprResult(methodDeclaration).srcrefTree(exprResult),
+                            exprResult);
+                    changesMade = true;
+                } else {
+                    compiler.report(JSError.make(jsDocSourceNode, CR_MAKE_PUBLIC_HAS_NO_JSDOC));
+                }
+                publicAPIStrings.remove(publicName);
+            }
+        }
+        return changesMade;
     }
 
     private void visitExportPath(Node crExportPathNode, Node parent) {
@@ -295,7 +405,8 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
                     !parent.isFunction()) {
                 if (parent.isVar()) {
                     if (parent.getParent() == this.namespaceBlock) {
-                        // It's a top-level exported variable definition.
+                        // It's a top-level exported variable definition (maybe without an
+                        // assignment).
                         // Change
                         //
                         //   var enum = { 'one': 1, 'two': 2 };
@@ -304,10 +415,14 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
                         //
                         //   my.namespace.name.enum = { 'one': 1, 'two': 2 };
                         Node varContent = n.removeFirstChild();
-                        Node exprResult = IR.exprResult(
-                                    IR.assign(buildQualifiedName(n), varContent).srcref(parent)
-                                ).srcref(parent);
-
+                        Node exprResult;
+                        if (varContent == null) {
+                            exprResult = IR.exprResult(buildQualifiedName(n)).srcref(parent);
+                        } else {
+                            exprResult = IR.exprResult(
+                                        IR.assign(buildQualifiedName(n), varContent).srcref(parent)
+                                    ).srcref(parent);
+                        }
                         if (parent.getJSDocInfo() != null) {
                             exprResult.getFirstChild().setJSDocInfo(parent.getJSDocInfo().clone());
                         }
@@ -337,5 +452,4 @@ public class ChromePass extends AbstractPostOrderCallback implements CompilerPas
                     this.namespaceName + "." + externalName).srcrefTree(internalName);
         }
     }
-
 }

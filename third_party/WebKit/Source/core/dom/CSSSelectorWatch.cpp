@@ -31,9 +31,9 @@
 #include "config.h"
 #include "core/dom/CSSSelectorWatch.h"
 
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/CSSSelectorList.h"
 #include "core/css/StylePropertySet.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalFrame.h"
@@ -141,10 +141,9 @@ static bool allCompound(const CSSSelectorList& selectorList)
 void CSSSelectorWatch::watchCSSSelectors(const Vector<String>& selectors)
 {
     m_watchedCallbackSelectors.clear();
-    BisonCSSParser parser(CSSParserContext(UASheetMode, 0));
+    CSSParser parser(CSSParserContext(UASheetMode, 0));
 
-    const CSSProperty callbackProperty(CSSPropertyInternalCallback, CSSPrimitiveValue::createIdentifier(CSSValueInternalPresence));
-    const RefPtrWillBeRawPtr<StylePropertySet> callbackPropertySet = ImmutableStylePropertySet::create(&callbackProperty, 1, UASheetMode);
+    const RefPtrWillBeRawPtr<StylePropertySet> callbackPropertySet = ImmutableStylePropertySet::create(nullptr, 0, UASheetMode);
 
     CSSSelectorList selectorList;
     for (unsigned i = 0; i < selectors.size(); ++i) {

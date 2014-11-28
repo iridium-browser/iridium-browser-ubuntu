@@ -35,7 +35,7 @@ class ValueForTest(value.Value):
   def GetBuildbotValue(self):
     pass
 
-  def GetBuildbotMeasurementAndTraceNameForComputedSummaryResult(
+  def GetChartAndTraceNameForComputedSummaryResult(
       self, trace_tag):
     pass
 
@@ -97,6 +97,7 @@ class ValueTest(TestBase):
           'name': 'x',
           'type': 'baz',
           'units': 'unit',
+          'important': True
         })
 
   def testAsDictWithPage(self):

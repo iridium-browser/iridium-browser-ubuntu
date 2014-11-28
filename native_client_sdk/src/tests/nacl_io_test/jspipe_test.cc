@@ -122,10 +122,11 @@ class JSPipeNodeTest : public ::testing::Test {
 
   void SetUp() {
     name_ = "jspipe1";
-    ASSERT_EQ(0, fs_.Access(Path("/jspipe1"), R_OK | W_OK));
-    ASSERT_EQ(EACCES, fs_.Access(Path("/jspipe1"), X_OK));
     ASSERT_EQ(0, fs_.Open(Path("/jspipe1"), O_RDWR, &pipe_dev_));
     ASSERT_NE(NULL_NODE, pipe_dev_.get());
+    struct stat buf;
+    ASSERT_EQ(0, pipe_dev_->GetStat(&buf));
+    ASSERT_EQ(S_IRUSR | S_IWUSR, buf.st_mode & S_IRWXU);
   }
 
   /**
@@ -433,7 +434,7 @@ TEST_F(JSPipeTest, JSPipeSelect) {
   fd_set writefds;
   fd_set errorfds;
 
-  int pipe_fd = ki_open("/dev/jspipe1", O_RDONLY);
+  int pipe_fd = ki_open("/dev/jspipe1", O_RDONLY, 0);
   ASSERT_GT(pipe_fd, 0) << "jspipe1 open failed: " << errno;
 
   FD_ZERO(&readfds);

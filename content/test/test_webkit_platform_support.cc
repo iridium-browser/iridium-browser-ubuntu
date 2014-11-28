@@ -5,8 +5,8 @@
 #include "content/test/test_webkit_platform_support.h"
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
@@ -19,6 +19,7 @@
 #include "media/base/media.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "storage/browser/database/vfs_backend.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/public/platform/WebStorageArea.h"
@@ -31,7 +32,6 @@
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebStorageEventDispatcher.h"
 #include "v8/include/v8.h"
-#include "webkit/browser/database/vfs_backend.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -163,7 +163,7 @@ blink::WebData TestWebKitPlatformSupport::loadResource(const char* name) {
         "\x82";
     return blink::WebData(red_square, arraysize(red_square));
   }
-  return blink::WebData();
+  return BlinkPlatformImpl::loadResource(name);
 }
 
 blink::WebString TestWebKitPlatformSupport::queryLocalizedString(
@@ -200,6 +200,8 @@ blink::WebString TestWebKitPlatformSupport::queryLocalizedString(
     return base::ASCIIToUTF16("range underflow");
   if (name == blink::WebLocalizedString::ValidationRangeOverflow)
     return base::ASCIIToUTF16("range overflow");
+  if (name == blink::WebLocalizedString::SelectMenuListText)
+    return base::ASCIIToUTF16("$1 selected");
   return BlinkPlatformImpl::queryLocalizedString(name, value);
 }
 

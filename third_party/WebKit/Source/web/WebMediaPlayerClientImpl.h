@@ -82,6 +82,9 @@ public:
     virtual void mediaSourceOpened(WebMediaSource*) OVERRIDE;
     virtual void requestFullscreen() OVERRIDE;
     virtual void requestSeek(double) OVERRIDE;
+    virtual void remoteRouteAvailabilityChanged(bool) OVERRIDE;
+    virtual void connectedToRemoteDevice() OVERRIDE;
+    virtual void disconnectedFromRemoteDevice() OVERRIDE;
 
     // MediaPlayer methods:
     virtual WebMediaPlayer* webMediaPlayer() const OVERRIDE;
@@ -104,7 +107,7 @@ private:
     // AudioClientImpl wraps an AudioSourceProviderClient.
     // When the audio format is known, Chromium calls setFormat() which then dispatches into WebCore.
 
-    class AudioClientImpl FINAL : public NoBaseWillBeGarbageCollectedFinalized<AudioClientImpl>, public WebAudioSourceProviderClient {
+    class AudioClientImpl FINAL : public GarbageCollectedFinalized<AudioClientImpl>, public WebAudioSourceProviderClient {
     public:
         explicit AudioClientImpl(AudioSourceProviderClient* client)
             : m_client(client)
@@ -119,7 +122,7 @@ private:
         void trace(Visitor*);
 
     private:
-        RawPtrWillBeMember<AudioSourceProviderClient> m_client;
+        Member<AudioSourceProviderClient> m_client;
     };
 
     // AudioSourceProviderImpl wraps a WebAudioSourceProvider.
@@ -143,7 +146,7 @@ private:
 
     private:
         WebAudioSourceProvider* m_webAudioSourceProvider;
-        OwnPtrWillBePersistent<AudioClientImpl> m_client;
+        Persistent<AudioClientImpl> m_client;
         Mutex provideInputLock;
     };
 

@@ -13,6 +13,7 @@
 
 #include "SkCanvas.h"
 #include "SkData.h"
+#include "SkDecodingImageGenerator.h"
 #include "SkDocument.h"
 #include "SkImage.h"
 #include "SkMatrix.h"
@@ -21,6 +22,7 @@
 #include "SkPixelRef.h"
 #include "SkRRect.h"
 #include "SkString.h"
+#include "SkTextBlob.h"
 #include "SkTypeface.h"
 
 extern "C" {
@@ -45,6 +47,7 @@ DEF_MTNAME(SkPath)
 DEF_MTNAME(SkPaint)
 DEF_MTNAME(SkPathEffect)
 DEF_MTNAME(SkShader)
+DEF_MTNAME(SkTextBlob)
 DEF_MTNAME(SkTypeface)
 
 template <typename T> T* push_new(lua_State* L) {
@@ -273,6 +276,11 @@ void SkLua::pushCanvas(SkCanvas* canvas, const char key[]) {
     CHECK_SETFIELD(key);
 }
 
+void SkLua::pushTextBlob(const SkTextBlob* blob, const char key[]) {
+    push_ref(fL, const_cast<SkTextBlob*>(blob));
+    CHECK_SETFIELD(key);
+}
+
 static const char* element_type(SkClipStack::Element::Type type) {
     switch (type) {
         case SkClipStack::Element::kEmpty_Type:
@@ -310,7 +318,7 @@ void SkLua::pushClipStack(const SkClipStack& stack, const char* key) {
     SkClipStack::B2TIter iter(stack);
     const SkClipStack::Element* element;
     int i = 0;
-    while (NULL != (element = iter.next())) {
+    while ((element = iter.next())) {
         this->pushClipStackElement(*element);
         lua_rawseti(fL, -2, ++i);
     }
@@ -448,7 +456,7 @@ static int lcanvas_drawImage(lua_State* L) {
         paint.setAlpha(SkScalarRoundToInt(lua2scalar(L, 5) * 255));
         paintPtr = &paint;
     }
-    image->draw(canvas, x, y, paintPtr);
+    canvas->drawImage(image, x, y, paintPtr);
     return 0;
 }
 
@@ -514,7 +522,7 @@ int SkLua::lcanvas_getReducedClipStack(lua_State* L) {
     GrReducedClip::ElementList::Iter iter(elements);
     int i = 0;
     lua_newtable(L);
-    while(NULL != iter.get()) {
+    while(iter.get()) {
         SkLua(L).pushClipStackElement(*iter.get());
         iter.next();
         lua_rawseti(L, -2, ++i);
@@ -1157,7 +1165,7 @@ static SkString segment_masks_to_str(uint32_t segmentMasks) {
     return result;
 }
 
-static int lpath_getSegementTypes(lua_State* L) {
+static int lpath_getSegmentTypes(lua_State* L) {
     uint32_t segMasks = get_obj<SkPath>(L, 1)->getSegmentMasks();
     SkLua(L).pushString(segment_masks_to_str(segMasks));
     return 1;
@@ -1257,7 +1265,7 @@ static int lpath_gc(lua_State* L) {
 static const struct luaL_Reg gSkPath_Methods[] = {
     { "getBounds", lpath_getBounds },
     { "getFillType", lpath_getFillType },
-    { "getSegmentTypes", lpath_getSegementTypes },
+    { "getSegmentTypes", lpath_getSegmentTypes },
     { "isConvex", lpath_isConvex },
     { "isEmpty", lpath_isEmpty },
     { "isRect", lpath_isRect },
@@ -1453,7 +1461,9 @@ static int lsk_loadImage(lua_State* L) {
         const char* name = lua_tolstring(L, 1, NULL);
         SkAutoDataUnref data(SkData::NewFromFileName(name));
         if (data.get()) {
-            SkImage* image = SkImage::NewEncodedData(data.get());
+            SkImage* image = SkImage::NewFromGenerator(
+                SkDecodingImageGenerator::Create(data, SkDecodingImageGenerator::Options()));
+
             if (image) {
                 push_ref(L, image);
                 image->unref();

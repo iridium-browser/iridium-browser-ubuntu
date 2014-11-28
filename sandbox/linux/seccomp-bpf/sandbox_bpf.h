@@ -5,40 +5,21 @@
 #ifndef SANDBOX_LINUX_SECCOMP_BPF_SANDBOX_BPF_H__
 #define SANDBOX_LINUX_SECCOMP_BPF_SANDBOX_BPF_H__
 
-#include <stddef.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+#include <stdint.h>
 
-#include <algorithm>
-#include <limits>
 #include <map>
 #include <set>
-#include <utility>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "sandbox/linux/seccomp-bpf/die.h"
 #include "sandbox/linux/seccomp-bpf/errorcode.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
+#include "sandbox/linux/seccomp-bpf/trap.h"
 #include "sandbox/sandbox_export.h"
 
+struct sock_filter;
+
 namespace sandbox {
-
-// This must match the kernel's seccomp_data structure.
-struct arch_seccomp_data {
-  int nr;
-  uint32_t arch;
-  uint64_t instruction_pointer;
-  uint64_t args[6];
-};
-
-struct arch_sigsys {
-  void* ip;
-  int nr;
-  unsigned int arch;
-};
-
 class CodeGen;
 class SandboxBPFPolicy;
 class SandboxUnittestHelper;
@@ -95,6 +76,10 @@ class SANDBOX_EXPORT SandboxBPF {
   // provided by the caller.
   static SandboxStatus SupportsSeccompSandbox(int proc_fd);
 
+  // Determines if the kernel has support for the seccomp() system call to
+  // synchronize BPF filters across a thread group.
+  static SandboxStatus SupportsSeccompThreadFilterSynchronization();
+
   // The sandbox needs to be able to access files in "/proc/self". If this
   // directory is not accessible when "startSandbox()" gets called, the caller
   // can provide an already opened file descriptor by calling "set_proc_fd()".
@@ -112,7 +97,7 @@ class SANDBOX_EXPORT SandboxBPF {
   // The "aux" field can carry a pointer to arbitrary data. See EvaluateSyscall
   // for a description of how to pass data from SetSandboxPolicy() to a Trap()
   // handler.
-  ErrorCode Trap(Trap::TrapFnc fnc, const void* aux);
+  static ErrorCode Trap(Trap::TrapFnc fnc, const void* aux);
 
   // Calls a user-space trap handler and disables all sandboxing for system
   // calls made from this trap handler.
@@ -124,7 +109,11 @@ class SANDBOX_EXPORT SandboxBPF {
   //   very useful to diagnose code that is incompatible with the sandbox.
   //   If even a single system call returns "UnsafeTrap", the security of
   //   entire sandbox should be considered compromised.
-  ErrorCode UnsafeTrap(Trap::TrapFnc fnc, const void* aux);
+  static ErrorCode UnsafeTrap(Trap::TrapFnc fnc, const void* aux);
+
+  // UnsafeTraps require some syscalls to always be allowed.
+  // This helper function returns true for these calls.
+  static bool IsRequiredForUnsafeTrap(int sysno);
 
   // From within an UnsafeTrap() it is often useful to be able to execute
   // the system call that triggered the trap. The ForwardSyscall() method
@@ -139,13 +128,21 @@ class SANDBOX_EXPORT SandboxBPF {
   // We can also use ErrorCode to request evaluation of a conditional
   // statement based on inspection of system call parameters.
   // This method wrap an ErrorCode object around the conditional statement.
-  // Argument "argno" (1..6) will be compared to "value" using comparator
-  // "op". If the condition is true "passed" will be returned, otherwise
-  // "failed".
+  // Argument "argno" (1..6) will be bitwise-AND'd with "mask" and compared
+  // to "value"; if equal, then "passed" will be returned, otherwise "failed".
   // If "is32bit" is set, the argument must in the range of 0x0..(1u << 32 - 1)
   // If it is outside this range, the sandbox treats the system call just
   // the same as any other ABI violation (i.e. it aborts with an error
   // message).
+  ErrorCode CondMaskedEqual(int argno,
+                            ErrorCode::ArgType is_32bit,
+                            uint64_t mask,
+                            uint64_t value,
+                            const ErrorCode& passed,
+                            const ErrorCode& failed);
+
+  // Legacy variant of CondMaskedEqual that supports a few comparison
+  // operations, which get converted into masked-equality comparisons.
   ErrorCode Cond(int argno,
                  ErrorCode::ArgType is_32bit,
                  ErrorCode::Operation op,
@@ -154,7 +151,7 @@ class SANDBOX_EXPORT SandboxBPF {
                  const ErrorCode& failed);
 
   // Kill the program and print an error message.
-  ErrorCode Kill(const char* msg);
+  static ErrorCode Kill(const char* msg);
 
   // This is the main public entry point. It finds all system calls that
   // need rewriting, sets up the resources needed by the sandbox, and
@@ -184,7 +181,7 @@ class SANDBOX_EXPORT SandboxBPF {
   // Returns the fatal ErrorCode that is used to indicate that somebody
   // attempted to pass a 64bit value in a 32bit system call argument.
   // This method is primarily needed for testing purposes.
-  ErrorCode Unexpected64bitArgument();
+  static ErrorCode Unexpected64bitArgument();
 
  private:
   friend class CodeGen;
@@ -200,6 +197,13 @@ class SANDBOX_EXPORT SandboxBPF {
   typedef std::vector<Range> Ranges;
   typedef std::map<uint32_t, ErrorCode> ErrMap;
   typedef std::set<ErrorCode, struct ErrorCode::LessThan> Conds;
+
+  // Used by CondExpressionHalf to track which half of the argument it's
+  // emitting instructions for.
+  enum ArgHalf {
+    LowerHalf,
+    UpperHalf,
+  };
 
   // Get a file descriptor pointing to "/proc", if currently available.
   int proc_fd() { return proc_fd_; }
@@ -221,7 +225,38 @@ class SANDBOX_EXPORT SandboxBPF {
 
   // Assembles and installs a filter based on the policy that has previously
   // been configured with SetSandboxPolicy().
-  void InstallFilter(SandboxThreadState thread_state);
+  void InstallFilter(bool must_sync_threads);
+
+  // Compile the configured policy into a complete instruction sequence.
+  // (See MaybeAddEscapeHatch for |has_unsafe_traps|.)
+  Instruction* CompilePolicy(CodeGen* gen, bool* has_unsafe_traps);
+
+  // Return an instruction sequence that checks the
+  // arch_seccomp_data's "arch" field is valid, and then passes
+  // control to |passed| if so.
+  Instruction* CheckArch(CodeGen* gen, Instruction* passed);
+
+  // If the |rest| instruction sequence contains any unsafe traps,
+  // then sets |*has_unsafe_traps| to true and returns an instruction
+  // sequence that allows all system calls from Syscall::Call(), and
+  // otherwise passes control to |rest|.
+  //
+  // If |rest| contains no unsafe traps, then |rest| is returned
+  // directly and |*has_unsafe_traps| is set to false.
+  Instruction* MaybeAddEscapeHatch(CodeGen* gen,
+                                   bool* has_unsafe_traps,
+                                   Instruction* rest);
+
+  // Return an instruction sequence that loads and checks the system
+  // call number, performs a binary search, and then dispatches to an
+  // appropriate instruction sequence compiled from the current
+  // policy.
+  Instruction* DispatchSyscall(CodeGen* gen);
+
+  // Return an instruction sequence that checks the system call number
+  // (expected to be loaded in register A) and if valid, passes
+  // control to |passed| (with register A still valid).
+  Instruction* CheckSyscallNumber(CodeGen* gen, Instruction* passed);
 
   // Verify the correctness of a compiled program by comparing it against the
   // current policy. This function should only ever be called by unit tests and
@@ -252,6 +287,14 @@ class SANDBOX_EXPORT SandboxBPF {
   // This function recursively calls RetExpression(); it should only ever be
   // called from RetExpression().
   Instruction* CondExpression(CodeGen* gen, const ErrorCode& cond);
+
+  // Returns a BPF program that evaluates half of a conditional expression;
+  // it should only ever be called from CondExpression().
+  Instruction* CondExpressionHalf(CodeGen* gen,
+                                  const ErrorCode& cond,
+                                  ArgHalf half,
+                                  Instruction* passed,
+                                  Instruction* failed);
 
   static SandboxStatus status_;
 

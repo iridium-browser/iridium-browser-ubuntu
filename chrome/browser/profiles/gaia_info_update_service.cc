@@ -49,7 +49,7 @@ void GAIAInfoUpdateService::Update() {
   // The user must be logged in.
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile_);
-  if (signin_manager->GetAuthenticatedAccountId().empty())
+  if (!signin_manager->IsAuthenticated())
     return;
 
   if (profile_image_downloader_)
@@ -204,11 +204,13 @@ void GAIAInfoUpdateService::ScheduleNextUpdate() {
 }
 
 void GAIAInfoUpdateService::GoogleSigninSucceeded(
+    const std::string& account_id,
     const std::string& username,
     const std::string& password) {
   OnUsernameChanged(username);
 }
 
-void GAIAInfoUpdateService::GoogleSignedOut(const std::string& username) {
+void GAIAInfoUpdateService::GoogleSignedOut(const std::string& account_id,
+                                            const std::string& username) {
   OnUsernameChanged(std::string());
 }

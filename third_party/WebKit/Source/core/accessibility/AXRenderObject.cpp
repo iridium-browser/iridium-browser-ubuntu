@@ -30,6 +30,7 @@
 #include "core/accessibility/AXRenderObject.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "core/InputTypeNames.h"
 #include "core/accessibility/AXImageMapLink.h"
 #include "core/accessibility/AXInlineTextBox.h"
 #include "core/accessibility/AXObjectCache.h"
@@ -44,6 +45,7 @@
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/htmlediting.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLLabelElement.h"
 #include "core/html/HTMLOptionElement.h"
@@ -276,6 +278,13 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
         return ListMarkerRole;
     if (isHTMLButtonElement(node))
         return buttonRoleType();
+    if (isHTMLDetailsElement(node))
+        return DetailsRole;
+    if (isHTMLSummaryElement(node)) {
+        if (node->parentElement() && isHTMLDetailsElement(node->parentElement()))
+            return DisclosureTriangleRole;
+        return UnknownRole;
+    }
     if (isHTMLLegendElement(node))
         return LegendRole;
     if (m_renderer->isText())
@@ -303,15 +312,14 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
 
     if (isHTMLInputElement(node)) {
         HTMLInputElement& input = toHTMLInputElement(*node);
-        if (input.isCheckbox())
+        const AtomicString& type = input.type();
+        if (type == InputTypeNames::checkbox)
             return CheckBoxRole;
-        if (input.isRadioButton())
+        if (type == InputTypeNames::radio)
             return RadioButtonRole;
         if (input.isTextButton())
             return buttonRoleType();
-
-        const AtomicString& type = input.getAttribute(typeAttr);
-        if (equalIgnoringCase(type, "color"))
+        if (type == InputTypeNames::color)
             return ColorWellRole;
     }
 
@@ -388,6 +396,12 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
     if (isEmbeddedObject())
         return EmbeddedObjectRole;
 
+    if (node && node->hasTagName(figcaptionTag))
+        return FigcaptionRole;
+
+    if (node && node->hasTagName(figureTag))
+        return FigureRole;
+
     // There should only be one banner/contentInfo per page. If header/footer are being used within an article or section
     // then it should not be exposed as whole page's banner/contentInfo
     if (node && node->hasTagName(headerTag) && !isDescendantOfElementType(articleTag) && !isDescendantOfElementType(sectionTag))
@@ -443,12 +457,7 @@ bool AXRenderObject::isAttachment() const
 
 bool AXRenderObject::isFileUploadButton() const
 {
-    if (m_renderer && isHTMLInputElement(m_renderer->node())) {
-        HTMLInputElement& input = toHTMLInputElement(*m_renderer->node());
-        return input.isFileUpload();
-    }
-
-    return false;
+    return m_renderer && isHTMLInputElement(m_renderer->node()) && toHTMLInputElement(*m_renderer->node()).type() == InputTypeNames::file;
 }
 
 static bool isLinkable(const AXObject& object)
@@ -596,7 +605,7 @@ bool AXRenderObject::computeAccessibilityIsIgnored() const
     if (roleValue() == IgnoredRole)
         return true;
 
-    if (roleValue() == PresentationalRole || inheritsPresentationalRole())
+    if ((roleValue() == NoneRole || roleValue() == PresentationalRole) || inheritsPresentationalRole())
         return true;
 
     // An ARIA tree can only have tree items and static text as children.
@@ -673,6 +682,15 @@ bool AXRenderObject::computeAccessibilityIsIgnored() const
         return false;
 
     if (roleValue() == DialogRole)
+        return false;
+
+    if (roleValue() == FigcaptionRole)
+        return false;
+
+    if (roleValue() == FigureRole)
+        return false;
+
+    if (roleValue() == DetailsRole)
         return false;
 
     // if this element has aria attributes on it, it should not be ignored.
@@ -1431,6 +1449,7 @@ void AXRenderObject::addChildren()
 
     addHiddenChildren();
     addAttachmentChildren();
+    addPopupChildren();
     addImageMapChildren();
     addTextFieldChildren();
     addCanvasChildren();
@@ -1686,7 +1705,8 @@ void AXRenderObject::textChanged()
     if (!m_renderer)
         return;
 
-    if (AXObjectCache::inlineTextBoxAccessibility() && roleValue() == StaticTextRole)
+    Settings* settings = document()->settings();
+    if (settings && settings->inlineTextBoxAccessibilityEnabled() && roleValue() == StaticTextRole)
         childrenChanged();
 
     // Do this last - AXNodeObject::textChanged posts live region announcements,
@@ -1728,12 +1748,14 @@ VisiblePosition AXRenderObject::visiblePositionForIndex(int index) const
     if (index <= 0)
         return VisiblePosition(firstPositionInOrBeforeNode(node), DOWNSTREAM);
 
-    RefPtrWillBeRawPtr<Range> range = Range::create(m_renderer->document());
-    range->selectNodeContents(node, IGNORE_EXCEPTION);
-    CharacterIterator it(range.get());
+    Position start, end;
+    bool selected = Range::selectNodeContents(node, start, end);
+    if (!selected)
+        return VisiblePosition();
+
+    CharacterIterator it(start, end);
     it.advance(index - 1);
-    return VisiblePosition(Position(it.range()->endContainer(), it.range()->endOffset(), Position::PositionIsOffsetInAnch\
-or), UPSTREAM);
+    return VisiblePosition(Position(it.endContainer(), it.endOffset(), Position::PositionIsOffsetInAnchor), UPSTREAM);
 }
 
 int AXRenderObject::indexForVisiblePosition(const VisiblePosition& pos) const
@@ -1763,7 +1785,8 @@ int AXRenderObject::indexForVisiblePosition(const VisiblePosition& pos) const
 
 void AXRenderObject::addInlineTextBoxChildren()
 {
-    if (!axObjectCache()->inlineTextBoxAccessibility())
+    Settings* settings = document()->settings();
+    if (!settings || !settings->inlineTextBoxAccessibilityEnabled())
         return;
 
     if (!renderer() || !renderer()->isText())
@@ -2031,6 +2054,10 @@ AXSVGRoot* AXRenderObject::remoteSVGRootElement() const
     if (!doc || !doc->isSVGDocument())
         return 0;
 
+    Settings* settings = doc->settings();
+    if (settings && !settings->accessibilityEnabled())
+        settings->setAccessibilityEnabled(true);
+
     SVGSVGElement* rootElement = doc->accessSVGExtensions().rootElement();
     if (!rootElement)
         return 0;
@@ -2193,6 +2220,14 @@ void AXRenderObject::addAttachmentChildren()
         m_children.append(axWidget);
 }
 
+void AXRenderObject::addPopupChildren()
+{
+    if (!isHTMLInputElement(node()))
+        return;
+    if (AXObject* axPopup = toHTMLInputElement(node())->popupRootAXObject())
+        m_children.append(axPopup);
+}
+
 void AXRenderObject::addRemoteSVGChildren()
 {
     AXSVGRoot* root = remoteSVGRootElement();
@@ -2271,7 +2306,7 @@ bool AXRenderObject::inheritsPresentationalRole() const
 
     QualifiedName tagName = toElement(elementNode)->tagQName();
     if (tagName == ulTag || tagName == olTag || tagName == dlTag)
-        return parent->roleValue() == PresentationalRole;
+        return (parent->roleValue() == NoneRole || parent->roleValue() == PresentationalRole);
 
     return false;
 }
@@ -2286,23 +2321,29 @@ LayoutRect AXRenderObject::computeElementRect() const
     if (obj->node()) // If we are a continuation, we want to make sure to use the primary renderer.
         obj = obj->node()->renderer();
 
-    // absoluteFocusRingQuads will query the hierarchy below this element, which for large webpages can be very slow.
+    // absoluteFocusRingBoundingBox will query the hierarchy below this element, which for large webpages can be very slow.
     // For a web area, which will have the most elements of any element, absoluteQuads should be used.
     // We should also use absoluteQuads for SVG elements, otherwise transforms won't be applied.
-    Vector<FloatQuad> quads;
 
-    if (obj->isText())
+    LayoutRect result;
+    if (obj->isText()) {
+        Vector<FloatQuad> quads;
         toRenderText(obj)->absoluteQuads(quads, 0, RenderText::ClipToEllipsis);
-    else if (isWebArea() || obj->isSVGRoot())
-        obj->absoluteQuads(quads);
-    else
-        obj->absoluteFocusRingQuads(quads);
-
-    LayoutRect result = boundingBoxForQuads(obj, quads);
+        result = boundingBoxForQuads(obj, quads);
+    } else if (isWebArea() || obj->isSVGRoot()) {
+        result = obj->absoluteBoundingBoxRect();
+    } else {
+        result = obj->absoluteFocusRingBoundingBoxRect();
+    }
 
     Document* document = this->document();
     if (document && document->isSVGDocument())
         offsetBoundingBoxForRemoteSVGElement(result);
+    if (document && document->frame() && document->frame()->pagePopupOwner()) {
+        IntPoint popupOrigin = document->view()->contentsToScreen(IntRect()).location();
+        IntPoint mainOrigin = axObjectCache()->rootObject()->documentFrameView()->contentsToScreen(IntRect()).location();
+        result.moveBy(IntPoint(popupOrigin - mainOrigin));
+    }
 
     // The size of the web area should be the content size, not the clipped size.
     if (isWebArea() && obj->frame()->view())

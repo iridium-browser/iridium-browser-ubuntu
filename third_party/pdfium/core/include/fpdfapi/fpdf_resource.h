@@ -38,6 +38,28 @@ class CFX_DIBitmap;
 typedef struct FT_FaceRec_* FXFT_Face;
 class CFX_CTTGSUBTable;
 class CPDF_Page;
+
+template <class ObjClass> class CPDF_CountedObject : public CFX_Object
+{
+public:
+    ObjClass	m_Obj;
+    FX_DWORD	m_nCount;
+};
+typedef CPDF_CountedObject<CPDF_Font*>          CPDF_CountedFont;
+typedef CPDF_CountedObject<CPDF_ColorSpace*>    CPDF_CountedColorSpace;
+typedef CPDF_CountedObject<CPDF_Pattern*>       CPDF_CountedPattern;
+typedef CPDF_CountedObject<CPDF_Image*>         CPDF_CountedImage;
+typedef CPDF_CountedObject<CPDF_IccProfile*>    CPDF_CountedICCProfile;
+typedef CPDF_CountedObject<CPDF_StreamAcc*>     CPDF_CountedStreamAcc;
+
+
+typedef CFX_MapPtrTemplate<CPDF_Dictionary*, CPDF_CountedFont*>     CPDF_FontMap;
+typedef CFX_MapPtrTemplate<CPDF_Object*, CPDF_CountedColorSpace*>   CPDF_ColorSpaceMap;
+typedef CFX_MapPtrTemplate<CPDF_Object*, CPDF_CountedPattern*>      CPDF_PatternMap;
+typedef CFX_MapPtrTemplate<FX_DWORD, CPDF_CountedImage*>            CPDF_ImageMap;
+typedef CFX_MapPtrTemplate<CPDF_Stream*, CPDF_CountedICCProfile*>   CPDF_IccProfileMap;
+typedef CFX_MapPtrTemplate<CPDF_Stream*, CPDF_CountedStreamAcc*>    CPDF_FontFileMap;
+
 #define PDFFONT_TYPE1			1
 #define PDFFONT_TRUETYPE		2
 #define PDFFONT_TYPE3			3
@@ -680,10 +702,8 @@ class CPDF_Color : public CFX_Object
 {
 public:
 
-    CPDF_Color()
+    CPDF_Color() :m_pCS(NULL), m_pBuffer(NULL)
     {
-        m_pBuffer = NULL;
-        m_pCS = NULL;
     }
 
     CPDF_Color(int family);
@@ -720,10 +740,10 @@ public:
 
     CPDF_ColorSpace*		m_pCS;
 
-    FX_FLOAT*			m_pBuffer;
 protected:
     void	ReleaseBuffer();
     void	ReleaseColorSpace();
+    FX_FLOAT*			    m_pBuffer;
 };
 #define PATTERN_TILING		1
 #define PATTERN_SHADING		2
@@ -732,7 +752,7 @@ class CPDF_Pattern : public CFX_Object
 public:
    
     virtual ~CPDF_Pattern();
-    void SaveColor(CPDF_Color* pColor) {m_pColor = pColor;}
+    void    SetForceClear(FX_BOOL bForceClear) { m_bForceClear = bForceClear; }
 
     CPDF_Object*                m_pPatternObj;
 
@@ -742,11 +762,10 @@ public:
     CFX_AffineMatrix            m_ParentMatrix;
 
     CPDF_Document*              m_pDocument;
-    CPDF_Color*                 m_pColor;
 
 protected:
-    
     CPDF_Pattern(const CFX_AffineMatrix* pParentMatrix);
+    FX_BOOL     m_bForceClear;
 };
 
 class CPDF_TilingPattern : public CPDF_Pattern
@@ -791,8 +810,9 @@ public:
 
     int					m_ShadingType;
 
-    CPDF_ColorSpace*	m_pCS;
+    CPDF_ColorSpace*	m_pCS; // Still keep m_pCS as some CPDF_ColorSpace (name object) are not managed as counted objects. Refer to CPDF_DocPageData::GetColorSpace.
 
+    CPDF_CountedColorSpace*	m_pCountedCS;
 
     CPDF_Function*		m_pFunctions[4];
 

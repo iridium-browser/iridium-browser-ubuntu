@@ -14,6 +14,7 @@
 #include "SkPixelRef.h"
 #include "SkRRect.h"
 #include "SkString.h"
+#include "SkTextBlob.h"
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -423,15 +424,25 @@ void SkDumpCanvas::onDrawTextOnPath(const void* text, size_t byteLength, const S
                str.c_str(), byteLength);
 }
 
+void SkDumpCanvas::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
+                                  const SkPaint& paint) {
+    SkString str;
+    toString(blob->bounds(), &str);
+    this->dump(kDrawText_Verb, &paint, "drawTextBlob(%p) [%s]", blob, str.c_str());
+    // FIXME: dump the actual blob content?
+}
+
 void SkDumpCanvas::onDrawPicture(const SkPicture* picture, const SkMatrix* matrix,
                                  const SkPaint* paint) {
-    this->dump(kDrawPicture_Verb, NULL, "drawPicture(%p) %d:%d", picture,
-               picture->width(), picture->height());
+    this->dump(kDrawPicture_Verb, NULL, "drawPicture(%p) %f:%f:%f:%f", picture,
+               picture->cullRect().fLeft, picture->cullRect().fTop,
+               picture->cullRect().fRight, picture->cullRect().fBottom);
     fNestLevel += 1;
     this->INHERITED::onDrawPicture(picture, matrix, paint);
     fNestLevel -= 1;
-    this->dump(kDrawPicture_Verb, NULL, "endPicture(%p) %d:%d", &picture,
-               picture->width(), picture->height());
+    this->dump(kDrawPicture_Verb, NULL, "endPicture(%p) %f:%f:%f:%f", &picture,
+               picture->cullRect().fLeft, picture->cullRect().fTop,
+               picture->cullRect().fRight, picture->cullRect().fBottom);
 }
 
 void SkDumpCanvas::drawVertices(VertexMode vmode, int vertexCount,

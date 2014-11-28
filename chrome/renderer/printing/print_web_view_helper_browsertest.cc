@@ -19,7 +19,7 @@
 #include "third_party/WebKit/public/web/WebView.h"
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "printing/image.h"
 
 using blink::WebFrame;
@@ -34,13 +34,14 @@ namespace {
 // A simple web page.
 const char kHelloWorldHTML[] = "<body><p>Hello World!</p></body>";
 
+#if !defined(OS_CHROMEOS)
+
 // A simple webpage with a button to print itself with.
 const char kPrintOnUserAction[] =
     "<body>"
     "  <button id=\"print\" onclick=\"window.print();\">Hello World!</button>"
     "</body>";
 
-#if !defined(OS_CHROMEOS)
 // HTML with 3 pages.
 const char kMultipageHTML[] =
   "<html><head><style>"
@@ -187,9 +188,20 @@ class PrintWebViewHelperTestBase : public ChromeRenderViewTest {
     }
 #endif  // defined(OS_CHROMEOS)
   }
+
+#if !defined(DISABLE_BASIC_PRINTING)
   void OnPrintPages() {
     PrintWebViewHelper::Get(view_)->OnPrintPages();
     ProcessPendingMessages();
+  }
+#endif  // !DISABLE_BASIC_PRINTING
+
+  void VerifyPreviewRequest(bool requested) {
+    const IPC::Message* print_msg =
+        render_thread_->sink().GetUniqueMessageMatching(
+            PrintHostMsg_SetupScriptedPrintPreview::ID);
+    bool did_print_msg = (NULL != print_msg);
+    ASSERT_EQ(requested, did_print_msg);
   }
 
   void OnPrintPreview(const base::DictionaryValue& dict) {
@@ -224,24 +236,8 @@ class PrintWebViewHelperTest : public PrintWebViewHelperTestBase {
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelperTest);
 };
 
-// Tests that printing pages work and sending and receiving messages through
-// that channel all works.
-TEST_F(PrintWebViewHelperTest, OnPrintPages) {
-  LoadHTML(kHelloWorldHTML);
-  OnPrintPages();
-
-  VerifyPageCount(1);
-  VerifyPagesPrinted(true);
-}
-
-// Duplicate of OnPrintPagesTest only using javascript to print.
-TEST_F(PrintWebViewHelperTest, PrintWithJavascript) {
-  PrintWithJavaScript();
-
-  VerifyPageCount(1);
-  VerifyPagesPrinted(true);
-}
-
+// This tests only for platforms without print preview.
+#if !defined(ENABLE_FULL_PRINTING)
 // Tests that the renderer blocks window.print() calls if they occur too
 // frequently.
 TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrinting) {
@@ -259,7 +255,7 @@ TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrinting) {
   VerifyPagesPrinted(false);
 
   // Unblock script initiated printing and verify printing works.
-  PrintWebViewHelper::Get(view_)->ResetScriptedPrintCount();
+  PrintWebViewHelper::Get(view_)->scripting_throttler_.Reset();
   chrome_render_thread_->printer()->ResetPrinter();
   PrintWithJavaScript();
   VerifyPageCount(1);
@@ -305,19 +301,28 @@ TEST_F(PrintWebViewHelperTest, AllowUserOriginatedPrinting) {
   VerifyPagesPrinted(true);
 }
 
-TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrintingFromPopup) {
-  PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
-  print_web_view_helper->SetScriptedPrintBlocked(true);
+// Duplicate of OnPrintPagesTest only using javascript to print.
+TEST_F(PrintWebViewHelperTest, PrintWithJavascript) {
   PrintWithJavaScript();
-  VerifyPagesPrinted(false);
 
-  print_web_view_helper->SetScriptedPrintBlocked(false);
-  PrintWithJavaScript();
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
 }
+#endif  // !ENABLE_FULL_PRINTING
 
-#if (defined(OS_WIN) && !WIN_PDF_METAFILE_FOR_PRINTING) || defined(OS_MACOSX)
+#if !defined(DISABLE_BASIC_PRINTING)
+// Tests that printing pages work and sending and receiving messages through
+// that channel all works.
+TEST_F(PrintWebViewHelperTest, OnPrintPages) {
+  LoadHTML(kHelloWorldHTML);
+  OnPrintPages();
+
+  VerifyPageCount(1);
+  VerifyPagesPrinted(true);
+}
+#endif  // !DISABLE_BASIC_PRINTING
+
+#if defined(OS_MACOSX) && !defined(DISABLE_BASIC_PRINTING)
 // TODO(estade): I don't think this test is worth porting to Linux. We will have
 // to rip out and replace most of the IPC code if we ever plan to improve
 // printing, and the comment below by sverrir suggests that it doesn't do much
@@ -330,6 +335,7 @@ TEST_F(PrintWebViewHelperTest, PrintWithIframe) {
       "  document.write(frames['sub1'].name);"
       "  frames['sub1'].document.write("
       "      '<p>Cras tempus ante eu felis semper luctus!</p>');"
+      "  frames['sub1'].document.close();"
       "</script></body></html>";
 
   LoadHTML(html);
@@ -358,7 +364,7 @@ TEST_F(PrintWebViewHelperTest, PrintWithIframe) {
   EXPECT_NE(0, image1.size().width());
   EXPECT_NE(0, image1.size().height());
 }
-#endif
+#endif  // OS_MACOSX && !DISABLE_BASIC_PRINTING
 
 // Tests if we can print a page and verify its results.
 // This test prints HTML pages into a pseudo printer and check their outputs,
@@ -404,7 +410,7 @@ const TestPageData kTestPages[] = {
 // hooking up Cairo to read a pdf stream, or accessing the cairo surface in the
 // metafile directly.
 // Same for printing via PDF on Windows.
-#if (defined(OS_WIN) && !WIN_PDF_METAFILE_FOR_PRINTING) || defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(DISABLE_BASIC_PRINTING)
 TEST_F(PrintWebViewHelperTest, PrintLayoutTest) {
   bool baseline = false;
 
@@ -457,7 +463,7 @@ TEST_F(PrintWebViewHelperTest, PrintLayoutTest) {
     }
   }
 }
-#endif
+#endif  // OS_MACOSX && !DISABLE_BASIC_PRINTING
 
 // These print preview tests do not work on Chrome OS yet.
 #if !defined(OS_CHROMEOS)
@@ -465,14 +471,6 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
  public:
   PrintWebViewHelperPreviewTest() {}
   virtual ~PrintWebViewHelperPreviewTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    // Append the print preview switch before creating the PrintWebViewHelper.
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kRendererPrintPreview);
-
-    ChromeRenderViewTest::SetUp();
-  }
 
  protected:
   void VerifyPrintPreviewCancelled(bool did_cancel) {
@@ -563,6 +561,40 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
 
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelperPreviewTest);
 };
+
+#if defined(ENABLE_FULL_PRINTING)
+TEST_F(PrintWebViewHelperPreviewTest, BlockScriptInitiatedPrinting) {
+  LoadHTML(kHelloWorldHTML);
+  PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
+  print_web_view_helper->SetScriptedPrintBlocked(true);
+  PrintWithJavaScript();
+  VerifyPreviewRequest(false);
+
+  print_web_view_helper->SetScriptedPrintBlocked(false);
+  PrintWithJavaScript();
+  VerifyPreviewRequest(true);
+}
+
+TEST_F(PrintWebViewHelperPreviewTest, PrintWithJavaScript) {
+  LoadHTML(kPrintOnUserAction);
+  gfx::Size new_size(200, 100);
+  Resize(new_size, gfx::Rect(), false);
+
+  gfx::Rect bounds = GetElementBounds("print");
+  EXPECT_FALSE(bounds.IsEmpty());
+  blink::WebMouseEvent mouse_event;
+  mouse_event.type = blink::WebInputEvent::MouseDown;
+  mouse_event.button = blink::WebMouseEvent::ButtonLeft;
+  mouse_event.x = bounds.CenterPoint().x();
+  mouse_event.y = bounds.CenterPoint().y();
+  mouse_event.clickCount = 1;
+  SendWebMouseEvent(mouse_event);
+  mouse_event.type = blink::WebInputEvent::MouseUp;
+  SendWebMouseEvent(mouse_event);
+
+  VerifyPreviewRequest(true);
+}
+#endif  // ENABLE_FULL_PRINTING
 
 // Tests that print preview work and sending and receiving messages through
 // that channel all works.
@@ -963,44 +995,5 @@ TEST_F(PrintWebViewHelperPreviewTest,
 }
 
 #endif  // !defined(OS_CHROMEOS)
-
-class PrintWebViewHelperKioskTest : public PrintWebViewHelperTestBase {
- public:
-  PrintWebViewHelperKioskTest() {}
-  virtual ~PrintWebViewHelperKioskTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    // Append the throttling disable switch before creating the
-    // PrintWebViewHelper.
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisableScriptedPrintThrottling);
-
-    ChromeRenderViewTest::SetUp();
-  }
-
- protected:
-  DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelperKioskTest);
-};
-
-// Tests that the switch overrides the throttling that blocks window.print()
-// calls if they occur too frequently. Compare with
-// PrintWebViewHelperTest.BlockScriptInitiatedPrinting above.
-TEST_F(PrintWebViewHelperKioskTest, DontBlockScriptInitiatedPrinting) {
-  // Pretend user will cancel printing.
-  chrome_render_thread_->set_print_dialog_user_response(false);
-  // Try to print with window.print() a few times.
-  PrintWithJavaScript();
-  chrome_render_thread_->printer()->ResetPrinter();
-  PrintWithJavaScript();
-  chrome_render_thread_->printer()->ResetPrinter();
-  PrintWithJavaScript();
-  chrome_render_thread_->printer()->ResetPrinter();
-  VerifyPagesPrinted(false);
-
-  // Pretend user will print, should not be throttled.
-  chrome_render_thread_->set_print_dialog_user_response(true);
-  PrintWithJavaScript();
-  VerifyPagesPrinted(true);
-}
 
 }  // namespace printing

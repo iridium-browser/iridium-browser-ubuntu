@@ -21,6 +21,7 @@ static_library("common") {
 }
 
 source_set("unit_tests") {
+  testonly = true
   sources = [
     "data_reduction_proxy_headers_unittest.cc",
   ]

@@ -11,10 +11,6 @@
 #include "build/build_config.h"
 #include "device/hid/hid_collection_info.h"
 
-#if defined(OS_MACOSX)
-#include <IOKit/hid/IOHIDDevice.h>
-#endif
-
 namespace device {
 
 enum HidBusType {
@@ -22,13 +18,8 @@ enum HidBusType {
   kHIDBusTypeBluetooth = 1,
 };
 
-#if defined(OS_MACOSX)
-typedef IOHIDDeviceRef HidDeviceId;
-const HidDeviceId kInvalidHidDeviceId = NULL;
-#else
 typedef std::string HidDeviceId;
 extern const char kInvalidHidDeviceId[];
-#endif
 
 struct HidDeviceInfo {
   HidDeviceInfo();
@@ -45,9 +36,9 @@ struct HidDeviceInfo {
   // Top-Level Collections information.
   std::vector<HidCollectionInfo> collections;
   bool has_report_id;
-  int max_input_report_size;
-  int max_output_report_size;
-  int max_feature_report_size;
+  uint16_t max_input_report_size;
+  uint16_t max_output_report_size;
+  uint16_t max_feature_report_size;
 };
 
 }  // namespace device

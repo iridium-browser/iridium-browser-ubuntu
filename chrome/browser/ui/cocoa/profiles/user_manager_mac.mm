@@ -4,48 +4,32 @@
 
 #include "chrome/browser/ui/cocoa/profiles/user_manager_mac.h"
 
+#include "base/mac/foundation_util.h"
 #include "chrome/app/chrome_command_ids.h"
+#import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #include "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
+#include "chrome/browser/ui/user_manager.h"
+#include "chrome/grit/chromium_strings.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
-// Default window size. Taken from the views implementation in
-// chrome/browser/ui/views/user_manager_view.cc.
-// TODO(noms): Figure out if this size can be computed dynamically or adjusted
-// for smaller screens.
-const int kWindowWidth = 900;
-const int kWindowHeight = 700;
 
-namespace chrome {
-
-// Declared in browser_dialogs.h so others don't have to depend on this header.
-void ShowUserManager(const base::FilePath& profile_path_to_focus) {
-  UserManagerMac::Show(
-      profile_path_to_focus, profiles::USER_MANAGER_NO_TUTORIAL);
-}
-
-void ShowUserManagerWithTutorial(profiles::UserManagerTutorialMode tutorial) {
-  UserManagerMac::Show(base::FilePath(), tutorial);
-}
-
-void HideUserManager() {
-  UserManagerMac::Hide();
-}
-
-}  // namespace chrome
+// An open User Manager window. There can only be one open at a time. This
+// is reset to NULL when the window is closed.
+UserManagerMac* instance_ = NULL;  // Weak.
 
 // Custom WebContentsDelegate that allows handling of hotkeys.
 class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
  public:
-  UserManagerWebContentsDelegate(ChromeEventProcessingWindow* window)
-    : window_(window) {}
+  UserManagerWebContentsDelegate() {}
 
   // WebContentsDelegate implementation. Forwards all unhandled keyboard events
   // to the current window.
@@ -55,19 +39,21 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
     if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
       return;
 
-    int commandId = [BrowserWindowUtils getCommandId:event];
+    // -getCommandId returns -1 if the event isn't a chrome accelerator.
+    int chromeCommandId = [BrowserWindowUtils getCommandId:event];
 
-    // Since the User Manager is a "top level" window, only handle close events.
-    if (commandId == IDC_CLOSE_WINDOW || commandId == IDC_EXIT) {
-      // Not invoking +[BrowserWindowUtils handleKeyboardEvent here], since the
-      // window in question is a ConstrainedWindowCustomWindow, not a
-      // BrowserWindow.
-      [window_ redispatchKeyEvent:event.os_event];
+    // Check for Cmd+A and Cmd+V events that could come from a password field.
+    bool isTextEditingCommand =
+        (event.modifiers & blink::WebInputEvent::MetaKey) &&
+        (event.windowsKeyCode == ui::VKEY_A ||
+         event.windowsKeyCode == ui::VKEY_V);
+
+    // Only handle close window Chrome accelerators and text editing ones.
+    if (chromeCommandId == IDC_CLOSE_WINDOW || chromeCommandId == IDC_EXIT ||
+        isTextEditingCommand) {
+      [[NSApp mainMenu] performKeyEquivalent:event.os_event];
     }
   }
-
- private:
-  ChromeEventProcessingWindow* window_;  // Used to redispatch key events.
 };
 
 // Window controller for the User Manager view.
@@ -97,9 +83,10 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
   CGFloat screenHeight = [mainScreen frame].size.height;
   CGFloat screenWidth = [mainScreen frame].size.width;
 
-  NSRect contentRect = NSMakeRect((screenWidth - kWindowWidth) / 2,
-                                  (screenHeight - kWindowHeight) / 2,
-                                  kWindowWidth, kWindowHeight);
+  NSRect contentRect =
+      NSMakeRect((screenWidth - UserManager::kWindowWidth) / 2,
+                 (screenHeight - UserManager::kWindowHeight) / 2,
+                 UserManager::kWindowWidth, UserManager::kWindowHeight);
   ChromeEventProcessingWindow* window = [[ChromeEventProcessingWindow alloc]
       initWithContentRect:contentRect
                 styleMask:NSTitledWindowMask |
@@ -109,7 +96,8 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
                     defer:NO
                    screen:mainScreen];
   [window setTitle:l10n_util::GetNSString(IDS_PRODUCT_NAME)];
-  [window setMinSize:NSMakeSize(kWindowWidth, kWindowHeight)];
+  [window setMinSize:NSMakeSize(UserManager::kWindowWidth,
+                                UserManager::kWindowHeight)];
 
   if ((self = [super initWithWindow:window])) {
     userManagerObserver_ = userManagerObserver;
@@ -118,7 +106,7 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
     webContents_.reset(content::WebContents::Create(
         content::WebContents::CreateParams(profile)));
     window.contentView = webContents_->GetNativeView();
-    webContentsDelegate_.reset(new UserManagerWebContentsDelegate(window));
+    webContentsDelegate_.reset(new UserManagerWebContentsDelegate());
     webContents_->SetDelegate(webContentsDelegate_.get());
     DCHECK(window.contentView);
 
@@ -138,12 +126,22 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
 
 - (void)showURL:(const GURL&)url {
   webContents_->GetController().LoadURL(url, content::Referrer(),
-                                        content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                        ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                         std::string());
   [self show];
 }
 
 - (void)show {
+  // Because the User Manager isn't a BrowserWindowController, activating it
+  // will not trigger a -windowChangedToProfile and update the menu bar.
+  // This is only important if the active profile is Guest, which may have
+  // happened after locking a profile.
+  Profile* guestProfile = profiles::SetActiveProfileToGuestIfLocked();
+  if (guestProfile && guestProfile->IsGuestSession()) {
+    AppController* controller =
+        base::mac::ObjCCast<AppController>([NSApp delegate]);
+    [controller windowChangedToProfile:guestProfile];
+  }
   [[self window] makeKeyAndOrderFront:self];
 }
 
@@ -163,8 +161,35 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
 
 @end
 
-// static
-UserManagerMac* UserManagerMac::instance_ = NULL;
+
+void UserManager::Show(
+    const base::FilePath& profile_path_to_focus,
+    profiles::UserManagerTutorialMode tutorial_mode,
+    profiles::UserManagerProfileSelected profile_open_action) {
+  ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::OPEN_USER_MANAGER);
+  if (instance_) {
+    // If there's a user manager window open already, just activate it.
+    [instance_->window_controller() show];
+    return;
+  }
+
+  // Create the guest profile, if necessary, and open the User Manager
+  // from the guest profile.
+  profiles::CreateGuestProfileForUserManager(
+      profile_path_to_focus,
+      tutorial_mode,
+      profile_open_action,
+      base::Bind(&UserManagerMac::OnGuestProfileCreated));
+}
+
+void UserManager::Hide() {
+  if (instance_)
+    [instance_->window_controller() close];
+}
+
+bool UserManager::IsShowing() {
+  return instance_ ? [instance_->window_controller() isVisible]: false;
+}
 
 UserManagerMac::UserManagerMac(Profile* profile) {
   window_controller_.reset([[UserManagerWindowController alloc]
@@ -175,38 +200,11 @@ UserManagerMac::~UserManagerMac() {
 }
 
 // static
-void UserManagerMac::Show(const base::FilePath& profile_path_to_focus,
-                          profiles::UserManagerTutorialMode tutorial_mode) {
-  if (instance_) {
-    // If there's a user manager window open already, just activate it.
-    [instance_->window_controller_ show];
-    return;
-  }
-
-  // Create the guest profile, if necessary, and open the User Manager
-  // from the guest profile.
-  profiles::CreateGuestProfileForUserManager(
-      profile_path_to_focus,
-      tutorial_mode,
-      base::Bind(&UserManagerMac::OnGuestProfileCreated));
-}
-
-// static
-void UserManagerMac::Hide() {
-  if (instance_)
-    [instance_->window_controller_ close];
-}
-
-// static
-bool UserManagerMac::IsShowing() {
-  return instance_ ? [instance_->window_controller_ isVisible]: false;
-}
-
-// static
 void UserManagerMac::OnGuestProfileCreated(Profile* guest_profile,
                                            const std::string& url) {
+  DCHECK(!instance_);
   instance_ = new UserManagerMac(guest_profile);
-  [instance_->window_controller_ showURL:GURL(url)];
+  [instance_->window_controller() showURL:GURL(url)];
 }
 
 void UserManagerMac::WindowWasClosed() {

@@ -13,8 +13,6 @@
 #include "webrtc/modules/audio_coding/codecs/tools/audio_codec_speed_test.h"
 
 using ::std::string;
-using ::std::tr1::make_tuple;
-using ::testing::ValuesIn;
 
 namespace webrtc {
 
@@ -73,7 +71,7 @@ float IsacSpeedTest::EncodeABlock(int16_t* in_data, uint8_t* bit_stream,
   size_t pointer = 0;
   for (int idx = 0; idx < subblocks; idx++, pointer += subblock_length) {
     value = WebRtcIsacfix_Encode(ISACFIX_main_inst_, &in_data[pointer],
-                                 reinterpret_cast<int16_t*>(bit_stream));
+                                 bit_stream);
   }
   clocks = clock() - clocks;
   EXPECT_GT(value, 0);
@@ -101,10 +99,10 @@ TEST_P(IsacSpeedTest, IsacEncodeDecodeTest) {
 }
 
 const coding_param param_set[] =
-    {make_tuple(1, 32000, string("audio_coding/speech_mono_16kHz"),
-                string("pcm"), true)};
+    {::std::tr1::make_tuple(1, 32000, string("audio_coding/speech_mono_16kHz"),
+                            string("pcm"), true)};
 
 INSTANTIATE_TEST_CASE_P(AllTest, IsacSpeedTest,
-                        ValuesIn(param_set));
+                        ::testing::ValuesIn(param_set));
 
 }  // namespace webrtc

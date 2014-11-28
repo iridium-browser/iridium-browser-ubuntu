@@ -90,9 +90,8 @@ DataSourceSender::~DataSourceSender() {
 
 void DataSourceSender::Init(mojo::ScopedDataPipeProducerHandle handle) {
   // This should never occur. |handle_| is only valid and |pending_send_| is
-  // only set after Init is called. Receiving an invalid |handle| from the
-  // client is also unrecoverable.
-  if (pending_send_ || handle_.is_valid() || !handle.is_valid() || shut_down_) {
+  // only set after Init is called.
+  if (pending_send_ || handle_.is_valid() || shut_down_) {
     DispatchFatalError();
     return;
   }
@@ -214,7 +213,7 @@ DataSourceSender::PendingSend::Buffer::Buffer(
 }
 
 DataSourceSender::PendingSend::Buffer::~Buffer() {
-  if (sender_)
+  if (sender_.get())
     pending_send_->Done(0);
 }
 
@@ -227,7 +226,7 @@ uint32_t DataSourceSender::PendingSend::Buffer::GetSize() {
 }
 
 void DataSourceSender::PendingSend::Buffer::Done(uint32_t bytes_written) {
-  DCHECK(sender_);
+  DCHECK(sender_.get());
   pending_send_->Done(bytes_written);
   sender_ = NULL;
   pending_send_ = NULL;
@@ -238,7 +237,7 @@ void DataSourceSender::PendingSend::Buffer::Done(uint32_t bytes_written) {
 void DataSourceSender::PendingSend::Buffer::DoneWithError(
     uint32_t bytes_written,
     int32_t error) {
-  DCHECK(sender_);
+  DCHECK(sender_.get());
   pending_send_->DoneWithError(bytes_written, error);
   sender_ = NULL;
   pending_send_ = NULL;

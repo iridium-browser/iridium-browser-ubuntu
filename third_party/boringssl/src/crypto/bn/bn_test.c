@@ -71,6 +71,7 @@
 
 #include <openssl/bio.h>
 #include <openssl/bn.h>
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/mem.h>
 
@@ -99,7 +100,7 @@ int test_mod_exp(BIO *bp, BN_CTX *ctx);
 int test_mod_exp_mont_consttime(BIO *bp, BN_CTX *ctx);
 int test_exp(BIO *bp, BN_CTX *ctx);
 int test_mod_sqrt(BIO *bp, BN_CTX *ctx);
-static int test_exp_mod_zero();
+static int test_exp_mod_zero(void);
 int test_small_prime(BIO *bp,BN_CTX *ctx);
 int test_mod_exp_mont5(BIO *bp, BN_CTX *ctx);
 int test_sqrt(BIO *bp, BN_CTX *ctx);
@@ -134,6 +135,8 @@ int main(int argc, char *argv[]) {
   BN_CTX *ctx;
   BIO *out = NULL;
   char *outfile = NULL;
+
+  CRYPTO_library_init();
 
   results = 0;
 
@@ -1129,7 +1132,7 @@ int test_exp(BIO *bp, BN_CTX *ctx) {
 }
 
 /* test_exp_mod_zero tests that x**0 mod 1 == 0. */
-static int test_exp_mod_zero() {
+static int test_exp_mod_zero(void) {
   BIGNUM a, p, m;
   BIGNUM r;
   BN_CTX *ctx = BN_CTX_new();

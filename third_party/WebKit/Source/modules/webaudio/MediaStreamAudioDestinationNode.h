@@ -38,8 +38,9 @@ namespace blink {
 class AudioContext;
 
 class MediaStreamAudioDestinationNode FINAL : public AudioBasicInspectorNode {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<MediaStreamAudioDestinationNode> create(AudioContext*, size_t numberOfChannels);
+    static MediaStreamAudioDestinationNode* create(AudioContext*, size_t numberOfChannels);
     virtual ~MediaStreamAudioDestinationNode();
     virtual void trace(Visitor*) OVERRIDE;
 
@@ -58,7 +59,7 @@ private:
     // As an audio source, we will never propagate silence.
     virtual bool propagatesSilence() const OVERRIDE { return false; }
 
-    PersistentWillBeMember<MediaStream> m_stream;
+    Member<MediaStream> m_stream;
     RefPtr<MediaStreamSource> m_source;
     RefPtr<AudioBus> m_mixBus;
 };

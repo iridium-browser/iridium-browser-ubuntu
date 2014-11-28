@@ -100,6 +100,9 @@
 #   documentation should state that the policy supports dynamic refresh or not.
 #   Supporting dynamic refresh means that Chrome respects the changes to the
 #   policy immediately, without the need for restart.
+#   'can_be_mandatory' can be set to False to exclude that policy in the
+#   mandatory policies template. This only affects the template generation;
+#   The default is True.
 #   'can_be_recommended' can be set to True to include that policy in the
 #   recommended policies templates. This only affects the template generation;
 #   all policies can be at the recommended level. The default is False.
@@ -120,7 +123,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 275
+#   For your editing convenience: highest ID currently used: 277
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -134,6 +137,10 @@
 #   that this policy is only supported as a device-level Cloud Policy.
 #   In that case no entry in the UserPolicy Protobuf is generated and
 #   it is assumed that it will be added to the DevicePolicy Protobuf manually.
+#
+# Enterprise defaults:
+#   An optional key 'default_for_enterprise_users' contains value that's set for
+#   enterprise users as a default.
 #
   'policy_definitions': [
     {
@@ -744,7 +751,7 @@
       'name': 'PrintingEnabled',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:8-', 'chrome_os:11-'],
+      'supported_on': ['chrome.*:8-', 'chrome_os:11-', 'android:39-'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -789,11 +796,11 @@
       'example_value': False,
       'id': 162,
       'caption': '''Force SafeSearch''',
-      'desc': '''Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting.
+      'desc': '''Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting. This setting also forces Safety Mode on YouTube.
 
-      If you enable this setting, SafeSearch in Google Search is always active.
+      If you enable this setting, SafeSearch in Google Search and YouTube is always active.
 
-      If you disable this setting or do not set a value, SafeSearch in Google Search is not enforced.''',
+      If you disable this setting or do not set a value, SafeSearch in Google Search and YouTube is not enforced.''',
     },
     {
       'name': 'SafeBrowsingEnabled',
@@ -2739,8 +2746,9 @@
             'dynamic_refresh': False,
             'per_profile': True,
             'can_be_recommended': True,
+            'can_be_mandatory' : False,
           },
-          'example_value': [{'protocol': 'mailto', 'url': 'https://mail.google.com/mail/?extsrc=mailto&url=%s', 'default': 'true'}],
+          'example_value': [{'protocol': 'mailto', 'url': 'https://mail.google.com/mail/?extsrc=mailto&url=%s', 'default': True}],
           'id': 268,
           'caption': '''Register protocol handlers''',
           'desc': '''Allows you to register a list of protocol handlers. This can only be a recommended policy. The property |protocol| should be set to the scheme such as 'mailto' and the property |url| should be set to the URL pattern of the application that handles the scheme. The pattern can include a '%s', which if present will be replaced by the handled URL.
@@ -3143,6 +3151,7 @@
         'per_profile': True,
       },
       'example_value': 'unrestricted',
+      'default_for_enterprise_users': 'primary-only',
       'id': 244,
       'caption': '''Control the user behavior in a multiprofile session''',
       'desc': '''Control the user behavior in a multiprofile session on <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices.
@@ -3468,6 +3477,26 @@
       'label': '''Import saved passwords from default browser on first run''',
     },
     {
+      'name': 'ImportAutofillFormData',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:39-'],
+      'features': {
+        'can_be_recommended': True,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 277,
+      'caption': '''Import autofill form data from default browser on first run''',
+      'desc': '''This policy forces the autofill form data to be imported from the previous default browser if enabled. If enabled, this policy also affects the import dialog.
+
+      If disabled, the autofill form data is not imported.
+
+      If it is not set, the user may be asked whether to import, or importing may happen automatically.''',
+      'label': '''Import autofill form data from default browser on first run''',
+    },
+    {
       'name': 'MaxConnectionsPerProxy',
       'type': 'int',
       'schema': { 'type': 'integer' },
@@ -3692,13 +3721,14 @@
       'type': 'main',
       'schema': { 'type': 'boolean' },
       'supported_on': ['chrome.*:18-'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': False,
         'per_profile': True,
       },
       'example_value': False,
       'id': 117,
-      'caption': '''Disable Print Preview''',
+      'caption': '''Disable Print Preview (deprecated)''',
       'desc': '''Show the system print dialog instead of print preview.
 
       When this setting is enabled, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will open the system print dialog instead of the built-in print preview when a user requests a page to be printed.
@@ -6415,6 +6445,8 @@
 
       The policy is a list of bookmarks, and each bookmark is a dictionary containing the bookmark "name" and target "url".
 
+      A bookmark can also be configured as a folder. In that case, define the folder "name" but don't define an "url"; instead, define the folder contents as another list of bookmarks under the "children" key.
+
       These bookmarks are placed in a Managed bookmarks folder inside the Mobile bookmarks. These bookmarks can't be modified by the user.
 
       When this policy is set then the Managed bookmarks are the default folder opened when the bookmarks view is opened in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
@@ -6599,13 +6631,14 @@
         'per_profile': True,
       },
       'example_value': True,
+      'default_for_enterprise_users': False,
       'id': 272,
-      'caption': '''Allows EasyUnlock to be used''',
-      'desc': '''Allows EasyUnlock to be used on <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices.
+      'caption': '''Allows Smart Lock to be used''',
+      'desc': '''Allows Smart Lock to be used on <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices.
 
-      If you enable this setting, users will be allowed to use EasyUnlock if the requirements for the feature are satified.
+      If you enable this setting, users will be allowed to use Smart Lock if the requirements for the feature are satisfied.
 
-      If you disable this setting, users will not be allowed to use EasyUnlock.
+      If you disable this setting, users will not be allowed to use Smart Lock.
 
       If this policy is left not set, the default is not allowed for enterprise-managed users and allowed for non-managed users.''',
     },
@@ -6657,6 +6690,132 @@
       'desc': '''If this policy is set to true or not configured, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will enable guest logins. Guest logins are <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> profiles where all windows are in incognito mode.
 
       If this policy is set to false, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will not allow guest profiles to be started.''',
+    },
+    {
+      'name': 'BrowserAddPersonEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:39-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': True,
+      'id': 276,
+      'caption': '''Enable add person in profile manager''',
+      'desc': '''If this policy is set to true or not configured, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will allow Add Person from the user manager.
+
+      If this policy is set to false, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will not allow creation of new profiles from the profile manager.''',
+    },
+    {
+      'name': 'SSLVersionMin',
+      'type': 'string-enum',
+      'schema': {
+        'type': 'string',
+        'enum': [
+          'ssl3',
+          'tls1',
+          'tls1.1',
+          'tls1.2',
+        ],
+      },
+      'items': [
+        {
+          'name': 'SSLv3',
+          'value': 'ssl3',
+          'caption': 'SSL 3.0',
+        },
+        {
+          'name': 'TLSv1',
+          'value': 'tls1',
+          'caption': 'TLS 1.0',
+        },
+        {
+          'name': 'TLSv1.1',
+          'value': 'tls1.1',
+          'caption': 'TLS 1.1',
+        },
+        {
+          'name': 'TLSv1.2',
+          'value': 'tls1.2',
+          'caption': 'TLS 1.2',
+        },
+      ],
+      'supported_on': [
+        'chrome.*:39-',
+        'chrome_os:39-',
+        'android:39-',
+        'ios:39-',
+      ],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': 'ssl3',
+      'id': 279,
+      'caption': '''Minimum SSL version enabled''',
+      'desc': '''If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use a default minimum version, which is SSLv3 in Chrome 39 but may be TLS 1.0 in Chrome 40.
+
+      Otherwise it may be set to one of the following values: "sslv3", "tls1", "tls1.1" or "tls1.2". When set, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will not use SSL/TLS versions less than the specified version. An unrecognized value will be ignored.
+
+      Note that, despite the number, "sslv3" is an earier version than "tls1".''',
+    },
+    {
+      'name': 'SSLVersionFallbackMin',
+      'type': 'string-enum',
+      'schema': {
+        'type': 'string',
+        'enum': [
+          'ssl3',
+          'tls1',
+          'tls1.1',
+          'tls1.2',
+        ],
+      },
+      'items': [
+        {
+          'name': 'SSLv3',
+          'value': 'ssl3',
+          'caption': 'SSL 3.0',
+        },
+        {
+          'name': 'TLSv1',
+          'value': 'tls1',
+          'caption': 'TLS 1.0',
+        },
+        {
+          'name': 'TLSv1.1',
+          'value': 'tls1.1',
+          'caption': 'TLS 1.1',
+        },
+        {
+          'name': 'TLSv1.2',
+          'value': 'tls1.2',
+          'caption': 'TLS 1.2',
+        },
+      ],
+      'supported_on': [
+        'chrome.*:39-',
+        'chrome_os:39-',
+        'android:39-',
+        'ios:39-',
+      ],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': 'tls1',
+      'id': 280,
+      'caption': '''Minimum SSL version to fallback to''',
+      'desc': '''When an SSL/TLS handshake fails, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retry the connection with a lesser version of SSL/TLS in order to work around bugs in HTTPS servers. This setting configures the version at which this fallback process will stop. If a server performs version negotiation correctly then this setting doesn't apply and SSLVersionMin controls.
+
+      If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use a default minimum version, which was SSLv3 in Chrome 38 but is TLS 1.0 in Chrome 39.
+
+      Otherwise it may be set to one of the following values: "sslv3", "tls1", "tls1.1" or "tls1.2". A setting of "tls1" protects against attacks on SSLv3 but is already the default. A more likely situation is that compatibility with a buggy server must be maintained and thus this needs to be set to "sslv3". That potentially opens up all connections to SSLv3 attacks since a network attacker can induce fallbacks. Thus this is a stopgap measure and the server should be rapidly fixed.
+
+      A setting of "tls1.2" disables all fallback but this may have a significant compatibility impact.
+
+      Note that, despite the number, "sslv3" is an earier version than "tls1".''',
     },
   ],
   'messages': {
@@ -6759,6 +6918,10 @@
       'desc': '''The name of the feature that indicates for a given policy that it can be recommended, instead of mandatory''',
       'text': '''Can Be Recommended'''
     },
+    'doc_feature_can_be_mandatory': {
+      'desc': '''The name of the feature that indicates for a given policy that it can be mandatory, instead of recommended''',
+      'text': '''Can Be Mandatory'''
+    },
     'doc_feature_per_profile': {
       'desc': '''The name of the feature that indicates whether a policy is applicable to browser Profiles individually or whether it affects the entire browser.''',
       'text': '''Per Profile'''
@@ -6770,6 +6933,10 @@
     'doc_recommended': {
       'desc': '''Text appended in parentheses next to the policies top-level container to indicate that those policies are of the Recommended level''',
       'text': 'Default Settings (users can override)',
+    },
+    'doc_complex_policies_on_windows': {
+      'desc': '''Text pointing the user to a help article for complex policies on Windows''',
+      'text': '''encoded as a JSON string, for details see <ph name="COMPLEX_POLICIES_URL">http://www.chromium.org/administrators/complex-policies-on-windows<ex>http://www.chromium.org/administrators/complex-policies-on-windows</ex></ph>''',
     },
   },
   'placeholders': [],

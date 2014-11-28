@@ -15,12 +15,19 @@
 #include "extensions/shell/browser/shell_content_browser_client.h"
 #include "extensions/shell/common/shell_content_client.h"
 #include "extensions/shell/renderer/shell_content_renderer_client.h"
-#include "extensions/shell/renderer/shell_renderer_main_delegate.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_paths.h"
 #endif
+
+#if !defined(DISABLE_NACL)
+#include "components/nacl/common/nacl_switches.h"
+#if defined(OS_LINUX)
+#include "components/nacl/common/nacl_paths.h"
+#include "components/nacl/zygote/nacl_fork_delegate_linux.h"
+#endif  // OS_LINUX
+#endif  // !DISABLE_NACL
 
 namespace {
 
@@ -48,11 +55,14 @@ ShellMainDelegate::~ShellMainDelegate() {
 
 bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
   InitLogging();
-  content_client_.reset(new ShellContentClient);
+  content_client_.reset(CreateContentClient());
   SetContentClient(content_client_.get());
 
 #if defined(OS_CHROMEOS)
   chromeos::RegisterPathProvider();
+#endif
+#if !defined(DISABLE_NACL) && defined(OS_LINUX)
+  nacl::RegisterPathProvider();
 #endif
   extensions::RegisterPathProvider();
   return false;
@@ -71,21 +81,33 @@ content::ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
   return browser_client_.get();
 }
 
+content::ContentRendererClient*
+ShellMainDelegate::CreateContentRendererClient() {
+  renderer_client_.reset(CreateShellContentRendererClient());
+  return renderer_client_.get();
+}
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+void ShellMainDelegate::ZygoteStarting(
+    ScopedVector<content::ZygoteForkDelegate>* delegates) {
+#if !defined(DISABLE_NACL)
+  nacl::AddNaClZygoteForkDelegates(delegates);
+#endif  // DISABLE_NACL
+}
+#endif  // OS_POSIX && !OS_MACOSX && !OS_ANDROID
+
+content::ContentClient* ShellMainDelegate::CreateContentClient() {
+  return new ShellContentClient();
+}
+
 content::ContentBrowserClient*
 ShellMainDelegate::CreateShellContentBrowserClient() {
   return new ShellContentBrowserClient(new DefaultShellBrowserMainDelegate());
 }
 
 content::ContentRendererClient*
-ShellMainDelegate::CreateContentRendererClient() {
-  renderer_client_.reset(
-      new ShellContentRendererClient(CreateShellRendererMainDelegate()));
-  return renderer_client_.get();
-}
-
-scoped_ptr<ShellRendererMainDelegate>
-ShellMainDelegate::CreateShellRendererMainDelegate() {
-  return scoped_ptr<ShellRendererMainDelegate>();
+ShellMainDelegate::CreateShellContentRendererClient() {
+  return new ShellContentRendererClient();
 }
 
 void ShellMainDelegate::InitializeResourceBundle() {
@@ -104,6 +126,9 @@ bool ShellMainDelegate::ProcessNeedsResourceBundle(
   return process_type.empty() ||
          process_type == switches::kZygoteProcess ||
          process_type == switches::kRendererProcess ||
+#if !defined(DISABLE_NACL)
+         process_type == switches::kNaClLoaderProcess ||
+#endif
          process_type == switches::kUtilityProcess;
 }
 

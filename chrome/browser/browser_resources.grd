@@ -76,9 +76,12 @@
         <structure name="IDR_OOBE_ENROLLMENT_JS" file="resources\chromeos\login\oobe_screen_oauth_enrollment.js" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_KEYBOARD_UTILS_JS" file="resources\chromeos\keyboard\keyboard_utils.js" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_NETWORK_CONFIG_JS" file="resources\chromeos\network\network_config.js" flattenhtml="true" type="chrome_html" />
+        <!-- TODO(dzhioev): move polymer to chrome://resources when
+             http://crbug.com/418199 is fixed. -->
+        <part file="polymer_resources.grdp" />
       </if>
       <structure name="IDR_READER_OUT_OF_DATE_HTML" file="resources\reader_out_of_date.html" flattenhtml="true" type="chrome_html" />
-      <structure name="IRD_SSL_INTERSTITIAL_V2_HTML" file="resources\ssl\interstitial_v2.html" flattenhtml="true" type="chrome_html" />
+      <structure name="IRD_SECURITY_INTERSTITIAL_HTML" file="resources\security_warnings\interstitial_v2.html" flattenhtml="true" type="chrome_html" />
     </structures>
     <includes>
       <if expr="is_win">
@@ -115,7 +118,8 @@
         <include name="IDR_CHROME_APP_MANIFEST" file="resources\chrome_app\manifest.json" type="BINDATA" />
       </if>
       <if expr="is_android">
-        <include name="IDR_CONTEXTUAL_SEARCH_PROMO_JS" file="resources\contextual_search\promo.js" type="BINDATA" />
+        <include name="IDR_CONTEXTUAL_SEARCH_PROMO_JS" file="resources\contextual_search\promo.js" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_CONTEXTUAL_SEARCH_PROMO_HEADER_SVG" file="resources\contextual_search\header.svg" type="BINDATA" />
       </if>
       <if expr="enable_printing">
         <include name="IDR_CLOUDPRINT_MANIFEST" file="resources\cloud_print_app\manifest.json" type="BINDATA" />
@@ -156,6 +160,7 @@
       </if>
       <include name="IDR_HOTWORD_HELPER_MANIFEST" file="resources\hotword_helper\manifest.json" type="BINDATA" />
       <include name="IDR_HOTWORD_MANIFEST" file="resources\hotword\manifest.json" type="BINDATA" />
+      <include name="IDR_HOTWORD_AUDIO_VERIFICATION_MANIFEST" file="resources\hotword_audio_verification\manifest.json" type="BINDATA" />
       <if expr="not is_android">
         <include name="IDR_HELP_JS" file="resources\help\help.js" flattenhtml="true" type="BINDATA" />
         <include name="IDR_HELP_PAGE_JS" file="resources\help\help_page.js" flattenhtml="true" type="BINDATA" />
@@ -177,13 +182,6 @@
       <include name="IDR_NET_EXPORT_HTML" file="resources\net_export\net_export.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NET_EXPORT_JS" file="resources\net_export\net_export.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST" file="resources\network_speech_synthesis\manifest.json" type="BINDATA" />
-      <if expr="not is_android">
-        <include name="IDR_PERFORMANCE_MONITOR_CHART_CSS" file="resources\performance_monitor\chart.css" flattenhtml="true" type="BINDATA" />
-        <include name="IDR_PERFORMANCE_MONITOR_CHART_JS" file="resources\performance_monitor\chart.js" type="BINDATA" />
-        <include name="IDR_PERFORMANCE_MONITOR_HTML" file="resources\performance_monitor\chart.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-        <include name="IDR_PERFORMANCE_MONITOR_JQUERY_FLOT_JS" file="..\..\third_party\flot\jquery.flot.min.js" type="BINDATA" />
-        <include name="IDR_PERFORMANCE_MONITOR_JQUERY_JS" file="..\..\third_party\flot\jquery.min.js" type="BINDATA" />
-      </if>
       <include name="IDR_PREDICTORS_HTML" file="resources\predictors\predictors.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_PREDICTORS_JS" file="resources\predictors\predictors.js" flattenhtml="true" type="BINDATA" />
       <if expr="not is_android">
@@ -360,7 +358,6 @@
         <include name="IDR_GENIUS_APP_MANIFEST" file="resources\chromeos\genius_app\manifest.json" type="BINDATA" />
         <include name="IDR_HELP_MANIFEST" file="resources\help_app\manifest.json" type="BINDATA" />
         <include name="IDR_QUICKOFFICE_MANIFEST" file="resources\chromeos\quickoffice\manifest.json" type="BINDATA" />
-        <include name="IDR_LEDGER_PROXY_MANIFEST" file="extensions\api\ledger\ledger_proxy\manifest.json" type="BINDATA" />
       </if>
       <if expr="chromeos">
         <include name="IDR_SALSA_CSS" file="resources\chromeos\salsa.css" type="BINDATA" />
@@ -397,6 +394,10 @@
       </if>
       <if expr="_google_chrome">
         <include name="IDR_PREF_HASH_SEED_BIN" file="resources\settings_internal\pref_hash_seed.bin" type="BINDATA" />
+        <include name="IDR_AUTOMATIC_PROFILE_RESET_RULES" file="internal\resources\profile_reset\automatic_profile_reset_rules.dat" type="BINDATA" />
+        <include name="IDR_AUTOMATIC_PROFILE_RESET_RULES_DRY" file="internal\resources\profile_reset\automatic_profile_reset_rules_dry.dat" type="BINDATA" />
+        <include name="IDR_AUTOMATIC_PROFILE_RESET_HASH_SEED" file="internal\resources\profile_reset\automatic_profile_reset_rules.seed" type="BINDATA" />
+        <include name="IDR_AUTOMATIC_PROFILE_RESET_HASH_SEED_DRY" file="internal\resources\profile_reset\automatic_profile_reset_rules_dry.seed" type="BINDATA" />
         <include name="IDR_ADDITIONAL_MODULE_IDS" file="${additional_modules_list_file}" use_base_dir="false" type="BINDATA" />
       </if>
       <if expr="chromeos">

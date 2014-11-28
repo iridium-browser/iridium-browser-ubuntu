@@ -27,6 +27,7 @@
 namespace blink {
 
 class SVGPathSegLinetoAbs FINAL : public SVGPathSegSingleCoordinate {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtr<SVGPathSegLinetoAbs> create(SVGPathElement* element, float x, float y)
     {
@@ -35,10 +36,7 @@ public:
 
 private:
     SVGPathSegLinetoAbs(SVGPathElement* element, float x, float y)
-        : SVGPathSegSingleCoordinate(element, x, y)
-    {
-        ScriptWrappable::init(this);
-    }
+        : SVGPathSegSingleCoordinate(element, x, y) { }
 
     virtual unsigned short pathSegType() const OVERRIDE { return PATHSEG_LINETO_ABS; }
     virtual String pathSegTypeAsLetter() const OVERRIDE { return "L"; }
@@ -46,4 +44,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // SVGPathSegLinetoAbs_h

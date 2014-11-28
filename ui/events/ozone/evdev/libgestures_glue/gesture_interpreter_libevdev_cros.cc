@@ -97,14 +97,14 @@ GestureInterpreterLibevdevCros::~GestureInterpreterLibevdevCros() {
 void GestureInterpreterLibevdevCros::OnLibEvdevCrosOpen(
     Evdev* evdev,
     EventStateRec* evstate) {
-  CHECK(evdev->info.is_monotonic) << "libevdev must use monotonic timestamps";
+  DCHECK(evdev->info.is_monotonic) << "libevdev must use monotonic timestamps";
   VLOG(9) << "HACK DO NOT REMOVE OR LINK WILL FAIL" << (void*)gestures_log;
 
   HardwareProperties hwprops = GestureHardwareProperties(evdev);
   GestureInterpreterDeviceClass devclass = GestureDeviceClass(evdev);
 
   // Create & initialize GestureInterpreter.
-  CHECK(!interpreter_);
+  DCHECK(!interpreter_);
   interpreter_ = NewGestureInterpreter();
   GestureInterpreterInitialize(interpreter_, devclass);
   GestureInterpreterSetHardwareProperties(interpreter_, &hwprops);
@@ -254,6 +254,14 @@ void GestureInterpreterLibevdevCros::OnGestureButtonsChange(
   if (!cursor_)
     return;  // No cursor!
 
+  // HACK for disabling TTC (actually, all clicks) on hidden cursor.
+  // This is normally plumbed via properties and can be removed soon.
+  // TODO(spang): Remove this.
+  if (buttons->down == GESTURES_BUTTON_LEFT &&
+      buttons->up == GESTURES_BUTTON_LEFT &&
+      !cursor_->IsCursorVisible())
+    return;
+
   // TODO(spang): Use buttons->start_time, buttons->end_time
   if (buttons->down & GESTURES_BUTTON_LEFT)
     DispatchMouseButton(EVDEV_MODIFIER_LEFT_MOUSE_BUTTON, true);
@@ -384,11 +392,7 @@ void GestureInterpreterLibevdevCros::DispatchMouseButton(unsigned int modifier,
   EventType type = (down ? ET_MOUSE_PRESSED : ET_MOUSE_RELEASED);
   modifiers_->UpdateModifier(modifier, down);
   MouseEvent event(type, loc, loc, modifiers_->GetModifierFlags() | flag, flag);
-
-  // This hack is necessary to trigger setting the repeat count.
-  // TODO(spang): Fix it.
-  MouseEvent event2(&event);
-  Dispatch(&event2);
+  Dispatch(&event);
 }
 
 }  // namespace ui

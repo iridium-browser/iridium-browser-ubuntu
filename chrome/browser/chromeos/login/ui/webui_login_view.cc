@@ -19,6 +19,7 @@
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -65,6 +66,8 @@ const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
 const char kAccelNameAppLaunchBailout[] = "app_launch_bailout";
 const char kAccelNameAppLaunchNetworkConfig[] = "app_launch_network_config";
+const char kAccelNameShowRollbackOption[] = "show_rollback_on_reset_screen";
+const char kAccelNameHideRollbackOption[] = "hide_rollback_on_reset_screen";
 
 // A class to change arrow key traversal behavior when it's alive.
 class ScopedArrowKeyTraversal {
@@ -154,6 +157,14 @@ WebUILoginView::WebUILoginView()
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameAppLaunchNetworkConfig;
 
+  ui::Accelerator show_rollback(ui::VKEY_MENU, ui::EF_ALT_DOWN);
+  show_rollback.set_type(ui::ET_KEY_PRESSED);
+  accel_map_[show_rollback] = kAccelNameShowRollbackOption;
+
+  ui::Accelerator hide_rollback(ui::VKEY_MENU, ui::EF_NONE);
+  hide_rollback.set_type(ui::ET_KEY_RELEASED);
+  accel_map_[hide_rollback] = kAccelNameHideRollbackOption;
+
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
 }
@@ -163,10 +174,12 @@ WebUILoginView::~WebUILoginView() {
                     observer_list_,
                     OnHostDestroying());
 
+#if !defined(USE_ATHENA)
   if (ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
     ash::Shell::GetInstance()->GetPrimarySystemTray()->
         SetNextFocusableView(NULL);
   }
+#endif
 }
 
 void WebUILoginView::Init() {
@@ -192,6 +205,9 @@ void WebUILoginView::Init() {
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
   WebContentsModalDialogManager::FromWebContents(web_contents)->
       SetDelegate(this);
+  if (!popup_manager_.get())
+    popup_manager_.reset(new web_modal::PopupManager(this));
+  popup_manager_->RegisterWith(web_contents);
 
   web_contents->SetDelegate(this);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
@@ -300,6 +316,7 @@ void WebUILoginView::OnPostponedShow() {
 }
 
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
+#if !defined(USE_ATHENA)
   if (ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
     ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
     if (visible) {
@@ -310,11 +327,14 @@ void WebUILoginView::SetStatusAreaVisible(bool visible) {
       tray->GetWidget()->Hide();
     }
   }
+#endif
 }
 
 void WebUILoginView::SetUIEnabled(bool enabled) {
   forward_keyboard_event_ = enabled;
+#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->GetPrimarySystemTray()->SetEnabled(enabled);
+#endif
 }
 
 void WebUILoginView::AddFrameObserver(FrameObserver* frame_observer) {
@@ -413,12 +433,14 @@ bool WebUILoginView::TakeFocus(content::WebContents* source, bool reverse) {
   if (!forward_keyboard_event_)
     return false;
 
+#if !defined(USE_ATHENA)
   ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
   if (tray && tray->GetWidget()->IsVisible()) {
     tray->SetNextFocusableView(this);
     ash::Shell::GetInstance()->RotateFocus(reverse ? ash::Shell::BACKWARD :
-                                                     ash::Shell::FORWARD);
+                                                    ash::Shell::FORWARD);
   }
+#endif
 
   return true;
 }
@@ -429,6 +451,14 @@ void WebUILoginView::RequestMediaAccessPermission(
     const content::MediaResponseCallback& callback) {
   if (MediaStreamInfoBarDelegate::Create(web_contents, request, callback))
     NOTREACHED() << "Media stream not allowed for WebUI";
+}
+
+bool WebUILoginView::CheckMediaAccessPermission(
+    content::WebContents* web_contents,
+    const GURL& security_origin,
+    content::MediaStreamType type) {
+  return MediaCaptureDevicesDispatcher::GetInstance()
+      ->CheckMediaAccessPermission(web_contents, security_origin, type);
 }
 
 bool WebUILoginView::PreHandleGestureEvent(

@@ -52,7 +52,7 @@ public:
     virtual void removeClientFromCache(RenderObject*, bool markForInvalidation = true) OVERRIDE;
 
     virtual bool applyResource(RenderObject*, RenderStyle*, GraphicsContext*&, unsigned short resourceMode) OVERRIDE;
-    virtual void postApplyResource(RenderObject*, GraphicsContext*&, unsigned short resourceMode, const Path*, const RenderSVGShape*) OVERRIDE;
+    virtual void postApplyResource(RenderObject*, GraphicsContext*&) OVERRIDE;
 
     virtual RenderSVGResourceType resourceType() const OVERRIDE { return s_resourceType; }
     static const RenderSVGResourceType s_resourceType;
@@ -63,7 +63,7 @@ private:
     PassOwnPtr<ImageBuffer> createTileImage(const PatternAttributes&, const FloatRect& tileBoundaries,
                                             const FloatRect& absoluteTileBoundaries, const AffineTransform& tileImageTransform) const;
 
-    PatternData* buildPattern(RenderObject*, unsigned short resourceMode);
+    PatternData* buildPattern(RenderObject*, const SVGPatternElement*);
 
     bool m_shouldCollectPatternAttributes : 1;
     PatternAttributes m_attributes;

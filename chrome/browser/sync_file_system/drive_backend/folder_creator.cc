@@ -113,15 +113,7 @@ void FolderCreator::DidListFolders(
 
   std::string file_id = oldest->file_id();
 
-  metadata_database_->UpdateByFileResourceList(
-      candidates.Pass(), base::Bind(&FolderCreator::DidUpdateDatabase,
-                                    weak_ptr_factory_.GetWeakPtr(),
-                                    file_id, callback));
-}
-
-void FolderCreator::DidUpdateDatabase(const std::string& file_id,
-                                      const FileIDCallback& callback,
-                                      SyncStatusCode status) {
+  status = metadata_database_->UpdateByFileResourceList(candidates.Pass());
   if (status != SYNC_STATUS_OK) {
     callback.Run(std::string(), status);
     return;

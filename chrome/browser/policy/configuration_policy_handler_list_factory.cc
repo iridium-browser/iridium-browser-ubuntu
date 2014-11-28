@@ -48,12 +48,9 @@
 #include "chrome/browser/download/download_dir_policy_handler.h"
 #endif
 
-#if !defined(OS_MACOSX) && !defined(OS_IOS)
-#include "apps/pref_names.h"
-#endif
-
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/api/messaging/native_messaging_policy_handler.h"
+#include "chrome/browser/extensions/extension_management_constants.h"
 #include "chrome/browser/extensions/policy_handlers.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/manifest.h"
@@ -295,13 +292,13 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kPluginsAlwaysAuthorize,
     base::Value::TYPE_BOOLEAN },
   { key::kBookmarkBarEnabled,
-    prefs::kShowBookmarkBar,
+    bookmarks::prefs::kShowBookmarkBar,
     base::Value::TYPE_BOOLEAN },
   { key::kEditBookmarksEnabled,
-    prefs::kEditBookmarksEnabled,
+    bookmarks::prefs::kEditBookmarksEnabled,
     base::Value::TYPE_BOOLEAN },
   { key::kShowAppsShortcutInBookmarkBar,
-    prefs::kShowAppsShortcutInBookmarkBar,
+    bookmarks::prefs::kShowAppsShortcutInBookmarkBar,
     base::Value::TYPE_BOOLEAN },
   { key::kAllowFileSelectionDialogs,
     prefs::kAllowFileSelectionDialogs,
@@ -320,6 +317,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_BOOLEAN },
   { key::kImportSavedPasswords,
     prefs::kImportSavedPasswords,
+    base::Value::TYPE_BOOLEAN },
+  { key::kImportAutofillFormData,
+    prefs::kImportAutofillFormData,
     base::Value::TYPE_BOOLEAN },
   { key::kMaxConnectionsPerProxy,
     prefs::kMaxConnectionsPerProxy,
@@ -366,6 +366,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kForceEphemeralProfiles,
     prefs::kForceEphemeralProfiles,
     base::Value::TYPE_BOOLEAN },
+  { key::kSSLVersionMin,
+    prefs::kSSLVersionMin,
+    base::Value::TYPE_STRING },
+  { key::kSSLVersionFallbackMin,
+    prefs::kSSLVersionFallbackMin,
+    base::Value::TYPE_STRING },
 
 #if !defined(OS_MACOSX) && !defined(OS_IOS)
   { key::kFullscreenAllowed,
@@ -373,7 +379,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_BOOLEAN },
 #if defined(ENABLE_EXTENSIONS)
   { key::kFullscreenAllowed,
-    apps::prefs::kAppFullscreenAllowed,
+    extensions::pref_names::kAppFullscreenAllowed,
     base::Value::TYPE_BOOLEAN },
 #endif  // defined(ENABLE_EXTENSIONS)
 #endif  // !defined(OS_MACOSX) && !defined(OS_IOS)
@@ -490,6 +496,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kBrowserGuestModeEnabled,
     prefs::kBrowserGuestModeEnabled,
     base::Value::TYPE_BOOLEAN },
+  { key::kBrowserAddPersonEnabled,
+    prefs::kBrowserAddPersonEnabled,
+    base::Value::TYPE_BOOLEAN },
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
 };
 
@@ -497,24 +506,16 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
 void GetExtensionAllowedTypesMap(
     ScopedVector<StringMappingListPolicyHandler::MappingEntry>* result) {
   // Mapping from extension type names to Manifest::Type.
-  result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-      "extension", scoped_ptr<base::Value>(new base::FundamentalValue(
-          extensions::Manifest::TYPE_EXTENSION))));
-  result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-      "theme", scoped_ptr<base::Value>(new base::FundamentalValue(
-          extensions::Manifest::TYPE_THEME))));
-  result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-      "user_script", scoped_ptr<base::Value>(new base::FundamentalValue(
-          extensions::Manifest::TYPE_USER_SCRIPT))));
-  result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-      "hosted_app", scoped_ptr<base::Value>(new base::FundamentalValue(
-          extensions::Manifest::TYPE_HOSTED_APP))));
-  result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-      "legacy_packaged_app", scoped_ptr<base::Value>(new base::FundamentalValue(
-          extensions::Manifest::TYPE_LEGACY_PACKAGED_APP))));
-  result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-      "platform_app", scoped_ptr<base::Value>(new base::FundamentalValue(
-          extensions::Manifest::TYPE_PLATFORM_APP))));
+  for (size_t index = 0;
+       index < extensions::schema_constants::kAllowedTypesMapSize;
+       ++index) {
+    const extensions::schema_constants::AllowedTypesMapEntry& entry =
+        extensions::schema_constants::kAllowedTypesMap[index];
+    result->push_back(new StringMappingListPolicyHandler::MappingEntry(
+        entry.name,
+        scoped_ptr<base::Value>(
+            new base::FundamentalValue(entry.manifest_type))));
+  }
 }
 #endif
 

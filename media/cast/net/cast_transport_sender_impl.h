@@ -25,6 +25,7 @@
 #define MEDIA_CAST_NET_CAST_TRANSPORT_IMPL_H_
 
 #include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -53,10 +54,21 @@ class CastTransportSenderImpl : public CastTransportSender {
   // This can be a null callback, i.e. if user is not interested in raw events.
   // |raw_events_callback_interval|: This can be |base::TimeDelta()| if
   // |raw_events_callback| is a null callback.
+  // |options| contains optional settings for the transport, possible
+  // keys are:
+  //   "DSCP" (value ignored) - turns DSCP on
+  //   "pacer_target_burst_size": int - specifies how many packets to send
+  //                                    per 10 ms ideally.
+  //   "pacer_max_burst_size": int - specifies how many pakcets to send
+  //                                 per 10 ms, max
+  //   "disable_wifi_scan" (value ignored) - disable wifi scans while streaming
+  //   "media_streaming_mode" (value ignored) - turn media streaming mode on
+  // Note, these options may be ignored on some platforms.
   CastTransportSenderImpl(
       net::NetLog* net_log,
       base::TickClock* clock,
       const net::IPEndPoint& remote_end_point,
+      scoped_ptr<base::DictionaryValue> options,
       const CastTransportStatusCallback& status_callback,
       const BulkRawEventsCallback& raw_events_callback,
       base::TimeDelta raw_events_callback_interval,
@@ -71,23 +83,37 @@ class CastTransportSenderImpl : public CastTransportSender {
   virtual void InitializeVideo(const CastTransportRtpConfig& config,
                                const RtcpCastMessageCallback& cast_message_cb,
                                const RtcpRttCallback& rtt_cb) OVERRIDE;
-  virtual void InsertCodedAudioFrame(const EncodedFrame& audio_frame) OVERRIDE;
-  virtual void InsertCodedVideoFrame(const EncodedFrame& video_frame) OVERRIDE;
+  virtual void InsertFrame(uint32 ssrc, const EncodedFrame& frame) OVERRIDE;
 
   virtual void SendSenderReport(
       uint32 ssrc,
       base::TimeTicks current_time,
       uint32 current_time_as_rtp_timestamp) OVERRIDE;
 
-  virtual void ResendPackets(bool is_audio,
-                             const MissingFramesAndPacketsMap& missing_packets,
-                             bool cancel_rtx_if_not_in_list,
-                             base::TimeDelta dedupe_window)
-      OVERRIDE;
+  virtual void CancelSendingFrames(
+      uint32 ssrc,
+      const std::vector<uint32>& frame_ids) OVERRIDE;
+
+  virtual void ResendFrameForKickstart(uint32 ssrc, uint32 frame_id) OVERRIDE;
 
   virtual PacketReceiverCallback PacketReceiverForTesting() OVERRIDE;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(CastTransportSenderImplTest, NacksCancelRetransmits);
+  FRIEND_TEST_ALL_PREFIXES(CastTransportSenderImplTest, CancelRetransmits);
+  FRIEND_TEST_ALL_PREFIXES(CastTransportSenderImplTest, Kickstart);
+  FRIEND_TEST_ALL_PREFIXES(CastTransportSenderImplTest,
+                           DedupRetransmissionWithAudio);
+
+  // Resend packets for the stream identified by |ssrc|.
+  // If |cancel_rtx_if_not_in_list| is true then transmission of packets for the
+  // frames but not in the list will be dropped.
+  // See PacedSender::ResendPackets() to see how |dedup_info| works.
+  void ResendPackets(uint32 ssrc,
+                     const MissingFramesAndPacketsMap& missing_packets,
+                     bool cancel_rtx_if_not_in_list,
+                     const DedupInfo& dedup_info);
+
   // If |raw_events_callback_| is non-null, calls it with events collected
   // by |event_subscriber_| since last call.
   void SendRawEvents();
@@ -98,6 +124,11 @@ class CastTransportSenderImpl : public CastTransportSender {
   // Called when a log message is received.
   void OnReceivedLogMessage(EventMediaType media_type,
                             const RtcpReceiverLogMessage& log);
+
+  // Called when a RTCP Cast message is received.
+  void OnReceivedCastMessage(uint32 ssrc,
+                             const RtcpCastMessageCallback& cast_message_cb,
+                             const RtcpCastMessage& cast_message);
 
   base::TickClock* clock_;  // Not owned by this class.
   CastTransportStatusCallback status_callback_;
@@ -131,6 +162,13 @@ class CastTransportSenderImpl : public CastTransportSender {
 
   BulkRawEventsCallback raw_events_callback_;
   base::TimeDelta raw_events_callback_interval_;
+
+  // Right after a frame is sent we record the number of bytes sent to the
+  // socket. We record the corresponding bytes sent for the most recent ACKed
+  // audio packet.
+  int64 last_byte_acked_for_audio_;
+
+  scoped_ptr<net::ScopedWifiOptions> wifi_options_autoreset_;
 
   base::WeakPtrFactory<CastTransportSenderImpl> weak_factory_;
 

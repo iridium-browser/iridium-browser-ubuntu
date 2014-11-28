@@ -7,15 +7,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_store.h"
-#include "chrome/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 
 namespace content_settings {
 
 CustomExtensionProvider::CustomExtensionProvider(
-    extensions::ContentSettingsStore* extensions_settings,
+    const scoped_refptr<extensions::ContentSettingsStore>& extensions_settings,
     bool incognito)
-    : incognito_(incognito),
-      extensions_settings_(extensions_settings) {
+    : incognito_(incognito), extensions_settings_(extensions_settings) {
   extensions_settings_->AddObserver(this);
 }
 

@@ -15,7 +15,6 @@
 #include "cc/resources/returned_resource.h"
 
 namespace cc {
-class BlockingTaskRunner;
 
 class CC_EXPORT DelegatedRendererLayer : public Layer {
  public:
@@ -47,7 +46,6 @@ class CC_EXPORT DelegatedRendererLayer : public Layer {
   DelegatedFrameData* frame_data_;
   gfx::RectF frame_damage_;
 
-  scoped_refptr<BlockingTaskRunner> main_thread_runner_;
   base::WeakPtrFactory<DelegatedRendererLayer> weak_ptrs_;
 
   DISALLOW_COPY_AND_ASSIGN(DelegatedRendererLayer);

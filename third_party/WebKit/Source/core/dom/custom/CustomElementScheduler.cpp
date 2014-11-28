@@ -33,13 +33,13 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
-#include "core/dom/custom/CustomElementCallbackDispatcher.h"
 #include "core/dom/custom/CustomElementCallbackInvocation.h"
 #include "core/dom/custom/CustomElementLifecycleCallbacks.h"
 #include "core/dom/custom/CustomElementMicrotaskDispatcher.h"
 #include "core/dom/custom/CustomElementMicrotaskImportStep.h"
 #include "core/dom/custom/CustomElementMicrotaskResolutionStep.h"
 #include "core/dom/custom/CustomElementMicrotaskRunQueue.h"
+#include "core/dom/custom/CustomElementProcessingStack.h"
 #include "core/dom/custom/CustomElementRegistrationContext.h"
 #include "core/dom/custom/CustomElementSyncMicrotaskQueue.h"
 #include "core/html/imports/HTMLImportChild.h"
@@ -49,29 +49,70 @@ namespace blink {
 
 DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(CustomElementScheduler)
 
+// FIXME: Consider moving the element's callback queue to ElementRareData.
+typedef WillBeHeapHashMap<RawPtrWillBeMember<Element>, OwnPtrWillBeMember<CustomElementCallbackQueue> > ElementCallbackQueueMap;
+
+static ElementCallbackQueueMap& callbackQueues()
+{
+    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<ElementCallbackQueueMap>, map, (adoptPtrWillBeNoop(new ElementCallbackQueueMap())));
+    return *map;
+}
+
+static CustomElementCallbackQueue& ensureCallbackQueue(PassRefPtrWillBeRawPtr<Element> element)
+{
+    ElementCallbackQueueMap::ValueType* it = callbackQueues().add(element.get(), nullptr).storedValue;
+    if (!it->value)
+        it->value = CustomElementCallbackQueue::create(element);
+    return *it->value.get();
+}
+
+// Finds or creates the callback queue for element.
+static CustomElementCallbackQueue& scheduleCallbackQueue(PassRefPtrWillBeRawPtr<Element> passElement)
+{
+    RefPtrWillBeRawPtr<Element> element(passElement);
+
+    CustomElementCallbackQueue& callbackQueue = ensureCallbackQueue(element);
+    if (callbackQueue.inCreatedCallback()) {
+        // Don't move it. Authors use the createdCallback like a
+        // constructor. By not moving it, the createdCallback
+        // completes before any other callbacks are entered for this
+        // element.
+        return callbackQueue;
+    }
+
+    if (CustomElementProcessingStack::inCallbackDeliveryScope()) {
+        // The processing stack is active.
+        CustomElementProcessingStack::instance().enqueue(&callbackQueue);
+        return callbackQueue;
+    }
+
+    CustomElementMicrotaskDispatcher::instance().enqueue(&callbackQueue);
+    return callbackQueue;
+}
+
 void CustomElementScheduler::scheduleCallback(PassRefPtr<CustomElementLifecycleCallbacks> callbacks, PassRefPtrWillBeRawPtr<Element> element, CustomElementLifecycleCallbacks::CallbackType type)
 {
-    ASSERT(type != CustomElementLifecycleCallbacks::AttributeChanged);
+    ASSERT(type != CustomElementLifecycleCallbacks::AttributeChangedCallback);
 
     if (!callbacks->hasCallback(type))
         return;
 
-    CustomElementCallbackQueue& queue = instance().schedule(element);
+    CustomElementCallbackQueue& queue = scheduleCallbackQueue(element);
     queue.append(CustomElementCallbackInvocation::createInvocation(callbacks, type));
 }
 
 void CustomElementScheduler::scheduleAttributeChangedCallback(PassRefPtr<CustomElementLifecycleCallbacks> callbacks, PassRefPtrWillBeRawPtr<Element> element, const AtomicString& name, const AtomicString& oldValue, const AtomicString& newValue)
 {
-    if (!callbacks->hasCallback(CustomElementLifecycleCallbacks::AttributeChanged))
+    if (!callbacks->hasCallback(CustomElementLifecycleCallbacks::AttributeChangedCallback))
         return;
 
-    CustomElementCallbackQueue& queue = instance().schedule(element);
+    CustomElementCallbackQueue& queue = scheduleCallbackQueue(element);
     queue.append(CustomElementCallbackInvocation::createAttributeChangedInvocation(callbacks, name, oldValue, newValue));
 }
 
 void CustomElementScheduler::resolveOrScheduleResolution(PassRefPtrWillBeRawPtr<CustomElementRegistrationContext> context, PassRefPtrWillBeRawPtr<Element> element, const CustomElementDescriptor& descriptor)
 {
-    if (CustomElementCallbackDispatcher::inCallbackDeliveryScope()) {
+    if (CustomElementProcessingStack::inCallbackDeliveryScope()) {
         context->resolve(element.get(), descriptor);
         return;
     }
@@ -100,67 +141,17 @@ void CustomElementScheduler::enqueueMicrotaskStep(Document& document, PassOwnPtr
     master.customElementMicrotaskRunQueue()->enqueue(document.importLoader(), step, importIsSync);
 }
 
-CustomElementScheduler& CustomElementScheduler::instance()
-{
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<CustomElementScheduler>, instance, (adoptPtrWillBeNoop (new CustomElementScheduler())));
-    return *instance;
-}
-
-CustomElementCallbackQueue& CustomElementScheduler::ensureCallbackQueue(PassRefPtrWillBeRawPtr<Element> element)
-{
-    ElementCallbackQueueMap::ValueType* it = m_elementCallbackQueueMap.add(element.get(), nullptr).storedValue;
-    if (!it->value)
-        it->value = CustomElementCallbackQueue::create(element);
-    return *it->value.get();
-}
 
 void CustomElementScheduler::callbackDispatcherDidFinish()
 {
     if (CustomElementMicrotaskDispatcher::instance().elementQueueIsEmpty())
-        instance().clearElementCallbackQueueMap();
+        callbackQueues().clear();
 }
 
 void CustomElementScheduler::microtaskDispatcherDidFinish()
 {
-    ASSERT(!CustomElementCallbackDispatcher::inCallbackDeliveryScope());
-    instance().clearElementCallbackQueueMap();
-}
-
-void CustomElementScheduler::clearElementCallbackQueueMap()
-{
-    ElementCallbackQueueMap emptyMap;
-    m_elementCallbackQueueMap.swap(emptyMap);
-}
-
-// Finds or creates the callback queue for element.
-CustomElementCallbackQueue& CustomElementScheduler::schedule(PassRefPtrWillBeRawPtr<Element> passElement)
-{
-    RefPtrWillBeRawPtr<Element> element(passElement);
-
-    CustomElementCallbackQueue& callbackQueue = ensureCallbackQueue(element);
-    if (callbackQueue.inCreatedCallback()) {
-        // Don't move it. Authors use the createdCallback like a
-        // constructor. By not moving it, the createdCallback
-        // completes before any other callbacks are entered for this
-        // element.
-        return callbackQueue;
-    }
-
-    if (CustomElementCallbackDispatcher::inCallbackDeliveryScope()) {
-        // The processing stack is active.
-        CustomElementCallbackDispatcher::instance().enqueue(&callbackQueue);
-        return callbackQueue;
-    }
-
-    CustomElementMicrotaskDispatcher::instance().enqueue(&callbackQueue);
-    return callbackQueue;
-}
-
-void CustomElementScheduler::trace(Visitor* visitor)
-{
-#if ENABLE(OILPAN)
-    visitor->trace(m_elementCallbackQueueMap);
-#endif
+    ASSERT(!CustomElementProcessingStack::inCallbackDeliveryScope());
+    callbackQueues().clear();
 }
 
 } // namespace blink

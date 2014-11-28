@@ -16,15 +16,15 @@
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/render_messages.h"
+#include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/browser/guest_view/web_view/web_view_permission_helper.h"
-#include "chrome/browser/guest_view/web_view/web_view_renderer_state.h"
+#include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
+#include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
 #endif
 
 #if defined(ENABLE_TASK_MANAGER)
@@ -114,16 +114,16 @@ void ChromeRenderMessageFilter::OnPreconnect(const GURL& url) {
 
 void ChromeRenderMessageFilter::OnResourceTypeStats(
     const WebCache::ResourceTypeStats& stats) {
-  HISTOGRAM_COUNTS("WebCoreCache.ImagesSizeKB",
-                   static_cast<int>(stats.images.size / 1024));
-  HISTOGRAM_COUNTS("WebCoreCache.CSSStylesheetsSizeKB",
-                   static_cast<int>(stats.cssStyleSheets.size / 1024));
-  HISTOGRAM_COUNTS("WebCoreCache.ScriptsSizeKB",
-                   static_cast<int>(stats.scripts.size / 1024));
-  HISTOGRAM_COUNTS("WebCoreCache.XSLStylesheetsSizeKB",
-                   static_cast<int>(stats.xslStyleSheets.size / 1024));
-  HISTOGRAM_COUNTS("WebCoreCache.FontsSizeKB",
-                   static_cast<int>(stats.fonts.size / 1024));
+  LOCAL_HISTOGRAM_COUNTS("WebCoreCache.ImagesSizeKB",
+                         static_cast<int>(stats.images.size / 1024));
+  LOCAL_HISTOGRAM_COUNTS("WebCoreCache.CSSStylesheetsSizeKB",
+                         static_cast<int>(stats.cssStyleSheets.size / 1024));
+  LOCAL_HISTOGRAM_COUNTS("WebCoreCache.ScriptsSizeKB",
+                         static_cast<int>(stats.scripts.size / 1024));
+  LOCAL_HISTOGRAM_COUNTS("WebCoreCache.XSLStylesheetsSizeKB",
+                         static_cast<int>(stats.xslStyleSheets.size / 1024));
+  LOCAL_HISTOGRAM_COUNTS("WebCoreCache.FontsSizeKB",
+                         static_cast<int>(stats.fonts.size / 1024));
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 #if defined(ENABLE_TASK_MANAGER)
@@ -134,7 +134,8 @@ void ChromeRenderMessageFilter::OnResourceTypeStats(
 
 void ChromeRenderMessageFilter::OnUpdatedCacheStats(
     const WebCache::UsageStats& stats) {
-  WebCacheManager::GetInstance()->ObserveStats(render_process_id_, stats);
+  web_cache::WebCacheManager::GetInstance()->ObserveStats(
+      render_process_id_, stats);
 }
 
 void ChromeRenderMessageFilter::OnV8HeapStats(int v8_memory_allocated,

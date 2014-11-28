@@ -34,6 +34,7 @@
 #include "core/frame/FrameClient.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/NavigationPolicy.h"
+#include "platform/heap/Handle.h"
 #include "platform/network/ResourceLoadPriority.h"
 #include "platform/weborigin/Referrer.h"
 #include "wtf/Forward.h"
@@ -44,7 +45,6 @@ namespace blink {
 class WebCookieJar;
 class WebRTCPeerConnectionHandler;
 class WebServiceWorkerProvider;
-class WebServiceWorkerProviderClient;
 class WebSocketHandle;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
@@ -52,31 +52,20 @@ class WebApplicationCacheHostClient;
 
 namespace blink {
 
-    class Color;
-    class DOMWindowExtension;
-    class DOMWrapperWorld;
     class DocumentLoader;
-    class Element;
     class FetchRequest;
-    class FrameLoader;
-    class FrameNetworkingContext;
     class HTMLAppletElement;
     class HTMLFormElement;
     class HTMLFrameOwnerElement;
     class HTMLPlugInElement;
     class HistoryItem;
-    class IntSize;
     class KURL;
     class LocalFrame;
     class MessageEvent;
-    class Page;
-    class PluginView;
     class ResourceError;
-    class ResourceHandle;
     class ResourceRequest;
     class ResourceResponse;
     class SecurityOrigin;
-    class SharedBuffer;
     class SharedWorkerRepositoryClient;
     class SocketStreamHandle;
     class SubstituteData;
@@ -154,7 +143,7 @@ namespace blink {
 
         virtual void transitionToCommittedForNewPage() = 0;
 
-        virtual PassRefPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, const Referrer&, HTMLFrameOwnerElement*) = 0;
+        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, const Referrer&, HTMLFrameOwnerElement*) = 0;
         // Whether or not plugin creation should fail if the HTMLPlugInElement isn't in the DOM after plugin initialization.
         enum DetachedPluginPolicy {
             FailOnDetachedPlugin,
@@ -197,9 +186,6 @@ namespace blink {
 
         virtual blink::WebCookieJar* cookieJar() const = 0;
 
-        // Returns true if the embedder intercepted the postMessage call
-        virtual bool willCheckAndDispatchMessageEvent(SecurityOrigin* /*target*/, MessageEvent*) const { return false; }
-
         virtual void didChangeName(const String&) { }
 
         virtual void dispatchWillOpenSocketStream(SocketStreamHandle*) { }
@@ -220,6 +206,8 @@ namespace blink {
         virtual void dispatchDidChangeResourcePriority(unsigned long identifier, ResourceLoadPriority, int intraPriorityValue) { }
 
         virtual PassOwnPtr<blink::WebServiceWorkerProvider> createServiceWorkerProvider() = 0;
+
+        virtual bool isControlledByServiceWorker() = 0;
 
         virtual SharedWorkerRepositoryClient* sharedWorkerRepositoryClient() { return 0; }
 

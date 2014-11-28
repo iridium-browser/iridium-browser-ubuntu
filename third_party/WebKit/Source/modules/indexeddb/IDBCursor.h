@@ -46,11 +46,13 @@ class SharedBuffer;
 class WebBlobInfo;
 
 class IDBCursor : public GarbageCollectedFinalized<IDBCursor>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static WebIDBCursorDirection stringToDirection(const String& modeString, ExceptionState&);
 
     static IDBCursor* create(PassOwnPtr<WebIDBCursor>, WebIDBCursorDirection, IDBRequest*, IDBAny* source, IDBTransaction*);
     virtual ~IDBCursor();
+    void dispose();
     void trace(Visitor*);
     void contextWillBeDestroyed() { m_backend.clear(); }
 
@@ -61,7 +63,7 @@ public:
     ScriptValue value(ScriptState*);
     ScriptValue source(ScriptState*) const;
 
-    IDBRequest* update(ScriptState*, ScriptValue&, ExceptionState&);
+    IDBRequest* update(ScriptState*, const ScriptValue&, ExceptionState&);
     void advance(unsigned long, ExceptionState&);
     void continueFunction(ScriptState*, const ScriptValue& key, ExceptionState&);
     void continuePrimaryKey(ScriptState*, const ScriptValue& key, const ScriptValue& primaryKey, ExceptionState&);

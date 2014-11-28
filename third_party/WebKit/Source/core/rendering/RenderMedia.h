@@ -63,6 +63,7 @@ private:
     // so we can't support generated content.
     virtual bool canHaveGeneratedChildren() const OVERRIDE FINAL { return false; }
     virtual bool canHaveChildren() const OVERRIDE FINAL { return true; }
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const override final;
 
     virtual const char* renderName() const OVERRIDE { return "RenderMedia"; }
     virtual bool isMedia() const OVERRIDE FINAL { return true; }

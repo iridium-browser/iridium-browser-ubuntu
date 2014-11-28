@@ -15,6 +15,7 @@ class URLRequest;
 
 namespace content {
 
+class ResourceRequestBody;
 class ServiceWorkerRegistration;
 class ServiceWorkerURLRequestJob;
 class ServiceWorkerVersion;
@@ -27,8 +28,9 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler
   ServiceWorkerControlleeRequestHandler(
       base::WeakPtr<ServiceWorkerContextCore> context,
       base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-      base::WeakPtr<webkit_blob::BlobStorageContext> blob_storage_context,
-      ResourceType resource_type);
+      base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
+      ResourceType resource_type,
+      scoped_refptr<ResourceRequestBody> body);
   virtual ~ServiceWorkerControlleeRequestHandler();
 
   // Called via custom URLRequestJobFactory.
@@ -38,7 +40,10 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler
 
   virtual void GetExtraResponseInfo(
       bool* was_fetched_via_service_worker,
-      GURL* original_url_via_service_worker) const OVERRIDE;
+      GURL* original_url_via_service_worker,
+      base::TimeTicks* fetch_start_time,
+      base::TimeTicks* fetch_ready_time,
+      base::TimeTicks* fetch_end_time) const OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerControlleeRequestHandlerTest,
@@ -59,6 +64,7 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler
 
   bool is_main_resource_load_;
   scoped_refptr<ServiceWorkerURLRequestJob> job_;
+  scoped_refptr<ResourceRequestBody> body_;
   base::WeakPtrFactory<ServiceWorkerControlleeRequestHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerControlleeRequestHandler);

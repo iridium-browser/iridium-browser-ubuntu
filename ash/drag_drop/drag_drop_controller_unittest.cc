@@ -273,7 +273,7 @@ void AddViewToWidgetAndResize(views::Widget* widget, views::View* view) {
 }
 
 void DispatchGesture(ui::EventType gesture_type, gfx::Point location) {
-  ui::GestureEventDetails event_details(gesture_type, 0, 0);
+  ui::GestureEventDetails event_details(gesture_type);
   event_details.set_oldest_touch_id(1);
   ui::GestureEvent gesture_event(
       location.x(), location.y(), 0, ui::EventTimeForNow(), event_details);
@@ -628,7 +628,7 @@ TEST_F(DragDropControllerTest, DragLeavesClipboardAloneTest) {
   std::string clip_str("I am on the clipboard");
   {
     // We first copy some text to the clipboard.
-    ui::ScopedClipboardWriter scw(cb, ui::CLIPBOARD_TYPE_COPY_PASTE);
+    ui::ScopedClipboardWriter scw(ui::CLIPBOARD_TYPE_COPY_PASTE);
     scw.WriteText(base::ASCIIToUTF16(clip_str));
   }
   EXPECT_TRUE(cb->IsFormatAvailable(ui::Clipboard::GetPlainTextFormatType(),

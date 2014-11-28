@@ -5,7 +5,7 @@
 
 """Makes sure files have the right permissions.
 
-Some developers have broken SCM configurations that flip the svn:executable
+Some developers have broken SCM configurations that flip the executable
 permission on for no good reason. Unix developers who run ls --color will then
 see .cc files in green and get confused.
 
@@ -143,14 +143,14 @@ NON_EXECUTABLE_PATHS = (
   'build/android/tests/symbolize/libb.so',
   'chrome/installer/mac/sign_app.sh.in',
   'chrome/installer/mac/sign_versioned_dir.sh.in',
-  'chrome/test/data/components/ihfokbkgjpifnbbojhneepfflplebdkc/'
-      'ihfokbkgjpifnbbojhneepfflplebdkc_1/a_changing_binary_file',
-  'chrome/test/data/components/ihfokbkgjpifnbbojhneepfflplebdkc/'
-      'ihfokbkgjpifnbbojhneepfflplebdkc_2/a_changing_binary_file',
   'chrome/test/data/extensions/uitest/plugins/plugin32.so',
   'chrome/test/data/extensions/uitest/plugins/plugin64.so',
   'chrome/test/data/extensions/uitest/plugins_private/plugin32.so',
   'chrome/test/data/extensions/uitest/plugins_private/plugin64.so',
+  'components/test/data/component_updater/ihfokbkgjpifnbbojhneepfflplebdkc/'
+      'ihfokbkgjpifnbbojhneepfflplebdkc_1/a_changing_binary_file',
+  'components/test/data/component_updater/ihfokbkgjpifnbbojhneepfflplebdkc/'
+      'ihfokbkgjpifnbbojhneepfflplebdkc_2/a_changing_binary_file',
   'courgette/testdata/elf-32-1',
   'courgette/testdata/elf-32-2',
   'courgette/testdata/elf-64',
@@ -226,34 +226,6 @@ def capture(cmd, cwd):
   return p.communicate()[0]
 
 
-def get_svn_info(dir_path):
-  """Returns svn meta-data for a svn checkout."""
-  if not os.path.isdir(dir_path):
-    return {}
-  out = capture(['svn', 'info', '.', '--non-interactive'], dir_path)
-  return dict(l.split(': ', 1) for l in out.splitlines() if l)
-
-
-def get_svn_url(dir_path):
-  return get_svn_info(dir_path).get('URL')
-
-
-def get_svn_root(dir_path):
-  """Returns the svn checkout root or None."""
-  svn_url = get_svn_url(dir_path)
-  if not svn_url:
-    return None
-  logging.info('svn url: %s' % svn_url)
-  while True:
-    parent = os.path.dirname(dir_path)
-    if parent == dir_path:
-      return None
-    svn_url = svn_url.rsplit('/', 1)[0]
-    if svn_url != get_svn_url(parent):
-      return dir_path
-    dir_path = parent
-
-
 def get_git_root(dir_path):
   """Returns the git checkout root or None."""
   root = capture(['git', 'rev-parse', '--show-toplevel'], dir_path).strip()
@@ -298,7 +270,7 @@ def has_shebang_or_is_elf(full_path):
   """
   with open(full_path, 'rb') as f:
     data = f.read(4)
-    return (data[:3] == '#!/', data == '\x7fELF')
+    return (data[:3] == '#!/' or data == '#! /', data == '\x7fELF')
 
 
 def check_file(root_path, rel_path):
@@ -398,24 +370,6 @@ class ApiBase(object):
     )
 
 
-class ApiSvnQuick(ApiBase):
-  """Returns all files in svn-versioned directories, independent of the fact if
-  they are versionned.
-
-  Uses svn info in each directory to determine which directories should be
-  crawled.
-  """
-  def __init__(self, *args):
-    super(ApiSvnQuick, self).__init__(*args)
-    self.url = get_svn_url(self.root_dir)
-
-  def check_dir(self, rel_path):
-    url = self.url + '/' + rel_path
-    if get_svn_url(os.path.join(self.root_dir, rel_path)) != url:
-      return []
-    return super(ApiSvnQuick, self).check_dir(rel_path)
-
-
 class ApiAllFilesAtOnceBase(ApiBase):
   _files = None
 
@@ -435,18 +389,6 @@ class ApiAllFilesAtOnceBase(ApiBase):
     raise NotImplementedError()
 
 
-class ApiSvn(ApiAllFilesAtOnceBase):
-  """Returns all the subversion controlled files.
-
-  Warning: svn ls is abnormally slow.
-  """
-  def _get_all_files(self):
-    cmd = ['svn', 'ls', '--non-interactive', '--recursive']
-    return (
-        x for x in capture(cmd, self.root_dir).splitlines()
-        if not x.endswith(os.path.sep))
-
-
 class ApiGit(ApiAllFilesAtOnceBase):
   def _get_all_files(self):
     return capture(['git', 'ls-files'], cwd=self.root_dir).splitlines()
@@ -455,11 +397,6 @@ class ApiGit(ApiAllFilesAtOnceBase):
 def get_scm(dir_path, bare):
   """Returns a properly configured ApiBase instance."""
   cwd = os.getcwd()
-  root = get_svn_root(dir_path or cwd)
-  if root:
-    if not bare:
-      print('Found subversion checkout at %s' % root)
-    return ApiSvnQuick(dir_path or root, bare)
   root = get_git_root(dir_path or cwd)
   if root:
     if not bare:

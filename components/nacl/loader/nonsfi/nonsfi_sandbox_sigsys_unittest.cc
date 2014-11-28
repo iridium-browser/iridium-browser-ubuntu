@@ -8,6 +8,9 @@
 
 #include "components/nacl/loader/nonsfi/nonsfi_sandbox.h"
 
+#include <sys/syscall.h>
+#include <unistd.h>
+
 #include "sandbox/linux/seccomp-bpf-helpers/sigsys_handlers.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
 
@@ -319,7 +322,6 @@ RESTRICT_SYSCALL_DEATH_TEST(oldstat);
 RESTRICT_SYSCALL_DEATH_TEST(olduname);
 #endif
 RESTRICT_SYSCALL_DEATH_TEST(open_by_handle_at);
-RESTRICT_SYSCALL_DEATH_TEST(openat);
 RESTRICT_SYSCALL_DEATH_TEST(pause);
 #if defined(__arm__)
 RESTRICT_SYSCALL_DEATH_TEST(pciconfig_iobase);

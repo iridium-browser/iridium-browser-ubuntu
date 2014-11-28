@@ -19,7 +19,6 @@ class ExtensionSystemSharedFactory;
 class ExtensionWarningBadgeService;
 class NavigationObserver;
 class SharedUserScriptMaster;
-class StandardManagementPolicyProvider;
 class StateStoreNotificationObserver;
 
 // The ExtensionSystem for ProfileImpl and OffTheRecordProfileImpl.
@@ -49,7 +48,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
       OVERRIDE;  // shared
   virtual InfoMap* info_map() OVERRIDE; // shared
   virtual EventRouter* event_router() OVERRIDE;  // shared
-  virtual ExtensionWarningService* warning_service() OVERRIDE;
+  virtual WarningService* warning_service() OVERRIDE;
   virtual Blacklist* blacklist() OVERRIDE;  // shared
   virtual ErrorConsole* error_console() OVERRIDE;
   virtual InstallVerifier* install_verifier() OVERRIDE;
@@ -100,7 +99,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
     InfoMap* info_map();
     LazyBackgroundTaskQueue* lazy_background_task_queue();
     EventRouter* event_router();
-    ExtensionWarningService* warning_service();
+    WarningService* warning_service();
     ErrorConsole* error_console();
     InstallVerifier* install_verifier();
     QuotaService* quota_service();
@@ -132,16 +131,13 @@ class ExtensionSystemImpl : public ExtensionSystem {
     // API is used by an extension to request content scripts.
     ScopedVector<DeclarativeUserScriptMaster> declarative_user_script_masters_;
     scoped_ptr<Blacklist> blacklist_;
-    // StandardManagementPolicyProvider depends on Blacklist.
-    scoped_ptr<StandardManagementPolicyProvider>
-        standard_management_policy_provider_;
     scoped_ptr<RuntimeData> runtime_data_;
     // ExtensionService depends on StateStore, Blacklist and RuntimeData.
     scoped_ptr<ExtensionService> extension_service_;
     scoped_ptr<ManagementPolicy> management_policy_;
     // extension_info_map_ needs to outlive process_manager_.
     scoped_refptr<InfoMap> extension_info_map_;
-    scoped_ptr<ExtensionWarningService> extension_warning_service_;
+    scoped_ptr<WarningService> warning_service_;
     scoped_ptr<ExtensionWarningBadgeService> extension_warning_badge_service_;
     scoped_ptr<ErrorConsole> error_console_;
     scoped_ptr<InstallVerifier> install_verifier_;

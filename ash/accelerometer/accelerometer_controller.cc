@@ -5,7 +5,6 @@
 #include "ash/accelerometer/accelerometer_controller.h"
 
 #include "ash/accelerometer/accelerometer_observer.h"
-#include "ui/gfx/geometry/vector3d_f.h"
 
 namespace ash {
 
@@ -18,7 +17,8 @@ AccelerometerController::~AccelerometerController() {
 void AccelerometerController::Initialize(
     scoped_refptr<base::TaskRunner> blocking_task_runner) {
 #if defined(OS_CHROMEOS)
-  reader_.reset(new chromeos::AccelerometerReader(blocking_task_runner, this));
+  reader_.reset(
+      new chromeos::AccelerometerReader(blocking_task_runner, this));
 #endif
 }
 
@@ -31,11 +31,10 @@ void AccelerometerController::RemoveObserver(AccelerometerObserver* observer) {
 }
 
 #if defined(OS_CHROMEOS)
-void AccelerometerController::HandleAccelerometerReading(
-    const gfx::Vector3dF& base,
-    const gfx::Vector3dF& lid) {
+void AccelerometerController::HandleAccelerometerUpdate(
+    const ui::AccelerometerUpdate& update) {
   FOR_EACH_OBSERVER(AccelerometerObserver, observers_,
-      OnAccelerometerUpdated(base, lid));
+      OnAccelerometerUpdated(update));
 }
 #endif
 

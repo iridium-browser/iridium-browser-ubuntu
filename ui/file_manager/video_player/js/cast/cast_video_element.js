@@ -36,11 +36,13 @@ function CastVideoElement(media, session) {
   this.currentTime_ = null;
   this.src_ = '';
   this.volume_ = 100;
+  this.loop_ = false;
   this.currentMediaPlayerState_ = null;
   this.currentMediaCurrentTime_ = null;
   this.currentMediaDuration_ = null;
   this.playInProgress_ = false;
   this.pauseInProgress_ = false;
+  this.errorCode_ = 0;
 
   this.onMessageBound_ = this.onMessage_.bind(this);
   this.onCastMediaUpdatedBound_ = this.onCastMediaUpdated_.bind(this);
@@ -91,7 +93,11 @@ CastVideoElement.prototype = {
     }
   },
   set currentTime(currentTime) {
-    // TODO(yoshiki): Support seek.
+    var seekRequest = new chrome.cast.media.SeekRequest();
+    seekRequest.currentTime = currentTime;
+    this.castMedia_.seek(seekRequest,
+        function() {},
+        this.onCastCommandError_.wrap(this));
   },
 
   /**
@@ -115,16 +121,21 @@ CastVideoElement.prototype = {
     if (!this.castMedia_)
       return true;
 
-   return this.castMedia_.idleReason === chrome.cast.media.IdleReason.FINISHED;
+    return !this.playInProgress &&
+           this.castMedia_.idleReason === chrome.cast.media.IdleReason.FINISHED;
   },
 
   /**
-   * If this video is seekable or not.
-   * @type {boolean}
+   * TimeRange object that represents the seekable ranges of the media
+   * resource.
+   * @type {TimeRanges}
    */
   get seekable() {
-    // TODO(yoshiki): Support seek.
-    return false;
+    return {
+      length: 1,
+      start: function(index) { return 0; },
+      end: function(index) { return this.currentMediaDuration_; },
+    };
   },
 
   /**
@@ -139,9 +150,6 @@ CastVideoElement.prototype = {
   set volume(volume) {
     var VOLUME_EPS = 0.01;  // Threshold for ignoring a small change.
 
-    // Ignores < 1% change.
-    if (Math.abs(this.castSession_.receiver.volume.level - volume) < VOLUME_EPS)
-      return;
 
     if (this.castSession_.receiver.volume.muted) {
       if (volume < VOLUME_EPS)
@@ -156,6 +164,11 @@ CastVideoElement.prototype = {
           function() {},
           this.onCastCommandError_.wrap(this));
     } else {
+      // Ignores < 1% change.
+      var diff = this.castSession_.receiver.volume.level - volume;
+      if (Math.abs(diff) < VOLUME_EPS)
+        return;
+
       if (volume < VOLUME_EPS) {
         this.castSession_.setReceiverMuted(true,
             function() {},
@@ -181,11 +194,50 @@ CastVideoElement.prototype = {
   },
 
   /**
-   * Plays the video.
+   * Returns the flag if the video loops at end or not.
+   * @type {boolean}
    */
-  play: function() {
+  get loop() {
+    return this.loop_;
+  },
+  set loop(value) {
+    this.loop_ = !!value;
+  },
+
+  /**
+   * Returns the error object if available.
+   * @type {?Object}
+   */
+  get error() {
+    if (this.errorCode_ === 0)
+      return null;
+
+    return {code: this.errorCode_};
+  },
+
+  /**
+   * Plays the video.
+   * @param {boolean=} opt_seeking True when seeking. False otherwise.
+   */
+  play: function(opt_seeking) {
+    if (this.playInProgress_)
+      return;
+
     var play = function() {
-      this.castMedia_.play(null,
+      // If the casted media is already playing and a pause request is not in
+      // progress, we can skip this play request.
+      if (this.castMedia_.playerState ===
+              chrome.cast.media.PlayerState.PLAYING &&
+          !this.pauseInProgress_) {
+        this.playInProgress_ = false;
+        return;
+      }
+
+      var playRequest = new chrome.cast.media.PlayRequest();
+      playRequest.customData = {seeking: !!opt_seeking};
+
+      this.castMedia_.play(
+          playRequest,
           function() {
             this.playInProgress_ = false;
           }.wrap(this),
@@ -205,13 +257,23 @@ CastVideoElement.prototype = {
 
   /**
    * Pauses the video.
+   * @param {boolean=} opt_seeking True when seeking. False otherwise.
    */
-  pause: function() {
+  pause: function(opt_seeking) {
     if (!this.castMedia_)
       return;
 
+    if (this.pauseInProgress_ ||
+        this.castMedia_.playerState === chrome.cast.media.PlayerState.PAUSED) {
+      return;
+    }
+
+    var pauseRequest = new chrome.cast.media.PauseRequest();
+    pauseRequest.customData = {seeking: !!opt_seeking};
+
     this.pauseInProgress_ = true;
-    this.castMedia_.pause(null,
+    this.castMedia_.pause(
+        pauseRequest,
         function() {
           this.pauseInProgress_ = false;
         }.wrap(this),
@@ -230,6 +292,9 @@ CastVideoElement.prototype = {
       this.sendMessage_({message: 'push-token', token: token});
     }.bind(this));
 
+    // Resets the error code.
+    this.errorCode_ = 0;
+
     Promise.all([
       sendTokenPromise,
       this.mediaManager_.getUrl(),
@@ -237,8 +302,8 @@ CastVideoElement.prototype = {
       this.mediaManager_.getThumbnail()]).
         then(function(results) {
           var url = results[1];
-          var mime = results[2];
-          var thumbnailUrl = results[3];
+          var mime = results[2];  // maybe empty
+          var thumbnailUrl = results[3];  // maybe empty
 
           this.mediaInfo_ = new chrome.cast.media.MediaInfo(url);
           this.mediaInfo_.contentType = mime;
@@ -279,6 +344,7 @@ CastVideoElement.prototype = {
       this.castMedia_.removeUpdateListener(this.onCastMediaUpdatedBound_);
       this.castMedia_ = null;
     }
+
     clearInterval(this.updateTimerId_);
   },
 
@@ -304,19 +370,23 @@ CastVideoElement.prototype = {
     var message = JSON.parse(messageAsJson);
     if (message['message'] === 'request-token') {
       if (message['previousToken'] === this.token_) {
-          this.mediaManager_.getToken().then(function(token) {
-            this.sendMessage_({message: 'push-token', token: token});
-            // TODO(yoshiki): Revokes the previous token.
-          }.bind(this)).catch(function(error) {
-            // Send an empty token as an error.
-            this.sendMessage_({message: 'push-token', token: ''});
-            // TODO(yoshiki): Revokes the previous token.
-            console.error(error.stack || error);
-          });
+        this.mediaManager_.getToken(true).then(function(token) {
+          this.token_ = token;
+          this.sendMessage_({message: 'push-token', token: token});
+          // TODO(yoshiki): Revokes the previous token.
+        }.bind(this)).catch(function(error) {
+          // Send an empty token as an error.
+          this.sendMessage_({message: 'push-token', token: ''});
+          // TODO(yoshiki): Revokes the previous token.
+          console.error(error.stack || error);
+        });
       } else {
         console.error(
             'New token is requested, but the previous token mismatches.');
       }
+    } else if (message['message'] === 'playback-error') {
+      if (message['detail'] === 'src-not-supported')
+        this.errorCode_ = MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
     }
   },
 
@@ -377,6 +447,21 @@ CastVideoElement.prototype = {
       return;
 
     var media = this.castMedia_;
+    if (this.loop_ &&
+        media.idleReason === chrome.cast.media.IdleReason.FINISHED &&
+        !alive) {
+      // Resets the previous media silently.
+      this.castMedia_ = null;
+
+      // Replay the current media.
+      this.currentMediaPlayerState_ = chrome.cast.media.PlayerState.BUFFERING;
+      this.currentMediaCurrentTime_ = 0;
+      this.dispatchEvent(new Event('play'));
+      this.dispatchEvent(new Event('timeupdate'));
+      this.play();
+      return;
+    }
+
     if (this.currentMediaPlayerState_ !== media.playerState) {
       var oldPlayState = false;
       var oldState = this.currentMediaPlayerState_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,45 @@ class ListNode;
 class LiteralNode;
 class Scope;
 class UnaryOpNode;
+class BlockCommentNode;
+
+class Comments {
+ public:
+  Comments();
+  virtual ~Comments();
+
+  const std::vector<Token>& before() const { return before_; }
+  void append_before(Token c) {
+    before_.push_back(c);
+  }
+
+  const std::vector<Token>& suffix() const { return suffix_; }
+  void append_suffix(Token c) {
+    suffix_.push_back(c);
+  }
+  // Reverse the order of the suffix comments. When walking the tree in
+  // post-order we append suffix comments in reverse order, so this fixes them
+  // up.
+  void ReverseSuffix();
+
+  const std::vector<Token>& after() const { return after_; }
+  void append_after(Token c) {
+    after_.push_back(c);
+  }
+
+ private:
+  // Whole line comments before the expression.
+  std::vector<Token> before_;
+
+  // End-of-line comments after this expression.
+  std::vector<Token> suffix_;
+
+  // For top-level expressions only, after_ lists whole-line comments
+  // following the expression.
+  std::vector<Token> after_;
+
+  DISALLOW_COPY_AND_ASSIGN(Comments);
+};
 
 // ParseNode -------------------------------------------------------------------
 
@@ -42,6 +81,7 @@ class ParseNode {
   virtual const ListNode* AsList() const;
   virtual const LiteralNode* AsLiteral() const;
   virtual const UnaryOpNode* AsUnaryOp() const;
+  virtual const BlockCommentNode* AsBlockComment() const;
 
   virtual Value Execute(Scope* scope, Err* err) const = 0;
 
@@ -57,7 +97,13 @@ class ParseNode {
   // by the given number of spaces.
   virtual void Print(std::ostream& out, int indent) const = 0;
 
+  const Comments* comments() const { return comments_.get(); }
+  Comments* comments_mutable();
+  void PrintComments(std::ostream& out, int indent) const;
+
  private:
+  scoped_ptr<Comments> comments_;
+
   DISALLOW_COPY_AND_ASSIGN(ParseNode);
 };
 
@@ -392,6 +438,35 @@ class UnaryOpNode : public ParseNode {
   scoped_ptr<ParseNode> operand_;
 
   DISALLOW_COPY_AND_ASSIGN(UnaryOpNode);
+};
+
+// BlockCommentNode ------------------------------------------------------------
+
+// This node type is only used for standalone comments (that is, those not
+// specifically attached to another syntax element. The most common of these
+// is a standard header block. This node contains only the last line of such
+// a comment block as the anchor, and other lines of the block comment are
+// hung off of it as Before comments, similar to other syntax elements.
+class BlockCommentNode : public ParseNode {
+ public:
+  BlockCommentNode();
+  virtual ~BlockCommentNode();
+
+  virtual const BlockCommentNode* AsBlockComment() const OVERRIDE;
+  virtual Value Execute(Scope* scope, Err* err) const OVERRIDE;
+  virtual LocationRange GetRange() const OVERRIDE;
+  virtual Err MakeErrorDescribing(
+      const std::string& msg,
+      const std::string& help = std::string()) const OVERRIDE;
+  virtual void Print(std::ostream& out, int indent) const OVERRIDE;
+
+  const Token& comment() const { return comment_; }
+  void set_comment(const Token& t) { comment_ = t; }
+
+ private:
+  Token comment_;
+
+  DISALLOW_COPY_AND_ASSIGN(BlockCommentNode);
 };
 
 #endif  // TOOLS_GN_PARSE_TREE_H_

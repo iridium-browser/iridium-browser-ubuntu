@@ -6,8 +6,8 @@
 
 #include "base/bind_helpers.h"
 #include "base/cancelable_callback.h"
-#include "base/file_util.h"
 #include "base/files/file.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "chrome/common/chrome_utility_messages.h"
@@ -127,7 +127,7 @@ class PwgUtilityProcessHostClient : public content::UtilityProcessHostClient {
   void RunCallbackOnUIThread(bool success);
   void OnFilesReadyOnUIThread();
 
-  scoped_ptr<FileHandlers> files_;
+  scoped_ptr<FileHandlers, BrowserThread::DeleteOnFileThread> files_;
   printing::PdfRenderSettings settings_;
   printing::PwgRasterSettings bitmap_settings_;
   PWGRasterConverter::ResultCallback callback_;
@@ -142,8 +142,6 @@ PwgUtilityProcessHostClient::PwgUtilityProcessHostClient(
     : settings_(settings), bitmap_settings_(bitmap_settings) {}
 
 PwgUtilityProcessHostClient::~PwgUtilityProcessHostClient() {
-  // Delete temp directory.
-  BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE, files_.release());
 }
 
 void PwgUtilityProcessHostClient::Convert(

@@ -38,6 +38,7 @@ class Image;
 }
 
 namespace extensions {
+class ActiveScriptController;
 class BookmarkAppHelper;
 class Extension;
 class LocationBarController;
@@ -97,16 +98,16 @@ class TabHelper : public content::WebContentsObserver,
   // extension_misc::EXTENSION_ICON_SMALLISH).
   SkBitmap* GetExtensionAppIcon();
 
-  content::WebContents* web_contents() const {
-    return content::WebContentsObserver::web_contents();
-  }
-
   ScriptExecutor* script_executor() {
     return script_executor_.get();
   }
 
   LocationBarController* location_bar_controller() {
     return location_bar_controller_.get();
+  }
+
+  ActiveScriptController* active_script_controller() {
+    return active_script_controller_.get();
   }
 
   ActiveTabPermissionGranter* active_tab_permission_granter() {
@@ -159,7 +160,7 @@ class TabHelper : public content::WebContentsObserver,
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
   // Message handlers.
-  void OnDidGetApplicationInfo(const WebApplicationInfo& info);
+  void OnDidGetWebApplicationInfo(const WebApplicationInfo& info);
   void OnInlineWebstoreInstall(int install_id,
                                int return_route_id,
                                const std::string& webstore_item_id,
@@ -245,17 +246,19 @@ class TabHelper : public content::WebContentsObserver,
 
   scoped_ptr<LocationBarController> location_bar_controller_;
 
+  scoped_ptr<ActiveScriptController> active_script_controller_;
+
   scoped_ptr<ActiveTabPermissionGranter> active_tab_permission_granter_;
 
   scoped_ptr<BookmarkAppHelper> bookmark_app_helper_;
 
   Profile* profile_;
 
-  // Vend weak pointers that can be invalidated to stop in-progress loads.
-  base::WeakPtrFactory<TabHelper> image_loader_ptr_factory_;
-
   // Creates WebstoreInlineInstaller instances for inline install triggers.
   scoped_ptr<WebstoreInlineInstallerFactory> webstore_inline_installer_factory_;
+
+  // Vend weak pointers that can be invalidated to stop in-progress loads.
+  base::WeakPtrFactory<TabHelper> image_loader_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabHelper);
 };

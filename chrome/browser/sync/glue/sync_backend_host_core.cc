@@ -4,12 +4,11 @@
 
 #include "chrome/browser/sync/glue/sync_backend_host_core.h"
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/invalidation_adapter.h"
+#include "chrome/browser/sync/glue/local_device_info_provider_impl.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
-#include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/common/chrome_version_info.h"
 #include "components/invalidation/invalidation_util.h"
 #include "components/invalidation/object_id_invalidation_map.h"
@@ -71,8 +70,7 @@ DoInitializeOptions::DoInitializeOptions(
     scoped_ptr<syncer::InternalComponentsFactory> internal_components_factory,
     scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
     syncer::ReportUnrecoverableErrorFunction
-        report_unrecoverable_error_function,
-    const std::string& signin_scoped_device_id)
+        report_unrecoverable_error_function)
     : sync_loop(sync_loop),
       registrar(registrar),
       routing_info(routing_info),
@@ -90,8 +88,7 @@ DoInitializeOptions::DoInitializeOptions(
           restored_keystore_key_for_bootstrapping),
       internal_components_factory(internal_components_factory.Pass()),
       unrecoverable_error_handler(unrecoverable_error_handler.Pass()),
-      report_unrecoverable_error_function(report_unrecoverable_error_function),
-      signin_scoped_device_id(signin_scoped_device_id) {
+      report_unrecoverable_error_function(report_unrecoverable_error_function) {
 }
 
 DoInitializeOptions::~DoInitializeOptions() {}
@@ -404,13 +401,11 @@ void SyncBackendHostCore::DoInitialize(
   sync_loop_ = options->sync_loop;
   DCHECK(sync_loop_);
 
-  signin_scoped_device_id_ = options->signin_scoped_device_id;
-
   // Finish initializing the HttpBridgeFactory.  We do this here because
   // building the user agent may block on some platforms.
   chrome::VersionInfo version_info;
   options->http_bridge_factory->Init(
-      DeviceInfo::MakeUserAgentForSyncApi(version_info));
+      LocalDeviceInfoProviderImpl::MakeUserAgentForSyncApi(version_info));
 
   // Blow away the partial or corrupt sync data folder before doing any more
   // initialization, if necessary.
@@ -437,7 +432,7 @@ void SyncBackendHostCore::DoInitialize(
   args.service_url = options->service_url;
   args.post_factory = options->http_bridge_factory.Pass();
   args.workers = options->workers;
-  args.extensions_activity = options->extensions_activity;
+  args.extensions_activity = options->extensions_activity.get();
   args.change_delegate = options->registrar;  // as SyncManager::ChangeDelegate
   args.credentials = options->credentials;
   args.invalidator_client_id = options->invalidator_client_id;
@@ -509,25 +504,6 @@ void SyncBackendHostCore::DoInitialProcessControlTypes() {
     return;
   }
 
-  // Initialize device info. This is asynchronous on some platforms, so we
-  // provide a callback for when it finishes.
-  synced_device_tracker_.reset(
-      new SyncedDeviceTracker(sync_manager_->GetUserShare(),
-                              sync_manager_->cache_guid()));
-  synced_device_tracker_->InitLocalDeviceInfo(
-      signin_scoped_device_id_,
-      base::Bind(&SyncBackendHostCore::DoFinishInitialProcessControlTypes,
-                 weak_ptr_factory_.GetWeakPtr()));
-}
-
-void SyncBackendHostCore::DoFinishInitialProcessControlTypes() {
-  DCHECK_EQ(base::MessageLoop::current(), sync_loop_);
-
-  registrar_->ActivateDataType(syncer::DEVICE_INFO,
-                               syncer::GROUP_PASSIVE,
-                               synced_device_tracker_.get(),
-                               sync_manager_->GetUserShare());
-
   host_.Call(FROM_HERE,
              &SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop,
              js_backend_,
@@ -574,10 +550,6 @@ void SyncBackendHostCore::ShutdownOnUIThread() {
 
 void SyncBackendHostCore::DoShutdown(syncer::ShutdownReason reason) {
   DCHECK_EQ(base::MessageLoop::current(), sync_loop_);
-
-  // It's safe to do this even if the type was never activated.
-  registrar_->DeactivateDataType(syncer::DEVICE_INFO);
-  synced_device_tracker_.reset();
 
   DoDestroySyncManager(reason);
 

@@ -36,9 +36,9 @@
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatSize.h"
+#include "platform/graphics/DeferredImageDecoder.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/Image.h"
-#include "platform/graphics/DeferredImageDecoder.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkMatrix.h"
@@ -295,7 +295,7 @@ void NativeImageSkia::drawPattern(
 
     SkPaint paint;
     paint.setShader(shader.get());
-    paint.setXfermode(WebCoreCompositeToSkiaComposite(compositeOp, blendMode).get());
+    paint.setXfermodeMode(WebCoreCompositeToSkiaComposite(compositeOp, blendMode));
     paint.setColorFilter(context->colorFilter());
     paint.setFilterLevel(filterLevel);
 

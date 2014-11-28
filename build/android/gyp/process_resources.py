@@ -64,6 +64,8 @@ def ParseArgs(args):
   parser.add_option(
       '--extra-res-packages',
       help='Additional package names to generate R.java files for')
+  # TODO(cjhopman): Actually use --extra-r-text-files. We currently include all
+  # the resources in all R.java files for a particular apk.
   parser.add_option(
       '--extra-r-text-files',
       help='For each additional package, the R.txt file should contain a '
@@ -99,12 +101,7 @@ def ParseArgs(args):
   return options
 
 
-def CreateExtraRJavaFiles(
-    r_dir, extra_packages, extra_r_text_files):
-  if len(extra_packages) != len(extra_r_text_files):
-    raise Exception('--extra-res-packages and --extra-r-text-files'
-                    'should have the same length')
-
+def CreateExtraRJavaFiles(r_dir, extra_packages):
   java_files = build_utils.FindInDirectory(r_dir, "R.java")
   if len(java_files) != 1:
     return
@@ -153,6 +150,20 @@ def ZipResources(resource_dirs, zip_path):
   with zipfile.ZipFile(zip_path, 'w') as outzip:
     for archive_path, path in files_to_zip.iteritems():
       outzip.write(path, archive_path)
+
+
+def CombineZips(zip_files, output_path):
+  # When packaging resources, if the top-level directories in the zip file are
+  # of the form 0, 1, ..., then each subdirectory will be passed to aapt as a
+  # resources directory. While some resources just clobber others (image files,
+  # etc), other resources (particularly .xml files) need to be more
+  # intelligently merged. That merging is left up to aapt.
+  with zipfile.ZipFile(output_path, 'w') as outzip:
+    for i, z in enumerate(zip_files):
+      with zipfile.ZipFile(z, 'r') as inzip:
+        for name in inzip.namelist():
+          new_name = '%d/%s' % (i, name)
+          outzip.writestr(new_name, inzip.read(name))
 
 
 def main():
@@ -222,8 +233,7 @@ def main():
     if options.extra_res_packages:
       CreateExtraRJavaFiles(
           gen_dir,
-          build_utils.ParseGypList(options.extra_res_packages),
-          build_utils.ParseGypList(options.extra_r_text_files))
+          build_utils.ParseGypList(options.extra_res_packages))
 
     # This is the list of directories with resources to put in the final .zip
     # file. The order of these is important so that crunched/v14 resources
@@ -248,8 +258,8 @@ def main():
     ZipResources(zip_resource_dirs, options.resource_zip_out)
 
     if options.all_resources_zip_out:
-      ZipResources(
-          zip_resource_dirs + dep_subdirs, options.all_resources_zip_out)
+      CombineZips([options.resource_zip_out] + dep_zips,
+                  options.all_resources_zip_out)
 
     if options.R_dir:
       build_utils.DeleteDirectory(options.R_dir)

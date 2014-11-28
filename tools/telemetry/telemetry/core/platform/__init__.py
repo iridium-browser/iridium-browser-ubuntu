@@ -2,20 +2,41 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging as real_logging
+import os
 import sys
 
+from telemetry.core import discover
+from telemetry.core import util
+from telemetry.core.platform import platform_backend as platform_backend_module
+from telemetry.core.platform import profiling_controller
 from telemetry.core.platform import tracing_controller
 
 
 _host_platform = None
+# Remote platform is a dictionary from device ids to remote platform instances.
+_remote_platforms = {}
+
+
+def _IsRunningOnCrosDevice():
+  """Returns True if we're on a ChromeOS device."""
+  lsb_release = '/etc/lsb-release'
+  if sys.platform.startswith('linux') and os.path.exists(lsb_release):
+    with open(lsb_release, 'r') as f:
+      res = f.read()
+      if res.count('CHROMEOS_RELEASE_NAME'):
+        return True
+  return False
 
 
 def _InitHostPlatformIfNeeded():
   global _host_platform
   if _host_platform:
     return
-
-  if sys.platform.startswith('linux'):
+  if _IsRunningOnCrosDevice():
+    from telemetry.core.platform import cros_platform_backend
+    backend = cros_platform_backend.CrosPlatformBackend()
+  elif sys.platform.startswith('linux'):
     from telemetry.core.platform import linux_platform_backend
     backend = linux_platform_backend.LinuxPlatformBackend()
   elif sys.platform == 'darwin':
@@ -35,6 +56,29 @@ def GetHostPlatform():
   return _host_platform
 
 
+def GetPlatformForDevice(device, logging=real_logging):
+  """ Returns a platform instance for the device.
+    Args:
+      device: a device.Device instance.
+  """
+  if device.guid in _remote_platforms:
+    return _remote_platforms[device.guid]
+  try:
+    platform_backend = None
+    platform_dir = os.path.dirname(os.path.realpath(__file__))
+    for platform_backend_class in discover.DiscoverClasses(
+        platform_dir, util.GetTelemetryDir(),
+        platform_backend_module.PlatformBackend).itervalues():
+      if platform_backend_class.SupportsDevice(device):
+        platform_backend = platform_backend_class(device)
+        _remote_platforms[device.guid] = Platform(platform_backend)
+        return _remote_platforms[device.guid]
+    return None
+  except Exception:
+    logging.error('Fail to create platform instance for %s.', device.name)
+    raise
+
+
 class Platform(object):
   """The platform that the target browser is running on.
 
@@ -47,10 +91,16 @@ class Platform(object):
     self._platform_backend.SetPlatform(self)
     self._tracing_controller = tracing_controller.TracingController(
         self._platform_backend.tracing_controller_backend)
+    self._profiling_controller = profiling_controller.ProfilingController(
+        self._platform_backend.profiling_controller_backend)
 
   @property
   def tracing_controller(self):
     return self._tracing_controller
+
+  @property
+  def profiling_controller(self):
+    return self._profiling_controller
 
   def IsRawDisplayFrameRateSupported(self):
     """Platforms may be able to collect GL surface stats."""

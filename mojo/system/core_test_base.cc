@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "mojo/embedder/simple_platform_support.h"
 #include "mojo/system/constants.h"
 #include "mojo/system/core.h"
 #include "mojo/system/dispatcher.h"
@@ -174,12 +175,13 @@ CoreTestBase::~CoreTestBase() {
 }
 
 void CoreTestBase::SetUp() {
-  core_ = new Core();
+  core_ = new Core(scoped_ptr<embedder::PlatformSupport>(
+      new embedder::SimplePlatformSupport()));
 }
 
 void CoreTestBase::TearDown() {
   delete core_;
-  core_ = NULL;
+  core_ = nullptr;
 }
 
 MojoHandle CoreTestBase::CreateMockHandle(CoreTestBase::MockHandleInfo* info) {

@@ -20,21 +20,17 @@
 
 namespace blink {
 
-class UndefinedValue {
+class BooleanValue {
 public:
-    typedef WebServiceWorkerRegistration WebType;
-    static V8UndefinedType take(ScriptPromiseResolver* resolver, WebType* registration)
+    typedef bool WebType;
+    static bool take(ScriptPromiseResolver* resolver, WebType* boolean)
     {
-        ASSERT(!registration); // Anything passed here will be leaked.
-        return V8UndefinedType();
+        return *boolean;
     }
-    static void dispose(WebType* registration)
-    {
-        ASSERT(!registration); // Anything passed here will be leaked.
-    }
+    static void dispose(WebType* boolean) { }
 
 private:
-    UndefinedValue();
+    BooleanValue();
 };
 
 static void deleteIfNoExistingOwner(WebServiceWorker* serviceWorker)
@@ -80,11 +76,16 @@ void ServiceWorkerRegistration::setActive(WebServiceWorker* serviceWorker)
     m_active = ServiceWorker::from(executionContext(), serviceWorker);
 }
 
-PassRefPtrWillBeRawPtr<ServiceWorkerRegistration> ServiceWorkerRegistration::take(ScriptPromiseResolver* resolver, WebType* registration)
+ServiceWorkerRegistration* ServiceWorkerRegistration::from(ExecutionContext* executionContext, WebType* registration)
 {
     if (!registration)
-        return nullptr;
-    return getOrCreate(resolver->scriptState()->executionContext(), registration);
+        return 0;
+    return getOrCreate(executionContext, registration);
+}
+
+ServiceWorkerRegistration* ServiceWorkerRegistration::take(ScriptPromiseResolver* resolver, WebType* registration)
+{
+    return from(resolver->scriptState()->executionContext(), registration);
 }
 
 void ServiceWorkerRegistration::dispose(WebType* registration)
@@ -115,14 +116,14 @@ ScriptPromise ServiceWorkerRegistration::unregister(ScriptState* scriptState)
         return promise;
     }
 
-    m_provider->unregisterServiceWorker(scopeURL, new CallbackPromiseAdapter<UndefinedValue, ServiceWorkerError>(resolver));
+    m_provider->unregisterServiceWorker(scopeURL, new CallbackPromiseAdapter<BooleanValue, ServiceWorkerError>(resolver));
     return promise;
 }
 
-PassRefPtrWillBeRawPtr<ServiceWorkerRegistration> ServiceWorkerRegistration::getOrCreate(ExecutionContext* executionContext, WebServiceWorkerRegistration* outerRegistration)
+ServiceWorkerRegistration* ServiceWorkerRegistration::getOrCreate(ExecutionContext* executionContext, WebServiceWorkerRegistration* outerRegistration)
 {
     if (!outerRegistration)
-        return nullptr;
+        return 0;
 
     WebServiceWorkerRegistrationProxy* proxy = outerRegistration->proxy();
     if (proxy) {
@@ -133,9 +134,9 @@ PassRefPtrWillBeRawPtr<ServiceWorkerRegistration> ServiceWorkerRegistration::get
         }
     }
 
-    RefPtrWillBeRawPtr<ServiceWorkerRegistration> registration = adoptRefWillBeRefCountedGarbageCollected(new ServiceWorkerRegistration(executionContext, adoptPtr(outerRegistration)));
+    ServiceWorkerRegistration* registration = adoptRefCountedGarbageCollectedWillBeNoop(new ServiceWorkerRegistration(executionContext, adoptPtr(outerRegistration)));
     registration->suspendIfNeeded();
-    return registration.release();
+    return registration;
 }
 
 ServiceWorkerRegistration::ServiceWorkerRegistration(ExecutionContext* executionContext, PassOwnPtr<WebServiceWorkerRegistration> outerRegistration)
@@ -146,7 +147,6 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(ExecutionContext* execution
     , m_stopped(false)
 {
     ASSERT(m_outerRegistration);
-    ScriptWrappable::init(this);
 
     if (!executionContext)
         return;

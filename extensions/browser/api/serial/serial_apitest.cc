@@ -10,6 +10,7 @@
 #include "extensions/browser/api/serial/serial_connection.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/api/serial.h"
+#include "extensions/test/result_catcher.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using testing::_;
@@ -71,7 +72,7 @@ class FakeSerialConnectFunction : public core_api::SerialConnectFunction {
       const std::string& owner_extension_id) const OVERRIDE {
     scoped_refptr<FakeEchoSerialIoHandler> io_handler =
         new FakeEchoSerialIoHandler;
-    EXPECT_CALL(*io_handler, SetControlSignals(_)).Times(1).WillOnce(
+    EXPECT_CALL(*io_handler.get(), SetControlSignals(_)).Times(1).WillOnce(
         Return(true));
     SerialConnection* serial_connection =
         new SerialConnection(port, owner_extension_id);
@@ -114,8 +115,8 @@ ExtensionFunction* FakeSerialConnectFunctionFactory() {
 //
 #define SIMULATE_SERIAL_PORTS (1)
 IN_PROC_BROWSER_TEST_F(SerialApiTest, SerialFakeHardware) {
-  ResultCatcher catcher;
-  catcher.RestrictToProfile(browser()->profile());
+  extensions::ResultCatcher catcher;
+  catcher.RestrictToBrowserContext(browser()->profile());
 
 #if SIMULATE_SERIAL_PORTS
   ASSERT_TRUE(extensions::ExtensionFunctionDispatcher::OverrideFunction(
@@ -128,8 +129,8 @@ IN_PROC_BROWSER_TEST_F(SerialApiTest, SerialFakeHardware) {
 }
 
 IN_PROC_BROWSER_TEST_F(SerialApiTest, SerialRealHardware) {
-  ResultCatcher catcher;
-  catcher.RestrictToProfile(browser()->profile());
+  extensions::ResultCatcher catcher;
+  catcher.RestrictToBrowserContext(browser()->profile());
 
   ASSERT_TRUE(RunExtensionTest("serial/real_hardware")) << message_;
 }

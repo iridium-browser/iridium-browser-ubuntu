@@ -71,12 +71,13 @@ ScopedStyleResolver* ScopedStyleResolver::parent() const
 void ScopedStyleResolver::addRulesFromSheet(CSSStyleSheet* cssSheet, const MediaQueryEvaluator& medium, StyleResolver* resolver)
 {
     m_authorStyleSheets.append(cssSheet);
+    unsigned index = m_authorStyleSheets.size() - 1;
     StyleSheetContents* sheet = cssSheet->contents();
 
     AddRuleFlags addRuleFlags = resolver->document().securityOrigin()->canRequest(sheet->baseURL()) ? RuleHasDocumentSecurityOrigin : RuleHasNoSpecialState;
     const RuleSet& ruleSet = sheet->ensureRuleSet(medium, addRuleFlags);
     resolver->addMediaQueryResults(ruleSet.viewportDependentMediaQueryResults());
-    resolver->processScopedRules(ruleSet, cssSheet, treeScope().rootNode());
+    resolver->processScopedRules(ruleSet, cssSheet, index, treeScope().rootNode());
 }
 
 void ScopedStyleResolver::collectFeaturesTo(RuleFeatureSet& features, HashSet<const StyleSheetContents*>& visitedSharedStyleSheetContents) const
@@ -120,16 +121,16 @@ void ScopedStyleResolver::addKeyframeStyle(PassRefPtrWillBeRawPtr<StyleRuleKeyfr
     }
 }
 
-void ScopedStyleResolver::collectMatchingAuthorRules(ElementRuleCollector& collector, bool includeEmptyRules, bool applyAuthorStyles, CascadeScope cascadeScope, CascadeOrder cascadeOrder)
+void ScopedStyleResolver::collectMatchingAuthorRules(ElementRuleCollector& collector, bool includeEmptyRules, CascadeScope cascadeScope, CascadeOrder cascadeOrder)
 {
     unsigned contextFlags = SelectorChecker::DefaultBehavior;
 
-    if (!applyAuthorStyles)
-        contextFlags |= SelectorChecker::ScopeContainsLastMatchedElement;
+    // FIXME: This is always true now.
+    contextFlags |= SelectorChecker::ScopeContainsLastMatchedElement;
 
     RuleRange ruleRange = collector.matchedResult().ranges.authorRuleRange();
     for (size_t i = 0; i < m_authorStyleSheets.size(); ++i) {
-        MatchRequest matchRequest(&m_authorStyleSheets[i]->contents()->ruleSet(), includeEmptyRules, &m_scope->rootNode(), m_authorStyleSheets[i], applyAuthorStyles, i);
+        MatchRequest matchRequest(&m_authorStyleSheets[i]->contents()->ruleSet(), includeEmptyRules, &m_scope->rootNode(), m_authorStyleSheets[i], i);
         collector.collectMatchingRules(matchRequest, ruleRange, static_cast<SelectorChecker::ContextFlags>(contextFlags), cascadeScope, cascadeOrder);
     }
 }

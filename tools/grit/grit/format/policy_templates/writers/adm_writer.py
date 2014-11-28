@@ -153,9 +153,10 @@ class AdmWriter(template_writer.TemplateWriter):
     builder.AddLine()
 
   def WritePolicy(self, policy):
-    self._WritePolicy(policy,
-                      self.config['win_reg_mandatory_key_name'],
-                      self.policies)
+    if self.CanBeMandatory(policy):
+      self._WritePolicy(policy,
+                        self.config['win_reg_mandatory_key_name'],
+                        self.policies)
 
   def WriteRecommendedPolicy(self, policy):
     self._WritePolicy(policy,

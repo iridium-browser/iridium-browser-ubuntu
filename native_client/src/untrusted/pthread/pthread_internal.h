@@ -12,8 +12,6 @@
 
 struct nc_combined_tdb;
 
-extern struct nacl_irt_futex __nc_irt_futex;
-
 extern int __nc_thread_initialized;
 extern pthread_t __nc_initial_thread_id;
 
@@ -21,7 +19,7 @@ void __nc_initialize_globals(void);
 
 void __nc_initialize_unjoinable_thread(struct nc_combined_tdb *tdb);
 
-void __nc_initialize_interfaces(struct nacl_irt_thread *irt_thread);
+void __nc_initialize_interfaces(void);
 
 void __nc_tsd_exit(void);
 

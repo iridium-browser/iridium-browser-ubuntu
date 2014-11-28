@@ -26,13 +26,20 @@ package com.google.protos.ipc.invalidation;
 
 option optimize_for = LITE_RUNTIME;
 
-option java_outer_classname = "AndroidService";
+
+
+option java_outer_classname = "NanoAndroidService";
+option java_package = "com.google.protos.ipc.invalidation";
+
 
 
 import "client_protocol.proto";
 import "java_client.proto";
 
 // Call from application to Ticl.
+//
+// Android service messages are typically validated. Validation rules may be
+// declared in ClientProtoWrapperGenerator.java.
 
 message ClientDowncall {
   message StartDowncall {}

@@ -30,10 +30,13 @@
         'OZONE_IMPLEMENTATION',
       ],
       'sources': [
+        'channel_observer.h',
         'chromeos/display_message_handler.cc',
         'chromeos/display_message_handler.h',
         'chromeos/native_display_delegate_proxy.cc',
         'chromeos/native_display_delegate_proxy.h',
+        'dri_window_delegate_proxy.cc',
+        'dri_window_delegate_proxy.h',
         'gbm_buffer.cc',
         'gbm_buffer.h',
         'gbm_buffer_base.cc',

@@ -66,7 +66,6 @@ inline Range::Range(Document& ownerDocument)
     rangeCounter.increment();
 #endif
 
-    ScriptWrappable::init(this);
     m_ownerDocument->attachRange(this);
 }
 
@@ -84,7 +83,6 @@ inline Range::Range(Document& ownerDocument, Node* startContainer, int startOffs
     rangeCounter.increment();
 #endif
 
-    ScriptWrappable::init(this);
     m_ownerDocument->attachRange(this);
 
     // Simply setting the containers and offsets directly would not do any of the checking
@@ -316,7 +314,7 @@ Range::CompareResults Range::compareNode(Node* refNode, ExceptionState& exceptio
     return NODE_INSIDE; // ends inside the range
 }
 
-short Range::compareBoundaryPoints(CompareHow how, const Range* sourceRange, ExceptionState& exceptionState) const
+short Range::compareBoundaryPoints(unsigned how, const Range* sourceRange, ExceptionState& exceptionState) const
 {
     if (!(how == START_TO_START || how == START_TO_END || how == END_TO_END || how == END_TO_START)) {
         exceptionState.throwDOMException(NotSupportedError, "The comparison method provided must be one of 'START_TO_START', 'START_TO_END', 'END_TO_END', or 'END_TO_START'.");
@@ -470,19 +468,27 @@ void Range::deleteContents(ExceptionState& exceptionState)
     }
 }
 
-bool Range::intersectsNode(Node* refNode, ExceptionState& exceptionState)
+static bool nodeValidForIntersects(Node* refNode, Document* expectedDocument, ExceptionState& exceptionState)
 {
-    // http://developer.mozilla.org/en/docs/DOM:range.intersectsNode
-    // Returns a bool if the node intersects the range.
     if (!refNode) {
         exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
         return false;
     }
 
-    if (!refNode->inActiveDocument() || refNode->document() != m_ownerDocument) {
+    if (!refNode->inActiveDocument() || refNode->document() != expectedDocument) {
         // Firefox doesn't throw an exception for these cases; it returns false.
         return false;
     }
+
+    return true;
+}
+
+bool Range::intersectsNode(Node* refNode, ExceptionState& exceptionState)
+{
+    // http://developer.mozilla.org/en/docs/DOM:range.intersectsNode
+    // Returns a bool if the node intersects the range.
+    if (!nodeValidForIntersects(refNode, m_ownerDocument.get(), exceptionState))
+        return false;
 
     ContainerNode* parentNode = refNode->parentNode();
     int nodeIndex = refNode->nodeIndex();
@@ -501,6 +507,44 @@ bool Range::intersectsNode(Node* refNode, ExceptionState& exceptionState)
 
     if (comparePoint(parentNode, nodeIndex, exceptionState) > 0 // starts after end
         && comparePoint(parentNode, nodeIndex + 1, exceptionState) > 0) { // ends after end
+        return false;
+    }
+
+    return true; // all other cases
+}
+
+bool Range::intersectsNode(Node* refNode, const Position& start, const Position& end, ExceptionState& exceptionState)
+{
+    // http://developer.mozilla.org/en/docs/DOM:range.intersectsNode
+    // Returns a bool if the node intersects the range.
+    if (!nodeValidForIntersects(refNode, start.document(), exceptionState))
+        return false;
+
+    ContainerNode* parentNode = refNode->parentNode();
+    int nodeIndex = refNode->nodeIndex();
+
+    if (!parentNode) {
+        // if the node is the top document we should return NODE_BEFORE_AND_AFTER
+        // but we throw to match firefox behavior
+        exceptionState.throwDOMException(NotFoundError, "The node provided has no parent.");
+        return false;
+    }
+
+    Node* startContainerNode = start.containerNode();
+    int startOffset = start.computeOffsetInContainerNode();
+
+    if (compareBoundaryPoints(parentNode, nodeIndex, startContainerNode, startOffset, exceptionState) < 0 // starts before start
+        && compareBoundaryPoints(parentNode, nodeIndex + 1, startContainerNode, startOffset, exceptionState) < 0) { // ends before start
+        ASSERT(!exceptionState.hadException());
+        return false;
+    }
+
+    Node* endContainerNode = end.containerNode();
+    int endOffset = end.computeOffsetInContainerNode();
+
+    if (compareBoundaryPoints(parentNode, nodeIndex, endContainerNode, endOffset, exceptionState) > 0 // starts after end
+        && compareBoundaryPoints(parentNode, nodeIndex + 1, endContainerNode, endOffset, exceptionState) > 0) { // ends after end
+        ASSERT(!exceptionState.hadException());
         return false;
     }
 
@@ -1184,18 +1228,18 @@ void Range::selectNodeContents(Node* refNode, ExceptionState& exceptionState)
     // or DocumentType node.
     for (Node* n = refNode; n; n = n->parentNode()) {
         switch (n->nodeType()) {
-            case Node::ATTRIBUTE_NODE:
-            case Node::CDATA_SECTION_NODE:
-            case Node::COMMENT_NODE:
-            case Node::DOCUMENT_FRAGMENT_NODE:
-            case Node::DOCUMENT_NODE:
-            case Node::ELEMENT_NODE:
-            case Node::PROCESSING_INSTRUCTION_NODE:
-            case Node::TEXT_NODE:
-                break;
-            case Node::DOCUMENT_TYPE_NODE:
-                exceptionState.throwDOMException(InvalidNodeTypeError, "The node provided is of type '" + refNode->nodeName() + "'.");
-                return;
+        case Node::ATTRIBUTE_NODE:
+        case Node::CDATA_SECTION_NODE:
+        case Node::COMMENT_NODE:
+        case Node::DOCUMENT_FRAGMENT_NODE:
+        case Node::DOCUMENT_NODE:
+        case Node::ELEMENT_NODE:
+        case Node::PROCESSING_INSTRUCTION_NODE:
+        case Node::TEXT_NODE:
+            break;
+        case Node::DOCUMENT_TYPE_NODE:
+            exceptionState.throwDOMException(InvalidNodeTypeError, "The node provided is of type '" + refNode->nodeName() + "'.");
+            return;
         }
     }
 
@@ -1204,6 +1248,37 @@ void Range::selectNodeContents(Node* refNode, ExceptionState& exceptionState)
 
     m_start.setToStartOfNode(*refNode);
     m_end.setToEndOfNode(*refNode);
+}
+
+bool Range::selectNodeContents(Node* refNode, Position& start, Position& end)
+{
+    if (!refNode) {
+        return false;
+    }
+
+    for (Node* n = refNode; n; n = n->parentNode()) {
+        switch (n->nodeType()) {
+        case Node::ATTRIBUTE_NODE:
+        case Node::CDATA_SECTION_NODE:
+        case Node::COMMENT_NODE:
+        case Node::DOCUMENT_FRAGMENT_NODE:
+        case Node::DOCUMENT_NODE:
+        case Node::ELEMENT_NODE:
+        case Node::PROCESSING_INSTRUCTION_NODE:
+        case Node::TEXT_NODE:
+            break;
+        case Node::DOCUMENT_TYPE_NODE:
+            return false;
+        }
+    }
+
+    RangeBoundaryPoint startBoundaryPoint(refNode);
+    startBoundaryPoint.setToStartOfNode(*refNode);
+    start = startBoundaryPoint.toPosition();
+    RangeBoundaryPoint endBoundaryPoint(refNode);
+    endBoundaryPoint.setToEndOfNode(*refNode);
+    end = endBoundaryPoint.toPosition();
+    return true;
 }
 
 void Range::surroundContents(PassRefPtrWillBeRawPtr<Node> passNewParent, ExceptionState& exceptionState)

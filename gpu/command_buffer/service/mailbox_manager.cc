@@ -84,14 +84,14 @@ void MailboxManager::TextureDeleted(Texture* texture) {
     sync_->TextureDeleted(texture);
 }
 
-void MailboxManager::PushTextureUpdates() {
+void MailboxManager::PushTextureUpdates(uint32 sync_point) {
   if (sync_)
-    sync_->PushTextureUpdates(this);
+    sync_->PushTextureUpdates(this, sync_point);
 }
 
-void MailboxManager::PullTextureUpdates() {
+void MailboxManager::PullTextureUpdates(uint32 sync_point) {
   if (sync_)
-    sync_->PullTextureUpdates(this);
+    sync_->PullTextureUpdates(this, sync_point);
 }
 
 MailboxManager::TargetName::TargetName(unsigned target, const Mailbox& mailbox)
@@ -101,7 +101,9 @@ MailboxManager::TargetName::TargetName(unsigned target, const Mailbox& mailbox)
 
 bool MailboxManager::TargetNameLess(const MailboxManager::TargetName& lhs,
                                     const MailboxManager::TargetName& rhs) {
-  return memcmp(&lhs, &rhs, sizeof(lhs)) < 0;
+  if (lhs.target != rhs.target)
+    return lhs.target < rhs.target;
+  return lhs.mailbox < rhs.mailbox;
 }
 
 }  // namespace gles2

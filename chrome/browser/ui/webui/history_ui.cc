@@ -24,11 +24,9 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/web_history_service.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -38,16 +36,18 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/search/search.h"
+#include "components/sync_driver/device_info.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
@@ -233,9 +233,11 @@ void GetDeviceNameAndType(const ProfileSyncService* sync_service,
                           const std::string& client_id,
                           std::string* name,
                           std::string* type) {
-  if (sync_service && sync_service->sync_initialized()) {
-    scoped_ptr<browser_sync::DeviceInfo> device_info =
-        sync_service->GetDeviceInfo(client_id);
+  // DeviceInfoTracker becomes available when Sync backend gets initialed.
+  // It must exist in order for remote history entries to be available.
+  if (sync_service && sync_service->GetDeviceInfoTracker()) {
+    scoped_ptr<sync_driver::DeviceInfo> device_info =
+        sync_service->GetDeviceInfoTracker()->GetDeviceInfo(client_id);
     if (device_info.get()) {
       *name = device_info->client_name();
       switch (device_info->device_type()) {
@@ -251,7 +253,7 @@ void GetDeviceNameAndType(const ProfileSyncService* sync_service,
       return;
     }
   } else {
-    NOTREACHED() << "Got a remote history entry but no ProfileSyncService.";
+    NOTREACHED() << "Got a remote history entry but no DeviceInfoTracker.";
   }
   *name = l10n_util::GetStringUTF8(IDS_HISTORY_UNKNOWN_DEVICE);
   *type = kDeviceTypeLaptop;
@@ -327,6 +329,10 @@ scoped_ptr<base::DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
   if (domain.empty())
     domain = base::UTF8ToUTF16(url.scheme() + ":");
 
+  // The items which are to be written into result are also described in
+  // chrome/browser/resources/history/history.js in @typedef for
+  // HistoryEntry. Please update it whenever you add or remove
+  // any keys in result.
   result->SetString("domain", domain);
   result->SetDouble("time", time.ToJsTime());
 
@@ -783,6 +789,10 @@ void BrowsingHistoryHandler::QueryComplete(
             accept_languages));
   }
 
+  // The items which are to be written into results_info_value_ are also
+  // described in chrome/browser/resources/history/history.js in @typedef for
+  // HistoryQuery. Please update it whenever you add or remove any keys in
+  // results_info_value_.
   results_info_value_.SetString("term", search_text);
   results_info_value_.SetBoolean("finished", results->reached_beginning());
 

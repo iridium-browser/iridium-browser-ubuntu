@@ -6,15 +6,19 @@
 #include "public/platform/WebServiceWorkerResponse.h"
 
 #include "platform/blob/BlobData.h"
+#include "platform/network/HTTPHeaderMap.h"
+#include "public/platform/WebHTTPHeaderVisitor.h"
+#include "wtf/HashMap.h"
 
 namespace blink {
 
 class WebServiceWorkerResponsePrivate : public RefCounted<WebServiceWorkerResponsePrivate> {
 public:
+    WebServiceWorkerResponsePrivate() : status(0) { }
     WebURL url;
     unsigned short status;
     WebString statusText;
-    HashMap<String, String> headers;
+    HTTPHeaderMap headers;
     RefPtr<BlobDataHandle> blobDataHandle;
 };
 
@@ -68,16 +72,31 @@ void WebServiceWorkerResponse::setHeader(const WebString& key, const WebString& 
     m_private->headers.set(key, value);
 }
 
+void WebServiceWorkerResponse::appendHeader(const WebString& key, const WebString& value)
+{
+    HTTPHeaderMap::AddResult addResult = m_private->headers.add(key, value);
+    if (!addResult.isNewEntry)
+        addResult.storedValue->value = addResult.storedValue->value + ", " + String(value);
+}
+
 WebVector<WebString> WebServiceWorkerResponse::getHeaderKeys() const
 {
     Vector<String> keys;
-    copyKeysToVector(m_private->headers, keys);
+    for (HTTPHeaderMap::const_iterator it = m_private->headers.begin(), end = m_private->headers.end(); it != end; ++it)
+        keys.append(it->key);
+
     return keys;
 }
 
 WebString WebServiceWorkerResponse::getHeader(const WebString& key) const
 {
     return m_private->headers.get(key);
+}
+
+void WebServiceWorkerResponse::visitHTTPHeaderFields(WebHTTPHeaderVisitor* headerVisitor) const
+{
+    for (HTTPHeaderMap::const_iterator i = m_private->headers.begin(), end = m_private->headers.end(); i != end; ++i)
+        headerVisitor->visitHeader(i->key, i->value);
 }
 
 WebString WebServiceWorkerResponse::blobUUID() const
@@ -87,12 +106,7 @@ WebString WebServiceWorkerResponse::blobUUID() const
     return m_private->blobDataHandle->uuid();
 }
 
-void WebServiceWorkerResponse::setHeaders(const HashMap<String, String>& headers)
-{
-    m_private->headers = headers;
-}
-
-const HashMap<String, String>& WebServiceWorkerResponse::headers() const
+const HTTPHeaderMap& WebServiceWorkerResponse::headers() const
 {
     return m_private->headers;
 }

@@ -87,6 +87,10 @@ class TemplateWriter(object):
     '''Checks if the given policy can be recommended.'''
     return policy.get('features', {}).get('can_be_recommended', False)
 
+  def CanBeMandatory(self, policy):
+    '''Checks if the given policy can be mandatory.'''
+    return policy.get('features', {}).get('can_be_mandatory', True)
+
   def IsPolicySupportedOnPlatform(self, policy, platform):
     '''Checks if |policy| is supported on |platform|.
 

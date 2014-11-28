@@ -18,6 +18,7 @@ Usage example:
 
 import optparse
 import os
+import shlex
 import sys
 
 from cpp_bundle_generator import CppBundleGenerator
@@ -25,31 +26,35 @@ from cpp_generator import CppGenerator
 from cpp_type_generator import CppTypeGenerator
 from dart_generator import DartGenerator
 import json_schema
+from cpp_namespace_environment import CppNamespaceEnvironment
 from model import Model
 from schema_loader import SchemaLoader
 
 # Names of supported code generators, as specified on the command-line.
 # First is default.
-GENERATORS = ['cpp', 'cpp-bundle', 'dart']
+GENERATORS = ['cpp', 'cpp-bundle-registration', 'cpp-bundle-schema', 'dart']
 
-def GenerateSchema(generator,
+def GenerateSchema(generator_name,
                    file_paths,
                    root,
                    destdir,
                    cpp_namespace_pattern,
                    dart_overrides_dir,
-                   impl_dir):
+                   impl_dir,
+                   include_rules):
   # Merge the source files into a single list of schemas.
   api_defs = []
   for file_path in file_paths:
-    schema = os.path.normpath(file_path)
+    schema = os.path.relpath(file_path, root)
     schema_loader = SchemaLoader(
-        os.path.dirname(os.path.relpath(schema, root)),
-        os.path.dirname(file_path))
-    api_def = schema_loader.LoadSchema(os.path.split(schema)[1])
+        root,
+        os.path.dirname(schema),
+        include_rules,
+        cpp_namespace_pattern)
+    api_def = schema_loader.LoadSchema(schema)
 
     # If compiling the C++ model code, delete 'nocompile' nodes.
-    if generator == 'cpp':
+    if generator_name == 'cpp':
       api_def = json_schema.DeleteNodes(api_def, 'nocompile')
     api_defs.extend(api_def)
 
@@ -68,7 +73,9 @@ def GenerateSchema(generator,
     relpath = os.path.relpath(os.path.normpath(file_path), root)
     namespace = api_model.AddNamespace(target_namespace,
                                        relpath,
-                                       include_compiler_options=True)
+                                       include_compiler_options=True,
+                                       environment=CppNamespaceEnvironment(
+                                           cpp_namespace_pattern))
 
     if default_namespace is None:
       default_namespace = namespace
@@ -85,7 +92,7 @@ def GenerateSchema(generator,
   type_generator = CppTypeGenerator(api_model,
                                     schema_loader,
                                     default_namespace)
-  if generator == 'cpp-bundle':
+  if generator_name in ('cpp-bundle-registration', 'cpp-bundle-schema'):
     cpp_bundle_generator = CppBundleGenerator(root,
                                               api_model,
                                               api_defs,
@@ -93,19 +100,24 @@ def GenerateSchema(generator,
                                               cpp_namespace_pattern,
                                               src_path,
                                               impl_dir)
-    generators = [
-      ('generated_api.cc', cpp_bundle_generator.api_cc_generator),
-      ('generated_api.h', cpp_bundle_generator.api_h_generator),
-      ('generated_schemas.cc', cpp_bundle_generator.schemas_cc_generator),
-      ('generated_schemas.h', cpp_bundle_generator.schemas_h_generator)
-    ]
-  elif generator == 'cpp':
-    cpp_generator = CppGenerator(type_generator, cpp_namespace_pattern)
+    if generator_name == 'cpp-bundle-registration':
+      generators = [
+        ('generated_api_registration.cc',
+         cpp_bundle_generator.api_cc_generator),
+        ('generated_api_registration.h', cpp_bundle_generator.api_h_generator),
+      ]
+    elif generator_name == 'cpp-bundle-schema':
+      generators = [
+        ('generated_schemas.cc', cpp_bundle_generator.schemas_cc_generator),
+        ('generated_schemas.h', cpp_bundle_generator.schemas_h_generator)
+      ]
+  elif generator_name == 'cpp':
+    cpp_generator = CppGenerator(type_generator)
     generators = [
       ('%s.h' % filename_base, cpp_generator.h_generator),
       ('%s.cc' % filename_base, cpp_generator.cc_generator)
     ]
-  elif generator == 'dart':
+  elif generator_name == 'dart':
     generators = [
       ('%s.dart' % namespace.unix_name, DartGenerator(
           dart_overrides_dir))
@@ -117,7 +129,12 @@ def GenerateSchema(generator,
   for filename, generator in generators:
     code = generator.Generate(namespace).Render()
     if destdir:
-      output_dir = os.path.join(destdir, src_path)
+      if generator_name == 'cpp-bundle-registration':
+        # Function registrations must be output to impl_dir, since they link in
+        # API implementations.
+        output_dir = os.path.join(destdir, impl_dir)
+      else:
+        output_dir = os.path.join(destdir, src_path)
       if not os.path.exists(output_dir):
         os.makedirs(output_dir)
       with open(os.path.join(output_dir, filename), 'w') as f:
@@ -146,6 +163,10 @@ if __name__ == '__main__':
       help='Adds custom dart from files in the given directory (Dart only).')
   parser.add_option('-i', '--impl-dir', dest='impl_dir',
       help='The root path of all API implementations')
+  parser.add_option('-I', '--include-rules',
+      help='A list of paths to include when searching for referenced objects,'
+      ' with the namespace separated by a \':\'. Example: '
+      '/foo/bar:Foo::Bar::%(namespace)s')
 
   (opts, file_paths) = parser.parse_args()
 
@@ -153,13 +174,25 @@ if __name__ == '__main__':
     sys.exit(0) # This is OK as a no-op
 
   # Unless in bundle mode, only one file should be specified.
-  if opts.generator != 'cpp-bundle' and len(file_paths) > 1:
+  if (opts.generator not in ('cpp-bundle-registration', 'cpp-bundle-schema') and
+      len(file_paths) > 1):
     # TODO(sashab): Could also just use file_paths[0] here and not complain.
     raise Exception(
         "Unless in bundle mode, only one file can be specified at a time.")
 
+  def split_path_and_namespace(path_and_namespace):
+    if ':' not in path_and_namespace:
+      raise ValueError('Invalid include rule "%s". Rules must be of '
+                       'the form path:namespace' % path_and_namespace)
+    return path_and_namespace.split(':', 1)
+
+  include_rules = []
+  if opts.include_rules:
+    include_rules = map(split_path_and_namespace,
+                        shlex.split(opts.include_rules))
+
   result = GenerateSchema(opts.generator, file_paths, opts.root, opts.destdir,
                           opts.namespace, opts.dart_overrides_dir,
-                          opts.impl_dir)
+                          opts.impl_dir, include_rules)
   if not opts.destdir:
     print result

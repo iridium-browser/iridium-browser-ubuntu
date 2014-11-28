@@ -7,7 +7,6 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/renderer/extensions_renderer_client.h"
@@ -72,7 +71,13 @@ void UserScriptSet::GetInjections(
     if (!extension)
       continue;
     scoped_ptr<ScriptInjection> injection = GetInjectionForScript(
-        *iter, web_frame, tab_id, run_location, document_url, extension);
+        *iter,
+        web_frame,
+        tab_id,
+        run_location,
+        document_url,
+        extension,
+        false /* is_declarative */);
     if (injection.get())
       injections->push_back(injection.release());
   }
@@ -143,13 +148,39 @@ bool UserScriptSet::UpdateUserScripts(
   return true;
 }
 
+scoped_ptr<ScriptInjection> UserScriptSet::GetDeclarativeScriptInjection(
+    int script_id,
+    blink::WebFrame* web_frame,
+    int tab_id,
+    UserScript::RunLocation run_location,
+    const GURL& document_url,
+    const Extension* extension) {
+  for (ScopedVector<UserScript>::const_iterator it = scripts_.begin();
+       it != scripts_.end();
+       ++it) {
+    if ((*it)->id() == script_id) {
+      return GetInjectionForScript(*it,
+                                   web_frame,
+                                   tab_id,
+                                   run_location,
+                                   document_url,
+                                   extension,
+                                   true /* is_declarative */);
+    }
+  }
+  return scoped_ptr<ScriptInjection>();
+}
+
+// TODO(dcheng): Scripts can't be injected on a remote frame, so this function
+// signature needs to be updated.
 scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
     UserScript* script,
     blink::WebFrame* web_frame,
     int tab_id,
     UserScript::RunLocation run_location,
     const GURL& document_url,
-    const Extension* extension) {
+    const Extension* extension,
+    bool is_declarative) {
   scoped_ptr<ScriptInjection> injection;
   if (web_frame->parent() && !script->match_all_frames())
     return injection.Pass();  // Only match subframes if the script declared it.
@@ -160,13 +191,15 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
   if (!script->MatchesURL(effective_document_url))
     return injection.Pass();
 
-  if (extension->permissions_data()->GetContentScriptAccess(
+  scoped_ptr<ScriptInjector> injector(new UserScriptInjector(script,
+                                                             this,
+                                                             is_declarative));
+  if (injector->CanExecuteOnFrame(
           extension,
-          effective_document_url,
-          web_frame->top()->document().url(),
+          web_frame,
           -1,  // Content scripts are not tab-specific.
-          -1,  // We don't have a process id in this context.
-          NULL /* ignore error */) == PermissionsData::ACCESS_DENIED) {
+          web_frame->top()->document().url()) ==
+      PermissionsData::ACCESS_DENIED) {
     return injection.Pass();
   }
 
@@ -176,8 +209,8 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
       !script->js_scripts().empty() && script->run_location() == run_location;
   if (inject_css || inject_js) {
     injection.reset(new ScriptInjection(
-        scoped_ptr<ScriptInjector>(new UserScriptInjector(script, this)),
-        web_frame,
+        injector.Pass(),
+        web_frame->toWebLocalFrame(),
         extension->id(),
         run_location,
         tab_id));

@@ -17,7 +17,7 @@ from buildbot_lib import (
     ParseStandardCommandLine, RemoveDirectory, RemoveGypBuildDirectories,
     RemoveSconsBuildDirectories, RunBuild, SCons, SetupLinuxEnvironment,
     SetupMacEnvironment, SetupWindowsEnvironment, SetupAndroidEnvironment,
-    Step, StepLink, StepText, TryToCleanContents)
+    Step, StepLink, StepText, TryToCleanContents, RunningOnBuildbot)
 
 
 def SetupContextVars(context):
@@ -76,20 +76,18 @@ def ArchiveCoverage(context):
 
 
 def CommandGypBuild(context):
-  if context.Windows():
-    Command(
-        context,
-        cmd=[os.path.join(context['msvc'], 'Common7', 'IDE', 'devenv.com'),
-             r'build\all.sln',
-             '/build', context['gyp_mode']])
-  elif context.Linux():
+  use_goma = RunningOnBuildbot() and not context['no_goma']
+
+  if use_goma:
+    Command(context, cmd=[
+        sys.executable, '/b/build/goma/goma_ctl.py', 'restart'])
+  try:
     Command(context, cmd=[
         'ninja', '-v', '-k', '0', '-C', '../out/' + context['gyp_mode']])
-  elif context.Mac():
-    Command(context, cmd=[
-        'ninja', '-v', '-k', '0', '-C', '../out/' + context['gyp_mode']])
-  else:
-    raise Exception('Unknown platform')
+  finally:
+    if use_goma:
+      Command(context, cmd=[
+          sys.executable, '/b/build/goma/goma_ctl.py', 'stop'])
 
 
 def CommandGypGenerate(context):
@@ -307,20 +305,6 @@ def BuildScript(status, context):
     with Step('large_tests under GN', status, halt_on_fail=False):
       SCons(context, args=['large_tests', 'force_sel_ldr=' + gn_sel_ldr])
   ### END GN tests ###
-
-  if not context['no_gyp']:
-    # Build with ragel-based validator using GYP.
-    gyp_defines_save = context.GetEnv('GYP_DEFINES')
-    context.SetEnv('GYP_DEFINES',
-                   ' '.join([gyp_defines_save, 'nacl_validator_ragel=0']))
-    with Step('gyp_compile_noragel', status):
-      # Clobber GYP build to recompile necessary files with new preprocessor macro
-      # definitions.  It is done because some build systems (such as GNU Make,
-      # MSBuild etc.) do not consider compiler arguments as a dependency.
-      RemoveGypBuildDirectories()
-      CommandGypGenerate(context)
-      CommandGypBuild(context)
-    context.SetEnv('GYP_DEFINES', gyp_defines_save)
 
   # Build with ragel-based validator using scons.
   with Step('scons_compile_noragel', status):

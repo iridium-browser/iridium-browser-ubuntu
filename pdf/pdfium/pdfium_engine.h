@@ -131,6 +131,26 @@ class PDFiumEngine : public PDFEngine,
     pp::Point previous_origin_;
   };
 
+  // Used to store mouse down state to handle it in other mouse event handlers.
+  class MouseDownState {
+   public:
+    MouseDownState(const PDFiumPage::Area& area,
+                   const PDFiumPage::LinkTarget& target);
+    ~MouseDownState();
+
+    void Set(const PDFiumPage::Area& area,
+             const PDFiumPage::LinkTarget& target);
+    void Reset();
+    bool Matches(const PDFiumPage::Area& area,
+                 const PDFiumPage::LinkTarget& target) const;
+
+   private:
+    PDFiumPage::Area area_;
+    PDFiumPage::LinkTarget target_;
+
+    DISALLOW_COPY_AND_ASSIGN(MouseDownState);
+  };
+
   friend class SelectionChangeInvalidator;
 
   struct FileAvail : public FX_FILEAVAIL {
@@ -236,13 +256,21 @@ class PDFiumEngine : public PDFEngine,
   bool OnKeyUp(const pp::KeyboardInputEvent& event);
   bool OnChar(const pp::KeyboardInputEvent& event);
 
+  FPDF_DOCUMENT CreateSinglePageRasterPdf(
+      double source_page_width,
+      double source_page_height,
+      const PP_PrintSettings_Dev& print_settings,
+      PDFiumPage* page_to_print);
+
   pp::Buffer_Dev PrintPagesAsRasterPDF(
       const PP_PrintPageNumberRange_Dev* page_ranges,
       uint32_t page_range_count,
       const PP_PrintSettings_Dev& print_settings);
+
   pp::Buffer_Dev PrintPagesAsPDF(const PP_PrintPageNumberRange_Dev* page_ranges,
                                  uint32_t page_range_count,
                                  const PP_PrintSettings_Dev& print_settings);
+
   pp::Buffer_Dev GetFlattenedPrintData(const FPDF_DOCUMENT& doc);
   void FitContentsToPrintableAreaIfRequired(
       const FPDF_DOCUMENT& doc,
@@ -500,6 +528,8 @@ class PDFiumEngine : public PDFEngine,
   std::vector<PDFiumRange> selection_;
   // True if we're in the middle of selection.
   bool selecting_;
+
+  MouseDownState mouse_down_state_;
 
   // Used for searching.
   typedef std::vector<PDFiumRange> FindResults;

@@ -7,7 +7,7 @@ BOWER_VERSION := $(shell bower --version 2>/dev/null)
 
 check:
 ifndef NPM_VERSION
-	$(error npm not found. Install from nodejs.org or see README-mocha)
+	$(error npm not found. Install from nodejs.org or see README)
 endif
 ifndef BOWER_VERSION
 	@echo "bower not found. Installing:";
@@ -19,9 +19,9 @@ update: check
 	npm update
 
 test: check
-	xvfb-run ./node_modules/karma/bin/karma start
+	./node_modules/karma/bin/karma start
 
 single-test: check
-	xvfb-run ./node_modules/karma/bin/karma start --single-run
+	./node_modules/karma/bin/karma start --single-run
 
 .PHONY: check update test single-test

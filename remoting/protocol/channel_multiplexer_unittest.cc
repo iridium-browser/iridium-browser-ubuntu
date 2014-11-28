@@ -72,18 +72,21 @@ class ChannelMultiplexerTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
     // Create pair of multiplexers and connect them to each other.
-    host_mux_.reset(new ChannelMultiplexer(&host_session_, kMuxChannelName));
-    client_mux_.reset(new ChannelMultiplexer(&client_session_,
-                                             kMuxChannelName));
+    host_mux_.reset(new ChannelMultiplexer(
+        host_session_.GetTransportChannelFactory(), kMuxChannelName));
+    client_mux_.reset(new ChannelMultiplexer(
+        client_session_.GetTransportChannelFactory(), kMuxChannelName));
   }
 
   // Connect sockets to each other. Must be called after we've created at least
   // one channel with each multiplexer.
   void ConnectSockets() {
-    FakeSocket* host_socket =
-        host_session_.GetStreamChannel(ChannelMultiplexer::kMuxChannelName);
-    FakeSocket* client_socket =
-        client_session_.GetStreamChannel(ChannelMultiplexer::kMuxChannelName);
+    FakeStreamSocket* host_socket =
+        host_session_.fake_channel_factory().GetFakeChannel(
+            ChannelMultiplexer::kMuxChannelName);
+    FakeStreamSocket* client_socket =
+        client_session_.fake_channel_factory().GetFakeChannel(
+            ChannelMultiplexer::kMuxChannelName);
     host_socket->PairWith(client_socket);
 
     // Make writes asynchronous in one direction.
@@ -94,10 +97,10 @@ class ChannelMultiplexerTest : public testing::Test {
                      scoped_ptr<net::StreamSocket>* host_socket,
                      scoped_ptr<net::StreamSocket>* client_socket) {
     int counter = 2;
-    host_mux_->CreateStreamChannel(name, base::Bind(
+    host_mux_->CreateChannel(name, base::Bind(
         &ChannelMultiplexerTest::OnChannelConnected, base::Unretained(this),
         host_socket, &counter));
-    client_mux_->CreateStreamChannel(name, base::Bind(
+    client_mux_->CreateChannel(name, base::Bind(
         &ChannelMultiplexerTest::OnChannelConnected, base::Unretained(this),
         client_socket, &counter));
 
@@ -242,9 +245,9 @@ TEST_F(ChannelMultiplexerTest, WriteFailSync) {
 
   ConnectSockets();
 
-  host_session_.GetStreamChannel(kMuxChannelName)->
+  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
       set_next_write_error(net::ERR_FAILED);
-  host_session_.GetStreamChannel(kMuxChannelName)->
+  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
       set_async_write(false);
 
   scoped_refptr<net::IOBufferWithSize> buf = CreateTestBuffer(100);
@@ -280,9 +283,9 @@ TEST_F(ChannelMultiplexerTest, WriteFailAsync) {
 
   ConnectSockets();
 
-  host_session_.GetStreamChannel(kMuxChannelName)->
+  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
       set_next_write_error(net::ERR_FAILED);
-  host_session_.GetStreamChannel(kMuxChannelName)->
+  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
       set_async_write(true);
 
   scoped_refptr<net::IOBufferWithSize> buf = CreateTestBuffer(100);
@@ -314,9 +317,9 @@ TEST_F(ChannelMultiplexerTest, DeleteWhenFailed) {
 
   ConnectSockets();
 
-  host_session_.GetStreamChannel(kMuxChannelName)->
+  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
       set_next_write_error(net::ERR_FAILED);
-  host_session_.GetStreamChannel(kMuxChannelName)->
+  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
       set_async_write(true);
 
   scoped_refptr<net::IOBufferWithSize> buf = CreateTestBuffer(100);
@@ -349,15 +352,15 @@ TEST_F(ChannelMultiplexerTest, DeleteWhenFailed) {
 }
 
 TEST_F(ChannelMultiplexerTest, SessionFail) {
-  host_session_.set_async_creation(true);
-  host_session_.set_error(AUTHENTICATION_FAILED);
+  host_session_.fake_channel_factory().set_asynchronous_create(true);
+  host_session_.fake_channel_factory().set_fail_create(true);
 
   MockConnectCallback cb1;
   MockConnectCallback cb2;
 
-  host_mux_->CreateStreamChannel(kTestChannelName, base::Bind(
+  host_mux_->CreateChannel(kTestChannelName, base::Bind(
       &MockConnectCallback::OnConnected, base::Unretained(&cb1)));
-  host_mux_->CreateStreamChannel(kTestChannelName2, base::Bind(
+  host_mux_->CreateChannel(kTestChannelName2, base::Bind(
       &MockConnectCallback::OnConnected, base::Unretained(&cb2)));
 
   EXPECT_CALL(cb1, OnConnectedPtr(NULL))

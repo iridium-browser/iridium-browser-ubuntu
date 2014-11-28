@@ -7,7 +7,6 @@
     'chromium_code': 1,
 
     'linux_link_kerberos%': 0,
-    'use_tracing_cache_backend%': 0,
     'conditions': [
       ['chromeos==1 or embedded==1 or OS=="android" or OS=="ios"', {
         # Disable Kerberos on ChromeOS, Android and iOS, at least for now.
@@ -203,11 +202,6 @@
             'dns/dns_client.cc',
           ],
         }],
-        ['use_tracing_cache_backend==1', {
-          'defines': [
-            'USE_TRACING_CACHE_BACKEND'
-          ],
-         }],
         ['use_openssl==1', {
             'sources!': [
               'base/crypto_module_nss.cc',
@@ -549,6 +543,7 @@
         'http_server',
         'net',
         'net_derived_sources',
+        'net_extras',
         'net_test_support',
         'quic_tools',
       ],
@@ -642,8 +637,6 @@
             # TODO(bulach): Add equivalent tests when the underlying
             #               functionality is ported to OpenSSL.
             'sources!': [
-              'cert/ct_objects_extractor_unittest.cc',
-              'cert/multi_log_ct_verifier_unittest.cc',
               'cert/nss_cert_database_unittest.cc',
               'cert/nss_cert_database_chromeos_unittest.cc',
               'cert/nss_profile_filter_chromeos_unittest.cc',
@@ -851,6 +844,7 @@
         'cookies/cookie_monster_perftest.cc',
         'disk_cache/blockfile/disk_cache_perftest.cc',
         'proxy/proxy_resolver_perftest.cc',
+        'websockets/websocket_frame_perftest.cc',
       ],
       'conditions': [
         [ 'use_v8_in_net==1', {
@@ -875,6 +869,11 @@
             ],
             # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
             'msvs_disabled_warnings': [4267, ],
+        }],
+        [ 'enable_websockets != 1', {
+          'sources!': [
+            'websockets/websocket_frame_perftest.cc',
+          ],
         }],
       ],
     },
@@ -965,8 +964,14 @@
         'test/spawned_test_server/spawned_test_server.h',
         'test/spawned_test_server/spawner_communicator.cc',
         'test/spawned_test_server/spawner_communicator.h',
+        'test/url_request/url_request_failed_job.cc',
+        'test/url_request/url_request_failed_job.h',
+        'test/url_request/url_request_mock_http_job.cc',
+        'test/url_request/url_request_mock_http_job.h',
         'url_request/test_url_fetcher_factory.cc',
         'url_request/test_url_fetcher_factory.h',
+        'url_request/test_url_request_interceptor.cc',
+        'url_request/test_url_request_interceptor.h',
         'url_request/url_request_test_util.cc',
         'url_request/url_request_test_util.h',
       ],
@@ -1047,7 +1052,19 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
       ],
-      'includes': [ '../build/grit_target.gypi' ],
+    },
+    {
+      'target_name': 'net_extras',
+      'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../sql/sql.gyp:sql',
+        'net',
+      ],
+      'sources': [
+        '<@(net_extras_sources)',
+      ],
     },
     {
       'target_name': 'http_server',
@@ -1116,8 +1133,6 @@
         'tools/dump_cache/dump_files.h',
         'tools/dump_cache/simple_cache_dumper.cc',
         'tools/dump_cache/simple_cache_dumper.h',
-        'tools/dump_cache/upgrade_win.cc',
-        'tools/dump_cache/upgrade_win.h',
         'tools/dump_cache/url_to_filename_encoder.cc',
         'tools/dump_cache/url_to_filename_encoder.h',
         'tools/dump_cache/url_utilities.h',
@@ -1485,6 +1500,8 @@
             'tools/quic/quic_in_memory_cache.h',
             'tools/quic/quic_packet_writer_wrapper.cc',
             'tools/quic/quic_packet_writer_wrapper.h',
+            'tools/quic/quic_per_connection_packet_writer.cc',
+            'tools/quic/quic_per_connection_packet_writer.h',
             'tools/quic/quic_server.cc',
             'tools/quic/quic_server.h',
             'tools/quic/quic_server_session.cc',
@@ -1663,10 +1680,6 @@
           },
           'includes': [ '../build/android/java_cpp_template.gypi' ],
         },
-      ],
-    }],
-    ['OS == "android"', {
-      'targets': [
         {
           'target_name': 'net_unittests_apk',
           'type': 'none',

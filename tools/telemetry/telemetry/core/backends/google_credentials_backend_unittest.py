@@ -12,6 +12,7 @@ class TestGoogleCredentialsBackend(
     self._credentials_type = 'google'
 
   def testLoginUsingMock(self):
-    self._LoginUsingMock(google_credentials_backend.GoogleCredentialsBackend(),
-                         'https://accounts.google.com/', 'Email',
-                         'Passwd')
+    backend = google_credentials_backend.GoogleCredentialsBackend()
+    self._LoginUsingMock(backend, backend.url, backend.login_input_id,
+                         backend.password_input_id, backend.login_form_id,
+                         backend.logged_in_javascript)

@@ -13,6 +13,7 @@
 #include "ipc/ipc_message.h"
 #include "ui/accessibility/ax_enums.h"
 #include "ui/accessibility/ax_view_state.h"
+#include "ui/aura/window.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/events/event.h"
 #include "ui/views/accessibility/native_view_accessibility.h"
@@ -79,7 +80,7 @@ void WebView::SetEmbedFullscreenWidgetMode(bool enable) {
 
 void WebView::LoadInitialURL(const GURL& url) {
   GetWebContents()->GetController().LoadURL(
-      url, content::Referrer(), content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+      url, content::Referrer(), ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
 }
 
@@ -301,7 +302,14 @@ void WebView::AttachWebContents() {
   OnBoundsChanged(bounds());
   if (holder_->native_view() == view_to_attach)
     return;
+
+  // The WCV needs to be parented before making it visible.
   holder_->Attach(view_to_attach);
+
+  // Fullscreen widgets are not parented by a WebContentsView. Their visibility
+  // is controlled by content i.e. (RenderWidgetHost)
+  if (!is_embedding_fullscreen_widget_)
+    view_to_attach->Show();
 
   // The view will not be focused automatically when it is attached, so we need
   // to pass on focus to it if the FocusManager thinks the view is focused. Note
@@ -320,6 +328,11 @@ void WebView::AttachWebContents() {
 
 void WebView::DetachWebContents() {
   if (web_contents()) {
+    // Fullscreen widgets are not parented by a WebContentsView. Their
+    // visibility is controlled by content i.e. (RenderWidgetHost).
+    if (!is_embedding_fullscreen_widget_)
+      web_contents()->GetNativeView()->Hide();
+
     holder_->Detach();
 #if defined(OS_WIN)
     if (!is_embedding_fullscreen_widget_)

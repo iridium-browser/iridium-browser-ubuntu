@@ -36,8 +36,8 @@ Dispatcher* HandleTable::GetDispatcher(MojoHandle handle) {
 
   HandleToEntryMap::iterator it = handle_to_entry_map_.find(handle);
   if (it == handle_to_entry_map_.end())
-    return NULL;
-  return it->second.dispatcher;
+    return nullptr;
+  return it->second.dispatcher.get();
 }
 
 MojoResult HandleTable::GetAndRemoveDispatcher(
@@ -79,17 +79,17 @@ bool HandleTable::AddDispatcherVector(const DispatcherVector& dispatchers,
   DCHECK(handles);
   // TODO(vtl): |std::numeric_limits<size_t>::max()| isn't a compile-time
   // expression in C++03.
-  COMPILE_ASSERT(
+  static_assert(
       static_cast<uint64_t>(kMaxHandleTableSize) + kMaxMessageNumHandles <
           (sizeof(size_t) == 8 ? kuint64max
                                : static_cast<uint64_t>(kuint32max)),
-      addition_may_overflow);
+      "Addition may overflow");
 
   if (handle_to_entry_map_.size() + dispatchers.size() > kMaxHandleTableSize)
     return false;
 
   for (size_t i = 0; i < dispatchers.size(); i++) {
-    if (dispatchers[i]) {
+    if (dispatchers[i].get()) {
       handles[i] = AddDispatcherNoSizeCheck(dispatchers[i]);
     } else {
       LOG(WARNING) << "Invalid dispatcher at index " << i;
@@ -186,7 +186,7 @@ MojoResult HandleTable::MarkBusyAndStartTransport(
 
 MojoHandle HandleTable::AddDispatcherNoSizeCheck(
     const scoped_refptr<Dispatcher>& dispatcher) {
-  DCHECK(dispatcher);
+  DCHECK(dispatcher.get());
   DCHECK_LT(handle_to_entry_map_.size(), kMaxHandleTableSize);
   DCHECK_NE(next_handle_, MOJO_HANDLE_INVALID);
 

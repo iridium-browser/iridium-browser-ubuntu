@@ -32,8 +32,8 @@
 #define DateTimeChooserImpl_h
 
 #if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+#include "core/html/forms/DateTimeChooser.h"
 #include "core/page/PagePopupClient.h"
-#include "platform/DateTimeChooser.h"
 
 namespace blink {
 
@@ -48,6 +48,7 @@ public:
 
     // DateTimeChooser functions:
     virtual void endChooser() OVERRIDE;
+    virtual AXObject* rootAXObject() OVERRIDE;
 
 private:
     DateTimeChooserImpl(ChromeClientImpl*, DateTimeChooserClient*, const DateTimeChooserParameters&);
@@ -58,6 +59,7 @@ private:
     virtual void setValueAndClosePopup(int, const String&) OVERRIDE;
     virtual void setValue(const String&) OVERRIDE;
     virtual void closePopup() OVERRIDE;
+    virtual Element& ownerElement() OVERRIDE;
     virtual void didClosePopup() OVERRIDE;
 
     ChromeClientImpl* m_chromeClient;

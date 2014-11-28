@@ -12,6 +12,7 @@
 namespace blink {
 
 class GeofencingRegion : public GarbageCollectedFinalized<GeofencingRegion>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_NONCOPYABLE(GeofencingRegion);
 public:
     virtual ~GeofencingRegion() { }
@@ -20,8 +21,11 @@ public:
 
     virtual void trace(Visitor*) { }
 
+    // For SpecialWrapFor
+    virtual bool isCircularGeofencingRegion() const { return false; }
+
 protected:
-    GeofencingRegion(const String& id) : m_id(id) { }
+    explicit GeofencingRegion(const String& id) : m_id(id) { }
 
 private:
     String m_id;
@@ -29,4 +33,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // GeofencingRegion_h

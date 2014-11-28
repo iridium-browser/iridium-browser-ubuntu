@@ -90,7 +90,6 @@ enum NaClDescTypeTag {
   NACL_DESC_TRANSFERABLE_DATA_SOCKET,
   NACL_DESC_IMC_SOCKET,
   NACL_DESC_QUOTA,
-  NACL_DESC_DEVICE_RNG,
   NACL_DESC_DEVICE_POSTMESSAGE,
   NACL_DESC_CUSTOM,
   NACL_DESC_NULL
@@ -666,9 +665,6 @@ int NaClSafeCloseNaClHandle(NaClHandle h);
 int NaClDescIsSafeForMmap(struct NaClDesc *self);
 
 void NaClDescMarkSafeForMmap(struct NaClDesc *self);
-
-void NaClDescMarkUnsafeForMmap(struct NaClDesc *self);
-
 
 EXTERN_C_END
 

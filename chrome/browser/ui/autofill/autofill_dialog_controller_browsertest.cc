@@ -52,7 +52,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -62,6 +61,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
@@ -131,8 +131,8 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
                 GetRequestContext(), this, form_data.origin),
         message_loop_runner_(runner),
         use_validation_(false),
-        weak_ptr_factory_(this),
-        sign_in_user_index_(0U) {
+        sign_in_user_index_(0U),
+        weak_ptr_factory_(this) {
     test_manager_.Init(
         NULL,
         Profile::FromBrowserContext(contents->GetBrowserContext())->GetPrefs(),
@@ -261,11 +261,11 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   // This is used to control what |CurrentNotifications()| returns for testing.
   std::vector<DialogNotification> notifications_;
 
-  // Allows generation of WeakPtrs, so controller liveness can be tested.
-  base::WeakPtrFactory<TestAutofillDialogController> weak_ptr_factory_;
-
   // The user index that is assigned in IsSignInContinueUrl().
   size_t sign_in_user_index_;
+
+  // Allows generation of WeakPtrs, so controller liveness can be tested.
+  base::WeakPtrFactory<TestAutofillDialogController> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillDialogController);
 };
@@ -1200,7 +1200,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, SimulateSuccessfulSignIn) {
   content::OpenURLParams params(wallet::GetSignInContinueUrl(),
                                 content::Referrer(),
                                 CURRENT_TAB,
-                                content::PAGE_TRANSITION_LINK,
+                                ui::PAGE_TRANSITION_LINK,
                                 true);
 
   sign_in_contents->GetDelegate()->OpenURLFromTab(sign_in_contents, params);
@@ -1277,7 +1277,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AddAccount) {
   content::OpenURLParams params(wallet::GetSignInContinueUrl(),
                                 content::Referrer(),
                                 CURRENT_TAB,
-                                content::PAGE_TRANSITION_LINK,
+                                ui::PAGE_TRANSITION_LINK,
                                 true);
   sign_in_contents->GetDelegate()->OpenURLFromTab(sign_in_contents, params);
 
@@ -1421,7 +1421,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
   content::OpenURLParams params(GURL("http://google.com"),
                                 content::Referrer(),
                                 CURRENT_TAB,
-                                content::PAGE_TRANSITION_LINK,
+                                ui::PAGE_TRANSITION_LINK,
                                 true);
   params.user_gesture = true;
 

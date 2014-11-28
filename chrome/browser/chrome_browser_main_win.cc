@@ -39,6 +39,8 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/terminate_on_heap_corruption_experiment_win.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
@@ -46,9 +48,6 @@
 #include "chrome/installer/util/shell_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/main_function_params.h"
-#include "grit/app_locale_settings.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "installer_util_strings/installer_util_strings.h"
 #include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -57,6 +56,7 @@
 #include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
 #include "ui/gfx/switches.h"
+#include "ui/strings/grit/app_locale_settings.h"
 
 namespace {
 
@@ -158,7 +158,6 @@ int DoUninstallTasks(bool chrome_still_running) {
 ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     const content::MainFunctionParams& parameters)
     : ChromeBrowserMainParts(parameters) {
-  base::TimeTicks::SetNowIsHighResNowIfSupported();
   if (base::win::IsMetroProcess()) {
     typedef const wchar_t* (*GetMetroSwitches)(void);
     GetMetroSwitches metro_switches_proc = reinterpret_cast<GetMetroSwitches>(

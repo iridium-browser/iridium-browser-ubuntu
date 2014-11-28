@@ -49,6 +49,7 @@
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/url_fixer/url_fixer.h"
@@ -56,9 +57,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/cocoa/animation_utils.h"
@@ -69,6 +68,7 @@
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
+#include "ui/resources/grit/ui_resources.h"
 
 using base::UserMetricsAction;
 using content::OpenURLParams;
@@ -311,7 +311,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (hitView == self) {
     BrowserWindowController* windowController =
         [BrowserWindowController browserWindowControllerForView:self];
-    if (![windowController isFullscreen]) {
+    if (![windowController isInAnyFullscreenMode]) {
       [self trackClickForWindowMove:event];
       return;
     }
@@ -945,7 +945,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   const CGFloat kMaxTabWidth = [TabController maxTabWidth];
   const CGFloat kMinTabWidth = [TabController minTabWidth];
-  const CGFloat kMinSelectedTabWidth = [TabController minSelectedTabWidth];
+  const CGFloat kMinActiveTabWidth = [TabController minActiveTabWidth];
   const CGFloat kMiniTabWidth = [TabController miniTabWidth];
   const CGFloat kAppTabWidth = [TabController appTabWidth];
 
@@ -968,7 +968,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     availableSpace = NSWidth([tabStripView_ frame]);
 
     // Account for the width of the new tab button.
-    availableSpace -= NSWidth([newTabButton_ frame]) + kNewTabButtonOffset;
+    availableSpace -=
+        NSWidth([newTabButton_ frame]) + kNewTabButtonOffset - kTabOverlap;
 
     // Account for the right-side controls if not in rapid closure mode.
     // (In rapid closure mode, the available width is set based on the
@@ -980,33 +981,55 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   // Need to leave room for the left-side controls even in rapid closure mode.
   availableSpace -= [self leftIndentForControls];
 
-  // If there are any mini tabs, account for the extra spacing between the last
-  // mini tab and the first regular tab.
-  if ([self numberOfOpenMiniTabs])
-    availableSpace -= kLastMiniTabSpacing;
-
   // This may be negative, but that's okay (taken care of by |MAX()| when
   // calculating tab sizes). "mini" tabs in horizontal mode just get a special
   // section, they don't change size.
   CGFloat availableSpaceForNonMini = availableSpace;
-  availableSpaceForNonMini -=
-      [self numberOfOpenMiniTabs] * (kMiniTabWidth - kTabOverlap);
+  if ([self numberOfOpenMiniTabs]) {
+    availableSpaceForNonMini -=
+        [self numberOfOpenMiniTabs] * (kMiniTabWidth - kTabOverlap);
+    availableSpaceForNonMini -= kLastMiniTabSpacing;
+  }
 
   // Initialize |nonMiniTabWidth| in case there aren't any non-mini-tabs; this
   // value shouldn't actually be used.
   CGFloat nonMiniTabWidth = kMaxTabWidth;
   CGFloat nonMiniTabWidthFraction = 0;
-  const NSInteger numberOfOpenNonMiniTabs = [self numberOfOpenNonMiniTabs];
-  if (numberOfOpenNonMiniTabs) {
+  NSInteger numberOfNonMiniTabs = MIN(
+      [self numberOfOpenNonMiniTabs],
+      (availableSpaceForNonMini - kTabOverlap) / (kMinTabWidth - kTabOverlap));
+
+  if (numberOfNonMiniTabs) {
     // Find the width of a non-mini-tab. This only applies to horizontal
     // mode. Add in the amount we "get back" from the tabs overlapping.
-    availableSpaceForNonMini += (numberOfOpenNonMiniTabs - 1) * kTabOverlap;
-
-    // Divide up the space between the non-mini-tabs.
-    nonMiniTabWidth = availableSpaceForNonMini / numberOfOpenNonMiniTabs;
+    nonMiniTabWidth =
+        ((availableSpaceForNonMini - kTabOverlap) / numberOfNonMiniTabs) +
+        kTabOverlap;
 
     // Clamp the width between the max and min.
     nonMiniTabWidth = MAX(MIN(nonMiniTabWidth, kMaxTabWidth), kMinTabWidth);
+
+    // When there are multiple tabs, we'll have one active and some inactive
+    // tabs.  If the desired width was between the minimum sizes of these types,
+    // try to shrink the tabs with the smaller minimum.  For example, if we have
+    // a strip of width 10 with 4 tabs, the desired width per tab will be 2.5.
+    // If selected tabs have a minimum width of 4 and unselected tabs have
+    // minimum width of 1, the above code would set *unselected_width = 2.5,
+    // *selected_width = 4, which results in a total width of 11.5.  Instead, we
+    // want to set *unselected_width = 2, *selected_width = 4, for a total width
+    // of 10.
+    if (numberOfNonMiniTabs > 1 && nonMiniTabWidth < kMinActiveTabWidth) {
+      nonMiniTabWidth = (availableSpaceForNonMini - kMinActiveTabWidth) /
+                            (numberOfNonMiniTabs - 1) +
+                        kTabOverlap;
+      if (nonMiniTabWidth < kMinTabWidth) {
+        // The above adjustment caused the tabs to not fit, show 1 less tab.
+        --numberOfNonMiniTabs;
+        nonMiniTabWidth =
+            ((availableSpaceForNonMini - kTabOverlap) / numberOfNonMiniTabs) +
+            kTabOverlap;
+      }
+    }
 
     // Separate integral and fractional parts.
     CGFloat integralPart = std::floor(nonMiniTabWidth);
@@ -1092,7 +1115,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       }
 
       // In case of rounding error, give any left over pixels to the last tab.
-      if (laidOutNonMiniTabs == numberOfOpenNonMiniTabs - 1 &&
+      if (laidOutNonMiniTabs == numberOfNonMiniTabs - 1 &&
           tabWidthAccumulatedFraction > 0.5) {
         ++tabFrame.size.width;
       }
@@ -1100,8 +1123,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       ++laidOutNonMiniTabs;
     }
 
-    if ([tab selected])
-      tabFrame.size.width = MAX(tabFrame.size.width, kMinSelectedTabWidth);
+    if ([tab active])
+      tabFrame.size.width = MAX(tabFrame.size.width, kMinActiveTabWidth);
 
     // If this is the first non-mini tab, then add a bit of spacing between this
     // and the last mini tab.
@@ -1110,6 +1133,13 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       tabFrame.origin.x = offset;
     }
     isLastTabMini = isMini;
+
+    if (laidOutNonMiniTabs > numberOfNonMiniTabs) {
+      // There is not enough space to fit this tab.
+      tabFrame.size.width = 0;
+      [self setFrame:tabFrame ofTabView:[tab view]];
+      continue;
+    }
 
     // Animate a new tab in by putting it below the horizon unless told to put
     // it in a specific location (i.e., from a drop).
@@ -2034,7 +2064,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     case NEW_FOREGROUND_TAB: {
       content::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
       chrome::NavigateParams params(browser_, *url,
-                                    content::PAGE_TRANSITION_TYPED);
+                                    ui::PAGE_TRANSITION_TYPED);
       params.disposition = disposition;
       params.tabstrip_index = index;
       params.tabstrip_add_types =
@@ -2045,7 +2075,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     case CURRENT_TAB: {
       content::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
       OpenURLParams params(
-          *url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
+          *url, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false);
       tabStripModel_->GetWebContentsAt(index)->OpenURL(params);
       tabStripModel_->ActivateTabAt(index, true);
       break;

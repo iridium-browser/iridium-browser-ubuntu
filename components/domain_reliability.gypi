@@ -10,6 +10,7 @@
       'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/base.gyp:base_prefs',
         '../components/components.gyp:keyed_service_core',
         '../content/content.gyp:content_browser',
         '../net/net.gyp:net',
@@ -76,7 +77,6 @@
               'domain_reliability/baked_in_configs/partner_googleadservices_com.json',
               'domain_reliability/baked_in_configs/pubads_g_doubleclick_net.json',
               'domain_reliability/baked_in_configs/redirector_googlevideo_com.json',
-              'domain_reliability/baked_in_configs/redirector_gvt1_com.json',
               'domain_reliability/baked_in_configs/s0_2mdn_net.json',
               'domain_reliability/baked_in_configs/ssl_gstatic_com.json',
               'domain_reliability/baked_in_configs/star_admob_com.json',

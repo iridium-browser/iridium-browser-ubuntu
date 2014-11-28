@@ -53,12 +53,8 @@ class TiledLayerImplTest : public testing::Test {
 
     ResourceProvider::ResourceId resource_id = 1;
     for (int i = 0; i < layer->TilingForTesting()->num_tiles_x(); ++i) {
-      for (int j = 0; j < layer->TilingForTesting()->num_tiles_y(); ++j) {
-        gfx::Rect opaque_rect(
-            layer->TilingForTesting()->tile_bounds(i, j).origin(),
-            gfx::Size(1, 1));
-        layer->PushTileProperties(i, j, resource_id++, opaque_rect, false);
-      }
+      for (int j = 0; j < layer->TilingForTesting()->num_tiles_y(); ++j)
+        layer->PushTileProperties(i, j, resource_id++, false);
     }
 
     return layer.Pass();
@@ -172,13 +168,15 @@ TEST_F(TiledLayerImplTest, Checkerboarding) {
     EXPECT_EQ(render_pass->quad_list.size(), 4u);
     EXPECT_EQ(0u, data.num_missing_tiles);
 
-    for (size_t i = 0; i < render_pass->quad_list.size(); ++i)
-      EXPECT_EQ(render_pass->quad_list[i]->material, DrawQuad::TILED_CONTENT);
+    for (QuadList::Iterator iter = render_pass->quad_list.begin();
+         iter != render_pass->quad_list.end();
+         ++iter)
+      EXPECT_EQ(iter->material, DrawQuad::TILED_CONTENT);
   }
 
   for (int i = 0; i < num_tiles_x; ++i)
     for (int j = 0; j < num_tiles_y; ++j)
-      layer->PushTileProperties(i, j, 0, gfx::Rect(), false);
+      layer->PushTileProperties(i, j, 0, false);
 
   // All checkerboarding
   {
@@ -189,8 +187,10 @@ TEST_F(TiledLayerImplTest, Checkerboarding) {
     layer->AppendQuads(render_pass.get(), occlusion_tracker, &data);
     EXPECT_LT(0u, data.num_missing_tiles);
     EXPECT_EQ(render_pass->quad_list.size(), 4u);
-    for (size_t i = 0; i < render_pass->quad_list.size(); ++i)
-      EXPECT_NE(render_pass->quad_list[i]->material, DrawQuad::TILED_CONTENT);
+    for (QuadList::Iterator iter = render_pass->quad_list.begin();
+         iter != render_pass->quad_list.end();
+         ++iter)
+      EXPECT_NE(iter->material, DrawQuad::TILED_CONTENT);
   }
 }
 
@@ -266,17 +266,17 @@ TEST_F(TiledLayerImplTest, TextureInfoForLayerNoBorders) {
            LayerTilingData::NO_BORDER_TEXELS,
            gfx::Rect(layer_size));
 
-  for (size_t i = 0; i < render_pass->quad_list.size(); ++i) {
-    const TileDrawQuad* quad =
-        TileDrawQuad::MaterialCast(render_pass->quad_list[i]);
+  size_t i = 0;
+  for (QuadList::Iterator iter = render_pass->quad_list.begin();
+       iter != render_pass->quad_list.end();
+       ++iter) {
+    const TileDrawQuad* quad = TileDrawQuad::MaterialCast(&*iter);
 
     EXPECT_NE(0u, quad->resource_id) << LayerTestCommon::quad_string << i;
     EXPECT_EQ(gfx::RectF(gfx::PointF(), tile_size), quad->tex_coord_rect)
         << LayerTestCommon::quad_string << i;
     EXPECT_EQ(tile_size, quad->texture_size) << LayerTestCommon::quad_string
                                              << i;
-    EXPECT_EQ(gfx::Size(1, 1).ToString(), quad->opaque_rect.size().ToString())
-        << LayerTestCommon::quad_string << i;
   }
 }
 
@@ -293,18 +293,18 @@ TEST_F(TiledLayerImplTest, GPUMemoryUsage) {
   EXPECT_EQ(layer->GPUMemoryUsageInBytes(), 0u);
 
   ResourceProvider::ResourceId resource_id = 1;
-  layer->PushTileProperties(0, 1, resource_id++, gfx::Rect(0, 0, 1, 1), false);
-  layer->PushTileProperties(2, 3, resource_id++, gfx::Rect(0, 0, 1, 1), false);
-  layer->PushTileProperties(2, 0, resource_id++, gfx::Rect(0, 0, 1, 1), false);
+  layer->PushTileProperties(0, 1, resource_id++, false);
+  layer->PushTileProperties(2, 3, resource_id++, false);
+  layer->PushTileProperties(2, 0, resource_id++, false);
 
   EXPECT_EQ(
       layer->GPUMemoryUsageInBytes(),
       static_cast<size_t>(3 * 4 * tile_size.width() * tile_size.height()));
 
   ResourceProvider::ResourceId empty_resource(0);
-  layer->PushTileProperties(0, 1, empty_resource, gfx::Rect(0, 0, 1, 1), false);
-  layer->PushTileProperties(2, 3, empty_resource, gfx::Rect(0, 0, 1, 1), false);
-  layer->PushTileProperties(2, 0, empty_resource, gfx::Rect(0, 0, 1, 1), false);
+  layer->PushTileProperties(0, 1, empty_resource, false);
+  layer->PushTileProperties(2, 3, empty_resource, false);
+  layer->PushTileProperties(2, 0, empty_resource, false);
 
   EXPECT_EQ(layer->GPUMemoryUsageInBytes(), 0u);
 }
@@ -341,7 +341,7 @@ TEST_F(TiledLayerImplTest, Occlusion) {
   ResourceProvider::ResourceId resource_id = 1;
   for (int i = 0; i < tiled_layer->TilingForTesting()->num_tiles_x(); ++i) {
     for (int j = 0; j < tiled_layer->TilingForTesting()->num_tiles_y(); ++j)
-      tiled_layer->PushTileProperties(i, j, resource_id++, gfx::Rect(), false);
+      tiled_layer->PushTileProperties(i, j, resource_id++, false);
   }
 
   impl.CalcDrawProps(viewport_size);
@@ -371,11 +371,8 @@ TEST_F(TiledLayerImplTest, Occlusion) {
     impl.AppendQuadsWithOcclusion(tiled_layer, occluded);
 
     size_t partially_occluded_count = 0;
-    LayerTestCommon::VerifyQuadsCoverRectWithOcclusion(
-        impl.quad_list(),
-        gfx::Rect(layer_bounds),
-        occluded,
-        &partially_occluded_count);
+    LayerTestCommon::VerifyQuadsAreOccluded(
+        impl.quad_list(), occluded, &partially_occluded_count);
     // The layer outputs one quad, which is partially occluded.
     EXPECT_EQ(100u - 10u, impl.quad_list().size());
     EXPECT_EQ(10u + 10u, partially_occluded_count);

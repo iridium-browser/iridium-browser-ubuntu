@@ -5,6 +5,8 @@
 
 """Test the lint module."""
 
+from __future__ import print_function
+
 import collections
 import os
 import sys
@@ -73,6 +75,10 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
       """,
       """ whitespace is wrong""",
       """whitespace is wrong	""",
+      """ whitespace is wrong
+
+      Multiline tickles differently.
+      """,
       """Should be no trailing blank lines
 
       Returns:

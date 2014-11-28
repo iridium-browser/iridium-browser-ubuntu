@@ -6,24 +6,6 @@ found in the LICENSE file.
 
 <polymer-element name="ct-builder" attributes="builder" noscript>
   <template>
-    <style>
-      a {
-        border: 1px solid gray;
-        display: inline-block;
-        font-size: 11px;
-        margin-bottom: 2px;
-        padding: 1px;
-        text-decoration: none;
-      }
-
-      span {
-        background-color: #555;
-        color: white;
-        padding: 0 2px;
-      }
-    </style>
-    <a href="{{ builder.buildUrl }}">
-      <span>{{ builder.builder }}</span>
-    </a>
+    <a href="{{ builder.buildUrl }}" style="white-space: nowrap">{{ builder.builder }}</a>
   </template>
 </polymer-element>

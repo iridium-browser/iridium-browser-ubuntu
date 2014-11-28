@@ -1,9 +1,10 @@
-#!/usr/bin/python
 # Copyright (c) 2010 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Command to extract the dependancy tree for a given package."""
+
+from __future__ import print_function
 
 import json
 import portage  # pylint: disable=F0401
@@ -165,4 +166,4 @@ to stdout, in a serialized JSON format.""")
   deps_list = FlattenDepTree(deps_tree)
   if known_args.format == "cpe":
     deps_list = ExtractCPEList(deps_list)
-  print json.dumps(deps_list, sort_keys=True, indent=2)
+  print(json.dumps(deps_list, sort_keys=True, indent=2))

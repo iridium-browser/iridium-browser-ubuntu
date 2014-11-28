@@ -124,8 +124,7 @@ const struct TestHistoryEntry {
 
 // Stores the given text to clipboard.
 void SetClipboardText(const base::string16& text) {
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-  ui::ScopedClipboardWriter writer(clipboard, ui::CLIPBOARD_TYPE_COPY_PASTE);
+  ui::ScopedClipboardWriter writer(ui::CLIPBOARD_TYPE_COPY_PASTE);
   writer.WriteText(text);
 }
 
@@ -422,7 +421,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DISABLED_BrowserAccelerators) {
 }
 
 // Flakily fails and times out on Win only.  http://crbug.com/69941
-#if defined(OS_WIN)
+// Fails on Linux.  http://crbug.com/408634
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_PopupAccelerators DISABLED_PopupAccelerators
 #else
 #define MAYBE_PopupAccelerators PopupAccelerators
@@ -544,6 +544,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BackspaceInKeywordMode) {
 #else
 #define MAYBE_Escape Escape
 #endif
+
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Escape) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIHistoryURL));
   chrome::FocusLocationBar(browser());
@@ -703,13 +704,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DISABLED_EnterToSearch) {
   EXPECT_EQ("http://www.foo.com/search?q=z", url.spec());
 }
 
-// http://crbug.com/131179
-#if defined(OS_LINUX)
-#define MAYBE_EscapeToDefaultMatch DISABLED_EscapeToDefaultMatch
-#else
-#define MAYBE_EscapeToDefaultMatch EscapeToDefaultMatch
-#endif
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_EscapeToDefaultMatch) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, EscapeToDefaultMatch) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
@@ -745,12 +740,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_EscapeToDefaultMatch) {
   EXPECT_EQ(old_selected_line, popup_model->selected_line());
 }
 
-// http://crbug.com/131179, http://crbug.com/146619
-#if defined(OS_LINUX) || defined(OS_WIN)
+// Flaky on Windows: http://crbug.com/146619
+#if defined(OS_WIN)
 #define MAYBE_BasicTextOperations DISABLED_BasicTextOperations
 #else
 #define MAYBE_BasicTextOperations BasicTextOperations
 #endif
+
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BasicTextOperations) {
   ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
   chrome::FocusLocationBar(browser());
@@ -764,6 +760,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BasicTextOperations) {
 
   size_t start, end;
   omnibox_view->GetSelectionBounds(&start, &end);
+#if defined(OS_WIN) || defined(OS_LINUX)
+  // Views textfields select-all in reverse to show the leading text.
+  std::swap(start, end);
+#endif
   EXPECT_EQ(0U, start);
   EXPECT_EQ(old_text.size(), end);
 
@@ -794,6 +794,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BasicTextOperations) {
   omnibox_view->SelectAll(true);
   EXPECT_TRUE(omnibox_view->IsSelectAll());
   omnibox_view->GetSelectionBounds(&start, &end);
+#if defined(OS_WIN) || defined(OS_LINUX)
+  // Views textfields select-all in reverse to show the leading text.
+  std::swap(start, end);
+#endif
   EXPECT_EQ(0U, start);
   EXPECT_EQ(old_text.size(), end);
 
@@ -814,14 +818,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BasicTextOperations) {
   EXPECT_EQ(old_text.size(), end);
 }
 
-// http://crbug.com/131179
-#if defined(OS_LINUX)
-#define MAYBE_AcceptKeywordBySpace DISABLED_AcceptKeywordBySpace
-#else
-#define MAYBE_AcceptKeywordBySpace AcceptKeywordBySpace
-#endif
-
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_AcceptKeywordBySpace) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
 
@@ -1022,14 +1019,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_AcceptKeywordBySpace) {
   ASSERT_TRUE(omnibox_view->GetText().empty());
 }
 
-// http://crbug.com/131179
-#if defined(OS_LINUX)
-#define MAYBE_NonSubstitutingKeywordTest DISABLED_NonSubstitutingKeywordTest
-#else
-#define MAYBE_NonSubstitutingKeywordTest NonSubstitutingKeywordTest
-#endif
-
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_NonSubstitutingKeywordTest) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
@@ -1080,13 +1070,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_NonSubstitutingKeywordTest) {
             popup_model->result().default_match()->destination_url.spec());
 }
 
-// http://crbug.com/131179 http://crbug.com/165765
-#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_DeleteItem DISABLED_DeleteItem
-#else
-#define MAYBE_DeleteItem DeleteItem
-#endif
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DeleteItem) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DeleteItem) {
   // Disable the search provider, to make sure the popup contains only history
   // items.
   TemplateURLService* model =
@@ -1706,18 +1690,18 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, BeginningShownAfterBlur) {
   omnibox_view->SetWindowTextAndCaretPos(ASCIIToUTF16("data:text/plain,test"),
       5U, false, false);
   omnibox_view->OnAfterPossibleChange();
-  ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   size_t start, end;
   omnibox_view->GetSelectionBounds(&start, &end);
-  ASSERT_EQ(5U, start);
-  ASSERT_EQ(5U, end);
+  EXPECT_EQ(5U, start);
+  EXPECT_EQ(5U, end);
 
-  ui_test_utils::ClickOnView(browser(), VIEW_ID_TAB_CONTAINER);
-  ASSERT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+  ui_test_utils::FocusView(browser(), VIEW_ID_TAB_CONTAINER);
+  EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
 
   omnibox_view->GetSelectionBounds(&start, &end);
-  ASSERT_EQ(0U, start);
-  ASSERT_EQ(0U, end);
+  EXPECT_EQ(0U, start);
+  EXPECT_EQ(0U, end);
 }
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CtrlArrowAfterArrowSuggestions) {

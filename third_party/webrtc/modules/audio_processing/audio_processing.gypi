@@ -9,6 +9,7 @@
 {
   'variables': {
     'audio_processing_dependencies': [
+      '<(webrtc_root)/base/base.gyp:rtc_base_approved',
       '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
       '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
     ],
@@ -21,6 +22,7 @@
       'variables': {
         # Outputs some low-level debug files.
         'aec_debug_dump%': 0,
+        'agc_debug_dump%': 0,
 
         # Disables the usual mode where we trust the reported system delay
         # values the AEC receives. The corresponding define is set appropriately
@@ -92,6 +94,9 @@
         }],
         ['aec_untrusted_delay_for_testing==1', {
           'defines': ['WEBRTC_UNTRUSTED_DELAY',],
+        }],
+        ['agc_debug_dump==1', {
+          'defines': ['WEBRTC_AGC_DEBUG_DUMP',],
         }],
         ['enable_protobuf==1', {
           'dependencies': ['audioproc_debug_proto'],
@@ -221,6 +226,13 @@
               'ns/nsx_core_neon.c',
             ],
             'includes!': ['../../build/arm_neon.gypi',],
+          }],
+          # Disable LTO in audio_processing_neon target due to compiler bug
+          ['use_lto==1', {
+            'cflags!': [
+              '-flto',
+              '-ffat-lto-objects',
+            ],
           }],
         ],
       }],

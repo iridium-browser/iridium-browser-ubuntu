@@ -68,6 +68,7 @@ class AutofillAgent : public content::RenderViewObserver,
   virtual void DidChangeScrollOffset(blink::WebLocalFrame* frame) OVERRIDE;
   virtual void FocusedNodeChanged(const blink::WebNode& node) OVERRIDE;
   virtual void OrientationChangeEvent() OVERRIDE;
+  virtual void Resized() OVERRIDE;
 
   // PageClickListener:
   virtual void FormControlElementClicked(
@@ -228,25 +229,6 @@ class AutofillAgent : public content::RenderViewObserver,
   bool main_frame_processed_;
 
   base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_;
-
-  friend class PasswordAutofillAgentTest;
-  friend class RequestAutocompleteRendererTest;
-  FRIEND_TEST_ALL_PREFIXES(AutofillRendererTest, FillFormElement);
-  FRIEND_TEST_ALL_PREFIXES(AutofillRendererTest, SendDynamicForms);
-  FRIEND_TEST_ALL_PREFIXES(AutofillRendererTest, ShowAutofillWarning);
-  FRIEND_TEST_ALL_PREFIXES(PasswordAutofillAgentTest, WaitUsername);
-  FRIEND_TEST_ALL_PREFIXES(PasswordAutofillAgentTest, SuggestionAccept);
-  FRIEND_TEST_ALL_PREFIXES(PasswordAutofillAgentTest, SuggestionSelect);
-  FRIEND_TEST_ALL_PREFIXES(
-      PasswordAutofillAgentTest,
-      PasswordAutofillTriggersOnChangeEventsWaitForUsername);
-  FRIEND_TEST_ALL_PREFIXES(PasswordAutofillAgentTest, CredentialsOnClick);
-  FRIEND_TEST_ALL_PREFIXES(RequestAutocompleteRendererTest,
-                           NoCancelOnMainFrameNavigateAfterDone);
-  FRIEND_TEST_ALL_PREFIXES(RequestAutocompleteRendererTest,
-                           NoCancelOnSubframeNavigateAfterDone);
-  FRIEND_TEST_ALL_PREFIXES(RequestAutocompleteRendererTest,
-                           InvokingTwiceOnlyShowsOnce);
 
   DISALLOW_COPY_AND_ASSIGN(AutofillAgent);
 };

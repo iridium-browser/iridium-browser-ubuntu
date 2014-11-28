@@ -44,11 +44,11 @@ WebInspector.TracingLayerPayload;
 
 /**
   * @constructor
-  * @extends {WebInspector.SDKObject}
+  * @extends {WebInspector.SDKModel}
   */
 WebInspector.LayerTreeModel = function(target)
 {
-    WebInspector.SDKObject.call(this, target);
+    WebInspector.SDKModel.call(this, WebInspector.LayerTreeModel, target);
     target.registerLayerTreeDispatcher(new WebInspector.LayerTreeDispatcher(this));
     target.domModel.addEventListener(WebInspector.DOMModel.Events.DocumentUpdated, this._onDocumentUpdated, this);
     /** @type {?WebInspector.LayerTreeBase} */
@@ -158,7 +158,7 @@ WebInspector.LayerTreeModel.prototype = {
         this.enable();
     },
 
-    __proto__: WebInspector.SDKObject.prototype
+    __proto__: WebInspector.SDKModel.prototype
 }
 
 /**
@@ -1143,34 +1143,6 @@ WebInspector.DeferredAgentLayerTree.prototype = {
     {
         var result = new WebInspector.AgentLayerTree(this._target);
         result.setLayers(this._layers, callback.bind(null, result));
-    },
-
-    __proto__: WebInspector.DeferredLayerTree.prototype
-};
-
-/**
- * @constructor
- * @extends {WebInspector.DeferredLayerTree}
- * @param {?WebInspector.Target} target
- * @param {!WebInspector.TracingLayerPayload} root
- * @param {!Object} viewportSize
- */
-WebInspector.DeferredTracingLayerTree = function(target, root, viewportSize)
-{
-    WebInspector.DeferredLayerTree.call(this, target);
-    this._root = root;
-    this._viewportSize = viewportSize;
-}
-
-WebInspector.DeferredTracingLayerTree.prototype = {
-    /**
-     * @param {function(!WebInspector.LayerTreeBase)} callback
-     */
-    resolve: function(callback)
-    {
-        var result = new WebInspector.TracingLayerTree(this._target);
-        result.setViewportSize(this._viewportSize);
-        result.setLayers(this._root, callback.bind(null, result));
     },
 
     __proto__: WebInspector.DeferredLayerTree.prototype

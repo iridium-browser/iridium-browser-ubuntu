@@ -5,8 +5,8 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -154,7 +154,7 @@ class HistoryQueryTest : public testing::Test {
     GURL url(entry.url);
 
     history_->AddPage(url, entry.time, context_id, page_id_++, GURL(),
-                      history::RedirectList(), content::PAGE_TRANSITION_LINK,
+                      history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                       history::SOURCE_BROWSED, false);
     history_->SetPageTitle(url, base::UTF8ToUTF16(entry.title));
   }

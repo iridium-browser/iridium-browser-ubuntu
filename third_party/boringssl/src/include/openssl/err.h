@@ -146,11 +146,11 @@ extern "C" {
  * values. If this is not called then the string forms of errors produced by
  * the functions below will contain numeric identifiers rather than
  * human-readable strings. */
-OPENSSL_EXPORT void ERR_load_crypto_strings();
+OPENSSL_EXPORT void ERR_load_crypto_strings(void);
 
 /* ERR_free_strings frees any internal error values that have been loaded. This
  * should only be called at process shutdown. */
-OPENSSL_EXPORT void ERR_free_strings();
+OPENSSL_EXPORT void ERR_free_strings(void);
 
 
 /* Reading and formatting errors. */
@@ -256,13 +256,17 @@ OPENSSL_EXPORT void ERR_print_errors_cb(ERR_print_errors_callback_t callback,
 /* ERR_clear_error clears the error queue for the current thread. */
 OPENSSL_EXPORT void ERR_clear_error(void);
 
+/* ERR_remove_thread_state deletes the error queue for the given thread. If
+ * |tid| is NULL then the error queue for the current thread is deleted. */
+OPENSSL_EXPORT void ERR_remove_thread_state(const CRYPTO_THREADID *tid);
+
 
 /* Custom errors. */
 
 /* ERR_get_next_error_library returns a value suitable for passing as the
  * |library| argument to |ERR_put_error|. This is intended for code that wishes
  * to push its own, non-standard errors to the error queue. */
-OPENSSL_EXPORT int ERR_get_next_error_library();
+OPENSSL_EXPORT int ERR_get_next_error_library(void);
 
 
 /* Private functions. */
@@ -440,6 +444,7 @@ enum {
 #define ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED (2 | ERR_R_FATAL)
 #define ERR_R_PASSED_NULL_PARAMETER (3 | ERR_R_FATAL)
 #define ERR_R_INTERNAL_ERROR (4 | ERR_R_FATAL)
+#define ERR_R_OVERFLOW (5 | ERR_R_FATAL)
 
 /* System error functions */
 #define SYS_F_fopen 100
@@ -482,6 +487,11 @@ struct ERR_FNS_st {
    * never returns NULL. */
   ERR_STATE *(*get_state)(void);
 
+  /* release_state returns the |ERR_STATE| for the given thread, or NULL if
+   * none exists. It the return value is not NULL, it also returns ownership of
+   * the |ERR_STATE| and deletes it from its data structures. */
+  ERR_STATE *(*release_state)(const CRYPTO_THREADID *tid);
+
   /* get_next_library returns a unique value suitable for passing as the
    * |library| to error calls. It will be distinct from all built-in library
    * values. */
@@ -505,7 +515,7 @@ struct ERR_FNS_st {
 /* ERR_load_BIO_strings does nothing.
  *
  * TODO(fork): remove. libjingle calls this. */
-OPENSSL_EXPORT void ERR_load_BIO_strings();
+OPENSSL_EXPORT void ERR_load_BIO_strings(void);
 
 
 #if defined(__cplusplus)

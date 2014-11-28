@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// See https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#cache-storage
 [
-    WillBeGarbageCollected,
-    NoInterfaceObject,
+    GarbageCollected,
     Exposed=ServiceWorker,
-    RuntimeEnabled=ServiceWorker,
+    RuntimeEnabled=ServiceWorkerOnFetch,
 ] interface CacheStorage {
   [CallWith=ScriptState] Promise get(ScalarValueString cacheName);
   [CallWith=ScriptState] Promise has(ScalarValueString cacheName);

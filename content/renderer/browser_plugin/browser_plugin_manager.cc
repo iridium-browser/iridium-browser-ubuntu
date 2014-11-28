@@ -5,7 +5,10 @@
 #include "content/renderer/browser_plugin/browser_plugin_manager.h"
 
 #include "base/lazy_instance.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_local.h"
+#include "base/values.h"
+#include "content/common/browser_plugin/browser_plugin_constants.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/browser_plugin/browser_plugin.h"
 #include "content/renderer/browser_plugin/browser_plugin_manager_factory.h"
@@ -16,6 +19,7 @@ namespace content {
 // static
 BrowserPluginManagerFactory* BrowserPluginManager::factory_ = NULL;
 
+// static
 BrowserPluginManager* BrowserPluginManager::Create(
     RenderViewImpl* render_view) {
   if (factory_)
@@ -25,6 +29,7 @@ BrowserPluginManager* BrowserPluginManager::Create(
 
 BrowserPluginManager::BrowserPluginManager(RenderViewImpl* render_view)
     : RenderViewObserver(render_view),
+      current_instance_id_(browser_plugin::kInstanceIDNone),
       render_view_(render_view->AsWeakPtr()) {
 }
 
@@ -32,24 +37,28 @@ BrowserPluginManager::~BrowserPluginManager() {
 }
 
 void BrowserPluginManager::AddBrowserPlugin(
-    int guest_instance_id,
+    int browser_plugin_instance_id,
     BrowserPlugin* browser_plugin) {
-  instances_.AddWithID(browser_plugin, guest_instance_id);
+  instances_.AddWithID(browser_plugin, browser_plugin_instance_id);
 }
 
-void BrowserPluginManager::RemoveBrowserPlugin(int guest_instance_id) {
-  instances_.Remove(guest_instance_id);
+void BrowserPluginManager::RemoveBrowserPlugin(int browser_plugin_instance_id) {
+  instances_.Remove(browser_plugin_instance_id);
 }
 
 BrowserPlugin* BrowserPluginManager::GetBrowserPlugin(
-    int guest_instance_id) const {
-  return instances_.Lookup(guest_instance_id);
+    int browser_plugin_instance_id) const {
+  return instances_.Lookup(browser_plugin_instance_id);
 }
 
-void BrowserPluginManager::UpdateDeviceScaleFactor(float device_scale_factor) {
+int BrowserPluginManager::GetNextInstanceID() {
+  return ++current_instance_id_;
+}
+
+void BrowserPluginManager::UpdateDeviceScaleFactor() {
   IDMap<BrowserPlugin>::iterator iter(&instances_);
   while (!iter.IsAtEnd()) {
-    iter.GetCurrentValue()->UpdateDeviceScaleFactor(device_scale_factor);
+    iter.GetCurrentValue()->UpdateDeviceScaleFactor();
     iter.Advance();
   }
 }
@@ -60,6 +69,12 @@ void BrowserPluginManager::UpdateFocusState() {
     iter.GetCurrentValue()->UpdateGuestFocusState();
     iter.Advance();
   }
+}
+
+void BrowserPluginManager::Attach(int browser_plugin_instance_id) {
+  BrowserPlugin* plugin = GetBrowserPlugin(browser_plugin_instance_id);
+  if (plugin)
+    plugin->Attach();
 }
 
 }  // namespace content

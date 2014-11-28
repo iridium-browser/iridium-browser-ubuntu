@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -29,7 +28,6 @@ import tempfile
 
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import portage_utilities
 from chromite.lib import binpkg
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
@@ -37,6 +35,7 @@ from chromite.lib import git
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import portage_util
 from chromite.lib import toolchain
 
 # How many times to retry uploads.
@@ -247,8 +246,8 @@ def GetBoardOverlay(build_path, target):
      The last overlay configured for the given board as a string.
   """
   board = target.board_variant
-  overlays = portage_utilities.FindOverlays(constants.BOTH_OVERLAYS, board,
-                                            buildroot=build_path)
+  overlays = portage_util.FindOverlays(constants.BOTH_OVERLAYS, board,
+                                       buildroot=build_path)
   # We only care about the last entry.
   return overlays[-1]
 

@@ -9,8 +9,8 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state.h"
 #include "base/memory/scoped_ptr.h"
-#include "grit/ash_resources.h"
 #include "ui/gfx/font_list.h"
+#include "ui/views/test/test_views.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
@@ -38,7 +38,7 @@ TEST_F(DefaultHeaderPainterTest, TitleIconAlignment) {
   scoped_ptr<Widget> w(CreateTestWidget());
   ash::FrameCaptionButtonContainerView container(w.get(),
   ash::FrameCaptionButtonContainerView::MINIMIZE_ALLOWED);
-  views::View window_icon;
+  views::StaticSizedView window_icon(gfx::Size(16, 16));
   window_icon.SetBounds(0, 0, 16, 16);
   w->SetBounds(gfx::Rect(0, 0, 500, 500));
   w->Show();
@@ -46,8 +46,8 @@ TEST_F(DefaultHeaderPainterTest, TitleIconAlignment) {
   DefaultHeaderPainter painter;
   painter.Init(w.get(),
                w->non_client_view()->frame_view(),
-               &window_icon,
                &container);
+  painter.UpdateLeftHeaderView(&window_icon);
   painter.LayoutHeader();
   gfx::Rect title_bounds = painter.GetTitleBounds();
   EXPECT_EQ(window_icon.bounds().CenterPoint().y(),

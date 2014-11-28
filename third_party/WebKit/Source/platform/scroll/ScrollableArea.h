@@ -35,9 +35,8 @@
 namespace blink {
 
 class FloatPoint;
-class GraphicsContext;
 class GraphicsLayer;
-class PlatformGestureEvent;
+class HostWindow;
 class PlatformWheelEvent;
 class ProgrammaticScrollAnimator;
 class ScrollAnimator;
@@ -59,6 +58,10 @@ public:
     static int pixelsPerLineStep();
     static float minFractionToStepWhenPaging();
     static int maxOverlapBetweenPages();
+
+    // The window that hosts the ScrollView. The ScrollView will communicate scrolls and repaints to the
+    // host window in the window's coordinate space.
+    virtual HostWindow* hostWindow() const { return 0; };
 
     bool scroll(ScrollDirection, ScrollGranularity, float delta = 1);
     void scrollToOffsetWithoutAnimation(const FloatPoint&);
@@ -162,8 +165,8 @@ public:
     virtual IntPoint maximumScrollPosition() const = 0;
 
     virtual IntRect visibleContentRect(IncludeScrollbarsInRect = ExcludeScrollbars) const;
-    virtual int visibleHeight() const = 0;
-    virtual int visibleWidth() const = 0;
+    virtual int visibleHeight() const { return visibleContentRect().height(); }
+    virtual int visibleWidth() const { return visibleContentRect().width(); }
     virtual IntSize contentsSize() const = 0;
     virtual IntSize overhangAmount() const { return IntSize(); }
     virtual IntPoint lastKnownMousePosition() const { return IntPoint(); }
@@ -187,7 +190,7 @@ public:
 
     // Let subclasses provide a way of asking for and servicing scroll
     // animations.
-    virtual bool scheduleAnimation() { return false; }
+    bool scheduleAnimation();
     void serviceScrollAnimations(double monotonicTime);
 
     virtual bool usesCompositedScrolling() const { return false; }

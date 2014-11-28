@@ -56,7 +56,6 @@ public:
 
     enum BBoxHierarchyType {
         kNone_BBoxHierarchyType = 0,
-        kQuadTree_BBoxHierarchyType,
         kRTree_BBoxHierarchyType,
         kTileGrid_BBoxHierarchyType,
 
@@ -90,10 +89,10 @@ public:
      * @param useChecksumBasedFilenames Whether to use checksum-based filenames when writing
      *     bitmap images to disk.
      */
-    virtual void init(const SkPicture* pict, 
-                      const SkString* writePath, 
+    virtual void init(const SkPicture* pict,
+                      const SkString* writePath,
                       const SkString* mismatchPath,
-                      const SkString* inputFilename, 
+                      const SkString* inputFilename,
                       bool useChecksumBasedFilenames);
 
     /**
@@ -261,8 +260,6 @@ public:
         }
         if (kRTree_BBoxHierarchyType == fBBoxHierarchyType) {
             config.append("_rtree");
-        } else if (kQuadTree_BBoxHierarchyType == fBBoxHierarchyType) {
-            config.append("_quadtree");
         } else if (kTileGrid_BBoxHierarchyType == fBBoxHierarchyType) {
             config.append("_grid");
             config.append("_");
@@ -311,8 +308,6 @@ public:
         }
         if (kRTree_BBoxHierarchyType == fBBoxHierarchyType) {
             result["bbh"] = "rtree";
-        } else if (kQuadTree_BBoxHierarchyType == fBBoxHierarchyType) {
-            result["bbh"] = "quadtree";
         } else if (kTileGrid_BBoxHierarchyType == fBBoxHierarchyType) {
             SkString tmp("grid_");
             tmp.appendS32(fGridInfo.fTileInterval.width());
@@ -403,6 +398,10 @@ public:
     GrContext* getGrContext() {
         return fGrContext;
     }
+
+    const GrContext::Options& getGrContextOptions() {
+        return fGrContextFactory.getGlobalOptions();
+    }
 #endif
 
     SkCanvas* getCanvas() {
@@ -413,13 +412,18 @@ public:
         return fPicture;
     }
 
+#if SK_SUPPORT_GPU
+    explicit PictureRenderer(const GrContext::Options &opts)
+#else
     PictureRenderer()
+#endif
         : fJsonSummaryPtr(NULL)
         , fDeviceType(kBitmap_DeviceType)
         , fEnableWrites(false)
         , fBBoxHierarchyType(kNone_BBoxHierarchyType)
         , fScaleFactor(SK_Scalar1)
 #if SK_SUPPORT_GPU
+        , fGrContextFactory(opts)
         , fGrContext(NULL)
         , fSampleCount(0)
 #endif
@@ -500,6 +504,11 @@ private:
  * to time.
  */
 class RecordPictureRenderer : public PictureRenderer {
+public:
+#if SK_SUPPORT_GPU
+    RecordPictureRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+#endif
+
     virtual bool render(SkBitmap** out = NULL) SK_OVERRIDE;
 
     virtual SkString getPerIterTimeFormat() SK_OVERRIDE { return SkString("%.4f"); }
@@ -511,10 +520,16 @@ protected:
 
 private:
     virtual SkString getConfigNameInternal() SK_OVERRIDE;
+
+    typedef PictureRenderer INHERITED;
 };
 
 class PipePictureRenderer : public PictureRenderer {
 public:
+#if SK_SUPPORT_GPU
+    PipePictureRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+#endif
+
     virtual bool render(SkBitmap** out = NULL) SK_OVERRIDE;
 
 private:
@@ -525,10 +540,14 @@ private:
 
 class SimplePictureRenderer : public PictureRenderer {
 public:
+#if SK_SUPPORT_GPU
+    SimplePictureRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+#endif
+
     virtual void init(const SkPicture* pict,
-                      const SkString* writePath, 
+                      const SkString* writePath,
                       const SkString* mismatchPath,
-                      const SkString* inputFilename, 
+                      const SkString* inputFilename,
                       bool useChecksumBasedFilenames) SK_OVERRIDE;
 
     virtual bool render(SkBitmap** out = NULL) SK_OVERRIDE;
@@ -541,12 +560,16 @@ private:
 
 class TiledPictureRenderer : public PictureRenderer {
 public:
+#if SK_SUPPORT_GPU
+    TiledPictureRenderer(const GrContext::Options &opts);
+#else
     TiledPictureRenderer();
+#endif
 
-    virtual void init(const SkPicture* pict, 
-                      const SkString* writePath, 
+    virtual void init(const SkPicture* pict,
+                      const SkString* writePath,
                       const SkString* mismatchPath,
-                      const SkString* inputFilename, 
+                      const SkString* inputFilename,
                       bool useChecksumBasedFilenames) SK_OVERRIDE;
 
     /**
@@ -668,6 +691,10 @@ private:
  */
 class PlaybackCreationRenderer : public PictureRenderer {
 public:
+#if SK_SUPPORT_GPU
+    PlaybackCreationRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+#endif
+
     virtual void setup() SK_OVERRIDE;
 
     virtual bool render(SkBitmap** out = NULL) SK_OVERRIDE;
@@ -684,7 +711,11 @@ private:
     typedef PictureRenderer INHERITED;
 };
 
+#if SK_SUPPORT_GPU
+extern PictureRenderer* CreateGatherPixelRefsRenderer(const GrContext::Options& opts);
+#else
 extern PictureRenderer* CreateGatherPixelRefsRenderer();
+#endif
 
 }
 

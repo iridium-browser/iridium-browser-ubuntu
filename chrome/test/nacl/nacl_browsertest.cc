@@ -107,9 +107,6 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, BadNative) {
 #if defined(OS_WIN)
 // crbug.com/98721
 #  define MAYBE_Crash DISABLED_Crash
-#elif defined(OS_LINUX)
-// crbug.com/366334
-#  define MAYBE_Crash DISABLED_Crash
 #else
 #  define MAYBE_Crash Crash
 #endif
@@ -117,22 +114,6 @@ NACL_BROWSER_TEST_F(NaClBrowserTest, MAYBE_Crash, {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("ppapi_crash.html"));
 })
 
-// PNaCl version does not work.
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, ManifestFile) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_manifest_file_test.html"));
-}
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc, MAYBE_GLIBC(ManifestFile)) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_manifest_file_test.html"));
-}
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, PreInitManifestFile) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_pre_init_manifest_file_test.html"));
-}
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc,
-                       MAYBE_GLIBC(PreInitManifestFile)) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_pre_init_manifest_file_test.html"));
-}
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, IrtManifestFile) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_manifest_file_test.html"));
 }
@@ -141,17 +122,19 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnaclNonSfi,
   RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_manifest_file_test.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, IrtException) {
+#if defined(OS_WIN)
+// http://crbug.com/416272
+#define MAYBE_IrtException DISABLED_IrtException
+#else
+#define MAYBE_IrtException IrtException
+#endif
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, MAYBE_IrtException) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_exception_test.html"));
 }
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnaclNonSfi,
                        MAYBE_PNACL_NONSFI(IrtException)) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_exception_test.html"));
 }
-
-NACL_BROWSER_TEST_F(NaClBrowserTest, Nameservice, {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_nameservice_test.html"));
-})
 
 // Some versions of Visual Studio does not like preprocessor
 // conditionals inside the argument of a macro, so we put the
@@ -375,68 +358,6 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnacl,
 
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnacl, PnaclMimeType) {
   RunLoadTest(FILE_PATH_LITERAL("pnacl_mime_type.html"));
-}
-
-class NaClBrowserTestNewlibStdoutPM : public NaClBrowserTestNewlib {
- public:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    // Env needs to be set early because nacl_helper is spawned before the test
-    // body on Linux.
-    scoped_ptr<base::Environment> env(base::Environment::Create());
-    env->SetVar("NACL_EXE_STDOUT", "DEBUG_ONLY:dev://postmessage");
-    NaClBrowserTestNewlib::SetUpInProcessBrowserTestFixture();
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStdoutPM, RedirectFg0) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stdout&thread=fg&delay_us=0"));
-}
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStdoutPM, RedirectBg0) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stdout&thread=bg&delay_us=0"));
-}
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStdoutPM, RedirectFg1) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stdout&thread=fg&delay_us=1000000"));
-}
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStdoutPM, RedirectBg1) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stdout&thread=bg&delay_us=1000000"));
-}
-
-class NaClBrowserTestNewlibStderrPM : public NaClBrowserTestNewlib {
- public:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    // Env needs to be set early because nacl_helper is spawned before the test
-    // body on Linux.
-    scoped_ptr<base::Environment> env(base::Environment::Create());
-    env->SetVar("NACL_EXE_STDERR", "DEBUG_ONLY:dev://postmessage");
-    NaClBrowserTestNewlib::SetUpInProcessBrowserTestFixture();
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStderrPM, RedirectFg0) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stderr&thread=fg&delay_us=0"));
-}
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStderrPM, RedirectBg0) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stderr&thread=bg&delay_us=0"));
-}
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStderrPM, RedirectFg1) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stderr&thread=fg&delay_us=1000000"));
-}
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStderrPM, RedirectBg1) {
-  RunNaClIntegrationTest(FILE_PATH_LITERAL(
-      "pm_redir_test.html?stream=stderr&thread=bg&delay_us=1000000"));
 }
 
 // TODO(ncbray) support glibc and PNaCl

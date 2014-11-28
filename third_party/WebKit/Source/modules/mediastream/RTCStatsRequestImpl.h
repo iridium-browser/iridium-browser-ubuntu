@@ -40,7 +40,7 @@ class RTCStatsCallback;
 
 class RTCStatsRequestImpl FINAL : public RTCStatsRequest, public ActiveDOMObject {
 public:
-    static PassRefPtr<RTCStatsRequestImpl> create(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<RTCStatsCallback>, MediaStreamTrack*);
+    static RTCStatsRequestImpl* create(ExecutionContext*, RTCPeerConnection*, RTCStatsCallback*, MediaStreamTrack*);
     virtual ~RTCStatsRequestImpl();
 
     virtual RTCStatsResponseBase* createResponse() OVERRIDE;
@@ -52,15 +52,16 @@ public:
     // ActiveDOMObject
     virtual void stop() OVERRIDE;
 
+    virtual void trace(Visitor*) OVERRIDE;
+
 private:
-    RTCStatsRequestImpl(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<RTCStatsCallback>, MediaStreamTrack*);
+    RTCStatsRequestImpl(ExecutionContext*, RTCPeerConnection*, RTCStatsCallback*, MediaStreamTrack*);
 
     void clear();
 
-    OwnPtr<RTCStatsCallback> m_successCallback;
+    Member<RTCStatsCallback> m_successCallback;
     RefPtr<MediaStreamComponent> m_component;
-
-    Persistent<RTCPeerConnection> m_requester;
+    Member<RTCPeerConnection> m_requester;
 };
 
 } // namespace blink

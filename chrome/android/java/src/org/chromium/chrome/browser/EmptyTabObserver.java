@@ -42,10 +42,10 @@ public class EmptyTabObserver implements TabObserver {
     public void onWebContentsInstantSupportDisabled() { }
 
     @Override
-    public void onLoadStarted(Tab tabBase) { }
+    public void onLoadStarted(Tab tab) { }
 
     @Override
-    public void onLoadStopped(Tab tabBase) { }
+    public void onLoadStopped(Tab tab) { }
 
     @Override
     public void onLoadProgressChanged(Tab tab, int progress) { }
@@ -64,6 +64,10 @@ public class EmptyTabObserver implements TabObserver {
     public void onDidStartProvisionalLoadForFrame(Tab tab, long frameId, long parentFrameId,
             boolean isMainFrame, String validatedUrl, boolean isErrorPage,
             boolean isIframeSrcdoc) { }
+
+    @Override
+    public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
+            boolean isNavigationToDifferentPage, boolean isFragmentNavigation, int statusCode) { }
 
     @Override
     public void onDidChangeThemeColor(int color) { }

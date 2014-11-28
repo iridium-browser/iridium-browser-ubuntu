@@ -32,7 +32,6 @@
 #include "base/auto_reset.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -116,7 +115,7 @@ namespace {
 // A class to temporarily disable a given bounds animator.
 class BoundsAnimatorDisabler {
  public:
-  BoundsAnimatorDisabler(views::BoundsAnimator* bounds_animator)
+  explicit BoundsAnimatorDisabler(views::BoundsAnimator* bounds_animator)
       : old_duration_(bounds_animator->GetAnimationDuration()),
         bounds_animator_(bounds_animator) {
     bounds_animator_->SetAnimationDuration(1);
@@ -431,7 +430,7 @@ void ShelfView::Init() {
 void ShelfView::OnShelfAlignmentChanged() {
   overflow_button_->OnShelfAlignmentChanged();
   LayoutToIdealBounds();
-  for (int i=0; i < view_model_->view_size(); ++i) {
+  for (int i = 0; i < view_model_->view_size(); ++i) {
     if (i >= first_visible_index_ && i <= last_visible_index_)
       view_model_->view_at(i)->Layout();
   }
@@ -659,9 +658,9 @@ void ShelfView::EndDrag(bool cancel) {
       drag_and_drop_view, ShelfButtonHost::DRAG_AND_DROP, cancel);
 
   // Either destroy the temporarily created item - or - make the item visible.
-  if (drag_and_drop_item_pinned_ && cancel)
+  if (drag_and_drop_item_pinned_ && cancel) {
     delegate_->UnpinAppWithID(drag_and_drop_app_id_);
-  else if (drag_and_drop_view) {
+  } else if (drag_and_drop_view) {
     if (cancel) {
       // When a hosted drag gets canceled, the item can remain in the same slot
       // and it might have moved within the bounds. In that case the item need
@@ -1669,6 +1668,13 @@ void ShelfView::ButtonPressed(views::Button* sender, const ui::Event& event) {
   if (!IsUsableEvent(event))
     return;
 
+  // Don't activate the item twice on double-click. Otherwise the window starts
+  // animating open due to the first click, then immediately minimizes due to
+  // the second click. The user most likely intended to open or minimize the
+  // item once, not do both.
+  if (event.flags() & ui::EF_IS_DOUBLE_CLICK)
+    return;
+
   {
     ScopedTargetRootWindow scoped_target(
         sender->GetWidget()->GetNativeView()->GetRootWindow());
@@ -1715,14 +1721,15 @@ bool ShelfView::ShowListMenuForView(const ShelfItem& item,
                                     const ui::Event& event) {
   ShelfItemDelegate* item_delegate =
       item_manager_->GetShelfItemDelegate(item.id);
-  list_menu_model_.reset(item_delegate->CreateApplicationMenu(event.flags()));
+  scoped_ptr<ui::MenuModel> list_menu_model(
+      item_delegate->CreateApplicationMenu(event.flags()));
 
   // Make sure we have a menu and it has at least two items in addition to the
   // application title and the 3 spacing separators.
-  if (!list_menu_model_.get() || list_menu_model_->GetItemCount() <= 5)
+  if (!list_menu_model.get() || list_menu_model->GetItemCount() <= 5)
     return false;
 
-  ShowMenu(list_menu_model_.get(),
+  ShowMenu(list_menu_model.get(),
            source,
            gfx::Point(),
            false,

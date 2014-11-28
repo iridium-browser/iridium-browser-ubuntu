@@ -85,6 +85,7 @@ private:
     virtual bool isPickerIndicatorOwnerDisabledOrReadOnly() const OVERRIDE FINAL;
     virtual void pickerIndicatorChooseValue(const String&) OVERRIDE FINAL;
     virtual void pickerIndicatorChooseValue(double) OVERRIDE FINAL;
+    virtual Element& pickerOwnerElement() const OVERRIDE FINAL;
     virtual bool setupDateTimeChooserParameters(DateTimeChooserParameters&) OVERRIDE FINAL;
 
     // ClearButtonElement::ClearButtonOwner functions.
@@ -100,7 +101,7 @@ private:
     virtual void destroyShadowSubtree() OVERRIDE FINAL;
     virtual void disabledAttributeChanged() OVERRIDE FINAL;
     virtual void forwardEvent(Event*) OVERRIDE FINAL;
-    virtual void handleFocusEvent(Element* oldFocusedElement, FocusType) OVERRIDE;
+    virtual void handleFocusInEvent(Element* oldFocusedElement, FocusType) OVERRIDE FINAL;
     virtual void handleKeydownEvent(KeyboardEvent*) OVERRIDE FINAL;
     virtual bool hasBadInput() const OVERRIDE;
     virtual bool hasCustomFocusLogic() const OVERRIDE FINAL;
@@ -116,6 +117,7 @@ private:
     virtual void listAttributeTargetChanged() OVERRIDE FINAL;
     virtual void updateClearButtonVisibility() OVERRIDE FINAL;
     virtual TextDirection computedTextDirection() OVERRIDE FINAL;
+    virtual AXObject* popupRootAXObject() OVERRIDE FINAL;
 
     DateTimeEditElement* dateTimeEditElement() const;
     SpinButtonElement* spinButtonElement() const;

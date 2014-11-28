@@ -55,6 +55,8 @@ class RenderFrameProxyHost
     : public IPC::Listener,
       public IPC::Sender {
  public:
+  static RenderFrameProxyHost* FromID(int process_id, int routing_id);
+
   RenderFrameProxyHost(SiteInstance* site_instance,
                        FrameTreeNode* frame_tree_node);
   virtual ~RenderFrameProxyHost();
@@ -74,6 +76,8 @@ class RenderFrameProxyHost
   SiteInstance* GetSiteInstance() {
     return site_instance_.get();
   }
+
+  FrameTreeNode* frame_tree_node() const { return frame_tree_node_; };
 
   void SetChildRWHView(RenderWidgetHostView* view);
 
@@ -99,6 +103,10 @@ class RenderFrameProxyHost
   CrossProcessFrameConnector* cross_process_frame_connector() {
     return cross_process_frame_connector_.get();
   }
+
+  // Set the frame's opener to null in the renderer process in response to an
+  // action in another renderer process.
+  void DisownOpener();
 
  private:
   // This RenderFrameProxyHost's routing id.

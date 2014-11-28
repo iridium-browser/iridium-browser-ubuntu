@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
@@ -14,6 +15,8 @@
 #include "extensions/common/constants.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
+#include "ipc/ipc_message.h"
+#include "ipc/ipc_message_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -25,6 +28,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
+#include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
@@ -50,6 +54,17 @@ class GetAttentionImageSource : public gfx::ImageSkiaSource {
   const gfx::ImageSkia icon_;
 };
 
+struct IconRepresentationInfo {
+  // Size as a string that will be used to retrieve a representation value from
+  // SetIcon function arguments.
+  const char* size_string;
+  // Scale factor for which the represantion should be used.
+  ui::ScaleFactor scale;
+};
+
+const IconRepresentationInfo kIconSizes[] = {{"19", ui::SCALE_FACTOR_100P},
+                                             {"38", ui::SCALE_FACTOR_200P}};
+
 template <class T>
 bool HasValue(const std::map<int, T>& map, int tab_id) {
   return map.find(tab_id) != map.end();
@@ -58,7 +73,8 @@ bool HasValue(const std::map<int, T>& map, int tab_id) {
 }  // namespace
 
 const int ExtensionAction::kDefaultTabId = -1;
-const int ExtensionAction::kPageActionIconMaxSize = 19;
+const int ExtensionAction::kPageActionIconMaxSize =
+    extension_misc::EXTENSION_ICON_ACTION;
 
 ExtensionAction::ExtensionAction(const std::string& extension_id,
                                  extensions::ActionInfo::Type action_type,
@@ -136,6 +152,35 @@ void ExtensionAction::SetIcon(int tab_id, const gfx::Image& image) {
   SetValue(&icon_, tab_id, image.AsImageSkia());
 }
 
+bool ExtensionAction::ParseIconFromCanvasDictionary(
+    const base::DictionaryValue& dict,
+    gfx::ImageSkia* icon) {
+  // Try to extract an icon for each known scale.
+  for (size_t i = 0; i < arraysize(kIconSizes); i++) {
+    const base::BinaryValue* image_data;
+    std::string binary_string64;
+    IPC::Message pickle;
+    if (dict.GetBinary(kIconSizes[i].size_string, &image_data)) {
+      pickle = IPC::Message(image_data->GetBuffer(), image_data->GetSize());
+    } else if (dict.GetString(kIconSizes[i].size_string, &binary_string64)) {
+      std::string binary_string;
+      if (!base::Base64Decode(binary_string64, &binary_string))
+        return false;
+      pickle = IPC::Message(binary_string.c_str(), binary_string.length());
+    } else {
+      continue;
+    }
+    PickleIterator iter(pickle);
+    SkBitmap bitmap;
+    if (!IPC::ReadParam(&pickle, &iter, &bitmap))
+      return false;
+    CHECK(!bitmap.isNull());
+    float scale = ui::GetScaleForScaleFactor(kIconSizes[i].scale);
+    icon->AddRepresentation(gfx::ImageSkiaRep(bitmap, scale));
+  }
+  return true;
+}
+
 gfx::ImageSkia ExtensionAction::GetExplicitlySetIcon(int tab_id) const {
   return GetValue(&icon_, tab_id);
 }
@@ -163,6 +208,35 @@ void ExtensionAction::UndoDeclarativeShow(int tab_id) {
     declarative_show_count_.erase(tab_id);
 }
 
+void ExtensionAction::DeclarativeSetIcon(int tab_id,
+                                         int priority,
+                                         const gfx::Image& icon) {
+  DCHECK_NE(tab_id, kDefaultTabId);
+  declarative_icon_[tab_id][priority].push_back(icon);
+}
+
+void ExtensionAction::UndoDeclarativeSetIcon(int tab_id,
+                                             int priority,
+                                             const gfx::Image& icon) {
+  std::vector<gfx::Image>& icons = declarative_icon_[tab_id][priority];
+  for (std::vector<gfx::Image>::iterator it = icons.begin(); it != icons.end();
+       ++it) {
+    if (it->AsImageSkia().BackedBySameObjectAs(icon.AsImageSkia())) {
+      icons.erase(it);
+      return;
+    }
+  }
+}
+
+const gfx::ImageSkia ExtensionAction::GetDeclarativeIcon(int tab_id) const {
+  if (declarative_icon_.find(tab_id) != declarative_icon_.end() &&
+      !declarative_icon_.find(tab_id)->second.rbegin()->second.empty()) {
+    return declarative_icon_.find(tab_id)->second.rbegin()
+        ->second.back().AsImageSkia();
+  }
+  return gfx::ImageSkia();
+}
+
 void ExtensionAction::ClearAllValuesForTab(int tab_id) {
   popup_url_.erase(tab_id);
   title_.erase(tab_id);
@@ -173,7 +247,7 @@ void ExtensionAction::ClearAllValuesForTab(int tab_id) {
   is_visible_.erase(tab_id);
   // TODO(jyasskin): Erase the element from declarative_show_count_
   // when the tab's closed.  There's a race between the
-  // PageActionController and the ContentRulesRegistry on navigation,
+  // LocationBarController and the ContentRulesRegistry on navigation,
   // which prevents me from cleaning everything up now.
 }
 

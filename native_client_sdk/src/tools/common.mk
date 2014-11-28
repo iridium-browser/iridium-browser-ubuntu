@@ -204,6 +204,9 @@ TC_PATH := $(abspath $(NACL_SDK_ROOT)/toolchain)
 
 #
 # Check for required minimum SDK version.
+# A makefile can declare NACL_SDK_VERSION_MIN of the form "<major>.<position>",
+# where <major> is the major Chromium version number, and <position> is the
+# Chromium Cr-Commit-Position number. eg. "39.295386".
 #
 ifdef NACL_SDK_VERSION_MIN
   VERSION_CHECK:=$(shell $(GETOS) --check-version=$(NACL_SDK_VERSION_MIN) 2>&1)
@@ -324,10 +327,6 @@ NACL_LDFLAGS ?= -O2
 PNACL_LDFLAGS ?= -O2
 else
 POSIX_FLAGS ?= -g -O0 -pthread -MMD -DNACL_SDK_DEBUG
-endif
-
-ifdef STANDALONE
-POSIX_FLAGS += -DSEL_LDR=1
 endif
 
 NACL_CFLAGS ?= -Wno-long-long -Werror

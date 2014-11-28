@@ -41,10 +41,9 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     scope_ = GURL("http://host/scope/");
     script_url_ = GURL("http://host/script.js");
     registration_ = new ServiceWorkerRegistration(
-        scope_, script_url_, 1L, context()->AsWeakPtr());
+        scope_, 1L, context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(
-        registration_,
-        1L, context()->AsWeakPtr());
+        registration_.get(), script_url_, 1L, context()->AsWeakPtr());
 
     // An empty host.
     scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
@@ -95,11 +94,11 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateBefore24Hours) {
       new ServiceWorkerContextRequestHandler(
           context()->AsWeakPtr(),
           provider_host_,
-          base::WeakPtr<webkit_blob::BlobStorageContext>(),
+          base::WeakPtr<storage::BlobStorageContext>(),
           RESOURCE_TYPE_SERVICE_WORKER));
   scoped_refptr<net::URLRequestJob> job =
       handler->MaybeCreateJob(request.get(), NULL);
-  ASSERT_TRUE(job);
+  ASSERT_TRUE(job.get());
   ServiceWorkerWriteToCacheJob* sw_job =
       static_cast<ServiceWorkerWriteToCacheJob*>(job.get());
 
@@ -126,11 +125,11 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateAfter24Hours) {
       new ServiceWorkerContextRequestHandler(
           context()->AsWeakPtr(),
           provider_host_,
-          base::WeakPtr<webkit_blob::BlobStorageContext>(),
+          base::WeakPtr<storage::BlobStorageContext>(),
           RESOURCE_TYPE_SERVICE_WORKER));
   scoped_refptr<net::URLRequestJob> job =
       handler->MaybeCreateJob(request.get(), NULL);
-  ASSERT_TRUE(job);
+  ASSERT_TRUE(job.get());
   ServiceWorkerWriteToCacheJob* sw_job =
       static_cast<ServiceWorkerWriteToCacheJob*>(job.get());
 

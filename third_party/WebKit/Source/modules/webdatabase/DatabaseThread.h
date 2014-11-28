@@ -28,8 +28,8 @@
 #ifndef DatabaseThread_h
 #define DatabaseThread_h
 
+#include "platform/WebThreadSupportingGC.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebThread.h"
 #include "wtf/Deque.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
@@ -42,7 +42,7 @@
 
 namespace blink {
 
-class DatabaseBackend;
+class Database;
 class DatabaseTask;
 class Document;
 class MessageLoopInterruptor;
@@ -58,14 +58,14 @@ public:
     void trace(Visitor*);
 
     void start();
-    void requestTermination(TaskSynchronizer* cleanupSync);
-    bool terminationRequested(TaskSynchronizer* = 0) const;
+    void terminate();
+    bool terminationRequested() const;
 
     void scheduleTask(PassOwnPtr<DatabaseTask>);
 
-    void recordDatabaseOpen(DatabaseBackend*);
-    void recordDatabaseClosed(DatabaseBackend*);
-    bool isDatabaseOpen(DatabaseBackend*);
+    void recordDatabaseOpen(Database*);
+    void recordDatabaseClosed(Database*);
+    bool isDatabaseOpen(Database*);
 
     bool isDatabaseThread() { return m_thread && m_thread->isCurrentThread(); }
 
@@ -79,12 +79,12 @@ private:
     void cleanupDatabaseThread();
     void cleanupDatabaseThreadCompleted();
 
-    OwnPtr<WebThread> m_thread;
+    OwnPtr<WebThreadSupportingGC> m_thread;
 
     // This set keeps track of the open databases that have been used on this thread.
     // This must be updated in the database thread though it is constructed and
     // destructed in the context thread.
-    WillBeHeapHashSet<RefPtrWillBeMember<DatabaseBackend> > m_openDatabaseSet;
+    WillBeHeapHashSet<RefPtrWillBeMember<Database> > m_openDatabaseSet;
 
     OwnPtr<SQLTransactionClient> m_transactionClient;
     OwnPtrWillBeMember<SQLTransactionCoordinator> m_transactionCoordinator;
@@ -92,8 +92,6 @@ private:
 
     mutable Mutex m_terminationRequestedMutex;
     bool m_terminationRequested;
-    OwnPtr<PendingGCRunner> m_pendingGCRunner;
-    OwnPtr<MessageLoopInterruptor> m_messageLoopInterruptor;
 };
 
 } // namespace blink

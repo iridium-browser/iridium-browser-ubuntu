@@ -4,12 +4,21 @@
 
 """Collection of tests to run on the rootfs of a built image."""
 
+from __future__ import print_function
+
+import cStringIO
+import collections
 import itertools
 import logging
+import magic
+import mimetypes
 import os
+import re
+import stat
 import unittest
 
 from chromite.lib import cros_build_lib
+from chromite.lib import filetype
 from chromite.lib import osutils
 from chromite.lib import perf_uploader
 
@@ -26,7 +35,7 @@ def IsPerfFile(file_name):
   return file_name.endswith(PERF_EXTENSION)
 
 
-class BoardAndDirectoryMixin(object):
+class _BoardAndDirectoryMixin(object):
   """A mixin to hold image test's specific info."""
 
   _board = None
@@ -39,7 +48,7 @@ class BoardAndDirectoryMixin(object):
     self._result_dir = result_dir
 
 
-class ImageTestCase(unittest.TestCase, BoardAndDirectoryMixin):
+class ImageTestCase(unittest.TestCase, _BoardAndDirectoryMixin):
   """Subclass unittest.TestCase to provide utility methods for image tests.
 
   Tests should not directly inherit this class. They should instead inherit
@@ -48,7 +57,8 @@ class ImageTestCase(unittest.TestCase, BoardAndDirectoryMixin):
   Tests MUST use prefix "Test" (e.g.: TestLinkage, TestDiskSpace), not "test"
   prefix, in order to be picked up by the test runner.
 
-  Tests are run outside chroot.
+  Tests are run inside chroot. Tests are run as root. DO NOT modify any mounted
+  partitions.
 
   The current working directory is set up so that "ROOT_A", and "STATEFUL"
   constants refer to the mounted partitions. The partitions are mounted
@@ -147,7 +157,7 @@ class NonForgivingImageTestCase(ImageTestCase):
     return False
 
 
-class ImageTestSuite(unittest.TestSuite, BoardAndDirectoryMixin):
+class ImageTestSuite(unittest.TestSuite, _BoardAndDirectoryMixin):
   """Wrap around unittest.TestSuite to pass more info to the actual tests."""
 
   def GetTests(self):
@@ -160,7 +170,7 @@ class ImageTestSuite(unittest.TestSuite, BoardAndDirectoryMixin):
     return super(ImageTestSuite, self).run(result)
 
 
-class ImageTestRunner(unittest.TextTestRunner, BoardAndDirectoryMixin):
+class ImageTestRunner(unittest.TextTestRunner, _BoardAndDirectoryMixin):
   """Wrap around unittest.TextTestRunner to pass more info down the chain."""
 
   def run(self, test):
@@ -191,34 +201,130 @@ class LocaltimeTest(NonForgivingImageTestCase):
                      os.readlink(localtime_path))
 
 
+def _GuessMimeType(magic_obj, file_name):
+  """Guess a file's mimetype base on its extension and content.
+
+  File extension is favored over file content to reduce noise.
+
+  Args:
+    magic_obj: A loaded magic instance.
+    file_name: A path to the file.
+
+  Returns:
+    A mime type of |file_name|.
+  """
+  mime_type, _ = mimetypes.guess_type(file_name)
+  if not mime_type:
+    mime_type = magic_obj.file(file_name)
+  return mime_type
+
+
 class BlacklistTest(NonForgivingImageTestCase):
-  """Verify that rootfs does not contain blacklisted directories."""
+  """Verify that rootfs does not contain blacklisted items."""
 
   def TestBlacklistedDirectories(self):
     dirs = [os.path.join(ROOT_A, 'usr', 'share', 'locale')]
     for d in dirs:
       self.assertFalse(os.path.isdir(d), 'Directory %s is blacklisted.' % d)
 
+  def TestBlacklistedFileTypes(self):
+    """Fail if there are files of prohibited types (such as C++ source code).
+
+    The whitelist has higher precedence than the blacklist.
+    """
+    blacklisted_patterns = [re.compile(x) for x in [
+        r'text/x-c\+\+',
+        r'text/x-c',
+    ]]
+    whitelisted_patterns = [re.compile(x) for x in [
+        r'.*/braille/.*',
+        r'.*/brltty/.*',
+        r'.*/etc/sudoers$',
+        r'.*/dump_vpd_log$',
+        r'.*\.conf$',
+        r'.*/libnl/classid$',
+        r'.*/locale/',
+        r'.*/X11/xkb/',
+        r'.*/chromeos-assets/',
+        r'.*/udev/rules.d/',
+        r'.*/firmware/ar3k/.*pst$',
+        r'.*/etc/services',
+        r'.*/usr/share/dev-install/portage',
+    ]]
+
+    failures = []
+
+    magic_obj = magic.open(magic.MAGIC_MIME_TYPE)
+    magic_obj.load()
+    for root, _, file_names in os.walk(ROOT_A):
+      for file_name in file_names:
+        full_name = os.path.join(root, file_name)
+        if os.path.islink(full_name) or not os.path.isfile(full_name):
+          continue
+
+        mime_type = _GuessMimeType(magic_obj, full_name)
+        if (any(x.match(mime_type) for x in blacklisted_patterns) and not
+            any(x.match(full_name) for x in whitelisted_patterns)):
+          failures.append('File %s has blacklisted type %s.' %
+                          (full_name, mime_type))
+    magic_obj.close()
+
+    self.assertFalse(failures, '\n'.join(failures))
+
+  def TestValidInterpreter(self):
+    """Fail if a script's interpreter is not found, or not executable.
+
+    A script interpreter is anything after the #! sign, up to the end of line
+    or the first space.
+    """
+    failures = []
+
+    for root, _, file_names in os.walk(ROOT_A):
+      for file_name in file_names:
+        full_name = os.path.join(root, file_name)
+        file_stat = os.lstat(full_name)
+        if (not stat.S_ISREG(file_stat.st_mode) or
+            (file_stat.st_mode & 0111) == 0):
+          continue
+
+        with open(full_name, 'rb') as f:
+          if f.read(2) != '#!':
+            continue
+          line = '#!' + f.readline().strip()
+
+        try:
+          # Ignore arguments to the interpreter.
+          interp, _ = filetype.SplitShebang(line)
+        except ValueError:
+          failures.append('File %s has an invalid interpreter path: "%s".' %
+                          (full_name, line))
+
+        # Absolute path to the interpreter.
+        interp = os.path.join(ROOT_A, interp.lstrip('/'))
+        # Interpreter could be a symlink. Resolve it.
+        interp = osutils.ResolveSymlink(interp, ROOT_A)
+        if not os.path.isfile(interp):
+          failures.append('File %s uses non-existing interpreter %s.' %
+                          (full_name, interp))
+        elif (os.stat(interp).st_mode & 0111) == 0:
+          failures.append('Interpreter %s is not executable.' % interp)
+
+    self.assertFalse(failures, '\n'.join(failures))
+
 
 class LinkageTest(NonForgivingImageTestCase):
   """Verify that all binaries and libraries have proper linkage."""
 
   def setUp(self):
-    self._outside_chroot = os.getcwd()
-    try:
-      self._inside_chroot = cros_build_lib.ToChrootPath(self._outside_chroot)
-    except ValueError:
-      self._inside_chroot = self._outside_chroot
-
     osutils.MountDir(
-        os.path.join(self._outside_chroot, STATEFUL, 'var_overlay'),
-        os.path.join(self._outside_chroot, ROOT_A, 'var'),
+        os.path.join(STATEFUL, 'var_overlay'),
+        os.path.join(ROOT_A, 'var'),
         mount_opts=('bind', ),
     )
 
   def tearDown(self):
     osutils.UmountDir(
-        os.path.join(self._outside_chroot, ROOT_A, 'var'),
+        os.path.join(ROOT_A, 'var'),
         cleanup=False,
     )
 
@@ -226,11 +332,10 @@ class LinkageTest(NonForgivingImageTestCase):
     cmd = [
         'portageq-%s' % self._board,
         'has_version',
-        os.path.join(self._inside_chroot, ROOT_A),
+        ROOT_A,
         package_name
     ]
-    ret = cros_build_lib.RunCommand(cmd, error_code_ok=True,
-                                    enter_chroot=True)
+    ret = cros_build_lib.RunCommand(cmd, error_code_ok=True)
     return ret.returncode == 0
 
   def TestLinkage(self):
@@ -326,27 +431,93 @@ class FileSystemMetaDataTest(ForgivingImageTestCase):
     block_size = int(fs_stat['Block size'])
 
     sum_file_size = 0
-    sum_block_size = 0
     for root, _, filenames in os.walk(ROOT_A):
       for file_name in filenames:
         full_name = os.path.join(root, file_name)
         file_stat = os.lstat(full_name)
         sum_file_size += file_stat.st_size
-        if file_stat.st_size < 60:
-          # Small files (< 60 bytes) are inlined in the inode, no data block
-          # is needed.
-          continue
-        else:
-          sum_block_size += ((file_stat.st_size + block_size - 1) /
-                             block_size) * block_size
+
+    metadata_size = (block_count - free_blocks) * block_size - sum_file_size
 
     self.OutputPerfValue('free_inodes_over_inode_count',
-                         float(free_inodes) / inode_count, 'percent',
+                         free_inodes * 100.0 / inode_count, 'percent',
                          graph='free_over_used_ratio')
     self.OutputPerfValue('free_blocks_over_block_count',
-                         float(free_blocks) / block_count, 'percent',
+                         free_blocks * 100.0 / block_count, 'percent',
                          graph='free_over_used_ratio')
-    self.OutputPerfValue('file_size', sum_file_size, 'bytes',
-                         higher_is_better=False, graph='disk_space')
-    self.OutputPerfValue('disk_size', sum_block_size, 'bytes',
-                         higher_is_better=False, graph='disk_space')
+    self.OutputPerfValue('apparent_size', sum_file_size, 'bytes',
+                         higher_is_better=False, graph='filesystem_stats')
+    self.OutputPerfValue('metadata_size', metadata_size, 'bytes',
+                         higher_is_better=False, graph='filesystem_stats')
+
+
+class SymbolsTest(NonForgivingImageTestCase):
+  """Tests related to symbols in ELF files."""
+
+  def setUp(self):
+    # Mapping of file name --> 2-tuple (import, export).
+    self._known_symtabs = {}
+
+  def _GetSymbols(self, file_name):
+    """Return a 2-tuple (import, export) of an ELF file |file_name|.
+
+    Import and export in the returned tuple are sets of strings (symbol names).
+    """
+    if file_name in self._known_symtabs:
+      return self._known_symtabs[file_name]
+
+    # We use cstringio here to obviate fseek/fread time in pyelftools.
+    stream = cStringIO.StringIO(osutils.ReadFile(file_name))
+
+    # pyelftools is not available during initial bootstrap, crbug.com/341152.
+    from chromite.lib import parseelf
+    from elftools.elf import elffile
+    from elftools.common import exceptions
+
+    try:
+      elf = elffile.ELFFile(stream)
+    except exceptions.ELFError:
+      raise ValueError('%s is not an ELF file.' % file_name)
+
+    imp, exp = parseelf.ParseELFSymbols(elf)
+    exp = set(exp.keys())
+
+    self._known_symtabs[file_name] = imp, exp
+    return imp, exp
+
+  def TestImportedSymbolsAreAvailable(self):
+    """Ensure all ELF files' imported symbols are available in ROOT-A.
+
+    In this test, we find all imported symbols and exported symbols from all
+    ELF files on the system. This test will fail if the set of imported symbols
+    is not a subset of exported symbols.
+
+    This test DOES NOT simulate ELF loading. "TestLinkage" does that with
+    `lddtree`.
+    """
+    # Import tables of files, keyed by file names.
+    importeds = collections.defaultdict(set)
+    # All exported symbols.
+    exported = set()
+
+    for root, _, filenames in os.walk(ROOT_A):
+      for filename in filenames:
+        full_name = os.path.join(root, filename)
+        if os.path.islink(full_name) or not os.path.isfile(full_name):
+          continue
+
+        try:
+          imp, exp = self._GetSymbols(full_name)
+        except (ValueError, IOError):
+          continue
+        else:
+          importeds[full_name] = imp
+          exported.update(exp)
+
+    failures = []
+    for full_name, imported in importeds.iteritems():
+      missing = imported - exported
+      if missing:
+        failures.append('File %s contains unsatisfied symbols: %r' %
+                        (full_name, missing))
+    self.assertFalse(failures, '\n'.join(failures))

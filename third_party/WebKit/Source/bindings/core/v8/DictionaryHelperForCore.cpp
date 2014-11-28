@@ -265,22 +265,6 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, RefP
 }
 
 template <>
-bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, MessagePortArray& value)
-{
-    v8::Local<v8::Value> v8Value;
-    if (!dictionary.get(key, v8Value))
-        return false;
-
-    ASSERT(dictionary.isolate());
-    ASSERT(dictionary.isolate() == v8::Isolate::GetCurrent());
-    if (blink::isUndefinedOrNull(v8Value))
-        return true;
-    bool success = false;
-    value = toRefPtrWillBeMemberNativeArray<MessagePort, V8MessagePort>(v8Value, key, dictionary.isolate(), &success);
-    return success;
-}
-
-template <>
 bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, HashSet<AtomicString>& value)
 {
     v8::Local<v8::Value> v8Value;
@@ -338,7 +322,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, RefP
         // we add them.
         v8::Handle<v8::Object> track = V8TextTrack::findInstanceInPrototypeChain(wrapper, dictionary.isolate());
         if (!track.IsEmpty())
-            source = V8TextTrack::toNative(track);
+            source = V8TextTrack::toImpl(track);
     }
     value = source;
     return true;
@@ -471,11 +455,25 @@ struct DictionaryHelperTraits<Storage> {
     typedef V8Storage type;
 };
 
+template <>
+struct DictionaryHelperTraits<Element> {
+    typedef V8Element type;
+};
+
+template <>
+struct DictionaryHelperTraits<Path2D> {
+    typedef V8Path2D type;
+};
+
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtr<Uint8Array>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtr<ArrayBufferView>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<MediaKeyError>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<DOMError>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<Storage>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<Element>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, RawPtr<Element>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<Path2D>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, RawPtr<Path2D>& value);
 
 template <typename T>
 struct IntegralTypeTraits {
@@ -649,7 +647,18 @@ bool DictionaryHelper::convert(const Dictionary& dictionary, Dictionary::Convers
     if (!dictionary.get(key, v8Value))
         return true;
 
-    return DictionaryHelper::get(dictionary, key, value);
+    ASSERT(dictionary.isolate());
+    ASSERT(dictionary.isolate() == v8::Isolate::GetCurrent());
+
+    if (isUndefinedOrNull(v8Value))
+        return true;
+
+    value = toRefPtrWillBeMemberNativeArray<MessagePort, V8MessagePort>(v8Value, key, dictionary.isolate(), context.exceptionState());
+
+    if (context.exceptionState().throwIfNeeded())
+        return false;
+
+    return true;
 }
 
 } // namespace blink

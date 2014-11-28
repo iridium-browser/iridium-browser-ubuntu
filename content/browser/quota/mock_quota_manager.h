@@ -11,19 +11,19 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "storage/browser/quota/quota_client.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/browser/quota/quota_task.h"
+#include "storage/common/quota/quota_types.h"
 #include "url/gurl.h"
-#include "webkit/browser/quota/quota_client.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/browser/quota/quota_task.h"
-#include "webkit/common/quota/quota_types.h"
 
-using quota::GetOriginsCallback;
-using quota::QuotaClient;
-using quota::QuotaManager;
-using quota::QuotaStatusCode;
-using quota::SpecialStoragePolicy;
-using quota::StatusCallback;
-using quota::StorageType;
+using storage::GetOriginsCallback;
+using storage::QuotaClient;
+using storage::QuotaManager;
+using storage::QuotaStatusCode;
+using storage::SpecialStoragePolicy;
+using storage::StatusCallback;
+using storage::StorageType;
 
 namespace content {
 
@@ -40,11 +40,12 @@ namespace content {
 // origin data stored in the profile.
 class MockQuotaManager : public QuotaManager {
  public:
-  MockQuotaManager(bool is_incognito,
-                   const base::FilePath& profile_path,
-                   base::SingleThreadTaskRunner* io_thread,
-                   base::SequencedTaskRunner* db_thread,
-                   SpecialStoragePolicy* special_storage_policy);
+  MockQuotaManager(
+      bool is_incognito,
+      const base::FilePath& profile_path,
+      const scoped_refptr<base::SingleThreadTaskRunner>& io_thread,
+      const scoped_refptr<base::SequencedTaskRunner>& db_thread,
+      const scoped_refptr<SpecialStoragePolicy>& special_storage_policy);
 
   // Overrides QuotaManager's implementation. The internal usage data is
   // updated when MockQuotaManagerProxy::NotifyStorageModified() is
@@ -52,7 +53,7 @@ class MockQuotaManager : public QuotaManager {
   // a helper method MockQuotaManagerProxy::SetQuota().
   virtual void GetUsageAndQuota(
       const GURL& origin,
-      quota::StorageType type,
+      storage::StorageType type,
       const GetUsageAndQuotaCallback& callback) OVERRIDE;
 
   // Overrides QuotaManager's implementation with a canned implementation that

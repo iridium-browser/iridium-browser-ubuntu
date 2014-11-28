@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/strings/string_util.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerState.h"
 #include "url/gurl.h"
@@ -31,6 +32,7 @@ static const int64 kInvalidServiceWorkerRegistrationId = -1;
 static const int64 kInvalidServiceWorkerVersionId = -1;
 static const int64 kInvalidServiceWorkerResourceId = -1;
 static const int64 kInvalidServiceWorkerResponseId = -1;
+static const int kInvalidEmbeddedWorkerThreadId = -1;
 
 // Indicates how the service worker handled a fetch event.
 enum ServiceWorkerFetchEventResult {
@@ -41,21 +43,30 @@ enum ServiceWorkerFetchEventResult {
   SERVICE_WORKER_FETCH_EVENT_LAST = SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE
 };
 
+struct ServiceWorkerCaseInsensitiveCompare {
+  bool operator()(const std::string& lhs, const std::string& rhs) const {
+    return base::strcasecmp(lhs.c_str(), rhs.c_str()) < 0;
+  }
+};
+
+typedef std::map<std::string, std::string, ServiceWorkerCaseInsensitiveCompare>
+    ServiceWorkerHeaderMap;
+
 // To dispatch fetch request from browser to child process.
-// TODO(kinuko): This struct will definitely need more fields and
-// we'll probably want to have response struct/class too.
 struct CONTENT_EXPORT ServiceWorkerFetchRequest {
   ServiceWorkerFetchRequest();
   ServiceWorkerFetchRequest(const GURL& url,
                             const std::string& method,
-                            const std::map<std::string, std::string>& headers,
+                            const ServiceWorkerHeaderMap& headers,
                             const GURL& referrer,
                             bool is_reload);
   ~ServiceWorkerFetchRequest();
 
   GURL url;
   std::string method;
-  std::map<std::string, std::string> headers;
+  ServiceWorkerHeaderMap headers;
+  std::string blob_uuid;
+  uint64 blob_size;
   GURL referrer;
   bool is_reload;
 };
@@ -66,15 +77,44 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
   ServiceWorkerResponse(const GURL& url,
                         int status_code,
                         const std::string& status_text,
-                        const std::map<std::string, std::string>& headers,
+                        const ServiceWorkerHeaderMap& headers,
                         const std::string& blob_uuid);
   ~ServiceWorkerResponse();
 
   GURL url;
   int status_code;
   std::string status_text;
-  std::map<std::string, std::string> headers;
+  ServiceWorkerHeaderMap headers;
   std::string blob_uuid;
+};
+
+// Controls how requests are matched in the Cache API.
+struct CONTENT_EXPORT ServiceWorkerCacheQueryParams {
+  ServiceWorkerCacheQueryParams();
+
+  bool ignore_search;
+  bool ignore_method;
+  bool ignore_vary;
+  bool prefix_match;
+};
+
+// The type of a single batch operation in the Cache API.
+enum ServiceWorkerCacheOperationType {
+  SERVICE_WORKER_CACHE_OPERATION_TYPE_UNDEFINED,
+  SERVICE_WORKER_CACHE_OPERATION_TYPE_PUT,
+  SERVICE_WORKER_CACHE_OPERATION_TYPE_DELETE,
+  SERVICE_WORKER_CACHE_OPERATION_TYPE_LAST =
+      SERVICE_WORKER_CACHE_OPERATION_TYPE_DELETE
+};
+
+// A single batch operation for the Cache API.
+struct CONTENT_EXPORT ServiceWorkerBatchOperation {
+  ServiceWorkerBatchOperation();
+
+  ServiceWorkerCacheOperationType operation_type;
+  ServiceWorkerFetchRequest request;
+  ServiceWorkerResponse response;
+  ServiceWorkerCacheQueryParams match_params;
 };
 
 // Represents initialization info for a WebServiceWorker object.
@@ -84,6 +124,12 @@ struct CONTENT_EXPORT ServiceWorkerObjectInfo {
   GURL scope;
   GURL url;
   blink::WebServiceWorkerState state;
+};
+
+struct ServiceWorkerRegistrationObjectInfo {
+  ServiceWorkerRegistrationObjectInfo();
+  int handle_id;
+  GURL scope;
 };
 
 struct ServiceWorkerVersionAttributes {

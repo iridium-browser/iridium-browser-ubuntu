@@ -98,7 +98,7 @@ class FakeVideoCaptureDeviceTest : public testing::Test {
 
   scoped_ptr<media::VideoCaptureDevice::Names> EnumerateDevices() {
     media::VideoCaptureDevice::Names* names;
-    EXPECT_CALL(*device_enumeration_listener_,
+    EXPECT_CALL(*device_enumeration_listener_.get(),
                 OnEnumeratedDevicesCallbackPtr(_)).WillOnce(SaveArg<0>(&names));
 
     video_capture_device_factory_->EnumerateDeviceNames(
@@ -134,7 +134,6 @@ TEST_F(FakeVideoCaptureDeviceTest, Capture) {
   capture_params.requested_format.frame_size.SetSize(640, 480);
   capture_params.requested_format.frame_rate = 30;
   capture_params.requested_format.pixel_format = PIXEL_FORMAT_I420;
-  capture_params.allow_resolution_change = false;
   device->AllocateAndStart(capture_params, client_.PassAs<Client>());
   WaitForCapturedFrame();
   EXPECT_EQ(last_format().frame_size.width(), 640);
@@ -169,14 +168,16 @@ TEST_F(FakeVideoCaptureDeviceTest, GetDeviceSupportedFormats) {
   }
 }
 
-TEST_F(FakeVideoCaptureDeviceTest, CaptureVariableResolution) {
+// Disabled, http://crbug.com/407061 .
+TEST_F(FakeVideoCaptureDeviceTest, DISABLED_CaptureVariableResolution) {
   scoped_ptr<VideoCaptureDevice::Names> names(EnumerateDevices());
 
   VideoCaptureParams capture_params;
   capture_params.requested_format.frame_size.SetSize(640, 480);
   capture_params.requested_format.frame_rate = 30;
   capture_params.requested_format.pixel_format = PIXEL_FORMAT_I420;
-  capture_params.allow_resolution_change = true;
+  capture_params.resolution_change_policy =
+      RESOLUTION_POLICY_DYNAMIC_WITHIN_LIMIT;
 
   ASSERT_GT(static_cast<int>(names->size()), 0);
 

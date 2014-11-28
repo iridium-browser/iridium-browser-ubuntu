@@ -21,7 +21,7 @@ import com.google.ipc.invalidation.external.client.InvalidationListener;
 import com.google.ipc.invalidation.external.client.SystemResources;
 import com.google.ipc.invalidation.external.client.types.AckHandle;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
-import com.google.protos.ipc.invalidation.ClientProtocol.ClientConfigP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ClientConfigP;
 
 import java.util.Collection;
 import java.util.Random;

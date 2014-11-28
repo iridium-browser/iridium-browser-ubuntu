@@ -380,7 +380,40 @@ Caps::Caps()
       maxViewportHeight(0),
       minAliasedPointSize(0),
       maxAliasedPointSize(0),
-      minAliasedLineWidth(0)
+      minAliasedLineWidth(0),
+      // Table 6.29
+      maxElementsIndices(0),
+      maxElementsVertices(0),
+      maxServerWaitTimeout(0),
+      // Table 6.31
+      maxVertexAttributes(0),
+      maxVertexUniformComponents(0),
+      maxVertexUniformVectors(0),
+      maxVertexUniformBlocks(0),
+      maxVertexOutputComponents(0),
+      maxVertexTextureImageUnits(0),
+      // Table 6.32
+      maxFragmentUniformComponents(0),
+      maxFragmentUniformVectors(0),
+      maxFragmentUniformBlocks(0),
+      maxFragmentInputComponents(0),
+      maxTextureImageUnits(0),
+      minProgramTexelOffset(0),
+      maxProgramTexelOffset(0),
+
+      maxUniformBufferBindings(0),
+      maxUniformBlockSize(0),
+      uniformBufferOffsetAlignment(0),
+      maxCombinedUniformBlocks(0),
+      maxCombinedVertexUniformComponents(0),
+      maxCombinedFragmentUniformComponents(0),
+      maxVaryingComponents(0),
+      maxVaryingVectors(0),
+      maxCombinedTextureImageUnits(0),
+
+      maxTransformFeedbackInterleavedComponents(0),
+      maxTransformFeedbackSeparateAttributes(0),
+      maxTransformFeedbackSeparateComponents(0)
 {
 }
 

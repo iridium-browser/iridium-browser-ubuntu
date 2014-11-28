@@ -16,27 +16,25 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.ipc.invalidation.common.CommonProtos2;
 import com.google.ipc.invalidation.common.DigestFunction;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
+import com.google.ipc.invalidation.ticl.proto.Client.PersistentStateBlob;
+import com.google.ipc.invalidation.ticl.proto.Client.PersistentTiclState;
+import com.google.ipc.invalidation.util.Bytes;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
 import com.google.ipc.invalidation.util.TypedUtil;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.Client.PersistentStateBlob;
-import com.google.protos.ipc.invalidation.Client.PersistentTiclState;
 
 /**
  * Utility methods for handling the Ticl persistent state.
  *
  */
-
 public class PersistenceUtils {
 
   /** Serializes a Ticl state blob. */
-  
-  public static byte[] serializeState(PersistentTiclState state, DigestFunction digestFn) {
-    ByteString mac = generateMac(state, digestFn);
-    return CommonProtos2.newPersistentStateBlob(state, mac).toByteArray();
+  public static byte[] serializeState(
+      PersistentTiclState state, DigestFunction digestFn) {
+    Bytes mac = generateMac(state, digestFn);
+    return PersistentStateBlob.create(state, mac).toByteArray();
   }
 
   /**
@@ -49,15 +47,15 @@ public class PersistenceUtils {
     try {
       // Try parsing the envelope protocol buffer.
       stateBlob = PersistentStateBlob.parseFrom(stateBlobBytes);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.severe("Failed deserializing Ticl state: %s", exception.getMessage());
       return null;
     }
 
     // Check the mac in the envelope against the recomputed mac from the state.
     PersistentTiclState ticlState = stateBlob.getTiclState();
-    ByteString mac = generateMac(ticlState, digestFn);
-    if (!TypedUtil.<ByteString>equals(mac, stateBlob.getAuthenticationCode())) {
+    Bytes mac = generateMac(ticlState, digestFn);
+    if (!TypedUtil.<Bytes>equals(mac, stateBlob.getAuthenticationCode())) {
       logger.warning("Ticl state failed MAC check: computed %s vs %s", mac,
           stateBlob.getAuthenticationCode());
       return null;
@@ -66,10 +64,10 @@ public class PersistenceUtils {
   }
 
   /** Returns a message authentication code over {@code state}. */
-  private static ByteString generateMac(PersistentTiclState state, DigestFunction digestFn) {
+  private static Bytes generateMac(PersistentTiclState state, DigestFunction digestFn) {
     digestFn.reset();
     digestFn.update(state.toByteArray());
-    return ByteString.copyFrom(digestFn.getDigest());
+    return new Bytes(digestFn.getDigest());
   }
 
   private PersistenceUtils() {

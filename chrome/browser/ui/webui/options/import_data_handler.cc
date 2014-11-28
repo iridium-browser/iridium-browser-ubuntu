@@ -24,10 +24,10 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 
 using content::BrowserThread;
 
@@ -45,7 +45,7 @@ ImportDataHandler::~ImportDataHandler() {
   if (importer_host_)
     importer_host_->set_observer(NULL);
 
-  if (select_file_dialog_)
+  if (select_file_dialog_.get())
     select_file_dialog_->ListenerDestroyed();
 }
 
@@ -55,20 +55,21 @@ void ImportDataHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   static OptionsStringResource resources[] = {
-    { "importFromLabel", IDS_IMPORT_FROM_LABEL },
-    { "importLoading", IDS_IMPORT_LOADING_PROFILES },
-    { "importDescription", IDS_IMPORT_ITEMS_LABEL },
-    { "importHistory", IDS_IMPORT_HISTORY_CHKBOX },
-    { "importFavorites", IDS_IMPORT_FAVORITES_CHKBOX },
-    { "importSearch", IDS_IMPORT_SEARCH_ENGINES_CHKBOX },
-    { "importPasswords", IDS_IMPORT_PASSWORDS_CHKBOX },
-    { "importChooseFile", IDS_IMPORT_CHOOSE_FILE },
-    { "importCommit", IDS_IMPORT_COMMIT },
-    { "noProfileFound", IDS_IMPORT_NO_PROFILE_FOUND },
-    { "importSucceeded", IDS_IMPORT_SUCCEEDED },
-    { "findYourImportedBookmarks", IDS_IMPORT_FIND_YOUR_BOOKMARKS },
+    {"importFromLabel", IDS_IMPORT_FROM_LABEL},
+    {"importLoading", IDS_IMPORT_LOADING_PROFILES},
+    {"importDescription", IDS_IMPORT_ITEMS_LABEL},
+    {"importHistory", IDS_IMPORT_HISTORY_CHKBOX},
+    {"importFavorites", IDS_IMPORT_FAVORITES_CHKBOX},
+    {"importSearch", IDS_IMPORT_SEARCH_ENGINES_CHKBOX},
+    {"importPasswords", IDS_IMPORT_PASSWORDS_CHKBOX},
+    {"importAutofillFormData", IDS_IMPORT_AUTOFILL_FORM_DATA_CHKBOX},
+    {"importChooseFile", IDS_IMPORT_CHOOSE_FILE},
+    {"importCommit", IDS_IMPORT_COMMIT},
+    {"noProfileFound", IDS_IMPORT_NO_PROFILE_FOUND},
+    {"importSucceeded", IDS_IMPORT_SUCCEEDED},
+    {"findYourImportedBookmarks", IDS_IMPORT_FIND_YOUR_BOOKMARKS},
 #if defined(OS_MACOSX)
-    { "macPasswordKeychain", IDS_IMPORT_PASSWORD_KEYCHAIN_WARNING },
+    {"macPasswordKeychain", IDS_IMPORT_PASSWORD_KEYCHAIN_WARNING},
 #endif
   };
 
@@ -152,6 +153,9 @@ void ImportDataHandler::ImportData(const base::ListValue* args) {
   if (args->GetString(4, &string_value) && string_value == "true") {
     selected_items |= importer::SEARCH_ENGINES;
   }
+  if (args->GetString(5, &string_value) && string_value == "true") {
+    selected_items |= importer::AUTOFILL_FORM_DATA;
+  }
 
   const importer::SourceProfile& source_profile =
       importer_list_->GetSourceProfileAt(browser_index);
@@ -186,6 +190,8 @@ void ImportDataHandler::InitializePage() {
         (browser_services & importer::PASSWORDS) != 0);
     browser_profile->SetBoolean("search",
         (browser_services & importer::SEARCH_ENGINES) != 0);
+    browser_profile->SetBoolean("autofill-form-data",
+        (browser_services & importer::AUTOFILL_FORM_DATA) != 0);
 
     browser_profile->SetBoolean("show_bottom_bar",
 #if defined(OS_MACOSX)

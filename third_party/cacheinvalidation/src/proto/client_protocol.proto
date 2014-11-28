@@ -26,9 +26,10 @@ package com.google.protos.ipc.invalidation;
 
 option optimize_for = LITE_RUNTIME;
 
-option java_outer_classname = "ClientProtocol";
 
 
+option java_outer_classname = "NanoClientProtocol";
+option java_package = "com.google.protos.ipc.invalidation";
 
 
 
@@ -67,6 +68,14 @@ option java_outer_classname = "ClientProtocol";
 //    S -> C: InfoRequestMessage
 //    C -> S: InfoMessage
 //
+// Client protocol messages are typically validated. Validation rules may be
+// declared in the following locations when making changes to this file:
+//
+// 1. TiclMessageValidator2.java: validation logic that is run on the
+// server.
+//
+// 2. ClientProtoWrapperGenerator.java: validation logic that is run
+// on the client.
 // ------------------------------------------------------------------------
 
 // A basic message type used for versioning public proto messages and/or
@@ -110,14 +119,14 @@ message ClientVersion {
   // All fields below are for informational/debugging/monitoring purposes only.
   // No critical code decision is supposed to be made using them.
 
-  // Information about the client operating system/platform, e.g., Windows,
-  // ChromeOS.
+  // Optional: information about the client operating system/platform, e.g.,
+  // Windows, ChromeOS.
   optional string platform = 2;
 
-  // Language used for the library.
+  // Optional: language used for the library.
   optional string language = 3;
 
-  // Extra information about the client (e.g., application name).
+  // Optional: extra information about the client (e.g., application name).
   optional string application_info = 4;
 }
 

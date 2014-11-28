@@ -17,11 +17,11 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_shell.Shell;
 
 import java.lang.annotation.ElementType;
@@ -86,7 +86,7 @@ public class ContentShellTestBase extends ActivityInstrumentationTestCase2<Conte
         launchContentShellWithUrl(UrlUtils.getTestFileUrl(url));
         assertNotNull(getActivity());
         assertTrue(waitForActiveShellToBeDoneLoading());
-        assertEquals(UrlUtils.getTestFileUrl(url), getContentViewCore().getUrl());
+        assertEquals(UrlUtils.getTestFileUrl(url), getContentViewCore().getWebContents().getUrl());
     }
 
     /**
@@ -138,7 +138,8 @@ public class ContentShellTestBase extends ActivityInstrumentationTestCase2<Conte
                                 // loading because it has no URL set yet.  The second is that
                                 // we've set a URL and it actually is loading.
                                 isLoaded.set(!shell.isLoading()
-                                        && !TextUtils.isEmpty(shell.getContentViewCore().getUrl()));
+                                        && !TextUtils.isEmpty(shell.getContentViewCore()
+                                                .getWebContents().getUrl()));
                             } else {
                                 isLoaded.set(false);
                             }
@@ -168,7 +169,7 @@ public class ContentShellTestBase extends ActivityInstrumentationTestCase2<Conte
                 new Runnable() {
                     @Override
                     public void run() {
-                        viewCore.loadUrl(params);
+                        viewCore.getWebContents().getNavigationController().loadUrl(params);
                     }
                 });
     }

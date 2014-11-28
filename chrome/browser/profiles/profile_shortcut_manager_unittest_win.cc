@@ -5,7 +5,7 @@
 #include <objbase.h>  // For CoInitialize().
 
 #include "base/base_paths.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/profiles/profile_shortcut_manager_win.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/grit/chromium_strings.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/product.h"
 #include "chrome/installer/util/shell_util.h"
@@ -25,7 +26,6 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/test/test_browser_thread.h"
-#include "grit/chromium_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 

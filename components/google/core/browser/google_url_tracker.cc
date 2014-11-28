@@ -39,7 +39,7 @@ GoogleURLTracker::GoogleURLTracker(scoped_ptr<GoogleURLTrackerClient> client,
       need_to_prompt_(false),
       search_committed_(false),
       weak_ptr_factory_(this) {
-  net::NetworkChangeNotifier::AddIPAddressObserver(this);
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
   client_->set_google_url_tracker(this);
 
   // Because this function can be called during startup, when kicking off a URL
@@ -179,7 +179,11 @@ void GoogleURLTracker::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 }
 
-void GoogleURLTracker::OnIPAddressChanged() {
+void GoogleURLTracker::OnNetworkChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  // Ignore destructive signals.
+  if (type == net::NetworkChangeNotifier::CONNECTION_NONE)
+    return;
   already_fetched_ = false;
   StartFetchIfDesirable();
 }
@@ -188,7 +192,7 @@ void GoogleURLTracker::Shutdown() {
   client_.reset();
   fetcher_.reset();
   weak_ptr_factory_.InvalidateWeakPtrs();
-  net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
 void GoogleURLTracker::DeleteMapEntryForManager(
@@ -242,9 +246,17 @@ void GoogleURLTracker::StartFetchIfDesirable() {
                          net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher_->SetRequestContext(client_->GetRequestContext());
 
-  // Configure to max_retries at most kMaxRetries times for 5xx errors.
+  // Configure to retry at most kMaxRetries times for 5xx errors.
   static const int kMaxRetries = 5;
   fetcher_->SetMaxRetriesOn5xx(kMaxRetries);
+
+  // Also retry kMaxRetries times on network change errors. A network change can
+  // propagate through Chrome in various stages, so it's possible for this code
+  // to be reached via OnNetworkChanged(), and then have the fetch we kick off
+  // be canceled due to e.g. the DNS server changing at a later time. In general
+  // it's not possible to ensure that by the time we reach here any requests we
+  // start won't be canceled in this fashion, so retrying is the best we can do.
+  fetcher_->SetAutomaticallyRetryOnNetworkChanges(kMaxRetries);
 
   fetcher_->Start();
 }

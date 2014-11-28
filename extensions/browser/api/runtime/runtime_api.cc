@@ -33,8 +33,8 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
+#include "storage/browser/fileapi/isolated_context.h"
 #include "url/gurl.h"
-#include "webkit/browser/fileapi/isolated_context.h"
 
 using content::BrowserContext;
 
@@ -498,14 +498,14 @@ ExtensionFunction::ResponseAction RuntimeGetPlatformInfoFunction::Run() {
 
 ExtensionFunction::ResponseAction
 RuntimeGetPackageDirectoryEntryFunction::Run() {
-  fileapi::IsolatedContext* isolated_context =
-      fileapi::IsolatedContext::GetInstance();
+  storage::IsolatedContext* isolated_context =
+      storage::IsolatedContext::GetInstance();
   DCHECK(isolated_context);
 
   std::string relative_path = kPackageDirectoryPath;
   base::FilePath path = extension_->path();
   std::string filesystem_id = isolated_context->RegisterFileSystemForPath(
-      fileapi::kFileSystemTypeNativeLocal, std::string(), path, &relative_path);
+      storage::kFileSystemTypeNativeLocal, std::string(), path, &relative_path);
 
   int renderer_id = render_view_host_->GetProcess()->GetID();
   content::ChildProcessSecurityPolicy* policy =

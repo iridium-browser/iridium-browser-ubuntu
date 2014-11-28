@@ -58,6 +58,10 @@ const char kAshEnableMagnifierKeyScroller[] =
 const char kAshDisableTextFilteringInOverviewMode[] =
     "ash-disable-text-filtering-in-overview-mode";
 
+// Enables quick, non-cancellable locking of the screen when in maximize mode.
+const char kAshEnablePowerButtonQuickLock[] =
+    "ash-enable-power-button-quick-lock";
+
 // Enables software based mirroring.
 const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
 
@@ -65,6 +69,10 @@ const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
 // TODO(skuhne): Remove TOGGLE_TOUCH_VIEW_TESTING accelerator once this
 // flag is removed.
 const char kAshEnableTouchViewTesting[] = "ash-enable-touch-view-testing";
+
+// Enables additional visual feedback to touch input.
+const char kAshEnableTouchViewTouchFeedback[] =
+    "ash-enable-touch-view-touch-feedback";
 
 // When this flag is set, system sounds will be played whether the
 // ChromeVox is enabled or not.

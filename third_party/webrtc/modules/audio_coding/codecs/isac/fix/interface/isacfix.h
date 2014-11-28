@@ -14,8 +14,7 @@
 /*
  * Define the fixpoint numeric formats
  */
-#include "typedefs.h"
-
+#include "webrtc/typedefs.h"
 
 typedef struct {
   void *dummy;
@@ -131,7 +130,7 @@ extern "C" {
 
   int16_t WebRtcIsacfix_Encode(ISACFIX_MainStruct *ISAC_main_inst,
                                const int16_t *speechIn,
-                               int16_t *encoded);
+                               uint8_t* encoded);
 
 
 

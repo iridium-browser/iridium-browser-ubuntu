@@ -49,7 +49,7 @@ readonly SCONS_NONSFI="\
 # subset of tests used on toolchain builders
 readonly SCONS_TC_TESTS="small_tests medium_tests"
 
-readonly SCONS_COMMON="./scons --verbose bitcode=1"
+readonly SCONS_COMMON="./scons --verbose bitcode=1 naclsdk_validate=0"
 readonly UP_DOWN_LOAD="buildbot/file_up_down_load.sh"
 # This script is used by toolchain bots (i.e. tc-xxx functions)
 readonly PNACL_BUILD="pnacl/build.sh"
@@ -437,6 +437,7 @@ tc-tests-fast() {
   scons-stage-noirt "${arch}" "${scons_flags} -j1" "large_tests"
   scons-stage-noirt "${arch}" "${scons_flags} -j8 pnacl_generate_pexe=0" \
     "nonpexe_tests"
+  scons-stage-noirt "${arch}" "${scons_flags} -j8 minsfi=1" "minsfi_tests"
 }
 
 mode-buildbot-tc-x8664-linux() {

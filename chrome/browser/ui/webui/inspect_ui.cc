@@ -16,13 +16,14 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_manager.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -50,6 +51,8 @@ const char kPortForwardingConfigCommand[] = "set-port-forwarding-config";
 
 const char kPortForwardingDefaultPort[] = "8080";
 const char kPortForwardingDefaultLocation[] = "localhost:8080";
+
+// InspectMessageHandler --------------------------------------------
 
 class InspectMessageHandler : public WebUIMessageHandler {
  public:
@@ -196,7 +199,55 @@ void InspectMessageHandler::HandlePortForwardingConfigCommand(
     profile->GetPrefs()->Set(prefs::kDevToolsPortForwardingConfig, *dict_src);
 }
 
+// DevToolsUIBindingsEnabler ----------------------------------------
+
+class DevToolsUIBindingsEnabler
+    : public content::WebContentsObserver {
+ public:
+  DevToolsUIBindingsEnabler(WebContents* web_contents,
+                            const GURL& url);
+  virtual ~DevToolsUIBindingsEnabler() {}
+
+  DevToolsUIBindings* GetBindings();
+
+ private:
+  // contents::WebContentsObserver overrides.
+  virtual void WebContentsDestroyed() OVERRIDE;
+  virtual void AboutToNavigateRenderView(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+
+  DevToolsUIBindings bindings_;
+  GURL url_;
+  DISALLOW_COPY_AND_ASSIGN(DevToolsUIBindingsEnabler);
+};
+
+DevToolsUIBindingsEnabler::DevToolsUIBindingsEnabler(
+    WebContents* web_contents,
+    const GURL& url)
+    : WebContentsObserver(web_contents),
+      bindings_(web_contents),
+      url_(url) {
+}
+
+DevToolsUIBindings* DevToolsUIBindingsEnabler::GetBindings() {
+  return &bindings_;
+}
+
+void DevToolsUIBindingsEnabler::WebContentsDestroyed() {
+  delete this;
+}
+
+void DevToolsUIBindingsEnabler::AboutToNavigateRenderView(
+    content::RenderViewHost* render_view_host) {
+   content::NavigationEntry* entry =
+       web_contents()->GetController().GetActiveEntry();
+   if (url_ != entry->GetURL())
+     delete this;
+}
+
 }  // namespace
+
+// InspectUI --------------------------------------------------------
 
 InspectUI::InspectUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
@@ -224,29 +275,41 @@ void InspectUI::InitUI() {
 void InspectUI::Inspect(const std::string& source_id,
                         const std::string& target_id) {
   DevToolsTargetImpl* target = FindTarget(source_id, target_id);
-  if (target)
+  if (target) {
+    const std::string target_type = target->GetType();
     target->Inspect(Profile::FromWebUI(web_ui()));
+    ForceUpdateIfNeeded(source_id, target_type);
+  }
 }
 
 void InspectUI::Activate(const std::string& source_id,
                          const std::string& target_id) {
   DevToolsTargetImpl* target = FindTarget(source_id, target_id);
-  if (target)
+  if (target) {
+    const std::string target_type = target->GetType();
     target->Activate();
+    ForceUpdateIfNeeded(source_id, target_type);
+  }
 }
 
 void InspectUI::Close(const std::string& source_id,
                       const std::string& target_id) {
   DevToolsTargetImpl* target = FindTarget(source_id, target_id);
-  if (target)
+  if (target) {
+    const std::string target_type = target->GetType();
     target->Close();
+    ForceUpdateIfNeeded(source_id, target_type);
+  }
 }
 
 void InspectUI::Reload(const std::string& source_id,
                        const std::string& target_id) {
   DevToolsTargetImpl* target = FindTarget(source_id, target_id);
-  if (target)
+  if (target) {
+    const std::string target_type = target->GetType();
     target->Reload();
+    ForceUpdateIfNeeded(source_id, target_type);
+  }
 }
 
 static void NoOp(DevToolsTargetImpl*) {}
@@ -283,19 +346,16 @@ void InspectUI::InspectBrowserWithCustomFrontend(
   WebContents* inspect_ui = web_ui()->GetWebContents();
   WebContents* front_end = inspect_ui->GetDelegate()->OpenURLFromTab(
       inspect_ui,
-      content::OpenURLParams(GURL(url::kAboutBlankURL),
+      content::OpenURLParams(frontend_url,
                              content::Referrer(),
                              NEW_FOREGROUND_TAB,
-                             content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                             ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                              false));
 
   // Install devtools bindings.
-  DevToolsUIBindings* bindings = new DevToolsUIBindings(front_end,
-                                                        frontend_url);
-
-  // Engage remote debugging between front-end and agent host.
-  content::DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(
-      agent_host, bindings);
+  DevToolsUIBindingsEnabler* bindings_enabler =
+      new DevToolsUIBindingsEnabler(front_end, frontend_url);
+  bindings_enabler->GetBindings()->AttachTo(agent_host);
 }
 
 void InspectUI::InspectDevices(Browser* browser) {
@@ -323,9 +383,7 @@ void InspectUI::StartListeningNotifications() {
       base::Bind(&InspectUI::PopulateTargets, base::Unretained(this));
 
   AddTargetUIHandler(
-      DevToolsTargetsUIHandler::CreateForRenderers(callback));
-  AddTargetUIHandler(
-      DevToolsTargetsUIHandler::CreateForWorkers(callback));
+      DevToolsTargetsUIHandler::CreateForLocal(callback));
   if (profile->IsOffTheRecord()) {
     ShowIncognitoWarning();
   } else {
@@ -372,32 +430,7 @@ content::WebUIDataSource* InspectUI::CreateInspectUIHTMLSource() {
   source->AddResourcePath("inspect.css", IDR_INSPECT_CSS);
   source->AddResourcePath("inspect.js", IDR_INSPECT_JS);
   source->SetDefaultResource(IDR_INSPECT_HTML);
-  source->OverrideContentSecurityPolicyFrameSrc(
-      "frame-src chrome://serviceworker-internals;");
-  serviceworker_webui_.reset(web_ui()->GetWebContents()->CreateWebUI(
-      GURL(content::kChromeUIServiceWorkerInternalsURL)));
-  serviceworker_webui_->OverrideJavaScriptFrame(
-      content::kChromeUIServiceWorkerInternalsHost);
   return source;
-}
-
-void InspectUI::RenderViewCreated(content::RenderViewHost* render_view_host) {
-  serviceworker_webui_->GetController()->RenderViewCreated(render_view_host);
-}
-
-void InspectUI::RenderViewReused(content::RenderViewHost* render_view_host) {
-  serviceworker_webui_->GetController()->RenderViewReused(render_view_host);
-}
-
-bool InspectUI::OverrideHandleWebUIMessage(const GURL& source_url,
-                                           const std::string& message,
-                                           const base::ListValue& args) {
-  if (source_url.SchemeIs(content::kChromeUIScheme) &&
-      source_url.host() == content::kChromeUIServiceWorkerInternalsHost) {
-    serviceworker_webui_->ProcessWebUIMessage(source_url, message, args);
-    return true;
-  }
-  return false;
 }
 
 void InspectUI::UpdateDiscoverUsbDevicesEnabled() {
@@ -480,6 +513,17 @@ void InspectUI::PopulateTargets(const std::string& source,
   web_ui()->CallJavascriptFunction("populateTargets",
                                    base::StringValue(source),
                                    targets);
+}
+
+void InspectUI::ForceUpdateIfNeeded(const std::string& source_id,
+                                    const std::string& target_type) {
+  // TODO(dgozman): remove this after moving discovery to protocol.
+  // See crbug.com/398049.
+  if (target_type != DevToolsTargetImpl::kTargetTypeServiceWorker)
+    return;
+  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
+  if (handler)
+    handler->ForceUpdate();
 }
 
 void InspectUI::PopulatePortStatus(const base::Value& status) {

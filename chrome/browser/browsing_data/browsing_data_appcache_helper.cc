@@ -7,19 +7,18 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 
-using content::BrowserThread;
 using content::BrowserContext;
+using content::BrowserThread;
 
-BrowsingDataAppCacheHelper::BrowsingDataAppCacheHelper(Profile* profile)
+BrowsingDataAppCacheHelper::BrowsingDataAppCacheHelper(
+    BrowserContext* browser_context)
     : is_fetching_(false),
-      appcache_service_(BrowserContext::GetDefaultStoragePartition(profile)->
-                            GetAppCacheService()) {
+      appcache_service_(BrowserContext::GetDefaultStoragePartition(
+                            browser_context)->GetAppCacheService()) {
 }
 
 void BrowsingDataAppCacheHelper::StartFetching(const base::Closure& callback) {
@@ -87,19 +86,9 @@ void BrowsingDataAppCacheHelper::OnFetchComplete(int rv) {
 }
 
 CannedBrowsingDataAppCacheHelper::CannedBrowsingDataAppCacheHelper(
-    Profile* profile)
-    : BrowsingDataAppCacheHelper(profile),
-      profile_(profile) {
+    BrowserContext* browser_context)
+    : BrowsingDataAppCacheHelper(browser_context) {
   info_collection_ = new content::AppCacheInfoCollection;
-}
-
-CannedBrowsingDataAppCacheHelper* CannedBrowsingDataAppCacheHelper::Clone() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  CannedBrowsingDataAppCacheHelper* clone =
-      new CannedBrowsingDataAppCacheHelper(profile_);
-
-  clone->info_collection_->infos_by_origin = info_collection_->infos_by_origin;
-  return clone;
 }
 
 void CannedBrowsingDataAppCacheHelper::AddAppCache(const GURL& manifest_url) {

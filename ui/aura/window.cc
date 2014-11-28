@@ -409,6 +409,7 @@ void Window::SetTransform(const gfx::Transform& transform) {
   layer()->SetTransform(transform);
   FOR_EACH_OBSERVER(WindowObserver, observers_,
                     OnWindowTransformed(this));
+  NotifyAncestorWindowTransformed(this);
 }
 
 void Window::SetLayoutManager(LayoutManager* layout_manager) {
@@ -491,9 +492,8 @@ void Window::SchedulePaintInRect(const gfx::Rect& rect) {
       parent_rect.Offset(bounds().origin().OffsetFromOrigin());
       parent_->SchedulePaintInRect(parent_rect);
     }
-  } else if (layer() && layer()->SchedulePaint(rect)) {
-    FOR_EACH_OBSERVER(
-        WindowObserver, observers_, OnWindowPaintScheduled(this, rect));
+  } else if (layer()) {
+    layer()->SchedulePaint(rect);
   }
 }
 
@@ -1318,6 +1318,15 @@ void Window::NotifyWindowVisibilityChangedUp(aura::Window* target,
   }
 }
 
+void Window::NotifyAncestorWindowTransformed(Window* source) {
+  FOR_EACH_OBSERVER(WindowObserver, observers_,
+                    OnAncestorWindowTransformed(source, this));
+  for (Window::Windows::const_iterator it = children_.begin();
+       it != children_.end(); ++it) {
+    (*it)->NotifyAncestorWindowTransformed(source);
+  }
+}
+
 void Window::OnWindowBoundsChanged(const gfx::Rect& old_bounds) {
   if (layer()) {
     bounds_ = layer()->bounds();
@@ -1354,6 +1363,13 @@ bool Window::CleanupGestureState() {
 
 void Window::OnPaintLayer(gfx::Canvas* canvas) {
   Paint(canvas);
+}
+
+void Window::OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) {
+  DCHECK(layer());
+  FOR_EACH_OBSERVER(WindowObserver,
+                    observers_,
+                    OnDelegatedFrameDamage(this, damage_rect_in_dip));
 }
 
 base::Closure Window::PrepareForLayerBoundsChange() {

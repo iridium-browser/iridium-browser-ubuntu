@@ -4,22 +4,22 @@
 
 #include "chrome/browser/component_updater/swiftshader_component_installer.h"
 
+#include <stdint.h>
 #include <string>
 #include <vector>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/cpu.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/component_updater/component_updater_service.h"
 #include "components/component_updater/component_updater_paths.h"
+#include "components/component_updater/component_updater_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
@@ -33,10 +33,10 @@ namespace component_updater {
 namespace {
 
 // CRX hash. The extension id is: nhfgdggnnopgbfdlpeoalgcjdgfafocg.
-const uint8 kSha2Hash[] = {0xd7, 0x56, 0x36, 0x6d, 0xde, 0xf6, 0x15, 0x3b,
-                           0xf4, 0xe0, 0xb6, 0x29, 0x36, 0x50, 0x5e, 0x26,
-                           0xbd, 0x77, 0x8b, 0x8e, 0x35, 0xc2, 0x7e, 0x43,
-                           0x52, 0x47, 0x62, 0xed, 0x12, 0xca, 0xcc, 0x6a};
+const uint8_t kSha2Hash[] = {0xd7, 0x56, 0x36, 0x6d, 0xde, 0xf6, 0x15, 0x3b,
+                             0xf4, 0xe0, 0xb6, 0x29, 0x36, 0x50, 0x5e, 0x26,
+                             0xbd, 0x77, 0x8b, 0x8e, 0x35, 0xc2, 0x7e, 0x43,
+                             0x52, 0x47, 0x62, 0xed, 0x12, 0xca, 0xcc, 0x6a};
 
 // File name of the internal SwiftShader plugin on different platforms.
 const base::FilePath::CharType kSwiftShaderEglName[] =
@@ -249,10 +249,6 @@ void RegisterSwiftShaderPath(ComponentUpdateService* cus) {
 
 void RegisterSwiftShaderComponent(ComponentUpdateService* cus) {
 #if defined(ENABLE_SWIFTSHADER)
-  base::CPU cpu;
-
-  if (!cpu.has_sse2())
-    return;
   BrowserThread::PostTask(BrowserThread::FILE,
                           FROM_HERE,
                           base::Bind(&RegisterSwiftShaderPath, cus));

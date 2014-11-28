@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import functools
 import json
+import re
 import time
 import unittest
 import urllib2
@@ -54,19 +56,16 @@ def WriteFullResultsIfNecessary(args, full_results):
     fp.write("\n")
 
 
-def UploadFullResultsIfNecessary(args, _full_results):
+def UploadFullResultsIfNecessary(args, full_results):
   if not args.test_results_server:
     return False, ''
 
-  # TODO(dpranke) crbug.com/403663 disable this temporarily.
-  return False, ''
-
-  #url = 'http://%s/testfile/upload' % args.test_results_server
-  #attrs = [('builder', args.builder_name),
-  #         ('master', args.master_name),
-  #         ('testtype', args.test_type)]
-  #content_type, data = _EncodeMultiPartFormData(attrs,  full_results)
-  #return _UploadData(url, data, content_type)
+  url = 'http://%s/testfile/upload' % args.test_results_server
+  attrs = [('builder', args.builder_name),
+           ('master', args.master_name),
+           ('testtype', args.test_type)]
+  content_type, data = _EncodeMultiPartFormData(attrs,  full_results)
+  return _UploadData(url, data, content_type)
 
 
 TEST_SEPARATOR = '.'
@@ -88,28 +87,45 @@ def FullResults(args, suite, results):
     key, val = md.split('=', 1)
     full_results[key] = val
 
-  # TODO(dpranke): Handle skipped tests as well.
-
   all_test_names = AllTestNames(suite)
-  num_failures = NumFailuresAfterRetries(results)
+  sets_of_passing_test_names = map(PassingTestNames, results)
+  sets_of_failing_test_names = map(functools.partial(FailedTestNames, suite),
+                                   results)
+
+  # TODO(crbug.com/405379): This handles tests that are skipped via the
+  # unittest skip decorators (like skipUnless). The tests that are skipped via
+  # telemetry's decorators package are not included in the test suite at all so
+  # we need those to be passed in in order to include them.
+  skipped_tests = (set(all_test_names) - sets_of_passing_test_names[0]
+                                       - sets_of_failing_test_names[0])
+
+  num_tests = len(all_test_names)
+  num_failures = NumFailuresAfterRetries(suite, results)
+  num_skips = len(skipped_tests)
+  num_passes = num_tests - num_failures - num_skips
   full_results['num_failures_by_type'] = {
       'FAIL': num_failures,
-      'PASS': len(all_test_names) - num_failures,
+      'PASS': num_passes,
+      'SKIP': num_skips,
   }
-
-  sets_of_passing_test_names = map(PassingTestNames, results)
-  sets_of_failing_test_names = map(FailedTestNames, results)
 
   full_results['tests'] = {}
 
   for test_name in all_test_names:
-    value = {
-        'expected': 'PASS',
-        'actual': ActualResultsForTest(test_name, sets_of_failing_test_names,
-                                       sets_of_passing_test_names)
-    }
-    if value['actual'].endswith('FAIL'):
-      value['is_unexpected'] = True
+    if test_name in skipped_tests:
+      value = {
+          'expected': 'SKIP',
+          'actual': 'SKIP',
+      }
+    else:
+      value = {
+          'expected': 'PASS',
+          'actual': ActualResultsForTest(test_name,
+                                         sets_of_failing_test_names,
+                                         sets_of_passing_test_names),
+      }
+      if value['actual'].endswith('FAIL'):
+        value['is_unexpected'] = True
     _AddPathToTrie(full_results['tests'], test_name, value)
 
   return full_results
@@ -147,12 +163,36 @@ def AllTestNames(suite):
   return test_names
 
 
-def NumFailuresAfterRetries(results):
-  return len(FailedTestNames(results[-1]))
+def NumFailuresAfterRetries(suite, results):
+  return len(FailedTestNames(suite, results[-1]))
 
 
-def FailedTestNames(result):
-  return set(test.id() for test, _ in result.failures + result.errors)
+def FailedTestNames(suite, result):
+  failed_test_names = set()
+  for test, error in result.failures + result.errors:
+    if isinstance(test, unittest.TestCase):
+      failed_test_names.add(test.id())
+    elif isinstance(test, unittest.suite._ErrorHolder):  # pylint: disable=W0212
+      # If there's an error in setUpClass or setUpModule, unittest gives us an
+      # _ErrorHolder object. We can parse the object's id for the class or
+      # module that failed, then find all tests in that class or module.
+      match = re.match('setUp[a-zA-Z]+ \\((.+)\\)', test.id())
+      assert match, "Don't know how to retry after this error:\n%s" % error
+      module_or_class = match.groups()[0]
+      failed_test_names |= _FindChildren(module_or_class, AllTestNames(suite))
+    else:
+      assert False, 'Unknown test type: %s' % test.__class__
+  return failed_test_names
+
+
+def _FindChildren(parent, potential_children):
+  children = set()
+  parent_name_parts = parent.split('.')
+  for potential_child in potential_children:
+    child_name_parts = potential_child.split('.')
+    if parent_name_parts == child_name_parts[:len(parent_name_parts)]:
+      children.add(potential_child)
+  return children
 
 
 def PassingTestNames(result):

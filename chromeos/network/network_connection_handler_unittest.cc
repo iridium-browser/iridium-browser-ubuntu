@@ -6,14 +6,14 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chromeos/cert_loader.h"
-#include "chromeos/dbus/fake_dbus_thread_manager.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_profile_client.h"
@@ -77,9 +77,8 @@ class NetworkConnectionHandlerTest : public testing::Test {
     CertLoader* cert_loader = CertLoader::Get();
     cert_loader->force_hardware_backed_for_test();
 
-    FakeDBusThreadManager* dbus_manager = new FakeDBusThreadManager;
-    dbus_manager->SetFakeClients();
-    DBusThreadManager::InitializeForTesting(dbus_manager);
+    DBusThreadManager::Initialize();
+    DBusThreadManager* dbus_manager = DBusThreadManager::Get();
     test_manager_client_ =
         dbus_manager->GetShillManagerClient()->GetTestInterface();
     test_service_client_ =
@@ -231,9 +230,11 @@ class NetworkConnectionHandlerTest : public testing::Test {
     net::CertificateList loaded_certs;
     scoped_refptr<net::CryptoModule> module(net::CryptoModule::CreateFromHandle(
         test_nssdb_->GetPrivateSlot().get()));
-    if (test_nssdb_->ImportFromPKCS12(
-            module, pkcs12_data, base::string16(), false, &loaded_certs) !=
-        net::OK) {
+    if (test_nssdb_->ImportFromPKCS12(module.get(),
+                                      pkcs12_data,
+                                      base::string16(),
+                                      false,
+                                      &loaded_certs) != net::OK) {
       LOG(ERROR) << "Error while importing to NSSDB.";
       return NULL;
     }
@@ -372,7 +373,7 @@ TEST_F(NetworkConnectionHandlerTest, ConnectCertificateMissing) {
 TEST_F(NetworkConnectionHandlerTest, ConnectWithCertificateSuccess) {
   StartCertLoader();
   scoped_refptr<net::X509Certificate> cert = ImportTestClientCert();
-  ASSERT_TRUE(cert);
+  ASSERT_TRUE(cert.get());
 
   SetupPolicy(base::StringPrintf(kPolicyWithCertPatternTemplate,
                                  cert->subject().common_name.c_str()),
@@ -387,7 +388,7 @@ TEST_F(NetworkConnectionHandlerTest, ConnectWithCertificateSuccess) {
 TEST_F(NetworkConnectionHandlerTest,
        DISABLED_ConnectWithCertificateRequestedBeforeCertsAreLoaded) {
   scoped_refptr<net::X509Certificate> cert = ImportTestClientCert();
-  ASSERT_TRUE(cert);
+  ASSERT_TRUE(cert.get());
 
   SetupPolicy(base::StringPrintf(kPolicyWithCertPatternTemplate,
                                  cert->subject().common_name.c_str()),

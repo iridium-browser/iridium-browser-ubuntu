@@ -22,7 +22,7 @@
     "chrome://resources/",
     "chrome://theme/",
     "fileBrowserHandler",
-    "fileBrowserPrivate",
+    "fileManagerPrivate",
     "fileSystem",
     "fullscreen",
     "metricsPrivate",
@@ -31,9 +31,6 @@
   ],
   "file_handlers": {
     "open": {
-      "types": [
-        "image/*"
-      ],
       "extensions": [
         "bmp",
         "gif",

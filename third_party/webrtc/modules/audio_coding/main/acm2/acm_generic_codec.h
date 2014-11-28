@@ -11,12 +11,12 @@
 #ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_ACM2_ACM_GENERIC_CODEC_H_
 #define WEBRTC_MODULES_AUDIO_CODING_MAIN_ACM2_ACM_GENERIC_CODEC_H_
 
+#include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module_typedefs.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/neteq/interface/neteq.h"
 #include "webrtc/modules/audio_coding/neteq/interface/audio_decoder.h"
 #include "webrtc/system_wrappers/interface/rw_lock_wrapper.h"
-#include "webrtc/system_wrappers/interface/thread_annotations.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
 #define MAX_FRAME_SIZE_10MSEC 6
@@ -211,18 +211,6 @@ class ACMGenericCodec {
   //    0 if the rate is adjusted successfully
   //
   int16_t SetBitRate(const int32_t bitrate_bps);
-
-  ///////////////////////////////////////////////////////////////////////////
-  // DestructEncoderInst()
-  // This API is used in conferencing. It will free the memory that is pointed
-  // by |ptr_inst|. |ptr_inst| is a pointer to encoder instance, created and
-  // filled up by calling EncoderInst(...).
-  //
-  // Inputs:
-  //   -ptr_inst            : pointer to an encoder instance to be deleted.
-  //
-  //
-  void DestructEncoderInst(void* ptr_inst);
 
   ///////////////////////////////////////////////////////////////////////////
   // uint32_t EarliestTimestamp()
@@ -538,21 +526,20 @@ class ACMGenericCodec {
                                  int16_t* payload_len_bytes);
 
   ///////////////////////////////////////////////////////////////////////////
-  // int SetOpusMaxBandwidth()
-  // Sets maximum required encoding bandwidth for Opus. This is to tell Opus
-  // that it is enough to code the input audio up to a bandwidth. A use case of
-  // this is when the receiver cannot render the full band. Opus can take this
-  // information to optimize the bit rate and increase the computation
-  // efficiency.
+  // int SetOpusMaxPlaybackRate()
+  // Sets maximum playback rate the receiver will render, if the codec is Opus.
+  // This is to tell Opus that it is enough to code the input audio up to a
+  // bandwidth. Opus can take this information to optimize the bit rate and
+  // increase the computation efficiency.
   //
   // Input:
-  //   -max_bandwidth      : maximum required bandwidth.
+  //   -frequency_hz      : maximum playback rate in Hz.
   //
   // Return value:
   //   -1 if failed or on codecs other than Opus
   //    0 if succeeded.
   //
-  virtual int SetOpusMaxBandwidth(int /* max_bandwidth */);
+  virtual int SetOpusMaxPlaybackRate(int /* frequency_hz */);
 
   ///////////////////////////////////////////////////////////////////////////
   // HasFrameToEncode()
@@ -836,23 +823,6 @@ class ACMGenericCodec {
   //    0 if succeeded.
   //
   virtual int16_t InternalCreateEncoder() = 0;
-
-  ///////////////////////////////////////////////////////////////////////////
-  // void InternalDestructEncoderInst()
-  // This is a codec-specific method, used in conferencing, called from
-  // DestructEncoderInst(). The input argument is pointer to encoder instance
-  // (codec instance for codecs that encoder and decoder share the same
-  // instance). This method is called to free the memory that |ptr_inst| is
-  // pointing to.
-  //
-  // Input:
-  //   -ptr_inst           : pointer to encoder instance.
-  //
-  // Return value:
-  //   -1 if failed,
-  //    0 if succeeded.
-  //
-  virtual void InternalDestructEncoderInst(void* ptr_inst) = 0;
 
   ///////////////////////////////////////////////////////////////////////////
   // int16_t InternalResetEncoder()

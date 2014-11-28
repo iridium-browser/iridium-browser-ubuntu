@@ -28,7 +28,9 @@
 #include "core/rendering/RenderTheme.h"
 #include "core/rendering/TextAutosizer.h"
 #include "core/rendering/style/AppliedTextDecoration.h"
+#include "core/rendering/style/BorderEdge.h"
 #include "core/rendering/style/ContentData.h"
+#include "core/rendering/style/DataEquivalency.h"
 #include "core/rendering/style/QuotesData.h"
 #include "core/rendering/style/ShadowList.h"
 #include "core/rendering/style/StyleImage.h"
@@ -232,7 +234,6 @@ void RenderStyle::copyNonInheritedFrom(const RenderStyle* other)
     noninherited_flags.pageBreakAfter = other->noninherited_flags.pageBreakAfter;
     noninherited_flags.pageBreakInside = other->noninherited_flags.pageBreakInside;
     noninherited_flags.explicitInheritance = other->noninherited_flags.explicitInheritance;
-    noninherited_flags.currentColor = other->noninherited_flags.currentColor;
     noninherited_flags.hasViewportUnits = other->noninherited_flags.hasViewportUnits;
     if (m_svgStyle != other->m_svgStyle)
         m_svgStyle.access()->copyNonInheritedFrom(other->m_svgStyle.get());
@@ -386,15 +387,10 @@ StyleDifference RenderStyle::visualInvalidationDiff(const RenderStyle& other) co
 
     if (!diff.needsFullLayout() && position() != StaticPosition && surround->offset != other.surround->offset) {
         // Optimize for the case where a positioned layer is moving but not changing size.
-        if ((position() == AbsolutePosition || position() == FixedPosition)
-            && positionedObjectMovedOnly(surround->offset, other.surround->offset, m_box->width())) {
+        if (positionedObjectMovedOnly(surround->offset, other.surround->offset, m_box->width()))
             diff.setNeedsPositionedMovementLayout();
-        } else {
-            // FIXME: We would like to use SimplifiedLayout for relative positioning, but we can't quite do that yet.
-            // We need to make sure SimplifiedLayout can operate correctly on RenderInlines (we will need
-            // to add a selfNeedsSimplifiedLayout bit in order to not get confused and taint every line).
+        else
             diff.setNeedsFullLayout();
-        }
     }
 
     if (diffNeedsPaintInvalidationLayer(other))
@@ -440,9 +436,6 @@ bool RenderStyle::diffNeedsFullLayoutAndPaintInvalidation(const RenderStyle& oth
             || rareNonInheritedData->m_wrapThrough != other.rareNonInheritedData->m_wrapThrough
             || rareNonInheritedData->m_shapeMargin != other.rareNonInheritedData->m_shapeMargin
             || rareNonInheritedData->m_order != other.rareNonInheritedData->m_order
-            || rareNonInheritedData->m_alignContent != other.rareNonInheritedData->m_alignContent
-            || rareNonInheritedData->m_alignItems != other.rareNonInheritedData->m_alignItems
-            || rareNonInheritedData->m_alignSelf != other.rareNonInheritedData->m_alignSelf
             || rareNonInheritedData->m_justifyContent != other.rareNonInheritedData->m_justifyContent
             || rareNonInheritedData->m_grid.get() != other.rareNonInheritedData->m_grid.get()
             || rareNonInheritedData->m_gridItem.get() != other.rareNonInheritedData->m_gridItem.get()
@@ -545,7 +538,6 @@ bool RenderStyle::diffNeedsFullLayoutAndPaintInvalidation(const RenderStyle& oth
         || noninherited_flags.overflowY != other.noninherited_flags.overflowY
         || noninherited_flags.clear != other.noninherited_flags.clear
         || noninherited_flags.unicodeBidi != other.noninherited_flags.unicodeBidi
-        || noninherited_flags.position != other.noninherited_flags.position
         || noninherited_flags.floating != other.noninherited_flags.floating
         || noninherited_flags.originalDisplay != other.noninherited_flags.originalDisplay)
         return true;
@@ -606,7 +598,8 @@ bool RenderStyle::diffNeedsFullLayout(const RenderStyle& other) const
             return true;
     }
 
-    if (noninherited_flags.verticalAlign != other.noninherited_flags.verticalAlign)
+    if (noninherited_flags.verticalAlign != other.noninherited_flags.verticalAlign
+        || noninherited_flags.position != other.noninherited_flags.position)
         return true;
 
     if (surround.get() != other.surround.get()) {
@@ -617,12 +610,19 @@ bool RenderStyle::diffNeedsFullLayout(const RenderStyle& other) const
             return true;
     }
 
+    if (rareNonInheritedData.get() != other.rareNonInheritedData.get()) {
+        if (rareNonInheritedData->m_alignContent != other.rareNonInheritedData->m_alignContent
+            || rareNonInheritedData->m_alignItems != other.rareNonInheritedData->m_alignItems
+            || rareNonInheritedData->m_alignSelf != other.rareNonInheritedData->m_alignSelf)
+            return true;
+    }
+
     return false;
 }
 
 bool RenderStyle::diffNeedsPaintInvalidationLayer(const RenderStyle& other) const
 {
-    if (position() != StaticPosition && (visual->clip != other.visual->clip || visual->hasClip != other.visual->hasClip))
+    if (position() != StaticPosition && (visual->clip != other.visual->clip || visual->hasAutoClip != other.visual->hasAutoClip))
         return true;
 
     if (rareNonInheritedData.get() != other.rareNonInheritedData.get()) {
@@ -660,8 +660,8 @@ bool RenderStyle::diffNeedsPaintInvalidationObject(const RenderStyle& other) con
             || rareNonInheritedData->m_borderFit != other.rareNonInheritedData->m_borderFit
             || rareNonInheritedData->m_objectFit != other.rareNonInheritedData->m_objectFit
             || rareNonInheritedData->m_objectPosition != other.rareNonInheritedData->m_objectPosition
-            || rareNonInheritedData->m_shapeOutside != other.rareNonInheritedData->m_shapeOutside
-            || rareNonInheritedData->m_clipPath != other.rareNonInheritedData->m_clipPath)
+            || !dataEquivalent(rareNonInheritedData->m_shapeOutside, other.rareNonInheritedData->m_shapeOutside)
+            || !dataEquivalent(rareNonInheritedData->m_clipPath, other.rareNonInheritedData->m_clipPath))
             return true;
     }
 
@@ -703,15 +703,6 @@ void RenderStyle::updatePropertySpecificDifferences(const RenderStyle& other, St
                 diff.setTextOrColorChanged();
         }
     }
-}
-
-void RenderStyle::setClip(const Length& top, const Length& right, const Length& bottom, const Length& left)
-{
-    StyleVisualData* data = visual.access();
-    data->clip.m_top = top;
-    data->clip.m_right = right;
-    data->clip.m_bottom = bottom;
-    data->clip.m_left = left;
 }
 
 void RenderStyle::addCursor(PassRefPtr<StyleImage> image, const IntPoint& hotSpot)
@@ -1703,6 +1694,56 @@ float calcBorderRadiiConstraintScaleFor(const FloatRect& rect, const FloatRounde
 
     ASSERT(factor <= 1);
     return factor;
+}
+
+bool RenderStyle::borderObscuresBackground() const
+{
+    if (!hasBorder())
+        return false;
+
+    // Bail if we have any border-image for now. We could look at the image alpha to improve this.
+    if (borderImage().image())
+        return false;
+
+    BorderEdge edges[4];
+    getBorderEdgeInfo(edges);
+
+    for (int i = BSTop; i <= BSLeft; ++i) {
+        const BorderEdge& currEdge = edges[i];
+        if (!currEdge.obscuresBackground())
+            return false;
+    }
+
+    return true;
+}
+
+void RenderStyle::getBorderEdgeInfo(BorderEdge edges[], bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+{
+    bool horizontal = isHorizontalWritingMode();
+
+    edges[BSTop] = BorderEdge(borderTopWidth(),
+        visitedDependentColor(CSSPropertyBorderTopColor),
+        borderTopStyle(),
+        borderTopIsTransparent(),
+        horizontal || includeLogicalLeftEdge);
+
+    edges[BSRight] = BorderEdge(borderRightWidth(),
+        visitedDependentColor(CSSPropertyBorderRightColor),
+        borderRightStyle(),
+        borderRightIsTransparent(),
+        !horizontal || includeLogicalRightEdge);
+
+    edges[BSBottom] = BorderEdge(borderBottomWidth(),
+        visitedDependentColor(CSSPropertyBorderBottomColor),
+        borderBottomStyle(),
+        borderBottomIsTransparent(),
+        horizontal || includeLogicalRightEdge);
+
+    edges[BSLeft] = BorderEdge(borderLeftWidth(),
+        visitedDependentColor(CSSPropertyBorderLeftColor),
+        borderLeftStyle(),
+        borderLeftIsTransparent(),
+        !horizontal || includeLogicalLeftEdge);
 }
 
 } // namespace blink

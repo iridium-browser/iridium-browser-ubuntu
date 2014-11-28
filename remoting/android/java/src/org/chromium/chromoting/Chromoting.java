@@ -96,6 +96,13 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
      */
     boolean mTriedNewAuthToken;
 
+    /**
+     * Flag to track whether a call to AccountManager.getAuthToken() is currently pending.
+     * This avoids infinitely-nested calls in case onStart() gets triggered a second time
+     * while a token is being fetched.
+     */
+    private boolean mWaitingForAuthToken = false;
+
     /** Shows a warning explaining that a Google account is required, then closes the activity. */
     private void showNoAccountsDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
@@ -155,7 +162,7 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
         mHostListLoader = new HostListLoader();
 
         // Get ahold of our view widgets.
-        mHostListView = (ListView)findViewById(R.id.hostList_chooser);
+        mHostListView = (ListView) findViewById(R.id.hostList_chooser);
         mHostListView.setEmptyView(findViewById(R.id.hostList_empty));
         mProgressView = findViewById(R.id.hostList_progress);
 
@@ -174,6 +181,7 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
             }
         }
     }
+
     /**
      * Called when the activity becomes visible. This happens on initial launch and whenever the
      * user switches to the activity, for example, by using the window-switcher or when coming from
@@ -291,27 +299,32 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
     }
 
     private void refreshHostList() {
+        if (mWaitingForAuthToken) {
+            return;
+        }
+
         mTriedNewAuthToken = false;
         setHostListProgressVisible(true);
 
         // The refresh button simply makes use of the currently-chosen account.
+        requestAuthToken();
+    }
+
+    private void requestAuthToken() {
         AccountManager.get(this).getAuthToken(mAccount, TOKEN_SCOPE, null, this, this, null);
+        mWaitingForAuthToken = true;
     }
 
     @Override
     public void run(AccountManagerFuture<Bundle> future) {
         Log.i("auth", "User finished with auth dialogs");
+        mWaitingForAuthToken = false;
+
         Bundle result = null;
         String explanation = null;
         try {
             // Here comes our auth token from the Android system.
             result = future.getResult();
-            String authToken = result.getString(AccountManager.KEY_AUTHTOKEN);
-            Log.i("auth", "Received an auth token from system");
-
-            mToken = authToken;
-
-            mHostListLoader.retrieveHostList(authToken, this);
         } catch (OperationCanceledException ex) {
             // User canceled authentication. No need to report an error.
         } catch (AuthenticatorException ex) {
@@ -321,18 +334,17 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
         }
 
         if (result == null) {
+            setHostListProgressVisible(false);
             if (explanation != null) {
                 Toast.makeText(this, explanation, Toast.LENGTH_LONG).show();
             }
             return;
         }
 
-        String authToken = result.getString(AccountManager.KEY_AUTHTOKEN);
+        mToken = result.getString(AccountManager.KEY_AUTHTOKEN);
         Log.i("auth", "Received an auth token from system");
 
-        mToken = authToken;
-
-        mHostListLoader.retrieveHostList(authToken, this);
+        mHostListLoader.retrieveHostList(mToken, this);
     }
 
     @Override
@@ -394,7 +406,7 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
             Log.w("auth", "Requesting renewal of rejected auth token");
             authenticator.invalidateAuthToken(mAccount.type, mToken);
             mToken = null;
-            authenticator.getAuthToken(mAccount, TOKEN_SCOPE, null, this, this, null);
+            requestAuthToken();
 
             // We're not in an error state *yet*.
             return;
@@ -464,6 +476,7 @@ public class Chromoting extends Activity implements JniInterface.ConnectionListe
 
     private ThirdPartyTokenFetcher createTokenFetcher(HostInfo host) {
         ThirdPartyTokenFetcher.Callback callback = new ThirdPartyTokenFetcher.Callback() {
+            @Override
             public void onTokenFetched(String code, String accessToken) {
                 // The native client sends the OAuth authorization code to the host as the token so
                 // that the host can obtain the shared secret from the third party authorization

@@ -18,8 +18,10 @@ namespace {
 SupervisedUserCreationScreen* GetScreen(LoginDisplayHost* host) {
   DCHECK(host);
   DCHECK(host->GetWizardController());
-  DCHECK(host->GetWizardController()->GetSupervisedUserCreationScreen());
-  return host->GetWizardController()->GetSupervisedUserCreationScreen();
+  SupervisedUserCreationScreen* result =
+      SupervisedUserCreationScreen::Get(host->GetWizardController());
+  DCHECK(result);
+  return result;
 }
 
 } // namespace
@@ -48,6 +50,10 @@ bool SupervisedUserCreationFlow::ShouldLaunchBrowser() {
 
 bool SupervisedUserCreationFlow::ShouldSkipPostLoginScreens() {
   return true;
+}
+
+bool SupervisedUserCreationFlow::SupportsEarlyRestartToApplyFlags() {
+  return false;
 }
 
 void SupervisedUserCreationFlow::HandleOAuthTokenStatusChange(

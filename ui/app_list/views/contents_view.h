@@ -15,6 +15,10 @@
 #include "ui/app_list/pagination_model_observer.h"
 #include "ui/views/view.h"
 
+namespace gfx {
+class Rect;
+}
+
 namespace views {
 class ViewModel;
 }
@@ -84,7 +88,8 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // True if |named_page| is the current active laucher page.
   bool IsNamedPageActive(NamedPage named_page) const;
 
-  // Gets the index of a launcher page in |view_model_|, by NamedPage.
+  // Gets the index of a launcher page in |view_model_|, by NamedPage. Returns
+  // -1 if there is no view for |named_page|.
   int GetPageIndexForNamedPage(NamedPage named_page) const;
 
   int NumLauncherPages() const;
@@ -103,7 +108,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
 
   // Overridden from PaginationModelObserver:
   virtual void TotalPagesChanged() OVERRIDE;
@@ -121,6 +125,10 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   // Invoked when active view is changed.
   void ActivePageChanged(bool show_search_results);
+
+  // Gets the origin (the off-screen resting place) for a given launcher page
+  // with index |page_index|.
+  gfx::Rect GetOffscreenPageBounds(int page_index) const;
 
   // Calculates and sets the bounds for the subviews. If there is currently an
   // animation, this positions the views as appropriate for the current frame.
@@ -142,10 +150,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // Note: This is different to |pagination_model_|, which manages top-level
   // launcher-page pagination.
   PaginationModel* GetAppsPaginationModel();
-
-  // Overridden from ui::EventHandler:
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
 
   // Special sub views of the ContentsView. All owned by the views hierarchy.
   AppsContainerView* apps_container_view_;

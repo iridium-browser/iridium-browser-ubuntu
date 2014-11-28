@@ -8,10 +8,10 @@
 #include <cmath>
 
 #include "base/big_endian.h"
-#include "base/file_util.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
@@ -38,8 +38,6 @@ const int kCurrentExtraVersion = 1;
 // Indicates whether we prefer to have more free CPU memory over GPU memory.
 const bool kPreferCPUMemory = true;
 
-// TODO(): ETC1 texture sizes should be multiples of four, but some drivers only
-// allow power-of-two ETC1 textures.  Find better work around.
 size_t NextPowerOfTwo(size_t x) {
   --x;
   x |= x >> 1;
@@ -50,10 +48,18 @@ size_t NextPowerOfTwo(size_t x) {
   return x + 1;
 }
 
-gfx::Size GetEncodedSize(const gfx::Size& bitmap_size) {
+size_t RoundUpMod4(size_t x) {
+  return (x + 3) & ~3;
+}
+
+gfx::Size GetEncodedSize(const gfx::Size& bitmap_size, bool supports_npot) {
   DCHECK(!bitmap_size.IsEmpty());
-  return gfx::Size(NextPowerOfTwo(bitmap_size.width()),
-                   NextPowerOfTwo(bitmap_size.height()));
+  if (!supports_npot)
+    return gfx::Size(NextPowerOfTwo(bitmap_size.width()),
+                     NextPowerOfTwo(bitmap_size.height()));
+  else
+    return gfx::Size(RoundUpMod4(bitmap_size.width()),
+                     RoundUpMod4(bitmap_size.height()));
 }
 
 template<typename T>
@@ -188,7 +194,9 @@ void ThumbnailStore::Remove(TabId tab_id) {
   RemoveFromReadQueue(tab_id);
 }
 
-Thumbnail* ThumbnailStore::Get(TabId tab_id, bool force_disk_read) {
+Thumbnail* ThumbnailStore::Get(TabId tab_id,
+                               bool force_disk_read,
+                               bool allow_approximation) {
   Thumbnail* thumbnail = cache_.Get(tab_id);
   if (thumbnail) {
     thumbnail->CreateUIResource();
@@ -204,10 +212,12 @@ Thumbnail* ThumbnailStore::Get(TabId tab_id, bool force_disk_read) {
     ReadNextThumbnail();
   }
 
-  thumbnail = approximation_cache_.Get(tab_id);
-  if (thumbnail) {
-    thumbnail->CreateUIResource();
-    return thumbnail;
+  if (allow_approximation) {
+    thumbnail = approximation_cache_.Get(tab_id);
+    if (thumbnail) {
+      thumbnail->CreateUIResource();
+      return thumbnail;
+    }
   }
 
   return NULL;
@@ -381,11 +391,16 @@ void ThumbnailStore::CompressThumbnailIfNecessary(
                                          time_stamp,
                                          scale);
 
-  base::WorkerPool::PostTask(
-      FROM_HERE,
-      base::Bind(
-          &ThumbnailStore::CompressionTask, bitmap, post_compression_task),
-      true);
+  gfx::Size raw_data_size(bitmap.width(), bitmap.height());
+  gfx::Size encoded_size = GetEncodedSize(
+      raw_data_size, ui_resource_provider_->SupportsETC1NonPowerOfTwo());
+
+  base::WorkerPool::PostTask(FROM_HERE,
+                             base::Bind(&ThumbnailStore::CompressionTask,
+                                        bitmap,
+                                        encoded_size,
+                                        post_compression_task),
+                             true);
 }
 
 void ThumbnailStore::ReadNextThumbnail() {
@@ -555,6 +570,7 @@ void ThumbnailStore::PostWriteTask() {
 
 void ThumbnailStore::CompressionTask(
     SkBitmap raw_data,
+    gfx::Size encoded_size,
     const base::Callback<void(skia::RefPtr<SkPixelRef>, const gfx::Size&)>&
         post_compression_task) {
   skia::RefPtr<SkPixelRef> compressed_data;
@@ -566,15 +582,14 @@ void ThumbnailStore::CompressionTask(
     size_t pixel_size = 4;  // Pixel size is 4 bytes for kARGB_8888_Config.
     size_t stride = pixel_size * raw_data_size.width();
 
-    gfx::Size encoded_size = GetEncodedSize(raw_data_size);
     size_t encoded_bytes =
         etc1_get_encoded_data_size(encoded_size.width(), encoded_size.height());
-    SkImageInfo info = {encoded_size.width(),
-                        encoded_size.height(),
-                        kUnknown_SkColorType,
-                        kUnpremul_SkAlphaType};
+    SkImageInfo info = SkImageInfo::Make(encoded_size.width(),
+                                         encoded_size.height(),
+                                         kUnknown_SkColorType,
+                                         kUnpremul_SkAlphaType);
     skia::RefPtr<SkData> etc1_pixel_data = skia::AdoptRef(
-        SkData::NewFromMalloc(new uint8_t[encoded_bytes], encoded_bytes));
+        SkData::NewUninitialized(encoded_bytes));
     skia::RefPtr<SkMallocPixelRef> etc1_pixel_ref = skia::AdoptRef(
         SkMallocPixelRef::NewWithData(info, 0, NULL, etc1_pixel_data.get()));
 
@@ -687,25 +702,21 @@ bool ReadFromFile(base::File& file,
     return false;
   }
 
-  skia::RefPtr<SkData> etc1_pixel_data;
   int data_size = etc1_get_encoded_data_size(raw_width, raw_height);
-  scoped_ptr<uint8_t[]> raw_data =
-      scoped_ptr<uint8_t[]>(new uint8_t[data_size]);
+  skia::RefPtr<SkData> etc1_pixel_data =
+      skia::AdoptRef(SkData::NewUninitialized(data_size));
 
   int pixel_bytes_read = file.ReadAtCurrentPos(
-      reinterpret_cast<char*>(raw_data.get()),
+      reinterpret_cast<char*>(etc1_pixel_data->writable_data()),
       data_size);
 
   if (pixel_bytes_read != data_size)
     return false;
 
-  SkImageInfo info = {raw_width,
-                      raw_height,
-                      kUnknown_SkColorType,
-                      kUnpremul_SkAlphaType};
-
-  etc1_pixel_data = skia::AdoptRef(
-      SkData::NewFromMalloc(raw_data.release(), data_size));
+  SkImageInfo info = SkImageInfo::Make(raw_width,
+                                       raw_height,
+                                       kUnknown_SkColorType,
+                                       kUnpremul_SkAlphaType);
 
   *out_pixels = skia::AdoptRef(
       SkMallocPixelRef::NewWithData(info,

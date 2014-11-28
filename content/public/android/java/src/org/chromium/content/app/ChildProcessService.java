@@ -16,6 +16,7 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
+import org.chromium.base.BaseSwitches;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
 import org.chromium.base.JNINamespace;
@@ -129,6 +130,14 @@ public class ChildProcessService extends Service {
             @Override
             public void run()  {
                 try {
+                    // CommandLine must be initialized before others, e.g., Linker.isUsed()
+                    // may check the command line options.
+                    synchronized (mMainThread) {
+                        while (mCommandLineParams == null) {
+                            mMainThread.wait();
+                        }
+                    }
+                    CommandLine.init(mCommandLineParams);
                     boolean useLinker = Linker.isUsed();
                     boolean requestedSharedRelro = false;
                     if (useLinker) {
@@ -137,23 +146,21 @@ public class ChildProcessService extends Service {
                                 mMainThread.wait();
                             }
                         }
-                        if (mLinkerParams != null) {
-                            if (mLinkerParams.mWaitForSharedRelro) {
-                                requestedSharedRelro = true;
-                                Linker.initServiceProcess(mLinkerParams.mBaseLoadAddress);
-                            } else {
-                                Linker.disableSharedRelros();
-                            }
-                            Linker.setTestRunnerClassName(mLinkerParams.mTestRunnerClassName);
+                        assert mLinkerParams != null;
+                        if (mLinkerParams.mWaitForSharedRelro) {
+                            requestedSharedRelro = true;
+                            Linker.initServiceProcess(mLinkerParams.mBaseLoadAddress);
+                        } else {
+                            Linker.disableSharedRelros();
                         }
+                        Linker.setTestRunnerClassName(mLinkerParams.mTestRunnerClassName);
                     }
                     boolean isLoaded = false;
-                    synchronized (mMainThread) {
-                        while (mCommandLineParams == null) {
-                            mMainThread.wait();
-                        }
+                    if (CommandLine.getInstance().hasSwitch(
+                            BaseSwitches.RENDERER_WAIT_FOR_JAVA_DEBUGGER)) {
+                        android.os.Debug.waitForDebugger();
                     }
-                    CommandLine.init(mCommandLineParams);
+
                     try {
                         LibraryLoader.loadNow(getApplicationContext(), false);
                         isLoaded = true;
@@ -243,9 +250,9 @@ public class ChildProcessService extends Service {
         synchronized (mMainThread) {
             mCommandLineParams = intent.getStringArrayExtra(
                     ChildProcessConnection.EXTRA_COMMAND_LINE);
-            mLinkerParams = null;
-            if (Linker.isUsed())
-                mLinkerParams = new ChromiumLinkerParams(intent);
+            // mLinkerParams is never used if Linker.isUsed() returns false.
+            // See onCreate().
+            mLinkerParams = new ChromiumLinkerParams(intent);
             mIsBound = true;
             mMainThread.notifyAll();
         }

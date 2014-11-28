@@ -77,6 +77,35 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '"MainPolicy"=dword:00000001'])
     self.CompareOutputs(output, expected_output)
 
+  def testRecommendedMainPolicy(self):
+    # Tests a policy group with a single policy of type 'main'.
+    grd = self.PrepareTest(
+        '{'
+        '  "policy_definitions": ['
+        '    {'
+        '      "name": "MainPolicy",'
+        '      "type": "main",'
+        '      "features": {'
+        '        "can_be_recommended": True,'
+        '        "can_be_mandatory": False '
+        '      },'
+        '      "caption": "",'
+        '      "desc": "",'
+        '      "supported_on": ["chrome.win:8-"],'
+        '      "example_value": True'
+        '    },'
+        '  ],'
+        '  "placeholders": [],'
+        '  "messages": {},'
+        '}')
+    output = self.GetOutput(grd, 'fr', {'_google_chrome' : '1'}, 'reg', 'en')
+    expected_output = self.NEWLINE.join([
+        'Windows Registry Editor Version 5.00',
+        '',
+        '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Google\\Chrome\\Recommended]',
+        '"MainPolicy"=dword:00000001'])
+    self.CompareOutputs(output, expected_output)
+
   def testStringPolicy(self):
     # Tests a policy group with a single policy of type 'string'.
     grd = self.PrepareTest(

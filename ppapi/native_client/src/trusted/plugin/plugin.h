@@ -11,15 +11,10 @@
 
 #include <stdio.h>
 
-#include <map>
-#include <queue>
-#include <set>
 #include <string>
 
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
-#include "native_client/src/include/nacl_string.h"
-#include "native_client/src/public/nacl_file_info.h"
 
 #include "ppapi/c/private/ppb_nacl_private.h"
 #include "ppapi/cpp/instance.h"
@@ -93,8 +88,7 @@ class Plugin : public pp::Instance {
                       bool enable_dyncode_syscalls,
                       bool enable_exception_handling,
                       bool enable_crash_throttling,
-                      const pp::CompletionCallback& init_done_cb,
-                      const pp::CompletionCallback& crash_cb);
+                      const pp::CompletionCallback& init_done_cb);
 
   // Finish hooking interfaces up, after low-level initialization is
   // complete.
@@ -113,7 +107,7 @@ class Plugin : public pp::Instance {
   // Blocks until the helper module signals initialization is done.
   // Does not update nacl_module_origin().
   // Returns NULL or the NaClSubprocess of the new helper NaCl module.
-  NaClSubprocess* LoadHelperNaClModule(const nacl::string& helper_url,
+  NaClSubprocess* LoadHelperNaClModule(const std::string& helper_url,
                                        PP_NaClFileInfo file_info,
                                        ErrorInfo* error_info);
 
@@ -121,14 +115,6 @@ class Plugin : public pp::Instance {
   void ReportLoadError(const ErrorInfo& error_info);
 
   nacl::DescWrapperFactory* wrapper_factory() const { return wrapper_factory_; }
-
-  // A helper function that indicates if |url| can be requested by the document
-  // under the same-origin policy. Strictly speaking, it may be possible for the
-  // document to request the URL using CORS even if this function returns false.
-  bool DocumentCanRequest(const std::string& url);
-
-  // set_exit_status may be called off the main thread.
-  void set_exit_status(int exit_status);
 
   const PPB_NaCl_Private* nacl_interface() const { return nacl_interface_; }
   pp::UMAPrivate& uma_interface() { return uma_interface_; }
@@ -176,18 +162,6 @@ class Plugin : public pp::Instance {
   void NexeFileDidOpen(int32_t pp_error);
   void NexeFileDidOpenContinuation(int32_t pp_error);
 
-  // Callback used when the reverse channel closes.  This is an
-  // asynchronous event that might turn into a JavaScript error or
-  // crash event -- this is controlled by the two state variables
-  // nacl_ready_state_ and nexe_error_reported_: If an error or crash
-  // had already been reported, no additional crash event is
-  // generated.  If no error has been reported but nacl_ready_state_
-  // is not DONE, then the loadend event has not been reported, and we
-  // enqueue an error event followed by loadend.  If nacl_ready_state_
-  // is DONE, then we are in the post-loadend (we need temporal
-  // predicate symbols), and we enqueue a crash event.
-  void NexeDidCrash(int32_t pp_error);
-
   // Callback used when a .nexe is translated from bitcode.  If the translation
   // is successful, the file descriptor is opened and can be passed to sel_ldr
   // with the sandbox on.
@@ -204,9 +178,7 @@ class Plugin : public pp::Instance {
   void NaClManifestFileDidOpen(int32_t pp_error);
 
   // Processes the JSON manifest string and starts loading the nexe.
-  void ProcessNaClManifest(const nacl::string& manifest_json);
-
-  void SetExitStatusOnMainThread(int32_t pp_error, int exit_status);
+  void ProcessNaClManifest(const std::string& manifest_json);
 
   // Keep track of the NaCl module subprocess that was spun up in the plugin.
   NaClSubprocess main_subprocess_;

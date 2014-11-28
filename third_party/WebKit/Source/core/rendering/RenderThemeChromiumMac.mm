@@ -28,12 +28,12 @@
 #import "core/dom/Document.h"
 #import "core/dom/Element.h"
 #import "core/fileapi/FileList.h"
+#import "core/frame/FrameView.h"
 #import "core/html/HTMLInputElement.h"
 #import "core/html/HTMLMediaElement.h"
 #import "core/html/HTMLMeterElement.h"
 #import "core/html/TimeRanges.h"
 #import "core/html/shadow/MediaControlElements.h"
-#import "core/frame/FrameView.h"
 #import "core/rendering/PaintInfo.h"
 #import "core/rendering/RenderLayer.h"
 #import "core/rendering/RenderMedia.h"
@@ -55,7 +55,6 @@
 #import "platform/mac/WebCoreNSCellExtras.h"
 #import "platform/text/PlatformLocale.h"
 #import "platform/text/StringTruncator.h"
-
 #import <AvailabilityMacros.h>
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
@@ -151,27 +150,13 @@ namespace blink {
 
 using namespace HTMLNames;
 
-enum {
-    topMargin,
-    rightMargin,
-    bottomMargin,
-    leftMargin
-};
-
-enum {
-    topPadding,
-    rightPadding,
-    bottomPadding,
-    leftPadding
-};
-
 RenderThemeChromiumMac::RenderThemeChromiumMac()
     : m_notificationObserver(AdoptNS, [[WebCoreRenderThemeNotificationObserver alloc] initWithTheme:this])
 {
     [[NSNotificationCenter defaultCenter] addObserver:m_notificationObserver.get()
-                                                        selector:@selector(systemColorsDidChange:)
-                                                            name:NSSystemColorsDidChangeNotification
-                                                          object:nil];
+                                             selector:@selector(systemColorsDidChange:)
+                                                 name:NSSystemColorsDidChangeNotification
+                                               object:nil];
 }
 
 RenderThemeChromiumMac::~RenderThemeChromiumMac()
@@ -266,40 +251,40 @@ void RenderThemeChromiumMac::systemFont(CSSValueID cssValueId, FontDescription& 
     FontDescription* cachedDesc;
     NSFont* font = nil;
     switch (cssValueId) {
-        case CSSValueSmallCaption:
-            cachedDesc = &smallSystemFont;
-            if (!smallSystemFont.isAbsoluteSize())
-                font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        case CSSValueMenu:
-            cachedDesc = &menuFont;
-            if (!menuFont.isAbsoluteSize())
-                font = [NSFont menuFontOfSize:[NSFont systemFontSize]];
-            break;
-        case CSSValueStatusBar:
-            cachedDesc = &labelFont;
-            if (!labelFont.isAbsoluteSize())
-                font = [NSFont labelFontOfSize:[NSFont labelFontSize]];
-            break;
-        case CSSValueWebkitMiniControl:
-            cachedDesc = &miniControlFont;
-            if (!miniControlFont.isAbsoluteSize())
-                font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSMiniControlSize]];
-            break;
-        case CSSValueWebkitSmallControl:
-            cachedDesc = &smallControlFont;
-            if (!smallControlFont.isAbsoluteSize())
-                font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSSmallControlSize]];
-            break;
-        case CSSValueWebkitControl:
-            cachedDesc = &controlFont;
-            if (!controlFont.isAbsoluteSize())
-                font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSRegularControlSize]];
-            break;
-        default:
-            cachedDesc = &systemFont;
-            if (!systemFont.isAbsoluteSize())
-                font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
+    case CSSValueSmallCaption:
+        cachedDesc = &smallSystemFont;
+        if (!smallSystemFont.isAbsoluteSize())
+            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
+        break;
+    case CSSValueMenu:
+        cachedDesc = &menuFont;
+        if (!menuFont.isAbsoluteSize())
+            font = [NSFont menuFontOfSize:[NSFont systemFontSize]];
+        break;
+    case CSSValueStatusBar:
+        cachedDesc = &labelFont;
+        if (!labelFont.isAbsoluteSize())
+            font = [NSFont labelFontOfSize:[NSFont labelFontSize]];
+        break;
+    case CSSValueWebkitMiniControl:
+        cachedDesc = &miniControlFont;
+        if (!miniControlFont.isAbsoluteSize())
+            font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSMiniControlSize]];
+        break;
+    case CSSValueWebkitSmallControl:
+        cachedDesc = &smallControlFont;
+        if (!smallControlFont.isAbsoluteSize())
+            font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSSmallControlSize]];
+        break;
+    case CSSValueWebkitControl:
+        cachedDesc = &controlFont;
+        if (!controlFont.isAbsoluteSize())
+            font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSRegularControlSize]];
+        break;
+    default:
+        cachedDesc = &systemFont;
+        if (!systemFont.isAbsoluteSize())
+            font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
     }
 
     if (font) {
@@ -399,105 +384,108 @@ Color RenderThemeChromiumMac::systemColor(CSSValueID cssValueId) const
     Color color;
     bool needsFallback = false;
     switch (cssValueId) {
-        case CSSValueActiveborder:
-            color = convertNSColorToColor([NSColor keyboardFocusIndicatorColor]);
-            break;
-        case CSSValueActivecaption:
-            color = convertNSColorToColor([NSColor windowFrameTextColor]);
-            break;
-        case CSSValueAppworkspace:
-            color = convertNSColorToColor([NSColor headerColor]);
-            break;
-        case CSSValueBackground:
-            // Use theme independent default
-            needsFallback = true;
-            break;
-        case CSSValueButtonface:
-            // We use this value instead of NSColor's controlColor to avoid website incompatibilities.
-            // We may want to change this to use the NSColor in future.
-            color = 0xFFC0C0C0;
-            break;
-        case CSSValueButtonhighlight:
-            color = convertNSColorToColor([NSColor controlHighlightColor]);
-            break;
-        case CSSValueButtonshadow:
-            color = convertNSColorToColor([NSColor controlShadowColor]);
-            break;
-        case CSSValueButtontext:
-            color = convertNSColorToColor([NSColor controlTextColor]);
-            break;
-        case CSSValueCaptiontext:
-            color = convertNSColorToColor([NSColor textColor]);
-            break;
-        case CSSValueGraytext:
-            color = convertNSColorToColor([NSColor disabledControlTextColor]);
-            break;
-        case CSSValueHighlight:
-            color = convertNSColorToColor([NSColor selectedTextBackgroundColor]);
-            break;
-        case CSSValueHighlighttext:
-            color = convertNSColorToColor([NSColor selectedTextColor]);
-            break;
-        case CSSValueInactiveborder:
-            color = convertNSColorToColor([NSColor controlBackgroundColor]);
-            break;
-        case CSSValueInactivecaption:
-            color = convertNSColorToColor([NSColor controlBackgroundColor]);
-            break;
-        case CSSValueInactivecaptiontext:
-            color = convertNSColorToColor([NSColor textColor]);
-            break;
-        case CSSValueInfobackground:
-            // There is no corresponding NSColor for this so we use a hard coded value.
-            color = 0xFFFBFCC5;
-            break;
-        case CSSValueInfotext:
-            color = convertNSColorToColor([NSColor textColor]);
-            break;
-        case CSSValueMenu:
-            color = menuBackgroundColor();
-            break;
-        case CSSValueMenutext:
-            color = convertNSColorToColor([NSColor selectedMenuItemTextColor]);
-            break;
-        case CSSValueScrollbar:
-            color = convertNSColorToColor([NSColor scrollBarColor]);
-            break;
-        case CSSValueText:
-            color = convertNSColorToColor([NSColor textColor]);
-            break;
-        case CSSValueThreeddarkshadow:
-            color = convertNSColorToColor([NSColor controlDarkShadowColor]);
-            break;
-        case CSSValueThreedshadow:
-            color = convertNSColorToColor([NSColor shadowColor]);
-            break;
-        case CSSValueThreedface:
-            // We use this value instead of NSColor's controlColor to avoid website incompatibilities.
-            // We may want to change this to use the NSColor in future.
-            color = 0xFFC0C0C0;
-            break;
-        case CSSValueThreedhighlight:
-            color = convertNSColorToColor([NSColor highlightColor]);
-            break;
-        case CSSValueThreedlightshadow:
-            color = convertNSColorToColor([NSColor controlLightHighlightColor]);
-            break;
-        case CSSValueWebkitFocusRingColor:
-            color = convertNSColorToColor([NSColor keyboardFocusIndicatorColor]);
-            break;
-        case CSSValueWindow:
-            color = convertNSColorToColor([NSColor windowBackgroundColor]);
-            break;
-        case CSSValueWindowframe:
-            color = convertNSColorToColor([NSColor windowFrameColor]);
-            break;
-        case CSSValueWindowtext:
-            color = convertNSColorToColor([NSColor windowFrameTextColor]);
-            break;
-        default:
-            needsFallback = true;
-            break;
+    case CSSValueActiveborder:
+        color = convertNSColorToColor([NSColor keyboardFocusIndicatorColor]);
+        break;
+    case CSSValueActivecaption:
+        color = convertNSColorToColor([NSColor windowFrameTextColor]);
+        break;
+    case CSSValueAppworkspace:
+        color = convertNSColorToColor([NSColor headerColor]);
+        break;
+    case CSSValueBackground:
+        // Use theme independent default
+        needsFallback = true;
+        break;
+    case CSSValueButtonface:
+        // We use this value instead of NSColor's controlColor to avoid website
+        // incompatibilities. We may want to change this to use the NSColor in
+        // future.
+        color = 0xFFC0C0C0;
+        break;
+    case CSSValueButtonhighlight:
+        color = convertNSColorToColor([NSColor controlHighlightColor]);
+        break;
+    case CSSValueButtonshadow:
+        color = convertNSColorToColor([NSColor controlShadowColor]);
+        break;
+    case CSSValueButtontext:
+        color = convertNSColorToColor([NSColor controlTextColor]);
+        break;
+    case CSSValueCaptiontext:
+        color = convertNSColorToColor([NSColor textColor]);
+        break;
+    case CSSValueGraytext:
+        color = convertNSColorToColor([NSColor disabledControlTextColor]);
+        break;
+    case CSSValueHighlight:
+        color = convertNSColorToColor([NSColor selectedTextBackgroundColor]);
+        break;
+    case CSSValueHighlighttext:
+        color = convertNSColorToColor([NSColor selectedTextColor]);
+        break;
+    case CSSValueInactiveborder:
+        color = convertNSColorToColor([NSColor controlBackgroundColor]);
+        break;
+    case CSSValueInactivecaption:
+        color = convertNSColorToColor([NSColor controlBackgroundColor]);
+        break;
+    case CSSValueInactivecaptiontext:
+        color = convertNSColorToColor([NSColor textColor]);
+        break;
+    case CSSValueInfobackground:
+        // There is no corresponding NSColor for this so we use a hard coded
+        // value.
+        color = 0xFFFBFCC5;
+        break;
+    case CSSValueInfotext:
+        color = convertNSColorToColor([NSColor textColor]);
+        break;
+    case CSSValueMenu:
+        color = menuBackgroundColor();
+        break;
+    case CSSValueMenutext:
+        color = convertNSColorToColor([NSColor selectedMenuItemTextColor]);
+        break;
+    case CSSValueScrollbar:
+        color = convertNSColorToColor([NSColor scrollBarColor]);
+        break;
+    case CSSValueText:
+        color = convertNSColorToColor([NSColor textColor]);
+        break;
+    case CSSValueThreeddarkshadow:
+        color = convertNSColorToColor([NSColor controlDarkShadowColor]);
+        break;
+    case CSSValueThreedshadow:
+        color = convertNSColorToColor([NSColor shadowColor]);
+        break;
+    case CSSValueThreedface:
+        // We use this value instead of NSColor's controlColor to avoid website
+        // incompatibilities. We may want to change this to use the NSColor in
+        // future.
+        color = 0xFFC0C0C0;
+        break;
+    case CSSValueThreedhighlight:
+        color = convertNSColorToColor([NSColor highlightColor]);
+        break;
+    case CSSValueThreedlightshadow:
+        color = convertNSColorToColor([NSColor controlLightHighlightColor]);
+        break;
+    case CSSValueWebkitFocusRingColor:
+        color = convertNSColorToColor([NSColor keyboardFocusIndicatorColor]);
+        break;
+    case CSSValueWindow:
+        color = convertNSColorToColor([NSColor windowBackgroundColor]);
+        break;
+    case CSSValueWindowframe:
+        color = convertNSColorToColor([NSColor windowFrameColor]);
+        break;
+    case CSSValueWindowtext:
+        color = convertNSColorToColor([NSColor windowFrameTextColor]);
+        break;
+    default:
+        needsFallback = true;
+        break;
     }
 
     if (needsFallback)
@@ -514,10 +502,12 @@ bool RenderThemeChromiumMac::isControlStyled(const RenderStyle* style, const Cac
     if (style->appearance() == TextFieldPart || style->appearance() == TextAreaPart)
         return style->border() != uaStyle->border || style->boxShadow();
 
-    // FIXME: This is horrible, but there is not much else that can be done.  Menu lists cannot draw properly when
-    // scaled.  They can't really draw properly when transformed either.  We can't detect the transform case at style
-    // adjustment time so that will just have to stay broken.  We can however detect that we're zooming.  If zooming
-    // is in effect we treat it like the control is styled.
+    // FIXME: This is horrible, but there is not much else that can be done.
+    // Menu lists cannot draw properly when scaled. They can't really draw
+    // properly when transformed either. We can't detect the transform case at
+    // style adjustment time so that will just have to stay broken.  We can
+    // however detect that we're zooming. If zooming is in effect we treat it
+    // like the control is styled.
     if (style->appearance() == MenulistPart && style->effectiveZoom() != 1.0f)
         return true;
     // FIXME: NSSearchFieldCell doesn't work well when scaled.
@@ -529,21 +519,21 @@ bool RenderThemeChromiumMac::isControlStyled(const RenderStyle* style, const Cac
 
 const int sliderThumbShadowBlur = 1;
 
-void RenderThemeChromiumMac::adjustRepaintRect(const RenderObject* o, IntRect& r)
+void RenderThemeChromiumMac::adjustPaintInvalidationRect(const RenderObject* o, IntRect& r)
 {
     ControlPart part = o->style()->appearance();
 
 #if USE(NEW_THEME)
     switch (part) {
-        case CheckboxPart:
-        case RadioPart:
-        case PushButtonPart:
-        case SquareButtonPart:
-        case ButtonPart:
-        case InnerSpinButtonPart:
-            return RenderTheme::adjustRepaintRect(o, r);
-        default:
-            break;
+    case CheckboxPart:
+    case RadioPart:
+    case PushButtonPart:
+    case SquareButtonPart:
+    case ButtonPart:
+    case InnerSpinButtonPart:
+        return RenderTheme::adjustPaintInvalidationRect(o, r);
+    default:
+        break;
     }
 #endif
 
@@ -554,35 +544,17 @@ void RenderThemeChromiumMac::adjustRepaintRect(const RenderObject* o, IntRect& r
         IntSize size = popupButtonSizes()[[popupButton() controlSize]];
         size.setHeight(size.height() * zoomLevel);
         size.setWidth(r.width());
-        r = inflateRect(r, size, popupButtonMargins(), zoomLevel);
+        r = ThemeMac::inflateRect(r, size, popupButtonMargins(), zoomLevel);
     } else if (part == SliderThumbHorizontalPart || part == SliderThumbVerticalPart) {
         r.setHeight(r.height() + sliderThumbShadowBlur);
     }
-}
-
-IntRect RenderThemeChromiumMac::inflateRect(const IntRect& r, const IntSize& size, const int* margins, float zoomLevel) const
-{
-    // Only do the inflation if the available width/height are too small.  Otherwise try to
-    // fit the glow/check space into the available box's width/height.
-    int widthDelta = r.width() - (size.width() + margins[leftMargin] * zoomLevel + margins[rightMargin] * zoomLevel);
-    int heightDelta = r.height() - (size.height() + margins[topMargin] * zoomLevel + margins[bottomMargin] * zoomLevel);
-    IntRect result(r);
-    if (widthDelta < 0) {
-        result.setX(result.x() - margins[leftMargin] * zoomLevel);
-        result.setWidth(result.width() - widthDelta);
-    }
-    if (heightDelta < 0) {
-        result.setY(result.y() - margins[topMargin] * zoomLevel);
-        result.setHeight(result.height() - heightDelta);
-    }
-    return result;
 }
 
 FloatRect RenderThemeChromiumMac::convertToPaintingRect(const RenderObject* inputRenderer, const RenderObject* partRenderer, const FloatRect& inputRect, const IntRect& r) const
 {
     FloatRect partRect(inputRect);
 
-    // Compute an offset between the part renderer and the input renderer
+    // Compute an offset between the part renderer and the input renderer.
     FloatSize offsetFromInputRenderer;
     const RenderObject* renderer = partRenderer;
     while (renderer && renderer != inputRenderer) {
@@ -590,11 +562,11 @@ FloatRect RenderThemeChromiumMac::convertToPaintingRect(const RenderObject* inpu
         offsetFromInputRenderer -= roundedIntSize(renderer->offsetFromContainer(containingRenderer, LayoutPoint()));
         renderer = containingRenderer;
     }
-    // If the input renderer was not a container, something went wrong
+    // If the input renderer was not a container, something went wrong.
     ASSERT(renderer == inputRenderer);
-    // Move the rect into partRenderer's coords
+    // Move the rect into partRenderer's coords.
     partRect.move(offsetFromInputRenderer);
-    // Account for the local drawing offset (tx, ty)
+    // Account for the local drawing offset (tx, ty).
     partRect.move(r.x(), r.y());
 
     return partRect;
@@ -635,7 +607,7 @@ void RenderThemeChromiumMac::updateFocusedState(NSCell* cell, const RenderObject
 void RenderThemeChromiumMac::updatePressedState(NSCell* cell, const RenderObject* o)
 {
     bool oldPressed = [cell isHighlighted];
-    bool pressed = (o->node() && o->node()->active());
+    bool pressed = o->node() && o->node()->active();
     if (pressed != oldPressed)
         [cell setHighlighted:pressed];
 }
@@ -650,8 +622,8 @@ NSControlSize RenderThemeChromiumMac::controlSizeForFont(RenderStyle* style) con
     return NSMiniControlSize;
 }
 
-// We don't use controlSizeForFont() for search field decorations because it needs to fit
-// into the search field. The font size will already be modified by
+// We don't use controlSizeForFont() for search field decorations because it
+// needs to fit into the search field. The font size will already be modified by
 // setFontFromControlSize() called on the search field.
 static NSControlSize searchFieldControlSizeForFont(RenderStyle* style)
 {
@@ -674,7 +646,9 @@ void RenderThemeChromiumMac::setControlSize(NSCell* cell, const IntSize* sizes, 
         size = NSSmallControlSize;
     else
         size = NSMiniControlSize;
-    if (size != [cell controlSize]) // Only update if we have to, since AppKit does work even if the size is the same.
+    // Only update if we have to, since AppKit does work even if the size is the
+    // same.
+    if (size != [cell controlSize])
         [cell setControlSize:size];
 }
 
@@ -698,7 +672,8 @@ IntSize RenderThemeChromiumMac::sizeForSystemFont(RenderStyle* style, const IntS
 
 void RenderThemeChromiumMac::setSizeFromFont(RenderStyle* style, const IntSize* sizes) const
 {
-    // FIXME: Check is flawed, since it doesn't take min-width/max-width into account.
+    // FIXME: Check is flawed, since it doesn't take min-width/max-width into
+    // account.
     IntSize size = sizeForFont(style, sizes);
     if (style->width().isIntrinsicOrAuto() && size.width() > 0)
         style->setWidth(Length(size.width(), Fixed));
@@ -717,7 +692,7 @@ void RenderThemeChromiumMac::setFontFromControlSize(RenderStyle* style, NSContro
     fontDescription.setComputedSize([font pointSize] * style->effectiveZoom());
     fontDescription.setSpecifiedSize([font pointSize] * style->effectiveZoom());
 
-    // Reset line height
+    // Reset line height.
     style->setLineHeight(RenderStyle::initialLineHeight());
 
     if (style->setFontDescription(fontDescription))
@@ -739,16 +714,17 @@ NSControlSize RenderThemeChromiumMac::controlSizeForSystemFont(RenderStyle* styl
 
 bool RenderThemeChromiumMac::paintTextField(RenderObject* o, const PaintInfo& paintInfo, const IntRect& r)
 {
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
+    LocalCurrentGraphicsContext localContext(paintInfo.context, r);
 
 #if __MAC_OS_X_VERSION_MIN_REQUIRED <= 1070
     bool useNSTextFieldCell = o->style()->hasAppearance()
         && o->style()->visitedDependentColor(CSSPropertyBackgroundColor) == Color::white
         && !o->style()->hasBackgroundImage();
 
-    // We do not use NSTextFieldCell to draw styled text fields on Lion and SnowLeopard because
-    // there are a number of bugs on those platforms that require NSTextFieldCell to be in charge
-    // of painting its own background. We need WebCore to paint styled backgrounds, so we'll use
+    // We do not use NSTextFieldCell to draw styled text fields on Lion and
+    // SnowLeopard because there are a number of bugs on those platforms that
+    // require NSTextFieldCell to be in charge of painting its own
+    // background. We need WebCore to paint styled backgrounds, so we'll use
     // this AppKit SPI function instead.
     if (!useNSTextFieldCell) {
         _NSDrawCarbonThemeBezel(r, isEnabled(o) && !isReadOnlyControl(o), YES);
@@ -770,8 +746,9 @@ bool RenderThemeChromiumMac::paintTextField(RenderObject* o, const PaintInfo& pa
 
 bool RenderThemeChromiumMac::paintCapsLockIndicator(RenderObject*, const PaintInfo& paintInfo, const IntRect& r)
 {
-    // This draws the caps lock indicator as it was done by WKDrawCapsLockIndicator.
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
+    // This draws the caps lock indicator as it was done by
+    // WKDrawCapsLockIndicator.
+    LocalCurrentGraphicsContext localContext(paintInfo.context, r);
     CGContextRef c = localContext.cgContext();
     CGMutablePathRef shape = CGPathCreateMutable();
 
@@ -786,8 +763,8 @@ bool RenderThemeChromiumMac::paintCapsLockIndicator(RenderObject*, const PaintIn
     CGPathAddArc(shape, NULL, 4.5,  4.5,  4, M_PI,     3*M_PI/2, false);
     CGPathAddArc(shape, NULL, 12.5, 4.5,  4, 3*M_PI/2, 0,        false);
 
-    // Draw the arrow - note this is drawing in a flipped coordinate system, so the
-    // arrow is pointing down.
+    // Draw the arrow - note this is drawing in a flipped coordinate system, so
+    // the arrow is pointing down.
     CGPathMoveToPoint(shape, NULL, 8.5, 2);  // Tip point.
     CGPathAddLineToPoint(shape, NULL, 4,     7);
     CGPathAddLineToPoint(shape, NULL, 6.25,  7);
@@ -797,7 +774,8 @@ bool RenderThemeChromiumMac::paintCapsLockIndicator(RenderObject*, const PaintIn
     CGPathAddLineToPoint(shape, NULL, 13,    7);
     CGPathAddLineToPoint(shape, NULL, 8.5,   2);
 
-    // Draw the rectangle that underneath (or above in the flipped system) the arrow.
+    // Draw the rectangle that underneath (or above in the flipped system) the
+    // arrow.
     CGPathAddLineToPoint(shape, NULL, 10.75, 12);
     CGPathAddLineToPoint(shape, NULL, 6.25,  12);
     CGPathAddLineToPoint(shape, NULL, 6.25,  14.25);
@@ -829,7 +807,7 @@ bool RenderThemeChromiumMac::paintCapsLockIndicator(RenderObject*, const PaintIn
 
 bool RenderThemeChromiumMac::paintTextArea(RenderObject* o, const PaintInfo& paintInfo, const IntRect& r)
 {
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
+    LocalCurrentGraphicsContext localContext(paintInfo.context, r);
     _NSDrawCarbonThemeListBox(r, isEnabled(o) && !isReadOnlyControl(o), YES, YES);
     return false;
 }
@@ -864,7 +842,6 @@ const int* RenderThemeChromiumMac::popupButtonPadding(NSControlSize size) const
 
 bool RenderThemeChromiumMac::paintMenuList(RenderObject* o, const PaintInfo& paintInfo, const IntRect& r)
 {
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
     setPopupButtonCellState(o, r);
 
     NSPopUpButtonCell* popupButton = this->popupButton();
@@ -877,11 +854,13 @@ bool RenderThemeChromiumMac::paintMenuList(RenderObject* o, const PaintInfo& pai
     // Now inflate it to account for the shadow.
     IntRect inflatedRect = r;
     if (r.width() >= minimumMenuListSize(o->style()))
-        inflatedRect = inflateRect(inflatedRect, size, popupButtonMargins(), zoomLevel);
+        inflatedRect = ThemeMac::inflateRect(inflatedRect, size, popupButtonMargins(), zoomLevel);
 
+    LocalCurrentGraphicsContext localContext(paintInfo.context, ThemeMac::inflateRectForFocusRing(inflatedRect));
     GraphicsContextStateSaver stateSaver(*paintInfo.context);
 
-    // On Leopard, the cell will draw outside of the given rect, so we have to clip to the rect
+    // On Leopard, the cell will draw outside of the given rect, so we have to
+    // clip to the rect.
     paintInfo.context->clip(inflatedRect);
 
     if (zoomLevel != 1.0f) {
@@ -920,7 +899,7 @@ bool RenderThemeChromiumMac::paintMeter(RenderObject* renderObject, const PaintI
     if (!renderObject->isMeter())
         return true;
 
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
+    LocalCurrentGraphicsContext localContext(paintInfo.context, rect);
 
     NSLevelIndicatorCell* cell = levelIndicatorFor(toRenderMeter(renderObject));
     GraphicsContextStateSaver stateSaver(*paintInfo.context);
@@ -958,7 +937,6 @@ NSLevelIndicatorStyle RenderThemeChromiumMac::levelIndicatorStyleFor(ControlPart
     default:
         return NSContinuousCapacityLevelIndicatorStyle;
     }
-
 }
 
 NSLevelIndicatorCell* RenderThemeChromiumMac::levelIndicatorFor(const RenderMeter* renderMeter) const
@@ -973,21 +951,22 @@ NSLevelIndicatorCell* RenderThemeChromiumMac::levelIndicatorFor(const RenderMete
     HTMLMeterElement* element = renderMeter->meterElement();
     double value = element->value();
 
-    // Because NSLevelIndicatorCell does not support optimum-in-the-middle type coloring,
-    // we explicitly control the color instead giving low and high value to NSLevelIndicatorCell as is.
+    // Because NSLevelIndicatorCell does not support optimum-in-the-middle type
+    // coloring, we explicitly control the color instead giving low and high
+    // value to NSLevelIndicatorCell as is.
     switch (element->gaugeRegion()) {
     case HTMLMeterElement::GaugeRegionOptimum:
-        // Make meter the green
+        // Make meter the green.
         [cell setWarningValue:value + 1];
         [cell setCriticalValue:value + 2];
         break;
     case HTMLMeterElement::GaugeRegionSuboptimal:
-        // Make the meter yellow
+        // Make the meter yellow.
         [cell setWarningValue:value - 1];
         [cell setCriticalValue:value + 1];
         break;
     case HTMLMeterElement::GaugeRegionEvenLessGood:
-        // Make the meter red
+        // Make the meter red.
         [cell setWarningValue:value - 2];
         [cell setCriticalValue:value - 1];
         break;
@@ -1049,7 +1028,7 @@ bool RenderThemeChromiumMac::paintProgressBar(RenderObject* renderObject, const 
     // Now inflate it to account for the shadow.
     IntRect inflatedRect = rect;
     if (rect.height() <= minimumProgressBarHeight(renderObject->style()))
-        inflatedRect = inflateRect(inflatedRect, size, progressBarMargins(controlSize), zoomLevel);
+        inflatedRect = ThemeMac::inflateRect(inflatedRect, size, progressBarMargins(controlSize), zoomLevel);
 
     RenderProgress* renderProgress = toRenderProgress(renderObject);
     HIThemeTrackDrawInfo trackInfo;
@@ -1073,8 +1052,8 @@ bool RenderThemeChromiumMac::paintProgressBar(RenderObject* renderObject, const 
     if (!imageBuffer)
         return true;
 
-    ContextContainer cgContextContainer(imageBuffer->context());
-    CGContextRef cgContext = cgContextContainer.context();
+    LocalCurrentGraphicsContext localContext(imageBuffer->context(), IntRect(IntPoint(), inflatedRect.size()));
+    CGContextRef cgContext = localContext.cgContext();
     HIThemeDrawTrack(&trackInfo, 0, cgContext, kHIThemeOrientationNormal);
 
     GraphicsContextStateSaver stateSaver(*paintInfo.context);
@@ -1107,7 +1086,8 @@ bool RenderThemeChromiumMac::paintMenuListButton(RenderObject* o, const PaintInf
                              r.y() + o->style()->borderTopWidth(),
                              r.width() - o->style()->borderLeftWidth() - o->style()->borderRightWidth(),
                              r.height() - o->style()->borderTopWidth() - o->style()->borderBottomWidth());
-    // Since we actually know the size of the control here, we restrict the font scale to make sure the arrows will fit vertically in the bounds
+    // Since we actually know the size of the control here, we restrict the font
+    // scale to make sure the arrows will fit vertically in the bounds
     float fontScale = std::min(o->style()->fontSize() / baseFontSize, bounds.height() / (baseArrowHeight * 2 + baseSpaceBetweenArrows));
     float centerY = bounds.y() + bounds.height() / 2.0f;
     float arrowHeight = baseArrowHeight * fontScale;
@@ -1128,7 +1108,7 @@ bool RenderThemeChromiumMac::paintMenuListButton(RenderObject* o, const PaintInf
     arrow1[1] = FloatPoint(leftEdge + arrowWidth, centerY - spaceBetweenArrows / 2.0f);
     arrow1[2] = FloatPoint(leftEdge + arrowWidth / 2.0f, centerY - spaceBetweenArrows / 2.0f - arrowHeight);
 
-    // Draw the top arrow
+    // Draw the top arrow.
     paintInfo.context->drawConvexPolygon(3, arrow1, true);
 
     FloatPoint arrow2[3];
@@ -1136,7 +1116,7 @@ bool RenderThemeChromiumMac::paintMenuListButton(RenderObject* o, const PaintInf
     arrow2[1] = FloatPoint(leftEdge + arrowWidth, centerY + spaceBetweenArrows / 2.0f);
     arrow2[2] = FloatPoint(leftEdge + arrowWidth / 2.0f, centerY + spaceBetweenArrows / 2.0f + arrowHeight);
 
-    // Draw the bottom arrow
+    // Draw the bottom arrow.
     paintInfo.context->drawConvexPolygon(3, arrow2, true);
     return false;
 }
@@ -1157,7 +1137,7 @@ void RenderThemeChromiumMac::adjustMenuListStyle(RenderStyle* style, Element* e)
     // Height is locked to auto.
     style->setHeight(Length(Auto));
 
-    // White-space is locked to pre
+    // White-space is locked to pre.
     style->setWhiteSpace(PRE);
 
     // Set the foreground color to black or gray when we have the aqua look.
@@ -1167,25 +1147,29 @@ void RenderThemeChromiumMac::adjustMenuListStyle(RenderStyle* style, Element* e)
     // Set the button's vertical size.
     setSizeFromFont(style, menuListButtonSizes());
 
-    // Our font is locked to the appropriate system font size for the control.  To clarify, we first use the CSS-specified font to figure out
-    // a reasonable control size, but once that control size is determined, we throw that font away and use the appropriate
-    // system font for the control size instead.
+    // Our font is locked to the appropriate system font size for the
+    // control. To clarify, we first use the CSS-specified font to figure out a
+    // reasonable control size, but once that control size is determined, we
+    // throw that font away and use the appropriate system font for the control
+    // size instead.
     setFontFromControlSize(style, controlSize);
 }
 
 const int autofillPopupHorizontalPadding = 4;
 
-// These functions are called with MenuListPart or MenulistButtonPart appearance by RenderMenuList, or with TextFieldPart appearance by AutofillPopupMenuClient.
-// We assume only AutofillPopupMenuClient gives TexfieldPart appearance here.
-// We want to change only Autofill padding.
-// In the future, we have to separate Autofill popup window logic from WebKit to Chromium.
+// These functions are called with MenuListPart or MenulistButtonPart appearance
+// by RenderMenuList, or with TextFieldPart appearance by
+// AutofillPopupMenuClient. We assume only AutofillPopupMenuClient gives
+// TexfieldPart appearance here. We want to change only Autofill padding.  In
+// the future, we have to separate Autofill popup window logic from WebKit to
+// Chromium.
 int RenderThemeChromiumMac::popupInternalPaddingLeft(RenderStyle* style) const
 {
     if (style->appearance() == TextFieldPart)
         return autofillPopupHorizontalPadding;
 
     if (style->appearance() == MenulistPart)
-        return popupButtonPadding(controlSizeForFont(style))[leftPadding] * style->effectiveZoom();
+        return popupButtonPadding(controlSizeForFont(style))[ThemeMac::LeftMargin] * style->effectiveZoom();
     if (style->appearance() == MenulistButtonPart)
         return styledPopupPaddingLeft * style->effectiveZoom();
     return 0;
@@ -1197,7 +1181,7 @@ int RenderThemeChromiumMac::popupInternalPaddingRight(RenderStyle* style) const
         return autofillPopupHorizontalPadding;
 
     if (style->appearance() == MenulistPart)
-        return popupButtonPadding(controlSizeForFont(style))[rightPadding] * style->effectiveZoom();
+        return popupButtonPadding(controlSizeForFont(style))[ThemeMac::RightMargin] * style->effectiveZoom();
     if (style->appearance() == MenulistButtonPart) {
         float fontScale = style->fontSize() / baseFontSize;
         float arrowWidth = baseArrowWidth * fontScale;
@@ -1209,7 +1193,7 @@ int RenderThemeChromiumMac::popupInternalPaddingRight(RenderStyle* style) const
 int RenderThemeChromiumMac::popupInternalPaddingTop(RenderStyle* style) const
 {
     if (style->appearance() == MenulistPart)
-        return popupButtonPadding(controlSizeForFont(style))[topPadding] * style->effectiveZoom();
+        return popupButtonPadding(controlSizeForFont(style))[ThemeMac::TopMargin] * style->effectiveZoom();
     if (style->appearance() == MenulistButtonPart)
         return styledPopupPaddingTop * style->effectiveZoom();
     return 0;
@@ -1218,7 +1202,7 @@ int RenderThemeChromiumMac::popupInternalPaddingTop(RenderStyle* style) const
 int RenderThemeChromiumMac::popupInternalPaddingBottom(RenderStyle* style) const
 {
     if (style->appearance() == MenulistPart)
-        return popupButtonPadding(controlSizeForFont(style))[bottomPadding] * style->effectiveZoom();
+        return popupButtonPadding(controlSizeForFont(style))[ThemeMac::BottomMargin] * style->effectiveZoom();
     if (style->appearance() == MenulistButtonPart)
         return styledPopupPaddingBottom * style->effectiveZoom();
     return 0;
@@ -1425,7 +1409,7 @@ bool RenderThemeChromiumMac::paintSliderThumb(RenderObject* o, const PaintInfo& 
 
 bool RenderThemeChromiumMac::paintSearchField(RenderObject* o, const PaintInfo& paintInfo, const IntRect& r)
 {
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
+    LocalCurrentGraphicsContext localContext(paintInfo.context, r);
 
     NSSearchFieldCell* search = this->search();
     setSearchCellState(o, r);
@@ -1445,7 +1429,8 @@ bool RenderThemeChromiumMac::paintSearchField(RenderObject* o, const PaintInfo& 
         paintInfo.context->translate(-unzoomedRect.x(), -unzoomedRect.y());
     }
 
-    // Set the search button to nil before drawing.  Then reset it so we can draw it later.
+    // Set the search button to nil before drawing. Then reset it so we can
+    // draw it later.
     [search setSearchButtonCell:nil];
 
     [search drawWithFrame:NSRect(unzoomedRect) inView:documentViewFor(o)];
@@ -1644,7 +1629,7 @@ bool RenderThemeChromiumMac::paintSearchFieldResultsDecoration(RenderObject* o, 
         paintInfo.context->translate(-unzoomedRect.x(), -unzoomedRect.y());
     }
 
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
+    LocalCurrentGraphicsContext localContext(paintInfo.context, r);
 
     NSSearchFieldCell* search = this->search();
     setSearchCellState(input->renderer(), r);
@@ -1703,7 +1688,7 @@ NSSearchFieldCell* RenderThemeChromiumMac::search() const
         if ([m_search.get() respondsToSelector:sel]) {
             BOOL boolValue = NO;
             NSMethodSignature* signature = [NSSearchFieldCell instanceMethodSignatureForSelector:sel];
-            NSInvocation* invocation = [NSInvocation invocationWithMethodSignature: signature];
+            NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
             [invocation setTarget:m_search.get()];
             [invocation setSelector:sel];
             [invocation setArgument:&boolValue atIndex:2];
@@ -1712,14 +1697,6 @@ NSSearchFieldCell* RenderThemeChromiumMac::search() const
     }
 
     return m_search.get();
-}
-
-NSMenu* RenderThemeChromiumMac::searchMenuTemplate() const
-{
-    if (!m_searchMenuTemplate)
-        m_searchMenuTemplate.adoptNS([[NSMenu alloc] initWithTitle:@""]);
-
-    return m_searchMenuTemplate.get();
 }
 
 NSTextFieldCell* RenderThemeChromiumMac::textField() const
@@ -1733,9 +1710,9 @@ NSTextFieldCell* RenderThemeChromiumMac::textField() const
         [m_textField.get() setDrawsBackground:YES];
         [m_textField.get() setBackgroundColor:[NSColor whiteColor]];
 #else
-        // Post-Lion, WebCore can be in charge of paintinng the background thanks to
-        // the workaround in place for <rdar://problem/11385461>, which is implemented
-        // above as _coreUIDrawOptionsWithFrame.
+        // Post-Lion, WebCore can be in charge of paintinng the background
+        // thanks to the workaround in place for <rdar://problem/11385461>,
+        // which is implemented above as _coreUIDrawOptionsWithFrame.
         [m_textField.get() setDrawsBackground:NO];
 #endif
     }
@@ -1792,13 +1769,13 @@ NSView* RenderThemeChromiumMac::documentViewFor(RenderObject*) const
     return FlippedView();
 }
 
-// Updates the control tint (a.k.a. active state) of |cell| (from |o|).
-// In the Chromium port, the renderer runs as a background process and controls'
+// Updates the control tint (a.k.a. active state) of |cell| (from |o|).  In the
+// Chromium port, the renderer runs as a background process and controls'
 // NSCell(s) lack a parent NSView. Therefore controls don't have their tint
 // color updated correctly when the application is activated/deactivated.
 // FocusController's setActive() is called when the application is
-// activated/deactivated, which causes a repaint at which time this code is
-// called.
+// activated/deactivated, which causes a paint invalidation at which time this
+// code is called.
 // This function should be called before drawing any NSCell-derived controls,
 // unless you're sure it isn't needed.
 void RenderThemeChromiumMac::updateActiveState(NSCell* cell, const RenderObject* o)

@@ -18,8 +18,9 @@
         '../../mojo/public/tools/bindings/mojom_bindings_generator.gypi',
       ],
       'sources': [
-        'serial.mojom',
         'data_stream.mojom',
+        'data_stream_serialization.mojom',
+        'serial.mojom',
       ],
     },
     {
@@ -27,9 +28,14 @@
       'target_name': 'device_serial',
       'type': 'static_library',
       'conditions': [
-        ['OS=="linux"', {
+        ['use_udev == 1', {
           'dependencies': [
             '../../build/linux/system.gyp:udev',
+          ],
+        }, {
+          'sources!': [
+            'serial_device_enumerator_linux.cc',
+            'serial_device_enumerator_linux.h',
           ],
         }],
       ],
@@ -45,6 +51,8 @@
       'sources': [
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/data_stream.mojom.cc',
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/data_stream.mojom.h',
+        '<(SHARED_INTERMEDIATE_DIR)/device/serial/data_stream_serialization.mojom.cc',
+        '<(SHARED_INTERMEDIATE_DIR)/device/serial/data_stream_serialization.mojom.h',
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/serial.mojom.cc',
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/serial.mojom.h',
         'async_waiter.cc',
@@ -53,6 +61,10 @@
         'buffer.h',
         'data_receiver.cc',
         'data_receiver.h',
+        'data_sender.cc',
+        'data_sender.h',
+        'data_sink_receiver.cc',
+        'data_sink_receiver.h',
         'data_source_sender.cc',
         'data_source_sender.h',
         'serial_connection.cc',

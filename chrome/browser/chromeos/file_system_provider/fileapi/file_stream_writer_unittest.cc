@@ -24,10 +24,10 @@
 #include "extensions/browser/extension_registry.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/file_system_url.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/async_file_util.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/browser/fileapi/file_system_url.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -43,14 +43,14 @@ void LogValue(std::vector<int>* log, int value) {
 }
 
 // Creates a cracked FileSystemURL for tests.
-fileapi::FileSystemURL CreateFileSystemURL(const std::string& mount_point_name,
+storage::FileSystemURL CreateFileSystemURL(const std::string& mount_point_name,
                                            const base::FilePath& file_path) {
   const std::string origin = std::string("chrome-extension://") + kExtensionId;
-  const fileapi::ExternalMountPoints* const mount_points =
-      fileapi::ExternalMountPoints::GetSystemInstance();
+  const storage::ExternalMountPoints* const mount_points =
+      storage::ExternalMountPoints::GetSystemInstance();
   return mount_points->CreateCrackedFileSystemURL(
       GURL(origin),
-      fileapi::kFileSystemTypeExternal,
+      storage::kFileSystemTypeExternal,
       base::FilePath::FromUTF8Unsafe(mount_point_name).Append(file_path));
 }
 
@@ -112,8 +112,8 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
   scoped_ptr<TestingProfileManager> profile_manager_;
   TestingProfile* profile_;  // Owned by TestingProfileManager.
   FakeProvidedFileSystem* provided_file_system_;  // Owned by Service.
-  fileapi::FileSystemURL file_url_;
-  fileapi::FileSystemURL wrong_file_url_;
+  storage::FileSystemURL file_url_;
+  storage::FileSystemURL wrong_file_url_;
 };
 
 TEST_F(FileSystemProviderFileStreamWriter, Write) {
@@ -134,10 +134,12 @@ TEST_F(FileSystemProviderFileStreamWriter, Write) {
     EXPECT_LT(0, write_log[0]);
     EXPECT_EQ(sizeof(kTextToWrite) - 1, static_cast<size_t>(write_log[0]));
 
-    FakeEntry entry;
-    ASSERT_TRUE(provided_file_system_->GetEntry(
-        base::FilePath::FromUTF8Unsafe(kFakeFilePath), &entry));
-    EXPECT_EQ(kTextToWrite, entry.contents.substr(0, sizeof(kTextToWrite) - 1));
+    const FakeEntry* const entry = provided_file_system_->GetEntry(
+        base::FilePath::FromUTF8Unsafe(kFakeFilePath));
+    ASSERT_TRUE(entry);
+
+    EXPECT_EQ(kTextToWrite,
+              entry->contents.substr(0, sizeof(kTextToWrite) - 1));
   }
 
   // Write additional data to be sure, that the writer's offset is shifted
@@ -153,16 +155,38 @@ TEST_F(FileSystemProviderFileStreamWriter, Write) {
     EXPECT_LT(0, write_log[0]);
     EXPECT_EQ(sizeof(kTextToWrite) - 1, static_cast<size_t>(write_log[0]));
 
-    FakeEntry entry;
-    ASSERT_TRUE(provided_file_system_->GetEntry(
-        base::FilePath::FromUTF8Unsafe(kFakeFilePath), &entry));
+    const FakeEntry* const entry = provided_file_system_->GetEntry(
+        base::FilePath::FromUTF8Unsafe(kFakeFilePath));
+    ASSERT_TRUE(entry);
 
     // The testing text is written twice.
     const std::string expected_contents =
         std::string(kTextToWrite) + kTextToWrite;
     EXPECT_EQ(expected_contents,
-              entry.contents.substr(0, expected_contents.size()));
+              entry->contents.substr(0, expected_contents.size()));
   }
+}
+
+TEST_F(FileSystemProviderFileStreamWriter, Cancel) {
+  std::vector<int> write_log;
+
+  const int64 initial_offset = 0;
+  FileStreamWriter writer(file_url_, initial_offset);
+  scoped_refptr<net::IOBuffer> io_buffer(new net::StringIOBuffer(kTextToWrite));
+
+  const int write_result = writer.Write(io_buffer.get(),
+                                        sizeof(kTextToWrite) - 1,
+                                        base::Bind(&LogValue, &write_log));
+  EXPECT_EQ(net::ERR_IO_PENDING, write_result);
+
+  std::vector<int> cancel_log;
+  const int cancel_result = writer.Cancel(base::Bind(&LogValue, &cancel_log));
+  EXPECT_EQ(net::ERR_IO_PENDING, cancel_result);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(0u, write_log.size());
+  ASSERT_EQ(1u, cancel_log.size());
+  EXPECT_EQ(net::OK, cancel_log[0]);
 }
 
 TEST_F(FileSystemProviderFileStreamWriter, Write_WrongFile) {
@@ -185,11 +209,12 @@ TEST_F(FileSystemProviderFileStreamWriter, Write_WrongFile) {
 TEST_F(FileSystemProviderFileStreamWriter, Write_Append) {
   std::vector<int> write_log;
 
-  FakeEntry entry_before;
-  ASSERT_TRUE(provided_file_system_->GetEntry(
-      base::FilePath::FromUTF8Unsafe(kFakeFilePath), &entry_before));
+  const FakeEntry* const entry = provided_file_system_->GetEntry(
+      base::FilePath::FromUTF8Unsafe(kFakeFilePath));
+  ASSERT_TRUE(entry);
 
-  const int64 initial_offset = entry_before.metadata.size;
+  const std::string original_contents = entry->contents;
+  const int64 initial_offset = entry->metadata->size;
   ASSERT_LT(0, initial_offset);
 
   FileStreamWriter writer(file_url_, initial_offset);
@@ -204,11 +229,8 @@ TEST_F(FileSystemProviderFileStreamWriter, Write_Append) {
   ASSERT_EQ(1u, write_log.size());
   EXPECT_EQ(sizeof(kTextToWrite) - 1, static_cast<size_t>(write_log[0]));
 
-  FakeEntry entry_after;
-  ASSERT_TRUE(provided_file_system_->GetEntry(
-      base::FilePath::FromUTF8Unsafe(kFakeFilePath), &entry_after));
-  const std::string expected_contents = entry_before.contents + kTextToWrite;
-  EXPECT_EQ(expected_contents, entry_after.contents);
+  const std::string expected_contents = original_contents + kTextToWrite;
+  EXPECT_EQ(expected_contents, entry->contents);
 }
 
 }  // namespace file_system_provider

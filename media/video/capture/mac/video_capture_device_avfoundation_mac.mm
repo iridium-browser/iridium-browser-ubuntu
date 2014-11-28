@@ -70,21 +70,18 @@
         break;
     }
 
-  CoreMediaGlue::CMVideoDimensions dimensions =
+    CoreMediaGlue::CMVideoDimensions dimensions =
         CoreMediaGlue::CMVideoFormatDescriptionGetDimensions(
             [format formatDescription]);
 
-  for (CrAVFrameRateRange* frameRate in
+    for (CrAVFrameRateRange* frameRate in
            [format videoSupportedFrameRateRanges]) {
       media::VideoCaptureFormat format(
           gfx::Size(dimensions.width, dimensions.height),
           frameRate.maxFrameRate,
           pixelFormat);
       formats->push_back(format);
-      DVLOG(2) << name.name() << " resolution: "
-               << format.frame_size.ToString() << ", fps: "
-               << format.frame_rate << ", pixel format: "
-               << format.pixel_format;
+      DVLOG(2) << name.name() << " " << format.ToString();
     }
   }
 

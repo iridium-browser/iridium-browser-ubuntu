@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
@@ -24,7 +24,7 @@
 
 #if !defined(OS_WIN)
 #include "chrome/common/chrome_version_info.h"
-#include "grit/chromium_strings.h"
+#include "chrome/grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #endif
 

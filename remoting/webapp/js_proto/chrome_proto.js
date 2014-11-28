@@ -241,6 +241,20 @@ OnClickData.prototype.checked;
 
 
 /** @type {Object} */
+chrome.fileSystem = {
+  /**
+   * @param {Object.<string>?} options
+   * @param {function(Entry, Array.<FileEntry>):void} callback
+   */
+  chooseEntry: function(options, callback) {},
+  /**
+   * @param {FileEntry} fileEntry
+   * @param {function(string):void} callback
+   */
+  getDisplayPath: function(fileEntry, callback) {}
+};
+
+/** @type {Object} */
 chrome.identity = {
   /**
    * @param {Object.<string>} parameters
@@ -332,6 +346,8 @@ var AppWindow = function() {
   /** @type {Window} */
   this.contentWindow = null;
   /** @type {chrome.Event} */
+  this.onClosed = null;
+  /** @type {chrome.Event} */
   this.onRestored = null;
   /** @type {chrome.Event} */
   this.onMaximized = null;
@@ -346,6 +362,7 @@ AppWindow.prototype.drawAttention = function() {};
 AppWindow.prototype.maximize = function() {};
 AppWindow.prototype.minimize = function() {};
 AppWindow.prototype.restore = function() {};
+AppWindow.prototype.show = function() {};
 AppWindow.prototype.fullscreen = function() {};
 /** @return {boolean} */
 AppWindow.prototype.isFullscreen = function() {};
@@ -385,3 +402,278 @@ function ClientRect() {
   /** @type {number} */
   this.right = 0;
 };
+
+/** @type {Object} */
+chrome.cast = {};
+
+/** @constructor */
+chrome.cast.AutoJoinPolicy = function() {};
+
+/** @type {chrome.cast.AutoJoinPolicy} */
+chrome.cast.AutoJoinPolicy.PAGE_SCOPED;
+
+/** @type {chrome.cast.AutoJoinPolicy} */
+chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED;
+
+/** @type {chrome.cast.AutoJoinPolicy} */
+chrome.cast.AutoJoinPolicy.TAB_AND_ORIGIN_SCOPED;
+
+/** @constructor */
+chrome.cast.DefaultActionPolicy = function() {};
+
+/** @type {chrome.cast.DefaultActionPolicy} */
+chrome.cast.DefaultActionPolicy.CAST_THIS_TAB;
+
+/** @type {chrome.cast.DefaultActionPolicy} */
+chrome.cast.DefaultActionPolicy.CREATE_SESSION;
+
+/** @constructor */
+chrome.cast.Error = function() {};
+
+/** @constructor */
+chrome.cast.ReceiverAvailability = function() {};
+
+/** @type {chrome.cast.ReceiverAvailability} */
+chrome.cast.ReceiverAvailability.AVAILABLE;
+
+/** @type {chrome.cast.ReceiverAvailability} */
+chrome.cast.ReceiverAvailability.UNAVAILABLE;
+
+/** @type {Object} */
+chrome.cast.media = {};
+
+/** @constructor */
+chrome.cast.media.Media = function() {
+  /** @type {number} */
+  this.mediaSessionId = 0;
+};
+
+/** @constructor */
+chrome.cast.Session = function() {
+  /** @type {Array.<chrome.cast.media.Media>} */
+  this.media = [];
+
+  /** @type {string} */
+  this.sessionId = '';
+};
+
+/**
+ * @param {string} namespace
+ * @param {Object} message
+ * @param {function():void} successCallback
+ * @param {function(chrome.cast.Error):void} errorCallback
+ */
+chrome.cast.Session.prototype.sendMessage =
+    function(namespace, message, successCallback, errorCallback) {};
+
+/**
+ * @param {function(chrome.cast.media.Media):void} listener
+ */
+chrome.cast.Session.prototype.addMediaListener = function(listener) {};
+
+/**
+ * @param {function(boolean):void} listener
+ */
+chrome.cast.Session.prototype.addUpdateListener = function(listener) {};
+
+/**
+ * @param {string} namespace
+ * @param {function(chrome.cast.media.Media):void} listener
+ */
+chrome.cast.Session.prototype.addMessageListener =
+    function(namespace, listener){};
+
+/**
+ * @param {function():void} successCallback
+ * @param {function(chrome.cast.Error):void} errorCallback
+ */
+chrome.cast.Session.prototype.stop =
+    function(successCallback, errorCallback) {};
+
+/**
+ * @constructor
+ * @param {string} applicationID
+ */
+chrome.cast.SessionRequest = function(applicationID) {};
+
+/**
+ * @constructor
+ * @param {chrome.cast.SessionRequest} sessionRequest
+ * @param {function(chrome.cast.Session):void} sessionListener
+ * @param {function(chrome.cast.ReceiverAvailability):void} receiverListener
+ * @param {chrome.cast.AutoJoinPolicy=} opt_autoJoinPolicy
+ * @param {chrome.cast.DefaultActionPolicy=} opt_defaultActionPolicy
+ */
+chrome.cast.ApiConfig = function(sessionRequest,
+                                 sessionListener,
+                                 receiverListener,
+                                 opt_autoJoinPolicy,
+                                 opt_defaultActionPolicy) {};
+
+/**
+ * @param {chrome.cast.ApiConfig} apiConfig
+ * @param {function():void} onInitSuccess
+ * @param {function(chrome.cast.Error):void} onInitError
+ */
+chrome.cast.initialize =
+    function(apiConfig, onInitSuccess, onInitError) {};
+
+/**
+ * @param {function(chrome.cast.Session):void} successCallback
+ * @param {function(chrome.cast.Error):void} errorCallback
+ */
+chrome.cast.requestSession =
+    function(successCallback, errorCallback) {};
+
+/** @type {Object} */
+chrome.sockets = {};
+
+/** @type {Object} */
+chrome.sockets.tcp = {};
+
+/** @constructor */
+chrome.sockets.tcp.CreateInfo = function() {
+  /** @type {number} */
+  this.socketId = 0;
+}
+
+/**
+ * @param {Object} properties
+ * @param {function(chrome.sockets.tcp.CreateInfo):void} callback
+ */
+chrome.sockets.tcp.create = function(properties, callback) {};
+
+
+/** @constructor */
+chrome.sockets.tcp.ConnectInfo = function() {
+  /** @type {number} */
+  this.result = 0;
+}
+
+/**
+ * @param {number} socketId
+ * @param {string} peerAddress
+ * @param {number} peerPort
+ * @param {function(chrome.sockets.tcp.ConnectInfo):void} callback
+ */
+chrome.sockets.tcp.connect =
+    function(socketId, peerAddress, peerPort, callback) {};
+
+
+/** @constructor */
+chrome.sockets.tcp.SendInfo = function() {
+  /** @type {number} */
+  this.resultCode = 0;
+
+  /** @type {number} */
+  this.bytesSent = 0;
+}
+
+/**
+ * @param {number} socketId
+ * @param {ArrayBuffer} data
+ * @param {function(chrome.sockets.tcp.SendInfo):void} callback
+ */
+chrome.sockets.tcp.send = function(socketId, data, callback) {};
+
+
+/**
+ * @param {number} socketId
+ */
+chrome.sockets.tcp.close = function(socketId) {};
+
+/**
+ * @param {number} socketId
+ * @param {Object} options
+ * @param {function(number):void} callback
+ */
+chrome.sockets.tcp.secure = function(socketId, options, callback) {};
+
+/** @constructor */
+chrome.sockets.tcp.ReceiveInfo = function() {
+  /** @type {number} */
+  this.socketId = 0;
+
+  /** @type {ArrayBuffer} */
+  this.data = null;
+}
+
+/** @type {chrome.Event} */
+chrome.sockets.tcp.onReceive = null;
+
+/** @constructor */
+chrome.sockets.tcp.ReceiveErrorInfo = function() {
+  /** @type {number} */
+  this.socketId = 0;
+
+  /** @type {number} */
+  this.resultCode = 0;
+}
+
+/** @type {chrome.Event} */
+chrome.sockets.tcp.onReceiveError = null;
+
+/** @type {Object} */
+chrome.socket = {};
+
+/** @constructor */
+chrome.socket.CreateInfo = function() {
+  /** @type {number} */
+  this.socketId = 0;
+}
+
+/**
+ * @param {string} socketType
+ * @param {Object} options
+ * @param {function(chrome.socket.CreateInfo):void} callback
+ */
+chrome.socket.create = function(socketType, options, callback) {};
+
+/**
+ * @param {number} socketId
+ * @param {string} hostname
+ * @param {number} port
+ * @param {function(number):void} callback
+ */
+chrome.socket.connect =
+    function(socketId, hostname, port, callback) {};
+
+/** @constructor */
+chrome.socket.WriteInfo = function() {
+  /** @type {number} */
+  this.bytesWritten = 0;
+}
+
+/**
+ * @param {number} socketId
+ * @param {ArrayBuffer} data
+ * @param {function(chrome.socket.WriteInfo):void} callback
+ */
+chrome.socket.write = function(socketId, data, callback) {};
+
+/** @constructor */
+chrome.socket.ReadInfo = function() {
+  /** @type {number} */
+  this.resultCode = 0;
+
+  /** @type {ArrayBuffer} */
+  this.data = null;
+}
+
+/**
+ * @param {number} socketId
+ * @param {function(chrome.socket.ReadInfo):void} callback
+ */
+chrome.socket.read = function(socketId, callback) {};
+
+/**
+ * @param {number} socketId
+ */
+chrome.socket.destroy = function(socketId) {};
+
+/**
+ * @param {number} socketId
+ * @param {Object} options
+ * @param {function(number):void} callback
+ */
+chrome.socket.secure = function(socketId, options, callback) {};

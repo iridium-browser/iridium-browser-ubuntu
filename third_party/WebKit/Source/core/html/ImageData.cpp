@@ -30,6 +30,7 @@
 #include "core/html/ImageData.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/custom/V8Uint8ClampedArrayCustom.h"
 #include "core/dom/ExceptionCode.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
@@ -124,11 +125,26 @@ PassRefPtrWillBeRawPtr<ImageData> ImageData::create(Uint8ClampedArray* data, uns
     return adoptRefWillBeNoop(new ImageData(IntSize(width, height), data));
 }
 
+v8::Handle<v8::Object> ImageData::associateWithWrapper(const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate)
+{
+    ScriptWrappable::associateWithWrapper(wrapperType, wrapper, isolate);
+
+    if (!wrapper.IsEmpty()) {
+        // Create a V8 Uint8ClampedArray object.
+        v8::Handle<v8::Value> pixelArray = toV8(data(), wrapper, isolate);
+        // Set the "data" property of the ImageData object to
+        // the created v8 object, eliminating the C++ callback
+        // when accessing the "data" property.
+        if (!pixelArray.IsEmpty())
+            wrapper->ForceSet(v8AtomicString(isolate, "data"), pixelArray, v8::ReadOnly);
+    }
+    return wrapper;
+}
+
 ImageData::ImageData(const IntSize& size)
     : m_size(size)
     , m_data(Uint8ClampedArray::create(size.width() * size.height() * 4))
 {
-    ScriptWrappable::init(this);
 }
 
 ImageData::ImageData(const IntSize& size, PassRefPtr<Uint8ClampedArray> byteArray)
@@ -136,8 +152,6 @@ ImageData::ImageData(const IntSize& size, PassRefPtr<Uint8ClampedArray> byteArra
     , m_data(byteArray)
 {
     ASSERT_WITH_SECURITY_IMPLICATION(static_cast<unsigned>(size.width() * size.height() * 4) <= m_data->length());
-    ScriptWrappable::init(this);
 }
 
-}
-
+} // namespace blink

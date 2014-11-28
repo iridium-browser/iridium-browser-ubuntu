@@ -25,12 +25,14 @@
       # would just make things uglier.
       '--product-dir', '<(PRODUCT_DIR)/xyz',
       '--config-name', '<(CONFIGURATION_NAME)',
+      '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
     ],
     # Default C compiler defines.
     'nacl_default_defines': [
       '__STDC_LIMIT_MACROS=1',
       '__STDC_FORMAT_MACROS=1',
       '_GNU_SOURCE=1',
+      '_DEFAULT_SOURCE=1',
       '_BSD_SOURCE=1',
       '_POSIX_C_SOURCE=199506',
       '_XOPEN_SOURCE=600',
@@ -104,6 +106,10 @@
           ],
           'sources': [],
           'link_flags': [],
+          # X86-32 IRT needs to be callable with an under-aligned stack so we
+          # disable SSE instructions, which can fault on misaligned addresses:
+          # see https://code.google.com/p/nativeclient/issues/detail?id=3935
+          'irt_flags_x86_32': '-Wt,-mattr=-sse',
         },
       },
     }],
@@ -222,7 +228,6 @@
                  'outputs': ['>(out_newlib64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'newlib_nexe',
@@ -264,7 +269,6 @@
                  'outputs': ['>(out_newlib64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'newlib_nlib',
@@ -307,7 +311,6 @@
                  'outputs': ['>(out_newlib64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'newlib_nexe_pnacl',
@@ -351,7 +354,6 @@
                  'outputs': ['>(out_newlib64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'newlib_nlib_pnacl',
@@ -393,7 +395,6 @@
                  'outputs': ['>(out_newlib32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
                    '--build', 'newlib_nexe',
@@ -435,7 +436,6 @@
                  'outputs': ['>(out_newlib32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
                    '--build', 'newlib_nlib',
@@ -478,17 +478,17 @@
                  'outputs': ['>(out_newlib32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
-                   '--build', 'newlib_nexe',
+                   '--build', 'newlib_nexe_pnacl',
                    '--name', '>(out_newlib32)',
                    '--objdir', '>(objdir_newlib32)',
                    '--include-dirs=>(tc_include_dir_newlib) ^(include_dirs) >(_include_dirs)',
-                   '--compile_flags=-m32 ^(gcc_irt_compile_flags) ^(gcc_compile_flags) >(_gcc_compile_flags) ^(compile_flags) >(_compile_flags)',
+                   '--compile_flags=--target=i686-unknown-nacl -stdlib=libstdc++ ^(compile_flags) >(_compile_flags) -gline-tables-only ^(pnacl_compile_flags) >(_pnacl_compile_flags)',
                    '--gomadir', '<(gomadir)',
                    '--defines=^(defines) >(_defines)',
-                   '--link_flags=-m32 -B>(tc_lib_dir_irt32) ^(gcc_irt_link_flags) ^(link_flags) >(_link_flags)',
+
+                   '--link_flags=--target=i686-unknown-nacl -stdlib=libstdc++ -arch x86-32 --pnacl-allow-translate --pnacl-allow-native >(irt_flags_x86_32) -B>(tc_lib_dir_irt32) ^(pnacl_irt_link_flags) ^(link_flags) >(_link_flags)',
                    '--source-list=^(source_list_newlib32)',
                    '--tls-edit=<(PRODUCT_DIR)/tls_edit<(EXECUTABLE_SUFFIX)',
                    '--irt-layout',
@@ -522,17 +522,16 @@
                  'outputs': ['>(out_newlib32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
-                   '--build', 'newlib_nlib',
+                   '--build', 'newlib_nlib_pnacl',
                    '--name', '>(out_newlib32)',
                    '--objdir', '>(objdir_newlib32)',
                    '--include-dirs=>(tc_include_dir_newlib) ^(include_dirs) >(_include_dirs)',
-                   '--compile_flags=-m32 ^(gcc_irt_compile_flags) ^(gcc_compile_flags) >(_gcc_compile_flags) ^(compile_flags) >(_compile_flags)',
+                   '--compile_flags=--target=i686-unknown-nacl -stdlib=libstdc++ >(irt_flags_x86_32) ^(compile_flags) >(_compile_flags) -gline-tables-only ^(pnacl_compile_flags) >(_pnacl_compile_flags)',
                    '--gomadir', '<(gomadir)',
                    '--defines=^(defines) >(_defines)',
-                   '--link_flags=-m32 -B>(tc_lib_dir_irt32) ^(gcc_irt_link_flags) ^(link_flags) >(_link_flags)',
+                   '--link_flags=--target=i686-unknown-nacl -stdlib=libstdc++ -B>(tc_lib_dir_irt32) ^(pnacl_irt_link_flags) ^(link_flags) >(_link_flags)',
                    '--source-list=^(source_list_newlib32)',
                  ],
                },
@@ -570,7 +569,6 @@
                 'outputs': ['>(out_newlib_arm)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'arm',
                   '--build', 'newlib_nexe',
@@ -612,7 +610,6 @@
                 'outputs': ['>(out_newlib_arm)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'arm',
                   '--build', 'newlib_nlib',
@@ -653,7 +650,6 @@
                 'outputs': ['>(out_bionic_arm)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'arm',
                   '--build', 'bionic_nlib',
@@ -696,7 +692,6 @@
                 'outputs': ['>(out_newlib_arm)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'arm',
                   '--build', 'newlib_nexe',
@@ -740,7 +735,6 @@
                 'outputs': ['>(out_newlib_arm)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'arm',
                   '--build', 'newlib_nlib',
@@ -788,7 +782,6 @@
                 'outputs': ['>(out_newlib_mips)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'mips',
                   '--build', 'newlib_nexe',
@@ -830,7 +823,6 @@
                 'outputs': ['>(out_newlib_mips)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'mips',
                   '--build', 'newlib_nlib',
@@ -873,7 +865,6 @@
                 'outputs': ['>(out_newlib_mips)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'mips',
                   '--build', 'newlib_nexe',
@@ -917,7 +908,6 @@
                 'outputs': ['>(out_newlib_mips)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'mips',
                   '--build', 'newlib_nlib',
@@ -965,7 +955,6 @@
                  'outputs': ['>(out_glibc64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'glibc_nexe',
@@ -1007,7 +996,6 @@
                  'outputs': ['>(out_glibc32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
                    '--build', 'glibc_nexe',
@@ -1049,7 +1037,6 @@
                  'outputs': ['>(out_glibc64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'glibc_nlib',
@@ -1091,7 +1078,6 @@
                  'outputs': ['>(out_glibc32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
                    '--build', 'glibc_nlib',
@@ -1134,7 +1120,6 @@
                  'action': [
                    '<@(common_args)',
                    '>@(extra_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '--arch', 'x86-64',
                    '--build', 'glibc_nso',
                    '--name', '>(out_glibc64)',
@@ -1176,7 +1161,6 @@
                  'action': [
                    '<@(common_args)',
                    '>@(extra_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '--arch', 'x86-32',
                    '--build', 'glibc_nso',
                    '--name', '>(out_glibc32)',
@@ -1285,7 +1269,6 @@
              'outputs': ['>(out_pnacl_newlib)'],
              'action': [
                '<@(common_args)',
-               '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                '>@(extra_args)',
                '--arch', 'pnacl',
                '--build', 'newlib_pexe',
@@ -1316,7 +1299,6 @@
                'outputs': [ '>(out_pnacl_newlib_x86_32_nexe)' ],
                'action' : [
                  '<@(common_args)',
-                 '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                  '--arch', 'x86-32',
                  '--build', 'newlib_translate',
                  '--name', '>(out_pnacl_newlib_x86_32_nexe)',
@@ -1339,7 +1321,6 @@
                'outputs': [ '>(out_pnacl_newlib_x86_32_nonsfi_nexe)' ],
                'action' : [
                  '<@(common_args)',
-                 '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                  '--arch', 'x86-32-nonsfi',
                  '--build', 'newlib_translate',
                  '--name', '>(out_pnacl_newlib_x86_32_nonsfi_nexe)',
@@ -1362,7 +1343,6 @@
                'outputs': [ '>(out_pnacl_newlib_x86_64_nexe)' ],
                'action' : [
                  '<@(common_args)',
-                 '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                  '--arch', 'x86-64',
                  '--build', 'newlib_translate',
                  '--name', '>(out_pnacl_newlib_x86_64_nexe)',
@@ -1385,7 +1365,6 @@
                'outputs': [ '>(out_pnacl_newlib_arm_nexe)' ],
                'action' : [
                  '<@(common_args)',
-                 '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                  '--arch', 'arm',
                  '--build', 'newlib_translate',
                  '--name', '>(out_pnacl_newlib_arm_nexe)',
@@ -1408,7 +1387,6 @@
                'outputs': [ '>(out_pnacl_newlib_mips_nexe)' ],
                'action' : [
                  '<@(common_args)',
-                 '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                  '--arch', 'mips',
                  '--build', 'newlib_translate',
                  '--name', '>(out_pnacl_newlib_mips_nexe)',
@@ -1446,7 +1424,6 @@
              'outputs': ['>(out_pnacl_newlib)'],
              'action': [
                '<@(common_args)',
-               '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                '>@(extra_args)',
                '--arch', 'pnacl',
                '--build', 'newlib_plib',
@@ -1495,7 +1472,6 @@
                 'outputs': ['>(out_pnacl_newlib_arm)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'arm',
                   '--build', 'newlib_nlib_pnacl',
@@ -1543,7 +1519,6 @@
                  'outputs': ['>(out_pnacl_newlib_x86_64)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-64',
                    '--build', 'newlib_nlib_pnacl',
@@ -1586,7 +1561,6 @@
                  'outputs': ['>(out_pnacl_newlib_x86_32)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32',
                    '--build', 'newlib_nlib_pnacl',
@@ -1633,7 +1607,6 @@
                  'outputs': ['>(out_pnacl_newlib_x86_32_nonsfi)'],
                  'action': [
                    '<@(common_args)',
-                   '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                    '>@(extra_args)',
                    '--arch', 'x86-32-nonsfi',
                    '--build', 'newlib_nlib_pnacl',
@@ -1680,7 +1653,6 @@
                 'outputs': ['>(out_pnacl_newlib_mips)'],
                 'action': [
                   '<@(common_args)',
-                  '-t', '<(SHARED_INTERMEDIATE_DIR)/sdk/',
                   '>@(extra_args)',
                   '--arch', 'mips',
                   '--build', 'newlib_nlib_pnacl',

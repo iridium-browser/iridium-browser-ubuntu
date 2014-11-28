@@ -5,17 +5,17 @@
 #include "content/public/test/render_widget_test.h"
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/stringprintf.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/render_view_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/size.h"
 #include "ui/surface/transport_dib.h"
@@ -42,7 +42,7 @@ void RenderWidgetTest::TestOnResize() {
   resize_params.screen_info = blink::WebScreenInfo();
   resize_params.new_size = gfx::Size();
   resize_params.physical_backing_size = gfx::Size();
-  resize_params.overdraw_bottom_height = 0.f;
+  resize_params.top_controls_layout_height = 0.f;
   resize_params.resizer_rect = gfx::Rect();
   resize_params.is_fullscreen = false;
   widget->OnResize(resize_params);

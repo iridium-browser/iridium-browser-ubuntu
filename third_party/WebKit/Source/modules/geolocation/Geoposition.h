@@ -34,6 +34,7 @@
 namespace blink {
 
 class Geoposition FINAL : public GarbageCollected<Geoposition>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static Geoposition* create(Coordinates* coordinates, DOMTimeStamp timestamp)
     {
@@ -54,7 +55,6 @@ private:
         , m_timestamp(timestamp)
     {
         ASSERT(m_coordinates);
-        ScriptWrappable::init(this);
     }
 
     Member<Coordinates> m_coordinates;

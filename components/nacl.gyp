@@ -181,6 +181,7 @@
             '..',
           ],
           'dependencies': [
+            'nacl_common',
             '../content/content.gyp:content_renderer',
             '../ppapi/native_client/src/trusted/plugin/plugin.gyp:nacl_trusted_plugin',
             '../third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
@@ -245,8 +246,8 @@
               'cflags': ['-fPIE'],
               'ldflags!': [
                 # Do not pick the default ASan options from
-                # base/debug/sanitizer_options.cc to avoid a conflict with those
-                # in nacl/nacl_helper_linux.cc.
+                # build/sanitizers/sanitizer_options.cc to avoid a conflict with
+                # those in nacl/nacl_helper_linux.cc.
                 '-Wl,-u_sanitizer_options_link_helper',
               ],
               'link_settings': {
@@ -406,8 +407,12 @@
               'sources': [
                 'nacl/common/nacl_cmd_line.cc',
                 'nacl/common/nacl_cmd_line.h',
+                'nacl/common/nacl_constants.cc',
+                'nacl/common/nacl_constants.h',
                 'nacl/common/nacl_messages.cc',
                 'nacl/common/nacl_messages.h',
+                'nacl/common/nacl_renderer_messages.h',
+                'nacl/common/nacl_renderer_messages.cc',
                 'nacl/common/nacl_types.cc',
                 'nacl/common/nacl_types.h',
               ],
@@ -485,6 +490,8 @@
       'sources': [
         'nacl/common/nacl_cmd_line.cc',
         'nacl/common/nacl_cmd_line.h',
+        'nacl/common/nacl_constants.cc',
+        'nacl/common/nacl_constants.h',
         'nacl/common/nacl_host_messages.h',
         'nacl/common/nacl_host_messages.cc',
         'nacl/common/nacl_messages.cc',
@@ -492,6 +499,8 @@
         'nacl/common/nacl_nonsfi_util.cc',
         'nacl/common/nacl_nonsfi_util.h',
         'nacl/common/nacl_process_type.h',
+        'nacl/common/nacl_renderer_messages.h',
+        'nacl/common/nacl_renderer_messages.cc',
         'nacl/common/nacl_sandbox_type_mac.h',
         'nacl/common/nacl_types.cc',
         'nacl/common/nacl_types.h',

@@ -14,7 +14,7 @@ CastIPCDispatcher::CastIPCDispatcher(
     const scoped_refptr<base::MessageLoopProxy>& io_message_loop)
     : sender_(NULL),
       io_message_loop_(io_message_loop) {
-  DCHECK(io_message_loop_);
+  DCHECK(io_message_loop_.get());
   DCHECK(!global_instance_);
 }
 
@@ -102,10 +102,10 @@ void CastIPCDispatcher::OnRawEvents(
 
 void CastIPCDispatcher::OnRtt(int32 channel_id,
                               uint32 ssrc,
-                              const media::cast::RtcpRttReport& rtt_report) {
+                              base::TimeDelta rtt) {
   CastTransportSenderIPC* sender = id_map_.Lookup(channel_id);
   if (sender) {
-    sender->OnRtt(ssrc, rtt_report);
+    sender->OnRtt(ssrc, rtt);
   } else {
     DVLOG(1) << "CastIPCDispatcher::OnRtt on non-existing channel.";
   }

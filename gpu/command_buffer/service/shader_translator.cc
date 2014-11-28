@@ -34,15 +34,13 @@ class ShaderTranslatorInitializer {
 base::LazyInstance<ShaderTranslatorInitializer> g_translator_initializer =
     LAZY_INSTANCE_INITIALIZER;
 
-#if !defined(ANGLE_SH_VERSION) || ANGLE_SH_VERSION < 108
-typedef int ANGLEGetInfoType;
-#else
-typedef size_t ANGLEGetInfoType;
-#endif
-
 void GetVariableInfo(ShHandle compiler, ShShaderInfo var_type,
                      ShaderTranslator::VariableMap* var_map) {
-  ANGLEGetInfoType name_len = 0, mapped_name_len = 0;
+  if (!var_map)
+    return;
+  var_map->clear();
+
+  size_t name_len = 0, mapped_name_len = 0;
   switch (var_type) {
     case SH_ACTIVE_ATTRIBUTES:
       ShGetInfo(compiler, SH_ACTIVE_ATTRIBUTE_MAX_LENGTH, &name_len);
@@ -60,16 +58,12 @@ void GetVariableInfo(ShHandle compiler, ShShaderInfo var_type,
   scoped_ptr<char[]> name(new char[name_len]);
   scoped_ptr<char[]> mapped_name(new char[mapped_name_len]);
 
-  ANGLEGetInfoType num_vars = 0;
+  size_t num_vars = 0;
   ShGetInfo(compiler, var_type, &num_vars);
-  for (ANGLEGetInfoType i = 0; i < num_vars; ++i) {
-    ANGLEGetInfoType len = 0;
+  for (size_t i = 0; i < num_vars; ++i) {
+    size_t len = 0;
     int size = 0;
-#if (ANGLE_SH_VERSION >= 126)
     sh::GLenum type = GL_NONE;
-#else
-    ShDataType type = SH_NONE;
-#endif
     ShPrecisionType precision = SH_PRECISION_UNDEFINED;
     int static_use = 0;
 
@@ -92,19 +86,23 @@ void GetVariableInfo(ShHandle compiler, ShShaderInfo var_type,
 
 void GetNameHashingInfo(
     ShHandle compiler, ShaderTranslator::NameMap* name_map) {
-  ANGLEGetInfoType hashed_names_count = 0;
+  if (!name_map)
+    return;
+  name_map->clear();
+
+  size_t hashed_names_count = 0;
   ShGetInfo(compiler, SH_HASHED_NAMES_COUNT, &hashed_names_count);
   if (hashed_names_count == 0)
     return;
 
-  ANGLEGetInfoType name_max_len = 0, hashed_name_max_len = 0;
+  size_t name_max_len = 0, hashed_name_max_len = 0;
   ShGetInfo(compiler, SH_NAME_MAX_LENGTH, &name_max_len);
   ShGetInfo(compiler, SH_HASHED_NAME_MAX_LENGTH, &hashed_name_max_len);
 
   scoped_ptr<char[]> name(new char[name_max_len]);
   scoped_ptr<char[]> hashed_name(new char[hashed_name_max_len]);
 
-  for (ANGLEGetInfoType i = 0; i < hashed_names_count; ++i) {
+  for (size_t i = 0; i < hashed_names_count; ++i) {
     ShGetNameHashingEntry(compiler, i, name.get(), hashed_name.get());
     (*name_map)[hashed_name.get()] = name.get();
   }
@@ -128,22 +126,14 @@ ShaderTranslator::ShaderTranslator()
 }
 
 bool ShaderTranslator::Init(
-#if (ANGLE_SH_VERSION >= 126)
     GLenum shader_type,
-#else
-    ShShaderType shader_type,
-#endif
     ShShaderSpec shader_spec,
     const ShBuiltInResources* resources,
     ShaderTranslatorInterface::GlslImplementationType glsl_implementation_type,
     ShCompileOptions driver_bug_workarounds) {
   // Make sure Init is called only once.
   DCHECK(compiler_ == NULL);
-#if (ANGLE_SH_VERSION >= 126)
   DCHECK(shader_type == GL_FRAGMENT_SHADER || shader_type == GL_VERTEX_SHADER);
-#else
-  DCHECK(shader_type == SH_FRAGMENT_SHADER || shader_type == SH_VERTEX_SHADER);
-#endif
   DCHECK(shader_spec == SH_GLES2_SPEC || shader_spec == SH_WEBGL_SPEC);
   DCHECK(resources != NULL);
 
@@ -174,41 +164,53 @@ int ShaderTranslator::GetCompileOptions() const {
   return compile_options;
 }
 
-bool ShaderTranslator::Translate(const char* shader) {
+bool ShaderTranslator::Translate(const std::string& shader_source,
+                                 std::string* info_log,
+                                 std::string* translated_source,
+                                 VariableMap* attrib_map,
+                                 VariableMap* uniform_map,
+                                 VariableMap* varying_map,
+                                 NameMap* name_map) const {
   // Make sure this instance is initialized.
   DCHECK(compiler_ != NULL);
-  DCHECK(shader != NULL);
-  ClearResults();
 
   bool success = false;
   {
     TRACE_EVENT0("gpu", "ShCompile");
-    success = !!ShCompile(compiler_, &shader, 1, GetCompileOptions());
+    const char* const shader_strings[] = { shader_source.c_str() };
+    success = !!ShCompile(
+        compiler_, shader_strings, 1, GetCompileOptions());
   }
   if (success) {
-    // Get translated shader.
-    ANGLEGetInfoType obj_code_len = 0;
-    ShGetInfo(compiler_, SH_OBJECT_CODE_LENGTH, &obj_code_len);
-    if (obj_code_len > 1) {
-      translated_shader_.reset(new char[obj_code_len]);
-      ShGetObjectCode(compiler_, translated_shader_.get());
+    if (translated_source) {
+      translated_source->clear();
+      // Get translated shader.
+      size_t obj_code_len = 0;
+      ShGetInfo(compiler_, SH_OBJECT_CODE_LENGTH, &obj_code_len);
+      if (obj_code_len > 1) {
+        scoped_ptr<char[]> buffer(new char[obj_code_len]);
+        ShGetObjectCode(compiler_, buffer.get());
+        *translated_source = std::string(buffer.get(), obj_code_len - 1);
+      }
     }
-    // Get info for attribs and uniforms.
-    GetVariableInfo(compiler_, SH_ACTIVE_ATTRIBUTES, &attrib_map_);
-    GetVariableInfo(compiler_, SH_ACTIVE_UNIFORMS, &uniform_map_);
-    GetVariableInfo(compiler_, SH_VARYINGS, &varying_map_);
+    // Get info for attribs, uniforms, and varyings.
+    GetVariableInfo(compiler_, SH_ACTIVE_ATTRIBUTES, attrib_map);
+    GetVariableInfo(compiler_, SH_ACTIVE_UNIFORMS, uniform_map);
+    GetVariableInfo(compiler_, SH_VARYINGS, varying_map);
     // Get info for name hashing.
-    GetNameHashingInfo(compiler_, &name_map_);
+    GetNameHashingInfo(compiler_, name_map);
   }
 
   // Get info log.
-  ANGLEGetInfoType info_log_len = 0;
-  ShGetInfo(compiler_, SH_INFO_LOG_LENGTH, &info_log_len);
-  if (info_log_len > 1) {
-    info_log_.reset(new char[info_log_len]);
-    ShGetInfoLog(compiler_, info_log_.get());
-  } else {
-    info_log_.reset();
+  if (info_log) {
+    info_log->clear();
+    size_t info_log_len = 0;
+    ShGetInfo(compiler_, SH_INFO_LOG_LENGTH, &info_log_len);
+    if (info_log_len > 1) {
+      scoped_ptr<char[]> buffer(new char[info_log_len]);
+      ShGetInfoLog(compiler_, buffer.get());
+      *info_log = std::string(buffer.get(), info_log_len - 1);
+    }
   }
 
   return success;
@@ -216,10 +218,9 @@ bool ShaderTranslator::Translate(const char* shader) {
 
 std::string ShaderTranslator::GetStringForOptionsThatWouldAffectCompilation()
     const {
-#if ANGLE_SH_VERSION >= 124
   DCHECK(compiler_ != NULL);
 
-  ANGLEGetInfoType resource_len = 0;
+  size_t resource_len = 0;
   ShGetInfo(compiler_, SH_RESOURCES_STRING_LENGTH, &resource_len);
   DCHECK(resource_len > 1);
   scoped_ptr<char[]> resource_str(new char[resource_len]);
@@ -229,110 +230,6 @@ std::string ShaderTranslator::GetStringForOptionsThatWouldAffectCompilation()
   return std::string(":CompileOptions:" +
          base::IntToString(GetCompileOptions())) +
          std::string(resource_str.get());
-#else
-#if ANGLE_SH_VERSION >= 123
-  const size_t kNumIntFields = 21;
-#elif ANGLE_SH_VERSION >= 122
-  const size_t kNumIntFields = 20;
-#else
-  const size_t kNumIntFields = 16;
-#endif
-  const size_t kNumEnumFields = 1;
-  const size_t kNumFunctionPointerFields = 1;
-  struct MustMatchShBuiltInResource {
-    typedef khronos_uint64_t (*FunctionPointer)(const char*, size_t);
-    enum Enum {
-      kFirst,
-    };
-    int int_fields[kNumIntFields];
-    FunctionPointer pointer_fields[kNumFunctionPointerFields];
-    Enum enum_fields[kNumEnumFields];
-  };
-  // If this assert fails most likely that means something below needs updating.
-  COMPILE_ASSERT(
-      sizeof(ShBuiltInResources) == sizeof(MustMatchShBuiltInResource),
-      Fields_Have_Changed_In_ShBuiltInResource_So_Update_Below);
-
-  return std::string(
-      ":CompileOptions:" +
-      base::IntToString(GetCompileOptions()) +
-      ":MaxVertexAttribs:" +
-      base::IntToString(compiler_options_.MaxVertexAttribs) +
-      ":MaxVertexUniformVectors:" +
-      base::IntToString(compiler_options_.MaxVertexUniformVectors) +
-      ":MaxVaryingVectors:" +
-      base::IntToString(compiler_options_.MaxVaryingVectors) +
-      ":MaxVertexTextureImageUnits:" +
-      base::IntToString(compiler_options_.MaxVertexTextureImageUnits) +
-      ":MaxCombinedTextureImageUnits:" +
-      base::IntToString(compiler_options_.MaxCombinedTextureImageUnits) +
-      ":MaxTextureImageUnits:" +
-      base::IntToString(compiler_options_.MaxTextureImageUnits) +
-      ":MaxFragmentUniformVectors:" +
-      base::IntToString(compiler_options_.MaxFragmentUniformVectors) +
-      ":MaxDrawBuffers:" +
-      base::IntToString(compiler_options_.MaxDrawBuffers) +
-      ":OES_standard_derivatives:" +
-      base::IntToString(compiler_options_.OES_standard_derivatives) +
-      ":OES_EGL_image_external:" +
-      base::IntToString(compiler_options_.OES_EGL_image_external) +
-      ":ARB_texture_rectangle:" +
-      base::IntToString(compiler_options_.ARB_texture_rectangle) +
-      ":EXT_draw_buffers:" +
-      base::IntToString(compiler_options_.EXT_draw_buffers) +
-      ":FragmentPrecisionHigh:" +
-      base::IntToString(compiler_options_.FragmentPrecisionHigh) +
-      ":MaxExpressionComplexity:" +
-      base::IntToString(compiler_options_.MaxExpressionComplexity) +
-      ":MaxCallStackDepth:" +
-      base::IntToString(compiler_options_.MaxCallStackDepth) +
-      ":EXT_frag_depth:" +
-#if ANGLE_SH_VERSION >= 122
-      base::IntToString(compiler_options_.EXT_frag_depth) +
-#if ANGLE_SH_VERSION >= 123
-      ":EXT_shader_texture_lod:" +
-      base::IntToString(compiler_options_.EXT_shader_texture_lod) +
-#endif
-      ":MaxVertexOutputVectors:" +
-      base::IntToString(compiler_options_.MaxVertexOutputVectors) +
-      ":MaxFragmentInputVectors:" +
-      base::IntToString(compiler_options_.MaxFragmentInputVectors) +
-      ":MinProgramTexelOffset:" +
-      base::IntToString(compiler_options_.MinProgramTexelOffset) +
-      ":MaxProgramTexelOffset:" +
-      base::IntToString(compiler_options_.MaxProgramTexelOffset));
-#else   // ANGLE_SH_VERSION < 122
-      base::IntToString(compiler_options_.EXT_frag_depth));
-#endif
-#endif
-}
-
-const char* ShaderTranslator::translated_shader() const {
-  return translated_shader_.get();
-}
-
-const char* ShaderTranslator::info_log() const {
-  return info_log_.get();
-}
-
-const ShaderTranslatorInterface::VariableMap&
-ShaderTranslator::attrib_map() const {
-  return attrib_map_;
-}
-
-const ShaderTranslatorInterface::VariableMap&
-ShaderTranslator::uniform_map() const {
-  return uniform_map_;
-}
-
-const ShaderTranslatorInterface::VariableMap&
-ShaderTranslator::varying_map() const {
-  return varying_map_;
-}
-
-const ShaderTranslatorInterface::NameMap&
-ShaderTranslator::name_map() const {
-  return name_map_;
 }
 
 void ShaderTranslator::AddDestructionObserver(
@@ -352,15 +249,6 @@ ShaderTranslator::~ShaderTranslator() {
 
   if (compiler_ != NULL)
     ShDestruct(compiler_);
-}
-
-void ShaderTranslator::ClearResults() {
-  translated_shader_.reset();
-  info_log_.reset();
-  attrib_map_.clear();
-  uniform_map_.clear();
-  varying_map_.clear();
-  name_map_.clear();
 }
 
 }  // namespace gles2

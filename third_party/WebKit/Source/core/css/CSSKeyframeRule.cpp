@@ -27,9 +27,9 @@
 #include "core/css/CSSKeyframeRule.h"
 
 #include "core/css/CSSKeyframesRule.h"
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/PropertySetCSSStyleDeclaration.h"
 #include "core/css/StylePropertySet.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/frame/UseCounter.h"
 #include "wtf/text/StringBuilder.h"
 
@@ -52,7 +52,7 @@ String StyleKeyframe::keyText() const
         for (unsigned i = 0; i < m_keys->size(); ++i) {
             if (i)
                 keyText.append(',');
-            keyText.append(String::number(m_keys->at(i) * 100));
+            keyText.appendNumber(m_keys->at(i) * 100);
             keyText.append('%');
         }
         m_keyText = keyText.toString();
@@ -77,7 +77,7 @@ const Vector<double>& StyleKeyframe::keys() const
         // Keys can only be cleared by setting the key text from JavaScript
         // and this can never be null.
         ASSERT(!m_keyText.isNull());
-        m_keys = BisonCSSParser(strictCSSParserContext()).parseKeyframeKeyList(m_keyText);
+        m_keys = CSSParser::parseKeyframeKeyList(m_keyText);
     }
     // If an invalid key string was set, m_keys may be empty.
     ASSERT(m_keys);

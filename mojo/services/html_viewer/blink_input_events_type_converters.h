@@ -7,7 +7,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "mojo/services/public/interfaces/input_events/input_events.mojom.h"
-#include "ui/events/event.h"
 
 namespace blink {
 class WebInputEvent;
@@ -15,10 +14,9 @@ class WebInputEvent;
 
 namespace mojo {
 
-template<>
-class TypeConverter<EventPtr, scoped_ptr<blink::WebInputEvent> > {
- public:
-  static scoped_ptr<blink::WebInputEvent> ConvertTo(const EventPtr& input);
+template <>
+struct TypeConverter<scoped_ptr<blink::WebInputEvent>, EventPtr> {
+  static scoped_ptr<blink::WebInputEvent> Convert(const EventPtr& input);
 };
 
 }  // namespace mojo

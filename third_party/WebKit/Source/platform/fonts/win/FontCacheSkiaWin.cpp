@@ -37,22 +37,22 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/FontFaceCreationParams.h"
+#include "platform/fonts/FontPlatformData.h"
 #include "platform/fonts/SimpleFontData.h"
-#include "platform/fonts/harfbuzz/FontPlatformDataHarfbuzz.h"
 #include "platform/fonts/win/FontFallbackWin.h"
 
 namespace blink {
 
-HashMap<String, SkTypeface*>* FontCache::s_sideloadedFonts = 0;
+HashMap<String, RefPtr<SkTypeface> >* FontCache::s_sideloadedFonts = 0;
 
 // static
 void FontCache::addSideloadedFontForTesting(SkTypeface* typeface)
 {
     if (!s_sideloadedFonts)
-        s_sideloadedFonts = new HashMap<String, SkTypeface*>;
+        s_sideloadedFonts = new HashMap<String, RefPtr<SkTypeface> >;
     SkString name;
     typeface->getFamilyName(&name);
-    s_sideloadedFonts->set(name.c_str(), typeface);
+    s_sideloadedFonts->set(name.c_str(), adoptRef(typeface));
 }
 
 FontCache::FontCache()
@@ -76,7 +76,9 @@ FontCache::FontCache()
 
 // Given the desired base font, this will create a SimpleFontData for a specific
 // font that can be used to render the given range of characters.
-PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(const FontDescription& fontDescription, UChar32 character, const SimpleFontData*)
+PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(
+    const FontDescription& fontDescription, UChar32 character,
+    const SimpleFontData* originalFontData)
 {
     // First try the specified font with standard style & weight.
     if (fontDescription.style() == FontStyleItalic
@@ -161,6 +163,15 @@ PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(const FontDescrip
         data = getFontPlatformData(fontDescription, createByFamily);
     }
 
+    // For font fallback we want to match the subpixel behavior of the original
+    // font. Mixing subpixel and non-subpixel in the same text run looks really
+    // odd and causes problems with preferred width calculations.
+    if (data && originalFontData) {
+        const FontPlatformData& platformData = originalFontData->platformData();
+        data->setMinSizeForAntiAlias(platformData.minSizeForAntiAlias());
+        data->setMinSizeForSubpixel(platformData.minSizeForSubpixel());
+    }
+
     // When i-th font (0-base) in |panUniFonts| contains a character and
     // we get out of the loop, |i| will be |i + 1|. That is, if only the
     // last font in the array covers the character, |i| will be numFonts.
@@ -204,21 +215,119 @@ static bool typefacesMatchesFamily(const SkTypeface* tf, const AtomicString& fam
     return matchesRequestedFamily;
 }
 
+static bool typefacesHasWeightSuffix(const AtomicString& family,
+    AtomicString& adjustedName, FontWeight& variantWeight)
+{
+    struct FamilyWeightSuffix {
+        const wchar_t* suffix;
+        size_t length;
+        FontWeight weight;
+    };
+    // Mapping from suffix to weight from the DirectWrite documentation.
+    // http://msdn.microsoft.com/en-us/library/windows/desktop/dd368082.aspx
+    const static FamilyWeightSuffix variantForSuffix[] = {
+        { L" thin", 5,  FontWeight100 },
+        { L" extralight", 11,  FontWeight200 },
+        { L" ultralight", 11,  FontWeight200 },
+        { L" light", 6,  FontWeight300 },
+        { L" medium", 7,  FontWeight500 },
+        { L" demibold", 9,  FontWeight600 },
+        { L" semibold", 9,  FontWeight600 },
+        { L" extrabold", 10,  FontWeight800 },
+        { L" ultrabold", 10,  FontWeight800 },
+        { L" black", 6,  FontWeight900 },
+        { L" heavy", 6,  FontWeight900 }
+    };
+    size_t numVariants = WTF_ARRAY_LENGTH(variantForSuffix);
+    bool caseSensitive = false;
+    for (size_t i = 0; i < numVariants; i++) {
+        const FamilyWeightSuffix& entry = variantForSuffix[i];
+        if (family.endsWith(entry.suffix, caseSensitive)) {
+            String familyName = family.string();
+            familyName.truncate(family.length() - entry.length);
+            adjustedName = AtomicString(familyName);
+            variantWeight = entry.weight;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool typefacesHasStretchSuffix(const AtomicString& family,
+    AtomicString& adjustedName, FontStretch& variantStretch)
+{
+    struct FamilyStretchSuffix {
+        const wchar_t* suffix;
+        size_t length;
+        FontStretch stretch;
+    };
+    // Mapping from suffix to stretch value from the DirectWrite documentation.
+    // http://msdn.microsoft.com/en-us/library/windows/desktop/dd368078.aspx
+    // Also includes Narrow as a synonym for Condensed to to support Arial
+    // Narrow and other fonts following the same naming scheme.
+    const static FamilyStretchSuffix variantForSuffix[] = {
+        { L" ultracondensed", 15,  FontStretchUltraCondensed },
+        { L" extracondensed", 15,  FontStretchExtraCondensed },
+        { L" condensed", 10,  FontStretchCondensed },
+        { L" narrow", 7,  FontStretchCondensed },
+        { L" semicondensed", 14,  FontStretchSemiCondensed },
+        { L" semiexpanded", 13,  FontStretchSemiExpanded },
+        { L" expanded", 9,  FontStretchExpanded },
+        { L" extraexpanded", 14,  FontStretchExtraExpanded },
+        { L" ultraexpanded", 14,  FontStretchUltraExpanded }
+    };
+    size_t numVariants = WTF_ARRAY_LENGTH(variantForSuffix);
+    bool caseSensitive = false;
+    for (size_t i = 0; i < numVariants; i++) {
+        const FamilyStretchSuffix& entry = variantForSuffix[i];
+        if (family.endsWith(entry.suffix, caseSensitive)) {
+            String familyName = family.string();
+            familyName.truncate(family.length() - entry.length);
+            adjustedName = AtomicString(familyName);
+            variantStretch = entry.stretch;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const FontFaceCreationParams& creationParams, float fontSize)
 {
     ASSERT(creationParams.creationType() == CreateFontByFamily);
+
     CString name;
     RefPtr<SkTypeface> tf = createTypeface(fontDescription, creationParams, name);
-    if (!tf)
-        return 0;
-
     // Windows will always give us a valid pointer here, even if the face name
     // is non-existent. We have to double-check and see if the family name was
     // really used.
-    // FIXME: Do we need to use predefined fonts "guaranteed" to exist
-    // when we're running in layout-test mode?
-    if (!typefacesMatchesFamily(tf.get(), creationParams.family())) {
-        return 0;
+    if (!tf || !typefacesMatchesFamily(tf.get(), creationParams.family())) {
+        AtomicString adjustedName;
+        FontWeight variantWeight;
+        FontStretch variantStretch;
+
+        if (typefacesHasWeightSuffix(creationParams.family(), adjustedName,
+            variantWeight)) {
+            FontFaceCreationParams adjustedParams(adjustedName);
+            FontDescription adjustedFontDescription = fontDescription;
+            adjustedFontDescription.setWeight(variantWeight);
+            tf = createTypeface(adjustedFontDescription, adjustedParams, name);
+            if (!tf || !typefacesMatchesFamily(tf.get(), adjustedName))
+                return 0;
+
+        } else if (typefacesHasStretchSuffix(creationParams.family(),
+            adjustedName, variantStretch)) {
+            FontFaceCreationParams adjustedParams(adjustedName);
+            FontDescription adjustedFontDescription = fontDescription;
+            adjustedFontDescription.setStretch(variantStretch);
+            tf = createTypeface(adjustedFontDescription, adjustedParams, name);
+            if (!tf || !typefacesMatchesFamily(tf.get(), adjustedName))
+                return 0;
+
+        } else {
+            return 0;
+        }
     }
 
     FontPlatformData* result = new FontPlatformData(tf,

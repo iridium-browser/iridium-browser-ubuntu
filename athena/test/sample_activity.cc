@@ -4,8 +4,10 @@
 
 #include "athena/test/sample_activity.h"
 
+#include "ui/gfx/image/image_skia.h"
 #include "ui/views/background.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 namespace athena {
 namespace test {
@@ -43,6 +45,15 @@ Activity::ActivityMediaState SampleActivity::GetMediaState() {
   return Activity::ACTIVITY_MEDIA_STATE_NONE;
 }
 
+aura::Window* SampleActivity::GetWindow() {
+  return !contents_view_ ? NULL
+                         : contents_view_->GetWidget()->GetNativeWindow();
+}
+
+content::WebContents* SampleActivity::GetWebContents() {
+  return NULL;
+}
+
 void SampleActivity::Init() {
 }
 
@@ -52,6 +63,10 @@ SkColor SampleActivity::GetRepresentativeColor() const {
 
 base::string16 SampleActivity::GetTitle() const {
   return title_;
+}
+
+gfx::ImageSkia SampleActivity::GetIcon() const {
+  return gfx::ImageSkia();
 }
 
 bool SampleActivity::UsesFrame() const {
@@ -67,11 +82,18 @@ views::View* SampleActivity::GetContentsView() {
   return contents_view_;
 }
 
-void SampleActivity::CreateOverviewModeImage() {
+views::Widget* SampleActivity::CreateWidget() {
+  return NULL;
 }
 
 gfx::ImageSkia SampleActivity::GetOverviewModeImage() {
   return gfx::ImageSkia();
+}
+
+void SampleActivity::PrepareContentsForOverview() {
+}
+
+void SampleActivity::ResetContentsView() {
 }
 
 }  // namespace test

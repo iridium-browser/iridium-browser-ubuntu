@@ -118,6 +118,108 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
     </array>''')
     self.assertEquals(output.strip(), expected_output.strip())
 
+  def testRecommendedPolicy(self):
+    # Tests a policy group with a single policy of type 'main'.
+    grd = self.PrepareTest('''
+      {
+        'policy_definitions': [
+          {
+            'name': 'MainGroup',
+            'type': 'group',
+            'policies': [{
+              'name': 'MainPolicy',
+              'type': 'main',
+              'desc': '',
+              'caption': '',
+              'features': {
+                'can_be_recommended' : True
+              },
+              'supported_on': ['chrome.mac:8-'],
+            }],
+            'desc': '',
+            'caption': '',
+          },
+        ],
+        'placeholders': [],
+        'messages': {}
+      }''')
+    output = self.GetOutput(
+        grd,
+        'fr',
+        {'_chromium' : '1', 'mac_bundle_id': 'com.example.Test'},
+        'plist',
+        'en')
+    expected_output = self._GetExpectedOutputs(
+        'Chromium', 'com.example.Test', '''<array>
+      <dict>
+        <key>pfm_name</key>
+        <string>MainPolicy</string>
+        <key>pfm_description</key>
+        <string/>
+        <key>pfm_title</key>
+        <string/>
+        <key>pfm_targets</key>
+        <array>
+          <string>user</string>
+          <string>user-managed</string>
+        </array>
+        <key>pfm_type</key>
+        <string>boolean</string>
+      </dict>
+    </array>''')
+    self.assertEquals(output.strip(), expected_output.strip())
+
+  def testRecommendedOnlyPolicy(self):
+    # Tests a policy group with a single policy of type 'main'.
+    grd = self.PrepareTest('''
+      {
+        'policy_definitions': [
+          {
+            'name': 'MainGroup',
+            'type': 'group',
+            'policies': [{
+              'name': 'MainPolicy',
+              'type': 'main',
+              'desc': '',
+              'caption': '',
+              'features': {
+                'can_be_recommended' : True,
+                'can_be_mandatory' : False
+              },
+              'supported_on': ['chrome.mac:8-'],
+            }],
+            'desc': '',
+            'caption': '',
+          },
+        ],
+        'placeholders': [],
+        'messages': {}
+      }''')
+    output = self.GetOutput(
+        grd,
+        'fr',
+        {'_chromium' : '1', 'mac_bundle_id': 'com.example.Test'},
+        'plist',
+        'en')
+    expected_output = self._GetExpectedOutputs(
+        'Chromium', 'com.example.Test', '''<array>
+      <dict>
+        <key>pfm_name</key>
+        <string>MainPolicy</string>
+        <key>pfm_description</key>
+        <string/>
+        <key>pfm_title</key>
+        <string/>
+        <key>pfm_targets</key>
+        <array>
+          <string>user</string>
+        </array>
+        <key>pfm_type</key>
+        <string>boolean</string>
+      </dict>
+    </array>''')
+    self.assertEquals(output.strip(), expected_output.strip())
+
   def testStringPolicy(self):
     # Tests a policy group with a single policy of type 'string'.
     grd = self.PrepareTest('''

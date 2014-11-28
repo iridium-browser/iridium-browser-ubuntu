@@ -11,7 +11,7 @@
 #include <set>
 #include <vector>
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
@@ -20,9 +20,9 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "grit/ui_strings.h"
 #import "ui/base/cocoa/nib_loading.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/strings/grit/ui_strings.h"
 
 namespace {
 
@@ -52,7 +52,7 @@ class SelectFileDialogImpl;
       parentWindow:(NSWindow*)parentWindow;
 
 // NSSavePanel delegate method
-- (BOOL)panel:(id)sender shouldShowFilename:(NSString *)filename;
+- (BOOL)panel:(id)sender shouldEnableURL:(NSURL *)url;
 
 @end
 
@@ -161,8 +161,9 @@ void SelectFileDialogImpl::FileWasSelected(
 
 bool SelectFileDialogImpl::ShouldEnableFilename(NSSavePanel* dialog,
                                                 NSString* filename) {
-  // If this is a single open file dialog, disable selecting packages.
-  if (type_map_[dialog] != SELECT_OPEN_FILE)
+  // If this is a single/multiple open file dialog, disable selecting packages.
+  if (type_map_[dialog] != SELECT_OPEN_FILE &&
+      type_map_[dialog] != SELECT_OPEN_MULTI_FILE)
     return true;
 
   return ![[NSWorkspace sharedWorkspace] isFilePackageAtPath:filename];
@@ -425,8 +426,10 @@ bool SelectFileDialogImpl::HasMultipleFileTypeChoicesImpl() {
   [panel release];
 }
 
-- (BOOL)panel:(id)sender shouldShowFilename:(NSString *)filename {
-  return selectFileDialogImpl_->ShouldEnableFilename(sender, filename);
+- (BOOL)panel:(id)sender shouldEnableURL:(NSURL *)url {
+  if (![url isFileURL])
+    return NO;
+  return selectFileDialogImpl_->ShouldEnableFilename(sender, [url path]);
 }
 
 @end

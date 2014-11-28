@@ -33,7 +33,7 @@ class WakeThread : public Thread {
 #ifndef CARBON_DEPRECATED
 
 // Test that MacCFSocketServer::Wait works as expected.
-TEST(MacCFSocketServerTest, TestWait) {
+TEST(MacCFSocketServerTest, DISABLED_TestWait) {
   MacCFSocketServer server;
   uint32 start = Time();
   server.Wait(1000, true);
@@ -41,7 +41,7 @@ TEST(MacCFSocketServerTest, TestWait) {
 }
 
 // Test that MacCFSocketServer::Wakeup works as expected.
-TEST(MacCFSocketServerTest, TestWakeup) {
+TEST(MacCFSocketServerTest, DISABLED_TestWakeup) {
   MacCFSocketServer server;
   WakeThread thread(&server);
   uint32 start = Time();
@@ -51,7 +51,7 @@ TEST(MacCFSocketServerTest, TestWakeup) {
 }
 
 // Test that MacCarbonSocketServer::Wait works as expected.
-TEST(MacCarbonSocketServerTest, TestWait) {
+TEST(MacCarbonSocketServerTest, DISABLED_TestWait) {
   MacCarbonSocketServer server;
   uint32 start = Time();
   server.Wait(1000, true);
@@ -59,7 +59,7 @@ TEST(MacCarbonSocketServerTest, TestWait) {
 }
 
 // Test that MacCarbonSocketServer::Wakeup works as expected.
-TEST(MacCarbonSocketServerTest, TestWakeup) {
+TEST(MacCarbonSocketServerTest, DISABLED_TestWakeup) {
   MacCarbonSocketServer server;
   WakeThread thread(&server);
   uint32 start = Time();
@@ -69,7 +69,7 @@ TEST(MacCarbonSocketServerTest, TestWakeup) {
 }
 
 // Test that MacCarbonAppSocketServer::Wait works as expected.
-TEST(MacCarbonAppSocketServerTest, TestWait) {
+TEST(MacCarbonAppSocketServerTest, DISABLED_TestWait) {
   MacCarbonAppSocketServer server;
   uint32 start = Time();
   server.Wait(1000, true);
@@ -77,7 +77,7 @@ TEST(MacCarbonAppSocketServerTest, TestWait) {
 }
 
 // Test that MacCarbonAppSocketServer::Wakeup works as expected.
-TEST(MacCarbonAppSocketServerTest, TestWakeup) {
+TEST(MacCarbonAppSocketServerTest, DISABLED_TestWakeup) {
   MacCarbonAppSocketServer server;
   WakeThread thread(&server);
   uint32 start = Time();
@@ -102,19 +102,19 @@ class MacAsyncSocketTest : public SocketTest {
   SocketServerScope scope_;
 };
 
-TEST_F(MacAsyncSocketTest, TestConnectIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectIPv4) {
   SocketTest::TestConnectIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestConnectIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectIPv6) {
   SocketTest::TestConnectIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestConnectWithDnsLookupIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectWithDnsLookupIPv4) {
   SocketTest::TestConnectWithDnsLookupIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestConnectWithDnsLookupIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectWithDnsLookupIPv6) {
   SocketTest::TestConnectWithDnsLookupIPv6();
 }
 
@@ -123,7 +123,7 @@ TEST_F(MacAsyncSocketTest, DISABLED_TestConnectFailIPv4) {
   SocketTest::TestConnectFailIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestConnectFailIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectFailIPv6) {
   SocketTest::TestConnectFailIPv6();
 }
 
@@ -136,11 +136,11 @@ TEST_F(MacAsyncSocketTest, DISABLED_TestConnectWithDnsLookupFailIPv6) {
   SocketTest::TestConnectWithDnsLookupFailIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestConnectWithClosedSocketIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectWithClosedSocketIPv4) {
   SocketTest::TestConnectWithClosedSocketIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestConnectWithClosedSocketIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestConnectWithClosedSocketIPv6) {
   SocketTest::TestConnectWithClosedSocketIPv6();
 }
 
@@ -155,51 +155,51 @@ TEST_F(MacAsyncSocketTest, DISABLED_TestServerCloseDuringConnectIPv6) {
 }
 // Flaky at the moment (0.5% failure rate).  Seems the client doesn't get
 // signalled in a timely manner...
-TEST_F(MacAsyncSocketTest, TestClientCloseDuringConnectIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestClientCloseDuringConnectIPv4) {
   SocketTest::TestClientCloseDuringConnectIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestClientCloseDuringConnectIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestClientCloseDuringConnectIPv6) {
   SocketTest::TestClientCloseDuringConnectIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestServerCloseIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestServerCloseIPv4) {
   SocketTest::TestServerCloseIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestServerCloseIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestServerCloseIPv6) {
   SocketTest::TestServerCloseIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestCloseInClosedCallbackIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestCloseInClosedCallbackIPv4) {
   SocketTest::TestCloseInClosedCallbackIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestCloseInClosedCallbackIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestCloseInClosedCallbackIPv6) {
   SocketTest::TestCloseInClosedCallbackIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestSocketServerWaitIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestSocketServerWaitIPv4) {
   SocketTest::TestSocketServerWaitIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestSocketServerWaitIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestSocketServerWaitIPv6) {
   SocketTest::TestSocketServerWaitIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestTcpIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestTcpIPv4) {
   SocketTest::TestTcpIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestTcpIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestTcpIPv6) {
   SocketTest::TestTcpIPv6();
 }
 
-TEST_F(MacAsyncSocketTest, TestSingleFlowControlCallbackIPv4) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestSingleFlowControlCallbackIPv4) {
   SocketTest::TestSingleFlowControlCallbackIPv4();
 }
 
-TEST_F(MacAsyncSocketTest, TestSingleFlowControlCallbackIPv6) {
+TEST_F(MacAsyncSocketTest, DISABLED_TestSingleFlowControlCallbackIPv6) {
   SocketTest::TestSingleFlowControlCallbackIPv6();
 }
 
@@ -226,11 +226,11 @@ class MacCarbonAppAsyncSocketTest : public MacAsyncSocketTest {
   };
 };
 
-TEST_F(MacCarbonAppAsyncSocketTest, TestSocketServerWaitIPv4) {
+TEST_F(MacCarbonAppAsyncSocketTest, DISABLED_TestSocketServerWaitIPv4) {
   SocketTest::TestSocketServerWaitIPv4();
 }
 
-TEST_F(MacCarbonAppAsyncSocketTest, TestSocketServerWaitIPv6) {
+TEST_F(MacCarbonAppAsyncSocketTest, DISABLED_TestSocketServerWaitIPv6) {
   SocketTest::TestSocketServerWaitIPv6();
 }
 #endif

@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/switches.h"
@@ -45,11 +46,15 @@ bool RendererPermissionsPolicyDelegate::CanExecuteScriptOnPage(
     return false;
   }
 
-  if (dispatcher_->IsExtensionActive(extension_misc::kWebStoreAppId)) {
+// TODO(thestig): Remove scaffolding once this file no longer builds with
+// extensions disabled.
+#if defined(ENABLE_EXTENSIONS)
+  if (dispatcher_->IsExtensionActive(extensions::kWebStoreAppId)) {
     if (error)
       *error = errors::kCannotScriptGallery;
     return false;
   }
+#endif
 
   return true;
 }

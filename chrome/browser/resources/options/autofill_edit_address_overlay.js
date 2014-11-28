@@ -10,7 +10,8 @@ cr.define('options', function() {
   /**
    * AutofillEditAddressOverlay class
    * Encapsulated handling of the 'Add Page' overlay page.
-   * @class
+   * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function AutofillEditAddressOverlay() {
     Page.call(this, 'autofillEditAddress',
@@ -206,7 +207,7 @@ cr.define('options', function() {
 
     /**
      * Sets the value of each input field according to |address|.
-     * @param {object} address The object with values to use.
+     * @param {Object} address The object with values to use.
      * @private
      */
     setInputFields_: function(address) {
@@ -233,17 +234,17 @@ cr.define('options', function() {
       var inputFields = this.getInputFields_();
       var address = [
         this.guid_,
-        inputFields.fullName || [],
-        inputFields.companyName || '',
-        inputFields.addrLines || '',
-        inputFields.dependentLocality || '',
-        inputFields.city || '',
-        inputFields.state || '',
-        inputFields.postalCode || '',
-        inputFields.sortingCode || '',
-        inputFields.country || '',
-        inputFields.phone || [],
-        inputFields.email || [],
+        inputFields['fullName'] || [],
+        inputFields['companyName'] || '',
+        inputFields['addrLines'] || '',
+        inputFields['dependentLocality'] || '',
+        inputFields['city'] || '',
+        inputFields['state'] || '',
+        inputFields['postalCode'] || '',
+        inputFields['sortingCode'] || '',
+        inputFields['country'] || '',
+        inputFields['phone'] || [],
+        inputFields['email'] || [],
         this.languageCode_,
       ];
       chrome.send('setAddress', address);
@@ -322,6 +323,15 @@ cr.define('options', function() {
         option.disabled = countryList[i].value == 'separator';
         countrySelect.appendChild(option);
       }
+    },
+
+    /**
+     * Called to prepare the overlay when a new address is being added.
+     * @private
+     */
+    prepForNewAddress_: function() {
+      // Focus the first element.
+      this.pageDiv.querySelector('input').focus();
     },
 
     /**
@@ -407,6 +417,10 @@ cr.define('options', function() {
     },
   };
 
+  AutofillEditAddressOverlay.prepForNewAddress = function() {
+    AutofillEditAddressOverlay.getInstance().prepForNewAddress_();
+  };
+
   AutofillEditAddressOverlay.loadAddress = function(address) {
     AutofillEditAddressOverlay.getInstance().loadAddress_(address);
   };
@@ -422,7 +436,8 @@ cr.define('options', function() {
   AutofillEditAddressOverlay.setValidatedPhoneNumbers = function(numbers) {
     var instance = AutofillEditAddressOverlay.getInstance();
     var phoneList = instance.pageDiv.querySelector('[field=phone]');
-    instance.setMultiValueList_(phoneList, numbers);
+    instance.setMultiValueList_(assertInstanceof(phoneList, cr.ui.List),
+                                numbers);
     phoneList.didReceiveValidationResult();
   };
 

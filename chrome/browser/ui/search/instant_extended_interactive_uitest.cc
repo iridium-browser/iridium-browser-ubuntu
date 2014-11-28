@@ -16,7 +16,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
-#include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -25,7 +24,6 @@
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
@@ -54,10 +52,12 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/google/core/browser/google_url_tracker.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_provider.h"
 #include "components/omnibox/autocomplete_result.h"
+#include "components/omnibox/search_provider.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/sessions/serialized_navigation_entry.h"
 #include "content/public/browser/navigation_controller.h"
@@ -71,7 +71,6 @@
 #include "content/public/common/bindings_policy.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
-#include "grit/generated_resources.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -594,16 +593,11 @@ IN_PROC_BROWSER_TEST_F(InstantPolicyTest,
   EXPECT_EQ(2, on_theme_changed_calls);
 }
 
-// Flaky on Mac and Linux Tests bots.
-#if defined(OS_MACOSX) || defined(OS_LINUX)
-#define MAYBE_UpdateSearchQueryOnBackNavigation DISABLED_UpdateSearchQueryOnBackNavigation
-#else
-#define MAYBE_UpdateSearchQueryOnBackNavigation UpdateSearchQueryOnBackNavigation
-#endif
+// Flaky on all bots.  http://crbug.com/253092
 // Test to verify that the omnibox search query is updated on browser
 // back button press event.
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
-                       MAYBE_UpdateSearchQueryOnBackNavigation) {
+                       DISABLED_UpdateSearchQueryOnBackNavigation) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
 
   // Focus omnibox and confirm overlay isn't shown.
@@ -840,17 +834,19 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
   observer.Wait();
 
   // Set the fake response for suggest request. Response has prefetch details.
-  // Ensure that the page received the prefetch query.
+  // Ensure that the page received the suggest response, then add another
+  // keystroke to allow the asynchronously-received inline autocomplete
+  // suggestion to actually be inlined (which in turn triggers it to prefetch).
   fake_factory()->SetFakeResponse(
-      instant_url().Resolve("#q=pupp"),
-      "[\"pupp\",[\"puppy\", \"puppies\"],[],[],"
+      instant_url().Resolve("#q=pup"),
+      "[\"pup\",[\"puppy\", \"puppies\"],[],[],"
       "{\"google:clientdata\":{\"phi\": 0},"
           "\"google:suggesttype\":[\"QUERY\", \"QUERY\"],"
           "\"google:suggestrelevance\":[1400, 9]}]",
       net::HTTP_OK,
       net::URLRequestStatus::SUCCESS);
 
-  SetOmniboxText("pupp");
+  SetOmniboxText("pup");
   while (!omnibox()->model()->autocomplete_controller()->done()) {
     content::WindowedNotificationObserver ready_observer(
         chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
@@ -858,6 +854,7 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
             omnibox()->model()->autocomplete_controller()));
     ready_observer.Wait();
   }
+  SetOmniboxText("pupp");
 
   ASSERT_EQ(3, CountSearchProviderSuggestions());
   content::WebContents* active_tab =

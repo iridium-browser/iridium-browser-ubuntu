@@ -7,8 +7,10 @@ import logging
 import os
 
 from telemetry.core import util
+from telemetry.core.backends import codepen_credentials_backend
 from telemetry.core.backends import facebook_credentials_backend
 from telemetry.core.backends import google_credentials_backend
+from telemetry.page.actions import action_runner
 from telemetry.unittest import options_for_unittests
 
 
@@ -24,6 +26,7 @@ class BrowserCredentials(object):
 
     if backends is None:
       backends = [
+        codepen_credentials_backend.CodePenCredentialsBackend(),
         facebook_credentials_backend.FacebookCredentialsBackend(),
         google_credentials_backend.GoogleCredentialsBackend()]
 
@@ -55,19 +58,20 @@ class BrowserCredentials(object):
           'Unrecognized credentials type: %s', credentials_type)
     if credentials_type not in self._credentials:
       return False
+    runner = action_runner.ActionRunner(tab)
     return self._backends[credentials_type].LoginNeeded(
-      tab, self._credentials[credentials_type])
+      tab, runner, self._credentials[credentials_type])
 
   def LoginNoLongerNeeded(self, tab, credentials_type):
     assert credentials_type in self._backends
     self._backends[credentials_type].LoginNoLongerNeeded(tab)
 
   @property
-  def credentials_path(self):
+  def credentials_path(self):  # pylint: disable=E0202
     return self._credentials_path
 
   @credentials_path.setter
-  def credentials_path(self, credentials_path):
+  def credentials_path(self, credentials_path):  # pylint: disable=E0202
     self._credentials_path = credentials_path
     self._RebuildCredentials()
 
@@ -142,8 +146,11 @@ class BrowserCredentials(object):
       logging.warning("""
         Credentials for %s were not found. %i pages will not be tested.
 
-        To fix this, either add svn-internal to your .gclient using
-        http://goto/read-src-internal, or add your own credentials to:
+        To fix this, either follow the instructions to authenticate to gsutil
+        here:
+        http://www.chromium.org/developers/telemetry/upload_to_cloud_storage,
+
+        or add your own credentials to:
             %s
         An example credentials file you can copy from is here:
             %s\n""" % (', '.join(missing_credentials),

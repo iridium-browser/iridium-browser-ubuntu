@@ -29,6 +29,7 @@ class ASH_EXPORT DefaultSystemTrayDelegate : public SystemTrayDelegate {
   virtual const base::string16 GetSupervisedUserManagerName() const
       OVERRIDE;
   virtual const base::string16 GetSupervisedUserMessage() const OVERRIDE;
+  virtual bool IsUserSupervised() const OVERRIDE;
   virtual bool SystemShouldUpgrade() const OVERRIDE;
   virtual base::HourClockType GetHourClockType() const OVERRIDE;
   virtual void ShowSettings() OVERRIDE;
@@ -64,10 +65,8 @@ class ASH_EXPORT DefaultSystemTrayDelegate : public SystemTrayDelegate {
   virtual void GetCurrentIMEProperties(IMEPropertyInfoList* list) OVERRIDE;
   virtual void SwitchIME(const std::string& ime_id) OVERRIDE;
   virtual void ActivateIMEProperty(const std::string& key) OVERRIDE;
-  virtual void ShowNetworkConfigure(const std::string& network_id,
-                                    gfx::NativeWindow parent_window) OVERRIDE;
-  virtual bool EnrollNetwork(const std::string& network_id,
-                             gfx::NativeWindow parent_window) OVERRIDE;
+  virtual void ShowNetworkConfigure(const std::string& network_id) OVERRIDE;
+  virtual bool EnrollNetwork(const std::string& network_id) OVERRIDE;
   virtual void ManageBluetoothDevices() OVERRIDE;
   virtual void ToggleBluetooth() OVERRIDE;
   virtual bool IsBluetoothDiscovering() OVERRIDE;

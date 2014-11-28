@@ -25,12 +25,14 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "blink/public/resources/grit/blink_resources.h"
+#include "content/app/resources/grit/content_resources.h"
 #include "content/app/strings/grit/content_strings.h"
 #include "content/child/child_thread.h"
 #include "content/child/content_child_helpers.h"
-#include "content/child/fling_curve_configuration.h"
+#include "content/child/touch_fling_gesture_curve.h"
 #include "content/child/web_discardable_memory_impl.h"
 #include "content/child/web_socket_stream_handle_impl.h"
 #include "content/child/web_url_loader_impl.h"
@@ -38,7 +40,6 @@
 #include "content/child/webthread_impl.h"
 #include "content/child/worker_task_runner.h"
 #include "content/public/common/content_client.h"
-#include "grit/webkit_resources.h"
 #include "net/base/data_url.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
@@ -169,6 +170,14 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_AM_PM_FIELD_TEXT;
     case WebLocalizedString::AXButtonActionVerb:
       return IDS_AX_BUTTON_ACTION_VERB;
+    case WebLocalizedString::AXCalendarShowMonthSelector:
+      return IDS_AX_CALENDAR_SHOW_MONTH_SELECTOR;
+    case WebLocalizedString::AXCalendarShowNextMonth:
+      return IDS_AX_CALENDAR_SHOW_NEXT_MONTH;
+    case WebLocalizedString::AXCalendarShowPreviousMonth:
+      return IDS_AX_CALENDAR_SHOW_PREVIOUS_MONTH;
+    case WebLocalizedString::AXCalendarWeekDescription:
+      return IDS_AX_CALENDAR_WEEK_DESCRIPTION;
     case WebLocalizedString::AXCheckedCheckBoxActionVerb:
       return IDS_AX_CHECKED_CHECK_BOX_ACTION_VERB;
     case WebLocalizedString::AXDateTimeFieldEmptyValueText:
@@ -219,6 +228,10 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON;
     case WebLocalizedString::AXMediaHideClosedCaptionsButton:
       return IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON;
+    case WebLocalizedString::AxMediaCastOffButton:
+      return IDS_AX_MEDIA_CAST_OFF_BUTTON;
+    case WebLocalizedString::AxMediaCastOnButton:
+      return IDS_AX_MEDIA_CAST_ON_BUTTON;
     case WebLocalizedString::AXMediaAudioElementHelp:
       return IDS_AX_MEDIA_AUDIO_ELEMENT_HELP;
     case WebLocalizedString::AXMediaVideoElementHelp:
@@ -249,6 +262,10 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON_HELP;
     case WebLocalizedString::AXMediaHideClosedCaptionsButtonHelp:
       return IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON_HELP;
+    case WebLocalizedString::AxMediaCastOffButtonHelp:
+      return IDS_AX_MEDIA_CAST_OFF_BUTTON_HELP;
+    case WebLocalizedString::AxMediaCastOnButtonHelp:
+      return IDS_AX_MEDIA_CAST_ON_BUTTON_HELP;
     case WebLocalizedString::AXMillisecondFieldText:
       return IDS_AX_MILLISECOND_FIELD_TEXT;
     case WebLocalizedString::AXMinuteFieldText:
@@ -405,7 +422,6 @@ BlinkPlatformImpl::BlinkPlatformImpl()
       shared_timer_fire_time_(0.0),
       shared_timer_fire_time_was_set_while_suspended_(false),
       shared_timer_suspended_(0),
-      fling_curve_configuration_(new FlingCurveConfiguration),
       current_thread_slot_(&DestroyCurrentThread) {}
 
 BlinkPlatformImpl::~BlinkPlatformImpl() {
@@ -476,6 +492,10 @@ blink::WebThread* BlinkPlatformImpl::currentThread() {
   thread = new WebThreadImplForMessageLoop(message_loop.get());
   current_thread_slot_.Set(thread);
   return thread;
+}
+
+void BlinkPlatformImpl::yieldCurrentThread() {
+  base::PlatformThread::YieldCurrentThread();
 }
 
 blink::WebWaitableEvent* BlinkPlatformImpl::createWaitableEvent() {
@@ -754,6 +774,10 @@ const DataResource kDataResources[] = {
     IDR_MEDIAPLAYER_FULLSCREEN_BUTTON_HOVER, ui::SCALE_FACTOR_100P },
   { "mediaplayerFullscreenDown",
     IDR_MEDIAPLAYER_FULLSCREEN_BUTTON_DOWN, ui::SCALE_FACTOR_100P },
+  { "mediaplayerCastOff",
+    IDR_MEDIAPLAYER_CAST_BUTTON_OFF, ui::SCALE_FACTOR_100P },
+  { "mediaplayerCastOn",
+    IDR_MEDIAPLAYER_CAST_BUTTON_ON, ui::SCALE_FACTOR_100P },
   { "mediaplayerFullscreenDisabled",
     IDR_MEDIAPLAYER_FULLSCREEN_BUTTON_DISABLED, ui::SCALE_FACTOR_100P },
   { "mediaplayerOverlayPlay",
@@ -808,8 +832,6 @@ const DataResource kDataResources[] = {
   { "xhtmlmp.css", IDR_UASTYLE_XHTMLMP_CSS, ui::SCALE_FACTOR_NONE},
   { "viewportAndroid.css", IDR_UASTYLE_VIEWPORT_ANDROID_CSS,
     ui::SCALE_FACTOR_NONE},
-  { "XMLViewer.js", IDR_XML_VIEWER_JS, ui::SCALE_FACTOR_NONE },
-  { "XMLViewer.css", IDR_XML_VIEWER_CSS, ui::SCALE_FACTOR_NONE },
   { "InspectorOverlayPage.html", IDR_INSPECTOR_OVERLAY_PAGE_HTML,
     ui::SCALE_FACTOR_NONE },
   { "InjectedScriptCanvasModuleSource.js",
@@ -818,6 +840,14 @@ const DataResource kDataResources[] = {
   { "InjectedScriptSource.js", IDR_INSPECTOR_INJECTED_SCRIPT_SOURCE_JS,
     ui::SCALE_FACTOR_NONE },
   { "DebuggerScriptSource.js", IDR_INSPECTOR_DEBUGGER_SCRIPT_SOURCE_JS,
+    ui::SCALE_FACTOR_NONE },
+  { "DocumentXMLTreeViewer.js", IDR_PRIVATE_SCRIPT_DOCUMENTXMLTREEVIEWER_JS,
+    ui::SCALE_FACTOR_NONE },
+  { "HTMLMarqueeElement.js", IDR_PRIVATE_SCRIPT_HTMLMARQUEEELEMENT_JS,
+    ui::SCALE_FACTOR_NONE },
+  { "PluginPlaceholderElement.js",
+    IDR_PRIVATE_SCRIPT_PLUGINPLACEHOLDERELEMENT_JS, ui::SCALE_FACTOR_NONE },
+  { "PrivateScriptRunner.js", IDR_PRIVATE_SCRIPT_PRIVATESCRIPTRUNNER_JS,
     ui::SCALE_FACTOR_NONE },
 #ifdef IDR_PICKER_COMMON_JS
   { "pickerCommon.js", IDR_PICKER_COMMON_JS, ui::SCALE_FACTOR_NONE },
@@ -967,12 +997,7 @@ blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
       cumulative_scroll);
 #endif
 
-  if (device_source == blink::WebGestureDeviceTouchscreen)
-    return fling_curve_configuration_->CreateForTouchScreen(velocity,
-                                                            cumulative_scroll);
-
-  return fling_curve_configuration_->CreateForTouchPad(velocity,
-                                                       cumulative_scroll);
+  return TouchFlingGestureCurve::Create(velocity, cumulative_scroll);
 }
 
 void BlinkPlatformImpl::didStartWorkerRunLoop(
@@ -1151,12 +1176,6 @@ size_t BlinkPlatformImpl::maxDecodedImageBytes() {
 #else
   return noDecodedImageByteLimit;
 #endif
-}
-
-void BlinkPlatformImpl::SetFlingCurveParameters(
-    const std::vector<float>& new_touchpad,
-    const std::vector<float>& new_touchscreen) {
-  fling_curve_configuration_->SetCurveParameters(new_touchpad, new_touchscreen);
 }
 
 void BlinkPlatformImpl::SuspendSharedTimer() {

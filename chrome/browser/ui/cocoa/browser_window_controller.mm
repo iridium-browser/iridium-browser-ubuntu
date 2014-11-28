@@ -43,6 +43,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
+#import "chrome/browser/ui/cocoa/browser_window_layout.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
@@ -54,7 +55,6 @@
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
-#import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_button_controller.h"
@@ -80,18 +80,19 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
+#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
+#import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
@@ -178,7 +179,6 @@ using content::OpenURLParams;
 using content::Referrer;
 using content::RenderWidgetHostView;
 using content::WebContents;
-using web_modal::WebContentsModalDialogManager;
 
 @interface NSWindow (NSPrivateApis)
 // Note: These functions are private, use -[NSObject respondsToSelector:]
@@ -374,14 +374,16 @@ using web_modal::WebContentsModalDialogManager;
     // Allow bar visibility to be changed.
     [self enableBarVisibilityUpdates];
 
-    // Force a relayout of all the various bars.
-    [self layoutSubviews];
-
     // Set the window to participate in Lion Fullscreen mode.  Setting this flag
     // has no effect on Snow Leopard or earlier.  Panels can share a fullscreen
     // space with a tabbed window, but they can not be primary fullscreen
-    // windows.  Do this after |-layoutSubviews| so that the fullscreen button
-    // can be adjusted in FramedBrowserWindow.
+    // windows.
+    // This ensures the fullscreen button is appropriately positioned. It must
+    // be done before calling layoutSubviews because the new avatar button's
+    // position depends on the fullscreen button's position, as well as
+    // TabStripController's rightIndentForControls.
+    // The fullscreen button's position may depend on the old avatar button's
+    // width, but that does not require calling layoutSubviews first.
     NSUInteger collectionBehavior = [window collectionBehavior];
     collectionBehavior |=
        browser_->type() == Browser::TYPE_TABBED ||
@@ -389,6 +391,8 @@ using web_modal::WebContentsModalDialogManager;
                NSWindowCollectionBehaviorFullScreenPrimary :
                NSWindowCollectionBehaviorFullScreenAuxiliary;
     [window setCollectionBehavior:collectionBehavior];
+
+    [self layoutSubviews];
 
     // For a popup window, |desiredContentRect| contains the desired height of
     // the content, not of the whole window.  Now that all the views are laid
@@ -558,7 +562,6 @@ using web_modal::WebContentsModalDialogManager;
 - (void)updateDevToolsForContents:(WebContents*)contents {
   [devToolsController_ updateDevToolsForWebContents:contents
                                         withProfile:browser_->profile()];
-  [self updateAllowOverlappingViews:[self inPresentationMode]];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -615,7 +618,7 @@ using web_modal::WebContentsModalDialogManager;
   [[self window] setViewsNeedDisplay:YES];
 
   // TODO(viettrungluu): For some reason, the above doesn't suffice.
-  if ([self isFullscreen])
+  if ([self isInAnyFullscreenMode])
     [floatingBarBackingView_ setNeedsDisplay:YES];  // Okay even if nil.
 }
 
@@ -625,7 +628,7 @@ using web_modal::WebContentsModalDialogManager;
   [[self window] setViewsNeedDisplay:YES];
 
   // TODO(viettrungluu): For some reason, the above doesn't suffice.
-  if ([self isFullscreen])
+  if ([self isInAnyFullscreenMode])
     [floatingBarBackingView_ setNeedsDisplay:YES];  // Okay even if nil.
 }
 
@@ -846,7 +849,7 @@ using web_modal::WebContentsModalDialogManager;
 - (BOOL)adjustWindowHeightBy:(CGFloat)deltaH {
   // By not adjusting the window height when initializing, we can ensure that
   // the window opens with the same size that was saved on close.
-  if (initializing_ || [self isFullscreen] || deltaH == 0)
+  if (initializing_ || [self isInAnyFullscreenMode] || deltaH == 0)
     return NO;
 
   NSWindow* window = [self window];
@@ -962,6 +965,22 @@ using web_modal::WebContentsModalDialogManager;
          view == [infoBarContainerController_ view] ||
          view == [downloadShelfController_ view] ||
          view == [bookmarkBarController_ view]);
+
+  // The infobar has insufficient information to determine its new height. It
+  // knows the total height of all of the info bars (which is what it passes
+  // into this method), but knows nothing about the maximum arrow height, which
+  // is determined by this class.
+  if (view == [infoBarContainerController_ view]) {
+    base::scoped_nsobject<BrowserWindowLayout> layout(
+        [[BrowserWindowLayout alloc] init]);
+    [self updateLayoutParameters:layout];
+    // Use the new height for the info bar.
+    [layout setInfoBarHeight:height];
+
+    chrome::LayoutOutput output = [layout computeLayout];
+
+    height = NSHeight(output.infoBarFrame);
+  }
 
   // Change the height of the view and call |-layoutSubViews|. We set the height
   // here without regard to where the view is on the screen or whether it needs
@@ -1088,9 +1107,9 @@ using web_modal::WebContentsModalDialogManager;
         case IDC_FULLSCREEN: {
           if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item)) {
             NSString* menuTitle = l10n_util::GetNSString(
-                [self isFullscreen] && ![self inPresentationMode] ?
-                    IDS_EXIT_FULLSCREEN_MAC :
-                    IDS_ENTER_FULLSCREEN_MAC);
+                [self isInAppKitFullscreen] && ![self inPresentationMode]
+                    ? IDS_EXIT_FULLSCREEN_MAC
+                    : IDS_ENTER_FULLSCREEN_MAC);
             [menuItem setTitle:menuTitle];
 
             if (!chrome::mac::SupportsSystemFullscreen())
@@ -1492,11 +1511,11 @@ using web_modal::WebContentsModalDialogManager;
 }
 
 - (BOOL)tabTearingAllowed {
-  return ![self isFullscreen];
+  return ![self isInAnyFullscreenMode];
 }
 
 - (BOOL)windowMovementAllowed {
-  return ![self isFullscreen];
+  return ![self isInAnyFullscreenMode];
 }
 
 - (BOOL)isTabFullyVisible:(TabView*)tab {
@@ -1549,12 +1568,15 @@ using web_modal::WebContentsModalDialogManager;
       [downloadShelfController_ isVisible];
 }
 
-- (DownloadShelfController*)downloadShelf {
+- (void)createAndAddDownloadShelf {
   if (!downloadShelfController_.get()) {
     downloadShelfController_.reset([[DownloadShelfController alloc]
         initWithBrowser:browser_.get() resizeDelegate:self]);
     [[[self window] contentView] addSubview:[downloadShelfController_ view]];
   }
+}
+
+- (DownloadShelfController*)downloadShelf {
   return downloadShelfController_;
 }
 
@@ -1565,7 +1587,7 @@ using web_modal::WebContentsModalDialogManager;
   // Create a controller for the findbar.
   findBarCocoaController_.reset([findBarCocoaController retain]);
   [self layoutSubviews];
-  [self updateSubviewZOrder:[self inPresentationMode]];
+  [self updateSubviewZOrder];
 }
 
 - (NSWindow*)createFullscreenWindow {
@@ -1588,8 +1610,8 @@ using web_modal::WebContentsModalDialogManager;
 }
 
 - (NSRect)regularWindowFrame {
-  return [self isFullscreen] ? savedRegularWindowFrame_ :
-                               [[self window] frame];
+  return [self isInAnyFullscreenMode] ? savedRegularWindowFrame_
+                                      : [[self window] frame];
 }
 
 // (Override of |TabWindowController| method.)
@@ -1605,8 +1627,9 @@ using web_modal::WebContentsModalDialogManager;
   WebContents* contents = browser_->tab_strip_model()->GetWebContentsAt(index);
   if (!contents)
     return NO;
-  return !WebContentsModalDialogManager::FromWebContents(contents)->
-      IsDialogActive();
+
+  return !web_modal::PopupManager::FromWebContents(contents)->
+      IsWebModalDialogActive(contents);
 }
 
 // TabStripControllerDelegate protocol.
@@ -1637,8 +1660,6 @@ using web_modal::WebContentsModalDialogManager;
   // unnecesary resize in contents.
   [devToolsController_ updateDevToolsForWebContents:contents
                                         withProfile:browser_->profile()];
-
-  [self updateAllowOverlappingViews:[self inPresentationMode]];
 }
 
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
@@ -1894,7 +1915,7 @@ using web_modal::WebContentsModalDialogManager;
     if (webContents) {
       OpenURLParams params(
           GURL(chrome::kCrashReasonURL), Referrer(), CURRENT_TAB,
-          content::PAGE_TRANSITION_LINK, false);
+          ui::PAGE_TRANSITION_LINK, false);
       webContents->OpenURL(params);
     }
   }
@@ -2020,20 +2041,6 @@ willAnimateFromState:(BookmarkBar::State)oldState
   [sheet orderOut:self];
 }
 
-- (void)onFindBarVisibilityChanged {
-  [self updateAllowOverlappingViews:[self inPresentationMode]];
-}
-
-- (void)onOverlappedViewShown {
-  ++overlappedViewCount_;
-  [self updateAllowOverlappingViews:[self inPresentationMode]];
-}
-
-- (void)onOverlappedViewHidden {
-  --overlappedViewCount_;
-  [self updateAllowOverlappingViews:[self inPresentationMode]];
-}
-
 - (void)executeExtensionCommand:(const std::string&)extension_id
                         command:(const extensions::Command&)command {
   // Global commands are handled by the ExtensionCommandsGlobalRegistry
@@ -2043,16 +2050,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
                                                  command.accelerator());
 }
 
-- (void)activatePageAction:(const std::string&)extension_id {
-  [toolbarController_ activatePageAction:extension_id];
-}
-
-- (void)activateBrowserAction:(const std::string&)extension_id {
-  [toolbarController_ activateBrowserAction:extension_id];
-}
-
 @end  // @implementation BrowserWindowController
-
 
 @implementation BrowserWindowController(Fullscreen)
 
@@ -2061,45 +2059,16 @@ willAnimateFromState:(BookmarkBar::State)oldState
   chrome::ExecuteCommand(browser_.get(), IDC_FULLSCREEN);
 }
 
-// Called to transition into or out of fullscreen mode. Only use System
-// Fullscreen mode if the system supports it and we aren't trying to go
-// fullscreen for the renderer-initiated use cases.
-// Discussion: http://crbug.com/179181 and http:/crbug.com/351252
-- (void)setFullscreen:(BOOL)fullscreen {
-  if (fullscreen == [self isFullscreen])
+- (void)enterFullscreenWithChrome {
+  if (![self isInAppKitFullscreen]) {
+    // Invoking the AppKitFullscreen API by default uses Canonical Fullscreen.
+    [self enterAppKitFullscreen];
     return;
-
-  if (fullscreen) {
-    const BOOL shouldUseSystemFullscreen =
-        chrome::mac::SupportsSystemFullscreen() && !fullscreenWindow_ &&
-        !browser_->fullscreen_controller()->IsWindowFullscreenForTabOrPending();
-    if (shouldUseSystemFullscreen) {
-      if (FramedBrowserWindow* framedBrowserWindow =
-          base::mac::ObjCCast<FramedBrowserWindow>([self window])) {
-        [framedBrowserWindow toggleSystemFullScreen];
-      }
-    } else {
-      [self enterImmersiveFullscreen];
-    }
-  } else {
-    if ([self isInSystemFullscreen]) {
-      if (FramedBrowserWindow* framedBrowserWindow =
-          base::mac::ObjCCast<FramedBrowserWindow>([self window])) {
-        [framedBrowserWindow toggleSystemFullScreen];
-      }
-    } else {
-      DCHECK(fullscreenWindow_.get());
-      [self exitImmersiveFullscreen];
-    }
   }
-}
 
-- (void)enterFullscreen {
-  [self setFullscreen:YES];
-}
-
-- (void)exitFullscreen {
-  [self setFullscreen:NO];
+  // If AppKitFullscreen is already enabled, then just switch to Canonical
+  // Fullscreen.
+  [self adjustUIForSlidingFullscreenStyle:fullscreen_mac::OMNIBOX_TABS_PRESENT];
 }
 
 - (void)updateFullscreenExitBubbleURL:(const GURL&)url
@@ -2110,120 +2079,83 @@ willAnimateFromState:(BookmarkBar::State)oldState
   [self showFullscreenExitBubbleIfNecessary];
 }
 
-- (BOOL)isFullscreen {
-  return [self isInImmersiveFullscreen] ||
-         [self isInSystemFullscreen] ||
-         enteringFullscreen_;
+- (BOOL)isInAnyFullscreenMode {
+  return [self isInImmersiveFullscreen] || [self isInAppKitFullscreen];
 }
 
 - (BOOL)isInImmersiveFullscreen {
-  return fullscreenWindow_.get() != nil;
+  return fullscreenWindow_.get() != nil || enteringImmersiveFullscreen_;
 }
 
-- (BOOL)isInSystemFullscreen {
+- (BOOL)isInAppKitFullscreen {
   return ([[self window] styleMask] & NSFullScreenWindowMask) ==
-      NSFullScreenWindowMask;
+             NSFullScreenWindowMask ||
+         enteringAppKitFullscreen_;
 }
 
-// On Lion, this function is called by either the presentation mode toggle
-// button or the "Enter Presentation Mode" menu item.  In the latter case, this
-// function also triggers the Lion machinery to enter fullscreen mode as well as
-// set presentation mode.  On Snow Leopard, this function is called by the
-// "Enter Presentation Mode" menu item, and triggering presentation mode always
-// moves the user into fullscreen mode.
-- (void)setPresentationMode:(BOOL)presentationMode
-                        url:(const GURL&)url
-                 bubbleType:(FullscreenExitBubbleType)bubbleType {
-  fullscreenUrl_ = url;
-  fullscreenBubbleType_ = bubbleType;
-
-  // Presentation mode on systems without fullscreen support maps directly to
-  // fullscreen mode.
+- (void)enterPresentationMode {
   if (!chrome::mac::SupportsSystemFullscreen()) {
-    [self setFullscreen:presentationMode];
+    if ([self isInImmersiveFullscreen])
+      return;
+    [self enterImmersiveFullscreen];
     return;
   }
 
-  if (presentationMode) {
-    BOOL fullscreen = [self isFullscreen];
-    enteringPresentationMode_ = YES;
-
-    if (fullscreen) {
-      // If already in fullscreen mode, just toggle the presentation mode
-      // setting.  Go through an elaborate dance to force the overlay to show,
-      // then animate out once the mouse moves away.  This helps draw attention
-      // to the fact that the UI is in an overlay.  Focus the tab contents
-      // because the omnibox is the most likely source of bar visibility locks,
-      // and taking focus away from the omnibox releases its lock.
-      [self lockBarVisibilityForOwner:self withAnimation:NO delay:NO];
-      [self focusTabContents];
-      [self setPresentationModeInternal:YES forceDropdown:YES];
-      [self releaseBarVisibilityForOwner:self withAnimation:YES delay:YES];
-      // Since -windowDidEnterFullScreen: won't be called in the
-      // fullscreen --> presentation mode case, manually show the exit bubble
-      // and notify the change happened with WindowFullscreenStateChanged().
-      [self showFullscreenExitBubbleIfNecessary];
-      browser_->WindowFullscreenStateChanged();
-    } else {
-      // Need to transition into fullscreen mode.  Presentation mode will
-      // automatically be enabled in |-windowWillEnterFullScreen:|.
-      [self setFullscreen:YES];
-    }
+  if ([self isInAppKitFullscreen]) {
+    // Already in AppKit Fullscreen. Adjust the UI to use Presentation Mode.
+    [self
+        adjustUIForSlidingFullscreenStyle:fullscreen_mac::OMNIBOX_TABS_HIDDEN];
   } else {
-    // Exiting presentation mode does not exit system fullscreen; it merely
-    // switches from presentation mode to normal fullscreen.
-    [self setPresentationModeInternal:NO forceDropdown:NO];
-
-    // Since -windowDidExitFullScreen: won't be called in the
-    // presentation mode --> normal fullscreen case, manually show the exit
-    // bubble and notify the change happened with
-    // WindowFullscreenStateChanged().
-    [self showFullscreenExitBubbleIfNecessary];
-    browser_->WindowFullscreenStateChanged();
+    // Need to invoke AppKit Fullscreen API. Presentation mode will
+    // automatically be enabled in |-windowWillEnterFullScreen:|.
+    enteringPresentationMode_ = YES;
+    [self enterAppKitFullscreen];
   }
 }
 
-- (void)enterPresentationModeForURL:(const GURL&)url
-                         bubbleType:(FullscreenExitBubbleType)bubbleType {
-  [self setPresentationMode:YES url:url bubbleType:bubbleType];
+- (void)enterExtensionFullscreenForURL:(const GURL&)url
+                            bubbleType:(FullscreenExitBubbleType)bubbleType {
+  if (chrome::mac::SupportsSystemFullscreen()) {
+    fullscreenUrl_ = url;
+    fullscreenBubbleType_ = bubbleType;
+    [self enterPresentationMode];
+  } else {
+    [self enterImmersiveFullscreen];
+    DCHECK(!url.is_empty());
+    [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];
+  }
 }
 
-- (void)exitPresentationMode {
-  // url: and bubbleType: are ignored when leaving presentation mode.
-  [self setPresentationMode:NO url:GURL() bubbleType:FEB_TYPE_NONE];
-}
-
-- (void)enterFullscreenForURL:(const GURL&)url
-                   bubbleType:(FullscreenExitBubbleType)bubbleType {
-  // This method may only be called in simplified fullscreen mode.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  DCHECK(command_line->HasSwitch(switches::kEnableSimplifiedFullscreen));
-
+- (void)enterWebContentFullscreenForURL:(const GURL&)url
+                             bubbleType:(FullscreenExitBubbleType)bubbleType {
   [self enterImmersiveFullscreen];
-  [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];
+  if (!url.is_empty())
+    [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];
+}
+
+- (void)exitAnyFullscreen {
+  // TODO(erikchen): Fullscreen modes should stack. Should be able to exit
+  // Immersive Fullscreen and still be in AppKit Fullscreen.
+  if ([self isInAppKitFullscreen])
+    [self exitAppKitFullscreen];
+  if ([self isInImmersiveFullscreen])
+    [self exitImmersiveFullscreen];
 }
 
 - (BOOL)inPresentationMode {
   return presentationModeController_.get() &&
-      [presentationModeController_ inPresentationMode];
+         [presentationModeController_ inPresentationMode] &&
+         presentationModeController_.get().slidingStyle ==
+             fullscreen_mac::OMNIBOX_TABS_HIDDEN;
 }
 
 - (void)resizeFullscreenWindow {
-  DCHECK([self isFullscreen]);
-  if (![self isFullscreen])
+  DCHECK([self isInAnyFullscreenMode]);
+  if (![self isInAnyFullscreenMode])
     return;
 
   NSWindow* window = [self window];
   [window setFrame:[[window screen] frame] display:YES];
-  [self layoutSubviews];
-}
-
-- (CGFloat)floatingBarShownFraction {
-  return floatingBarShownFraction_;
-}
-
-- (void)setFloatingBarShownFraction:(CGFloat)fraction {
-  floatingBarShownFraction_ = fraction;
   [self layoutSubviews];
 }
 

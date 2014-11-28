@@ -4,12 +4,11 @@
 
 package org.chromium.content.browser;
 
-import android.test.suitebuilder.annotation.SmallTest;
-
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellTestBase;
@@ -48,8 +47,12 @@ public class WebContentsObserverAndroidTest extends ContentShellTestBase {
         waitForActiveShellToBeDoneLoading();
     }
 
+    /*
     @SmallTest
     @Feature({"Navigation"})
+    http://crbug.com/411931
+    */
+    @DisabledTest
     public void testDidFirstVisuallyNonEmptyPaint() throws Throwable {
         TestWebContentsObserverAndroid observer = ThreadUtils.runOnUiThreadBlocking(
                 new Callable<TestWebContentsObserverAndroid>() {
@@ -64,7 +67,8 @@ public class WebContentsObserverAndroidTest extends ContentShellTestBase {
         getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                getContentViewCore().loadUrl(new LoadUrlParams(URL));
+                getContentViewCore().getWebContents().getNavigationController()
+                        .loadUrl(new LoadUrlParams(URL));
             }
         });
         observer.getDidFirstVisuallyNonEmptyPaintCallbackHelper().waitForCallback(callCount);

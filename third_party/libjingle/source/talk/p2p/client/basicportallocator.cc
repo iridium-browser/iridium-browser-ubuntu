@@ -47,13 +47,15 @@ using rtc::CreateRandomString;
 
 namespace {
 
-const uint32 MSG_CONFIG_START = 1;
-const uint32 MSG_CONFIG_READY = 2;
-const uint32 MSG_ALLOCATE = 3;
-const uint32 MSG_ALLOCATION_PHASE = 4;
-const uint32 MSG_SHAKE = 5;
-const uint32 MSG_SEQUENCEOBJECTS_CREATED = 6;
-const uint32 MSG_CONFIG_STOP = 7;
+enum {
+  MSG_CONFIG_START,
+  MSG_CONFIG_READY,
+  MSG_ALLOCATE,
+  MSG_ALLOCATION_PHASE,
+  MSG_SHAKE,
+  MSG_SEQUENCEOBJECTS_CREATED,
+  MSG_CONFIG_STOP,
+};
 
 const int PHASE_UDP = 0;
 const int PHASE_RELAY = 1;
@@ -147,9 +149,6 @@ class AllocationSequence : public rtc::MessageHandler,
                     const rtc::PacketTime& packet_time);
 
   void OnPortDestroyed(PortInterface* port);
-  void OnResolvedTurnServerAddress(
-    TurnPort* port, const rtc::SocketAddress& server_address,
-    const rtc::SocketAddress& resolved_server_address);
 
   BasicPortAllocatorSession* session_;
   rtc::Network* network_;
@@ -161,8 +160,7 @@ class AllocationSequence : public rtc::MessageHandler,
   rtc::scoped_ptr<rtc::AsyncPacketSocket> udp_socket_;
   // There will be only one udp port per AllocationSequence.
   UDPPort* udp_port_;
-  // Keeping a map for turn ports keyed with server addresses.
-  std::map<rtc::SocketAddress, Port*> turn_ports_;
+  std::vector<TurnPort*> turn_ports_;
   int phase_;
 };
 
@@ -228,9 +226,10 @@ BasicPortAllocator::~BasicPortAllocator() {
 PortAllocatorSession *BasicPortAllocator::CreateSessionInternal(
     const std::string& content_name, int component,
     const std::string& ice_ufrag, const std::string& ice_pwd) {
-  return new BasicPortAllocatorSession(this, content_name, component,
-                                       ice_ufrag, ice_pwd);
+  return new BasicPortAllocatorSession(
+      this, content_name, component, ice_ufrag, ice_pwd);
 }
+
 
 // BasicPortAllocatorSession
 BasicPortAllocatorSession::BasicPortAllocatorSession(
@@ -432,7 +431,11 @@ void BasicPortAllocatorSession::DoAllocate() {
       }
 
       if (!(sequence_flags & PORTALLOCATOR_ENABLE_IPV6) &&
+#ifdef USE_WEBRTC_DEV_BRANCH
+          networks[i]->GetBestIP().family() == AF_INET6) {
+#else  // USE_WEBRTC_DEV_BRANCH
           networks[i]->ip().family() == AF_INET6) {
+#endif  // USE_WEBRTC_DEV_BRANCH
         // Skip IPv6 networks unless the flag's been set.
         continue;
       }
@@ -530,8 +533,10 @@ void BasicPortAllocatorSession::OnCandidateReady(
   // Send candidates whose protocol is enabled.
   std::vector<Candidate> candidates;
   ProtocolType pvalue;
+  bool candidate_allowed_to_send = CheckCandidateFilter(c);
   if (StringToProto(c.protocol().c_str(), &pvalue) &&
-      data->sequence()->ProtocolEnabled(pvalue)) {
+      data->sequence()->ProtocolEnabled(pvalue) &&
+      candidate_allowed_to_send) {
     candidates.push_back(c);
   }
 
@@ -542,7 +547,9 @@ void BasicPortAllocatorSession::OnCandidateReady(
   // Moving to READY state as we have atleast one candidate from the port.
   // Since this port has atleast one candidate we should forward this port
   // to listners, to allow connections from this port.
-  if (!data->ready()) {
+  // Also we should make sure that candidate gathered from this port is allowed
+  // to send outside.
+  if (!data->ready() && candidate_allowed_to_send) {
     data->set_ready();
     SignalPortReady(this, port);
   }
@@ -588,6 +595,8 @@ void BasicPortAllocatorSession::OnProtocolEnabled(AllocationSequence* seq,
 
     const std::vector<Candidate>& potentials = it->port()->Candidates();
     for (size_t i = 0; i < potentials.size(); ++i) {
+      if (!CheckCandidateFilter(potentials[i]))
+        continue;
       ProtocolType pvalue;
       if (!StringToProto(potentials[i].protocol().c_str(), &pvalue))
         continue;
@@ -600,6 +609,31 @@ void BasicPortAllocatorSession::OnProtocolEnabled(AllocationSequence* seq,
   if (!candidates.empty()) {
     SignalCandidatesReady(this, candidates);
   }
+}
+
+bool BasicPortAllocatorSession::CheckCandidateFilter(const Candidate& c) {
+  uint32 filter = allocator_->candidate_filter();
+  bool allowed = false;
+  if (filter & CF_RELAY) {
+    allowed |= (c.type() == RELAY_PORT_TYPE);
+  }
+
+  if (filter & CF_REFLEXIVE) {
+    // We allow host candidates if the filter allows server-reflexive candidates
+    // and the candidate is a public IP. Because we don't generate
+    // server-reflexive candidates if they have the same IP as the host
+    // candidate (i.e. when the host candidate is a public IP), filtering to
+    // only server-reflexive candidates won't work right when the host
+    // candidates have public IPs.
+    allowed |= (c.type() == STUN_PORT_TYPE) ||
+               (c.type() == LOCAL_PORT_TYPE && !c.address().IsPrivateIP());
+  }
+
+  if (filter & CF_HOST) {
+    allowed |= (c.type() == LOCAL_PORT_TYPE);
+  }
+
+  return allowed;
 }
 
 void BasicPortAllocatorSession::OnPortAllocationComplete(
@@ -698,7 +732,12 @@ AllocationSequence::AllocationSequence(BasicPortAllocatorSession* session,
                                        uint32 flags)
     : session_(session),
       network_(network),
+
+#ifdef USE_WEBRTC_DEV_BRANCH
+      ip_(network->GetBestIP()),
+#else  // USE_WEBRTC_DEV_BRANCH
       ip_(network->ip()),
+#endif  // USE_WEBRTC_DEV_BRANCH
       config_(config),
       state_(kInit),
       flags_(flags),
@@ -741,7 +780,11 @@ AllocationSequence::~AllocationSequence() {
 
 void AllocationSequence::DisableEquivalentPhases(rtc::Network* network,
     PortConfiguration* config, uint32* flags) {
+#ifdef USE_WEBRTC_DEV_BRANCH
+  if (!((network == network_) && (ip_ == network->GetBestIP()))) {
+#else  // USE_WEBRTC_DEV_BRANCH
   if (!((network == network_) && (ip_ == network->ip()))) {
+#endif  // USE_WEBRTC_DEV_BRANCH
     // Different network setup; nothing is equivalent.
     return;
   }
@@ -1020,26 +1063,15 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
     // don't pass shared socket for ports which will create TCP sockets.
     // TODO(mallinath) - Enable shared socket mode for TURN ports. Disabled
     // due to webrtc bug https://code.google.com/p/webrtc/issues/detail?id=3537
-    if (IsFlagSet(PORTALLOCATOR_ENABLE_TURN_SHARED_SOCKET) &&
+    if (IsFlagSet(PORTALLOCATOR_ENABLE_SHARED_SOCKET) &&
         relay_port->proto == PROTO_UDP) {
       port = TurnPort::Create(session_->network_thread(),
                               session_->socket_factory(),
                               network_, udp_socket_.get(),
                               session_->username(), session_->password(),
                               *relay_port, config.credentials, config.priority);
-      // If we are using shared socket for TURN and udp ports, we need to
-      // find a way to demux the packets to the correct port when received.
-      // Mapping against server_address is one way of doing this. When packet
-      // is received the remote_address will be checked against the map.
-      // If server address is not resolved, a signal will be sent from the port
-      // after the address is resolved. The map entry will updated with the
-      // resolved address when the signal is received from the port.
-      if ((*relay_port).address.IsUnresolved()) {
-        // If server address is not resolved then listen for signal from port.
-        port->SignalResolvedServerAddress.connect(
-            this, &AllocationSequence::OnResolvedTurnServerAddress);
-      }
-      turn_ports_[(*relay_port).address] = port;
+
+      turn_ports_.push_back(port);
       // Listen to the port destroyed signal, to allow AllocationSequence to
       // remove entrt from it's map.
       port->SignalDestroyed.connect(this, &AllocationSequence::OnPortDestroyed);
@@ -1063,51 +1095,45 @@ void AllocationSequence::OnReadPacket(
     const rtc::SocketAddress& remote_addr,
     const rtc::PacketTime& packet_time) {
   ASSERT(socket == udp_socket_.get());
-  // If the packet is received from one of the TURN server in the config, then
-  // pass down the packet to that port, otherwise it will be handed down to
-  // the local udp port.
-  Port* port = NULL;
-  std::map<rtc::SocketAddress, Port*>::iterator iter =
-      turn_ports_.find(remote_addr);
-  if (iter != turn_ports_.end()) {
-    port = iter->second;
-  } else if (udp_port_) {
-    port = udp_port_;
+
+  bool turn_port_found = false;
+
+  // Try to find the TurnPort that matches the remote address. Note that the
+  // message could be a STUN binding response if the TURN server is also used as
+  // a STUN server. We don't want to parse every message here to check if it is
+  // a STUN binding response, so we pass the message to TurnPort regardless of
+  // the message type. The TurnPort will just ignore the message since it will
+  // not find any request by transaction ID.
+  for (std::vector<TurnPort*>::const_iterator it = turn_ports_.begin();
+       it != turn_ports_.end(); ++it) {
+    TurnPort* port = *it;
+    if (port->server_address().address == remote_addr) {
+      port->HandleIncomingPacket(socket, data, size, remote_addr, packet_time);
+      turn_port_found = true;
+      break;
+    }
   }
-  ASSERT(port != NULL);
-  if (port) {
-    port->HandleIncomingPacket(socket, data, size, remote_addr, packet_time);
+
+  if (udp_port_) {
+    const ServerAddresses& stun_servers = udp_port_->server_addresses();
+
+    // Pass the packet to the UdpPort if there is no matching TurnPort, or if
+    // the TURN server is also a STUN server.
+    if (!turn_port_found ||
+        stun_servers.find(remote_addr) != stun_servers.end()) {
+      udp_port_->HandleIncomingPacket(
+          socket, data, size, remote_addr, packet_time);
+    }
   }
 }
 
 void AllocationSequence::OnPortDestroyed(PortInterface* port) {
   if (udp_port_ == port) {
     udp_port_ = NULL;
-  } else {
-    std::map<rtc::SocketAddress, Port*>::iterator iter;
-    for (iter = turn_ports_.begin(); iter != turn_ports_.end(); ++iter) {
-      if (iter->second == port) {
-        turn_ports_.erase(iter);
-        break;
-      }
-    }
-  }
-}
-
-void AllocationSequence::OnResolvedTurnServerAddress(
-    TurnPort* port, const rtc::SocketAddress& server_address,
-    const rtc::SocketAddress& resolved_server_address) {
-  std::map<rtc::SocketAddress, Port*>::iterator iter;
-  iter = turn_ports_.find(server_address);
-  if (iter == turn_ports_.end()) {
-    LOG(LS_INFO) << "TurnPort entry is not found in the map.";
     return;
   }
 
-  ASSERT(iter->second == port);
-  // Remove old entry and then insert using the resolved address as key.
-  turn_ports_.erase(iter);
-  turn_ports_[resolved_server_address] = port;
+  turn_ports_.erase(std::find(turn_ports_.begin(), turn_ports_.end(), port));
 }
 
 // PortConfiguration

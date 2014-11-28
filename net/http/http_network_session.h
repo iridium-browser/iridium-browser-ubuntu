@@ -43,6 +43,7 @@ class HttpResponseBodyDrainer;
 class HttpServerProperties;
 class NetLog;
 class NetworkDelegate;
+class ProxyDelegate;
 class ProxyService;
 class QuicClock;
 class QuicCryptoClientStreamFactory;
@@ -80,6 +81,7 @@ class NET_EXPORT HttpNetworkSession
     bool ignore_certificate_errors;
     uint16 testing_fixed_http_port;
     uint16 testing_fixed_https_port;
+    bool enable_tcp_fast_open_for_ssl;
 
     bool force_spdy_single_domain;
     bool enable_spdy_compression;
@@ -112,6 +114,7 @@ class NET_EXPORT HttpNetworkSession
     bool enable_quic_port_selection;
     bool enable_quic_time_based_loss_detection;
     bool quic_always_require_handshake_confirmation;
+    bool quic_disable_connection_pooling;
     HostPortPair origin_to_force_quic_on;
     QuicClock* quic_clock;  // Will be owned by QuicStreamFactory.
     QuicRandom* quic_random;
@@ -121,6 +124,7 @@ class NET_EXPORT HttpNetworkSession
     QuicCryptoClientStreamFactory* quic_crypto_client_stream_factory;
     QuicVersionVector quic_supported_versions;
     QuicTagVector quic_connection_options;
+    ProxyDelegate* proxy_delegate;
   };
 
   enum SocketPoolType {

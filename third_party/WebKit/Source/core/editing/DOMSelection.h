@@ -41,14 +41,15 @@
 namespace blink {
 
 class ExceptionState;
-class LocalFrame;
 class Node;
 class Position;
 class Range;
 class TreeScope;
 class VisibleSelection;
 
-class DOMSelection FINAL : public RefCountedWillBeGarbageCollectedFinalized<DOMSelection>, public ScriptWrappable, public DOMWindowProperty {
+class DOMSelection FINAL : public RefCountedWillBeGarbageCollected<DOMSelection>, public ScriptWrappable, public DOMWindowProperty {
+    DEFINE_WRAPPERTYPEINFO();
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DOMSelection);
 public:
     static PassRefPtrWillBeRawPtr<DOMSelection> create(const TreeScope* treeScope)
     {
@@ -80,11 +81,9 @@ public:
     bool isCollapsed() const;
     int rangeCount() const;
     void collapse(Node*, int offset, ExceptionState&);
-    void collapse(Node*, ExceptionState&);
     void collapseToEnd(ExceptionState&);
     void collapseToStart(ExceptionState&);
     void extend(Node*, int offset, ExceptionState&);
-    void extend(Node*, ExceptionState&);
     PassRefPtrWillBeRawPtr<Range> getRangeAt(int, ExceptionState&);
     void removeAllRanges();
     void addRange(Range*);
@@ -97,7 +96,7 @@ public:
     // Microsoft Selection Object API
     void empty();
 
-    void trace(Visitor* visitor) { visitor->trace(m_treeScope); }
+    virtual void trace(Visitor*) OVERRIDE;
 
 private:
     explicit DOMSelection(const TreeScope*);

@@ -60,10 +60,8 @@ import javax.net.ssl.X509TrustManager;
  *
  * Based heavily on the CTSWebServer in Android.
  */
-public class TestWebServer {
+public final class TestWebServer {
     private static final String TAG = "TestWebServer";
-    private static final int SERVER_PORT = 4444;
-    private static final int SSL_SERVER_PORT = 4445;
 
     public static final String SHUTDOWN_PREFIX = "/shutdown";
 
@@ -108,19 +106,21 @@ public class TestWebServer {
     public TestWebServer(boolean ssl) throws Exception {
         mSsl = ssl;
         if (mSsl) {
+            mServerUri = "https:";
             if (sSecureInstance != null) {
                 sSecureInstance.shutdown();
             }
-            mServerUri = "https://localhost:" + SSL_SERVER_PORT;
         } else {
+            mServerUri = "http:";
             if (sInstance != null) {
                 sInstance.shutdown();
             }
-            mServerUri = "http://localhost:" + SERVER_PORT;
         }
+
         setInstance(this, mSsl);
         mServerThread = new ServerThread(this, mSsl);
         mServerThread.start();
+        mServerUri += "//localhost:" + mServerThread.mSocket.getLocalPort();
     }
 
     /**
@@ -422,7 +422,9 @@ public class TestWebServer {
             if (response.mResponseAction != null) response.mResponseAction.run();
 
             httpResponse = createResponse(HttpStatus.SC_OK);
-            httpResponse.setEntity(createEntity(response.mResponseData));
+            ByteArrayEntity entity = createEntity(response.mResponseData);
+            httpResponse.setEntity(entity);
+            httpResponse.setHeader("Content-Length", "" + entity.getContentLength());
             for (Pair<String, String> header : response.mResponseHeaders) {
                 httpResponse.addHeader(header.first, header.second);
             }
@@ -465,7 +467,9 @@ public class TestWebServer {
             buf.append("</title></head><body>");
             buf.append(reason);
             buf.append("</body></html>");
-            response.setEntity(createEntity(buf.toString().getBytes()));
+            ByteArrayEntity entity = createEntity(buf.toString().getBytes());
+            response.setEntity(entity);
+            response.setHeader("Content-Length", "" + entity.getContentLength());
         }
         return response;
     }
@@ -548,10 +552,9 @@ public class TestWebServer {
                     if (mIsSsl) {
                         mSslContext = SSLContext.getInstance("TLS");
                         mSslContext.init(getKeyManagers(), null, null);
-                        mSocket = mSslContext.getServerSocketFactory().createServerSocket(
-                                SSL_SERVER_PORT);
+                        mSocket = mSslContext.getServerSocketFactory().createServerSocket(0);
                     } else {
-                        mSocket = new ServerSocket(SERVER_PORT);
+                        mSocket = new ServerSocket(0);
                     }
                     return;
                 } catch (IOException e) {

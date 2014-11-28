@@ -31,6 +31,7 @@
 #include "config.h"
 #include "Init.h"
 
+#include "bindings/core/v8/ScriptStreamerThread.h"
 #include "core/EventNames.h"
 #include "core/EventTargetNames.h"
 #include "core/EventTypeNames.h"
@@ -73,9 +74,6 @@ void CoreInitializer::init()
     ASSERT(!m_isInited);
     m_isInited = true;
 
-    // It would make logical sense to do this and WTF::StringStatics::init() in
-    // WTF::initialize() but there are ordering dependencies.
-    AtomicString::init();
     HTMLNames::init();
     SVGNames::init();
     XLinkNames::init();
@@ -93,7 +91,10 @@ void CoreInitializer::init()
     MediaFeatureNames::init();
     MediaTypeNames::init();
 
+    // It would make logical sense to do this in WTF::initialize() but there are
+    // ordering dependencies, e.g. about "xmlns".
     WTF::StringStatics::init();
+
     QualifiedName::init();
     Partitions::init();
     EventTracer::initialize();
@@ -106,13 +107,17 @@ void CoreInitializer::init()
 
     StringImpl::freezeStaticStrings();
 
-    // Creates HTMLParserThread::shared, but does not start the thread.
+    // Creates HTMLParserThread::shared and ScriptStreamerThread::shared, but
+    // does not start the threads.
     HTMLParserThread::init();
+    ScriptStreamerThread::init();
 }
 
 void CoreInitializer::shutdown()
 {
-    // Make sure we stop the HTMLParserThread before Platform::current() is cleared.
+    // Make sure we stop the HTMLParserThread and ScriptStreamerThread before
+    // Platform::current() is cleared.
+    ScriptStreamerThread::shutdown();
     HTMLParserThread::shutdown();
 
     // Make sure we stop WorkerThreads before Partition::shutdown() which frees ExecutionContext.

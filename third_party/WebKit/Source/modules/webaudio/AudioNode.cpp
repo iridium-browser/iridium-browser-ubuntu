@@ -52,20 +52,14 @@ AudioNode::AudioNode(AudioContext* context, float sampleRate)
     , m_sampleRate(sampleRate)
     , m_lastProcessingTime(-1)
     , m_lastNonSilentTime(-1)
-#if !ENABLE(OILPAN)
-    , m_normalRefCount(1) // start out with normal refCount == 1 (like WTF::RefCounted class)
-#endif
     , m_connectionRefCount(0)
     , m_isDisabled(false)
-    , m_isDisposeCalled(false)
+    , m_newChannelCountMode(Max)
     , m_channelCount(2)
     , m_channelCountMode(Max)
     , m_channelInterpretation(AudioBus::Speakers)
 {
-    ScriptWrappable::init(this);
-#if ENABLE(OILPAN)
     m_context->registerLiveNode(*this);
-#endif
 #if DEBUG_AUDIONODE_REFERENCES
     if (!s_isNodeCountInitialized) {
         s_isNodeCountInitialized = true;
@@ -77,15 +71,11 @@ AudioNode::AudioNode(AudioContext* context, float sampleRate)
 
 AudioNode::~AudioNode()
 {
-    ASSERT(m_isDisposeCalled);
     --s_instanceCount;
 #if DEBUG_AUDIONODE_REFERENCES
     --s_nodeCount[nodeType()];
-#if ENABLE(OILPAN)
-    fprintf(stderr, "%p: %d: AudioNode::~AudioNode() %d\n", this, nodeType(), m_connectionRefCount);
-#else
-    fprintf(stderr, "%p: %d: AudioNode::~AudioNode() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
-#endif
+    fprintf(stderr, "%p: %2d: AudioNode::~AudioNode() %d [%d]\n",
+        this, nodeType(), m_connectionRefCount, s_nodeCount[nodeType()]);
 #endif
 }
 
@@ -104,17 +94,11 @@ void AudioNode::dispose()
     ASSERT(isMainThread());
     ASSERT(context()->isGraphOwner());
 
-    // This flag prevents:
-    //   - the following disconnectAll() from re-registering this AudioNode into
-    //     the m_outputs.
-    //   - this AudioNode from getting marked as dirty after calling
-    //     unmarkDirtyNode.
-    m_isDisposeCalled = true;
-
+    context()->removeChangedChannelCountMode(this);
     context()->removeAutomaticPullNode(this);
+    context()->disposeOutputs(*this);
     for (unsigned i = 0; i < m_outputs.size(); ++i)
         output(i)->disconnectAll();
-    context()->unmarkDirtyNode(*this);
 }
 
 String AudioNode::nodeTypeName() const
@@ -168,6 +152,7 @@ void AudioNode::setNodeType(NodeType type)
 
 #if DEBUG_AUDIONODE_REFERENCES
     ++s_nodeCount[type];
+    fprintf(stderr, "%p: %2d: AudioNode::AudioNode [%3d]\n", this, nodeType(), s_nodeCount[nodeType()]);
 #endif
 }
 
@@ -176,7 +161,7 @@ void AudioNode::addInput()
     m_inputs.append(AudioNodeInput::create(*this));
 }
 
-void AudioNode::addOutput(PassOwnPtrWillBeRawPtr<AudioNodeOutput> output)
+void AudioNode::addOutput(AudioNodeOutput* output)
 {
     m_outputs.append(output);
 }
@@ -327,17 +312,17 @@ void AudioNode::setChannelCountMode(const String& mode, ExceptionState& exceptio
     ChannelCountMode oldMode = m_channelCountMode;
 
     if (mode == "max") {
-        m_channelCountMode = Max;
+        m_newChannelCountMode = Max;
     } else if (mode == "clamped-max") {
-        m_channelCountMode = ClampedMax;
+        m_newChannelCountMode = ClampedMax;
     } else if (mode == "explicit") {
-        m_channelCountMode = Explicit;
+        m_newChannelCountMode = Explicit;
     } else {
         ASSERT_NOT_REACHED();
     }
 
-    if (m_channelCountMode != oldMode)
-        updateChannelsForInputs();
+    if (m_newChannelCountMode != oldMode)
+        context()->addChangedChannelCountMode(this);
 }
 
 String AudioNode::channelInterpretation()
@@ -473,7 +458,7 @@ void AudioNode::enableOutputsIfNecessary()
 void AudioNode::disableOutputsIfNecessary()
 {
     // Disable outputs if appropriate. We do this if the number of connections is 0 or 1. The case
-    // of 0 is from finishDeref() where there are no connections left. The case of 1 is from
+    // of 0 is from deref() where there are no connections left. The case of 1 is from
     // AudioNodeInput::disable() where we want to disable outputs when there's only one connection
     // left because we're ready to go away, but can't quite yet.
     if (m_connectionRefCount <= 1 && !m_isDisabled) {
@@ -496,62 +481,19 @@ void AudioNode::disableOutputsIfNecessary()
     }
 }
 
-#if !ENABLE(OILPAN)
-void AudioNode::ref()
-{
-    atomicIncrement(&m_normalRefCount);
-
-#if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: %d: AudioNode::ref() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
-#endif
-}
-#endif
-
 void AudioNode::makeConnection()
 {
     atomicIncrement(&m_connectionRefCount);
-    // See the disabling code in finishDeref() below. This handles the case
-    // where a node is being re-connected after being used at least once and
-    // disconnected. In this case, we need to re-enable.
+
+#if DEBUG_AUDIONODE_REFERENCES
+    fprintf(stderr, "%p: %2d: AudioNode::ref   %3d [%3d]\n",
+        this, nodeType(), m_connectionRefCount, s_nodeCount[nodeType()]);
+#endif
+    // See the disabling code in disableOutputsIfNecessary(). This handles
+    // the case where a node is being re-connected after being used at least
+    // once and disconnected. In this case, we need to re-enable.
     enableOutputsIfNecessary();
 }
-
-#if !ENABLE(OILPAN)
-void AudioNode::deref()
-{
-    // The actual work for deref happens completely within the audio context's
-    // graph lock. In the case of the audio thread, we must use a tryLock to
-    // avoid glitches.
-    bool hasLock = false;
-    bool mustReleaseLock = false;
-
-    if (context()->isAudioThread()) {
-        // Real-time audio thread must not contend lock (to avoid glitches).
-        hasLock = context()->tryLock(mustReleaseLock);
-    } else {
-        context()->lock(mustReleaseLock);
-        hasLock = true;
-    }
-
-    if (hasLock) {
-        // This is where the real deref work happens.
-        finishDeref();
-
-        if (mustReleaseLock)
-            context()->unlock();
-    } else {
-        // We were unable to get the lock, so put this in a list to finish up later.
-        ASSERT(context()->isAudioThread());
-        context()->addDeferredFinishDeref(this);
-    }
-
-    // Once AudioContext::uninitialize() is called there's no more chances for deleteMarkedNodes() to get called, so we call here.
-    // We can't call in AudioContext::~AudioContext() since it will never be called as long as any AudioNode is alive
-    // because AudioNodes keep a reference to the context.
-    if (!context()->isInitialized())
-        context()->deleteMarkedNodes();
-}
-#endif
 
 void AudioNode::breakConnection()
 {
@@ -585,32 +527,15 @@ void AudioNode::breakConnection()
 void AudioNode::breakConnectionWithLock()
 {
     atomicDecrement(&m_connectionRefCount);
-#if !ENABLE(OILPAN)
-    ASSERT(m_normalRefCount > 0);
+
+#if DEBUG_AUDIONODE_REFERENCES
+    fprintf(stderr, "%p: %2d: AudioNode::deref %3d [%3d]\n",
+        this, nodeType(), m_connectionRefCount, s_nodeCount[nodeType()]);
 #endif
+
     if (!m_connectionRefCount)
         disableOutputsIfNecessary();
 }
-
-#if !ENABLE(OILPAN)
-void AudioNode::finishDeref()
-{
-    ASSERT(context()->isGraphOwner());
-
-    ASSERT(m_normalRefCount > 0);
-    atomicDecrement(&m_normalRefCount);
-
-#if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: %d: AudioNode::deref() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
-#endif
-
-    if (!m_normalRefCount) {
-        // Mark for deletion at end of each render quantum or when context shuts
-        // down.
-        context()->markForDeletion(this);
-    }
-}
-#endif
 
 #if DEBUG_AUDIONODE_REFERENCES
 
@@ -625,7 +550,7 @@ void AudioNode::printNodeCounts()
     fprintf(stderr, "===========================\n");
 
     for (unsigned i = 0; i < NodeTypeEnd; ++i)
-        fprintf(stderr, "%d: %d\n", i, s_nodeCount[i]);
+        fprintf(stderr, "%2d: %d\n", i, s_nodeCount[i]);
 
     fprintf(stderr, "===========================\n\n\n");
 }
@@ -638,6 +563,12 @@ void AudioNode::trace(Visitor* visitor)
     visitor->trace(m_inputs);
     visitor->trace(m_outputs);
     EventTargetWithInlineData::trace(visitor);
+}
+
+void AudioNode::updateChannelCountMode()
+{
+    m_channelCountMode = m_newChannelCountMode;
+    updateChannelsForInputs();
 }
 
 } // namespace blink

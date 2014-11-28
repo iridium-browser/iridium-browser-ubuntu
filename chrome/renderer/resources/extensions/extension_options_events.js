@@ -10,16 +10,20 @@ var CreateEvent = function(name) {
 };
 
 var EXTENSION_OPTIONS_EVENTS = {
+  'close': {
+    evt: CreateEvent('extensionOptionsInternal.onClose'),
+    fields: []
+  },
   'load': {
     evt: CreateEvent('extensionOptionsInternal.onLoad'),
     fields: []
   },
   'sizechanged': {
     evt: CreateEvent('extensionOptionsInternal.onSizeChanged'),
-    customHandler: function(handler, event, webViewEvent) {
-      handler.handleSizeChangedEvent(event, webViewEvent);
+    customHandler: function(handler, event, extensionOptionsEvent) {
+      handler.handleSizeChangedEvent(event, extensionOptionsEvent);
     },
-    fields:['width', 'height']
+    fields:['newWidth', 'newHeight', 'oldWidth', 'oldHeight']
   }
 }
 
@@ -63,8 +67,10 @@ ExtensionOptionsEvents.prototype.setupEvent = function(name, info) {
 
 ExtensionOptionsEvents.prototype.handleSizeChangedEvent = function(
     event, extensionOptionsEvent) {
-  this.extensionOptionsInternal.onSizeChanged(extensionOptionsEvent.width,
-                                              extensionOptionsEvent.height);
+  this.extensionOptionsInternal.onSizeChanged(extensionOptionsEvent.newWidth,
+                                              extensionOptionsEvent.newHeight,
+                                              extensionOptionsEvent.oldWidth,
+                                              extensionOptionsEvent.oldHeight);
   this.extensionOptionsInternal.dispatchEvent(extensionOptionsEvent);
 }
 

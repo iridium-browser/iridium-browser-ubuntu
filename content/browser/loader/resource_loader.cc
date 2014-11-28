@@ -42,7 +42,6 @@ namespace {
 void PopulateResourceResponse(ResourceRequestInfoImpl* info,
                               net::URLRequest* request,
                               ResourceResponse* response) {
-  response->head.error_code = request->status().error();
   response->head.request_time = request->request_time();
   response->head.response_time = request->response_time();
   response->head.headers = request->response_headers();
@@ -61,7 +60,10 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
           ServiceWorkerRequestHandler::GetHandler(request)) {
     handler->GetExtraResponseInfo(
         &response->head.was_fetched_via_service_worker,
-        &response->head.original_url_via_service_worker);
+        &response->head.original_url_via_service_worker,
+        &response->head.service_worker_fetch_start,
+        &response->head.service_worker_fetch_ready,
+        &response->head.service_worker_fetch_end);
   }
   AppCacheInterceptor::GetExtraResponseInfo(
       request,
@@ -518,7 +520,7 @@ void ResourceLoader::StoreSignedCertificateTimestamps(
 
   for (net::SignedCertificateTimestampAndStatusList::const_iterator iter =
        sct_list.begin(); iter != sct_list.end(); ++iter) {
-    const int sct_id(sct_store->Store(iter->sct, process_id));
+    const int sct_id(sct_store->Store(iter->sct.get(), process_id));
     sct_ids->push_back(
         SignedCertificateTimestampIDAndStatus(sct_id, iter->status));
   }
@@ -614,7 +616,7 @@ void ResourceLoader::ReadMore(int* bytes_read) {
     return;
   }
 
-  DCHECK(buf);
+  DCHECK(buf.get());
   DCHECK(buf_size > 0);
 
   request_->Read(buf.get(), buf_size, bytes_read);

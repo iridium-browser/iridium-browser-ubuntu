@@ -13,7 +13,6 @@
 #include "cc/output/renderer.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_resource.h"
-#include "cc/resources/task_graph_runner.h"
 
 namespace cc {
 
@@ -28,8 +27,7 @@ class CC_EXPORT DirectRenderer : public Renderer {
 
   virtual void DecideRenderPassAllocationsForFrame(
       const RenderPassList& render_passes_in_draw_order) OVERRIDE;
-  virtual bool HasAllocatedResourcesForTesting(RenderPass::Id id) const
-      OVERRIDE;
+  virtual bool HasAllocatedResourcesForTesting(RenderPassId id) const OVERRIDE;
   virtual void DrawFrame(RenderPassList* render_passes_in_draw_order,
                          float device_scale_factor,
                          const gfx::Rect& device_viewport_rect,
@@ -40,6 +38,7 @@ class CC_EXPORT DirectRenderer : public Renderer {
     DrawingFrame();
     ~DrawingFrame();
 
+    const RenderPassList* render_passes_in_draw_order;
     const RenderPass* root_render_pass;
     const RenderPass* current_render_pass;
     const ScopedResource* current_texture;
@@ -115,7 +114,7 @@ class CC_EXPORT DirectRenderer : public Renderer {
       DrawingFrame* frame,
       scoped_ptr<CopyOutputRequest> request) = 0;
 
-  base::ScopedPtrHashMap<RenderPass::Id, ScopedResource> render_pass_textures_;
+  base::ScopedPtrHashMap<RenderPassId, ScopedResource> render_pass_textures_;
   OutputSurface* output_surface_;
   ResourceProvider* resource_provider_;
   scoped_ptr<OverlayProcessor> overlay_processor_;

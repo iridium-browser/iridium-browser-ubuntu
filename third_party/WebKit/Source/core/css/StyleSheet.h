@@ -22,7 +22,6 @@
 #define StyleSheet_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "core/css/parser/CSSParserMode.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 #include "wtf/RefCounted.h"
@@ -36,11 +35,9 @@ class Node;
 class StyleSheet;
 
 class StyleSheet : public RefCountedWillBeGarbageCollectedFinalized<StyleSheet>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    StyleSheet()
-    {
-        ScriptWrappable::init(this);
-    }
+    StyleSheet() { }
     virtual ~StyleSheet();
 
     virtual bool disabled() const = 0;
@@ -61,6 +58,6 @@ public:
     virtual void trace(Visitor*) { }
 };
 
-} // namespace
+} // namespace blink
 
 #endif

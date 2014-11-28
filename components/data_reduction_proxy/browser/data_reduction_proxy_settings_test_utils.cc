@@ -10,6 +10,11 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/test_simple_task_runner.h"
+#include "base/time/time.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/common/data_reduction_proxy_headers_test_utils.h"
 #include "components/data_reduction_proxy/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/common/data_reduction_proxy_switches.h"
 
@@ -26,14 +31,6 @@ const char kProxy[] = "proxy";
 }  // namespace
 
 namespace data_reduction_proxy {
-
-// Transform "normal"-looking headers (\n-separated) to the appropriate
-// input format for ParseRawHeaders (\0-separated).
-void HeadersToRaw(std::string* headers) {
-  std::replace(headers->begin(), headers->end(), '\n', '\0');
-  if (!headers->empty())
-    *headers += '\0';
-}
 
 ProbeURLFetchResult FetchResult(bool enabled, bool success) {
   if (enabled) {
@@ -75,8 +72,7 @@ void TestDataReductionProxyConfig::Disable() {
 }
 
 DataReductionProxySettingsTestBase::DataReductionProxySettingsTestBase()
-    : testing::Test() {
-}
+    : testing::Test() {}
 
 DataReductionProxySettingsTestBase::~DataReductionProxySettingsTestBase() {}
 
@@ -92,6 +88,13 @@ void DataReductionProxySettingsTestBase::SetUp() {
   registry->RegisterBooleanPref(prefs::kDataReductionProxyAltEnabled, false);
   registry->RegisterBooleanPref(prefs::kDataReductionProxyWasEnabledBefore,
                                 false);
+
+  statistics_prefs_.reset(new DataReductionProxyStatisticsPrefs(
+      &pref_service_,
+      scoped_refptr<base::TestSimpleTaskRunner>(
+          new base::TestSimpleTaskRunner()),
+          base::TimeDelta()));
+
   //AddProxyToCommandLine();
   ResetSettings(true, true, false, true, false);
 
@@ -105,7 +108,7 @@ void DataReductionProxySettingsTestBase::SetUp() {
     received_update->Insert(0, new base::StringValue(base::Int64ToString(i)));
   }
   last_update_time_ = base::Time::Now().LocalMidnight();
-  pref_service_.SetInt64(
+  statistics_prefs_->SetInt64(
       prefs::kDailyHttpContentLengthLastUpdateDate,
       last_update_time_.ToInternalValue());
   expected_params_.reset(new TestDataReductionProxyParams(
@@ -113,7 +116,8 @@ void DataReductionProxySettingsTestBase::SetUp() {
       DataReductionProxyParams::kFallbackAllowed |
       DataReductionProxyParams::kPromoAllowed,
       TestDataReductionProxyParams::HAS_EVERYTHING &
-      ~TestDataReductionProxyParams::HAS_DEV_ORIGIN));
+      ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+      ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
 }
 
 template <class C>
@@ -146,6 +150,7 @@ void DataReductionProxySettingsTestBase::ResetSettings(bool allowed,
   settings_.reset(settings);
   configurator_.reset(new TestDataReductionProxyConfig());
   settings_->configurator_ = configurator_.get();
+  settings_->SetDataReductionProxyStatisticsPrefs(statistics_prefs_.get());
 }
 
 // Explicitly generate required instantiations.
@@ -282,7 +287,6 @@ void DataReductionProxySettingsTestBase::CheckInitDataReductionProxy(
       new net::TestURLRequestContextGetter(base::MessageLoopProxy::current());
 
   settings_->InitDataReductionProxySettings(
-      &pref_service_,
       &pref_service_,
       request_context.get());
   settings_->SetOnDataReductionEnabledCallback(

@@ -5,8 +5,8 @@
 #include "content/shell/renderer/test_runner/mock_web_media_stream_center.h"
 
 #include "base/logging.h"
-#include "content/shell/renderer/test_runner/WebTestDelegate.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
+#include "content/shell/renderer/test_runner/web_test_delegate.h"
 #include "third_party/WebKit/public/platform/WebAudioDestinationConsumer.h"
 #include "third_party/WebKit/public/platform/WebAudioSourceProvider.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
@@ -30,7 +30,7 @@ class NewTrackTask : public WebMethodTask<MockWebMediaStreamCenter> {
 
   virtual ~NewTrackTask() {}
 
-  virtual void runIfValid() OVERRIDE {
+  virtual void RunIfValid() OVERRIDE {
     blink::WebMediaStreamSource source;
     blink::WebMediaStreamTrack track;
     source.initialize("MagicVideoDevice#1",
@@ -140,7 +140,7 @@ void MockWebMediaStreamCenter::didCreateMediaStream(
       delete consumer;
     }
   }
-  interfaces_->GetDelegate()->postTask(new NewTrackTask(this, stream));
+  interfaces_->GetDelegate()->PostTask(new NewTrackTask(this, stream));
 }
 
 blink::WebAudioSourceProvider*

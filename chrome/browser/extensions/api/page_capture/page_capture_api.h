@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/page_capture.h"
-#include "webkit/common/blob/shareable_file_reference.h"
+#include "storage/common/blob/shareable_file_reference.h"
 
 namespace base {
 class FilePath;
@@ -60,7 +60,7 @@ class PageCaptureSaveAsMHTMLFunction : public ChromeAsyncExtensionFunction {
   base::FilePath mhtml_path_;
 
   // The file containing the MHTML.
-  scoped_refptr<webkit_blob::ShareableFileReference> mhtml_file_;
+  scoped_refptr<storage::ShareableFileReference> mhtml_file_;
 
   DECLARE_EXTENSION_FUNCTION("pageCapture.saveAsMHTML", PAGECAPTURE_SAVEASMHTML)
 };

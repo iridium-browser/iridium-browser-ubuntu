@@ -6,8 +6,8 @@
 #include "base/values.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
-#include "chrome/common/content_settings.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/test/test_browser_thread.h"
 #include "extensions/common/extension.h"
@@ -20,7 +20,7 @@ using content::BrowserThread;
 using extensions::Extension;
 using extensions::ExtensionSet;
 using extensions::Manifest;
-using quota::SpecialStoragePolicy;
+using storage::SpecialStoragePolicy;
 
 typedef SpecialStoragePolicy::StoragePolicy StoragePolicy;
 

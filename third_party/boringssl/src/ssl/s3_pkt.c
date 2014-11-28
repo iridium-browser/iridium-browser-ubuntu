@@ -311,7 +311,7 @@ static int ssl3_get_record(SSL *s)
 		extra=0;
 	if (extra && !s->s3->init_extra)
 		{
-		/* An application error: SLS_OP_MICROSOFT_BIG_SSLV3_BUFFER
+		/* An application error: SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER
 		 * set after ssl3_setup_buffers() was done */
 		OPENSSL_PUT_ERROR(SSL, ssl3_get_record, ERR_R_INTERNAL_ERROR);
 		return -1;
@@ -760,9 +760,6 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 			if (eivlen <= 1)
 				eivlen = 0;
 			}
-		/* Need explicit part of IV for GCM mode */
-		else if (mode == EVP_CIPH_GCM_MODE)
-			eivlen = EVP_GCM_TLS_EXPLICIT_IV_LEN;
 		else
 			eivlen = 0;
 		}
@@ -886,8 +883,7 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 			return(s->s3->wpend_ret);
 			}
 		else if (i <= 0) {
-			if (s->version == DTLS1_VERSION ||
-			    s->version == DTLS1_BAD_VER) {
+			if (SSL_IS_DTLS(s)) {
 				/* For DTLS, just drop it. That's kind of the whole
 				   point in using a datagram service */
 				wb->left = 0;
@@ -1427,8 +1423,6 @@ err:
 int ssl3_do_change_cipher_spec(SSL *s)
 	{
 	int i;
-	const char *sender;
-	int slen;
 
 	if (s->state & SSL_ST_ACCEPT)
 		i=SSL3_CHANGE_CIPHER_SERVER_READ;
@@ -1450,29 +1444,6 @@ int ssl3_do_change_cipher_spec(SSL *s)
 
 	if (!s->method->ssl3_enc->change_cipher_state(s,i))
 		return(0);
-
-	/* we have to record the message digest at
-	 * this point so we can get it before we read
-	 * the finished message */
-	if (s->state & SSL_ST_CONNECT)
-		{
-		sender=s->method->ssl3_enc->server_finished_label;
-		slen=s->method->ssl3_enc->server_finished_label_len;
-		}
-	else
-		{
-		sender=s->method->ssl3_enc->client_finished_label;
-		slen=s->method->ssl3_enc->client_finished_label_len;
-		}
-
-	i = s->method->ssl3_enc->final_finish_mac(s,
-		sender,slen,s->s3->tmp.peer_finish_md);
-	if (i == 0)
-		{
-		OPENSSL_PUT_ERROR(SSL, ssl3_do_change_cipher_spec, ERR_R_INTERNAL_ERROR);
-		return 0;
-		}
-	s->s3->tmp.peer_finish_md_len = i;
 
 	return(1);
 	}

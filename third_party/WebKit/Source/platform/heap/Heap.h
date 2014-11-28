@@ -35,7 +35,7 @@
 #include "platform/heap/AddressSanitizer.h"
 #include "platform/heap/ThreadState.h"
 #include "platform/heap/Visitor.h"
-
+#include "public/platform/WebThread.h"
 #include "wtf/Assertions.h"
 #include "wtf/HashCountedSet.h"
 #include "wtf/LinkedHashSet.h"
@@ -77,6 +77,9 @@ const size_t freeListMask = 2;
 // tracing of already finalized objects in another thread's heap which is a
 // use-after-free situation.
 const size_t deadBitMask = 4;
+// On free-list entries we reuse the dead bit to distinguish a normal free-list
+// entry from one that has been promptly freed.
+const size_t promptlyFreedMask = freeListMask | deadBitMask;
 #if ENABLE(GC_PROFILE_HEAP)
 const size_t heapObjectGenerations = 8;
 const size_t maxHeapObjectAge = heapObjectGenerations - 1;
@@ -91,12 +94,16 @@ const uint8_t finalizedZapValue = 24;
 // the mark bit when tracing.
 const uint8_t orphanedZapValue = 240;
 
+const int numberOfMarkingThreads = 2;
+
+const int numberOfPagesToConsiderForCoalescing = 100;
+
 enum CallbackInvocationMode {
     GlobalMarking,
     ThreadLocalMarking,
-    WeaknessProcessing,
 };
 
+class CallbackStack;
 class HeapStats;
 class PageMemory;
 template<ThreadAffinity affinity> class ThreadLocalPersistents;
@@ -278,6 +285,12 @@ public:
     bool isFree() { return m_size & freeListMask; }
 
     NO_SANITIZE_ADDRESS
+    bool isPromptlyFreed() { return (m_size & promptlyFreedMask) == promptlyFreedMask; }
+
+    NO_SANITIZE_ADDRESS
+    void markPromptlyFreed() { m_size |= promptlyFreedMask; }
+
+    NO_SANITIZE_ADDRESS
     size_t size() const { return m_size & sizeMask; }
 
 #if ENABLE(GC_PROFILE_HEAP)
@@ -297,7 +310,7 @@ public:
 #endif
 
 protected:
-    size_t m_size;
+    volatile unsigned m_size;
 };
 
 // Our heap object layout is layered with the HeapObjectHeader closest
@@ -435,6 +448,16 @@ public:
         *prevNext = this;
     }
 
+    NO_SANITIZE_ADDRESS
+    FreeListEntry* next() const { return m_next; }
+
+    NO_SANITIZE_ADDRESS
+    void append(FreeListEntry* next)
+    {
+        ASSERT(!m_next);
+        m_next = next;
+    }
+
 #if defined(ADDRESS_SANITIZER)
     NO_SANITIZE_ADDRESS
     bool shouldAddToFreeList()
@@ -472,7 +495,7 @@ public:
     HeapPage(PageMemory*, ThreadHeap<Header>*, const GCInfo*);
 
     void link(HeapPage**);
-    static void unlink(HeapPage*, HeapPage**);
+    static void unlink(ThreadHeap<Header>*, HeapPage*, HeapPage**);
 
     bool isEmpty();
 
@@ -502,7 +525,7 @@ public:
 
     void getStats(HeapStats&);
     void clearLiveAndMarkDead();
-    void sweep();
+    void sweep(HeapStats*, ThreadHeap<Header>*);
     void clearObjectStartBitMap();
     void finalize(Header*);
     virtual void checkAndMarkPointer(Visitor*, Address) OVERRIDE;
@@ -512,7 +535,7 @@ public:
 #if ENABLE(GC_PROFILE_HEAP)
     virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*);
 #endif
-    ThreadHeap<Header>* heap() { return m_heap; }
+
 #if defined(ADDRESS_SANITIZER)
     void poisonUnmarkedObjects();
 #endif
@@ -540,8 +563,10 @@ protected:
     TraceCallback traceCallback(Header*);
     bool hasVTable(Header*);
 
+    intptr_t padding() const { return m_padding; }
+
     HeapPage<Header>* m_next;
-    ThreadHeap<Header>* m_heap;
+    intptr_t m_padding; // Preserve 8-byte alignment on 32-bit systems.
     bool m_objectStartBitMapComputed;
     uint8_t m_objectStartBitMap[reservedForObjectBitMap];
 
@@ -668,7 +693,7 @@ class ThreadSafeRefCountedGarbageCollected : public GarbageCollectedFinalized<T>
 public:
     ThreadSafeRefCountedGarbageCollected()
     {
-        m_keepAlive = adoptPtr(new CrossThreadPersistent<T>(static_cast<T*>(this)));
+        makeKeepAlive();
     }
 
     // Override ref to deal with a case where a reference count goes up
@@ -680,8 +705,7 @@ public:
     {
         MutexLocker lock(m_mutex);
         if (UNLIKELY(!refCount())) {
-            ASSERT(!m_keepAlive);
-            m_keepAlive = adoptPtr(new CrossThreadPersistent<T>(static_cast<T*>(this)));
+            makeKeepAlive();
         }
         WTF::ThreadSafeRefCountedBase::ref();
     }
@@ -703,6 +727,12 @@ protected:
     ~ThreadSafeRefCountedGarbageCollected() { }
 
 private:
+    void makeKeepAlive()
+    {
+        ASSERT(!m_keepAlive);
+        m_keepAlive = adoptPtr(new CrossThreadPersistent<T>(static_cast<T*>(this)));
+    }
+
     OwnPtr<CrossThreadPersistent<T> > m_keepAlive;
     mutable Mutex m_mutex;
 };
@@ -756,80 +786,6 @@ private:
     void clearMemory(PageMemory*);
 };
 
-// The CallbackStack contains all the visitor callbacks used to trace and mark
-// objects. A specific CallbackStack instance contains at most bufferSize elements.
-// If more space is needed a new CallbackStack instance is created and chained
-// together with the former instance. I.e. a logical CallbackStack can be made of
-// multiple chained CallbackStack object instances.
-// There are two logical callback stacks. One containing all the marking callbacks and
-// one containing the weak pointer callbacks.
-class CallbackStack {
-public:
-    CallbackStack(CallbackStack** first)
-        : m_limit(&(m_buffer[bufferSize]))
-        , m_current(&(m_buffer[0]))
-        , m_next(*first)
-    {
-#if ENABLE(ASSERT)
-        clearUnused();
-#endif
-        *first = this;
-    }
-
-    ~CallbackStack();
-    void clearUnused();
-
-    bool isEmpty();
-
-    class Item {
-    public:
-        Item() { }
-        Item(void* object, VisitorCallback callback)
-            : m_object(object)
-            , m_callback(callback)
-        {
-        }
-        void* object() { return m_object; }
-        VisitorCallback callback() { return m_callback; }
-
-    private:
-        void* m_object;
-        VisitorCallback m_callback;
-    };
-
-    static void init(CallbackStack** first);
-    static void shutdown(CallbackStack** first);
-    static void clear(CallbackStack** first)
-    {
-        if (!(*first)->isEmpty()) {
-            shutdown(first);
-            init(first);
-        }
-    }
-    template<CallbackInvocationMode Mode> bool popAndInvokeCallback(CallbackStack** first, Visitor*);
-    static void invokeCallbacks(CallbackStack** first, Visitor*);
-
-    Item* allocateEntry(CallbackStack** first)
-    {
-        if (m_current < m_limit)
-            return m_current++;
-        return (new CallbackStack(first))->allocateEntry(first);
-    }
-
-#if ENABLE(ASSERT)
-    bool hasCallbackForObject(const void*);
-#endif
-
-private:
-    void invokeOldestCallbacks(Visitor*);
-
-    static const size_t bufferSize = 8000;
-    Item m_buffer[bufferSize];
-    Item* m_limit;
-    Item* m_current;
-    CallbackStack* m_next;
-};
-
 // Non-template super class used to pass a heap around to other classes.
 class BaseHeap {
 public:
@@ -851,18 +807,26 @@ public:
 
     // Sweep this part of the Blink heap. This finalizes dead objects
     // and builds freelists for all the unused memory.
-    virtual void sweep() = 0;
+    virtual void sweep(HeapStats*) = 0;
+    virtual void postSweepProcessing() = 0;
 
     virtual void clearFreeLists() = 0;
     virtual void clearLiveAndMarkDead() = 0;
+
+    virtual void makeConsistentForSweeping() = 0;
+
 #if ENABLE(ASSERT)
+    virtual bool isConsistentForSweeping() = 0;
+
     virtual void getScannedStats(HeapStats&) = 0;
 #endif
 
-    virtual void makeConsistentForGC() = 0;
-    virtual bool isConsistentForGC() = 0;
-
     virtual void prepareHeapForTermination() = 0;
+
+    virtual int normalPageCount() = 0;
+
+    virtual BaseHeap* split(int normalPages) = 0;
+    virtual void merge(BaseHeap* other) = 0;
 
     // Returns a bucket number for inserting a FreeListEntry of a
     // given size. All FreeListEntries in the given bucket, n, have
@@ -894,15 +858,20 @@ public:
 #if ENABLE(GC_PROFILE_HEAP)
     virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*);
 #endif
-    virtual void sweep();
+
+    virtual void sweep(HeapStats*);
+    virtual void postSweepProcessing();
+
     virtual void clearFreeLists();
     virtual void clearLiveAndMarkDead();
+
+    virtual void makeConsistentForSweeping();
+
 #if ENABLE(ASSERT)
+    virtual bool isConsistentForSweeping();
+
     virtual void getScannedStats(HeapStats&);
 #endif
-
-    virtual void makeConsistentForGC();
-    virtual bool isConsistentForGC();
 
     ThreadState* threadState() { return m_threadState; }
     HeapStats& stats() { return m_threadState->stats(); }
@@ -918,8 +887,16 @@ public:
         return allocationSizeFromSize(size) - sizeof(Header);
     }
 
-    void prepareHeapForTermination();
+    virtual void prepareHeapForTermination();
+
+    virtual int normalPageCount() { return m_numberOfNormalPages; }
+
+    virtual BaseHeap* split(int numberOfNormalPages);
+    virtual void merge(BaseHeap* splitOffBase);
+
     void removePageFromHeap(HeapPage<Header>*);
+
+    PLATFORM_EXPORT void promptlyFreeObject(Header*);
 
 private:
     void addPageToHeap(const GCInfo*);
@@ -942,21 +919,44 @@ private:
     void freeLargeObject(LargeHeapObject<Header>*, LargeHeapObject<Header>**);
     void allocatePage(const GCInfo*);
 
+#if ENABLE(ASSERT)
+    bool pagesToBeSweptContains(Address);
+    bool pagesAllocatedDuringSweepingContains(Address);
+#endif
+
+    void sweepNormalPages(HeapStats*);
+    void sweepLargePages(HeapStats*);
+    bool coalesce(size_t);
+
     Address m_currentAllocationPoint;
     size_t m_remainingAllocationSize;
 
     HeapPage<Header>* m_firstPage;
     LargeHeapObject<Header>* m_firstLargeHeapObject;
 
+    HeapPage<Header>* m_firstPageAllocatedDuringSweeping;
+    HeapPage<Header>* m_lastPageAllocatedDuringSweeping;
+
+    // Merge point for parallel sweep.
+    HeapPage<Header>* m_mergePoint;
+
     int m_biggestFreeListIndex;
+
     ThreadState* m_threadState;
 
     // All FreeListEntries in the nth list have size >= 2^n.
     FreeListEntry* m_freeLists[blinkPageSizeLog2];
+    FreeListEntry* m_lastFreeListEntries[blinkPageSizeLog2];
 
     // Index into the page pools. This is used to ensure that the pages of the
     // same type go into the correct page pool and thus avoid type confusion.
     int m_index;
+
+    int m_numberOfNormalPages;
+
+    // The promptly freed count contains the number of promptly freed objects
+    // since the last sweep or since it was manually reset to delay coalescing.
+    size_t m_promptlyFreedCount;
 };
 
 class PLATFORM_EXPORT Heap {
@@ -973,7 +973,11 @@ public:
 #endif
 
     // Push a trace callback on the marking stack.
-    static void pushTraceCallback(void* containerObject, TraceCallback);
+    static void pushTraceCallback(CallbackStack*, void* containerObject, TraceCallback);
+
+    // Push a trace callback on the post-marking callback stack. These callbacks
+    // are called after normal marking (including ephemeron iteration).
+    static void pushPostMarkingCallback(void*, TraceCallback);
 
     // Add a weak pointer callback to the weak callback work list. General
     // object pointer callbacks are added to a thread local weak callback work
@@ -990,9 +994,14 @@ public:
     // is OK because cells are just cleared and no deallocation can happen.
     static void pushWeakCellPointerCallback(void** cell, WeakPointerCallback);
 
-    // Pop the top of the marking stack and call the callback with the visitor
+    // Pop the top of a marking stack and call the callback with the visitor
     // and the object. Returns false when there is nothing more to do.
-    template<CallbackInvocationMode Mode> static bool popAndInvokeTraceCallback(Visitor*);
+    template<CallbackInvocationMode Mode> static bool popAndInvokeTraceCallback(CallbackStack*, Visitor*);
+
+    // Remove an item from the post-marking callback stack and call
+    // the callback with the visitor and the object pointer. Returns
+    // false when there is nothing more to do.
+    static bool popAndInvokePostMarkingCallback(Visitor*);
 
     // Remove an item from the weak callback work list and call the callback
     // with the visitor and the closure pointer. Returns false when there is
@@ -1005,14 +1014,21 @@ public:
     static bool weakTableRegistered(const void*);
 #endif
 
+    template<typename T, typename HeapTraits> static Address allocate(size_t);
+    // FIXME: remove this once c++11 is allowed everywhere:
     template<typename T> static Address allocate(size_t);
+
     template<typename T> static Address reallocate(void* previous, size_t);
 
-    static void collectGarbage(ThreadState::StackState);
+    static void collectGarbage(ThreadState::StackState, ThreadState::CauseOfGC = ThreadState::NormalGC);
     static void collectGarbageForTerminatingThread(ThreadState*);
     static void collectAllGarbage();
+    static void processMarkingStackEntries(int* numberOfMarkingThreads);
+    static void processMarkingStackOnMultipleThreads();
+    static void processMarkingStackInParallel();
     template<CallbackInvocationMode Mode> static void processMarkingStack();
-    static void globalWeakProcessingAndCleanup();
+    static void postMarkingProcessing();
+    static void globalWeakProcessing();
     static void setForcePreciseGCForTesting();
 
     static void prepareForGC();
@@ -1040,8 +1056,11 @@ public:
 
     static void getHeapSpaceSize(uint64_t*, uint64_t*);
 
-    static bool isConsistentForGC();
-    static void makeConsistentForGC();
+    static void makeConsistentForSweeping();
+
+#if ENABLE(ASSERT)
+    static bool isConsistentForSweeping();
+#endif
 
     static void flushHeapDoesNotContainCache();
     static bool heapDoesNotContainCacheIsEmpty() { return s_heapDoesNotContainCache->isEmpty(); }
@@ -1055,8 +1074,9 @@ public:
 
 private:
     static Visitor* s_markingVisitor;
-
+    static Vector<OwnPtr<blink::WebThread> >* s_markingThreads;
     static CallbackStack* s_markingStack;
+    static CallbackStack* s_postMarkingCallbackStack;
     static CallbackStack* s_weakCallbackStack;
     static CallbackStack* s_ephemeronStack;
     static HeapDoesNotContainCache* s_heapDoesNotContainCache;
@@ -1395,7 +1415,13 @@ NO_SANITIZE_ADDRESS
 void HeapObjectHeader::mark()
 {
     checkHeader();
-    m_size |= markBitMask;
+    // The use of atomic ops guarantees that the reads and writes are
+    // atomic and that no memory operation reorderings take place.
+    // Multiple threads can still read the old value and all store the
+    // new value. However, the new value will be the same for all of
+    // the threads and the end result is therefore consistent.
+    unsigned size = asanUnsafeAcquireLoad(&m_size);
+    asanUnsafeReleaseStore(&m_size, size | markBitMask);
 }
 
 Address FinalizedHeapObjectHeader::payload()
@@ -1450,21 +1476,23 @@ Address ThreadHeap<Header>::allocate(size_t size, const GCInfo* gcInfo)
     return result;
 }
 
-// FIXME: Allocate objects that do not need finalization separately
-// and use separate sweeping to not have to check for finalizers.
-template<typename T>
+template<typename T, typename HeapTraits>
 Address Heap::allocate(size_t size)
 {
     ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
     ASSERT(state->isAllocationAllowed());
-    BaseHeap* heap = state->heap(HeapTrait<T>::index);
-    Address addr =
-        static_cast<typename HeapTrait<T>::HeapType*>(heap)->allocate(size, GCInfoTrait<T>::get());
-    return addr;
+    const GCInfo* gcInfo = GCInfoTrait<T>::get();
+    int heapIndex = HeapTraits::index(gcInfo->hasFinalizer());
+    BaseHeap* heap = state->heap(heapIndex);
+    return static_cast<typename HeapTraits::HeapType*>(heap)->allocate(size, gcInfo);
 }
 
-// FIXME: Allocate objects that do not need finalization separately
-// and use separate sweeping to not have to check for finalizers.
+template<typename T>
+Address Heap::allocate(size_t size)
+{
+    return allocate<T, HeapTypeTrait<T> >(size);
+}
+
 template<typename T>
 Address Heap::reallocate(void* previous, size_t size)
 {
@@ -1476,19 +1504,21 @@ Address Heap::reallocate(void* previous, size_t size)
     }
     ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
     ASSERT(state->isAllocationAllowed());
+    const GCInfo* gcInfo = GCInfoTrait<T>::get();
+    int heapIndex = HeapTypeTrait<T>::index(gcInfo->hasFinalizer());
     // FIXME: Currently only supports raw allocation on the
     // GeneralHeap. Hence we assume the header is a
     // FinalizedHeapObjectHeader.
-    ASSERT(HeapTrait<T>::index == GeneralHeap);
-    BaseHeap* heap = state->heap(HeapTrait<T>::index);
-    Address address = static_cast<typename HeapTrait<T>::HeapType*>(heap)->allocate(size, GCInfoTrait<T>::get());
+    ASSERT(heapIndex == GeneralHeap || heapIndex == GeneralHeapNonFinalized);
+    BaseHeap* heap = state->heap(heapIndex);
+    Address address = static_cast<typename HeapTypeTrait<T>::HeapType*>(heap)->allocate(size, gcInfo);
     if (!previous) {
         // This is equivalent to malloc(size).
         return address;
     }
     FinalizedHeapObjectHeader* previousHeader = FinalizedHeapObjectHeader::fromPayload(previous);
     ASSERT(!previousHeader->hasFinalizer());
-    ASSERT(previousHeader->gcInfo() == GCInfoTrait<T>::get());
+    ASSERT(previousHeader->gcInfo() == gcInfo);
     size_t copySize = previousHeader->payloadSize();
     if (copySize > size)
         copySize = size;
@@ -1502,7 +1532,7 @@ public:
     static size_t quantizedSize(size_t count)
     {
         RELEASE_ASSERT(count <= kMaxUnquantizedAllocation / sizeof(T));
-        return HeapTrait<T>::HeapType::roundedAllocationSize(count * sizeof(T));
+        return HeapIndexTrait<CollectionBackingHeap>::HeapType::roundedAllocationSize(count * sizeof(T));
     }
     static const size_t kMaxUnquantizedAllocation = maxHeapObjectSize;
 };
@@ -1518,19 +1548,20 @@ public:
     template <typename Return, typename Metadata>
     static Return backingMalloc(size_t size)
     {
-        return malloc<Return, Metadata>(size);
+        return reinterpret_cast<Return>(Heap::allocate<Metadata, HeapIndexTrait<CollectionBackingHeap> >(size));
     }
     template <typename Return, typename Metadata>
     static Return zeroedBackingMalloc(size_t size)
     {
-        return malloc<Return, Metadata>(size);
+        return backingMalloc<Return, Metadata>(size);
     }
     template <typename Return, typename Metadata>
     static Return malloc(size_t size)
     {
         return reinterpret_cast<Return>(Heap::allocate<Metadata>(size));
     }
-    static void backingFree(void* address) { }
+    PLATFORM_EXPORT static void backingFree(void* address);
+
     static void free(void* address) { }
     template<typename T>
     static void* newArray(size_t bytes)
@@ -1560,6 +1591,11 @@ public:
     static void trace(Visitor* visitor, T& t)
     {
         CollectionBackingTraceTrait<WTF::ShouldBeTraced<Traits>::value, Traits::weakHandlingFlag, WTF::WeakPointersActWeak, T, Traits>::trace(visitor, t);
+    }
+
+    static void registerDelayedMarkNoTracing(Visitor* visitor, const void* object)
+    {
+        visitor->registerDelayedMarkNoTracing(object);
     }
 
     static void registerWeakMembers(Visitor* visitor, const void* closure, const void* object, WeakPointerCallback callback)
@@ -1612,6 +1648,20 @@ public:
     static T& getOther(T* other)
     {
         return *other;
+    }
+
+    static void enterNoAllocationScope()
+    {
+#if ENABLE(ASSERT)
+        ThreadStateFor<AnyThread>::state()->enterNoAllocationScope();
+#endif
+    }
+
+    static void leaveNoAllocationScope()
+    {
+#if ENABLE(ASSERT)
+        ThreadStateFor<AnyThread>::state()->leaveNoAllocationScope();
+#endif
     }
 
 private:
@@ -1785,6 +1835,21 @@ public:
         Deque<T, inlineCapacity, HeapAllocator>::append(other);
     }
 };
+
+template<typename T, size_t i>
+inline void swap(HeapVector<T, i>& a, HeapVector<T, i>& b) { a.swap(b); }
+template<typename T, size_t i>
+inline void swap(HeapDeque<T, i>& a, HeapDeque<T, i>& b) { a.swap(b); }
+template<typename T, typename U, typename V>
+inline void swap(HeapHashSet<T, U, V>& a, HeapHashSet<T, U, V>& b) { a.swap(b); }
+template<typename T, typename U, typename V, typename W, typename X>
+inline void swap(HeapHashMap<T, U, V, W, X>& a, HeapHashMap<T, U, V, W, X>& b) { a.swap(b); }
+template<typename T, size_t i, typename U>
+inline void swap(HeapListHashSet<T, i, U>& a, HeapListHashSet<T, i, U>& b) { a.swap(b); }
+template<typename T, typename U, typename V>
+inline void swap(HeapLinkedHashSet<T, U, V>& a, HeapLinkedHashSet<T, U, V>& b) { a.swap(b); }
+template<typename T, typename U, typename V>
+inline void swap(HeapHashCountedSet<T, U, V>& a, HeapHashCountedSet<T, U, V>& b) { a.swap(b); }
 
 template<typename T>
 struct ThreadingTrait<Member<T> > {
@@ -2246,9 +2311,9 @@ struct TraceInCollectionTrait<WeakHandlingInCollections, strongify, KeyValuePair
 
 // Nodes used by LinkedHashSet. Again we need two versions to disambiguate the
 // template.
-template<ShouldWeakPointersBeMarkedStrongly strongify, typename Value, typename Traits>
-struct TraceInCollectionTrait<NoWeakHandlingInCollections, strongify, LinkedHashSetNode<Value>, Traits> {
-    static bool trace(blink::Visitor* visitor, LinkedHashSetNode<Value>& self)
+template<ShouldWeakPointersBeMarkedStrongly strongify, typename Value, typename Allocator, typename Traits>
+struct TraceInCollectionTrait<NoWeakHandlingInCollections, strongify, LinkedHashSetNode<Value, Allocator>, Traits> {
+    static bool trace(blink::Visitor* visitor, LinkedHashSetNode<Value, Allocator>& self)
     {
         ASSERT(ShouldBeTraced<Traits>::value);
         blink::TraceTrait<Value>::trace(visitor, &self.m_value);
@@ -2256,9 +2321,9 @@ struct TraceInCollectionTrait<NoWeakHandlingInCollections, strongify, LinkedHash
     }
 };
 
-template<ShouldWeakPointersBeMarkedStrongly strongify, typename Value, typename Traits>
-struct TraceInCollectionTrait<WeakHandlingInCollections, strongify, LinkedHashSetNode<Value>, Traits> {
-    static bool trace(blink::Visitor* visitor, LinkedHashSetNode<Value>& self)
+template<ShouldWeakPointersBeMarkedStrongly strongify, typename Value, typename Allocator, typename Traits>
+struct TraceInCollectionTrait<WeakHandlingInCollections, strongify, LinkedHashSetNode<Value, Allocator>, Traits> {
+    static bool trace(blink::Visitor* visitor, LinkedHashSetNode<Value, Allocator>& self)
     {
         return TraceInCollectionTrait<WeakHandlingInCollections, strongify, Value, typename Traits::ValueTraits>::trace(visitor, self.m_value);
     }

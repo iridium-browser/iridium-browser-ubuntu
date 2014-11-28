@@ -50,7 +50,7 @@ class LayerTreeHostScrollTestScrollSimple : public LayerTreeHostScrollTest {
 
   virtual void Layout() OVERRIDE {
     Layer* root = layer_tree_host()->root_layer();
-    Layer* scroll_layer = root->children()[0];
+    Layer* scroll_layer = root->children()[0].get();
     if (!layer_tree_host()->source_frame_number()) {
       EXPECT_VECTOR_EQ(initial_scroll_, scroll_layer->scroll_offset());
     } else {
@@ -86,8 +86,9 @@ class LayerTreeHostScrollTestScrollSimple : public LayerTreeHostScrollTest {
     }
   }
 
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float scale) OVERRIDE {
+  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                   float scale,
+                                   float top_controls_delta) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -170,8 +171,9 @@ class LayerTreeHostScrollTestScrollMultipleRedraw
     }
   }
 
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float scale) OVERRIDE {
+  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                   float scale,
+                                   float top_controls_delta) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -221,7 +223,8 @@ class LayerTreeHostScrollTestScrollAbortedCommit
 
   virtual void WillBeginMainFrame() OVERRIDE {
     num_will_begin_main_frames_++;
-    Layer* root_scroll_layer = layer_tree_host()->root_layer()->children()[0];
+    Layer* root_scroll_layer =
+        layer_tree_host()->root_layer()->children()[0].get();
     switch (num_will_begin_main_frames_) {
       case 1:
         // This will not be aborted because of the initial prop changes.
@@ -341,8 +344,9 @@ class LayerTreeHostScrollTestScrollAbortedCommit
     }
   }
 
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float scale) OVERRIDE {
+  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                   float scale,
+                                   float top_controls_delta) OVERRIDE {
     num_impl_scrolls_++;
   }
 
@@ -512,8 +516,9 @@ class LayerTreeHostScrollTestCaseWithChild : public LayerTreeHostScrollTest {
     final_scroll_offset_ = expected_scroll_layer_->scroll_offset();
   }
 
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float scale) OVERRIDE {
+  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                   float scale,
+                                   float top_controls_delta) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -561,13 +566,8 @@ class LayerTreeHostScrollTestCaseWithChild : public LayerTreeHostScrollTest {
     EXPECT_VECTOR_EQ(gfx::Vector2d(),
                      expected_no_scroll_layer_impl->ScrollDelta());
 
-    // Ensure device scale factor is affecting the layers.
-    EXPECT_FLOAT_EQ(device_scale_factor_,
-                    root_scroll_layer_impl->HighResTiling()->contents_scale());
-
-    EXPECT_FLOAT_EQ(device_scale_factor_,
-                    child_layer_impl->HighResTiling()->contents_scale());
-
+    // Ensure device scale factor matches the active tree.
+    EXPECT_EQ(device_scale_factor_, impl->active_tree()->device_scale_factor());
     switch (impl->active_tree()->source_frame_number()) {
       case 0: {
         // Gesture scroll on impl thread.
@@ -773,7 +773,7 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
 
   virtual void Layout() OVERRIDE {
     Layer* root = layer_tree_host()->root_layer();
-    Layer* scroll_layer = root->children()[0];
+    Layer* scroll_layer = root->children()[0].get();
     if (!layer_tree_host()->source_frame_number()) {
       EXPECT_VECTOR_EQ(scroll_layer->scroll_offset(), initial_scroll_);
     } else {
@@ -850,8 +850,9 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
     }
   }
 
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float scale) OVERRIDE {
+  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                   float scale,
+                                   float top_controls_delta) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -901,7 +902,7 @@ class ImplSidePaintingScrollTestImplOnlyScroll
 
   virtual void WillCommit() OVERRIDE {
     Layer* root = layer_tree_host()->root_layer();
-    Layer* scroll_layer = root->children()[0];
+    Layer* scroll_layer = root->children()[0].get();
     switch (layer_tree_host()->source_frame_number()) {
       case 0:
         EXPECT_TRUE(scroll_layer->needs_push_properties());

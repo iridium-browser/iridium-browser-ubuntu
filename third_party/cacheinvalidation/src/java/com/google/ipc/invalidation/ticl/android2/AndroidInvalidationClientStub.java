@@ -16,24 +16,20 @@
 
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.InvalidationClient;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.types.AckHandle;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
-import com.google.ipc.invalidation.ticl.ProtoConverter;
+import com.google.ipc.invalidation.ticl.ProtoWrapperConverter;
 import com.google.ipc.invalidation.ticl.android2.ProtocolIntents.ClientDowncalls;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.Client.AckHandleP;
-import com.google.protos.ipc.invalidation.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.util.Preconditions;
 
 import android.content.Context;
 import android.content.Intent;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.List;
+import java.util.Collections;
 
 /**
  * Implementation of {@link InvalidationClient} that uses intents to send commands to an Android
@@ -73,39 +69,35 @@ class AndroidInvalidationClientStub implements InvalidationClient {
 
   @Override
   public void register(ObjectId objectId) {
-    List<ObjectIdP> objects = new ArrayList<ObjectIdP>(1);
-    objects.add(ProtoConverter.convertToObjectIdProto(objectId));
+    Collection<ObjectIdP> objects =
+        Collections.singletonList(ProtoWrapperConverter.convertToObjectIdProto(objectId));
     issueIntent(ClientDowncalls.newRegistrationIntent(objects));
   }
 
   @Override
   public void register(Collection<ObjectId> objectIds) {
-    List<ObjectIdP> objectIdPs = ProtoConverter.convertToObjectIdProtoList(objectIds);
+    Collection<ObjectIdP> objectIdPs =
+        ProtoWrapperConverter.convertToObjectIdProtoCollection(objectIds);
     issueIntent(ClientDowncalls.newRegistrationIntent(objectIdPs));
   }
 
   @Override
   public void unregister(ObjectId objectId) {
-    List<ObjectIdP> objects = new ArrayList<ObjectIdP>(1);
-    objects.add(ProtoConverter.convertToObjectIdProto(objectId));
+    Collection<ObjectIdP> objects =
+        Collections.singletonList(ProtoWrapperConverter.convertToObjectIdProto(objectId));
     issueIntent(ClientDowncalls.newUnregistrationIntent(objects));
   }
 
   @Override
   public void unregister(Collection<ObjectId> objectIds) {
-    List<ObjectIdP> objectIdPs = ProtoConverter.convertToObjectIdProtoList(objectIds);
+    Collection<ObjectIdP> objectIdPs =
+        ProtoWrapperConverter.convertToObjectIdProtoCollection(objectIds);
     issueIntent(ClientDowncalls.newUnregistrationIntent(objectIdPs));
   }
 
   @Override
   public void acknowledge(AckHandle ackHandle) {
-    try {
-      AckHandleP ackHandleP = AckHandleP.parseFrom(ackHandle.getHandleData());
-      issueIntent(ClientDowncalls.newAcknowledgeIntent(ackHandleP));
-    } catch (InvalidProtocolBufferException exception) {
-      logger.warning("Dropping acknowledge(); could not parse ack handle data %s",
-          Arrays.toString(ackHandle.getHandleData()));
-    }
+    issueIntent(ClientDowncalls.newAcknowledgeIntent(ackHandle.getHandleData()));
   }
 
   /** Sends {@code intent} to the service implemented by {@link #serviceClass}. */

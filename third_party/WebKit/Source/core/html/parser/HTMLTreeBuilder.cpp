@@ -402,7 +402,7 @@ void HTMLTreeBuilder::processToken(AtomicHTMLToken* token)
 
     // Any non-character token needs to cause us to flush any pending text immediately.
     // NOTE: flush() can cause any queued tasks to execute, possibly re-entering the parser.
-    m_tree.flush();
+    m_tree.flush(FlushAlways);
     m_shouldSkipLeadingNewline = false;
 
     switch (token->type()) {
@@ -867,10 +867,19 @@ void HTMLTreeBuilder::processStartTagForInBody(AtomicHTMLToken* token)
         m_tree.insertHTMLElement(token);
         return;
     }
-    if (token->name() == rpTag || token->name() == rtTag) {
+    if (token->name() == rbTag || token->name() == rtcTag) {
         if (m_tree.openElements()->inScope(rubyTag.localName())) {
             m_tree.generateImpliedEndTags();
             if (!m_tree.currentStackItem()->hasTagName(rubyTag))
+                parseError(token);
+        }
+        m_tree.insertHTMLElement(token);
+        return;
+    }
+    if (token->name() == rtTag || token->name() == rpTag) {
+        if (m_tree.openElements()->inScope(rubyTag.localName())) {
+            m_tree.generateImpliedEndTagsWithExclusion(rtcTag.localName());
+            if (!m_tree.currentStackItem()->hasTagName(rubyTag) && !m_tree.currentStackItem()->hasTagName(rtcTag))
                 parseError(token);
         }
         m_tree.insertHTMLElement(token);
@@ -2680,7 +2689,7 @@ void HTMLTreeBuilder::processTokenInForeignContent(AtomicHTMLToken* token)
         return;
     }
 
-    m_tree.flush();
+    m_tree.flush(FlushAlways);
     HTMLStackItem* adjustedCurrentNode = adjustedCurrentStackItem();
 
     switch (token->type()) {

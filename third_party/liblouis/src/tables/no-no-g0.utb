@@ -60,11 +60,11 @@ include digits8Dots.uti
 punctuation : 25	colon													x003A
 punctuation ; 23	semicolon											x003B
 # math < 5-256			less-than sign								x003C
-math < 126				less-than sign								x003C
+math < 246-3				less-than sign								x003C
 math = 2356				equal sign										x003D
 uplow \x00C6\x00E6 345		ae											x00C6 / 00E6
 
-math > 345				greater-than sign							x003E
+math > 135-2				greater-than sign							x003E
 punctuation ? 26	question mark									x003F
 sign @ 4					commercial at									x0040
 
@@ -107,7 +107,7 @@ sign ¥ 45-13456				yen	sign																		x00A5
 sign § 346						section sign																x00A7
 sign © 236-14-356		copyright			x00A9
 # sign « 45-2356				left-pointing double angle quotation mark		x00AB
-sign « 256				left-pointing double angle quotation mark		x00AB
+punctuation « 256				left-pointing double angle quotation mark		x00AB
 sign ° 5-356					degree sign																	x00B0
 
 sign ² 4-6-126				superscript 2 sign													x00B2
@@ -115,7 +115,7 @@ sign ³ 4-6-146				superscript 3 sign													x00B3
 sign \x00B4 6					acute sign dec-180
 sign ¹ 1-27						superscript 1 sign													x00B9
 # sign » 2356-12				right-pointing double angle quotation mark	x00BB
-sign » 256				right-pointing double angle quotation mark	x00BB
+punctuation » 256				right-pointing double angle quotation mark	x00BB
 math ¼ 6-16-34-1456		vulgar fraction one quarter								x00BC
 
 math ½ 6-16-34-126		vulgar fraction one half									x00BD
@@ -155,18 +155,12 @@ uplow \x00D2\x00F2 4-135 DEC 242 ò
 lowercase \x00F3 4-135 DEC 243 ó
 lowercase \x00F4 4-135 DEC 244 ô
 
+# Taken from Czech braille:
+uplow       \x0160\x0161  156,156             Šš                  LATIN CAPITAL LETTER S WITH CARON - LATIN SMALL LETTER S WITH CARON
+
 
 # ------------------- End char definitions --------------------
-litdigit 1 1
-litdigit 2 12
-litdigit 3 14
-litdigit 4 145
-litdigit 5 15
-litdigit 6 124
-litdigit 7 1245
-litdigit 8 125
-litdigit 9 24
-litdigit 0 245
+include litdigits6Dots.uti
 
 # unicode braille
 include braille-patterns.cti
@@ -178,12 +172,22 @@ capsign 6							# single capital letter indicator
 begcaps 6-6						# a block of consecutive capital letters indicator
 endcaps 56
 
-begital 23
-begbold 23
-begunder 456
-endital 56
-endbold 56
-endunder 456
+lenitalphrase 1
+lenboldphrase 1
+
+firstwordital 23
+firstletterital 23
+firstwordbold 23
+firstletterbold 23
+firstwordunder 23
+firstletterunder 23
+
+lastworditalafter 56
+lastletterital 56
+lastwordboldafter 56
+lastletterbold 56
+lastwordunderafter 56
+lastletterunder 56
 
 midnum , 2
 midnum . 3
@@ -205,9 +209,6 @@ endnum g 56-1245
 endnum h 56-125
 endnum i 56-24
 endnum j 56-245
-repeated \s 0		espaces
-repeated \t 0		tabulations
-repeated \x00a0 0		espaces insécables
 
 repeated ... 3-3-3		points de suite
 repeated --- 36-36-36
@@ -215,3 +216,45 @@ repeated ___ 456-456-456
 
 # always \s--\s 36-36	tiret
 noback always ;\s; 0
+
+begcomp 126
+endcomp 345
+
+compbrl :// URLs
+compbrl www.
+compbrl .com
+compbrl .edu
+compbrl .gov
+compbrl .mil
+compbrl .net
+compbrl .org
+compbrl .no
+compbrl .nu
+compbrl .se
+compbrl .dk
+compbrl .fi
+compbrl .ini
+compbrl .doc
+compbrl .docx
+compbrl .xml
+compbrl .xsl
+compbrl .htm
+compbrl .html
+compbrl .tex
+compbrl .txt
+compbrl .gif
+compbrl .jpg
+compbrl .png
+compbrl .wav
+compbrl .mp3
+compbrl .m3u
+compbrl .tar
+compbrl .gz
+compbrl .bz2
+compbrl .zip
+
+# Fix input where less than / greater than already are surrounding the
+# URL / email address.
+
+pass2 @126-246-3 @126
+pass2 @135-2-345 @345

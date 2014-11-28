@@ -21,18 +21,18 @@ namespace printing {
 
 class PRINTING_EXPORT PrintingContextMac : public PrintingContext {
  public:
-  explicit PrintingContextMac(const std::string& app_locale);
+  explicit PrintingContextMac(Delegate* delegate);
   virtual ~PrintingContextMac();
 
   // PrintingContext implementation.
   virtual void AskUserForSettings(
-      gfx::NativeView parent_view,
       int max_pages,
       bool has_selection,
       const PrintSettingsCallback& callback) OVERRIDE;
   virtual Result UseDefaultSettings() OVERRIDE;
   virtual gfx::Size GetPdfPaperSizeDeviceUnits() OVERRIDE;
-  virtual Result UpdatePrinterSettings(bool external_preview) OVERRIDE;
+  virtual Result UpdatePrinterSettings(bool external_preview,
+                                       bool show_system_dialog) OVERRIDE;
   virtual Result InitWithSettings(const PrintSettings& settings) OVERRIDE;
   virtual Result NewDocument(const base::string16& document_name) OVERRIDE;
   virtual Result NewPage() OVERRIDE;

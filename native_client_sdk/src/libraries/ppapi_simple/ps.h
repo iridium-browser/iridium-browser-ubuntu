@@ -1,6 +1,6 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
 
 #ifndef PPAPI_SIMPLE_PS_H_
 #define PPAPI_SIMPLE_PS_H_
@@ -43,8 +43,7 @@ EXTERN_C_BEGIN
  * Return the PP_Instance id of this instance of the module.  This is required
  * by most of the Pepper resource creation routines.
  */
-PP_Instance PSGetInstanceId();
-
+PP_Instance PSGetInstanceId(void);
 
 /**
  * PSGetInterface
@@ -53,7 +52,6 @@ PP_Instance PSGetInstanceId();
  * to the interface, or NULL if not found or not available.
  */
 const void* PSGetInterface(const char *name);
-
 
 /**
  * PSUserCreateInstance
@@ -67,20 +65,6 @@ const void* PSGetInterface(const char *name);
  */
 extern void* PSUserCreateInstance(PP_Instance inst);
 
-
-/**
- * PPAPI_SIMPLE_USE_MAIN
- *
- * For use with C projects, this macro calls the provided factory with
- * configuration information.
- */
-#define PPAPI_SIMPLE_USE_MAIN(factory, func)   \
-void* PSUserCreateInstance(PP_Instance inst) { \
-  return factory(inst, func);                  \
-}
-
-
 EXTERN_C_END
 
-
-#endif  // PPAPI_SIMPLE_PS_H_
+#endif  /* PPAPI_SIMPLE_PS_H_ */

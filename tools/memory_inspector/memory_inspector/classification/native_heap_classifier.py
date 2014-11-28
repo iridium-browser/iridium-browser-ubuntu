@@ -34,7 +34,7 @@ from memory_inspector.core import exceptions
 from memory_inspector.core import native_heap
 
 
-_RESULT_KEYS = ['bytes_allocated']
+_RESULT_KEYS = ['bytes_allocated', 'bytes_resident']
 
 
 def LoadRules(content):
@@ -61,7 +61,8 @@ def Classify(nativeheap, rule_tree):
 
   res = results.AggreatedResults(rule_tree, _RESULT_KEYS)
   for allocation in nativeheap.allocations:
-    res.AddToMatchingNodes(allocation, [allocation.total_size])
+    res.AddToMatchingNodes(allocation,
+                           [allocation.size, allocation.resident_size])
   return res
 
 
@@ -125,8 +126,8 @@ def InferHeuristicRulesFromHeap(nheap, max_depth=3, threshold=0.02):
       continue
     # Add the blamed dir to the leaderboard.
     blamed_dir = dir_histogram.most_common()[0][0]
-    blamed_dirs.update({blamed_dir : alloc.total_size})
-    total_allocated += alloc.total_size
+    blamed_dirs.update({blamed_dir : alloc.size})
+    total_allocated += alloc.size
 
   # Select only the top paths from the leaderboard which contribute for more
   # than |threshold| and make a radix tree out of them.

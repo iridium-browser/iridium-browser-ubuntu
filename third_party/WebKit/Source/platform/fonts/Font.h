@@ -29,6 +29,7 @@
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/FontFallbackList.h"
 #include "platform/fonts/SimpleFontData.h"
+#include "platform/fonts/TextBlob.h"
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextPath.h"
 #include "wtf/HashMap.h"
@@ -42,13 +43,15 @@
 #undef Complex
 #endif
 
+class SkTextBlob;
+struct SkPoint;
+
 namespace blink {
 
 class FloatPoint;
 class FloatRect;
 class FontData;
 class FontMetrics;
-class FontPlatformData;
 class FontSelector;
 class GlyphBuffer;
 class GraphicsContext;
@@ -97,7 +100,7 @@ public:
     void update(PassRefPtrWillBeRawPtr<FontSelector>) const;
 
     enum CustomFontNotReadyAction { DoNotPaintIfFontNotReady, UseFallbackIfFontNotReady };
-    void drawText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&, CustomFontNotReadyAction = DoNotPaintIfFontNotReady) const;
+    float drawText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&, CustomFontNotReadyAction = DoNotPaintIfFontNotReady) const;
     void drawEmphasisMarks(GraphicsContext*, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&) const;
 
     float width(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
@@ -120,27 +123,30 @@ public:
 
     const SimpleFontData* primaryFont() const;
     const FontData* fontDataAt(unsigned) const;
-    inline GlyphData glyphDataForCharacter(UChar32 c, bool mirror, FontDataVariant variant = AutoVariant) const
+    inline GlyphData glyphDataForCharacter(UChar32& c, bool mirror, bool spaceNormalize = false, FontDataVariant variant = AutoVariant) const
     {
-        return glyphDataAndPageForCharacter(c, mirror, variant).first;
+        return glyphDataAndPageForCharacter(c, mirror, spaceNormalize, variant).first;
     }
 #if OS(MACOSX)
     const SimpleFontData* fontDataForCombiningCharacterSequence(const UChar*, size_t length, FontDataVariant) const;
 #endif
-    std::pair<GlyphData, GlyphPage*> glyphDataAndPageForCharacter(UChar32, bool mirror, FontDataVariant = AutoVariant) const;
+    std::pair<GlyphData, GlyphPage*> glyphDataAndPageForCharacter(UChar32&, bool mirror, bool normalizeSpace = false, FontDataVariant = AutoVariant) const;
     bool primaryFontHasGlyphForCharacter(UChar32) const;
 
     CodePath codePath(const TextRun&) const;
+
+    PassTextBlobPtr buildTextBlob(const TextRunPaintInfo&, const FloatPoint& textOrigin, bool couldUseLCDRenderedText, CustomFontNotReadyAction = DoNotPaintIfFontNotReady) const;
+    void drawTextBlob(GraphicsContext*, const SkTextBlob*, const SkPoint& origin) const;
 
 private:
     enum ForTextEmphasisOrNot { NotForTextEmphasis, ForTextEmphasis };
 
     // Returns the initial in-stream advance.
     float getGlyphsAndAdvancesForSimpleText(const TextRunPaintInfo&, GlyphBuffer&, ForTextEmphasisOrNot = NotForTextEmphasis) const;
-    void drawSimpleText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
+    float drawSimpleText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
     void drawEmphasisMarksForSimpleText(GraphicsContext*, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&) const;
     void drawGlyphs(GraphicsContext*, const SimpleFontData*, const GlyphBuffer&, unsigned from, unsigned numGlyphs, const FloatPoint&, const FloatRect& textRect) const;
-    void drawGlyphBuffer(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const FloatPoint&) const;
+    float drawGlyphBuffer(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const FloatPoint&) const;
     void drawEmphasisMarks(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const AtomicString&, const FloatPoint&) const;
     float floatWidthForSimpleText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, IntRectExtent* glyphBounds = 0) const;
     int offsetForPositionForSimpleText(const TextRun&, float position, bool includePartialGlyphs) const;
@@ -150,11 +156,14 @@ private:
 
     // Returns the initial in-stream advance.
     float getGlyphsAndAdvancesForComplexText(const TextRunPaintInfo&, GlyphBuffer&, ForTextEmphasisOrNot = NotForTextEmphasis) const;
-    void drawComplexText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
+    float drawComplexText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
     void drawEmphasisMarksForComplexText(GraphicsContext*, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&) const;
     float floatWidthForComplexText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts, IntRectExtent* glyphBounds) const;
     int offsetForPositionForComplexText(const TextRun&, float position, bool includePartialGlyphs) const;
     FloatRect selectionRectForComplexText(const TextRun&, const FloatPoint&, int h, int from, int to) const;
+
+    PassTextBlobPtr buildTextBlobForSimpleText(const TextRunPaintInfo&, const FloatPoint& textOrigin, bool couldUseLCDRenderedText) const;
+    PassTextBlobPtr buildTextBlob(const GlyphBuffer&, float initialAdvance, const FloatRect& bounds, float& advance, bool couldUseLCD) const;
 
     friend struct WidthIterator;
     friend class SVGTextRunRenderingContext;

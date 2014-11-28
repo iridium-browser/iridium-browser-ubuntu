@@ -14,11 +14,10 @@ import android.util.Log;
 import android.webkit.WebSettings;
 import android.webkit.WebSettings.PluginState;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
 
 /**
  * Stores Android WebView specific settings that does not need to be synced to WebKit.
@@ -160,7 +159,7 @@ public class AwSettings {
                         case RUN_RUNNABLE_BLOCKING:
                             synchronized (mAwSettingsLock) {
                                 if (mNativeAwSettings != 0) {
-                                    ((Runnable)msg.obj).run();
+                                    ((Runnable) msg.obj).run();
                                 }
                                 mSynchronizationPending = false;
                                 mAwSettingsLock.notifyAll();

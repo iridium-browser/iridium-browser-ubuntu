@@ -30,10 +30,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
-#include "content/public/browser/devtools_client_host.h"
-#include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -44,14 +43,13 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 
 using base::DictionaryValue;
 using content::BrowserThread;
@@ -62,6 +60,10 @@ static const char kFrontendHostId[] = "id";
 static const char kFrontendHostMethod[] = "method";
 static const char kFrontendHostParams[] = "params";
 static const char kTitleFormat[] = "Developer Tools - %s";
+
+typedef std::vector<DevToolsUIBindings*> DevToolsUIBindingsList;
+base::LazyInstance<DevToolsUIBindingsList>::Leaky g_instances =
+    LAZY_INSTANCE_INITIALIZER;
 
 std::string SkColorToRGBAString(SkColor color) {
   // We avoid StringPrintf because it will use locale specific formatters for
@@ -206,7 +208,7 @@ void DefaultBindingsDelegate::ActivateWindow() {
 void DefaultBindingsDelegate::OpenInNewTab(const std::string& url) {
   content::OpenURLParams params(
       GURL(url), content::Referrer(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false);
+      ui::PAGE_TRANSITION_LINK, false);
   Browser* browser = FindBrowser(web_contents_);
   browser->OpenURL(params);
 }
@@ -231,7 +233,6 @@ class DevToolsUIBindings::FrontendWebContentsObserver
 
  private:
   // contents::WebContentsObserver:
-  virtual void WebContentsDestroyed() OVERRIDE;
   virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
   virtual void AboutToNavigateRenderView(
       content::RenderViewHost* render_view_host) OVERRIDE;
@@ -251,18 +252,14 @@ DevToolsUIBindings::FrontendWebContentsObserver::
     ~FrontendWebContentsObserver() {
 }
 
-void DevToolsUIBindings::FrontendWebContentsObserver::WebContentsDestroyed() {
-  delete devtools_bindings_;
-}
-
 void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
     base::TerminationStatus status) {
   switch (status) {
     case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
     case base::TERMINATION_STATUS_PROCESS_CRASHED:
-      content::DevToolsManager::GetInstance()->ClientHostClosing(
-          devtools_bindings_);
+      if (devtools_bindings_->agent_host_.get())
+        devtools_bindings_->Detach();
       break;
     default:
       break;
@@ -272,15 +269,9 @@ void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
 
 void DevToolsUIBindings::FrontendWebContentsObserver::AboutToNavigateRenderView(
     content::RenderViewHost* render_view_host) {
-  content::NavigationEntry* entry =
-      web_contents()->GetController().GetActiveEntry();
-  if (devtools_bindings_->url_ == entry->GetURL()) {
-    devtools_bindings_->frontend_host_.reset(
-        content::DevToolsFrontendHost::Create(
-            render_view_host, devtools_bindings_));
-  } else {
-    delete devtools_bindings_;
-  }
+  devtools_bindings_->frontend_host_.reset(
+      content::DevToolsFrontendHost::Create(
+          render_view_host, devtools_bindings_));
 }
 
 void DevToolsUIBindings::FrontendWebContentsObserver::
@@ -289,6 +280,19 @@ void DevToolsUIBindings::FrontendWebContentsObserver::
 }
 
 // DevToolsUIBindings ---------------------------------------------------------
+
+DevToolsUIBindings* DevToolsUIBindings::ForWebContents(
+     content::WebContents* web_contents) {
+ if (g_instances == NULL)
+   return NULL;
+ DevToolsUIBindingsList* instances = g_instances.Pointer();
+ for (DevToolsUIBindingsList::iterator it(instances->begin());
+      it != instances->end(); ++it) {
+   if ((*it)->web_contents() == web_contents)
+     return *it;
+ }
+ return NULL;
+}
 
 // static
 GURL DevToolsUIBindings::ApplyThemeToURL(Profile* profile,
@@ -313,15 +317,14 @@ GURL DevToolsUIBindings::ApplyThemeToURL(Profile* profile,
   return GURL(url_string);
 }
 
-DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents,
-                                       const GURL& url)
+DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
     : profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       web_contents_(web_contents),
       delegate_(new DefaultBindingsDelegate(web_contents_)),
       device_count_updates_enabled_(false),
       devices_updates_enabled_(false),
-      url_(url),
       weak_factory_(this) {
+  g_instances.Get().push_back(this);
   frontend_contents_observer_.reset(new FrontendWebContentsObserver(this));
   web_contents_->GetMutableRendererPrefs()->can_accept_load_drops = false;
 
@@ -329,10 +332,6 @@ DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents,
   file_system_indexer_ = new DevToolsFileSystemIndexer();
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents_);
-
-  web_contents_->GetController().LoadURL(
-      url, content::Referrer(),
-      content::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
 
   // Wipe out page icon so that the default application icon is used.
   content::NavigationEntry* entry =
@@ -348,10 +347,15 @@ DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents,
 
   embedder_message_dispatcher_.reset(
       DevToolsEmbedderMessageDispatcher::createForDevToolsFrontend(this));
+
+  frontend_host_.reset(
+      content::DevToolsFrontendHost::Create(
+          web_contents_->GetRenderViewHost(), this));
 }
 
 DevToolsUIBindings::~DevToolsUIBindings() {
-  content::DevToolsManager::GetInstance()->ClientHostClosing(this);
+  if (agent_host_.get())
+    agent_host_->DetachClient();
 
   for (IndexingJobsMap::const_iterator jobs_it(indexing_jobs_.begin());
        jobs_it != indexing_jobs_.end(); ++jobs_it) {
@@ -360,6 +364,13 @@ DevToolsUIBindings::~DevToolsUIBindings() {
   indexing_jobs_.clear();
   SetDeviceCountUpdatesEnabled(false);
   SetDevicesUpdatesEnabled(false);
+
+  // Remove self from global list.
+  DevToolsUIBindingsList* instances = g_instances.Pointer();
+  DevToolsUIBindingsList::iterator it(
+      std::find(instances->begin(), instances->end(), this));
+  DCHECK(it != instances->end());
+  instances->erase(it);
 }
 
 // content::NotificationObserver overrides ------------------------------------
@@ -403,23 +414,25 @@ void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
 
 void DevToolsUIBindings::HandleMessageFromDevToolsFrontendToBackend(
     const std::string& message) {
-  content::DevToolsManager::GetInstance()->DispatchOnInspectorBackend(
-      this, message);
+  if (agent_host_.get())
+    agent_host_->DispatchProtocolMessage(message);
 }
 
-// content::DevToolsClientHost implementation ---------------------------------
-void DevToolsUIBindings::DispatchOnInspectorFrontend(
-    const std::string& message) {
+// content::DevToolsAgentHostClient implementation --------------------------
+void DevToolsUIBindings::DispatchProtocolMessage(
+    content::DevToolsAgentHost* agent_host, const std::string& message) {
+  DCHECK(agent_host == agent_host_.get());
   base::StringValue message_value(message);
   CallClientFunction("InspectorFrontendAPI.dispatchMessage",
                      &message_value, NULL, NULL);
 }
 
-void DevToolsUIBindings::InspectedContentsClosing() {
+void DevToolsUIBindings::AgentHostClosed(
+    content::DevToolsAgentHost* agent_host,
+    bool replaced_with_another_client) {
+  DCHECK(agent_host == agent_host_.get());
+  agent_host_ = NULL;
   delegate_->InspectedContentsClosing();
-}
-
-void DevToolsUIBindings::ReplacedWithAnotherClient() {
 }
 
 // DevToolsEmbedderMessageDispatcher::Delegate implementation -----------------
@@ -625,8 +638,8 @@ void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
 }
 
 void DevToolsUIBindings::SendMessageToBrowser(const std::string& message) {
-  content::DevToolsManager::GetInstance()->DispatchOnInspectorBackend(
-      this, message);
+  if (agent_host_.get())
+    agent_host_->DispatchProtocolMessage(message);
 }
 
 void DevToolsUIBindings::DeviceCountChanged(int count) {
@@ -778,6 +791,30 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
 
 void DevToolsUIBindings::SetDelegate(Delegate* delegate) {
   delegate_.reset(delegate);
+}
+
+void DevToolsUIBindings::AttachTo(
+    const scoped_refptr<content::DevToolsAgentHost>& agent_host) {
+  if (agent_host_.get())
+    Detach();
+  agent_host_ = agent_host;
+  agent_host_->AttachClient(this);
+}
+
+void DevToolsUIBindings::Reattach() {
+  DCHECK(agent_host_.get());
+  agent_host_->DetachClient();
+  agent_host_->AttachClient(this);
+}
+
+void DevToolsUIBindings::Detach() {
+  if (agent_host_.get())
+    agent_host_->DetachClient();
+  agent_host_ = NULL;
+}
+
+bool DevToolsUIBindings::IsAttachedTo(content::DevToolsAgentHost* agent_host) {
+  return agent_host_.get() == agent_host;
 }
 
 void DevToolsUIBindings::CallClientFunction(const std::string& function_name,

@@ -77,6 +77,8 @@ config("key_defines") {
 
 source_set("google_apis") {
   sources = [
+    "gaia/account_tracker.cc",
+    "gaia/account_tracker.h",
     "gaia/gaia_auth_consumer.cc",
     "gaia/gaia_auth_consumer.h",
     "gaia/gaia_auth_fetcher.cc",
@@ -167,6 +169,7 @@ source_set("google_apis") {
 }
 
 source_set("test_support") {
+  testonly = true
   sources = [
     "gaia/fake_gaia.cc",
     "gaia/fake_gaia.h",
@@ -179,13 +182,12 @@ source_set("test_support") {
     "gaia/oauth2_token_service_test_util.h",
   ]
 
-  deps = [
+  public_deps = [
     "//base",
     "//base/test:test_support",
     "//net",
     "//net:test_support",
   ]
-  forward_dependent_configs_from = deps
 
   if (enable_extensions) {
     sources += [

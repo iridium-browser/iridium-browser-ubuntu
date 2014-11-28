@@ -6,13 +6,15 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_message_filter.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
+#include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/drop_data.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/test/test_content_browser_client.h"
@@ -20,6 +22,7 @@
 #include "content/test/test_web_contents.h"
 #include "net/base/filename_util.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "ui/base/page_transition_types.h"
 
 namespace content {
 
@@ -93,7 +96,7 @@ TEST_F(RenderViewHostTest, ResetUnloadOnReload) {
 
   NavigateAndCommit(url1);
   controller().LoadURL(
-      url2, Referrer(), PAGE_TRANSITION_LINK, std::string());
+      url2, Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
   // Simulate the ClosePage call which is normally sent by the net::URLRequest.
   rvh()->ClosePage();
   // Needed so that navigations are not suspended on the RVH.
@@ -214,12 +217,12 @@ TEST_F(RenderViewHostTest, MessageWithBadHistoryItemFiles) {
   EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &file_path));
   file_path = file_path.AppendASCII("foo");
   EXPECT_EQ(0, process()->bad_msg_count());
-  test_rvh()->TestOnUpdateStateWithFile(process()->GetID(), file_path);
+  test_rvh()->TestOnUpdateStateWithFile(-1, file_path);
   EXPECT_EQ(1, process()->bad_msg_count());
 
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFile(
       process()->GetID(), file_path);
-  test_rvh()->TestOnUpdateStateWithFile(process()->GetID(), file_path);
+  test_rvh()->TestOnUpdateStateWithFile(-1, file_path);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
@@ -243,6 +246,73 @@ TEST_F(RenderViewHostTest, RoutingIdSane) {
       contents()->GetFrameTree()->root()->current_frame_host();
   EXPECT_EQ(test_rvh()->GetProcess(), root_rfh->GetProcess());
   EXPECT_NE(test_rvh()->GetRoutingID(), root_rfh->routing_id());
+}
+
+class TestSaveImageFromDataURL : public RenderMessageFilter {
+ public:
+  TestSaveImageFromDataURL(
+      BrowserContext* context)
+      : RenderMessageFilter(
+            0,
+            nullptr,
+            context,
+            context->GetRequestContext(),
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr) {
+    Reset();
+  }
+
+  void Reset() {
+    url_string_ = std::string();
+    is_downloaded_ = false;
+  }
+
+  std::string& UrlString() const {
+    return url_string_;
+  }
+
+  bool IsDownloaded() const {
+    return is_downloaded_;
+  }
+
+  void Test(const std::string& url) {
+    OnMessageReceived(ViewHostMsg_SaveImageFromDataURL(0, url));
+  }
+
+ protected:
+  virtual ~TestSaveImageFromDataURL() { }
+  virtual void DownloadUrl(int render_view_id,
+                           const GURL& url,
+                           const Referrer& referrer,
+                           const base::string16& suggested_name,
+                           const bool use_prompt) const OVERRIDE {
+    url_string_ = url.spec();
+    is_downloaded_ = true;
+  }
+
+ private:
+  mutable std::string url_string_;
+  mutable bool is_downloaded_;
+};
+
+TEST_F(RenderViewHostTest, SaveImageFromDataURL) {
+  scoped_refptr<TestSaveImageFromDataURL> tester(
+      new TestSaveImageFromDataURL(browser_context()));
+
+  tester->Reset();
+  tester->Test("http://non-data-url.com");
+  EXPECT_EQ(tester->UrlString(), "");
+  EXPECT_FALSE(tester->IsDownloaded());
+
+  const std::string data_url = "data:image/gif;base64,"
+      "R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=";
+
+  tester->Reset();
+  tester->Test(data_url);
+  EXPECT_EQ(tester->UrlString(), data_url);
+  EXPECT_TRUE(tester->IsDownloaded());
 }
 
 }  // namespace content

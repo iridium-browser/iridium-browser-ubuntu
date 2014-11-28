@@ -19,7 +19,6 @@
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/file_system_provider/observer.h"
 #include "chrome/browser/chromeos/file_system_provider/service.h"
-#include "chrome/browser/local_discovery/storage/privet_volume_lister.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -208,21 +207,16 @@ class VolumeManager : public KeyedService,
  private:
   void OnDiskMountManagerRefreshed(bool success);
   void OnStorageMonitorInitialized();
-  void OnPrivetVolumesAvailable(
-      const local_discovery::PrivetVolumeLister::VolumeList& volumes);
   void DoMountEvent(chromeos::MountError error_code,
-                    const VolumeInfo& volume_info,
-                    bool is_remounting);
+                    const VolumeInfo& volume_info);
   void DoUnmountEvent(chromeos::MountError error_code,
                       const VolumeInfo& volume_info);
 
   Profile* profile_;
   drive::DriveIntegrationService* drive_integration_service_;  // Not owned.
   chromeos::disks::DiskMountManager* disk_mount_manager_;      // Not owned.
-  scoped_ptr<MountedDiskMonitor> mounted_disk_monitor_;
   PrefChangeRegistrar pref_change_registrar_;
   ObserverList<VolumeManagerObserver> observers_;
-  scoped_ptr<local_discovery::PrivetVolumeLister> privet_volume_lister_;
   chromeos::file_system_provider::Service*
       file_system_provider_service_;  // Not owned by this class.
   std::map<std::string, VolumeInfo> mounted_volumes_;

@@ -167,6 +167,16 @@
       ],
     },
     {
+      'target_name': 'boringssl_pkcs12_test',
+      'type': 'executable',
+      'dependencies': [
+        'boringssl.gyp:boringssl',
+      ],
+      'sources': [
+        'src/crypto/pkcs8/pkcs12_test.c',
+      ],
+    },
+    {
       'target_name': 'boringssl_rsa_test',
       'type': 'executable',
       'dependencies': [
@@ -196,6 +206,26 @@
         'src/crypto/x509/pkcs7_test.c',
       ],
     },
+    {
+      'target_name': 'boringssl_pqueue_test',
+      'type': 'executable',
+      'dependencies': [
+        'boringssl.gyp:boringssl',
+      ],
+      'sources': [
+        'src/ssl/pqueue/pqueue_test.c',
+      ],
+    },
+    {
+      'target_name': 'boringssl_ssl_test',
+      'type': 'executable',
+      'dependencies': [
+        'boringssl.gyp:boringssl',
+      ],
+      'sources': [
+        'src/ssl/ssl_test.c',
+      ],
+    },
   ],
   'variables': {
     'boringssl_test_targets': [
@@ -215,9 +245,12 @@
       'boringssl_hmac_test',
       'boringssl_lhash_test',
       'boringssl_md5_test',
+      'boringssl_pkcs12_test',
       'boringssl_pkcs7_test',
+      'boringssl_pqueue_test',
       'boringssl_rsa_test',
       'boringssl_sha1_test',
+      'boringssl_ssl_test',
     ],
   }
 }

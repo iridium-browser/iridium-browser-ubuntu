@@ -85,16 +85,29 @@ PPB_VideoDecoder_API* VideoDecoderResource::AsPPB_VideoDecoder_API() {
   return this;
 }
 
-int32_t VideoDecoderResource::Initialize(
+int32_t VideoDecoderResource::Initialize0_1(
     PP_Resource graphics_context,
     PP_VideoProfile profile,
     PP_Bool allow_software_fallback,
+    scoped_refptr<TrackedCallback> callback) {
+  return Initialize(graphics_context,
+                    profile,
+                    allow_software_fallback
+                        ? PP_HARDWAREACCELERATION_WITHFALLBACK
+                        : PP_HARDWAREACCELERATION_ONLY,
+                    callback);
+}
+
+int32_t VideoDecoderResource::Initialize(
+    PP_Resource graphics_context,
+    PP_VideoProfile profile,
+    PP_HardwareAcceleration acceleration,
     scoped_refptr<TrackedCallback> callback) {
   if (initialized_)
     return PP_ERROR_FAILED;
   if (profile < 0 || profile > PP_VIDEOPROFILE_MAX)
     return PP_ERROR_BADARGUMENT;
-  if (initialize_callback_)
+  if (initialize_callback_.get())
     return PP_ERROR_INPROGRESS;
   if (!graphics_context)
     return PP_ERROR_BADRESOURCE;
@@ -128,7 +141,7 @@ int32_t VideoDecoderResource::Initialize(
   Call<PpapiPluginMsg_VideoDecoder_InitializeReply>(
       RENDERER,
       PpapiHostMsg_VideoDecoder_Initialize(
-          host_resource, profile, PP_ToBool(allow_software_fallback)),
+          host_resource, profile, acceleration),
       base::Bind(&VideoDecoderResource::OnPluginMsgInitializeComplete, this));
 
   return PP_OK_COMPLETIONPENDING;
@@ -140,9 +153,9 @@ int32_t VideoDecoderResource::Decode(uint32_t decode_id,
                                      scoped_refptr<TrackedCallback> callback) {
   if (decoder_last_error_)
     return decoder_last_error_;
-  if (flush_callback_ || reset_callback_)
+  if (flush_callback_.get() || reset_callback_.get())
     return PP_ERROR_FAILED;
-  if (decode_callback_)
+  if (decode_callback_.get())
     return PP_ERROR_INPROGRESS;
   if (size > kMaximumBitstreamBufferSize)
     return PP_ERROR_NOMEMORY;
@@ -241,9 +254,9 @@ int32_t VideoDecoderResource::GetPicture(
     scoped_refptr<TrackedCallback> callback) {
   if (decoder_last_error_)
     return decoder_last_error_;
-  if (reset_callback_)
+  if (reset_callback_.get())
     return PP_ERROR_FAILED;
-  if (get_picture_callback_)
+  if (get_picture_callback_.get())
     return PP_ERROR_INPROGRESS;
 
   // If the next picture is ready, return it synchronously.
@@ -267,9 +280,9 @@ void VideoDecoderResource::RecyclePicture(const PP_VideoPicture* picture) {
 int32_t VideoDecoderResource::Flush(scoped_refptr<TrackedCallback> callback) {
   if (decoder_last_error_)
     return decoder_last_error_;
-  if (reset_callback_)
+  if (reset_callback_.get())
     return PP_ERROR_FAILED;
-  if (flush_callback_)
+  if (flush_callback_.get())
     return PP_ERROR_INPROGRESS;
   flush_callback_ = callback;
 
@@ -284,9 +297,9 @@ int32_t VideoDecoderResource::Flush(scoped_refptr<TrackedCallback> callback) {
 int32_t VideoDecoderResource::Reset(scoped_refptr<TrackedCallback> callback) {
   if (decoder_last_error_)
     return decoder_last_error_;
-  if (flush_callback_)
+  if (flush_callback_.get())
     return PP_ERROR_FAILED;
-  if (reset_callback_)
+  if (reset_callback_.get())
     return PP_ERROR_INPROGRESS;
   reset_callback_ = callback;
 
@@ -442,7 +455,7 @@ void VideoDecoderResource::OnPluginMsgDecodeComplete(
   // Make the shm buffer available.
   available_shm_buffers_.push_back(shm_buffers_[shm_id]);
   // If the plugin is waiting, let it call Decode again.
-  if (decode_callback_) {
+  if (decode_callback_.get()) {
     scoped_refptr<TrackedCallback> callback;
     callback.swap(decode_callback_);
     callback->Run(PP_OK);
@@ -454,7 +467,7 @@ void VideoDecoderResource::OnPluginMsgFlushComplete(
   // All shm buffers should have been made available by now.
   DCHECK_EQ(shm_buffers_.size(), available_shm_buffers_.size());
 
-  if (get_picture_callback_) {
+  if (get_picture_callback_.get()) {
     scoped_refptr<TrackedCallback> callback;
     callback.swap(get_picture_callback_);
     callback->Abort();

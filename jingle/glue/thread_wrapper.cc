@@ -57,7 +57,7 @@ JingleThreadWrapper::JingleThreadWrapper(
   DCHECK(!rtc::Thread::Current());
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
   rtc::MessageQueueManager::Add(this);
-  WrapCurrent();
+  SafeWrapCurrent();
 }
 
 JingleThreadWrapper::~JingleThreadWrapper() {

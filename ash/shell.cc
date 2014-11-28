@@ -23,7 +23,6 @@
 #include "ash/display/event_transformation_handler.h"
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/display/screen_position_controller.h"
-#include "ash/display/virtual_keyboard_window_controller.h"
 #include "ash/drag_drop/drag_drop_controller.h"
 #include "ash/first_run/first_run_helper_impl.h"
 #include "ash/focus_cycler.h"
@@ -54,6 +53,7 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
+#include "ash/virtual_keyboard_controller.h"
 #include "ash/wm/app_list_controller.h"
 #include "ash/wm/ash_focus_rules.h"
 #include "ash/wm/ash_native_cursor_manager.h"
@@ -196,7 +196,7 @@ Shell* Shell::CreateInstance(const ShellInitParams& init_params) {
 
 // static
 Shell* Shell::GetInstance() {
-  DCHECK(instance_);
+  CHECK(instance_);
   return instance_;
 }
 
@@ -213,22 +213,26 @@ void Shell::DeleteInstance() {
 
 // static
 RootWindowController* Shell::GetPrimaryRootWindowController() {
+  CHECK(HasInstance());
   return GetRootWindowController(GetPrimaryRootWindow());
 }
 
 // static
 Shell::RootWindowControllerList Shell::GetAllRootWindowControllers() {
+  CHECK(HasInstance());
   return Shell::GetInstance()->display_controller()->
       GetAllRootWindowControllers();
 }
 
 // static
 aura::Window* Shell::GetPrimaryRootWindow() {
+  CHECK(HasInstance());
   return GetInstance()->display_controller()->GetPrimaryRootWindow();
 }
 
 // static
 aura::Window* Shell::GetTargetRootWindow() {
+  CHECK(HasInstance());
   Shell* shell = GetInstance();
   if (shell->scoped_target_root_window_)
     return shell->scoped_target_root_window_;
@@ -242,6 +246,7 @@ gfx::Screen* Shell::GetScreen() {
 
 // static
 aura::Window::Windows Shell::GetAllRootWindows() {
+  CHECK(HasInstance());
   return Shell::GetInstance()->display_controller()->
       GetAllRootWindows();
 }
@@ -298,13 +303,13 @@ void Shell::ShowAppList(aura::Window* window) {
     window = GetTargetRootWindow();
   if (!app_list_controller_)
     app_list_controller_.reset(new AppListController);
-  app_list_controller_->SetVisible(true, window);
+  app_list_controller_->Show(window);
 }
 
 void Shell::DismissAppList() {
   if (!app_list_controller_)
     return;
-  app_list_controller_->SetVisible(false, GetTargetRootWindow());
+  app_list_controller_->Dismiss();
 }
 
 void Shell::ToggleAppList(aura::Window* window) {
@@ -447,13 +452,8 @@ void Shell::CreateKeyboard() {
   // TODO(bshe): Primary root window controller may not be the controller to
   // attach virtual keyboard. See http://crbug.com/303429
   InitKeyboard();
-  if (keyboard::IsKeyboardUsabilityExperimentEnabled()) {
-    display_controller()->virtual_keyboard_window_controller()->
-        ActivateKeyboard(keyboard::KeyboardController::GetInstance());
-  } else {
-    GetPrimaryRootWindowController()->
-        ActivateKeyboard(keyboard::KeyboardController::GetInstance());
-  }
+  GetPrimaryRootWindowController()->
+      ActivateKeyboard(keyboard::KeyboardController::GetInstance());
 }
 
 void Shell::DeactivateKeyboard() {
@@ -485,7 +485,8 @@ void Shell::RemoveShellObserver(ShellObserver* observer) {
 #if defined(OS_CHROMEOS)
 bool Shell::ShouldSaveDisplaySettings() {
   return !((maximize_mode_controller_->IsMaximizeModeWindowManagerEnabled() &&
-            maximize_mode_controller_->in_set_screen_rotation()) ||
+            maximize_mode_controller_->
+                ignore_display_configuration_updates()) ||
            resolution_notification_controller_->DoesNotificationTimeout());
 }
 #endif
@@ -793,6 +794,7 @@ Shell::~Shell() {
   display_manager_->CreateScreenForShutdown();
   display_controller_->Shutdown();
   display_controller_.reset();
+  virtual_keyboard_controller_.reset();
   screen_position_controller_.reset();
   accessibility_delegate_.reset();
   new_window_delegate_.reset();
@@ -823,9 +825,6 @@ Shell::~Shell() {
 
 void Shell::Init(const ShellInitParams& init_params) {
   delegate_->PreInit();
-  if (keyboard::IsKeyboardUsabilityExperimentEnabled()) {
-    display_manager_->SetSecondDisplayMode(DisplayManager::VIRTUAL_KEYBOARD);
-  }
   bool display_initialized = display_manager_->InitFromCommandLine();
 #if defined(OS_CHROMEOS)
   display_configurator_->Init(!gpu_support_->IsPanelFittingDisabled());
@@ -882,6 +881,7 @@ void Shell::Init(const ShellInitParams& init_params) {
   display_controller_->Start();
   display_controller_->CreatePrimaryHost(
       ShellInitParamsToAshWindowTreeHostInitParams(init_params));
+  virtual_keyboard_controller_.reset(new VirtualKeyboardController);
   aura::Window* root_window = display_controller_->GetPrimaryRootWindow();
   target_root_window_ = root_window;
 

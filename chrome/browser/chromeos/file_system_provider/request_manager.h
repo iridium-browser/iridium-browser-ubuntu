@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/files/file.h"
@@ -37,6 +38,7 @@ enum RequestType {
   MOVE_ENTRY,
   TRUNCATE,
   WRITE_FILE,
+  ABORT,
   TESTING
 };
 
@@ -125,9 +127,8 @@ class RequestManager {
   // new requests
   void SetTimeoutForTesting(const base::TimeDelta& timeout);
 
-  // Gets number of active requests for logging purposes.
-  // TODO(mtomasz): Introduce a logger class to gather more information
-  size_t GetActiveRequestsForLogging() const;
+  // Gets list of active request ids.
+  std::vector<int> GetActiveRequestIds() const;
 
   // Adds and removes observers.
   void AddObserver(Observer* observer);
@@ -169,8 +170,8 @@ class RequestManager {
   NotificationManagerInterface* notification_manager_;  // Not owned.
   int next_id_;
   base::TimeDelta timeout_;
-  base::WeakPtrFactory<RequestManager> weak_ptr_factory_;
   ObserverList<Observer> observers_;
+  base::WeakPtrFactory<RequestManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestManager);
 };

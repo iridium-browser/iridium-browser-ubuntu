@@ -17,8 +17,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/content_settings_details.h"
-#include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -28,11 +26,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
+#include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/notification_service.h"
@@ -47,8 +48,6 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -56,6 +55,8 @@
 #endif
 
 using base::UserMetricsAction;
+using content_settings::ContentSettingToString;
+using content_settings::ContentSettingFromString;
 using extensions::APIPermission;
 
 namespace {
@@ -135,39 +136,6 @@ ContentSettingsType ContentSettingsTypeFromGroupName(const std::string& name) {
   return CONTENT_SETTINGS_TYPE_DEFAULT;
 }
 
-std::string ContentSettingToString(ContentSetting setting) {
-  switch (setting) {
-    case CONTENT_SETTING_ALLOW:
-      return "allow";
-    case CONTENT_SETTING_ASK:
-      return "ask";
-    case CONTENT_SETTING_BLOCK:
-      return "block";
-    case CONTENT_SETTING_SESSION_ONLY:
-      return "session";
-    case CONTENT_SETTING_DEFAULT:
-      return "default";
-    case CONTENT_SETTING_NUM_SETTINGS:
-      NOTREACHED();
-  }
-
-  return std::string();
-}
-
-ContentSetting ContentSettingFromString(const std::string& name) {
-  if (name == "allow")
-    return CONTENT_SETTING_ALLOW;
-  if (name == "ask")
-    return CONTENT_SETTING_ASK;
-  if (name == "block")
-    return CONTENT_SETTING_BLOCK;
-  if (name == "session")
-    return CONTENT_SETTING_SESSION_ONLY;
-
-  NOTREACHED() << name << " is not a recognized content setting.";
-  return CONTENT_SETTING_DEFAULT;
-}
-
 // Create a DictionaryValue* that will act as a data source for a single row
 // in a HostContentSettingsMap-controlled exceptions table (e.g., cookies).
 // Ownership of the pointer is passed to the caller.
@@ -205,12 +173,18 @@ base::DictionaryValue* GetGeolocationExceptionForPage(
 // in the desktop notifications exceptions table. Ownership of the pointer is
 // passed to the caller.
 base::DictionaryValue* GetNotificationExceptionForPage(
-    const ContentSettingsPattern& pattern,
+    const ContentSettingsPattern& primary_pattern,
+    const ContentSettingsPattern& secondary_pattern,
     ContentSetting setting,
     const std::string& provider_name) {
+  std::string embedding_origin;
+  if (secondary_pattern != ContentSettingsPattern::Wildcard())
+    embedding_origin = secondary_pattern.ToString();
+
   base::DictionaryValue* exception = new base::DictionaryValue();
   exception->SetString(kSetting, ContentSettingToString(setting));
-  exception->SetString(kOrigin, pattern.ToString());
+  exception->SetString(kOrigin, primary_pattern.ToString());
+  exception->SetString(kEmbeddingOrigin, embedding_origin);
   exception->SetString(kSource, provider_name);
   return exception;
 }
@@ -294,7 +268,7 @@ ContentSettingsHandler::MediaSettingsInfo::MediaSettingsInfo()
 ContentSettingsHandler::MediaSettingsInfo::~MediaSettingsInfo() {
 }
 
-ContentSettingsHandler::ContentSettingsHandler() {
+ContentSettingsHandler::ContentSettingsHandler() : observer_(this) {
 }
 
 ContentSettingsHandler::~ContentSettingsHandler() {
@@ -304,6 +278,7 @@ void ContentSettingsHandler::GetLocalizedValues(
     base::DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
 
+  // TODO(dhnishi): Standardize to lowerCamelCase.
   static OptionsStringResource resources[] = {
     { "allowException", IDS_EXCEPTIONS_ALLOW_BUTTON },
     { "blockException", IDS_EXCEPTIONS_BLOCK_BUTTON },
@@ -318,10 +293,10 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "exceptionZoomHeader", IDS_EXCEPTIONS_ZOOM_HEADER },
     { "embeddedOnHost", IDS_EXCEPTIONS_GEOLOCATION_EMBEDDED_ON_HOST },
     // Cookies filter.
-    { "cookies_tab_label", IDS_COOKIES_TAB_LABEL },
+    { "cookiesTabLabel", IDS_COOKIES_TAB_LABEL },
     { "cookies_header", IDS_COOKIES_HEADER },
-    { "cookies_allow", IDS_COOKIES_ALLOW_RADIO },
-    { "cookies_block", IDS_COOKIES_BLOCK_RADIO },
+    { "cookiesAllow", IDS_COOKIES_ALLOW_RADIO },
+    { "cookiesBlock", IDS_COOKIES_BLOCK_RADIO },
     { "cookies_session_only", IDS_COOKIES_SESSION_ONLY_RADIO },
     { "cookies_block_3rd_party", IDS_COOKIES_BLOCK_3RDPARTY_CHKBOX },
     { "cookies_clear_when_close", IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX },
@@ -334,49 +309,49 @@ void ContentSettingsHandler::GetLocalizedValues(
        IDS_GEOLOCATION_GOOGLE_ACCESS_ENABLE_CHKBOX },
 #endif
     // Image filter.
-    { "images_tab_label", IDS_IMAGES_TAB_LABEL },
+    { "imagesTabLabel", IDS_IMAGES_TAB_LABEL },
     { "images_header", IDS_IMAGES_HEADER },
-    { "images_allow", IDS_IMAGES_LOAD_RADIO },
-    { "images_block", IDS_IMAGES_NOLOAD_RADIO },
+    { "imagesAllow", IDS_IMAGES_LOAD_RADIO },
+    { "imagesBlock", IDS_IMAGES_NOLOAD_RADIO },
     // JavaScript filter.
-    { "javascript_tab_label", IDS_JAVASCRIPT_TAB_LABEL },
+    { "javascriptTabLabel", IDS_JAVASCRIPT_TAB_LABEL },
     { "javascript_header", IDS_JAVASCRIPT_HEADER },
-    { "javascript_allow", IDS_JS_ALLOW_RADIO },
-    { "javascript_block", IDS_JS_DONOTALLOW_RADIO },
+    { "javascriptAllow", IDS_JS_ALLOW_RADIO },
+    { "javascriptBlock", IDS_JS_DONOTALLOW_RADIO },
     // Plug-ins filter.
-    { "plugins_tab_label", IDS_PLUGIN_TAB_LABEL },
+    { "pluginsTabLabel", IDS_PLUGIN_TAB_LABEL },
     { "plugins_header", IDS_PLUGIN_HEADER },
-    { "plugins_ask", IDS_PLUGIN_ASK_RADIO },
-    { "plugins_allow", IDS_PLUGIN_LOAD_RADIO },
-    { "plugins_block", IDS_PLUGIN_NOLOAD_RADIO },
+    { "pluginsAsk", IDS_PLUGIN_ASK_RADIO },
+    { "pluginsAllow", IDS_PLUGIN_LOAD_RADIO },
+    { "pluginsBlock", IDS_PLUGIN_NOLOAD_RADIO },
     { "disableIndividualPlugins", IDS_PLUGIN_SELECTIVE_DISABLE },
     // Pop-ups filter.
-    { "popups_tab_label", IDS_POPUP_TAB_LABEL },
+    { "popupsTabLabel", IDS_POPUP_TAB_LABEL },
     { "popups_header", IDS_POPUP_HEADER },
-    { "popups_allow", IDS_POPUP_ALLOW_RADIO },
-    { "popups_block", IDS_POPUP_BLOCK_RADIO },
+    { "popupsAllow", IDS_POPUP_ALLOW_RADIO },
+    { "popupsBlock", IDS_POPUP_BLOCK_RADIO },
     // Location filter.
-    { "location_tab_label", IDS_GEOLOCATION_TAB_LABEL },
+    { "locationTabLabel", IDS_GEOLOCATION_TAB_LABEL },
     { "location_header", IDS_GEOLOCATION_HEADER },
-    { "location_allow", IDS_GEOLOCATION_ALLOW_RADIO },
-    { "location_ask", IDS_GEOLOCATION_ASK_RADIO },
-    { "location_block", IDS_GEOLOCATION_BLOCK_RADIO },
+    { "locationAllow", IDS_GEOLOCATION_ALLOW_RADIO },
+    { "locationAsk", IDS_GEOLOCATION_ASK_RADIO },
+    { "locationBlock", IDS_GEOLOCATION_BLOCK_RADIO },
     { "set_by", IDS_GEOLOCATION_SET_BY_HOVER },
     // Notifications filter.
-    { "notifications_tab_label", IDS_NOTIFICATIONS_TAB_LABEL },
+    { "notificationsTabLabel", IDS_NOTIFICATIONS_TAB_LABEL },
     { "notifications_header", IDS_NOTIFICATIONS_HEADER },
-    { "notifications_allow", IDS_NOTIFICATIONS_ALLOW_RADIO },
-    { "notifications_ask", IDS_NOTIFICATIONS_ASK_RADIO },
-    { "notifications_block", IDS_NOTIFICATIONS_BLOCK_RADIO },
+    { "notificationsAllow", IDS_NOTIFICATIONS_ALLOW_RADIO },
+    { "notificationsAsk", IDS_NOTIFICATIONS_ASK_RADIO },
+    { "notificationsBlock", IDS_NOTIFICATIONS_BLOCK_RADIO },
     // Fullscreen filter.
-    { "fullscreen_tab_label", IDS_FULLSCREEN_TAB_LABEL },
+    { "fullscreenTabLabel", IDS_FULLSCREEN_TAB_LABEL },
     { "fullscreen_header", IDS_FULLSCREEN_HEADER },
     // Mouse Lock filter.
-    { "mouselock_tab_label", IDS_MOUSE_LOCK_TAB_LABEL },
+    { "mouselockTabLabel", IDS_MOUSE_LOCK_TAB_LABEL },
     { "mouselock_header", IDS_MOUSE_LOCK_HEADER },
-    { "mouselock_allow", IDS_MOUSE_LOCK_ALLOW_RADIO },
-    { "mouselock_ask", IDS_MOUSE_LOCK_ASK_RADIO },
-    { "mouselock_block", IDS_MOUSE_LOCK_BLOCK_RADIO },
+    { "mouselockAllow", IDS_MOUSE_LOCK_ALLOW_RADIO },
+    { "mouselockAsk", IDS_MOUSE_LOCK_ASK_RADIO },
+    { "mouselockBlock", IDS_MOUSE_LOCK_BLOCK_RADIO },
 #if defined(OS_CHROMEOS) || defined(OS_WIN)
     // Protected Content filter
     { "protectedContentTabLabel", IDS_PROTECTED_CONTENT_TAB_LABEL },
@@ -407,17 +382,17 @@ void ContentSettingsHandler::GetLocalizedValues(
     // PPAPI broker filter.
     { "ppapi-broker_header", IDS_PPAPI_BROKER_HEADER },
     { "ppapiBrokerTabLabel", IDS_PPAPI_BROKER_TAB_LABEL },
-    { "ppapi_broker_allow", IDS_PPAPI_BROKER_ALLOW_RADIO },
-    { "ppapi_broker_ask", IDS_PPAPI_BROKER_ASK_RADIO },
-    { "ppapi_broker_block", IDS_PPAPI_BROKER_BLOCK_RADIO },
+    { "ppapiBrokerAllow", IDS_PPAPI_BROKER_ALLOW_RADIO },
+    { "ppapiBrokerAsk", IDS_PPAPI_BROKER_ASK_RADIO },
+    { "ppapiBrokerBlock", IDS_PPAPI_BROKER_BLOCK_RADIO },
     // Multiple automatic downloads
-    { "multiple-automatic-downloads_header",
+    { "multipleAutomaticDownloadsTabLabel",
       IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL },
-    { "multiple-automatic-downloads_allow",
+    { "multipleAutomaticDownloadsAllow",
       IDS_AUTOMATIC_DOWNLOADS_ALLOW_RADIO },
-    { "multiple-automatic-downloads_ask",
+    { "multipleAutomaticDownloadsAsk",
       IDS_AUTOMATIC_DOWNLOADS_ASK_RADIO },
-    { "multiple-automatic-downloads_block",
+    { "multipleAutomaticDownloadsBlock",
       IDS_AUTOMATIC_DOWNLOADS_BLOCK_RADIO },
     // MIDI system exclusive messages
     { "midi-sysex_header", IDS_MIDI_SYSEX_TAB_LABEL },
@@ -485,9 +460,6 @@ void ContentSettingsHandler::InitializeHandler() {
       content::NotificationService::AllSources());
 
   notification_registrar_.Add(
-      this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
-      content::NotificationService::AllSources());
-  notification_registrar_.Add(
       this, chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
       content::NotificationService::AllSources());
   content::BrowserContext* context = GetBrowserContext(web_ui());
@@ -516,13 +488,21 @@ void ContentSettingsHandler::InitializeHandler() {
           base::Unretained(this)));
 
   content::HostZoomMap* host_zoom_map =
-      content::HostZoomMap::GetForBrowserContext(context);
+      content::HostZoomMap::GetDefaultForBrowserContext(context);
   host_zoom_map_subscription_ =
       host_zoom_map->AddZoomLevelChangedCallback(
           base::Bind(&ContentSettingsHandler::OnZoomLevelChanged,
                      base::Unretained(this)));
 
   flash_settings_manager_.reset(new PepperFlashSettingsManager(this, context));
+
+  Profile* profile = Profile::FromWebUI(web_ui());
+  observer_.Add(profile->GetHostContentSettingsMap());
+  if (profile->HasOffTheRecordProfile()) {
+    auto map = profile->GetOffTheRecordProfile()->GetHostContentSettingsMap();
+    if (!observer_.IsObserving(map))
+      observer_.Add(map);
+  }
 }
 
 void ContentSettingsHandler::InitializePage() {
@@ -534,41 +514,42 @@ void ContentSettingsHandler::InitializePage() {
   UpdateProtectedContentExceptionsButton();
 }
 
+void ContentSettingsHandler::OnContentSettingChanged(
+    const ContentSettingsPattern& primary_pattern,
+    const ContentSettingsPattern& secondary_pattern,
+    ContentSettingsType content_type,
+    std::string resource_identifier) {
+  const ContentSettingsDetails details(
+      primary_pattern, secondary_pattern, content_type, resource_identifier);
+  // TODO(estade): we pretend update_all() is always true.
+  if (details.update_all_types())
+    UpdateAllExceptionsViewsFromModel();
+  else
+    UpdateExceptionsViewFromModel(details.type());
+}
+
 void ContentSettingsHandler::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      if (content::Source<Profile>(source).ptr()->IsOffTheRecord()) {
+      Profile* profile = content::Source<Profile>(source).ptr();
+      if (profile->IsOffTheRecord() &&
+          observer_.IsObserving(profile->GetHostContentSettingsMap())) {
         web_ui()->CallJavascriptFunction(
             "ContentSettingsExceptionsArea.OTRProfileDestroyed");
+        observer_.Remove(profile->GetHostContentSettingsMap());
       }
       break;
     }
 
     case chrome::NOTIFICATION_PROFILE_CREATED: {
-      if (content::Source<Profile>(source).ptr()->IsOffTheRecord())
+      Profile* profile = content::Source<Profile>(source).ptr();
+      if (profile->IsOffTheRecord()) {
         UpdateAllOTRExceptionsViewsFromModel();
-      break;
-    }
-
-    case chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED: {
-      // Filter out notifications from other profiles.
-      HostContentSettingsMap* map =
-          content::Source<HostContentSettingsMap>(source).ptr();
-      if (map != GetContentSettingsMap() &&
-          map != GetOTRContentSettingsMap())
-        break;
-
-      const ContentSettingsDetails* settings_details =
-          content::Details<const ContentSettingsDetails>(details).ptr();
-
-      // TODO(estade): we pretend update_all() is always true.
-      if (settings_details->update_all_types())
-        UpdateAllExceptionsViewsFromModel();
-      else
-        UpdateExceptionsViewFromModel(settings_details->type());
+        observer_.Add(profile->GetHostContentSettingsMap());
+      }
       break;
     }
 
@@ -879,7 +860,9 @@ void ContentSettingsHandler::UpdateNotificationExceptionsView() {
     }
 
     exceptions.Append(
-        GetNotificationExceptionForPage(i->primary_pattern, i->setting,
+        GetNotificationExceptionForPage(i->primary_pattern,
+                                        i->secondary_pattern,
+                                        i->setting,
                                         i->source));
   }
 
@@ -999,7 +982,8 @@ void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
   base::ListValue zoom_levels_exceptions;
 
   content::HostZoomMap* host_zoom_map =
-      content::HostZoomMap::GetForBrowserContext(GetBrowserContext(web_ui()));
+      content::HostZoomMap::GetDefaultForBrowserContext(
+          GetBrowserContext(web_ui()));
   content::HostZoomMap::ZoomLevelVector zoom_levels(
       host_zoom_map->GetAllZoomLevels());
   std::sort(zoom_levels.begin(), zoom_levels.end(), HostZoomSort);
@@ -1164,24 +1148,6 @@ void ContentSettingsHandler::GetExceptionsFromHostContentSettingsMap(
   }
 }
 
-void ContentSettingsHandler::RemoveNotificationException(
-    const base::ListValue* args) {
-  Profile* profile = Profile::FromWebUI(web_ui());
-
-  std::string origin;
-  std::string setting;
-  bool rv = args->GetString(1, &origin);
-  DCHECK(rv);
-  rv = args->GetString(2, &setting);
-  DCHECK(rv);
-  ContentSetting content_setting = ContentSettingFromString(setting);
-
-  DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
-         content_setting == CONTENT_SETTING_BLOCK);
-  DesktopNotificationProfileUtil::ClearSetting(profile,
-      ContentSettingsPattern::FromString(origin));
-}
-
 void ContentSettingsHandler::RemoveMediaException(const base::ListValue* args) {
   std::string mode;
   bool rv = args->GetString(1, &mode);
@@ -1252,7 +1218,8 @@ void ContentSettingsHandler::RemoveZoomLevelException(
   DCHECK(rv);
 
   content::HostZoomMap* host_zoom_map =
-      content::HostZoomMap::GetForBrowserContext(GetBrowserContext(web_ui()));
+      content::HostZoomMap::GetDefaultForBrowserContext(
+          GetBrowserContext(web_ui()));
   double default_level = host_zoom_map->GetDefaultZoomLevel();
   host_zoom_map->SetZoomLevelForHost(pattern, default_level);
 }
@@ -1270,34 +1237,6 @@ void ContentSettingsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("checkExceptionPatternValidity",
       base::Bind(&ContentSettingsHandler::CheckExceptionPatternValidity,
                  base::Unretained(this)));
-}
-
-void ContentSettingsHandler::ApplyWhitelist(ContentSettingsType content_type,
-                                            ContentSetting default_setting) {
-  HostContentSettingsMap* map = GetContentSettingsMap();
-  if (content_type != CONTENT_SETTINGS_TYPE_PLUGINS)
-    return;
-  const int kDefaultWhitelistVersion = 1;
-  PrefService* prefs = user_prefs::UserPrefs::Get(GetBrowserContext(web_ui()));
-  int version = prefs->GetInteger(
-      prefs::kContentSettingsDefaultWhitelistVersion);
-  if (version >= kDefaultWhitelistVersion)
-    return;
-  ContentSetting old_setting =
-      map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS, NULL);
-  // TODO(bauerb): Remove this once the Google Talk plug-in works nicely with
-  // click-to-play (b/6090625).
-  if (old_setting == CONTENT_SETTING_ALLOW &&
-      default_setting == CONTENT_SETTING_ASK) {
-    map->SetWebsiteSetting(
-        ContentSettingsPattern::Wildcard(),
-        ContentSettingsPattern::Wildcard(),
-        CONTENT_SETTINGS_TYPE_PLUGINS,
-        "google-talk",
-        new base::FundamentalValue(CONTENT_SETTING_ALLOW));
-  }
-  prefs->SetInteger(prefs::kContentSettingsDefaultWhitelistVersion,
-                    kDefaultWhitelistVersion);
 }
 
 void ContentSettingsHandler::SetContentFilter(const base::ListValue* args) {
@@ -1322,7 +1261,6 @@ void ContentSettingsHandler::SetContentFilter(const base::ListValue* args) {
 
 
   HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
-  ApplyWhitelist(content_type, default_setting);
   map->SetDefaultContentSetting(content_type, default_setting);
 
   switch (content_type) {
@@ -1392,17 +1330,10 @@ void ContentSettingsHandler::RemoveException(const base::ListValue* args) {
   }
 
   ContentSettingsType type = ContentSettingsTypeFromGroupName(type_string);
-  switch (type) {
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      RemoveNotificationException(args);
-      break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-      RemoveMediaException(args);
-      break;
-    default:
-      RemoveExceptionFromHostContentSettingsMap(args, type);
-      break;
-  }
+  if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM)
+    RemoveMediaException(args);
+  else
+    RemoveExceptionFromHostContentSettingsMap(args, type);
 }
 
 void ContentSettingsHandler::SetException(const base::ListValue* args) {
@@ -1572,8 +1503,14 @@ void ContentSettingsHandler::UpdateFlashMediaLinksVisibility() {
 }
 
 void ContentSettingsHandler::UpdateProtectedContentExceptionsButton() {
-  PrefService* prefs = user_prefs::UserPrefs::Get(GetBrowserContext(web_ui()));
+#if defined(OS_CHROMEOS)
+  // Guests cannot modify exceptions. UIAccountTweaks will disabled the button.
+  if (user_manager::UserManager::Get()->IsLoggedInAsGuest())
+    return;
+#endif
+
   // Exceptions apply only when the feature is enabled.
+  PrefService* prefs = user_prefs::UserPrefs::Get(GetBrowserContext(web_ui()));
   bool enable_exceptions = prefs->GetBoolean(prefs::kEnableDRM);
   web_ui()->CallJavascriptFunction(
       "ContentSettings.enableProtectedContentExceptions",

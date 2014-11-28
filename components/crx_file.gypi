@@ -13,13 +13,12 @@
       'include_dirs': [
         '..',
       ],
-      'defines': [
-        'CRX_FILE_IMPLEMENTATION',
-      ],
       'sources': [
         'crx_file/constants.h',
         'crx_file/crx_file.cc',
         'crx_file/crx_file.h',
+        'crx_file/id_util.cc',
+        'crx_file/id_util.h',
       ],
     },
   ],

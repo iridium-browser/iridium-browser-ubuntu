@@ -572,6 +572,36 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_FALSE(display_manager()->IsMirrored());
 }
 
+// Make sure crash does not happen if add and remove happens at the same time.
+// See: crbug.com/414394
+TEST_F(DisplayManagerTest, DisplayAddRemoveAtTheSameTime) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  UpdateDisplay("100+0-500x500,0+501-400x400");
+
+  const int64 primary_id = DisplayController::GetPrimaryDisplayId();
+  const int64 secondary_id = ScreenUtil::GetSecondaryDisplay().id();
+
+  DisplayInfo primary_info = display_manager()->GetDisplayInfo(primary_id);
+  DisplayInfo secondary_info = display_manager()->GetDisplayInfo(secondary_id);
+
+  // An id which is different from primary and secondary.
+  const int64 third_id = primary_id + secondary_id;
+
+  DisplayInfo third_info =
+      CreateDisplayInfo(third_id, gfx::Rect(0, 0, 600, 600));
+
+  std::vector<DisplayInfo> display_info_list;
+  display_info_list.push_back(third_info);
+  display_info_list.push_back(secondary_info);
+  display_manager()->OnNativeDisplaysChanged(display_info_list);
+
+  EXPECT_EQ(third_id, DisplayController::GetPrimaryDisplayId());
+  EXPECT_EQ("600x600", GetDisplayForId(third_id).size().ToString());
+  EXPECT_EQ(secondary_id, ScreenUtil::GetSecondaryDisplay().id());
+}
+
 #if defined(OS_WIN)
 // TODO(scottmg): RootWindow doesn't get resized on Windows
 // Ash. http://crbug.com/247916.
@@ -1065,45 +1095,6 @@ TEST_F(DisplayManagerTest, UIScaleWithDisplayMode) {
       display_manager()->GetActiveModeForDisplayId(display_id)));
 }
 
-TEST_F(DisplayManagerTest, UIScaleUpgradeToHighDPI) {
-  int64 display_id = Shell::GetScreen()->GetPrimaryDisplay().id();
-  gfx::Display::SetInternalDisplayId(display_id);
-  UpdateDisplay("1920x1080");
-
-  DisplayInfo::SetAllowUpgradeToHighDPI(false);
-  display_manager()->SetDisplayUIScale(display_id, 1.125f);
-  EXPECT_EQ(1.0f, GetDisplayInfoAt(0).GetEffectiveDeviceScaleFactor());
-  EXPECT_EQ(1.125f, GetDisplayInfoAt(0).GetEffectiveUIScale());
-  EXPECT_EQ("2160x1215", GetDisplayForId(display_id).size().ToString());
-
-  display_manager()->SetDisplayUIScale(display_id, 0.5f);
-  EXPECT_EQ(1.0f, GetDisplayInfoAt(0).GetEffectiveDeviceScaleFactor());
-  EXPECT_EQ(0.5f, GetDisplayInfoAt(0).GetEffectiveUIScale());
-  EXPECT_EQ("960x540", GetDisplayForId(display_id).size().ToString());
-
-  DisplayInfo::SetAllowUpgradeToHighDPI(true);
-  display_manager()->SetDisplayUIScale(display_id, 1.125f);
-  EXPECT_EQ(1.0f, GetDisplayInfoAt(0).GetEffectiveDeviceScaleFactor());
-  EXPECT_EQ(1.125f, GetDisplayInfoAt(0).GetEffectiveUIScale());
-  EXPECT_EQ("2160x1215", GetDisplayForId(display_id).size().ToString());
-
-  display_manager()->SetDisplayUIScale(display_id, 0.5f);
-  EXPECT_EQ(2.0f, GetDisplayInfoAt(0).GetEffectiveDeviceScaleFactor());
-  EXPECT_EQ(1.0f, GetDisplayInfoAt(0).GetEffectiveUIScale());
-  EXPECT_EQ("960x540", GetDisplayForId(display_id).size().ToString());
-
-  // Upgrade only works on 1.0f DSF.
-  UpdateDisplay("1920x1080*2");
-  display_manager()->SetDisplayUIScale(display_id, 1.125f);
-  EXPECT_EQ(2.0f, GetDisplayInfoAt(0).GetEffectiveDeviceScaleFactor());
-  EXPECT_EQ(1.125f, GetDisplayInfoAt(0).GetEffectiveUIScale());
-  EXPECT_EQ("1080x607", GetDisplayForId(display_id).size().ToString());
-
-  display_manager()->SetDisplayUIScale(display_id, 0.5f);
-  EXPECT_EQ(2.0f, GetDisplayInfoAt(0).GetEffectiveDeviceScaleFactor());
-  EXPECT_EQ(0.5f, GetDisplayInfoAt(0).GetEffectiveUIScale());
-  EXPECT_EQ("480x270", GetDisplayForId(display_id).size().ToString());
-}
 
 TEST_F(DisplayManagerTest, Use125DSFRorUIScaling) {
   int64 display_id = Shell::GetScreen()->GetPrimaryDisplay().id();

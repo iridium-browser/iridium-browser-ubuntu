@@ -34,6 +34,7 @@
 namespace blink {
 
 class MediaKeyError FINAL : public RefCountedWillBeGarbageCollectedFinalized<MediaKeyError>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum {
         MEDIA_KEYERR_UNKNOWN = 1,
@@ -56,10 +57,8 @@ public:
     void trace(Visitor*) { }
 
 private:
-    MediaKeyError(Code code, unsigned long systemCode) : m_code(code), m_systemCode(systemCode)
-    {
-        ScriptWrappable::init(this);
-    }
+    MediaKeyError(Code code, unsigned long systemCode)
+        : m_code(code), m_systemCode(systemCode) { }
 
     Code m_code;
     unsigned long m_systemCode;
@@ -67,4 +66,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // MediaKeyError_h

@@ -246,6 +246,8 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_base.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_context_state.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_drawing.cc',
+        'command_buffer/service/gles2_cmd_decoder_unittest_extensions.cc',
+        'command_buffer/service/gles2_cmd_decoder_unittest_extensions_autogen.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_framebuffers.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_programs.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_textures.cc',
@@ -335,6 +337,7 @@
         'command_buffer/tests/compressed_texture_test.cc',
         'command_buffer/tests/gl_bind_uniform_location_unittest.cc',
         'command_buffer/tests/gl_chromium_framebuffer_multisample_unittest.cc',
+        'command_buffer/tests/gl_chromium_path_rendering_unittest.cc',
         'command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc',
         'command_buffer/tests/gl_depth_texture_unittest.cc',
         'command_buffer/tests/gl_gpu_memory_buffer_unittest.cc',
@@ -475,6 +478,7 @@
           'type': 'static_library',
           'includes': [
             'command_buffer_service.gypi',
+            '../build/android/increase_size_for_speed.gypi',
           ],
           'dependencies': [
             'command_buffer_common',
@@ -527,6 +531,7 @@
             'gles2_cmd_helper.gypi',
             'gpu_config.gypi',
             'gpu_ipc.gypi',
+            '../build/android/increase_size_for_speed.gypi',
           ],
           'defines': [
             'GPU_IMPLEMENTATION',

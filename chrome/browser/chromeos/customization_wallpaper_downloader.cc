@@ -7,7 +7,7 @@
 #include <math.h>
 #include <algorithm>
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
@@ -88,7 +88,7 @@ void CustomizationWallpaperDownloader::StartRequest() {
 
   url_fetcher_.reset(
       net::URLFetcher::Create(wallpaper_url_, net::URLFetcher::GET, this));
-  url_fetcher_->SetRequestContext(url_context_getter_);
+  url_fetcher_->SetRequestContext(url_context_getter_.get());
   url_fetcher_->SetLoadFlags(net::LOAD_BYPASS_CACHE |
                              net::LOAD_DISABLE_CACHE |
                              net::LOAD_DO_NOT_SAVE_COOKIES |

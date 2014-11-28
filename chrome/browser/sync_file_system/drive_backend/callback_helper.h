@@ -42,13 +42,13 @@ RebindForward(T& t) {
 template <typename T>
 class CallbackHolder {
  public:
-  CallbackHolder(base::SequencedTaskRunner* task_runner,
+  CallbackHolder(const scoped_refptr<base::SequencedTaskRunner>& task_runner,
                  const tracked_objects::Location& from_here,
                  const base::Callback<T>& callback)
       : task_runner_(task_runner),
         from_here_(from_here),
         callback_(new base::Callback<T>(callback)) {
-    DCHECK(task_runner_);
+    DCHECK(task_runner_.get());
   }
 
   ~CallbackHolder() {
@@ -57,7 +57,7 @@ class CallbackHolder {
       delete callback;
   }
 
-  base::SequencedTaskRunner* task_runner() const { return task_runner_; }
+  base::SequencedTaskRunner* task_runner() const { return task_runner_.get(); }
   const tracked_objects::Location& from_here() const { return from_here_; }
   const base::Callback<T>& callback() const { return *callback_; }
 
@@ -156,7 +156,7 @@ struct RelayToTaskRunnerHelper<void(A1, A2, A3, A4, A5, A6, A7)> {
 
 template <typename T>
 base::Callback<T> RelayCallbackToTaskRunner(
-    base::SequencedTaskRunner* task_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     const tracked_objects::Location& from_here,
     const base::Callback<T>& callback) {
   DCHECK(task_runner->RunsTasksOnCurrentThread());

@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "gtest/gtest.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
 #include "webrtc/modules/audio_coding/main/test/PCMFile.h"
@@ -35,10 +35,11 @@ class DualStreamTest : public AudioPacketizationCallback,
 
   void ApiTest();
 
-  int32_t SendData(FrameType frameType, uint8_t payload_type,
-                   uint32_t timestamp, const uint8_t* payload_data,
-                   uint16_t payload_size,
-                   const RTPFragmentationHeader* fragmentation);
+  virtual int32_t SendData(
+      FrameType frameType, uint8_t payload_type,
+      uint32_t timestamp, const uint8_t* payload_data,
+      uint16_t payload_size,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   void Perform(bool start_in_sync, int num_channels_input);
 

@@ -22,6 +22,7 @@
 #include "core/dom/QualifiedName.h"
 
 #include "core/HTMLNames.h"
+#include "core/MathMLNames.h"
 #include "core/SVGNames.h"
 #include "core/XLinkNames.h"
 #include "core/XMLNSNames.h"
@@ -33,7 +34,15 @@
 
 namespace blink {
 
+struct SameSizeAsQualifiedNameImpl : public RefCounted<SameSizeAsQualifiedNameImpl> {
+    unsigned bitfield;
+    void* pointers[4];
+};
+
+COMPILE_ASSERT(sizeof(QualifiedName::QualifiedNameImpl) == sizeof(SameSizeAsQualifiedNameImpl), qualified_name_impl_should_stay_small);
+
 static const int staticQualifiedNamesCount = HTMLNames::HTMLTagsCount + HTMLNames::HTMLAttrsCount
+    + MathMLNames::MathMLTagsCount + MathMLNames::MathMLAttrsCount
     + SVGNames::SVGTagsCount + SVGNames::SVGAttrsCount
     + XLinkNames::XLinkAttrsCount
     + XMLNSNames::XMLNSAttrsCount

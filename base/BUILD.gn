@@ -130,6 +130,8 @@ component("base") {
     "critical_closure_internal_ios.mm",
     "debug/alias.cc",
     "debug/alias.h",
+    "debug/asan_invalid_access.cc",
+    "debug/asan_invalid_access.h",
     "debug/crash_logging.cc",
     "debug/crash_logging.h",
     "debug/debugger.cc",
@@ -475,6 +477,7 @@ component("base") {
     "process/process_handle_posix.cc",
     "process/process_handle_win.cc",
     "process/process_info.h",
+    "process/process_info_linux.cc",
     "process/process_info_mac.cc",
     "process/process_info_win.cc",
     "process/process_iterator.cc",
@@ -880,6 +883,8 @@ component("base") {
     configs += linux_configs
     all_dependent_configs = linux_configs
 
+    defines += [ "USE_SYMBOLIZE" ]
+
     # These dependencies are not required on Android, and in the case
     # of xdg_mime must be excluded due to licensing restrictions.
     deps += [
@@ -890,13 +895,18 @@ component("base") {
   } else {
     # Non-Linux.
     sources -= [
-      "linux_util.cc",
-      "linux_util.h",
       "nix/mime_util_xdg.cc",
       "nix/mime_util_xdg.h",
       "nix/xdg_util.cc",
       "nix/xdg_util.h",
     ]
+
+    if (!is_android) {
+      sources -= [
+        "linux_util.cc",
+        "linux_util.h",
+      ]
+    }
   }
 
   if (!use_glib) {
@@ -904,6 +914,12 @@ component("base") {
       "message_loop/message_pump_glib.cc",
       "message_loop/message_pump_glib.h",
     ]
+  }
+
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+  if (is_android && !is_debug) {
+    configs -= [ "//build/config/compiler:optimize" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
   }
 }
 
@@ -917,6 +933,11 @@ source_set("base_static") {
     "win/pe_image.cc",
     "win/pe_image.h",
   ]
+
+  if (is_android && !is_debug) {
+    configs -= [ "//build/config/compiler:optimize" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
 }
 
 component("i18n") {
@@ -965,6 +986,11 @@ component("i18n") {
     "//base/third_party/dynamic_annotations",
     "//third_party/icu",
   ]
+
+  if (is_android && !is_debug) {
+    configs -= [ "//build/config/compiler:optimize" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
 }
 
 source_set("prefs") {
@@ -1010,9 +1036,15 @@ source_set("prefs") {
   defines = [ "BASE_PREFS_IMPLEMENTATION" ]
 
   deps = [ ":base" ]
+
+  if (is_android && !is_debug) {
+    configs -= [ "//build/config/compiler:optimize" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
 }
 
 source_set("prefs_test_support") {
+  testonly = true
   sources = [
     "prefs/mock_pref_change_callback.cc",
     "prefs/mock_pref_change_callback.h",
@@ -1033,6 +1065,7 @@ source_set("prefs_test_support") {
 }
 
 source_set("message_loop_tests") {
+  testonly = true
   sources = [
     "message_loop/message_loop_test.cc",
     "message_loop/message_loop_test.h",
@@ -1223,7 +1256,7 @@ test("base_unittests") {
     "template_util_unittest.cc",
     "test/expectations/expectation_unittest.cc",
     "test/expectations/parser_unittest.cc",
-    "test/statistics_delta_reader_unittest.cc",
+    "test/histogram_tester_unittest.cc",
     "test/test_reg_util_win_unittest.cc",
     "test/trace_event_analyzer_unittest.cc",
     "threading/non_thread_safe_unittest.cc",
@@ -1328,6 +1361,9 @@ test("base_unittests") {
   }
 
   if (is_android) {
+    deps += [
+      "//testing/android:native_test_native_code",
+    ]
     set_sources_assignment_filter([])
     sources += [ "debug/proc_maps_linux_unittest.cc" ]
     set_sources_assignment_filter(sources_assignment_filter)
@@ -1335,6 +1371,7 @@ test("base_unittests") {
 }
 
 if (is_android) {
+  # GYP: //base.gyp:base_jni_headers
   generate_jni("base_jni_headers") {
     sources = [
       "android/java/src/org/chromium/base/ApplicationStatus.java",
@@ -1360,6 +1397,7 @@ if (is_android) {
     jni_package = "base"
   }
 
+  # GYP: //base.gyp:base_java
   android_library("base_java") {
     srcjar_deps = [
       ":base_java_application_state",
@@ -1371,42 +1409,7 @@ if (is_android) {
       "//third_party/jsr-305:jsr_305_javalib"
     ]
 
-    java_files = [
-      "android/java/src/org/chromium/base/BaseChromiumApplication.java",
-      "android/java/src/org/chromium/base/JavaHandlerThread.java",
-      "android/java/src/org/chromium/base/PathService.java",
-      "android/java/src/org/chromium/base/CollectionUtil.java",
-      "android/java/src/org/chromium/base/PathUtils.java",
-      "android/java/src/org/chromium/base/library_loader/ProcessInitException.java",
-      "android/java/src/org/chromium/base/library_loader/LoaderErrors.java",
-      "android/java/src/org/chromium/base/library_loader/LibraryLoader.java",
-      "android/java/src/org/chromium/base/library_loader/Linker.java",
-      "android/java/src/org/chromium/base/library_loader/LibraryLoaderHelper.java",
-      "android/java/src/org/chromium/base/ThreadUtils.java",
-      "android/java/src/org/chromium/base/CpuFeatures.java",
-      "android/java/src/org/chromium/base/CalledByNative.java",
-      "android/java/src/org/chromium/base/PowerMonitor.java",
-      "android/java/src/org/chromium/base/CommandLine.java",
-      "android/java/src/org/chromium/base/SystemMessageHandler.java",
-      "android/java/src/org/chromium/base/ContentUriUtils.java",
-      "android/java/src/org/chromium/base/WindowCallbackWrapper.java",
-      "android/java/src/org/chromium/base/ImportantFileWriterAndroid.java",
-      "android/java/src/org/chromium/base/BaseSwitches.java",
-      "android/java/src/org/chromium/base/SysUtils.java",
-      "android/java/src/org/chromium/base/PowerStatusReceiver.java",
-      "android/java/src/org/chromium/base/ObserverList.java",
-      "android/java/src/org/chromium/base/PerfTraceEvent.java",
-      "android/java/src/org/chromium/base/BuildInfo.java",
-      "android/java/src/org/chromium/base/TraceEvent.java",
-      "android/java/src/org/chromium/base/AccessedByNative.java",
-      "android/java/src/org/chromium/base/JNINamespace.java",
-      "android/java/src/org/chromium/base/CalledByNativeUnchecked.java",
-      "android/java/src/org/chromium/base/MemoryPressureListener.java",
-      "android/java/src/org/chromium/base/NativeClassQualifiedName.java",
-      "android/java/src/org/chromium/base/ActivityState.java",
-      "android/java/src/org/chromium/base/ApplicationStatus.java",
-      "android/java/src/org/chromium/base/ApiCompatibilityUtils.java",
-    ]
+    DEPRECATED_java_in_dir = "android/java/src"
 
     # A new version of NativeLibraries.java (with the actual correct values)
     # will be created when creating an apk.
@@ -1416,6 +1419,24 @@ if (is_android) {
     ]
   }
 
+  # GYP: //base.gyp:base_javatests
+  android_library("base_javatests") {
+    deps = [
+      ":base_java",
+      ":base_java_test_support",
+    ]
+    DEPRECATED_java_in_dir = "android/javatests/src"
+  }
+
+  # GYP: //base.gyp:base_java_test_support
+  android_library("base_java_test_support") {
+    deps = [
+      ":base_java",
+    ]
+    DEPRECATED_java_in_dir = "test/android/javatests/src"
+  }
+
+  # GYP: //base.gyp:base_java_application_state
   java_cpp_template("base_java_application_state") {
     sources = [
       "android/java/src/org/chromium/base/ApplicationState.template",
@@ -1427,6 +1448,7 @@ if (is_android) {
     package_name = "org/chromium/base"
   }
 
+  # GYP: //base.gyp:base_java_memory_pressure_level_list
   java_cpp_template("base_java_memory_pressure_level_list") {
     sources = [
       "android/java/src/org/chromium/base/MemoryPressureLevelList.template",
@@ -1438,18 +1460,15 @@ if (is_android) {
     package_name = "org/chromium/base"
   }
 
+  # GYP: //base/base.gyp:base_native_libraries_gen
   java_cpp_template("base_native_libraries_gen") {
     sources = [
       "android/java/templates/NativeLibraries.template",
     ]
-    inputs = [
-      "android/java/templates/native_libraries_array.h",
-    ]
-
     package_name = "org/chromium/base/library_loader"
-    include_path = "android/java/templates"
   }
 
+  # GYP: //base.gyp:base_java_unittest_support
   android_library("base_java_unittest_support") {
     deps = [":base_java"]
     java_files = [
@@ -1457,6 +1476,7 @@ if (is_android) {
     ]
   }
 
+  # GYP: //base.gyp:base_unittests_apk
   unittest_apk("base_unittests_apk") {
     deps = [
       ":base_java",

@@ -8,18 +8,15 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/devtools/devtools_protocol.h"
+#include "chrome/browser/devtools/devtools_network_protocol_handler.h"
 #include "content/public/browser/devtools_manager_delegate.h"
-
-class DevToolsNetworkConditions;
-class Profile;
 
 class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
  public:
   ChromeDevToolsManagerDelegate();
   virtual ~ChromeDevToolsManagerDelegate();
 
-  // content::DevToolsManagerDelegate overrides:
+  // content::DevToolsManagerDelegate implementation.
   virtual void Inspect(content::BrowserContext* browser_context,
                        content::DevToolsAgentHost* agent_host) OVERRIDE;
   virtual void DevToolsAgentStateChanged(content::DevToolsAgentHost* agent_host,
@@ -27,17 +24,13 @@ class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
   virtual base::DictionaryValue* HandleCommand(
       content::DevToolsAgentHost* agent_host,
       base::DictionaryValue* command_dict) OVERRIDE;
+  virtual scoped_ptr<content::DevToolsTarget> CreateNewTarget(
+      const GURL& url) OVERRIDE;
+  virtual void EnumerateTargets(TargetCallback callback) OVERRIDE;
+  virtual std::string GetPageThumbnailData(const GURL& url) OVERRIDE;
 
  private:
-  Profile* GetProfile(content::DevToolsAgentHost* agent_host);
-
-  scoped_ptr<DevToolsProtocol::Response> EmulateNetworkConditions(
-      content::DevToolsAgentHost* agent_host,
-      DevToolsProtocol::Command* command);
-
-  void UpdateNetworkState(
-      content::DevToolsAgentHost* agent_host,
-      scoped_ptr<DevToolsNetworkConditions> conditions);
+  scoped_ptr<DevToolsNetworkProtocolHandler> network_protocol_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeDevToolsManagerDelegate);
 };

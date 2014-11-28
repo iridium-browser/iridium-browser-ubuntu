@@ -344,14 +344,16 @@ cvox.LiveRegions.announceChange = function(
   }
 
   var navDescriptions = cvox.LiveRegions.getNavDescriptionsRecursive(node);
-  if (navDescriptions.length == 0) {
-    return;
-  }
-
   if (isRemoval) {
+    navDescriptions = [cvox.DescriptionUtil.getDescriptionFromAncestors(
+        [node], true, cvox.ChromeVox.verbosity)];
     navDescriptions = [new cvox.NavDescription({
       context: cvox.ChromeVox.msgs.getMsg('live_regions_removed'), text: ''
     })].concat(navDescriptions);
+  }
+
+  if (navDescriptions.length == 0) {
+    return;
   }
 
   // Don't announce alerts on page load if their text and values consist of
@@ -404,11 +406,35 @@ cvox.LiveRegions.announceChange = function(
 
   // Set a category on the NavDescriptions - that way live regions
   // interrupt other live regions but not anything else.
-  navDescriptions.every(function(desc) {
+  navDescriptions.forEach(function(desc) {
     if (!desc.category) {
       desc.category = 'live';
     }
   });
+
+  // TODO(dmazzoni): http://crbug.com/415679 Temporary design decision;
+  // until we have a way to tell the speech queue to group the nav
+  // descriptions together, collapse them into one.
+  // Otherwise, one nav description could be spoken, then something unrelated,
+  // then the rest.
+  if (navDescriptions.length > 1) {
+    var allStrings = [];
+    navDescriptions.forEach(function(desc) {
+      if (desc.context) {
+        allStrings.push(desc.context);
+      }
+      if (desc.text) {
+        allStrings.push(desc.text);
+      }
+      if (desc.userValue) {
+        allStrings.push(desc.userValue);
+      }
+    });
+    navDescriptions = [new cvox.NavDescription({
+      text: allStrings.join(', '),
+      category: 'live'
+    })];
+  }
 
   handler(assertive, navDescriptions);
 };

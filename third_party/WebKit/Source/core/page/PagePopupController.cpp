@@ -41,7 +41,6 @@ PagePopupController::PagePopupController(PagePopupClient* client)
     : m_popupClient(client)
 {
     ASSERT(client);
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<PagePopupController> PagePopupController::create(PagePopupClient* client)
@@ -90,6 +89,17 @@ String PagePopupController::formatShortMonth(int year, int zeroBaseMonth)
     DateComponents date;
     date.setMonthsSinceEpoch((year - 1970) * 12.0 + zeroBaseMonth);
     return m_popupClient->locale().formatDateTime(date, Locale::FormatTypeShort);
+}
+
+String PagePopupController::formatWeek(int year, int weekNumber, const String& localizedDateString)
+{
+    if (!m_popupClient)
+        return emptyString();
+    DateComponents week;
+    bool setWeekResult = week.setWeek(year, weekNumber);
+    ASSERT_UNUSED(setWeekResult, setWeekResult);
+    String localizedWeek = m_popupClient->locale().formatDateTime(week);
+    return m_popupClient->locale().queryString(WebLocalizedString::AXCalendarWeekDescription, localizedWeek, localizedDateString);
 }
 
 void PagePopupController::clearPagePopupClient()

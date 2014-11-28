@@ -33,18 +33,15 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Element.h"
-#include "core/dom/FullscreenElementStack.h"
+#include "core/dom/Fullscreen.h"
 #include "core/dom/NamedNodeMap.h"
-#include "core/dom/custom/CustomElementCallbackDispatcher.h"
+#include "core/dom/custom/CustomElementProcessingStack.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/rendering/RenderBoxModelObject.h"
 #include "core/rendering/RenderObject.h"
 #include "public/platform/WebRect.h"
 #include "public/web/WebDocument.h"
 #include "wtf/PassRefPtr.h"
-
-
-using namespace blink;
 
 namespace blink {
 
@@ -83,7 +80,7 @@ void WebElement::removeAttribute(const WebString& attrName)
 {
     // TODO: Custom element callbacks need to be called on WebKit API methods that
     // mutate the DOM in any way.
-    CustomElementCallbackDispatcher::CallbackDeliveryScope deliverCustomElementCallbacks;
+    CustomElementProcessingStack::CallbackDeliveryScope deliverCustomElementCallbacks;
     unwrap<Element>()->removeAttribute(attrName);
 }
 
@@ -96,7 +93,7 @@ bool WebElement::setAttribute(const WebString& attrName, const WebString& attrVa
 {
     // TODO: Custom element callbacks need to be called on WebKit API methods that
     // mutate the DOM in any way.
-    CustomElementCallbackDispatcher::CallbackDeliveryScope deliverCustomElementCallbacks;
+    CustomElementProcessingStack::CallbackDeliveryScope deliverCustomElementCallbacks;
     TrackExceptionState exceptionState;
     unwrap<Element>()->setAttribute(attrName, attrValue, exceptionState);
     return !exceptionState.hadException();
@@ -144,7 +141,7 @@ WebString WebElement::computeInheritedLanguage() const
 void WebElement::requestFullScreen()
 {
     Element* element = unwrap<Element>();
-    FullscreenElementStack::from(element->document()).requestFullscreen(*element, FullscreenElementStack::PrefixedMozillaAllowKeyboardInputRequest);
+    Fullscreen::from(element->document()).requestFullscreen(*element, Fullscreen::PrefixedMozillaAllowKeyboardInputRequest);
 }
 
 WebRect WebElement::boundsInViewportSpace()
@@ -157,7 +154,7 @@ WebImage WebElement::imageContents()
     if (isNull())
         return WebImage();
 
-    blink::Image* image = unwrap<Element>()->imageContents();
+    Image* image = unwrap<Element>()->imageContents();
     if (!image)
         return WebImage();
 

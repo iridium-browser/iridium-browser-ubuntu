@@ -7,9 +7,6 @@
 #include "base/command_line.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chromeos/chromeos_switches.h"
-#include "chromeos/login/auth/user_context.h"
-#include "components/pairing/fake_controller_pairing_controller.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 
 using namespace chromeos::controller_pairing;
@@ -19,16 +16,14 @@ namespace chromeos {
 
 ControllerPairingScreen::ControllerPairingScreen(
     ScreenObserver* observer,
-    ControllerPairingScreenActor* actor)
+    ControllerPairingScreenActor* actor,
+    ControllerPairingController* controller)
     : WizardScreen(observer),
       actor_(actor),
+      controller_(controller),
       current_stage_(ControllerPairingController::STAGE_NONE),
       device_preselected_(false) {
   actor_->SetDelegate(this);
-  std::string controller_config =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kShowControllerPairingDemo);
-  controller_.reset(new FakeControllerPairingController(controller_config));
   controller_->AddObserver(this);
 }
 
@@ -113,6 +108,10 @@ void ControllerPairingScreen::PairingStageChanged(Stage new_stage) {
       break;
     }
     case ControllerPairingController::STAGE_WAITING_FOR_CREDENTIALS: {
+      controller_->RemoveObserver(this);
+      get_screen_observer()->OnExit(
+          WizardController::CONTROLLER_PAIRING_FINISHED);
+      // TODO: Move the rest of the stages to the proper location.
       desired_page = kPageEnrollmentIntroduction;
       break;
     }
@@ -197,13 +196,10 @@ void ControllerPairingScreen::OnUserActed(const std::string& action) {
     context_.SetString(kContextKeyPage, kPageAuthentication);
     disable_controls = false;
   } else if (action == kActionEnroll) {
-    std::string account_id =
+    const std::string account_id =
         gaia::SanitizeEmail(context_.GetString(kContextKeyAccountId));
-    context_.SetString(kContextKeyEnrollmentDomain,
-                       gaia::ExtractDomainName(account_id));
-    UserContext user_context(account_id);
-    controller_->OnAuthenticationDone(user_context,
-                                      actor_->GetBrowserContext());
+    const std::string domain(gaia::ExtractDomainName(account_id));
+    context_.SetString(kContextKeyEnrollmentDomain, domain);
   } else if (action == kActionStartSession) {
     controller_->StartSession();
   }

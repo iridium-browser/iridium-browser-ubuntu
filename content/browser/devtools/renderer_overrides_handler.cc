@@ -22,6 +22,8 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/cursors/webcursor.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -36,12 +38,16 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
+#include "content/public/common/url_constants.h"
 #include "ipc/ipc_sender.h"
 #include "net/base/net_util.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "third_party/WebKit/public/platform/WebCursorInfo.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/display.h"
@@ -49,7 +55,6 @@
 #include "ui/gfx/size_conversions.h"
 #include "ui/snapshot/snapshot.h"
 #include "url/gurl.h"
-#include "webkit/browser/quota/quota_manager.h"
 
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
@@ -68,13 +73,23 @@ static int kCaptureRetryLimit = 2;
 }  // namespace
 
 RendererOverridesHandler::RendererOverridesHandler()
-    : has_last_compositor_frame_metadata_(false),
+    : page_domain_enabled_(false),
+      has_last_compositor_frame_metadata_(false),
       capture_retry_count_(0),
+      touch_emulation_enabled_(false),
+      color_picker_enabled_(false),
+      last_cursor_x_(-1),
+      last_cursor_y_(-1),
       weak_factory_(this) {
   RegisterCommandHandler(
       devtools::DOM::setFileInputFiles::kName,
       base::Bind(
           &RendererOverridesHandler::GrantPermissionsForSetFileInputFiles,
+          base::Unretained(this)));
+  RegisterCommandHandler(
+      devtools::Network::canEmulateNetworkConditions::kName,
+      base::Bind(
+          &RendererOverridesHandler::CanEmulateNetworkConditions,
           base::Unretained(this)));
   RegisterCommandHandler(
       devtools::Network::clearBrowserCache::kName,
@@ -86,6 +101,10 @@ RendererOverridesHandler::RendererOverridesHandler()
       base::Bind(
           &RendererOverridesHandler::ClearBrowserCookies,
           base::Unretained(this)));
+  RegisterCommandHandler(
+      devtools::Page::enable::kName,
+      base::Bind(
+          &RendererOverridesHandler::PageEnable, base::Unretained(this)));
   RegisterCommandHandler(
       devtools::Page::disable::kName,
       base::Bind(
@@ -121,6 +140,16 @@ RendererOverridesHandler::RendererOverridesHandler()
           &RendererOverridesHandler::PageCaptureScreenshot,
           base::Unretained(this)));
   RegisterCommandHandler(
+      devtools::Page::setTouchEmulationEnabled::kName,
+      base::Bind(
+          &RendererOverridesHandler::PageSetTouchEmulationEnabled,
+          base::Unretained(this)));
+  RegisterCommandHandler(
+      devtools::Page::canEmulate::kName,
+      base::Bind(
+          &RendererOverridesHandler::PageCanEmulate,
+          base::Unretained(this)));
+  RegisterCommandHandler(
       devtools::Page::canScreencast::kName,
       base::Bind(
           &RendererOverridesHandler::PageCanScreencast,
@@ -141,18 +170,27 @@ RendererOverridesHandler::RendererOverridesHandler()
           &RendererOverridesHandler::PageQueryUsageAndQuota,
           base::Unretained(this)));
   RegisterCommandHandler(
+      devtools::Page::setColorPickerEnabled::kName,
+      base::Bind(
+          &RendererOverridesHandler::PageSetColorPickerEnabled,
+          base::Unretained(this)));
+  RegisterCommandHandler(
       devtools::Input::emulateTouchFromMouseEvent::kName,
       base::Bind(
           &RendererOverridesHandler::InputEmulateTouchFromMouseEvent,
           base::Unretained(this)));
+  mouse_event_callback_ = base::Bind(
+      &RendererOverridesHandler::HandleMouseEvent,
+      base::Unretained(this));
 }
 
 RendererOverridesHandler::~RendererOverridesHandler() {}
 
 void RendererOverridesHandler::OnClientDetached() {
-  if (screencast_command_ && host_)
-    host_->SetTouchEventEmulationEnabled(false, false);
+  touch_emulation_enabled_ = false;
   screencast_command_ = NULL;
+  UpdateTouchEventEmulationState();
+  SetColorPickerEnabled(false);
 }
 
 void RendererOverridesHandler::OnSwapCompositorFrame(
@@ -160,12 +198,14 @@ void RendererOverridesHandler::OnSwapCompositorFrame(
   last_compositor_frame_metadata_ = frame_metadata;
   has_last_compositor_frame_metadata_ = true;
 
-  if (screencast_command_)
+  if (screencast_command_.get())
     InnerSwapCompositorFrame();
+  if (color_picker_enabled_)
+    UpdateColorPickerFrame();
 }
 
 void RendererOverridesHandler::OnVisibilityChanged(bool visible) {
-  if (!screencast_command_)
+  if (!screencast_command_.get())
     return;
   NotifyScreencastVisibility(visible);
 }
@@ -173,16 +213,28 @@ void RendererOverridesHandler::OnVisibilityChanged(bool visible) {
 void RendererOverridesHandler::SetRenderViewHost(
     RenderViewHostImpl* host) {
   host_ = host;
-  if (screencast_command_ && host)
-    host->SetTouchEventEmulationEnabled(true, true);
+  if (!host)
+    return;
+  UpdateTouchEventEmulationState();
+  if (color_picker_enabled_)
+    host->AddMouseEventCallback(mouse_event_callback_);
 }
 
 void RendererOverridesHandler::ClearRenderViewHost() {
+  if (host_)
+    host_->RemoveMouseEventCallback(mouse_event_callback_);
   host_ = NULL;
+  ResetColorPickerFrame();
 }
 
-bool RendererOverridesHandler::OnSetTouchEventEmulationEnabled() {
-  return screencast_command_.get() != NULL;
+void RendererOverridesHandler::DidAttachInterstitialPage() {
+  if (page_domain_enabled_)
+    SendNotification(devtools::Page::interstitialShown::kName, NULL);
+}
+
+void RendererOverridesHandler::DidDetachInterstitialPage() {
+  if (page_domain_enabled_)
+    SendNotification(devtools::Page::interstitialHidden::kName, NULL);
 }
 
 void RendererOverridesHandler::InnerSwapCompositorFrame() {
@@ -201,14 +253,10 @@ void RendererOverridesHandler::InnerSwapCompositorFrame() {
   // TODO(vkuzkokov): do not use previous frame metadata.
   cc::CompositorFrameMetadata& metadata = last_compositor_frame_metadata_;
 
-  float page_scale = metadata.page_scale_factor;
   gfx::SizeF viewport_size_dip = gfx::ScaleSize(
-      metadata.scrollable_viewport_size, page_scale);
-
-  float total_bar_height_dip = metadata.location_bar_content_translation.y() +
-                                   metadata.overdraw_bottom_height;
-  gfx::SizeF screen_size_dip(viewport_size_dip.width(),
-                             viewport_size_dip.height() + total_bar_height_dip);
+      metadata.scrollable_viewport_size, metadata.page_scale_factor);
+  gfx::SizeF screen_size_dip = gfx::ScaleSize(view->GetPhysicalBackingSize(),
+                                              1 / metadata.device_scale_factor);
 
   std::string format;
   int quality = kDefaultScreenshotQuality;
@@ -289,6 +337,14 @@ RendererOverridesHandler::GrantPermissionsForSetFileInputFiles(
 // Network agent handlers  ----------------------------------------------------
 
 scoped_refptr<DevToolsProtocol::Response>
+RendererOverridesHandler::CanEmulateNetworkConditions(
+    scoped_refptr<DevToolsProtocol::Command> command) {
+  base::DictionaryValue* result = new base::DictionaryValue();
+  result->SetBoolean(devtools::kResult, false);
+  return command->SuccessResponse(result);
+}
+
+scoped_refptr<DevToolsProtocol::Response>
 RendererOverridesHandler::ClearBrowserCache(
     scoped_refptr<DevToolsProtocol::Command> command) {
   GetContentClient()->browser()->ClearCache(host_);
@@ -306,11 +362,19 @@ RendererOverridesHandler::ClearBrowserCookies(
 // Page agent handlers  -------------------------------------------------------
 
 scoped_refptr<DevToolsProtocol::Response>
+RendererOverridesHandler::PageEnable(
+    scoped_refptr<DevToolsProtocol::Command> command) {
+  page_domain_enabled_ = true;
+  // Fall through to the renderer.
+  return NULL;
+}
+
+scoped_refptr<DevToolsProtocol::Response>
 RendererOverridesHandler::PageDisable(
     scoped_refptr<DevToolsProtocol::Command> command) {
-  if (screencast_command_ && host_)
-    host_->SetTouchEventEmulationEnabled(false, false);
-  screencast_command_ = NULL;
+  page_domain_enabled_ = false;
+  OnClientDetached();
+  // Fall through to the renderer.
   return NULL;
 }
 
@@ -365,7 +429,7 @@ RendererOverridesHandler::PageNavigate(
   WebContents* web_contents = WebContents::FromRenderViewHost(host_);
   if (web_contents) {
     web_contents->GetController()
-        .LoadURL(gurl, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+        .LoadURL(gurl, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
     // Fall through into the renderer.
     return NULL;
   }
@@ -488,6 +552,43 @@ void RendererOverridesHandler::ScreenshotCaptured(
 }
 
 scoped_refptr<DevToolsProtocol::Response>
+RendererOverridesHandler::PageSetTouchEmulationEnabled(
+    scoped_refptr<DevToolsProtocol::Command> command) {
+  base::DictionaryValue* params = command->params();
+  bool enabled = false;
+  if (!params || !params->GetBoolean(
+      devtools::Page::setTouchEmulationEnabled::kParamEnabled,
+      &enabled)) {
+    // Pass to renderer.
+    return NULL;
+  }
+
+  touch_emulation_enabled_ = enabled;
+  UpdateTouchEventEmulationState();
+
+  // Pass to renderer.
+  return NULL;
+}
+
+scoped_refptr<DevToolsProtocol::Response>
+RendererOverridesHandler::PageCanEmulate(
+    scoped_refptr<DevToolsProtocol::Command> command) {
+  base::DictionaryValue* result = new base::DictionaryValue();
+#if defined(OS_ANDROID)
+  result->SetBoolean(devtools::kResult, false);
+#else
+  if (WebContents* web_contents = WebContents::FromRenderViewHost(host_)) {
+    result->SetBoolean(
+        devtools::kResult,
+        !web_contents->GetVisibleURL().SchemeIs(kChromeDevToolsScheme));
+  } else {
+    result->SetBoolean(devtools::kResult, true);
+  }
+#endif  // defined(OS_ANDROID)
+  return command->SuccessResponse(result);
+}
+
+scoped_refptr<DevToolsProtocol::Response>
 RendererOverridesHandler::PageCanScreencast(
     scoped_refptr<DevToolsProtocol::Command> command) {
   base::DictionaryValue* result = new base::DictionaryValue();
@@ -503,9 +604,9 @@ scoped_refptr<DevToolsProtocol::Response>
 RendererOverridesHandler::PageStartScreencast(
     scoped_refptr<DevToolsProtocol::Command> command) {
   screencast_command_ = command;
+  UpdateTouchEventEmulationState();
   if (!host_)
     return command->InternalErrorResponse("Could not connect to view");
-  host_->SetTouchEventEmulationEnabled(true, true);
   bool visible = !host_->is_hidden();
   NotifyScreencastVisibility(visible);
   if (visible) {
@@ -514,7 +615,8 @@ RendererOverridesHandler::PageStartScreencast(
     else
       host_->Send(new ViewMsg_ForceRedraw(host_->GetRoutingID(), 0));
   }
-  return command->SuccessResponse(NULL);
+  // Pass through to the renderer.
+  return NULL;
 }
 
 scoped_refptr<DevToolsProtocol::Response>
@@ -522,9 +624,9 @@ RendererOverridesHandler::PageStopScreencast(
     scoped_refptr<DevToolsProtocol::Command> command) {
   last_frame_time_ = base::TimeTicks();
   screencast_command_ = NULL;
-  if (host_)
-    host_->SetTouchEventEmulationEnabled(false, false);
-  return command->SuccessResponse(NULL);
+  UpdateTouchEventEmulationState();
+  // Pass through to the renderer.
+  return NULL;
 }
 
 void RendererOverridesHandler::ScreencastFrameCaptured(
@@ -583,6 +685,16 @@ void RendererOverridesHandler::ScreencastFrameCaptured(
   if (metadata.device_scale_factor != 0) {
     base::DictionaryValue* response_metadata = new base::DictionaryValue();
 
+    RenderWidgetHostViewBase* view = static_cast<RenderWidgetHostViewBase*>(
+        host_->GetView());
+    if (!view)
+      return;
+
+    gfx::SizeF viewport_size_dip = gfx::ScaleSize(
+        metadata.scrollable_viewport_size, metadata.page_scale_factor);
+    gfx::SizeF screen_size_dip = gfx::ScaleSize(
+        view->GetPhysicalBackingSize(), 1 / metadata.device_scale_factor);
+
     response_metadata->SetDouble(
         devtools::Page::ScreencastFrameMetadata::kParamDeviceScaleFactor,
         metadata.device_scale_factor);
@@ -600,7 +712,9 @@ void RendererOverridesHandler::ScreencastFrameCaptured(
         metadata.location_bar_content_translation.y());
     response_metadata->SetDouble(
         devtools::Page::ScreencastFrameMetadata::kParamOffsetBottom,
-        metadata.overdraw_bottom_height);
+        screen_size_dip.height() -
+            metadata.location_bar_content_translation.y() -
+            viewport_size_dip.height());
 
     base::DictionaryValue* viewport = new base::DictionaryValue();
     viewport->SetDouble(devtools::DOM::Rect::kParamX,
@@ -614,16 +728,12 @@ void RendererOverridesHandler::ScreencastFrameCaptured(
     response_metadata->Set(
         devtools::Page::ScreencastFrameMetadata::kParamViewport, viewport);
 
-    gfx::SizeF viewport_size_dip = gfx::ScaleSize(
-        metadata.scrollable_viewport_size, metadata.page_scale_factor);
     response_metadata->SetDouble(
         devtools::Page::ScreencastFrameMetadata::kParamDeviceWidth,
-        viewport_size_dip.width());
+        screen_size_dip.width());
     response_metadata->SetDouble(
         devtools::Page::ScreencastFrameMetadata::kParamDeviceHeight,
-        viewport_size_dip.height() +
-            metadata.location_bar_content_translation.y() +
-            metadata.overdraw_bottom_height);
+        screen_size_dip.height());
     response_metadata->SetDouble(
         devtools::Page::ScreencastFrameMetadata::kParamScrollOffsetX,
         metadata.root_scroll_offset.x());
@@ -673,53 +783,51 @@ void DidGetHostUsage(
   barrier.Run();
 }
 
-void DidGetQuotaValue(
-    base::DictionaryValue* dictionary,
-    const std::string& item_name,
-    const base::Closure& barrier,
-    quota::QuotaStatusCode status,
-    int64 value) {
-  if (status == quota::kQuotaStatusOk)
+void DidGetQuotaValue(base::DictionaryValue* dictionary,
+                      const std::string& item_name,
+                      const base::Closure& barrier,
+                      storage::QuotaStatusCode status,
+                      int64 value) {
+  if (status == storage::kQuotaStatusOk)
     dictionary->SetDouble(item_name, value);
   barrier.Run();
 }
 
-void DidGetUsageAndQuotaForWebApps(
-    base::DictionaryValue* quota,
-    const std::string& item_name,
-    const base::Closure& barrier,
-    quota::QuotaStatusCode status,
-    int64 used_bytes,
-    int64 quota_in_bytes) {
-  if (status == quota::kQuotaStatusOk)
+void DidGetUsageAndQuotaForWebApps(base::DictionaryValue* quota,
+                                   const std::string& item_name,
+                                   const base::Closure& barrier,
+                                   storage::QuotaStatusCode status,
+                                   int64 used_bytes,
+                                   int64 quota_in_bytes) {
+  if (status == storage::kQuotaStatusOk)
     quota->SetDouble(item_name, quota_in_bytes);
   barrier.Run();
 }
 
-std::string GetStorageTypeName(quota::StorageType type) {
+std::string GetStorageTypeName(storage::StorageType type) {
   switch (type) {
-    case quota::kStorageTypeTemporary:
+    case storage::kStorageTypeTemporary:
       return devtools::Page::Usage::kParamTemporary;
-    case quota::kStorageTypePersistent:
+    case storage::kStorageTypePersistent:
       return devtools::Page::Usage::kParamPersistent;
-    case quota::kStorageTypeSyncable:
+    case storage::kStorageTypeSyncable:
       return devtools::Page::Usage::kParamSyncable;
-    case quota::kStorageTypeQuotaNotManaged:
-    case quota::kStorageTypeUnknown:
+    case storage::kStorageTypeQuotaNotManaged:
+    case storage::kStorageTypeUnknown:
       NOTREACHED();
   }
   return "";
 }
 
-std::string GetQuotaClientName(quota::QuotaClient::ID id) {
+std::string GetQuotaClientName(storage::QuotaClient::ID id) {
   switch (id) {
-    case quota::QuotaClient::kFileSystem:
+    case storage::QuotaClient::kFileSystem:
       return devtools::Page::UsageItem::Id::kEnumFilesystem;
-    case quota::QuotaClient::kDatabase:
+    case storage::QuotaClient::kDatabase:
       return devtools::Page::UsageItem::Id::kEnumDatabase;
-    case quota::QuotaClient::kAppcache:
+    case storage::QuotaClient::kAppcache:
       return devtools::Page::UsageItem::Id::kEnumAppcache;
-    case quota::QuotaClient::kIndexedDatabase:
+    case storage::QuotaClient::kIndexedDatabase:
       return devtools::Page::UsageItem::Id::kEnumIndexeddatabase;
     default:
       NOTREACHED();
@@ -728,25 +836,22 @@ std::string GetQuotaClientName(quota::QuotaClient::ID id) {
 }
 
 void QueryUsageAndQuotaOnIOThread(
-    scoped_refptr<quota::QuotaManager> quota_manager,
+    scoped_refptr<storage::QuotaManager> quota_manager,
     const GURL& security_origin,
     const ResponseCallback& callback) {
   scoped_ptr<base::DictionaryValue> quota(new base::DictionaryValue);
   scoped_ptr<base::DictionaryValue> usage(new base::DictionaryValue);
 
-  static quota::QuotaClient::ID kQuotaClients[] = {
-      quota::QuotaClient::kFileSystem,
-      quota::QuotaClient::kDatabase,
-      quota::QuotaClient::kAppcache,
-      quota::QuotaClient::kIndexedDatabase
-  };
+  static storage::QuotaClient::ID kQuotaClients[] = {
+      storage::QuotaClient::kFileSystem, storage::QuotaClient::kDatabase,
+      storage::QuotaClient::kAppcache, storage::QuotaClient::kIndexedDatabase};
 
-  static const size_t kStorageTypeCount = quota::kStorageTypeUnknown;
-  std::map<quota::StorageType, base::ListValue*> storage_type_lists;
+  static const size_t kStorageTypeCount = storage::kStorageTypeUnknown;
+  std::map<storage::StorageType, base::ListValue*> storage_type_lists;
 
   for (size_t i = 0; i != kStorageTypeCount; i++) {
-    const quota::StorageType type = static_cast<quota::StorageType>(i);
-    if (type == quota::kStorageTypeQuotaNotManaged)
+    const storage::StorageType type = static_cast<storage::StorageType>(i);
+    if (type == storage::kStorageTypeQuotaNotManaged)
       continue;
     storage_type_lists[type] = new base::ListValue;
     usage->Set(GetStorageTypeName(type), storage_type_lists[type]);
@@ -767,9 +872,11 @@ void QueryUsageAndQuotaOnIOThread(
 
   quota_manager->GetUsageAndQuotaForWebApps(
       security_origin,
-      quota::kStorageTypeTemporary,
-      base::Bind(&DidGetUsageAndQuotaForWebApps, quota_raw_ptr,
-                 std::string(devtools::Page::Quota::kParamTemporary), barrier));
+      storage::kStorageTypeTemporary,
+      base::Bind(&DidGetUsageAndQuotaForWebApps,
+                 quota_raw_ptr,
+                 std::string(devtools::Page::Quota::kParamTemporary),
+                 barrier));
 
   quota_manager->GetPersistentHostQuota(
       host,
@@ -778,10 +885,10 @@ void QueryUsageAndQuotaOnIOThread(
                  barrier));
 
   for (size_t i = 0; i != arraysize(kQuotaClients); i++) {
-    std::map<quota::StorageType, base::ListValue*>::const_iterator iter;
+    std::map<storage::StorageType, base::ListValue*>::const_iterator iter;
     for (iter = storage_type_lists.begin();
          iter != storage_type_lists.end(); ++iter) {
-      const quota::StorageType type = (*iter).first;
+      const storage::StorageType type = (*iter).first;
       if (!quota_manager->IsTrackingHostUsage(type, kQuotaClients[i])) {
         barrier.Run();
         continue;
@@ -817,7 +924,7 @@ RendererOverridesHandler::PageQueryUsageAndQuota(
   if (!host_)
     return command->InternalErrorResponse("Could not connect to view");
 
-  scoped_refptr<quota::QuotaManager> quota_manager =
+  scoped_refptr<storage::QuotaManager> quota_manager =
       host_->GetProcess()->GetStoragePartition()->GetQuotaManager();
 
   BrowserThread::PostTask(
@@ -847,12 +954,249 @@ void RendererOverridesHandler::NotifyScreencastVisibility(bool visible) {
       devtools::Page::screencastVisibilityChanged::kName, params);
 }
 
+scoped_refptr<DevToolsProtocol::Response>
+RendererOverridesHandler::PageSetColorPickerEnabled(
+    scoped_refptr<DevToolsProtocol::Command> command) {
+  base::DictionaryValue* params = command->params();
+  bool color_picker_enabled = false;
+  if (!params || !params->GetBoolean(
+      devtools::Page::setColorPickerEnabled::kParamEnabled,
+      &color_picker_enabled)) {
+    return command->InvalidParamResponse(
+        devtools::Page::setColorPickerEnabled::kParamEnabled);
+  }
+
+  SetColorPickerEnabled(color_picker_enabled);
+  return command->SuccessResponse(NULL);
+}
+
+void RendererOverridesHandler::SetColorPickerEnabled(bool enabled) {
+  if (color_picker_enabled_ == enabled)
+    return;
+
+  color_picker_enabled_ = enabled;
+
+  if (!host_)
+    return;
+
+  if (enabled) {
+    host_->AddMouseEventCallback(mouse_event_callback_);
+    UpdateColorPickerFrame();
+  } else {
+    host_->RemoveMouseEventCallback(mouse_event_callback_);
+    ResetColorPickerFrame();
+
+    WebCursor pointer_cursor;
+    WebCursor::CursorInfo cursor_info;
+    cursor_info.type = blink::WebCursorInfo::TypePointer;
+    pointer_cursor.InitFromCursorInfo(cursor_info);
+    host_->SetCursor(pointer_cursor);
+  }
+}
+
+void RendererOverridesHandler::UpdateColorPickerFrame() {
+  if (!host_)
+    return;
+  RenderWidgetHostViewBase* view =
+      static_cast<RenderWidgetHostViewBase*>(host_->GetView());
+  if (!view)
+    return;
+
+  gfx::Size size = view->GetViewBounds().size();
+  view->CopyFromCompositingSurface(
+      gfx::Rect(size), size,
+      base::Bind(&RendererOverridesHandler::ColorPickerFrameUpdated,
+                 weak_factory_.GetWeakPtr()),
+      kN32_SkColorType);
+}
+
+void RendererOverridesHandler::ResetColorPickerFrame() {
+  color_picker_frame_.reset();
+  last_cursor_x_ = -1;
+  last_cursor_y_ = -1;
+}
+
+void RendererOverridesHandler::ColorPickerFrameUpdated(
+    bool succeeded,
+    const SkBitmap& bitmap) {
+  if (!color_picker_enabled_)
+    return;
+
+  if (succeeded) {
+    color_picker_frame_ = bitmap;
+    UpdateColorPickerCursor();
+  }
+}
+
+bool RendererOverridesHandler::HandleMouseEvent(
+    const blink::WebMouseEvent& event) {
+  last_cursor_x_ = event.x;
+  last_cursor_y_ = event.y;
+  if (color_picker_frame_.drawsNothing())
+    return true;
+
+  if (event.button == blink::WebMouseEvent::ButtonLeft &&
+      event.type == blink::WebInputEvent::MouseDown) {
+    if (last_cursor_x_ < 0 || last_cursor_x_ >= color_picker_frame_.width() ||
+        last_cursor_y_ < 0 || last_cursor_y_ >= color_picker_frame_.height()) {
+      return true;
+    }
+
+    SkAutoLockPixels lock_image(color_picker_frame_);
+    SkColor color = color_picker_frame_.getColor(last_cursor_x_,
+                                                 last_cursor_y_);
+    base::DictionaryValue* color_dict = new base::DictionaryValue();
+    color_dict->SetInteger("r", SkColorGetR(color));
+    color_dict->SetInteger("g", SkColorGetG(color));
+    color_dict->SetInteger("b", SkColorGetB(color));
+    color_dict->SetInteger("a", SkColorGetA(color));
+    base::DictionaryValue* response = new base::DictionaryValue();
+    response->Set(devtools::Page::colorPicked::kParamColor, color_dict);
+    SendNotification(devtools::Page::colorPicked::kName, response);
+  }
+  UpdateColorPickerCursor();
+  return true;
+}
+
+void RendererOverridesHandler::UpdateColorPickerCursor() {
+  if (!host_ || color_picker_frame_.drawsNothing())
+    return;
+
+  if (last_cursor_x_ < 0 || last_cursor_x_ >= color_picker_frame_.width() ||
+      last_cursor_y_ < 0 || last_cursor_y_ >= color_picker_frame_.height()) {
+    return;
+  }
+
+  RenderWidgetHostViewBase* view = static_cast<RenderWidgetHostViewBase*>(
+      host_->GetView());
+  if (!view)
+    return;
+
+  // Due to platform limitations, we are using two different cursors
+  // depending on the platform. Mac and Win have large cursors with two circles
+  // for original spot and its magnified projection; Linux gets smaller (64 px)
+  // magnified projection only with centered hotspot.
+  // Mac Retina requires cursor to be > 120px in order to render smoothly.
+
+#if defined(OS_LINUX)
+  const float kCursorSize = 63;
+  const float kDiameter = 63;
+  const float kHotspotOffset = 32;
+  const float kHotspotRadius = 0;
+  const float kPixelSize = 9;
+#else
+  const float kCursorSize = 150;
+  const float kDiameter = 110;
+  const float kHotspotOffset = 25;
+  const float kHotspotRadius = 5;
+  const float kPixelSize = 10;
+#endif
+
+  blink::WebScreenInfo screen_info;
+  view->GetScreenInfo(&screen_info);
+  double device_scale_factor = screen_info.deviceScaleFactor;
+
+  skia::RefPtr<SkCanvas> canvas = skia::AdoptRef(SkCanvas::NewRasterN32(
+      kCursorSize * device_scale_factor,
+      kCursorSize * device_scale_factor));
+  canvas->scale(device_scale_factor, device_scale_factor);
+  canvas->translate(0.5f, 0.5f);
+
+  SkPaint paint;
+
+  // Paint original spot with cross.
+  if (kHotspotRadius) {
+    paint.setStrokeWidth(1);
+    paint.setAntiAlias(false);
+    paint.setColor(SK_ColorDKGRAY);
+    paint.setStyle(SkPaint::kStroke_Style);
+
+    canvas->drawLine(kHotspotOffset, kHotspotOffset - 2 * kHotspotRadius,
+                     kHotspotOffset, kHotspotOffset - kHotspotRadius,
+                     paint);
+    canvas->drawLine(kHotspotOffset, kHotspotOffset + kHotspotRadius,
+                     kHotspotOffset, kHotspotOffset + 2 * kHotspotRadius,
+                     paint);
+    canvas->drawLine(kHotspotOffset - 2 * kHotspotRadius, kHotspotOffset,
+                     kHotspotOffset - kHotspotRadius, kHotspotOffset,
+                     paint);
+    canvas->drawLine(kHotspotOffset + kHotspotRadius, kHotspotOffset,
+                     kHotspotOffset + 2 * kHotspotRadius, kHotspotOffset,
+                     paint);
+
+    paint.setStrokeWidth(2);
+    paint.setAntiAlias(true);
+    canvas->drawCircle(kHotspotOffset, kHotspotOffset, kHotspotRadius, paint);
+  }
+
+  // Clip circle for magnified projection.
+  float padding = (kCursorSize - kDiameter) / 2;
+  SkPath clip_path;
+  clip_path.addOval(SkRect::MakeXYWH(padding, padding, kDiameter, kDiameter));
+  clip_path.close();
+  canvas->clipPath(clip_path, SkRegion::kIntersect_Op, true);
+
+  // Project pixels.
+  int pixel_count = kDiameter / kPixelSize;
+  SkRect src_rect = SkRect::MakeXYWH(last_cursor_x_ - pixel_count / 2,
+                                     last_cursor_y_ - pixel_count / 2,
+                                     pixel_count, pixel_count);
+  SkRect dst_rect = SkRect::MakeXYWH(padding, padding, kDiameter, kDiameter);
+  canvas->drawBitmapRectToRect(color_picker_frame_, &src_rect, dst_rect);
+
+  // Paint grid.
+  paint.setStrokeWidth(1);
+  paint.setAntiAlias(false);
+  paint.setColor(SK_ColorGRAY);
+  for (int i = 0; i < pixel_count; ++i) {
+    canvas->drawLine(padding + i * kPixelSize, padding,
+                     padding + i * kPixelSize, kCursorSize - padding, paint);
+    canvas->drawLine(padding, padding + i * kPixelSize,
+                     kCursorSize - padding, padding + i * kPixelSize, paint);
+  }
+
+  // Paint central pixel in red.
+  SkRect pixel = SkRect::MakeXYWH((kCursorSize - kPixelSize) / 2,
+                                  (kCursorSize - kPixelSize) / 2,
+                                  kPixelSize, kPixelSize);
+  paint.setColor(SK_ColorRED);
+  paint.setStyle(SkPaint::kStroke_Style);
+  canvas->drawRect(pixel, paint);
+
+  // Paint outline.
+  paint.setStrokeWidth(2);
+  paint.setColor(SK_ColorDKGRAY);
+  paint.setAntiAlias(true);
+  canvas->drawCircle(kCursorSize / 2, kCursorSize / 2, kDiameter / 2, paint);
+
+  SkBitmap result;
+  result.allocN32Pixels(kCursorSize * device_scale_factor,
+                        kCursorSize * device_scale_factor);
+  canvas->readPixels(&result, 0, 0);
+
+  WebCursor cursor;
+  WebCursor::CursorInfo cursor_info;
+  cursor_info.type = blink::WebCursorInfo::TypeCustom;
+  cursor_info.image_scale_factor = device_scale_factor;
+  cursor_info.custom_image = result;
+  cursor_info.hotspot =
+      gfx::Point(kHotspotOffset * device_scale_factor,
+                 kHotspotOffset * device_scale_factor);
+#if defined(OS_WIN)
+  cursor_info.external_handle = 0;
+#endif
+
+  cursor.InitFromCursorInfo(cursor_info);
+  DCHECK(host_);
+  host_->SetCursor(cursor);
+}
+
 // Input agent handlers  ------------------------------------------------------
 
 scoped_refptr<DevToolsProtocol::Response>
 RendererOverridesHandler::InputEmulateTouchFromMouseEvent(
     scoped_refptr<DevToolsProtocol::Command> command) {
-  if (!screencast_command_)
+  if (!screencast_command_.get())
     return command->InternalErrorResponse("Screencast should be turned on");
 
   base::DictionaryValue* params = command->params();
@@ -976,6 +1320,17 @@ RendererOverridesHandler::InputEmulateTouchFromMouseEvent(
   else
     host_->ForwardMouseEvent(mouse_event);
   return command->SuccessResponse(NULL);
+}
+
+void RendererOverridesHandler::UpdateTouchEventEmulationState() {
+  if (!host_)
+    return;
+  bool enabled = touch_emulation_enabled_ || screencast_command_.get();
+  host_->SetTouchEventEmulationEnabled(enabled);
+  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
+      WebContents::FromRenderViewHost(host_));
+  if (web_contents)
+    web_contents->SetForceDisableOverscrollContent(enabled);
 }
 
 }  // namespace content

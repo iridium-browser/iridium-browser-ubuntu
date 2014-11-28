@@ -28,9 +28,7 @@
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/component_updater/component_updater_configurator.h"
-#include "chrome/browser/component_updater/component_updater_service.h"
-#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
+#include "chrome/browser/component_updater/chrome_component_updater_configurator.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
@@ -62,9 +60,10 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
-#include "chrome/browser/ui/apps/chrome_apps_client.h"
+#include "chrome/browser/ui/apps/chrome_app_window_client.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -75,6 +74,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/component_updater/component_updater_service.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/metrics/metrics_service.h"
 #include "components/network_time/network_time_tracker.h"
@@ -107,6 +107,7 @@
 #if defined(OS_ANDROID)
 #include "components/gcm_driver/gcm_driver_android.h"
 #else
+#include "chrome/browser/chrome_device_client.h"
 #include "chrome/browser/services/gcm/gcm_desktop_utils.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #endif
@@ -127,6 +128,10 @@
 #include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "components/storage_monitor/storage_monitor.h"
+#endif
+
+#if !defined(DISABLE_NACL)
+#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
 #endif
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -191,8 +196,15 @@ BrowserProcessImpl::BrowserProcessImpl(
   InitIdleMonitor();
 #endif
 
+#if !defined(OS_ANDROID)
+  device_client_.reset(new ChromeDeviceClient);
+#endif
+
 #if defined(ENABLE_EXTENSIONS)
-  apps::AppsClient::Set(ChromeAppsClient::GetInstance());
+#if !defined(USE_ATHENA)
+  // Athena sets its own instance during Athena's init process.
+  extensions::AppWindowClient::Set(ChromeAppWindowClient::GetInstance());
+#endif
 
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
   ExtensionRendererState::GetInstance()->Init();
@@ -244,7 +256,7 @@ void BrowserProcessImpl::StartTearDown() {
     // The desktop User Manager needs to be closed before the guest profile
     // can be destroyed.
     if (switches::IsNewAvatarMenu())
-      chrome::HideUserManager();
+      UserManager::Hide();
     profile_manager_.reset();
   }
 
@@ -472,11 +484,11 @@ void BrowserProcessImpl::EndSession() {
     profile->SetExitType(Profile::EXIT_SESSION_ENDED);
 
     if (!use_broken_synchronization)
-      rundown_counter->Post(profile->GetIOTaskRunner());
+      rundown_counter->Post(profile->GetIOTaskRunner().get());
   }
 
   // Tell the metrics service it was cleanly shutdown.
-  MetricsService* metrics = g_browser_process->metrics_service();
+  metrics::MetricsService* metrics = g_browser_process->metrics_service();
   if (metrics && local_state()) {
     metrics->RecordStartOfSessionEnd();
 #if !defined(OS_CHROMEOS)
@@ -486,7 +498,7 @@ void BrowserProcessImpl::EndSession() {
     local_state()->CommitPendingWrite();
 
     if (!use_broken_synchronization)
-      rundown_counter->Post(local_state_task_runner_);
+      rundown_counter->Post(local_state_task_runner_.get());
 #endif
   }
 
@@ -502,7 +514,7 @@ void BrowserProcessImpl::EndSession() {
 #if defined(USE_X11) || defined(OS_WIN)
   if (use_broken_synchronization) {
     rundown_counter->Post(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE).get());
   }
 
   // Do a best-effort wait on the successful countdown of rundown tasks. Note
@@ -532,7 +544,7 @@ MetricsServicesManager* BrowserProcessImpl::GetMetricsServicesManager() {
   return metrics_services_manager_.get();
 }
 
-MetricsService* BrowserProcessImpl::metrics_service() {
+metrics::MetricsService* BrowserProcessImpl::metrics_service() {
   DCHECK(CalledOnValidThread());
   return GetMetricsServicesManager()->GetMetricsService();
 }
@@ -774,13 +786,11 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
 
   registry->RegisterBooleanPref(prefs::kAllowCrossOriginAuthPrompt, false);
 
-  registry->RegisterBooleanPref(prefs::kBrowserGuestModeEnabled, true);
-
 #if defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
   registry->RegisterBooleanPref(prefs::kEulaAccepted, false);
 #endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
 #if defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
     registry->RegisterStringPref(prefs::kRelaunchMode,
                                  upgrade_util::kRelaunchModeDefault);
   }
@@ -901,11 +911,15 @@ CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
 
 component_updater::PnaclComponentInstaller*
 BrowserProcessImpl::pnacl_component_installer() {
+#if !defined(DISABLE_NACL)
   if (!pnacl_component_installer_.get()) {
     pnacl_component_installer_.reset(
         new component_updater::PnaclComponentInstaller());
   }
   return pnacl_component_installer_.get();
+#else
+  return NULL;
+#endif
 }
 
 void BrowserProcessImpl::ResourceDispatcherHostCreated() {
@@ -1122,6 +1136,7 @@ void BrowserProcessImpl::CreateGCMDriver() {
   CHECK(PathService::Get(chrome::DIR_GLOBAL_GCM_STORE, &store_path));
   gcm_driver_ = gcm::CreateGCMDriverDesktop(
       make_scoped_ptr(new gcm::GCMClientFactory),
+      local_state(),
       store_path,
       system_request_context());
   // Sign-in is not required for device-level GCM usage. So we just call

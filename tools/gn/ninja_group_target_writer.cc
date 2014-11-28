@@ -5,12 +5,14 @@
 #include "tools/gn/ninja_group_target_writer.h"
 
 #include "base/strings/string_util.h"
+#include "tools/gn/deps_iterator.h"
+#include "tools/gn/output_file.h"
 #include "tools/gn/string_utils.h"
+#include "tools/gn/target.h"
 
 NinjaGroupTargetWriter::NinjaGroupTargetWriter(const Target* target,
-                                               const Toolchain* toolchain,
                                                std::ostream& out)
-    : NinjaTargetWriter(target, toolchain, out) {
+    : NinjaTargetWriter(target, out) {
 }
 
 NinjaGroupTargetWriter::~NinjaGroupTargetWriter() {
@@ -18,23 +20,16 @@ NinjaGroupTargetWriter::~NinjaGroupTargetWriter() {
 
 void NinjaGroupTargetWriter::Run() {
   // A group rule just generates a stamp file with dependencies on each of
-  // the deps in the group.
-  out_ << std::endl << "build ";
-  path_output_.WriteFile(out_, helper_.GetTargetOutputFile(target_));
-  out_ << ": "
-       << helper_.GetRulePrefix(target_->settings())
-       << "stamp";
+  // the deps and data_deps in the group.
+  std::vector<OutputFile> output_files;
+  for (DepsIterator iter(target_, DepsIterator::LINKED_ONLY);
+       !iter.done(); iter.Advance())
+    output_files.push_back(iter.target()->dependency_output_file());
 
-  const LabelTargetVector& deps = target_->deps();
-  for (size_t i = 0; i < deps.size(); i++) {
-    out_ << " ";
-    path_output_.WriteFile(out_, helper_.GetTargetOutputFile(deps[i].ptr));
-  }
+  std::vector<OutputFile> data_output_files;
+  const LabelTargetVector& data_deps = target_->data_deps();
+  for (size_t i = 0; i < data_deps.size(); i++)
+    data_output_files.push_back(data_deps[i].ptr->dependency_output_file());
 
-  const LabelTargetVector& datadeps = target_->datadeps();
-  for (size_t i = 0; i < datadeps.size(); i++) {
-    out_ << " ";
-    path_output_.WriteFile(out_, helper_.GetTargetOutputFile(datadeps[i].ptr));
-  }
-  out_ << std::endl;
+  WriteStampForTarget(output_files, data_output_files);
 }

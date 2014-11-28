@@ -5,10 +5,13 @@
 define([
     "gin/test/expect",
     "mojo/public/js/bindings/codec",
+    "mojo/public/interfaces/bindings/tests/rect.mojom",
     "mojo/public/interfaces/bindings/tests/sample_service.mojom",
-  ], function(expect, codec, sample) {
+    "mojo/public/interfaces/bindings/tests/test_structs.mojom",
+  ], function(expect, codec, rect, sample, structs) {
   testBar();
   testFoo();
+  testNamedRegion();
   testTypes();
   testAlign();
   testUtf8();
@@ -143,6 +146,32 @@ define([
     expect(foo2.array_of_bools).toEqual(foo.array_of_bools);
   }
 
+  function createRect(x, y, width, height) {
+    var r = new rect.Rect();
+    r.x = x;
+    r.y = y;
+    r.width = width;
+    r.height = height;
+    return r;
+  }
+
+  // Verify that the references to the imported Rect type in test_structs.mojom
+  // are generated correctly.
+  function testNamedRegion() {
+    var r = new structs.NamedRegion();
+    r.name = "rectangle";
+    r.rects = new Array(createRect(1, 2, 3, 4), createRect(10, 20, 30, 40));
+
+    var builder = new codec.MessageBuilder(1, structs.NamedRegion.encodedSize);
+    builder.encodeStruct(structs.NamedRegion, r);
+    var reader = new codec.MessageReader(builder.finish());
+    var result = reader.decodeStruct(structs.NamedRegion);
+
+    expect(result.name).toEqual("rectangle");
+    expect(result.rects[0]).toEqual(createRect(1, 2, 3, 4));
+    expect(result.rects[1]).toEqual(createRect(10, 20, 30, 40));
+  }
+
   function testTypes() {
     function encodeDecode(cls, input, expectedResult, encodedSize) {
       var messageName = 42;
@@ -159,6 +188,7 @@ define([
       expect(result).toEqual(expectedResult);
     }
     encodeDecode(codec.String, "banana", "banana", 24);
+    encodeDecode(codec.NullableString, null, null, 8);
     encodeDecode(codec.Int8, -1, -1);
     encodeDecode(codec.Int8, 0xff, -1);
     encodeDecode(codec.Int16, -1, -1);

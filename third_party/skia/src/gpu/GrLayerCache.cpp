@@ -17,7 +17,7 @@ void GrCachedLayer::validate(const GrTexture* backingTexture) const {
     SkASSERT(fKey.start() > 0 && fKey.stop() > 0);
 
 
-    if (NULL != fTexture) {
+    if (fTexture) {
         // If the layer is in some texture then it must occupy some rectangle
         SkASSERT(!fRect.isEmpty());
         if (!this->isAtlased()) {
@@ -30,17 +30,17 @@ void GrCachedLayer::validate(const GrTexture* backingTexture) const {
         SkASSERT(!fLocked);     // layers without a texture cannot be locked
     }
 
-    if (NULL != fPlot) {
+    if (fPlot) {
         // If a layer has a plot (i.e., is atlased) then it must point to
         // the backing texture. Additionally, its rect should be non-empty.
-        SkASSERT(NULL != fTexture && backingTexture == fTexture);
+        SkASSERT(fTexture && backingTexture == fTexture);
         SkASSERT(!fRect.isEmpty());
     }
 
     if (fLocked) {
         // If a layer is locked it must have a texture (though it need not be
         // the atlas-backing texture) and occupy some space.
-        SkASSERT(NULL != fTexture);
+        SkASSERT(fTexture);
         SkASSERT(!fRect.isEmpty());
     }
 }
@@ -50,12 +50,12 @@ public:
     GrAutoValidateLayer(GrTexture* backingTexture, const GrCachedLayer* layer) 
         : fBackingTexture(backingTexture)
         , fLayer(layer) {
-        if (NULL != fLayer) {
+        if (fLayer) {
             fLayer->validate(backingTexture);
         }
     }
     ~GrAutoValidateLayer() {
-        if (NULL != fLayer) {
+        if (fLayer) {
             fLayer->validate(fBackingTexture);
         }
     }
@@ -112,42 +112,46 @@ void GrLayerCache::freeAll() {
     fAtlas.free();
     // GrLayerCache always assumes an atlas exists so recreate it. The atlas 
     // lazily allocates a replacement texture so reallocating a new 
-    // atlas here won't disrupt a GrContext::contextDestroyed or freeGpuResources.
+    // atlas here won't disrupt a GrContext::abandonContext or freeGpuResources.
     // TODO: Make GrLayerCache lazily allocate the atlas manager?
     this->initAtlas();
 }
 
-GrCachedLayer* GrLayerCache::createLayer(const SkPicture* picture, 
+GrCachedLayer* GrLayerCache::createLayer(uint32_t pictureID, 
                                          int start, int stop, 
-                                         const SkMatrix& ctm) {
-    SkASSERT(picture->uniqueID() != SK_InvalidGenID && start > 0 && stop > 0);
+                                         const SkIPoint& offset,
+                                         const SkMatrix& ctm,
+                                         const SkPaint* paint) {
+    SkASSERT(pictureID != SK_InvalidGenID && start > 0 && stop > 0);
 
-    GrCachedLayer* layer = SkNEW_ARGS(GrCachedLayer, (picture->uniqueID(), start, stop, ctm));
+    GrCachedLayer* layer = SkNEW_ARGS(GrCachedLayer, (pictureID, start, stop, offset, ctm, paint));
     fLayerHash.add(layer);
     return layer;
 }
 
-GrCachedLayer* GrLayerCache::findLayer(const SkPicture* picture, 
+GrCachedLayer* GrLayerCache::findLayer(uint32_t pictureID,
                                        int start, int stop, 
+                                       const SkIPoint& offset,
                                        const SkMatrix& ctm) {
-    SkASSERT(picture->uniqueID() != SK_InvalidGenID && start > 0 && stop > 0);
-    return fLayerHash.find(GrCachedLayer::Key(picture->uniqueID(), start, stop, ctm));
+    SkASSERT(pictureID != SK_InvalidGenID && start > 0 && stop > 0);
+    return fLayerHash.find(GrCachedLayer::Key(pictureID, start, stop, offset, ctm));
 }
 
-GrCachedLayer* GrLayerCache::findLayerOrCreate(const SkPicture* picture, 
+GrCachedLayer* GrLayerCache::findLayerOrCreate(uint32_t pictureID,
                                                int start, int stop,
-                                               const SkMatrix& ctm) {
-    SkASSERT(picture->uniqueID() != SK_InvalidGenID && start > 0 && stop > 0);
-    GrCachedLayer* layer = fLayerHash.find(GrCachedLayer::Key(picture->uniqueID(), 
-                                                              start, stop, ctm));
+                                               const SkIPoint& offset,
+                                               const SkMatrix& ctm,
+                                               const SkPaint* paint) {
+    SkASSERT(pictureID != SK_InvalidGenID && start > 0 && stop > 0);
+    GrCachedLayer* layer = fLayerHash.find(GrCachedLayer::Key(pictureID, start, stop, offset, ctm));
     if (NULL == layer) {
-        layer = this->createLayer(picture, start, stop, ctm);
+        layer = this->createLayer(pictureID, start, stop, offset, ctm, paint);
     }
 
     return layer;
 }
 
-bool GrLayerCache::lock(GrCachedLayer* layer, const GrTextureDesc& desc) {
+bool GrLayerCache::lock(GrCachedLayer* layer, const GrTextureDesc& desc, bool dontAtlas) {
     SkDEBUGCODE(GrAutoValidateLayer avl(fAtlas->getTexture(), layer);)
 
     if (layer->locked()) {
@@ -155,19 +159,21 @@ bool GrLayerCache::lock(GrCachedLayer* layer, const GrTextureDesc& desc) {
 #ifdef SK_DEBUG
         if (layer->isAtlased()) {
             // It claims to be atlased
+            SkASSERT(!dontAtlas);
             SkASSERT(layer->rect().width() == desc.fWidth);
             SkASSERT(layer->rect().height() == desc.fHeight);
         }
 #endif
-        return true;
+        return false;
     }
 
     if (layer->isAtlased()) {
         // Hooray it is still in the atlas - make sure it stays there
+        SkASSERT(!dontAtlas);
         layer->setLocked(true);
         fPlotLocks[layer->plot()->id()]++;
-        return true;
-    } else if (PlausiblyAtlasable(desc.fWidth, desc.fHeight)) {
+        return false;
+    } else if (!dontAtlas && PlausiblyAtlasable(desc.fWidth, desc.fHeight)) {
         // Not in the atlas - will it fit?
         GrPictureInfo* pictInfo = fPictureHash.find(layer->pictureID());
         if (NULL == pictInfo) {
@@ -182,16 +188,16 @@ bool GrLayerCache::lock(GrCachedLayer* layer, const GrTextureDesc& desc) {
                                               NULL, &loc);
             // addToAtlas can allocate the backing texture
             SkDEBUGCODE(avl.setBackingTexture(fAtlas->getTexture()));
-            if (NULL != plot) {
+            if (plot) {
                 // The layer was successfully added to the atlas
                 GrIRect16 bounds = GrIRect16::MakeXYWH(loc.fX, loc.fY,
-                                                       SkToS16(desc.fWidth), 
+                                                       SkToS16(desc.fWidth),
                                                        SkToS16(desc.fHeight));
                 layer->setTexture(fAtlas->getTexture(), bounds);
                 layer->setPlot(plot);
                 layer->setLocked(true);
                 fPlotLocks[layer->plot()->id()]++;
-                return false;
+                return true;
             }
 
             // The layer was rejected by the atlas (even though we know it is 
@@ -210,7 +216,7 @@ bool GrLayerCache::lock(GrCachedLayer* layer, const GrTextureDesc& desc) {
 
     layer->setTexture(tex, GrIRect16::MakeWH(SkToS16(desc.fWidth), SkToS16(desc.fHeight)));
     layer->setLocked(true);
-    return false;
+    return true;
 }
 
 void GrLayerCache::unlock(GrCachedLayer* layer) {
@@ -228,12 +234,12 @@ void GrLayerCache::unlock(GrCachedLayer* layer) {
         fPlotLocks[plotID]--;
         // At this point we could aggressively clear out un-locked plots but
         // by delaying we may be able to reuse some of the atlased layers later.
-#if 0
+#if DISABLE_CACHING
         // This testing code aggressively removes the atlased layers. This
         // can be used to separate the performance contribution of less
         // render target pingponging from that due to the re-use of cached layers
         GrPictureInfo* pictInfo = fPictureHash.find(layer->pictureID());
-        SkASSERT(NULL != pictInfo);
+        SkASSERT(pictInfo);
         
         GrAtlas::RemovePlot(&pictInfo->fPlotUsage, layer->plot());
         
@@ -261,18 +267,20 @@ void GrLayerCache::validate() const {
         layer->validate(fAtlas->getTexture());
 
         const GrPictureInfo* pictInfo = fPictureHash.find(layer->pictureID());
-        if (NULL != pictInfo) {
+        if (pictInfo) {
             // In aggressive cleanup mode a picture info should only exist if
             // it has some atlased layers
+#if !DISABLE_CACHING
             SkASSERT(!pictInfo->fPlotUsage.isEmpty());
+#endif
         } else {
             // If there is no picture info for this layer then all of its
             // layers should be non-atlased.
             SkASSERT(!layer->isAtlased());
         }
 
-        if (NULL != layer->plot()) {
-            SkASSERT(NULL != pictInfo);
+        if (layer->plot()) {
+            SkASSERT(pictInfo);
             SkASSERT(pictInfo->fPictureID == layer->pictureID());
 
             SkASSERT(pictInfo->fPlotUsage.contains(layer->plot()));
@@ -323,7 +331,7 @@ void GrLayerCache::purge(uint32_t pictureID) {
     }
 
     GrPictureInfo* pictInfo = fPictureHash.find(pictureID);
-    if (NULL != pictInfo) {
+    if (pictInfo) {
         fPictureHash.remove(pictureID);
         SkDELETE(pictInfo);
     }
@@ -335,45 +343,63 @@ bool GrLayerCache::purgePlot() {
     GrAtlas::PlotIter iter;
     GrPlot* plot;
     for (plot = fAtlas->iterInit(&iter, GrAtlas::kLRUFirst_IterOrder);
-         NULL != plot;
+         plot;
          plot = iter.prev()) {
         if (fPlotLocks[plot->id()] > 0) {
             continue;
         }
 
-        // We need to find all the layers in 'plot' and remove them.
-        SkTDArray<GrCachedLayer*> toBeRemoved;
-
-        SkTDynamicHash<GrCachedLayer, GrCachedLayer::Key>::Iter iter(&fLayerHash);
-        for (; !iter.done(); ++iter) {
-            if (plot == (*iter).plot()) {
-                *toBeRemoved.append() = &(*iter);
-            }
-        }
-
-        for (int i = 0; i < toBeRemoved.count(); ++i) {
-            SkASSERT(!toBeRemoved[i]->locked());
-
-            GrPictureInfo* pictInfo = fPictureHash.find(toBeRemoved[i]->pictureID());
-            SkASSERT(NULL != pictInfo);
-
-            GrAtlas::RemovePlot(&pictInfo->fPlotUsage, plot);
-
-            // Aggressively remove layers and, if now totally uncached, picture info
-            fLayerHash.remove(GrCachedLayer::GetKey(*toBeRemoved[i]));
-            SkDELETE(toBeRemoved[i]);
-
-            if (pictInfo->fPlotUsage.isEmpty()) {
-                fPictureHash.remove(pictInfo->fPictureID);
-                SkDELETE(pictInfo);
-            }
-        }
-
-        plot->resetRects();
+        this->purgePlot(plot);
         return true;
     }
 
     return false;
+}
+
+void GrLayerCache::purgePlot(GrPlot* plot) {
+    SkASSERT(0 == fPlotLocks[plot->id()]);
+
+    // We need to find all the layers in 'plot' and remove them.
+    SkTDArray<GrCachedLayer*> toBeRemoved;
+
+    SkTDynamicHash<GrCachedLayer, GrCachedLayer::Key>::Iter iter(&fLayerHash);
+    for (; !iter.done(); ++iter) {
+        if (plot == (*iter).plot()) {
+            *toBeRemoved.append() = &(*iter);
+        }
+    }
+
+    for (int i = 0; i < toBeRemoved.count(); ++i) {
+        SkASSERT(!toBeRemoved[i]->locked());
+
+        GrPictureInfo* pictInfo = fPictureHash.find(toBeRemoved[i]->pictureID());
+        SkASSERT(pictInfo);
+
+        GrAtlas::RemovePlot(&pictInfo->fPlotUsage, plot);
+
+        // Aggressively remove layers and, if now totally uncached, picture info
+        fLayerHash.remove(GrCachedLayer::GetKey(*toBeRemoved[i]));
+        SkDELETE(toBeRemoved[i]);
+
+        if (pictInfo->fPlotUsage.isEmpty()) {
+            fPictureHash.remove(pictInfo->fPictureID);
+            SkDELETE(pictInfo);
+        }
+    }
+
+    plot->resetRects();
+}
+
+void GrLayerCache::purgeAll() {
+    GrAtlas::PlotIter iter;
+    GrPlot* plot;
+    for (plot = fAtlas->iterInit(&iter, GrAtlas::kLRUFirst_IterOrder);
+         plot;
+         plot = iter.prev()) {
+        SkASSERT(0 == fPlotLocks[plot->id()]);
+
+        this->purgePlot(plot);
+    }
 }
 
 class GrPictureDeletionListener : public SkPicture::DeletionListener {

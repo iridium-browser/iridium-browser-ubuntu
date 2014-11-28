@@ -31,6 +31,7 @@
 namespace blink {
 
 class NavigatorUserMediaError FINAL : public GarbageCollectedFinalized<NavigatorUserMediaError>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum Name {
         NamePermissionDenied,
@@ -54,7 +55,6 @@ private:
         : m_name(name), m_message(message), m_constraintName(constraintName)
     {
         ASSERT(!name.isEmpty());
-        ScriptWrappable::init(this);
     }
 
     String m_name;

@@ -4,10 +4,11 @@
 
 define("{{module.path}}", [
     "mojo/public/js/bindings/codec",
+    "mojo/public/js/bindings/validator",
 {%- for import in imports %}
     "{{import.module.path}}",
 {%- endfor %}
-  ], function(codec
+  ], function(codec, validator
 {%- for import in imports -%}
     , {{import.unique_name}}
 {%- endfor -%}
@@ -27,15 +28,15 @@ define("{{module.path}}", [
 {#--- Struct definitions #}
 {%  for struct in structs %}
 {%-   include "struct_definition.tmpl" %}
-{%- endfor %}
+{%- endfor -%}
 
 {#--- Interface definitions #}
-{%- for interface in interfaces %}
+{%- for interface in interfaces -%}
 {%-   include "interface_definition.tmpl" %}
 {%- endfor %}
 
   var exports = {};
-{%  for constant in module.constants %}
+{%-  for constant in module.constants %}
   exports.{{constant.name}} = {{constant.name}};
 {%- endfor %}
 {%- for enum in enums %}

@@ -13,6 +13,7 @@
   <release seq="1">
     <structures>
       <structure name="IDR_BOOKMARK_MANAGER_MAIN" file="bookmark_manager/main.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
+      <structure name="IDR_HOTWORD_AUDIO_VERIFICATION_MAIN" file="hotword_audio_verification/main.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
       <if expr="chromeos">
         <structure name="IDR_WALLPAPER_MANAGER_MAIN" file="chromeos/wallpaper_manager/main.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
         <if expr="not _google_chrome">
@@ -59,12 +60,34 @@
         <include name="IDR_HANGOUT_SERVICES_THUNK_JS" file="hangout_services/thunk.js" type="BINDATA" />
       </if>
       <if expr="enable_extensions">
+        <!-- Hotword Audio Verification extension -->
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_BACKGROUND_JS" file="hotword_audio_verification/event_page.js" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_MAIN_JS" file="hotword_audio_verification/main.js" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_FLOW_JS" file="hotword_audio_verification/flow.js" type="BINDATA" />
+        <include name="IDR_HOTWORD_ONLY_STEP_HTML" file="hotword_audio_verification/steps/hotword_only_step.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_AUDIO_HISTORY_STEP_HTML" file="hotword_audio_verification/steps/audio_history_step.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_HISTORY_STEP_HTML" file="hotword_audio_verification/steps/hotword_audio_history_step.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_SPEECH_TRAINING_STEP_HTML" file="hotword_audio_verification/steps/speech_training_step.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_FINISHED_STEP_HTML" file="hotword_audio_verification/steps/finished_step.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_STYLE_CSS" file="hotword_audio_verification/style.css" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_CLOSE" file="hotword_audio_verification/images/bt-close-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_HEADER" file="hotword_audio_verification/images/header-optin-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_CHECK_BLUE" file="hotword_audio_verification/images/ic-check-blue-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_CHECK_GRAY" file="hotword_audio_verification/images/ic-check-gray-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_ERROR" file="hotword_audio_verification/images/ic-error-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_MIC" file="hotword_audio_verification/images/mic-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_LOADER" file="hotword_audio_verification/images/placeholder-loader-1x.png" type="BINDATA" />
+        <include name="IDR_HOTWORD_AUDIO_VERIFICATION_IMAGE_LOADER_ERROR" file="hotword_audio_verification/images/placeholder-loader-error-1x.png" type="BINDATA" />
+
         <!-- Hotword Helper extension -->
         <include name="IDR_HOTWORD_HELPER_AUDIO_CLIENT_JS" file="hotword_helper/audio_client.js" type="BINDATA" />
         <include name="IDR_HOTWORD_HELPER_MANAGER_JS" file="hotword_helper/manager.js" type="BINDATA" />
 
         <!-- (Experimental) hotword triggering extension -->
+        <include name="IDR_HOTWORD_CONSTANTS_JS" file="hotword/constants.js" type="BINDATA" />
         <include name="IDR_HOTWORD_MANAGER_JS" file="hotword/manager.js" type="BINDATA" />
+        <include name="IDR_HOTWORD_NACL_MANAGER_JS" file="hotword/nacl_manager.js" type="BINDATA" />
+        <include name="IDR_HOTWORD_STATE_MANAGER_JS" file="hotword/state_manager.js" type="BINDATA" />
       </if>
       <if expr="not is_android">
         <include name="IDR_FEEDBACK_DEFAULT_HTML" file="feedback/html/default.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
@@ -121,7 +144,7 @@
       </if>
       <if expr="enable_plugins">
         <include name="IDR_PDF_INDEX_HTML" file="pdf/index.html" allowexternalscript="true" type="BINDATA" flattenhtml="true" />
-        <include name="IDR_PDF_JS" file="pdf/pdf.js" type="BINDATA" flattenhtml="true" />
+        <include name="IDR_PDF_MAIN_JS" file="pdf/main.js" type="BINDATA" flattenhtml="true" />
         <include name="IDR_PDF_BACKGROUND_JS" file="pdf/background.js" type="BINDATA" />
         <include name="IDR_PDF_INCLUDES_JS" file="pdf/includes.js" type="BINDATA" flattenhtml="true" />
 
@@ -176,15 +199,9 @@
       <include name="IDR_CRYPTOTOKEN_DEVICEFACTORYREGISTRY_JS" file="cryptotoken/devicefactoryregistry.js" type="BINDATA" />
       <include name="IDR_CRYPTOTOKEN_GSTATICORIGINCHECK_JS" file="cryptotoken/gstaticorigincheck.js" type="BINDATA" />
       <include name="IDR_CRYPTOTOKEN_ORIGINCHECK_JS" file="cryptotoken/origincheck.js" type="BINDATA" />
+      <include name="IDR_CRYPTOTOKEN_INDIVIDUALATTEST_JS" file="cryptotoken/individualattest.js" type="BINDATA" />
+      <include name="IDR_CRYPTOTOKEN_GOOGLECORPINDIVIDUALATTESt_JS" file="cryptotoken/googlecorpindividualattest.js" type="BINDATA" />
       <include name="IDR_CRYPTOTOKEN_CRYPTOTOKENBACKGROUND_JS" file="cryptotoken/cryptotokenbackground.js" type="BINDATA" />
-      <if expr="chromeos and _google_chrome">
-        <include name="IDR_LEDGER_BACKGROUND_HTML" file="../extensions/api/ledger/ledger_proxy/background.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-        <include name="IDR_LEDGER_INIT_JS" file="../extensions/api/ledger/ledger_proxy/js/init.js" type="BINDATA" />
-        <include name="IDR_LEDGER_NACL_JS" file="../extensions/api/ledger/ledger_proxy/js/nacl.js" type="BINDATA" />
-        <include name="IDR_LEDGER_WRAPPER_JS" file="../extensions/api/ledger/ledger_proxy/js/wrapper.js" type="BINDATA" />
-        <include name="IDR_LEDGER_LEDGER_PROXY_NMF" file="../extensions/api/ledger/ledger_proxy/ledger_proxy.nmf.js" type="BINDATA" />
-        <include name="IDR_LEDGER_LEDGER_PROXY_PEXE" file="../extensions/api/ledger/ledger_proxy/ledger_proxy_pnacl.pexe.js" type="BINDATA" />
-      </if>
       <include name="IDR_WHISPERNET_PROXY_BACKGROUND_HTML" file="whispernet_proxy/background.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_WHISPERNET_PROXY_INIT_JS" file="whispernet_proxy/js/init.js" type="BINDATA" />
       <include name="IDR_WHISPERNET_PROXY_NACL_JS" file="whispernet_proxy/js/nacl.js" type="BINDATA" />

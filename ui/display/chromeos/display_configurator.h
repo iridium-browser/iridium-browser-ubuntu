@@ -17,8 +17,8 @@
 #include "base/timer/timer.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/display/display_export.h"
-#include "ui/display/types/chromeos/native_display_observer.h"
 #include "ui/display/types/display_constants.h"
+#include "ui/display/types/native_display_observer.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace gfx {
@@ -41,9 +41,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     DisplayState();
 
     DisplaySnapshot* display;  // Not owned.
-
-    // XInput device ID or 0 if this display isn't a touchscreen.
-    int touch_device_id;
 
     // User-selected mode for the display.
     const DisplayMode* selected_mode;
@@ -97,18 +94,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     virtual bool SoftwareMirroringEnabled() const = 0;
   };
 
-  class TouchscreenDelegate {
-   public:
-    virtual ~TouchscreenDelegate() {}
-
-    // Searches for touchscreens among input devices,
-    // and tries to match them up to screens in |displays|.
-    // |displays| is an array of detected screens.
-    // If a touchscreen with same resolution as a display's native mode
-    // is detected, its id will be stored in this display.
-    virtual void AssociateTouchscreens(std::vector<DisplayState>* displays) = 0;
-  };
-
   // Helper class used by tests.
   class TestApi {
    public:
@@ -152,7 +137,9 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   virtual ~DisplayConfigurator();
 
   MultipleDisplayState display_state() const { return display_state_; }
-  chromeos::DisplayPowerState power_state() const { return power_state_; }
+  chromeos::DisplayPowerState requested_power_state() const {
+    return requested_power_state_;
+  }
   const gfx::Size framebuffer_size() const { return framebuffer_size_; }
   const std::vector<DisplayState>& cached_displays() const {
     return cached_displays_;
@@ -165,12 +152,10 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     mirroring_controller_ = controller;
   }
 
-  // Replaces |native_display_delegate_| and |touchscreen_delegate_| with the 2
-  // delegates passed in and sets |configure_display_| to true. Should be called
-  // before Init().
-  void SetDelegatesForTesting(
-      scoped_ptr<NativeDisplayDelegate> display_delegate,
-      scoped_ptr<TouchscreenDelegate> touchscreen_delegate);
+  // Replaces |native_display_delegate_| with the delegate passed in and sets
+  // |configure_display_| to true. Should be called before Init().
+  void SetDelegateForTesting(
+      scoped_ptr<NativeDisplayDelegate> display_delegate);
 
   // Sets the initial value of |power_state_|.  Must be called before Start().
   void SetInitialDisplayPower(chromeos::DisplayPowerState power_state);
@@ -191,7 +176,8 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   // Called when powerd notifies us that some set of displays should be turned
   // on or off.  This requires enabling or disabling the CRTC associated with
   // the display(s) in question so that the low power state is engaged.
-  // |flags| contains bitwise-or-ed kSetDisplayPower* values.
+  // |flags| contains bitwise-or-ed kSetDisplayPower* values. Returns true if
+  // the system successfully enters (or was already in) |power_state|.
   bool SetDisplayPower(chromeos::DisplayPowerState power_state, int flags);
 
   // Force switching the display mode to |new_state|. Returns false if
@@ -257,7 +243,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
 
   // Performs platform specific delegate initialization.
   scoped_ptr<NativeDisplayDelegate> CreatePlatformNativeDisplayDelegate();
-  scoped_ptr<TouchscreenDelegate> CreatePlatformTouchscreenDelegate();
 
   // Updates |cached_displays_| to contain currently-connected displays. Calls
   // |delegate_->GetDisplays()| and then does additional work, like finding the
@@ -322,7 +307,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   StateController* state_controller_;
   SoftwareMirroringController* mirroring_controller_;
   scoped_ptr<NativeDisplayDelegate> native_display_delegate_;
-  scoped_ptr<TouchscreenDelegate> touchscreen_delegate_;
 
   // Used to enable modes which rely on panel fitting.
   bool is_panel_fitting_enabled_;
@@ -339,8 +323,11 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
 
   gfx::Size framebuffer_size_;
 
-  // The current power state.
-  chromeos::DisplayPowerState power_state_;
+  // The last-requested and current power state. These may differ if
+  // configuration fails: SetDisplayMode() needs the last-requested state while
+  // SetDisplayPower() needs the current state.
+  chromeos::DisplayPowerState requested_power_state_;
+  chromeos::DisplayPowerState current_power_state_;
 
   // Most-recently-used display configuration. Note that the actual
   // configuration changes asynchronously.

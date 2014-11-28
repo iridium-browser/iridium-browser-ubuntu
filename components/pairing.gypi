@@ -17,6 +17,12 @@
         '../net/net.gyp:net',
       ],
       'sources': [
+        'pairing/bluetooth_controller_pairing_controller.cc',
+        'pairing/bluetooth_controller_pairing_controller.h',
+        'pairing/bluetooth_host_pairing_controller.cc',
+        'pairing/bluetooth_host_pairing_controller.h',
+        'pairing/bluetooth_pairing_constants.cc',
+        'pairing/bluetooth_pairing_constants.h',
         'pairing/controller_pairing_controller.cc',
         'pairing/controller_pairing_controller.h',
         'pairing/fake_controller_pairing_controller.cc',
@@ -29,6 +35,8 @@
         'pairing/message_buffer.h',
         'pairing/proto_decoder.cc',
         'pairing/proto_decoder.h',
+        'pairing/shark_connection_listener.cc',
+        'pairing/shark_connection_listener.h',
       ],
     },
     {

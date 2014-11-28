@@ -89,7 +89,8 @@ class Benchmark(command_line.Command):
 
     self._DownloadGeneratedProfileArchive(finder_options)
 
-    results = results_options.CreateResults(self.GetMetadata(), finder_options)
+    benchmark_metadata = self.GetMetadata()
+    results = results_options.CreateResults(benchmark_metadata, finder_options)
     try:
       page_runner.Run(pt, ps, expectations, finder_options, results)
     except page_test.TestNotSupportedOnPlatformFailure as failure:

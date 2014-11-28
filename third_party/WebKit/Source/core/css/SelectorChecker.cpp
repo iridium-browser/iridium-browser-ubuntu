@@ -33,7 +33,7 @@
 #include "core/css/SiblingTraversalStrategies.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
-#include "core/dom/FullscreenElementStack.h"
+#include "core/dom/Fullscreen.h"
 #include "core/dom/NodeRenderStyle.h"
 #include "core/dom/StyleEngine.h"
 #include "core/dom/Text.h"
@@ -63,7 +63,6 @@ using namespace HTMLNames;
 
 SelectorChecker::SelectorChecker(Document& document, Mode mode)
     : m_strictParsing(!document.inQuirksMode())
-    , m_documentIsHTML(document.isHTMLDocument())
     , m_mode(mode)
 {
 }
@@ -507,10 +506,11 @@ bool SelectorChecker::checkOne(const SelectorCheckingContext& context, const Sib
 
     bool elementIsHostInItsShadowTree = isHostInItsShadowTree(element, context.scope);
 
-    // Only :host and :ancestor should match the host: http://drafts.csswg.org/css-scoping/#host-element
-    if (elementIsHostInItsShadowTree && !selector.isHostPseudoClass()
-        && !(context.contextFlags & TreatShadowHostAsNormalScope))
-        return false;
+    // Only :host and :host-context() should match the host: http://drafts.csswg.org/css-scoping/#host-element
+    if (elementIsHostInItsShadowTree && (!selector.isHostPseudoClass()
+        && !(context.contextFlags & TreatShadowHostAsNormalScope)
+        && selector.match() != CSSSelector::PseudoElement))
+            return false;
 
     if (selector.match() == CSSSelector::Tag)
         return SelectorChecker::tagMatches(element, selector.tagQName());
@@ -855,18 +855,13 @@ bool SelectorChecker::checkOne(const SelectorCheckingContext& context, const Sib
             // context's Document is in the fullscreen state has the 'full-screen' pseudoclass applied.
             if (isHTMLFrameElementBase(element) && element.containsFullScreenElement())
                 return true;
-            if (FullscreenElementStack* fullscreen = FullscreenElementStack::fromIfExists(element.document())) {
-                if (!fullscreen->webkitIsFullScreen())
-                    return false;
-                return element == fullscreen->webkitCurrentFullScreenElement();
-            }
-            return false;
+            return Fullscreen::isActiveFullScreenElement(element);
         case CSSSelector::PseudoFullScreenAncestor:
             return element.containsFullScreenElement();
         case CSSSelector::PseudoFullScreenDocument:
             // While a Document is in the fullscreen state, the 'full-screen-document' pseudoclass applies
             // to all elements of that Document.
-            if (!FullscreenElementStack::isFullScreen(element.document()))
+            if (!Fullscreen::isFullScreen(element.document()))
                 return false;
             return true;
         case CSSSelector::PseudoInRange:

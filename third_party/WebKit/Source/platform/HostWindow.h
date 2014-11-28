@@ -31,10 +31,7 @@
 #include "wtf/Noncopyable.h"
 
 namespace blink {
-class Cursor;
-class IntPoint;
 class IntRect;
-class IntSize;
 struct WebScreenInfo;
 
 class PLATFORM_EXPORT HostWindow {
@@ -45,8 +42,6 @@ public:
 
     // Requests the host invalidate the contents and the root view.
     virtual void invalidateContentsAndRootView(const IntRect& updateRect) = 0;
-
-    virtual void scroll() = 0;
 
     // Requests the host invalidate the contents, not the root view. This is the slow path for scrolling.
     virtual void invalidateContentsForSlowScroll(const IntRect& updateRect) = 0;

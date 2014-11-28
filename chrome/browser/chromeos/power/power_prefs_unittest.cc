@@ -11,6 +11,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
@@ -23,7 +26,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/dbus/fake_dbus_thread_manager.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_power_manager_client.h"
 #include "chromeos/dbus/power_manager/policy.pb.h"
 #include "chromeos/dbus/power_policy_controller.h"
@@ -51,7 +54,6 @@ class PowerPrefsTest : public testing::Test {
   bool GetCurrentAllowScreenWakeLocks() const;
 
   TestingProfileManager profile_manager_;
-  FakeDBusThreadManager fake_dbus_thread_manager_;
   PowerPolicyController* power_policy_controller_;     // Not owned.
   FakePowerManagerClient* fake_power_manager_client_;  // Not owned.
 
@@ -62,17 +64,21 @@ class PowerPrefsTest : public testing::Test {
 
 PowerPrefsTest::PowerPrefsTest()
     : profile_manager_(TestingBrowserProcess::GetGlobal()),
-      power_policy_controller_(new PowerPolicyController),
+      power_policy_controller_(NULL),
       fake_power_manager_client_(new FakePowerManagerClient) {
-  fake_dbus_thread_manager_.SetPowerManagerClient(
-      scoped_ptr<PowerManagerClient>(fake_power_manager_client_));
-  fake_dbus_thread_manager_.SetPowerPolicyController(
-      scoped_ptr<PowerPolicyController>(power_policy_controller_));
-  power_policy_controller_->Init(&fake_dbus_thread_manager_);
 }
 
 void PowerPrefsTest::SetUp() {
   testing::Test::SetUp();
+
+  scoped_ptr<DBusThreadManagerSetter> dbus_setter =
+      chromeos::DBusThreadManager::GetSetterForTesting();
+  dbus_setter->SetPowerManagerClient(
+      scoped_ptr<PowerManagerClient>(fake_power_manager_client_));
+  // Power policy controller is recreated with SetPowerManagerClient().
+  power_policy_controller_ =
+      chromeos::DBusThreadManager::Get()->GetPowerPolicyController();
+
   ASSERT_TRUE(profile_manager_.SetUp());
 
   power_prefs_.reset(new PowerPrefs(power_policy_controller_));
@@ -161,15 +167,8 @@ TEST_F(PowerPrefsTest, LoginScreen) {
   builder.SetPath(
       profile_manager_.profiles_dir().AppendASCII(chrome::kInitialProfile));
   builder.SetPrefService(login_profile_prefs.PassAs<PrefServiceSyncable>());
-  builder.SetIncognito();
-  scoped_ptr<TestingProfile> login_profile_owner(builder.Build());
-
-  TestingProfile* login_profile = login_profile_owner.get();
-  TestingProfile* login_profile_parent = profile_manager_.CreateTestingProfile(
-      chrome::kInitialProfile);
-  login_profile_parent->SetOffTheRecordProfile(
-      login_profile_owner.PassAs<Profile>());
-  login_profile->SetOriginalProfile(login_profile_parent);
+  TestingProfile* login_profile = builder.BuildIncognito(
+      profile_manager_.CreateTestingProfile(chrome::kInitialProfile));
 
   // Inform power_prefs_ that the login screen is being shown.
   power_prefs_->Observe(chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
@@ -209,10 +208,16 @@ TEST_F(PowerPrefsTest, LoginScreen) {
 }
 
 TEST_F(PowerPrefsTest, UserSession) {
+  FakeUserManager* user_manager = new FakeUserManager();
+  ScopedUserManagerEnabler user_manager_enabler(user_manager);
+
   // Set up user profile.
-  TestingProfile* user_profile = profile_manager_.CreateTestingProfile("user");
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(switches::kLoginProfile,
-                                                      "user");
+  const char test_user1[] = "test-user1@example.com";
+  user_manager->AddUser(test_user1);
+  user_manager->LoginUser(test_user1);
+  TestingProfile* user_profile =
+      profile_manager_.CreateTestingProfile(test_user1);
+
   profile_manager_.SetLoggedIn(true);
 
   // Inform power_prefs_ that a session has started.
@@ -226,8 +231,11 @@ TEST_F(PowerPrefsTest, UserSession) {
   EXPECT_EQ(GetExpectedAllowScreenWakeLocksForProfile(user_profile),
             GetCurrentAllowScreenWakeLocks());
 
+  const char test_user2[] = "test-user2@example.com";
+  user_manager->AddUser(test_user2);
+  user_manager->LoginUser(test_user2);
   TestingProfile* other_profile =
-      profile_manager_.CreateTestingProfile("other");
+      profile_manager_.CreateTestingProfile(test_user2);
 
   // Inform power_prefs_ that an unrelated profile has been destroyed.
   power_prefs_->Observe(chrome::NOTIFICATION_PROFILE_DESTROYED,

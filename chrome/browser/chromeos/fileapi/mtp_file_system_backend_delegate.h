@@ -12,6 +12,15 @@ namespace base {
 class FilePath;
 }  // namespace base
 
+namespace storage {
+class AsyncFileUtil;
+class FileSystemContext;
+class FileStreamReader;
+class FileSystemURL;
+class FileStreamWriter;
+class WatcherManager;
+}  // namespace storage
+
 class DeviceMediaAsyncFileUtil;
 
 namespace chromeos {
@@ -25,17 +34,23 @@ class MTPFileSystemBackendDelegate : public FileSystemBackendDelegate {
   virtual ~MTPFileSystemBackendDelegate();
 
   // FileSystemBackendDelegate overrides.
-  virtual fileapi::AsyncFileUtil* GetAsyncFileUtil(
-      fileapi::FileSystemType type) OVERRIDE;
-  virtual scoped_ptr<webkit_blob::FileStreamReader> CreateFileStreamReader(
-      const fileapi::FileSystemURL& url,
+  virtual storage::AsyncFileUtil* GetAsyncFileUtil(
+      storage::FileSystemType type) OVERRIDE;
+  virtual scoped_ptr<storage::FileStreamReader> CreateFileStreamReader(
+      const storage::FileSystemURL& url,
       int64 offset,
+      int64 max_bytes_to_read,
       const base::Time& expected_modification_time,
-      fileapi::FileSystemContext* context) OVERRIDE;
-  virtual scoped_ptr<fileapi::FileStreamWriter> CreateFileStreamWriter(
-      const fileapi::FileSystemURL& url,
+      storage::FileSystemContext* context) OVERRIDE;
+  virtual scoped_ptr<storage::FileStreamWriter> CreateFileStreamWriter(
+      const storage::FileSystemURL& url,
       int64 offset,
-      fileapi::FileSystemContext* context) OVERRIDE;
+      storage::FileSystemContext* context) OVERRIDE;
+  virtual storage::WatcherManager* GetWatcherManager(
+      const storage::FileSystemURL& url) OVERRIDE;
+  virtual void GetRedirectURLForContents(
+      const storage::FileSystemURL& url,
+      const storage::URLCallback& callback) OVERRIDE;
 
  private:
   scoped_ptr<DeviceMediaAsyncFileUtil> device_media_async_file_util_;

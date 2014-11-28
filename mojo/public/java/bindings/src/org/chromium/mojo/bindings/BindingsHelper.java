@@ -29,9 +29,44 @@ public class BindingsHelper {
     public static final int POINTER_SIZE = 8;
 
     /**
+     * The value used for the expected length of a non-fixed size array.
+     */
+    public static final int UNSPECIFIED_ARRAY_LENGTH = -1;
+
+    /**
      * Align |size| on {@link BindingsHelper#ALIGNMENT}.
      */
     public static int align(int size) {
+        return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+    }
+
+    /**
+     * Passed as |arrayNullability| when neither the array nor its elements are nullable.
+     */
+    public static final int NOTHING_NULLABLE = 0;
+
+    /**
+     * "Array bit" of |arrayNullability| is set iff the array itself is nullable.
+     */
+    public static final int ARRAY_NULLABLE = (1 << 0);
+
+    /**
+     * "Element bit" of |arrayNullability| is set iff the array elements are nullable.
+     */
+    public static final int ELEMENT_NULLABLE = (1 << 1);
+
+    public static boolean isArrayNullable(int arrayNullability) {
+        return (arrayNullability & ARRAY_NULLABLE) > 0;
+    }
+
+    public static boolean isElementNullable(int arrayNullability) {
+        return (arrayNullability & ELEMENT_NULLABLE) > 0;
+    }
+
+    /**
+     * Align |size| on {@link BindingsHelper#ALIGNMENT}.
+     */
+    public static long align(long size) {
         return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
     }
 

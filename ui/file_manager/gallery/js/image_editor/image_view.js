@@ -264,7 +264,7 @@ ImageView.prototype.load =
     // Skip effects when reloading repeatedly very quickly.
     var time = Date.now();
     if (this.lastLoadTime_ &&
-       (time - this.lastLoadTime_) < ImageView.FAST_SCROLL_INTERVAL) {
+        (time - this.lastLoadTime_) < ImageView.FAST_SCROLL_INTERVAL) {
       effect = null;
     }
     this.lastLoadTime_ = time;
@@ -284,9 +284,9 @@ ImageView.prototype.load =
   } else {
     var cachedScreen = item.screenImage;
     var imageWidth = metadata.media && metadata.media.width ||
-                     metadata.drive && metadata.drive.imageWidth;
+                     metadata.external && metadata.external.imageWidth;
     var imageHeight = metadata.media && metadata.media.height ||
-                      metadata.drive && metadata.drive.imageHeight;
+                      metadata.external && metadata.external.imageHeight;
     if (cachedScreen) {
       // We have a cached screen-scale canvas, use it instead of a thumbnail.
       displayThumbnail(ImageView.LOAD_TYPE_CACHED_SCREEN, cachedScreen);
@@ -319,12 +319,12 @@ ImageView.prototype.load =
         width = metadata.media.width;
         height = metadata.media.height;
       }
-      // If metadata.drive.present is true, the image data is loaded directly
+      // If metadata.external.present is true, the image data is loaded directly
       // from local cache, whose size may be out of sync with the drive
       // metadata.
-      if (metadata.drive && !metadata.drive.present) {
-        width = metadata.drive.imageWidth;
-        height = metadata.drive.imageHeight;
+      if (metadata.external && !metadata.external.present) {
+        width = metadata.external.imageWidth;
+        height = metadata.external.imageHeight;
       }
       self.replace(
           canvas,
@@ -381,8 +381,7 @@ ImageView.prototype.load =
         loadType, ImageView.LOAD_TYPE_TOTAL);
 
     if (loadType === ImageView.LOAD_TYPE_ERROR &&
-        !navigator.onLine && metadata.streaming) {
-      // |streaming| is set only when the file is not locally cached.
+        !navigator.onLine && !metadata.external.present) {
       loadType = ImageView.LOAD_TYPE_OFFLINE;
     }
     if (loadCallback) loadCallback(loadType, animationDuration, opt_error);
@@ -417,10 +416,9 @@ ImageView.prototype.unload = function(zoomToRect) {
     this.setTransform_(this.screenImage_, this.viewport_, effect);
     this.screenImage_.setAttribute('fade', true);
     this.unloadTimer_ = setTimeout(function() {
-        this.unloadTimer_ = null;
-        this.unload(null /* force unload */);
-      }.bind(this),
-      effect.getSafeInterval());
+      this.unloadTimer_ = null;
+      this.unload(null /* force unload */);
+    }.bind(this), effect.getSafeInterval());
     return;
   }
   this.container_.textContent = '';
@@ -699,10 +697,11 @@ ImageView.Effect.prototype.getTiming = function() { return this.timing_; };
  * Obtains the CSS transformation string of the effect.
  * @param {DOMCanvas} element Canvas element to be applied the transformation.
  * @param {Viewport} viewport Current viewport.
- * @return CSS transformation description.
+ * @return {string} CSS transformation description.
  */
 ImageView.Effect.prototype.transform = function(element, viewport) {
   throw new Error('Not implemented.');
+  return '';
 };
 
 /**

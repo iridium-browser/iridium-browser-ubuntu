@@ -12,20 +12,31 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cert/x509_cert_types.h"
 #include "net/cert/x509_certificate.h"
 #include "url/gurl.h"
 
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+#include "chrome/browser/captive_portal/captive_portal_service.h"
+#include "chrome/browser/captive_portal/captive_portal_service_factory.h"
+#endif
+
+#if defined(OS_WIN)
+#include "base/win/win_util.h"
+#include "base/win/windows_version.h"
+#endif
+
 using base::Time;
 using base::TimeTicks;
 using base::TimeDelta;
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
 
 namespace {
 
@@ -42,6 +53,33 @@ enum SSLInterstitialCause {
   UNUSED_INTERSTITIAL_CAUSE_ENTRY,
 };
 
+// Events for UMA. Do not reorder or change!
+enum SSLInterstitialCauseCaptivePortal {
+  CAPTIVE_PORTAL_DETECTION_ENABLED,
+  CAPTIVE_PORTAL_DETECTION_ENABLED_OVERRIDABLE,
+  CAPTIVE_PORTAL_PROBE_COMPLETED,
+  CAPTIVE_PORTAL_PROBE_COMPLETED_OVERRIDABLE,
+  CAPTIVE_PORTAL_NO_RESPONSE,
+  CAPTIVE_PORTAL_NO_RESPONSE_OVERRIDABLE,
+  CAPTIVE_PORTAL_DETECTED,
+  CAPTIVE_PORTAL_DETECTED_OVERRIDABLE,
+  UNUSED_CAPTIVE_PORTAL_EVENT,
+};
+
+void RecordSSLInterstitialSeverityScore(float ssl_severity_score,
+                                        int cert_error) {
+  if (SSLErrorInfo::NetErrorToErrorType(cert_error) ==
+      SSLErrorInfo::CERT_DATE_INVALID) {
+    UMA_HISTOGRAM_COUNTS_100("interstitial.ssl.severity_score.date_invalid",
+                             static_cast<int>(ssl_severity_score * 100));
+  } else if (SSLErrorInfo::NetErrorToErrorType(cert_error) ==
+      SSLErrorInfo::CERT_COMMON_NAME_INVALID) {
+    UMA_HISTOGRAM_COUNTS_100(
+        "interstitial.ssl.severity_score.common_name_invalid",
+        static_cast<int>(ssl_severity_score * 100));
+  }
+}
+
 // Scores/weights which will be constant through all the SSL error types.
 static const float kServerWeight = 0.5f;
 static const float kClientWeight = 0.5f;
@@ -55,6 +93,14 @@ void RecordSSLInterstitialCause(bool overridable, SSLInterstitialCause event) {
                               UNUSED_INTERSTITIAL_CAUSE_ENTRY);
   }
 }
+
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+void RecordCaptivePortalEventStats(SSLInterstitialCauseCaptivePortal event) {
+  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.captive_portal",
+                            event,
+                            UNUSED_CAPTIVE_PORTAL_EVENT);
+}
+#endif
 
 int GetLevensteinDistance(const std::string& str1,
                           const std::string& str2) {
@@ -85,23 +131,69 @@ int GetLevensteinDistance(const std::string& str1,
 } // namespace
 
 SSLErrorClassification::SSLErrorClassification(
+    content::WebContents* web_contents,
     const base::Time& current_time,
     const GURL& url,
+    int cert_error,
     const net::X509Certificate& cert)
-  : current_time_(current_time),
+  : web_contents_(web_contents),
+    current_time_(current_time),
     request_url_(url),
-    cert_(cert) { }
+    cert_error_(cert_error),
+    cert_(cert),
+    captive_portal_detection_enabled_(false),
+    captive_portal_probe_completed_(false),
+    captive_portal_no_response_(false),
+    captive_portal_detected_(false) {
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  Profile* profile = Profile::FromBrowserContext(
+      web_contents_->GetBrowserContext());
+  CaptivePortalService* captive_portal_service =
+      CaptivePortalServiceFactory::GetForProfile(profile);
+  captive_portal_detection_enabled_ = captive_portal_service->enabled();
+  captive_portal_service->DetectCaptivePortal();
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT,
+                 content::Source<Profile>(profile));
+#endif
+}
 
 SSLErrorClassification::~SSLErrorClassification() { }
 
-float SSLErrorClassification::InvalidDateSeverityScore(
-    int cert_error) const {
+void SSLErrorClassification::RecordCaptivePortalUMAStatistics(
+    bool overridable) const {
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  if (captive_portal_detection_enabled_)
+    RecordCaptivePortalEventStats(
+        overridable ?
+        CAPTIVE_PORTAL_DETECTION_ENABLED_OVERRIDABLE :
+        CAPTIVE_PORTAL_DETECTION_ENABLED);
+  if (captive_portal_probe_completed_)
+    RecordCaptivePortalEventStats(
+        overridable ?
+        CAPTIVE_PORTAL_PROBE_COMPLETED_OVERRIDABLE :
+        CAPTIVE_PORTAL_PROBE_COMPLETED);
+  // Log only one of portal detected and no response results.
+  if (captive_portal_detected_)
+    RecordCaptivePortalEventStats(
+        overridable ?
+        CAPTIVE_PORTAL_DETECTED_OVERRIDABLE :
+        CAPTIVE_PORTAL_DETECTED);
+  else if (captive_portal_no_response_)
+    RecordCaptivePortalEventStats(
+        overridable ?
+        CAPTIVE_PORTAL_NO_RESPONSE_OVERRIDABLE :
+        CAPTIVE_PORTAL_NO_RESPONSE);
+#endif
+}
+
+void SSLErrorClassification::InvalidDateSeverityScore() {
   SSLErrorInfo::ErrorType type =
-      SSLErrorInfo::NetErrorToErrorType(cert_error);
+      SSLErrorInfo::NetErrorToErrorType(cert_error_);
   DCHECK(type == SSLErrorInfo::CERT_DATE_INVALID);
+
   // Client-side characteristics. Check whether or not the system's clock is
-  // wrong and whether or not the user has already encountered this error
-  // before.
+  // wrong and whether or not the user has encountered this error before.
   float severity_date_score = 0.0f;
 
   static const float kCertificateExpiredWeight = 0.3f;
@@ -119,7 +211,7 @@ float SSLErrorClassification::InvalidDateSeverityScore(
     severity_date_score += kClientWeight * kSystemClockWeight *
         kSystemClockRightWeight;
   }
-  // TODO(radhikabhar): (crbug.com/393262) Check website settings.
+  // TODO(felt): (crbug.com/393262) Check website settings.
 
   // Server-side characteristics. Check whether the certificate has expired or
   // is not yet valid. If the certificate has expired then factor the time which
@@ -130,13 +222,13 @@ float SSLErrorClassification::InvalidDateSeverityScore(
   }
   if (current_time_ < cert_.valid_start())
     severity_date_score += kServerWeight * kNotYetValidWeight;
-  return severity_date_score;
+
+  RecordSSLInterstitialSeverityScore(severity_date_score, cert_error_);
 }
 
-float SSLErrorClassification::InvalidCommonNameSeverityScore(
-    int cert_error) const {
+void SSLErrorClassification::InvalidCommonNameSeverityScore() {
   SSLErrorInfo::ErrorType type =
-      SSLErrorInfo::NetErrorToErrorType(cert_error);
+      SSLErrorInfo::NetErrorToErrorType(cert_error_);
   DCHECK(type == SSLErrorInfo::CERT_COMMON_NAME_INVALID);
   float severity_name_score = 0.0f;
 
@@ -164,13 +256,19 @@ float SSLErrorClassification::InvalidCommonNameSeverityScore(
     if (IsCertLikelyFromMultiTenantHosting())
       severity_name_score += kServerWeight * kLikelyMultiTenantHostingWeight;
   }
-  return severity_name_score;
+
+  static const float kEnvironmentWeight = 0.25f;
+
+  severity_name_score += kClientWeight * kEnvironmentWeight *
+      CalculateScoreEnvironments();
+
+  RecordSSLInterstitialSeverityScore(severity_name_score, cert_error_);
 }
 
-void SSLErrorClassification::RecordUMAStatistics(bool overridable,
-                                                 int cert_error) {
+void SSLErrorClassification::RecordUMAStatistics(
+    bool overridable) const {
   SSLErrorInfo::ErrorType type =
-      SSLErrorInfo::NetErrorToErrorType(cert_error);
+      SSLErrorInfo::NetErrorToErrorType(cert_error_);
   switch (type) {
     case SSLErrorInfo::CERT_DATE_INVALID: {
       if (IsUserClockInThePast(base::Time::NowFromSystemTime()))
@@ -228,6 +326,32 @@ float SSLErrorClassification::CalculateScoreTimePassedSinceExpiry() const {
     return kLowThresholdWeight;
 }
 
+float SSLErrorClassification::CalculateScoreEnvironments() const {
+  static const float kWifiWeight = 0.7f;
+  static const float kCellularWeight = 0.7f;
+  static const float kEthernetWeight = 0.7f;
+  static const float kOtherWeight = 0.7f;
+  net::NetworkChangeNotifier::ConnectionType type =
+      net::NetworkChangeNotifier::GetConnectionType();
+  if (type == net::NetworkChangeNotifier::CONNECTION_WIFI)
+    return kWifiWeight;
+  if (type == net::NetworkChangeNotifier::CONNECTION_2G ||
+      type == net::NetworkChangeNotifier::CONNECTION_3G ||
+      type == net::NetworkChangeNotifier::CONNECTION_4G ) {
+    return kCellularWeight;
+  }
+  if (type == net::NetworkChangeNotifier::CONNECTION_ETHERNET)
+    return kEthernetWeight;
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // Assume if captive portals are detected then the user is connected using a
+  // hot spot.
+  static const float kHotspotWeight = 0.2f;
+  if (captive_portal_probe_completed_ && captive_portal_detected_)
+      return kHotspotWeight;
+#endif
+  return kOtherWeight;
+}
+
 bool SSLErrorClassification::IsUserClockInThePast(const base::Time& time_now) {
   base::Time build_time = base::GetBuildTime();
   if (time_now < build_time - base::TimeDelta::FromDays(2))
@@ -243,14 +367,12 @@ bool SSLErrorClassification::IsUserClockInTheFuture(
   return false;
 }
 
-bool SSLErrorClassification::IsWindowsVersionSP3OrLower() {
+bool SSLErrorClassification::MaybeWindowsLacksSHA256Support() {
 #if defined(OS_WIN)
-  const base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
-  base::win::OSInfo::ServicePack service_pack = os_info->service_pack();
-  if (os_info->version() < base::win::VERSION_VISTA && service_pack.major < 3)
-    return true;
-#endif
+  return !base::win::MaybeHasSHA256Support();
+#else
   return false;
+#endif
 }
 
 bool SSLErrorClassification::IsHostNameKnownTLD(const std::string& host_name) {
@@ -445,4 +567,36 @@ bool SSLErrorClassification::IsCertLikelyFromMultiTenantHosting() const {
     }
   }
   return true;
+}
+
+void SSLErrorClassification::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // When detection is disabled, captive portal service always sends
+  // RESULT_INTERNET_CONNECTED. Ignore any probe results in that case.
+  if (!captive_portal_detection_enabled_)
+    return;
+  if (type == chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT) {
+    captive_portal_probe_completed_ = true;
+    CaptivePortalService::Results* results =
+        content::Details<CaptivePortalService::Results>(
+            details).ptr();
+    // If a captive portal was detected at any point when the interstitial was
+    // displayed, assume that the interstitial was caused by a captive portal.
+    // Example scenario:
+    // 1- Interstitial displayed and captive portal detected, setting the flag.
+    // 2- Captive portal detection automatically opens portal login page.
+    // 3- User logs in on the portal login page.
+    // A notification will be received here for RESULT_INTERNET_CONNECTED. Make
+    // sure we don't clear the captive protal flag, since the interstitial was
+    // potentially caused by the captive portal.
+    captive_portal_detected_ = captive_portal_detected_ ||
+        (results->result == captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL);
+    // Also keep track of non-HTTP portals and error cases.
+    captive_portal_no_response_ = captive_portal_no_response_ ||
+        (results->result == captive_portal::RESULT_NO_RESPONSE);
+  }
+#endif
 }

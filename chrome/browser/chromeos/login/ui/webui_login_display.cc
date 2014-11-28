@@ -20,6 +20,7 @@
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/login/user_names.h"
 #include "components/user_manager/user_manager.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/user_activity_detector.h"
@@ -31,10 +32,12 @@ namespace chromeos {
 WebUILoginDisplay::~WebUILoginDisplay() {
   if (webui_handler_)
     webui_handler_->ResetSigninScreenHandlerDelegate();
+#if !defined(USE_ATHENA)
   wm::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
-      user_activity_detector();
+    user_activity_detector();
   if (activity_detector->HasObserver(this))
     activity_detector->RemoveObserver(this);
+#endif
 }
 
 // LoginDisplay implementation: ------------------------------------------------
@@ -65,10 +68,12 @@ void WebUILoginDisplay::Init(const user_manager::UserList& users,
   show_users_ = show_users;
   show_new_user_ = show_new_user;
 
+#if !defined(USE_ATHENA)
   wm::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
       user_activity_detector();
   if (!activity_detector->HasObserver(this))
     activity_detector->AddObserver(this);
+#endif
 }
 
 // ---- Common methods
@@ -175,7 +180,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
 
     // Display a hint to switch keyboards if there are other active input
     // methods.
-    if (ime_manager->GetNumActiveInputMethods() > 1) {
+    if (ime_manager->GetActiveIMEState()->GetNumActiveInputMethods() > 1) {
       error_text += "\n" +
           l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_KEYBOARD_SWITCH_HINT);
     }

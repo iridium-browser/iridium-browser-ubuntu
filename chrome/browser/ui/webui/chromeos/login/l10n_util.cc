@@ -26,11 +26,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/ime/component_extension_ime_manager.h"
 #include "chromeos/ime/input_method_descriptor.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -53,12 +53,14 @@ scoped_ptr<base::DictionaryValue> CreateInputMethodsEntry(
 }
 
 // Returns true if element was inserted.
-bool InsertString(const std::string& str, std::set<std::string>& to) {
+bool InsertString(const std::string& str, std::set<std::string>* to) {
   const std::pair<std::set<std::string>::iterator, bool> result =
-      to.insert(str);
+      to->insert(str);
   return result.second;
 }
 
+#if !defined(USE_ATHENA)
+// TODO(dpolukhin): crbug.com/407579
 void AddOptgroupOtherLayouts(base::ListValue* input_methods_list) {
   scoped_ptr<base::DictionaryValue> optgroup(new base::DictionaryValue);
   optgroup->SetString(
@@ -66,12 +68,7 @@ void AddOptgroupOtherLayouts(base::ListValue* input_methods_list) {
       l10n_util::GetStringUTF16(IDS_OOBE_OTHER_KEYBOARD_LAYOUTS));
   input_methods_list->Append(optgroup.release());
 }
-
-// TODO(zork): Remove this blacklist when fonts are added to Chrome OS.
-// see: crbug.com/240586
-bool IsBlacklisted(const std::string& language_code) {
-  return language_code == "si";  // Sinhala
-}
+#endif
 
 // Gets the list of languages with |descriptors| based on |base_language_codes|.
 // The |most_relevant_language_codes| will be first in the list. If
@@ -126,10 +123,10 @@ scoped_ptr<base::ListValue> GetLanguageList(
        it != language_index.end(); ++it) {
     const std::string& language_id = it->first;
 
-    const size_t dash_pos = language_id.find_first_of('-');
+    const std::string lang = l10n_util::GetLanguage(language_id);
 
     // Ignore non-specific codes.
-    if (dash_pos == std::string::npos || dash_pos == 0)
+    if (lang.empty() || lang == language_id)
       continue;
 
     if (std::find(base_language_codes.begin(),
@@ -201,11 +198,6 @@ scoped_ptr<base::ListValue> GetLanguageList(
   for (size_t i = 0; i < base_language_codes.size(); ++i) {
     // Skip this language if it was already added.
     if (language_codes.find(base_language_codes[i]) != language_codes.end())
-      continue;
-
-    // TODO(zork): Remove this blacklist when fonts are added to Chrome OS.
-    // see: crbug.com/240586
-    if (IsBlacklisted(base_language_codes[i]))
       continue;
 
     base::string16 display_name =
@@ -309,7 +301,7 @@ void GetKeyboardLayoutsForResolvedLocale(
        it != layouts.end(); ++it) {
     const input_method::InputMethodDescriptor* ime =
         util->GetInputMethodDescriptorFromId(*it);
-    if (!InsertString(ime->id(), input_methods_added))
+    if (!InsertString(ime->id(), &input_methods_added))
       continue;
     input_methods_list->Append(
         CreateInputMethodsEntry(*ime, selected).release());
@@ -408,20 +400,24 @@ scoped_ptr<base::ListValue> GetAcceptLanguageList() {
       false);
 }
 
-scoped_ptr<base::ListValue> GetLoginKeyboardLayouts(
+scoped_ptr<base::ListValue> GetAndActivateLoginKeyboardLayouts(
     const std::string& locale,
     const std::string& selected) {
   scoped_ptr<base::ListValue> input_methods_list(new base::ListValue);
+#if !defined(USE_ATHENA)
+  // TODO(dpolukhin): crbug.com/407579
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::Get();
   input_method::InputMethodUtil* util = manager->GetInputMethodUtil();
 
   const std::vector<std::string>& hardware_login_input_methods =
       util->GetHardwareLoginInputMethodIds();
-  manager->EnableLoginLayouts(locale, hardware_login_input_methods);
+
+  manager->GetActiveIMEState()->EnableLoginLayouts(
+      locale, hardware_login_input_methods);
 
   scoped_ptr<input_method::InputMethodDescriptors> input_methods(
-      manager->GetActiveInputMethods());
+      manager->GetActiveIMEState()->GetActiveInputMethods());
   std::set<std::string> input_methods_added;
 
   for (std::vector<std::string>::const_iterator i =
@@ -444,7 +440,7 @@ scoped_ptr<base::ListValue> GetLoginKeyboardLayouts(
   for (size_t i = 0; i < input_methods->size(); ++i) {
     // Makes sure the id is in legacy xkb id format.
     const std::string& ime_id = (*input_methods)[i].id();
-    if (!InsertString(ime_id, input_methods_added))
+    if (!InsertString(ime_id, &input_methods_added))
       continue;
     if (!optgroup_added) {
       optgroup_added = true;
@@ -468,6 +464,7 @@ scoped_ptr<base::ListValue> GetLoginKeyboardLayouts(
     input_methods_list->Append(CreateInputMethodsEntry(*us_eng_descriptor,
                                                        selected).release());
   }
+#endif
   return input_methods_list.Pass();
 }
 
@@ -486,7 +483,7 @@ void GetKeyboardLayoutsForLocale(
   std::string (*get_application_locale)(const std::string&, bool) =
       &l10n_util::GetApplicationLocale;
   base::PostTaskAndReplyWithResult(
-      background_task_runner,
+      background_task_runner.get(),
       FROM_HERE,
       base::Bind(get_application_locale, locale, false /* set_icu_locale */),
       base::Bind(&GetKeyboardLayoutsForResolvedLocale, callback));
@@ -494,7 +491,9 @@ void GetKeyboardLayoutsForLocale(
 
 scoped_ptr<base::DictionaryValue> GetCurrentKeyboardLayout() {
   const input_method::InputMethodDescriptor current_input_method =
-      input_method::InputMethodManager::Get()->GetCurrentInputMethod();
+      input_method::InputMethodManager::Get()
+          ->GetActiveIMEState()
+          ->GetCurrentInputMethod();
   return CreateInputMethodsEntry(current_input_method,
                                  current_input_method.id());
 }

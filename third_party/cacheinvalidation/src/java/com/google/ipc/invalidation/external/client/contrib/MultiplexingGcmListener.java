@@ -21,7 +21,7 @@ import com.google.android.gcm.GCMBroadcastReceiver;
 import com.google.android.gcm.GCMRegistrar;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.android.service.AndroidLogger;
-import com.google.ipc.invalidation.ticl.android.c2dm.WakeLockManager;
+import com.google.ipc.invalidation.ticl.android2.WakeLockManager;
 
 import android.app.IntentService;
 import android.content.BroadcastReceiver;
@@ -135,9 +135,6 @@ public class MultiplexingGcmListener extends GCMBaseIntentService {
     /** Intent extra key used to hold wakelock names, for runtime checks. */
     private static final String EXTRA_WAKELOCK_NAME =
         "com.google.ipc.invalidation.gcmmplex.listener.WAKELOCK_NAME";
-
-    /** Logger for {@code AbstractListener}. */
-    private static final Logger logger = AndroidLogger.forTag("MplexGcmAbsListener");
 
     /**
      * A {@code BroadcastReceiver} to receive intents from the {@code MultiplexingGcmListener}
@@ -332,7 +329,7 @@ public class MultiplexingGcmListener extends GCMBaseIntentService {
     GCMRegistrar.checkDevice(context);
     GCMRegistrar.checkManifest(context);
     final String regId = GCMRegistrar.getRegistrationId(context);
-    if (regId.equals("")) {
+    if (regId.isEmpty()) {
       GCMRegistrar.register(context, readSenderIdsFromManifestOrDie(context));
     }
     return regId;

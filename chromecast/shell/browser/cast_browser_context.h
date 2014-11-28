@@ -13,6 +13,7 @@
 namespace chromecast {
 namespace shell {
 
+class CastDownloadManagerDelegate;
 class URLRequestContextFactory;
 
 // Chromecast does not currently support multiple profiles.  So there is a
@@ -41,7 +42,7 @@ class CastBrowserContext : public content::BrowserContext {
   virtual content::DownloadManagerDelegate*
       GetDownloadManagerDelegate() OVERRIDE;
   virtual content::BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
+  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
   virtual content::PushMessagingService* GetPushMessagingService() OVERRIDE;
   virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
 
@@ -55,6 +56,7 @@ class CastBrowserContext : public content::BrowserContext {
   URLRequestContextFactory* const url_request_context_factory_;
   base::FilePath path_;
   scoped_ptr<CastResourceContext> resource_context_;
+  scoped_ptr<CastDownloadManagerDelegate> download_manager_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(CastBrowserContext);
 };

@@ -32,6 +32,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLCollection.h"
 #include "core/html/HTMLDataListElement.h"
+#include "core/html/HTMLDataListOptionsCollection.h"
 #include "core/html/HTMLFormControlElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMeterElement.h"
@@ -310,6 +311,10 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
         return paintMediaCurrentTime(o, paintInfo, r);
     case MediaControlsBackgroundPart:
         return paintMediaControlsBackground(o, paintInfo, r);
+    case MediaCastOffButtonPart:
+        return paintMediaCastButton(o, paintInfo, r);
+    case MediaOverlayCastOffButtonPart:
+        return paintMediaCastButton(o, paintInfo, r);
     case MenulistButtonPart:
     case TextFieldPart:
     case TextAreaPart:
@@ -405,16 +410,8 @@ bool RenderTheme::paintDecorations(RenderObject* o, const PaintInfo& paintInfo, 
 String RenderTheme::extraDefaultStyleSheet()
 {
     StringBuilder runtimeCSS;
-    if (RuntimeEnabledFeatures::dialogElementEnabled()) {
-        runtimeCSS.appendLiteral("dialog:not([open]) { display: none; }");
-        runtimeCSS.appendLiteral("dialog { position: absolute; left: 0; right: 0; width: -webkit-fit-content; height: -webkit-fit-content; margin: auto; border: solid; padding: 1em; background: white; color: black;}");
-        runtimeCSS.appendLiteral("dialog::backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.1); }");
-    }
-
-    if (RuntimeEnabledFeatures::contextMenuEnabled()) {
+    if (RuntimeEnabledFeatures::contextMenuEnabled())
         runtimeCSS.appendLiteral("menu[type=\"popup\" i] { display: none; }");
-    }
-
     return runtimeCSS.toString();
 }
 
@@ -593,7 +590,7 @@ bool RenderTheme::isControlStyled(const RenderStyle* style, const CachedUAStyle*
     }
 }
 
-void RenderTheme::adjustRepaintRect(const RenderObject* o, IntRect& r)
+void RenderTheme::adjustPaintInvalidationRect(const RenderObject* o, IntRect& r)
 {
 #if USE(NEW_THEME)
     m_platformTheme->inflateControlPaintRect(o->style()->appearance(), controlStatesForRenderer(o), r, o->style()->effectiveZoom());
@@ -604,10 +601,10 @@ bool RenderTheme::shouldDrawDefaultFocusRing(RenderObject* renderer) const
 {
     if (supportsFocusRing(renderer->style()))
         return false;
-    if (!renderer->style()->hasAppearance())
-        return true;
     Node* node = renderer->node();
     if (!node)
+        return true;
+    if (!renderer->style()->hasAppearance() && !node->isLink())
         return true;
     // We can't use RenderTheme::isFocused because outline:auto might be
     // specified to non-:focus rulesets.
@@ -631,8 +628,7 @@ bool RenderTheme::stateChanged(RenderObject* o, ControlState state) const
     if (state == PressedControlState && !isEnabled(o))
         return false;
 
-    // Repaint the control.
-    o->paintInvalidationForWholeRenderer();
+    o->setShouldDoFullPaintInvalidation(true);
     return true;
 }
 
@@ -824,7 +820,7 @@ void RenderTheme::paintSliderTicks(RenderObject* o, const PaintInfo& paintInfo, 
         return;
 
     HTMLInputElement* input = toHTMLInputElement(node);
-    if (!input->isRangeControl())
+    if (input->type() != InputTypeNames::range)
         return;
 
     HTMLDataListElement* dataList = input->dataList();
@@ -878,13 +874,11 @@ void RenderTheme::paintSliderTicks(RenderObject* o, const PaintInfo& paintInfo, 
         tickRegionSideMargin = trackBounds.y() + (thumbSize.width() - tickSize.width() * zoomFactor) / 2.0;
         tickRegionWidth = trackBounds.height() - thumbSize.width();
     }
-    RefPtrWillBeRawPtr<HTMLCollection> options = dataList->options();
+    RefPtrWillBeRawPtr<HTMLDataListOptionsCollection> options = dataList->options();
     GraphicsContextStateSaver stateSaver(*paintInfo.context);
     paintInfo.context->setFillColor(o->resolveColor(CSSPropertyColor));
-    for (unsigned i = 0; Element* element = options->item(i); i++) {
-        ASSERT(isHTMLOptionElement(*element));
-        HTMLOptionElement& optionElement = toHTMLOptionElement(*element);
-        String value = optionElement.value();
+    for (unsigned i = 0; HTMLOptionElement* optionElement = options->item(i); i++) {
+        String value = optionElement->value();
         if (!input->isValidValue(value))
             continue;
         double parsedValue = parseToDoubleForNumberType(input->sanitizeValue(value));
@@ -911,7 +905,7 @@ double RenderTheme::animationDurationForProgressBar(RenderProgress*) const
 
 bool RenderTheme::shouldHaveSpinButton(HTMLInputElement* inputElement) const
 {
-    return inputElement->isSteppable() && !inputElement->isRangeControl();
+    return inputElement->isSteppable() && inputElement->type() != InputTypeNames::range;
 }
 
 void RenderTheme::adjustMenuListButtonStyle(RenderStyle*, Element*) const

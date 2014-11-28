@@ -6,8 +6,8 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
@@ -20,7 +20,7 @@
 #include "remoting/protocol/fake_session.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
 
 using testing::_;
 using testing::NotNull;
@@ -36,7 +36,7 @@ const char kTestSharedSecretBad[] = "0000-0000-0001";
 
 class MockChannelDoneCallback {
  public:
-  MOCK_METHOD2(OnDone, void(net::Error error, net::StreamSocket* socket));
+  MOCK_METHOD2(OnDone, void(int error, net::StreamSocket* socket));
 };
 
 ACTION_P(QuitThreadOnCounter, counter) {
@@ -70,8 +70,8 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
   }
 
   void RunChannelAuth(bool expected_fail) {
-    client_fake_socket_.reset(new FakeSocket());
-    host_fake_socket_.reset(new FakeSocket());
+    client_fake_socket_.reset(new FakeStreamSocket());
+    host_fake_socket_.reset(new FakeStreamSocket());
     client_fake_socket_->PairWith(host_fake_socket_.get());
 
     client_auth_->SecureAndAuthenticate(
@@ -82,7 +82,7 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
     host_auth_->SecureAndAuthenticate(
         host_fake_socket_.PassAs<net::StreamSocket>(),
         base::Bind(&SslHmacChannelAuthenticatorTest::OnHostConnected,
-                   base::Unretained(this)));
+                   base::Unretained(this), std::string("ref argument value")));
 
     // Expect two callbacks to be called - the client callback and the host
     // callback.
@@ -109,14 +109,20 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
     message_loop_.Run();
   }
 
-  void OnHostConnected(net::Error error,
+  void OnHostConnected(const std::string& ref_argument,
+                       int error,
                        scoped_ptr<net::StreamSocket> socket) {
+    // Try deleting the authenticator and verify that this doesn't destroy
+    // reference parameters.
+    host_auth_.reset();
+    DCHECK_EQ(ref_argument, "ref argument value");
+
     host_callback_.OnDone(error, socket.get());
     host_socket_ = socket.Pass();
   }
 
-  void OnClientConnected(net::Error error,
-                         scoped_ptr<net::StreamSocket> socket) {
+  void OnClientConnected(int error, scoped_ptr<net::StreamSocket> socket) {
+    client_auth_.reset();
     client_callback_.OnDone(error, socket.get());
     client_socket_ = socket.Pass();
   }
@@ -125,8 +131,8 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
 
   scoped_refptr<RsaKeyPair> key_pair_;
   std::string host_cert_;
-  scoped_ptr<FakeSocket> client_fake_socket_;
-  scoped_ptr<FakeSocket> host_fake_socket_;
+  scoped_ptr<FakeStreamSocket> client_fake_socket_;
+  scoped_ptr<FakeStreamSocket> host_fake_socket_;
   scoped_ptr<ChannelAuthenticator> client_auth_;
   scoped_ptr<ChannelAuthenticator> host_auth_;
   MockChannelDoneCallback client_callback_;
@@ -137,15 +143,8 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(SslHmacChannelAuthenticatorTest);
 };
 
-// These tests use net::SSLServerSocket which is not implemented for OpenSSL.
-#if defined(USE_OPENSSL)
-#define MAYBE(x) DISABLED_##x
-#else
-#define MAYBE(x) x
-#endif
-
 // Verify that a channel can be connected using a valid shared secret.
-TEST_F(SslHmacChannelAuthenticatorTest, MAYBE(SuccessfulAuth)) {
+TEST_F(SslHmacChannelAuthenticatorTest, SuccessfulAuth) {
   client_auth_ = SslHmacChannelAuthenticator::CreateForClient(
       host_cert_, kTestSharedSecret);
   host_auth_ = SslHmacChannelAuthenticator::CreateForHost(
@@ -165,7 +164,7 @@ TEST_F(SslHmacChannelAuthenticatorTest, MAYBE(SuccessfulAuth)) {
 }
 
 // Verify that channels cannot be using invalid shared secret.
-TEST_F(SslHmacChannelAuthenticatorTest, MAYBE(InvalidChannelSecret)) {
+TEST_F(SslHmacChannelAuthenticatorTest, InvalidChannelSecret) {
   client_auth_ = SslHmacChannelAuthenticator::CreateForClient(
       host_cert_, kTestSharedSecretBad);
   host_auth_ = SslHmacChannelAuthenticator::CreateForHost(

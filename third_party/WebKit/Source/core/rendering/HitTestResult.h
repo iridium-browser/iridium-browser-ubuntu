@@ -53,7 +53,7 @@ public:
 
     HitTestResult();
     HitTestResult(const LayoutPoint&);
-    // Pass non-negative padding values to perform a rect-based hit test.
+    // Pass positive padding values to perform a rect-based hit test.
     HitTestResult(const LayoutPoint& centerPoint, unsigned topPadding, unsigned rightPadding, unsigned bottomPadding, unsigned leftPadding);
     HitTestResult(const HitTestLocation&);
     HitTestResult(const HitTestResult&);
@@ -110,9 +110,6 @@ public:
     Image* image() const;
     IntRect imageRect() const;
     KURL absoluteImageURL() const;
-    // This variant of absoluteImageURL will also convert <canvas> elements
-    // to huge image data URLs (very expensive).
-    KURL absoluteImageURLIncludingCanvasDataURL() const;
     KURL absoluteMediaURL() const;
     KURL absoluteLinkURL() const;
     String textContent() const;
@@ -135,11 +132,7 @@ public:
     // Collapse the rect-based test result into a single target at the specified location.
     void resolveRectBasedTest(Node* resolvedInnerNode, const LayoutPoint& resolvedPointInMainFrame);
 
-    // FIXME: Remove this.
-    Node* targetNode() const { return innerNode(); }
-
 private:
-    KURL absoluteImageURLInternal(bool allowCanvas) const;
     NodeSet& mutableRectBasedTestResult(); // See above.
     HTMLMediaElement* mediaElement() const;
 

@@ -51,8 +51,6 @@
         'test/engine/mock_nudge_handler.h',
         'test/engine/mock_update_handler.cc',
         'test/engine/mock_update_handler.h',
-        'test/engine/simple_cryptographer_provider.cc',
-        'test/engine/simple_cryptographer_provider.h',
         'test/engine/single_type_mock_server.cc',
         'test/engine/single_type_mock_server.h',
         'test/engine/test_directory_setter_upper.cc',
@@ -286,6 +284,7 @@
         'internal_api/attachments/attachment_uploader_impl_unittest.cc',
         'internal_api/attachments/fake_attachment_downloader_unittest.cc',
         'internal_api/attachments/fake_attachment_uploader_unittest.cc',
+        'internal_api/attachments/task_queue_unittest.cc',
         'internal_api/debug_info_event_listener_unittest.cc',
         'internal_api/http_bridge_unittest.cc',
         'internal_api/js_mutation_event_observer_unittest.cc',
@@ -442,13 +441,37 @@
           'target_name': 'sync_java_test_support',
           'type': 'none',
           'variables': {
-            'package_name': 'sync_java_test_support',
             'java_in_dir': '../sync/test/android/javatests',
           },
           'dependencies': [
             'sync_java',
           ],
           'includes': [ '../build/java.gypi' ],
+        },
+        {
+          'target_name': 'sync_fake_server_jni_headers',
+          'type': 'none',
+          'sources': [
+            '../chrome/android/sync_shell/javatests/src/chromium/chrome/browser/sync/FakeServerHelper.java',
+          ],
+          'variables': {
+            'jni_gen_package': 'sync/test/fake_server',
+            'jni_generator_ptr_type': 'long',
+          },
+          'includes': [ '../build/jni_generator.gypi' ],
+        },
+        {
+          'target_name': 'test_support_sync_fake_server_android',
+          'type': 'static_library',
+          'dependencies': [
+            'sync_fake_server_jni_headers',
+            'test_support_sync_fake_server',
+            '../base/base.gyp:base',
+          ],
+          'sources': [
+            'test/fake_server/android/fake_server_helper_android.cc',
+            'test/fake_server/android/fake_server_helper_android.h',
+          ],
         },
       ],
     }],

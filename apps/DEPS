@@ -6,8 +6,10 @@ include_rules = [
   "+content/public/test",
   "+components/keyed_service",
   "+components/pref_registry/pref_registry_syncable.h",
+  "+components/sessions",
   "+components/user_manager",
   "+components/web_modal",
+  "+device/usb",
   "+extensions",
   "+net/base",
   "+skia/ext",
@@ -21,7 +23,6 @@ include_rules = [
   "+chrome/browser/chromeos/login/users/user_manager.h",
   "+chrome/browser/lifetime/application_lifetime.h",
   "+chrome/browser/profiles",
-  "+chrome/browser/sessions/session_id.h",
   "+chrome/common/chrome_switches.h",
 
   # For default app icon.
@@ -33,9 +34,7 @@ include_rules = [
   "+chrome/browser/extensions/api/file_handlers/mime_util.h",
   "+chrome/browser/extensions/api/file_system/file_system_api.h",
   "+chrome/browser/extensions/chrome_extension_web_contents_observer.h",
-  "+chrome/browser/extensions/suggest_permission_util.h",
   "+chrome/browser/extensions/unpacked_installer.h",
-  "+chrome/common/extensions/api/app_window.h",
 ]
 
 specific_include_rules = {
@@ -48,7 +47,6 @@ specific_include_rules = {
     "+chrome/browser/extensions/extension_browsertest.h",
     "+chrome/browser/extensions/extension_test_message_listener.h",
     "+chrome/browser/extensions/test_extension_environment.h",
-    "+chrome/browser/extensions/test_extension_prefs.h",
     "+chrome/browser/ui/browser.h",
     "+chrome/test/base/in_process_browser_test.h",
     "+chrome/test/base/interactive_test_utils.h",

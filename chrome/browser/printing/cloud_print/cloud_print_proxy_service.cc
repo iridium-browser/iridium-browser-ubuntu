@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -35,8 +35,8 @@ using content::BrowserThread;
 
 CloudPrintProxyService::CloudPrintProxyService(Profile* profile)
     : profile_(profile),
-      weak_factory_(this),
-      enforcing_connector_policy_(false) {
+      enforcing_connector_policy_(false),
+      weak_factory_(this) {
 }
 
 CloudPrintProxyService::~CloudPrintProxyService() {

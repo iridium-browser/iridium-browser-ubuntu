@@ -12,12 +12,14 @@ cr.define('print_preview', function() {
    * the destination store.
    * @param {!print_preview.DestinationStore} destinationStore Data store
    *     containing the destinations to search through.
+   * @param {!print_preview.InvitationStore} invitationStore Data store
+   *     holding printer sharing invitations.
    * @param {!print_preview.UserInfo} userInfo Event target that contains
    *     information about the logged in user.
    * @constructor
    * @extends {print_preview.Overlay}
    */
-  function DestinationSearch(destinationStore, userInfo) {
+  function DestinationSearch(destinationStore, invitationStore, userInfo) {
     print_preview.Overlay.call(this);
 
     /**
@@ -28,11 +30,25 @@ cr.define('print_preview', function() {
     this.destinationStore_ = destinationStore;
 
     /**
+     * Data store holding printer sharing invitations.
+     * @type {!print_preview.DestinationStore}
+     * @private
+     */
+    this.invitationStore_ = invitationStore;
+
+    /**
      * Event target that contains information about the logged in user.
      * @type {!print_preview.UserInfo}
      * @private
      */
     this.userInfo_ = userInfo;
+
+    /**
+     * Currently displayed printer sharing invitation.
+     * @type {print_preview.Invitation}
+     * @private
+     */
+    this.invitation_ = null;
 
     /**
      * Used to record usage statistics.
@@ -55,7 +71,7 @@ cr.define('print_preview', function() {
      * @private
      */
     this.searchBox_ = new print_preview.SearchBox(
-        localStrings.getString('searchBoxPlaceholder'));
+        loadTimeData.getString('searchBoxPlaceholder'));
     this.addChild(this.searchBox_);
 
     /**
@@ -73,8 +89,8 @@ cr.define('print_preview', function() {
      */
     this.localList_ = new print_preview.DestinationList(
         this,
-        localStrings.getString('localDestinationsTitle'),
-        cr.isChromeOS ? null : localStrings.getString('manage'));
+        loadTimeData.getString('localDestinationsTitle'),
+        cr.isChromeOS ? null : loadTimeData.getString('manage'));
     this.addChild(this.localList_);
 
     /**
@@ -138,6 +154,9 @@ cr.define('print_preview', function() {
         this.reflowLists_();
         this.metrics_.record(
             print_preview.Metrics.DestinationSearchBucket.DESTINATION_SHOWN);
+
+        this.destinationStore_.startLoadAllDestinations();
+        this.invitationStore_.startLoadingInvitations();
       } else {
         // Collapse all destination lists
         this.localList_.setIsShowAll(false);
@@ -177,6 +196,15 @@ cr.define('print_preview', function() {
           this.onSignInActivated_.bind(this));
 
       this.tracker.add(
+          this.getChildElement('.invitation-accept-button'),
+          'click',
+          this.onInvitationProcessButtonClick_.bind(this, true /*accept*/));
+      this.tracker.add(
+          this.getChildElement('.invitation-reject-button'),
+          'click',
+          this.onInvitationProcessButtonClick_.bind(this, false /*accept*/));
+
+      this.tracker.add(
           this.getChildElement('.cloudprint-promo > .close-button'),
           'click',
           this.onCloudprintPromoCloseButtonClick_.bind(this));
@@ -214,6 +242,15 @@ cr.define('print_preview', function() {
           this.onDestinationSearchDone_.bind(this));
 
       this.tracker.add(
+          this.invitationStore_,
+          print_preview.InvitationStore.EventType.INVITATION_SEARCH_DONE,
+          this.updateInvitations_.bind(this));
+      this.tracker.add(
+          this.invitationStore_,
+          print_preview.InvitationStore.EventType.INVITATION_PROCESSED,
+          this.updateInvitations_.bind(this));
+
+      this.tracker.add(
           this.localList_,
           print_preview.DestinationList.EventType.ACTION_LINK_ACTIVATED,
           this.onManageLocalDestinationsActivated_.bind(this));
@@ -241,12 +278,12 @@ cr.define('print_preview', function() {
       this.recentList_.render(this.getChildElement('.recent-list'));
       this.localList_.render(this.getChildElement('.local-list'));
       this.cloudList_.render(this.getChildElement('.cloud-list'));
-      this.getChildElement('.promo-text').innerHTML = localStrings.getStringF(
+      this.getChildElement('.promo-text').innerHTML = loadTimeData.getStringF(
           'cloudPrintPromotion',
           '<span class="sign-in link-button">',
           '</span>');
       this.getChildElement('.account-select-label').textContent =
-          localStrings.getString('accountSelectTitle');
+          loadTimeData.getString('accountSelectTitle');
     },
 
     /**
@@ -259,12 +296,13 @@ cr.define('print_preview', function() {
           parseInt(elStyle.getPropertyValue('padding-top')) -
           parseInt(elStyle.getPropertyValue('padding-bottom')) -
           this.getChildElement('.lists').offsetTop -
+          this.getChildElement('.invitation-container').offsetHeight -
           this.getChildElement('.cloudprint-promo').offsetHeight;
     },
 
     /**
      * Filters all destination lists with the given query.
-     * @param {?string} query Query to filter destination lists by.
+     * @param {RegExp} query Query to filter destination lists by.
      * @private
      */
     filterLists_: function(query) {
@@ -414,6 +452,59 @@ cr.define('print_preview', function() {
     },
 
     /**
+     * Updates printer sharing invitations UI.
+     * @private
+     */
+    updateInvitations_: function() {
+      var invitations = this.userInfo_.activeUser ?
+          this.invitationStore_.invitations(this.userInfo_.activeUser) : [];
+      if (invitations.length > 0) {
+        if (this.invitation_ != invitations[0]) {
+          this.metrics_.record(print_preview.Metrics.DestinationSearchBucket.
+              INVITATION_AVAILABLE);
+        }
+        this.invitation_ = invitations[0];
+        this.showInvitation_(this.invitation_);
+      } else {
+        this.invitation_ = null;
+      }
+      setIsVisible(
+          this.getChildElement('.invitation-container'), !!this.invitation_);
+      this.reflowLists_();
+    },
+
+    /**
+     * @param {!printe_preview.Invitation} invitation Invitation to show.
+     * @private
+     */
+    showInvitation_: function(invitation) {
+      var invitationText = '';
+      if (invitation.asGroupManager) {
+        invitationText = loadTimeData.getStringF(
+            'groupPrinterSharingInviteText',
+            invitation.sender,
+            invitation.destination.displayName,
+            invitation.receiver);
+      } else {
+        invitationText = loadTimeData.getStringF(
+            'printerSharingInviteText',
+            invitation.sender,
+            invitation.destination.displayName);
+      }
+      this.getChildElement('.invitation-text').innerHTML = invitationText;
+
+      var acceptButton = this.getChildElement('.invitation-accept-button');
+      acceptButton.textContent = loadTimeData.getString(
+          invitation.asGroupManager ? 'acceptForGroup' : 'accept');
+      acceptButton.disabled = !!this.invitationStore_.invitationInProgress;
+      this.getChildElement('.invitation-reject-button').disabled =
+          !!this.invitationStore_.invitationInProgress;
+      setIsVisible(
+          this.getChildElement('#invitation-process-throbber'),
+          !!this.invitationStore_.invitationInProgress);
+    },
+
+    /**
      * Called when user's logged in accounts change. Updates the UI.
      * @private
      */
@@ -429,7 +520,7 @@ cr.define('print_preview', function() {
           accountSelectEl.add(option);
         });
         var option = document.createElement('option');
-        option.text = localStrings.getString('addAccountTitle');
+        option.text = loadTimeData.getString('addAccountTitle');
         option.value = '';
         accountSelectEl.add(option);
 
@@ -440,7 +531,7 @@ cr.define('print_preview', function() {
       setIsVisible(this.getChildElement('.user-info'), loggedIn);
       setIsVisible(this.getChildElement('.cloud-list'), loggedIn);
       setIsVisible(this.getChildElement('.cloudprint-promo'), !loggedIn);
-      this.reflowLists_();
+      this.updateInvitations_();
     },
 
     /**
@@ -450,7 +541,7 @@ cr.define('print_preview', function() {
      * @private
      */
     onSearch_: function(evt) {
-      this.filterLists_(evt.query);
+      this.filterLists_(evt.queryRegExp);
     },
 
     /**
@@ -503,6 +594,9 @@ cr.define('print_preview', function() {
       this.updateThrobbers_();
       this.renderDestinations_();
       this.reflowLists_();
+      // In case user account information was retrieved with this search
+      // (knowing current user account is required to fetch invitations).
+      this.invitationStore_.startLoadingInvitations();
     },
 
     /**
@@ -548,6 +642,7 @@ cr.define('print_preview', function() {
       if (account) {
         this.userInfo_.activeUser = account;
         this.destinationStore_.reloadUserCookieBasedDestinations();
+        this.invitationStore_.startLoadingInvitations();
         this.metrics_.record(
             print_preview.Metrics.DestinationSearchBucket.ACCOUNT_CHANGED);
       } else {
@@ -562,6 +657,19 @@ cr.define('print_preview', function() {
         this.metrics_.record(
             print_preview.Metrics.DestinationSearchBucket.ADD_ACCOUNT_SELECTED);
       }
+    },
+
+    /**
+     * Called when the printer sharing invitation Accept/Reject button is
+     * clicked.
+     * @private
+     */
+    onInvitationProcessButtonClick_: function(accept) {
+      this.metrics_.record(accept ?
+          print_preview.Metrics.DestinationSearchBucket.INVITATION_ACCEPTED :
+          print_preview.Metrics.DestinationSearchBucket.INVITATION_REJECTED);
+      this.invitationStore_.processInvitation(this.invitation_, accept);
+      this.updateInvitations_();
     },
 
     /**

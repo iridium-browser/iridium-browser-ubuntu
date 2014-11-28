@@ -18,10 +18,9 @@ MediaStreamTrack* MediaStreamTrack::GetTrack(
 }
 
 MediaStreamTrack::MediaStreamTrack(
-    webrtc::MediaStreamTrackInterface* track, bool is_local_track)
-    : track_(track),
-      muted_state_(false),
-      is_local_track_(is_local_track){
+    const scoped_refptr<webrtc::MediaStreamTrackInterface>& track,
+    bool is_local_track)
+    : track_(track), is_local_track_(is_local_track) {
 }
 
 MediaStreamTrack::~MediaStreamTrack() {
@@ -29,18 +28,8 @@ MediaStreamTrack::~MediaStreamTrack() {
 
 void MediaStreamTrack::SetEnabled(bool enabled) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (track_)
+  if (track_.get())
     track_->set_enabled(enabled);
-}
-
-void MediaStreamTrack::SetMutedState(bool muted_state) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  muted_state_ = muted_state;
-}
-
-bool MediaStreamTrack::GetMutedState(void) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return muted_state_;
 }
 
 void MediaStreamTrack::Stop() {
@@ -49,7 +38,7 @@ void MediaStreamTrack::Stop() {
   // since there is no proper way of doing that on a remote track, we can
   // at least disable the track. Blink will not call down to the content layer
   // after a track has been stopped.
-  if (track_)
+  if (track_.get())
     track_->set_enabled(false);
 }
 

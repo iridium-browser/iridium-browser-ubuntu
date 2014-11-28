@@ -83,7 +83,6 @@ void ValidationMessageClientImpl::showValidationMessage(const Element& anchor, c
 
     m_webView.client()->showValidationMessage(anchorInRootView, m_message, toWebTextDirection(messageDir),
         subMessage, toWebTextDirection(subMessageDir));
-    m_webView.client()->showValidationMessage(anchorInRootView, m_message, subMessage, toWebTextDirection(messageDir));
 
     m_finishTime = monotonicallyIncreasingTime() + std::max(minimumSecondToShowValidationMessage, (message.length() + subMessage.length()) * secondPerCharacter);
     // FIXME: We should invoke checkAnchorStatus actively when layout, scroll,
@@ -124,7 +123,7 @@ void ValidationMessageClientImpl::checkAnchorStatus(Timer<ValidationMessageClien
     // Check the visibility of the element.
     // FIXME: Can we check invisibility by scrollable non-frame elements?
     IntRect newAnchorRect = currentView()->contentsToRootView(m_currentAnchor->pixelSnappedBoundingBox());
-    newAnchorRect = intersection(currentView()->convertToRootView(currentView()->boundsRect()), newAnchorRect);
+    newAnchorRect = intersection(currentView()->convertToContainingWindow(currentView()->boundsRect()), newAnchorRect);
     if (newAnchorRect.isEmpty()) {
         hideValidationMessage(*m_currentAnchor);
         return;

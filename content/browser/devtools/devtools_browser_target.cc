@@ -17,9 +17,8 @@
 
 namespace content {
 
-DevToolsBrowserTarget::DevToolsBrowserTarget(
-    net::HttpServer* http_server,
-    int connection_id)
+DevToolsBrowserTarget::DevToolsBrowserTarget(net::HttpServer* http_server,
+                                             int connection_id)
     : message_loop_proxy_(base::MessageLoopProxy::current()),
       http_server_(http_server),
       connection_id_(connection_id),
@@ -52,7 +51,7 @@ void DevToolsBrowserTarget::HandleMessage(const std::string& data) {
   std::string error_response;
   scoped_refptr<DevToolsProtocol::Command> command =
       DevToolsProtocol::ParseCommand(data, &error_response);
-  if (!command) {
+  if (!command.get()) {
     Respond(error_response);
     return;
   }
@@ -81,9 +80,9 @@ void DevToolsBrowserTarget::HandleMessage(const std::string& data) {
   if (handle_directly) {
     scoped_refptr<DevToolsProtocol::Response> response =
         handler->HandleCommand(command);
-    if (response && response->is_async_promise())
+    if (response.get() && response->is_async_promise())
       return;
-    if (response)
+    if (response.get())
       Respond(response->Serialize());
     else
       Respond(command->NoSuchMethodErrorResponse()->Serialize());
@@ -148,10 +147,10 @@ void DevToolsBrowserTarget::HandleCommandOnUIThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   scoped_refptr<DevToolsProtocol::Response> response =
       handler->HandleCommand(command);
-  if (response && response->is_async_promise())
+  if (response.get() && response->is_async_promise())
     return;
 
-  if (response)
+  if (response.get())
     RespondFromUIThread(response->Serialize());
   else
     RespondFromUIThread(command->NoSuchMethodErrorResponse()->Serialize());

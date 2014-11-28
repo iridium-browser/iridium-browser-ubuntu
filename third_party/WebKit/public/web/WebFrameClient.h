@@ -32,6 +32,7 @@
 #define WebFrameClient_h
 
 #include "../platform/WebColor.h"
+#include "WebAXObject.h"
 #include "WebDOMMessageEvent.h"
 #include "WebDataSource.h"
 #include "WebFrame.h"
@@ -62,6 +63,8 @@ class WebContentDecryptionModule;
 class WebCookieJar;
 class WebDataSource;
 class WebDOMEvent;
+class WebExternalPopupMenu;
+class WebExternalPopupMenuClient;
 class WebFormElement;
 class WebGeolocationClient;
 class WebInputEvent;
@@ -90,6 +93,7 @@ struct WebColorSuggestion;
 struct WebConsoleMessage;
 struct WebContextMenuData;
 struct WebPluginParams;
+struct WebPopupMenuInfo;
 struct WebRect;
 struct WebSize;
 struct WebURLError;
@@ -102,7 +106,8 @@ public:
     virtual WebPlugin* createPlugin(WebLocalFrame*, const WebPluginParams&) { return 0; }
 
     // May return null.
-    virtual WebMediaPlayer* createMediaPlayer(WebLocalFrame*, const WebURL&, WebMediaPlayerClient*) { return 0; }
+    // WebContentDecryptionModule* may be null if one has not yet been set.
+    virtual WebMediaPlayer* createMediaPlayer(WebLocalFrame*, const WebURL&, WebMediaPlayerClient*, WebContentDecryptionModule*) { return 0; }
 
     // May return null.
     virtual WebContentDecryptionModule* createContentDecryptionModule(WebLocalFrame*, const WebSecurityOrigin&, const WebString& keySystem) { return 0; }
@@ -115,6 +120,11 @@ public:
 
     // May return null.
     virtual WebWorkerPermissionClientProxy* createWorkerPermissionClientProxy(WebLocalFrame*) { return 0; }
+
+    // Create a new WebPopupMenu. In the "createExternalPopupMenu" form, the
+    // client is responsible for rendering the contents of the popup menu.
+    virtual WebExternalPopupMenu* createExternalPopupMenu(
+        const WebPopupMenuInfo&, WebExternalPopupMenuClient*) { return 0; }
 
 
     // Services ------------------------------------------------------------
@@ -551,6 +561,16 @@ public:
 
     // Access the embedder API for (client-based) screen orientation client .
     virtual WebScreenOrientationClient* webScreenOrientationClient() { return 0; }
+
+    // Accessibility -------------------------------------------------------
+
+    // Notifies embedder about an accessibility event.
+    virtual void postAccessibilityEvent(const WebAXObject&, WebAXEvent) { }
+
+    // ServiceWorker -------------------------------------------------------
+
+    // Whether the frame is controlled by the ServiceWorker
+    virtual bool isControlledByServiceWorker() { return false; }
 
 protected:
     virtual ~WebFrameClient() { }

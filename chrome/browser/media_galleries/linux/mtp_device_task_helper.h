@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
 #include "device/media_transfer_protocol/mtp_file_entry.pb.h"
-#include "webkit/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/async_file_util.h"
 
 class MTPReadFileWorker;
 struct SnapshotRequestInfo;
@@ -33,7 +33,7 @@ class MTPDeviceTaskHelper {
 
   // NOTE: The file names in the entry list have their file id appended at the
   // end. e.g. foo.jpg with file id 45 becomes foo.jpg,45.
-  typedef base::Callback<void(const fileapi::AsyncFileUtil::EntryList& entries,
+  typedef base::Callback<void(const storage::AsyncFileUtil::EntryList& entries,
                               bool has_more)> ReadDirectorySuccessCallback;
 
   typedef MTPDeviceAsyncDelegate::ErrorCallback ErrorCallback;

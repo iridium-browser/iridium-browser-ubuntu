@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
@@ -17,15 +17,15 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
-#include "extensions/common/id_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -45,11 +45,11 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/browser/extensions_browser_client.h"
-#include "webkit/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_context.h"
 #endif
 
 #if defined(ENABLE_APP_LIST)
-#include "grit/chromium_strings.h"
+#include "chrome/grit/chromium_strings.h"
 #endif
 
 using content::BrowserThread;
@@ -66,7 +66,7 @@ std::string GenerateId(const base::DictionaryValue* manifest,
   std::string id_input;
   CHECK(manifest->GetString(manifest_keys::kPublicKey, &raw_key));
   CHECK(Extension::ParsePEMKeyBytes(raw_key, &id_input));
-  std::string id = id_util::GenerateId(id_input);
+  std::string id = crx_file::id_util::GenerateId(id_input);
   return id;
 }
 
@@ -301,6 +301,14 @@ void ComponentLoader::AddHangoutServicesExtension() {
 #endif
 }
 
+void ComponentLoader::AddHotwordAudioVerificationApp() {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableExperimentalHotwording)) {
+    Add(IDR_HOTWORD_AUDIO_VERIFICATION_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("hotword_audio_verification")));
+  }
+}
+
 void ComponentLoader::AddHotwordHelperExtension() {
   if (HotwordServiceFactory::IsHotwordAllowed(browser_context_)) {
     CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -332,14 +340,24 @@ void ComponentLoader::AddChromeVoxExtension(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   base::FilePath resources_path;
   PathService::Get(chrome::DIR_RESOURCES, &resources_path);
+
   base::FilePath chromevox_path =
       resources_path.Append(extension_misc::kChromeVoxExtensionPath);
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  const char* manifest_filename =
-      command_line->HasSwitch(chromeos::switches::kGuestSession) ?
-      extension_misc::kChromeVoxGuestManifestFilename :
-          extension_misc::kChromeVoxManifestFilename;
+  bool is_chromevox_next =
+      command_line->HasSwitch(chromeos::switches::kEnableChromeVoxNext);
+  bool is_guest = command_line->HasSwitch(chromeos::switches::kGuestSession);
+  const char* manifest_filename;
+  if (is_chromevox_next) {
+    manifest_filename =
+        is_guest ? extension_misc::kChromeVoxNextGuestManifestFilename
+                 : extension_misc::kChromeVoxNextManifestFilename;
+  } else {
+    manifest_filename =
+        is_guest ? extension_misc::kChromeVoxGuestManifestFilename
+                 : extension_misc::kChromeVoxManifestFilename;
+  }
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE,
       FROM_HERE,
@@ -472,9 +490,7 @@ void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
     return;
 
   // Component extensions needed for kiosk apps.
-  AddVideoPlayerExtension();
   AddFileManagerExtension();
-  AddGalleryExtension();
 
   // Add virtual keyboard.
   AddKeyboardApp();
@@ -495,13 +511,11 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
 #if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
   // Since this is a v2 app it has a background page.
-  if (!command_line->HasSwitch(chromeos::switches::kDisableGeniusApp)) {
-    AddWithNameAndDescription(IDR_GENIUS_APP_MANIFEST,
-                              base::FilePath(FILE_PATH_LITERAL(
-                                  "/usr/share/chromeos-assets/genius_app")),
-                              IDS_GENIUS_APP_NAME,
-                              IDS_GENIUS_APP_DESCRIPTION);
-  }
+  AddWithNameAndDescription(IDR_GENIUS_APP_MANIFEST,
+                            base::FilePath(FILE_PATH_LITERAL(
+                                "/usr/share/chromeos-assets/genius_app")),
+                            IDS_GENIUS_APP_NAME,
+                            IDS_GENIUS_APP_DESCRIPTION);
 #endif
 
   if (!skip_session_components) {
@@ -510,6 +524,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     AddGalleryExtension();
 
     AddHangoutServicesExtension();
+    AddHotwordAudioVerificationApp();
     AddHotwordHelperExtension();
     AddImageLoaderExtension();
 
@@ -631,7 +646,7 @@ void ComponentLoader::EnableFileSystemInGuestMode(const std::string& id) {
             browser_context_);
     GURL site = content::SiteInstance::GetSiteForURL(
         off_the_record_context, Extension::GetBaseURLFromExtensionId(id));
-    fileapi::FileSystemContext* file_system_context =
+    storage::FileSystemContext* file_system_context =
         content::BrowserContext::GetStoragePartitionForSite(
             off_the_record_context, site)->GetFileSystemContext();
     file_system_context->EnableTemporaryFileSystemInIncognito();

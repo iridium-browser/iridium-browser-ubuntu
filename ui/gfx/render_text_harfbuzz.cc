@@ -28,6 +28,9 @@ namespace gfx {
 
 namespace {
 
+// Text length limit. Longer strings are slow and not fully tested.
+const size_t kMaxTextLength = 10000;
+
 // The maximum number of scripts a Unicode character can belong to. This value
 // is arbitrarily chosen to be a good limit because it is unlikely for a single
 // character to belong to more scripts.
@@ -269,7 +272,10 @@ class HarfBuzzFace {
 };
 
 // Creates a HarfBuzz font from the given Skia face and text size.
-hb_font_t* CreateHarfBuzzFont(SkTypeface* skia_face, int text_size) {
+hb_font_t* CreateHarfBuzzFont(SkTypeface* skia_face,
+                              int text_size,
+                              const FontRenderParams& params,
+                              bool background_is_transparent) {
   typedef std::pair<HarfBuzzFace, GlyphCache> FaceCache;
 
   // TODO(ckocagil): This shouldn't grow indefinitely. Maybe use base::MRUCache?
@@ -285,6 +291,9 @@ hb_font_t* CreateHarfBuzzFont(SkTypeface* skia_face, int text_size) {
   FontData* hb_font_data = new FontData(&face_cache->second);
   hb_font_data->paint_.setTypeface(skia_face);
   hb_font_data->paint_.setTextSize(text_size);
+  // TODO(ckocagil): Do we need to update these params later?
+  internal::ApplyRenderParams(params, background_is_transparent,
+                              &hb_font_data->paint_);
   hb_font_set_funcs(harfbuzz_font, g_font_funcs.Get().get(), hb_font_data,
                     DeleteByType<FontData>);
   hb_font_make_immutable(harfbuzz_font);
@@ -297,22 +306,31 @@ bool IsUnusualBlockCode(UBlockCode block_code) {
          block_code == UBLOCK_MISCELLANEOUS_SYMBOLS;
 }
 
-// Returns the index of the first unusual character after a usual character or
-// vice versa. Unusual characters are defined by |IsUnusualBlockCode|.
-size_t FindUnusualCharacter(const base::string16& text,
-                            size_t run_start,
-                            size_t run_break) {
+bool IsBracket(UChar32 character) {
+  static const char kBrackets[] = { '(', ')', '{', '}', '<', '>', };
+  static const char* kBracketsEnd = kBrackets + arraysize(kBrackets);
+  return std::find(kBrackets, kBracketsEnd, character) != kBracketsEnd;
+}
+
+// Returns the boundary between a special and a regular character. Special
+// characters are brackets or characters that satisfy |IsUnusualBlockCode|.
+size_t FindRunBreakingCharacter(const base::string16& text,
+                                size_t run_start,
+                                size_t run_break) {
   const int32 run_length = static_cast<int32>(run_break - run_start);
-  base::i18n::UTF16CharIterator iter(text.c_str() + run_start,
-                                     run_length);
-  const UBlockCode first_block_code = ublock_getCode(iter.get());
-  const bool first_block_unusual = IsUnusualBlockCode(first_block_code);
+  base::i18n::UTF16CharIterator iter(text.c_str() + run_start, run_length);
+  const UChar32 first_char = iter.get();
+  const UBlockCode first_block = ublock_getCode(first_char);
+  const bool first_block_unusual = IsUnusualBlockCode(first_block);
+  const bool first_bracket = IsBracket(first_char);
+
   while (iter.Advance() && iter.array_pos() < run_length) {
-    const UBlockCode current_block_code = ublock_getCode(iter.get());
-    if (current_block_code != first_block_code &&
-        (first_block_unusual || IsUnusualBlockCode(current_block_code))) {
+    const UChar32 current_char = iter.get();
+    const UBlockCode current_block = ublock_getCode(current_char);
+    const bool block_break = current_block != first_block &&
+        (first_block_unusual || IsUnusualBlockCode(current_block));
+    if (block_break || first_bracket != IsBracket(current_char))
       return run_start + iter.array_pos();
-    }
   }
   return run_break;
 }
@@ -557,7 +575,9 @@ Range TextRunHarfBuzz::GetGraphemeBounds(
 
 RenderTextHarfBuzz::RenderTextHarfBuzz()
     : RenderText(),
-      needs_layout_(false) {}
+      needs_layout_(false) {
+  set_truncate_length(kMaxTextLength);
+}
 
 RenderTextHarfBuzz::~RenderTextHarfBuzz() {}
 
@@ -601,8 +621,19 @@ SelectionModel RenderTextHarfBuzz::FindCursorPosition(const Point& point) {
 }
 
 std::vector<RenderText::FontSpan> RenderTextHarfBuzz::GetFontSpansForTesting() {
-  NOTIMPLEMENTED();
-  return std::vector<RenderText::FontSpan>();
+  EnsureLayout();
+
+  std::vector<RenderText::FontSpan> spans;
+  for (size_t i = 0; i < runs_.size(); ++i) {
+    SkString family_name;
+    runs_[i]->skia_face->getFamilyName(&family_name);
+    Font font(family_name.c_str(), runs_[i]->font_size);
+    spans.push_back(RenderText::FontSpan(font,
+        Range(LayoutIndexToTextIndex(runs_[i]->range.start()),
+              LayoutIndexToTextIndex(runs_[i]->range.end()))));
+  }
+
+  return spans;
 }
 
 Range RenderTextHarfBuzz::GetGlyphBounds(size_t index) {
@@ -871,13 +902,6 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
   internal::SkiaTextRenderer renderer(canvas);
   ApplyFadeEffects(&renderer);
   ApplyTextShadows(&renderer);
-
-#if defined(OS_WIN) || defined(OS_LINUX)
-  renderer.SetFontRenderParams(
-      font_list().GetPrimaryFont().GetFontRenderParams(),
-      background_is_transparent());
-#endif
-
   ApplyCompositionAndSelectionStyles();
 
   int current_x = 0;
@@ -886,6 +910,8 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
     const internal::TextRunHarfBuzz& run = *runs_[visual_to_logical_[i]];
     renderer.SetTypeface(run.skia_face.get());
     renderer.SetTextSize(run.font_size);
+    renderer.SetFontRenderParams(run.render_params,
+                                 background_is_transparent());
 
     Vector2d origin = line_offset + Vector2d(current_x, lines()[0].baseline);
     scoped_ptr<SkPoint[]> positions(new SkPoint[run.glyph_count]);
@@ -1016,11 +1042,12 @@ void RenderTextHarfBuzz::ItemizeText() {
     run_break = std::min(static_cast<size_t>(script_item_break),
                          TextIndexToLayoutIndex(style.GetRange().end()));
 
-    // Break runs adjacent to character substrings in certain code blocks.
-    // This avoids using their fallback fonts for more characters than needed,
-    // in cases like "\x25B6 Media Title", etc. http://crbug.com/278913
+    // Break runs at certain characters that need to be rendered separately to
+    // prevent either an unusual character from forcing a fallback font on the
+    // entire run, or brackets from being affected by a fallback font.
+    // http://crbug.com/278913, http://crbug.com/396776
     if (run_break > run->range.start())
-      run_break = FindUnusualCharacter(text, run->range.start(), run_break);
+      run_break = FindRunBreakingCharacter(text, run->range.start(), run_break);
 
     DCHECK(IsValidCodePointIndex(text, run_break));
     style.UpdatePosition(LayoutIndexToTextIndex(run_break));
@@ -1113,8 +1140,13 @@ bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
   if (skia_face == NULL)
     return false;
   run->skia_face = skia_face;
+  FontRenderParamsQuery query(false);
+  query.families.push_back(font_family);
+  query.pixel_size = run->font_size;
+  query.style = run->font_style;
+  run->render_params = GetFontRenderParams(query, NULL);
   hb_font_t* harfbuzz_font = CreateHarfBuzzFont(run->skia_face.get(),
-                                                run->font_size);
+      run->font_size, run->render_params, background_is_transparent());
 
   // Create a HarfBuzz buffer and add the string to be shaped. The HarfBuzz
   // buffer holds our text, run information to be used by the shaping engine,
@@ -1148,6 +1180,11 @@ bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
     const int y_offset = SkFixedToScalar(hb_positions[i].y_offset);
     run->positions[i].set(run->width + x_offset, -y_offset);
     run->width += SkFixedToScalar(hb_positions[i].x_advance);
+#if defined(OS_LINUX)
+    // Match Pango's glyph rounding logic on Linux.
+    if (!run->render_params.subpixel_positioning)
+      run->width = std::floor(run->width + 0.5f);
+#endif
   }
 
   hb_buffer_destroy(buffer);

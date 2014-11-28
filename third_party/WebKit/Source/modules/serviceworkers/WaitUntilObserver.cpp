@@ -26,15 +26,21 @@ public:
         Rejected,
     };
 
-    static PassOwnPtr<ScriptFunction> create(PassRefPtr<WaitUntilObserver> observer, ResolveType type)
+    static v8::Handle<v8::Function> createFunction(ScriptState* scriptState, WaitUntilObserver* observer, ResolveType type)
     {
-        ExecutionContext* executionContext = observer->executionContext();
-        return adoptPtr(new ThenFunction(toIsolate(executionContext), observer, type));
+        ThenFunction* self = new ThenFunction(scriptState, observer, type);
+        return self->bindToV8Function();
+    }
+
+    virtual void trace(Visitor* visitor) OVERRIDE
+    {
+        visitor->trace(m_observer);
+        ScriptFunction::trace(visitor);
     }
 
 private:
-    ThenFunction(v8::Isolate* isolate, PassRefPtr<WaitUntilObserver> observer, ResolveType type)
-        : ScriptFunction(isolate)
+    ThenFunction(ScriptState* scriptState, WaitUntilObserver* observer, ResolveType type)
+        : ScriptFunction(scriptState)
         , m_observer(observer)
         , m_resolveType(type)
     {
@@ -51,17 +57,13 @@ private:
         return value;
     }
 
-    RefPtr<WaitUntilObserver> m_observer;
+    Member<WaitUntilObserver> m_observer;
     ResolveType m_resolveType;
 };
 
-PassRefPtr<WaitUntilObserver> WaitUntilObserver::create(ExecutionContext* context, EventType type, int eventID)
+WaitUntilObserver* WaitUntilObserver::create(ExecutionContext* context, EventType type, int eventID)
 {
-    return adoptRef(new WaitUntilObserver(context, type, eventID));
-}
-
-WaitUntilObserver::~WaitUntilObserver()
-{
+    return new WaitUntilObserver(context, type, eventID);
 }
 
 void WaitUntilObserver::willDispatchEvent()
@@ -78,8 +80,8 @@ void WaitUntilObserver::waitUntil(ScriptState* scriptState, const ScriptValue& v
 {
     incrementPendingActivity();
     ScriptPromise::cast(scriptState, value).then(
-        ThenFunction::create(this, ThenFunction::Fulfilled),
-        ThenFunction::create(this, ThenFunction::Rejected));
+        ThenFunction::createFunction(scriptState, this, ThenFunction::Fulfilled),
+        ThenFunction::createFunction(scriptState, this, ThenFunction::Rejected));
 }
 
 WaitUntilObserver::WaitUntilObserver(ExecutionContext* context, EventType type, int eventID)

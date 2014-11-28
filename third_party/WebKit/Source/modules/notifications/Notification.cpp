@@ -31,34 +31,28 @@
 #include "config.h"
 #include "modules/notifications/Notification.h"
 
-#include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/Document.h"
 #include "core/events/Event.h"
-#include "core/frame/UseCounter.h"
 #include "core/page/WindowFocusAllowedIndicator.h"
 #include "modules/notifications/NotificationClient.h"
 #include "modules/notifications/NotificationController.h"
+#include "modules/notifications/NotificationOptions.h"
 #include "modules/notifications/NotificationPermissionClient.h"
 
 namespace blink {
 
-Notification* Notification::create(ExecutionContext* context, const String& title, const Dictionary& options)
+Notification* Notification::create(ExecutionContext* context, const String& title, const NotificationOptions& options)
 {
     NotificationClient& client = NotificationController::clientFrom(context);
     Notification* notification = adoptRefCountedGarbageCollectedWillBeNoop(new Notification(title, context, &client));
 
-    String argument;
-    if (DictionaryHelper::get(options, "body", argument))
-        notification->setBody(argument);
-    if (DictionaryHelper::get(options, "tag", argument))
-        notification->setTag(argument);
-    if (DictionaryHelper::get(options, "lang", argument))
-        notification->setLang(argument);
-    if (DictionaryHelper::get(options, "dir", argument))
-        notification->setDir(argument);
-    if (DictionaryHelper::get(options, "icon", argument)) {
-        KURL iconUrl = argument.isEmpty() ? KURL() : context->completeURL(argument);
+    notification->setBody(options.body());
+    notification->setTag(options.tag());
+    notification->setLang(options.lang());
+    notification->setDir(options.dir());
+    if (options.hasIcon()) {
+        KURL iconUrl = options.icon().isEmpty() ? KURL() : context->completeURL(options.icon());
         if (!iconUrl.isEmpty() && iconUrl.isValid())
             notification->setIconUrl(iconUrl);
     }
@@ -76,7 +70,6 @@ Notification::Notification(const String& title, ExecutionContext* context, Notif
     , m_asyncRunner(this, &Notification::show)
 {
     ASSERT(m_client);
-    ScriptWrappable::init(this);
 
     m_asyncRunner.runAsync();
 }
@@ -163,15 +156,13 @@ const String& Notification::permissionString(NotificationClient::Permission perm
 
 const String& Notification::permission(ExecutionContext* context)
 {
-    UseCounter::count(context, UseCounter::NotificationPermission);
     return permissionString(NotificationController::clientFrom(context).checkPermission(context));
 }
 
-void Notification::requestPermission(ExecutionContext* context, PassOwnPtr<NotificationPermissionCallback> callback)
+void Notification::requestPermission(ExecutionContext* context, NotificationPermissionCallback* callback)
 {
     // FIXME: Assert that this code-path will only be reached for Document environments
     // when Blink supports [Exposed] annotations on class members in IDL definitions.
-
     if (NotificationPermissionClient* permissionClient = NotificationPermissionClient::from(context)) {
         permissionClient->requestPermission(context, callback);
         return;

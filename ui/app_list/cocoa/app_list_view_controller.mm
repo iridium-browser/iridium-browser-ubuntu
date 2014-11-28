@@ -88,6 +88,7 @@ class AppListModelObserverBridge : public AppListViewDelegateObserver {
  private:
   // Overridden from app_list::AppListViewDelegateObserver:
   virtual void OnProfilesChanged() OVERRIDE;
+  virtual void OnShutdown() OVERRIDE;
 
   AppListViewController* parent_;  // Weak. Owns us.
 
@@ -106,6 +107,10 @@ AppListModelObserverBridge::~AppListModelObserverBridge() {
 
 void AppListModelObserverBridge::OnProfilesChanged() {
   [parent_ onProfilesChanged];
+}
+
+void AppListModelObserverBridge::OnShutdown() {
+  [parent_ setDelegate:nil];
 }
 
 }  // namespace app_list
@@ -154,10 +159,10 @@ void AppListModelObserverBridge::OnProfilesChanged() {
 }
 
 - (app_list::AppListViewDelegate*)delegate {
-  return delegate_.get();
+  return delegate_;
 }
 
-- (void)setDelegate:(scoped_ptr<app_list::AppListViewDelegate>)newDelegate {
+- (void)setDelegate:(app_list::AppListViewDelegate*)newDelegate {
   if (delegate_) {
     // Ensure the search box is cleared when switching profiles.
     if ([self searchBoxModel])
@@ -169,7 +174,7 @@ void AppListModelObserverBridge::OnProfilesChanged() {
     [appsSearchBoxController_ setDelegate:nil];
     [appsGridController_ setDelegate:nil];
   }
-  delegate_.reset(newDelegate.release());
+  delegate_ = newDelegate;
   if (delegate_) {
     [loadingIndicator_ stopAnimation:self];
   } else {
@@ -177,7 +182,7 @@ void AppListModelObserverBridge::OnProfilesChanged() {
     return;
   }
 
-  [appsGridController_ setDelegate:delegate_.get()];
+  [appsGridController_ setDelegate:delegate_];
   [appsSearchBoxController_ setDelegate:self];
   [appsSearchResultsController_ setDelegate:self];
   app_list_model_observer_bridge_.reset(

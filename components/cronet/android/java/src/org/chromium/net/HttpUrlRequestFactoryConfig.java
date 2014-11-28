@@ -4,6 +4,7 @@
 
 package org.chromium.net;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -12,6 +13,7 @@ import org.json.JSONObject;
  * HttpUrlRequestFactory.
  */
 public class HttpUrlRequestFactoryConfig {
+
     /**
      * Default config enables SPDY, QUIC, in memory http cache.
      */
@@ -20,6 +22,13 @@ public class HttpUrlRequestFactoryConfig {
         enableQUIC(false);
         enableSPDY(true);
         enableHttpCache(HttpCache.IN_MEMORY, 100 * 1024);
+    }
+
+    /**
+     * Override the name of the native library backing cronet.
+     */
+    public HttpUrlRequestFactoryConfig setLibraryName(String libName) {
+        return putString(UrlRequestContextConfig.NATIVE_LIBRARY_NAME, libName);
     }
 
     /**
@@ -37,7 +46,7 @@ public class HttpUrlRequestFactoryConfig {
         return putBoolean(UrlRequestContextConfig.ENABLE_LEGACY_MODE, value);
     }
 
-    public boolean legacyMode() {
+    boolean legacyMode() {
         return mConfig.optBoolean(UrlRequestContextConfig.ENABLE_LEGACY_MODE);
     }
 
@@ -53,6 +62,11 @@ public class HttpUrlRequestFactoryConfig {
      */
     public HttpUrlRequestFactoryConfig enableSPDY(boolean value) {
         return putBoolean(UrlRequestContextConfig.ENABLE_SPDY, value);
+    }
+
+    String libraryName() {
+        return mConfig.optString(UrlRequestContextConfig.NATIVE_LIBRARY_NAME,
+                                 "cronet");
     }
 
     /**
@@ -83,6 +97,37 @@ public class HttpUrlRequestFactoryConfig {
      */
     public HttpUrlRequestFactoryConfig setStoragePath(String value) {
         return putString(UrlRequestContextConfig.STORAGE_PATH, value);
+    }
+
+    /**
+     * Explicitly mark |host| as supporting QUIC.
+     * Note that enableHttpCache(DISK) is needed to take advantage of 0-RTT
+     * connection establishment between sessions.
+     *
+     * @param host of the server that supports QUIC.
+     * @param port of the server that supports QUIC.
+     * @param alternatePort to use for QUIC.
+     */
+    public HttpUrlRequestFactoryConfig addQuicHint(String host,
+                                                   int port,
+                                                   int alternatePort) {
+        try {
+            JSONArray quicHints = mConfig.optJSONArray(
+                    UrlRequestContextConfig.QUIC_HINTS);
+            if (quicHints == null) {
+                quicHints = new JSONArray();
+                mConfig.put(UrlRequestContextConfig.QUIC_HINTS, quicHints);
+            }
+
+            JSONObject hint = new JSONObject();
+            hint.put(UrlRequestContextConfig.QUIC_HINT_HOST, host);
+            hint.put(UrlRequestContextConfig.QUIC_HINT_PORT, port);
+            hint.put(UrlRequestContextConfig.QUIC_HINT_ALT_PORT, alternatePort);
+            quicHints.put(hint);
+        } catch (JSONException e) {
+            ;
+        }
+        return this;
     }
 
     /**

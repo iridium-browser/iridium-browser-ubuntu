@@ -30,8 +30,10 @@
 
 #include "config.h"
 
+#include "bindings/core/v8/V8Binding.h"
 #include "core/page/Page.h"
 #include "core/page/PageSerializer.h"
+#include "core/testing/URLTestHelpers.h"
 #include "platform/SerializedResource.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebString.h"
@@ -44,11 +46,9 @@
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include "web/tests/URLTestHelpers.h"
 #include "wtf/Vector.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
 using namespace blink;
 using blink::URLTestHelpers::toKURL;
 using blink::URLTestHelpers::registerMockedURLLoad;
@@ -174,6 +174,7 @@ TEST_F(PageSerializerTest, InputImage)
 
 TEST_F(PageSerializerTest, XMLDeclaration)
 {
+    V8TestingScope scope(v8::Isolate::GetCurrent());
     setBaseFolder("pageserializer/xmldecl/");
 
     registerURL("xmldecl.xml", "text/xml");

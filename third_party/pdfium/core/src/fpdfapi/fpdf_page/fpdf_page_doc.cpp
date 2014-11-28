@@ -107,9 +107,9 @@ CPDF_Pattern* CPDF_Document::LoadPattern(CPDF_Object* pPatternObj, FX_BOOL bShad
 {
     return GetValidatePageData()->GetPattern(pPatternObj, bShading, matrix);
 }
-CPDF_IccProfile* CPDF_Document::LoadIccProfile(CPDF_Stream* pStream, int nComponents)
+CPDF_IccProfile* CPDF_Document::LoadIccProfile(CPDF_Stream* pStream)
 {
-    return GetValidatePageData()->GetIccProfile(pStream, nComponents);
+    return GetValidatePageData()->GetIccProfile(pStream);
 }
 CPDF_Image* CPDF_Document::LoadImageF(CPDF_Object* pObj)
 {
@@ -134,6 +134,7 @@ CPDF_DocPageData::CPDF_DocPageData(CPDF_Document *pPDFDoc)
     , m_ImageMap()
     , m_IccProfileMap()
     , m_FontFileMap()
+    , m_bForceClear(FALSE)
 {
     m_FontMap.InitHashTable(64);
     m_ColorSpaceMap.InitHashTable(32);
@@ -146,100 +147,129 @@ CPDF_DocPageData::~CPDF_DocPageData()
 {
     Clear(FALSE);
     Clear(TRUE);
+    FX_POSITION pos = m_PatternMap.GetStartPosition();
+    while (pos)
+    {
+        CPDF_Object* ptObj;
+        CPDF_CountedObject<CPDF_Pattern*>* ptData;
+        m_PatternMap.GetNextAssoc(pos, ptObj, ptData);
+        delete ptData;
+    }
+    m_PatternMap.RemoveAll();
+    pos = m_FontMap.GetStartPosition();
+    while (pos)
+    {
+        CPDF_Dictionary* fontDict;
+        CPDF_CountedObject<CPDF_Font*>* fontData;
+        m_FontMap.GetNextAssoc(pos, fontDict, fontData);
+        delete fontData;
+    }
+    m_FontMap.RemoveAll();
+    pos = m_ColorSpaceMap.GetStartPosition();
+    while (pos)
+    {
+        CPDF_Object* csKey;
+        CPDF_CountedObject<CPDF_ColorSpace*>* csData;
+        m_ColorSpaceMap.GetNextAssoc(pos, csKey, csData);
+        delete csData;
+    }
+    m_ColorSpaceMap.RemoveAll();
 }
-void CPDF_DocPageData::Clear(FX_BOOL bRelease)
+void CPDF_DocPageData::Clear(FX_BOOL bForceRelease)
 {
     FX_POSITION pos;
-    FX_DWORD	nCount;
-    {
-        pos = m_PatternMap.GetStartPosition();
-        while (pos) {
-            CPDF_Object* ptObj;
-            CPDF_CountedObject<CPDF_Pattern*>* ptData;
-            m_PatternMap.GetNextAssoc(pos, ptObj, ptData);
-            nCount = ptData->m_nCount;
-            if (bRelease || nCount < 2) {
-                delete ptData->m_Obj;
-                ptData->m_Obj = NULL;
-            }
+    m_bForceClear = bForceRelease;
+    pos = m_PatternMap.GetStartPosition();
+    while (pos) {
+        CPDF_Object* ptObj;
+        CPDF_CountedObject<CPDF_Pattern*>* ptData;
+        m_PatternMap.GetNextAssoc(pos, ptObj, ptData);
+        if (!ptData->m_Obj) {
+            continue;
+        }
+        if (bForceRelease || ptData->m_nCount < 2) {
+            ptData->m_Obj->SetForceClear(bForceRelease);
+            delete ptData->m_Obj;
+            ptData->m_Obj = NULL;
         }
     }
-    {
-        pos = m_FontMap.GetStartPosition();
-        while (pos) {
-            CPDF_Dictionary* fontDict;
-            CPDF_CountedObject<CPDF_Font*>* fontData;
-            m_FontMap.GetNextAssoc(pos, fontDict, fontData);
-            nCount = fontData->m_nCount;
-            if (bRelease || nCount < 2) {
-                delete fontData->m_Obj;
-                fontData->m_Obj = NULL;
-            }
+    pos = m_FontMap.GetStartPosition();
+    while (pos) {
+        CPDF_Dictionary* fontDict;
+        CPDF_CountedObject<CPDF_Font*>* fontData;
+        m_FontMap.GetNextAssoc(pos, fontDict, fontData);
+        if (!fontData->m_Obj) {
+            continue;
+        }
+        if (bForceRelease || fontData->m_nCount < 2) {
+            delete fontData->m_Obj;
+            fontData->m_Obj = NULL;
         }
     }
-    {
-        pos = m_ImageMap.GetStartPosition();
-        while (pos) {
-            FX_DWORD objNum;
-            CPDF_CountedObject<CPDF_Image*>* imageData;
-            m_ImageMap.GetNextAssoc(pos, objNum, imageData);
-            nCount = imageData->m_nCount;
-            if (bRelease || nCount < 2) {
-                delete imageData->m_Obj;
-                delete imageData;
-                m_ImageMap.RemoveKey(objNum);
-            }
+    pos = m_ColorSpaceMap.GetStartPosition();
+    while (pos) {
+        CPDF_Object* csKey;
+        CPDF_CountedObject<CPDF_ColorSpace*>* csData;
+        m_ColorSpaceMap.GetNextAssoc(pos, csKey, csData);
+        if (!csData->m_Obj) {
+            continue;
+        }
+        if (bForceRelease || csData->m_nCount < 2) {
+            // csData->m_Obj is deleted in the function of ReleaseCS().
+            csData->m_Obj->ReleaseCS();
+            csData->m_Obj = NULL;
         }
     }
-    {
-        pos = m_ColorSpaceMap.GetStartPosition();
-        while (pos) {
-            CPDF_Object* csKey;
-            CPDF_CountedObject<CPDF_ColorSpace*>* csData;
-            m_ColorSpaceMap.GetNextAssoc(pos, csKey, csData);
-            nCount = csData->m_nCount;
-            if (bRelease || nCount < 2) {
-                csData->m_Obj->ReleaseCS();
-                csData->m_Obj = NULL;
-            }
+    pos = m_IccProfileMap.GetStartPosition();
+    while (pos) {
+        CPDF_Stream* ipKey;
+        CPDF_CountedObject<CPDF_IccProfile*>* ipData;
+        m_IccProfileMap.GetNextAssoc(pos, ipKey, ipData);
+        if (!ipData->m_Obj) {
+            continue;
         }
-    }
-    {
-        pos = m_IccProfileMap.GetStartPosition();
-        while (pos) {
-            CPDF_Stream* ipKey;
-            CPDF_CountedObject<CPDF_IccProfile*>* ipData;
-            m_IccProfileMap.GetNextAssoc(pos, ipKey, ipData);
-            nCount = ipData->m_nCount;
-            if (bRelease || nCount < 2) {
-                FX_POSITION pos2 = m_HashProfileMap.GetStartPosition();
-                while (pos2) {
-                    CFX_ByteString bsKey;
-                    CPDF_Stream* pFindStream = NULL;
-                    m_HashProfileMap.GetNextAssoc(pos2, bsKey, (void*&)pFindStream);
-                    if (ipKey == pFindStream) {
-                        m_HashProfileMap.RemoveKey(bsKey);
-                        break;
-                    }
+        if (bForceRelease || ipData->m_nCount < 2) {
+            FX_POSITION pos2 = m_HashProfileMap.GetStartPosition();
+            while (pos2) {
+                CFX_ByteString bsKey;
+                CPDF_Stream* pFindStream = NULL;
+                m_HashProfileMap.GetNextAssoc(pos2, bsKey, (void*&)pFindStream);
+                if (ipKey == pFindStream) {
+                    m_HashProfileMap.RemoveKey(bsKey);
+                    break;
                 }
-                delete ipData->m_Obj;
-                delete ipData;
-                m_IccProfileMap.RemoveKey(ipKey);
             }
+            delete ipData->m_Obj;
+            delete ipData;
+            m_IccProfileMap.RemoveKey(ipKey);
         }
     }
-    {
-        pos = m_FontFileMap.GetStartPosition();
-        while (pos) {
-            CPDF_Stream* ftKey;
-            CPDF_CountedObject<CPDF_StreamAcc*>* ftData;
-            m_FontFileMap.GetNextAssoc(pos, ftKey, ftData);
-            nCount = ftData->m_nCount;
-            if (bRelease || nCount < 2) {
-                delete ftData->m_Obj;
-                delete ftData;
-                m_FontFileMap.RemoveKey(ftKey);
-            }
+    pos = m_FontFileMap.GetStartPosition();
+    while (pos) {
+        CPDF_Stream* ftKey;
+        CPDF_CountedObject<CPDF_StreamAcc*>* ftData;
+        m_FontFileMap.GetNextAssoc(pos, ftKey, ftData);
+        if (!ftData->m_Obj) {
+            continue;
+        }
+        if (bForceRelease || ftData->m_nCount < 2) {
+            delete ftData->m_Obj;
+            delete ftData;
+            m_FontFileMap.RemoveKey(ftKey);
+        }
+    }
+    pos = m_ImageMap.GetStartPosition();
+    while (pos) {
+        FX_DWORD objNum;
+        CPDF_CountedObject<CPDF_Image*>* imageData;
+        m_ImageMap.GetNextAssoc(pos, objNum, imageData);
+        if (!imageData->m_Obj) {
+            continue;
+        }
+        if (bForceRelease || imageData->m_nCount < 2) {
+            delete imageData->m_Obj;
+            delete imageData;
+            m_ImageMap.RemoveKey(objNum);
         }
     }
 }
@@ -552,7 +582,7 @@ void CPDF_DocPageData::ReleaseImage(CPDF_Object* pImageStream)
     }
     PDF_DocPageData_Release<FX_DWORD, CPDF_Image*>(m_ImageMap, pImageStream->GetObjNum(), NULL);
 }
-CPDF_IccProfile* CPDF_DocPageData::GetIccProfile(CPDF_Stream* pIccProfileStream, FX_INT32 nComponents)
+CPDF_IccProfile* CPDF_DocPageData::GetIccProfile(CPDF_Stream* pIccProfileStream)
 {
     if (!pIccProfileStream) {
         return NULL;
@@ -572,7 +602,7 @@ CPDF_IccProfile* CPDF_DocPageData::GetIccProfile(CPDF_Stream* pIccProfileStream,
         ipData->m_nCount++;
         return ipData->m_Obj;
     }
-    CPDF_IccProfile* pProfile = FX_NEW CPDF_IccProfile(stream.GetData(), stream.GetSize(), nComponents);
+    CPDF_IccProfile* pProfile = FX_NEW CPDF_IccProfile(stream.GetData(), stream.GetSize());
     if (!pProfile) {
         return NULL;
     }
@@ -643,4 +673,24 @@ void CPDF_DocPageData::ReleaseFontFileStreamAcc(CPDF_Stream* pFontStream, FX_BOO
         return;
     }
     PDF_DocPageData_Release<CPDF_Stream*, CPDF_StreamAcc*>(m_FontFileMap, pFontStream, NULL, bForce);
+}
+CPDF_CountedColorSpace* CPDF_DocPageData::FindColorSpacePtr(CPDF_Object* pCSObj) const
+{
+    if (!pCSObj) return NULL;
+    CPDF_CountedObject<CPDF_ColorSpace*>* csData;
+    if (m_ColorSpaceMap.Lookup(pCSObj, csData))
+    {
+        return csData;
+    }
+    return NULL;
+}
+CPDF_CountedPattern* CPDF_DocPageData::FindPatternPtr(CPDF_Object* pPatternObj) const
+{
+    if (!pPatternObj) return NULL;
+    CPDF_CountedObject<CPDF_Pattern*>* ptData;
+    if (m_PatternMap.Lookup(pPatternObj, ptData))
+    {
+        return ptData;
+    }
+    return NULL;
 }

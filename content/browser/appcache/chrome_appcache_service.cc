@@ -11,21 +11,20 @@
 #include "content/public/browser/resource_context.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/browser/quota/quota_manager.h"
+#include "storage/browser/quota/quota_manager.h"
 
 namespace content {
 
 ChromeAppCacheService::ChromeAppCacheService(
-    quota::QuotaManagerProxy* quota_manager_proxy)
-    : AppCacheServiceImpl(quota_manager_proxy),
-      resource_context_(NULL) {
+    storage::QuotaManagerProxy* quota_manager_proxy)
+    : AppCacheServiceImpl(quota_manager_proxy), resource_context_(NULL) {
 }
 
 void ChromeAppCacheService::InitializeOnIOThread(
     const base::FilePath& cache_path,
     ResourceContext* resource_context,
     net::URLRequestContextGetter* request_context_getter,
-    scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy) {
+    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   cache_path_ = cache_path;

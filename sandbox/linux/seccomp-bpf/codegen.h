@@ -6,15 +6,14 @@
 #define SANDBOX_LINUX_SECCOMP_BPF_CODEGEN_H__
 
 #include <map>
-#include <set>
 #include <vector>
 
-#include "sandbox/linux/seccomp-bpf/basicblock.h"
-#include "sandbox/linux/seccomp-bpf/instruction.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
 #include "sandbox/sandbox_export.h"
 
 namespace sandbox {
+struct BasicBlock;
+struct Instruction;
 
 typedef std::vector<Instruction*> Instructions;
 typedef std::vector<BasicBlock*> BasicBlocks;
@@ -31,19 +30,18 @@ typedef std::map<const BasicBlock*, int> IncomingBranches;
 // build a DAG of Instructions. They'll eventually call Compile() to convert
 // this DAG to a SandboxBPF::Program.
 //
-// Instructions can be chained at the time when they are created, or they
-// can be joined later by calling JoinInstructions().
-//
 //   CodeGen gen;
-//   Instruction *dag, *branch;
-//   dag =
-//     gen.MakeInstruction(BPF_LD+BPF_W+BPF_ABS,
-//                         offsetof(struct arch_seccomp_data, nr),
+//   Instruction *allow, *branch, *dag;
+//
+//   allow =
+//     gen.MakeInstruction(BPF_RET+BPF_K,
+//                         ErrorCode(ErrorCode::ERR_ALLOWED).err()));
 //   branch =
 //     gen.MakeInstruction(BPF_JMP+BPF_EQ+BPF_K, __NR_getpid,
-//                         Trap(GetPidHandler, NULL), NULL);
-//   gen.JoinInstructions(branch,
-//     gen.MakeInstruction(BPF_RET+BPF_K, ErrorCode(ErrorCode::ERR_ALLOWED)));
+//                         Trap(GetPidHandler, NULL), allow);
+//   dag =
+//     gen.MakeInstruction(BPF_LD+BPF_W+BPF_ABS,
+//                         offsetof(struct arch_seccomp_data, nr), branch);
 //
 //   // Simplified code follows; in practice, it is important to avoid calling
 //   // any C++ destructors after starting the sandbox.
@@ -69,16 +67,10 @@ class SANDBOX_EXPORT CodeGen {
   Instruction* MakeInstruction(uint16_t code,
                                uint32_t k,
                                Instruction* next = NULL);
-  Instruction* MakeInstruction(uint16_t code, const ErrorCode& err);
   Instruction* MakeInstruction(uint16_t code,
                                uint32_t k,
                                Instruction* jt,
                                Instruction* jf);
-
-  // Join two (sequences of) instructions. This is useful, if the "next"
-  // parameter had not originally been given in the call to MakeInstruction(),
-  // or if a (conditional) jump still has an unsatisfied target.
-  void JoinInstructions(Instruction* head, Instruction* tail);
 
   // Traverse the graph of instructions and visit each instruction once.
   // Traversal order is implementation-defined. It is acceptable to make

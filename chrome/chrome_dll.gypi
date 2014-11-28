@@ -71,11 +71,26 @@
           ]
         },
         {
+          # GN version: //chrome:main_dll
           'target_name': 'chrome_main_dll',
           'type': 'shared_library',
           'variables': {
             'enable_wexit_time_destructors': 1,
           },
+          'sources': [
+            'app/chrome_command_ids.h',
+            'app/chrome_dll_resource.h',
+            'app/chrome_main.cc',
+            'app/chrome_main_delegate.cc',
+            'app/chrome_main_delegate.h',
+            'app/chrome_main_mac.mm',
+            'app/chrome_main_mac.h',
+            'app/close_handle_hook_win.cc',
+            'app/close_handle_hook_win.h',
+            'app/delay_load_hook_win.cc',
+            'app/delay_load_hook_win.h',
+            '../base/win/dllmain.cc',
+          ],
           'dependencies': [
             '<@(chromium_browser_dependencies)',
             '../content/content.gyp:content_app_browser',
@@ -110,23 +125,15 @@
                 # up actual Chromium functionality into this .dll.
                 'chrome_version_resources',
                 '../chrome/chrome_resources.gyp:chrome_unscaled_resources',
+                '../content/app/resources/content_resources.gyp:content_resources',
                 '../crypto/crypto.gyp:crypto',
                 '../net/net.gyp:net_resources',
                 '../ui/views/views.gyp:views',
-                '../webkit/glue/resources/webkit_resources.gyp:webkit_resources',
               ],
               'sources': [
-                'app/chrome_command_ids.h',
                 'app/chrome_dll.rc',
-                'app/chrome_dll_resource.h',
-                'app/chrome_main.cc',
-                'app/chrome_main_delegate.cc',
-                'app/chrome_main_delegate.h',
-                'app/delay_load_hook_win.cc',
-                'app/delay_load_hook_win.h',
-
+                
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
-                '../base/win/dllmain.cc',
 
                 # Cursors.
                 '<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_unscaled_resources.rc',
@@ -271,15 +278,6 @@
                 # sets -order_file.
                 'ORDER_FILE': 'app/framework.order',
               },
-              'sources': [
-                'app/chrome_command_ids.h',
-                'app/chrome_dll_resource.h',
-                'app/chrome_main.cc',
-                'app/chrome_main_delegate.cc',
-                'app/chrome_main_delegate.h',
-                'app/chrome_main_mac.mm',
-                'app/chrome_main_mac.h',
-              ],
               'dependencies': [
                 '../pdf/pdf.gyp:pdf',
               ],
@@ -306,13 +304,13 @@
                 ['mac_breakpad_compiled_in==1', {
                   'dependencies': [
                     '../breakpad/breakpad.gyp:breakpad',
-                    '../components/components.gyp:breakpad_component',
+                    '../components/components.gyp:crash_component',
                     '../components/components.gyp:policy',
                   ],
                   'sources': [
-                    'app/chrome_breakpad_client.cc',
-                    'app/chrome_breakpad_client.h',
-                    'app/chrome_breakpad_client_mac.mm',
+                    'app/chrome_crash_reporter_client.cc',
+                    'app/chrome_crash_reporter_client.h',
+                    'app/chrome_crash_reporter_client_mac.mm',
                   ],
                 }, {  # else: mac_breakpad_compiled_in!=1
                   # No Breakpad, put in the stubs.
@@ -349,6 +347,8 @@
             'app/chrome_main.cc',
             'app/chrome_main_delegate.cc',
             'app/chrome_main_delegate.h',
+            'app/close_handle_hook_win.cc',
+            'app/close_handle_hook_win.h',
           ],
           'conditions': [
             ['OS=="win"', {

@@ -43,10 +43,9 @@ namespace blink {
 
 DeprecatedStorageInfo::DeprecatedStorageInfo()
 {
-    ScriptWrappable::init(this);
 }
 
-void DeprecatedStorageInfo::queryUsageAndQuota(ExecutionContext* executionContext, int storageType, PassOwnPtr<StorageUsageCallback> successCallback, PassOwnPtr<StorageErrorCallback> errorCallback)
+void DeprecatedStorageInfo::queryUsageAndQuota(ExecutionContext* executionContext, int storageType, StorageUsageCallback* successCallback, StorageErrorCallback* errorCallback)
 {
     // Dispatching the request to DeprecatedStorageQuota, as this interface is deprecated in favor of DeprecatedStorageQuota.
     DeprecatedStorageQuota* storageQuota = getStorageQuota(storageType);
@@ -58,7 +57,7 @@ void DeprecatedStorageInfo::queryUsageAndQuota(ExecutionContext* executionContex
     storageQuota->queryUsageAndQuota(executionContext, successCallback, errorCallback);
 }
 
-void DeprecatedStorageInfo::requestQuota(ExecutionContext* executionContext, int storageType, unsigned long long newQuotaInBytes, PassOwnPtr<StorageQuotaCallback> successCallback, PassOwnPtr<StorageErrorCallback> errorCallback)
+void DeprecatedStorageInfo::requestQuota(ExecutionContext* executionContext, int storageType, unsigned long long newQuotaInBytes, StorageQuotaCallback* successCallback, StorageErrorCallback* errorCallback)
 {
     // Dispatching the request to DeprecatedStorageQuota, as this interface is deprecated in favor of DeprecatedStorageQuota.
     DeprecatedStorageQuota* storageQuota = getStorageQuota(storageType);

@@ -12,6 +12,8 @@
 #include "base/containers/hash_tables.h"
 #include "cc/base/cc_export.h"
 #include "cc/base/scoped_ptr_vector.h"
+#include "cc/quads/list_container.h"
+#include "cc/quads/render_pass_id.h"
 #include "skia/ext/refptr.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_f.h"
@@ -27,15 +29,17 @@ class Value;
 namespace cc {
 
 class DrawQuad;
-class RenderPassDrawQuad;
 class CopyOutputRequest;
+class RenderPassDrawQuad;
 class SharedQuadState;
 
 // A list of DrawQuad objects, sorted internally in front-to-back order.
-class QuadList : public ScopedPtrVector<DrawQuad> {
+class QuadList : public ListContainer<DrawQuad> {
  public:
-  typedef reverse_iterator BackToFrontIterator;
-  typedef const_reverse_iterator ConstBackToFrontIterator;
+  explicit QuadList(size_t default_size_to_reserve);
+
+  typedef QuadList::ReverseIterator BackToFrontIterator;
+  typedef QuadList::ConstReverseIterator ConstBackToFrontIterator;
 
   inline BackToFrontIterator BackToFrontBegin() { return rbegin(); }
   inline BackToFrontIterator BackToFrontEnd() { return rend(); }
@@ -47,25 +51,6 @@ typedef ScopedPtrVector<SharedQuadState> SharedQuadStateList;
 
 class CC_EXPORT RenderPass {
  public:
-  struct Id {
-    int layer_id;
-    int index;
-
-    Id(int layer_id, int index) : layer_id(layer_id), index(index) {}
-    void* AsTracingId() const;
-
-    bool operator==(const Id& other) const {
-      return layer_id == other.layer_id && index == other.index;
-    }
-    bool operator!=(const Id& other) const {
-      return !(*this == other);
-    }
-    bool operator<(const Id& other) const {
-      return layer_id < other.layer_id ||
-          (layer_id == other.layer_id && index < other.index);
-    }
-  };
-
   ~RenderPass();
 
   static scoped_ptr<RenderPass> Create();
@@ -73,18 +58,18 @@ class CC_EXPORT RenderPass {
 
   // A shallow copy of the render pass, which does not include its quads or copy
   // requests.
-  scoped_ptr<RenderPass> Copy(Id new_id) const;
+  scoped_ptr<RenderPass> Copy(RenderPassId new_id) const;
 
   // A deep copy of the render passes in the list including the quads.
   static void CopyAll(const ScopedPtrVector<RenderPass>& in,
                       ScopedPtrVector<RenderPass>* out);
 
-  void SetNew(Id id,
+  void SetNew(RenderPassId id,
               const gfx::Rect& output_rect,
               const gfx::Rect& damage_rect,
               const gfx::Transform& transform_to_root_target);
 
-  void SetAll(Id id,
+  void SetAll(RenderPassId id,
               const gfx::Rect& output_rect,
               const gfx::Rect& damage_rect,
               const gfx::Transform& transform_to_root_target,
@@ -93,22 +78,21 @@ class CC_EXPORT RenderPass {
   void AsValueInto(base::debug::TracedValue* dict) const;
 
   SharedQuadState* CreateAndAppendSharedQuadState();
+
   template <typename DrawQuadType>
   DrawQuadType* CreateAndAppendDrawQuad() {
-    scoped_ptr<DrawQuadType> draw_quad = make_scoped_ptr(new DrawQuadType);
-    quad_list.push_back(draw_quad.template PassAs<DrawQuad>());
-    return static_cast<DrawQuadType*>(quad_list.back());
+    return quad_list.AllocateAndConstruct<DrawQuadType>();
   }
 
   RenderPassDrawQuad* CopyFromAndAppendRenderPassDrawQuad(
       const RenderPassDrawQuad* quad,
       const SharedQuadState* shared_quad_state,
-      RenderPass::Id render_pass_id);
+      RenderPassId render_pass_id);
   DrawQuad* CopyFromAndAppendDrawQuad(const DrawQuad* quad,
                                       const SharedQuadState* shared_quad_state);
 
   // Uniquely identifies the render pass in the compositor's current frame.
-  Id id;
+  RenderPassId id;
 
   // These are in the space of the render pass' physical pixels.
   gfx::Rect output_rect;
@@ -137,10 +121,7 @@ class CC_EXPORT RenderPass {
  private:
   template <typename DrawQuadType>
   DrawQuadType* CopyFromAndAppendTypedDrawQuad(const DrawQuad* quad) {
-    scoped_ptr<DrawQuadType> draw_quad =
-        make_scoped_ptr(new DrawQuadType(*DrawQuadType::MaterialCast(quad)));
-    quad_list.push_back(draw_quad.template PassAs<DrawQuad>());
-    return static_cast<DrawQuadType*>(quad_list.back());
+    return quad_list.AllocateAndCopyFrom(DrawQuadType::MaterialCast(quad));
   }
 
   DISALLOW_COPY_AND_ASSIGN(RenderPass);
@@ -150,13 +131,13 @@ class CC_EXPORT RenderPass {
 
 namespace BASE_HASH_NAMESPACE {
 #if defined(COMPILER_MSVC)
-inline size_t hash_value(const cc::RenderPass::Id& key) {
+inline size_t hash_value(const cc::RenderPassId& key) {
   return base::HashPair(key.layer_id, key.index);
 }
 #elif defined(COMPILER_GCC)
-template<>
-struct hash<cc::RenderPass::Id> {
-  size_t operator()(cc::RenderPass::Id key) const {
+template <>
+struct hash<cc::RenderPassId> {
+  size_t operator()(cc::RenderPassId key) const {
     return base::HashPair(key.layer_id, key.index);
   }
 };
@@ -167,7 +148,7 @@ struct hash<cc::RenderPass::Id> {
 
 namespace cc {
 typedef ScopedPtrVector<RenderPass> RenderPassList;
-typedef base::hash_map<RenderPass::Id, RenderPass*> RenderPassIdHashMap;
+typedef base::hash_map<RenderPassId, RenderPass*> RenderPassIdHashMap;
 }  // namespace cc
 
 #endif  // CC_QUADS_RENDER_PASS_H_

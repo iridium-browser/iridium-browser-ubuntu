@@ -9,7 +9,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
-#include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/content_settings_details.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -272,7 +272,7 @@ TEST_F(HostContentSettingsMapTest, Observer) {
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
       profile.GetHostContentSettingsMap();
-  MockSettingsObserver observer;
+  MockSettingsObserver observer(host_content_settings_map);
 
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromString("[*.]example.com");
@@ -935,8 +935,13 @@ TEST_F(HostContentSettingsMapTest, ShouldAllowAllContent) {
                   https_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
                   embedder, http_host, CONTENT_SETTINGS_TYPE_COOKIES));
+#if defined(ENABLE_EXTENSIONS)
   EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
                   extension, extension, CONTENT_SETTINGS_TYPE_COOKIES));
+#else
+  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+                   extension, extension, CONTENT_SETTINGS_TYPE_COOKIES));
+#endif
   EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
                    extension, extension, CONTENT_SETTINGS_TYPE_PLUGINS));
   EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
@@ -1010,4 +1015,71 @@ TEST_F(HostContentSettingsMapTest, AddContentSettingsObserver) {
       CONTENT_SETTINGS_TYPE_IMAGES,
       std::string(),
       CONTENT_SETTING_DEFAULT);
+}
+
+TEST_F(HostContentSettingsMapTest, OverrideAllowedWebsiteSetting) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  GURL host("http://example.com/");
+  ContentSettingsPattern pattern =
+      ContentSettingsPattern::FromString("[*.]example.com");
+  host_content_settings_map->SetContentSetting(
+      pattern,
+      ContentSettingsPattern::Wildcard(),
+      CONTENT_SETTINGS_TYPE_GEOLOCATION,
+      std::string(),
+      CONTENT_SETTING_ALLOW);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
+
+  // Disabling should override an allowed exception.
+  host_content_settings_map->SetContentSettingOverride(
+      CONTENT_SETTINGS_TYPE_GEOLOCATION, false);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
+
+  host_content_settings_map->SetContentSettingOverride(
+      CONTENT_SETTINGS_TYPE_GEOLOCATION, true);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
+}
+
+TEST_F(HostContentSettingsMapTest, OverrideAllowedDefaultSetting) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+
+  // Check setting defaults.
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_IMAGES, NULL));
+
+  GURL host("http://example.com/");
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
+
+  // Disabling should override an allowed default setting.
+  host_content_settings_map->SetContentSettingOverride(
+      CONTENT_SETTINGS_TYPE_IMAGES, false);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
+
+  // Enabling shouldn't override positively.
+  host_content_settings_map->SetContentSettingOverride(
+      CONTENT_SETTINGS_TYPE_IMAGES, true);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_IMAGES, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
 }

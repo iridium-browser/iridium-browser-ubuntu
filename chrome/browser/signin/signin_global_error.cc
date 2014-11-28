@@ -19,10 +19,10 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -124,11 +124,8 @@ std::vector<base::string16> SigninGlobalError::GetBubbleViewMessages() {
   // If the user isn't signed in, no need to display an error bubble.
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfileIfExists(profile_);
-  if (signin_manager) {
-    std::string username = signin_manager->GetAuthenticatedUsername();
-    if (username.empty())
+  if (signin_manager && !signin_manager->IsAuthenticated())
       return messages;
-  }
 
   if (!error_controller_->HasError())
     return messages;

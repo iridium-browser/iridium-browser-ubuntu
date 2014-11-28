@@ -117,6 +117,13 @@ const char kAuthServerWhitelist[]           = "auth-server-whitelist";
 // computer startup and not by some user action.
 const char kAutoLaunchAtStartup[]           = "auto-launch-at-startup";
 
+// This flag makes Chrome auto-select the provided choice when an extension asks
+// permission to start desktop capture. Should only be used for tests. For
+// instance, --auto-select-desktop-capture-source="Entire screen" will
+// automatically select to share the entire screen in English locales.
+const char kAutoSelectDesktopCaptureSource[] =
+    "auto-select-desktop-capture-source";
+
 // Certificate Transparency: Uses the provided log(s) for checking Signed
 // Certificate Timestamps provided with certificates.
 // The switch's value is:
@@ -335,10 +342,6 @@ const char kDisableQuicTimeBasedLossDetection[] =
 // Prevents the save password bubble from being enabled.
 const char kDisableSavePasswordBubble[] = "disable-save-password-bubble";
 
-// Disables throttling prints initiated by scripts.
-const char kDisableScriptedPrintThrottling[] =
-    "disable-scripted-print-throttling";
-
 // Disables the "search button in omnibox" experiment.
 const char kDisableSearchButtonInOmnibox[]  =
     "disable-search-button-in-omnibox";
@@ -399,19 +402,8 @@ extern const char kEasyUnlockAppPath[]      = "easy-unlock-app-path";
 // If set, the app list will be enabled as if enabled from CWS.
 const char kEnableAppList[]                 = "enable-app-list";
 
-// Enables the <appview> tag in platform apps.
-const char kEnableAppView[]                 = "enable-app-view";
-
-// Enables the <window-controls> tag in platform apps.
-const char kEnableAppWindowControls[]       = "enable-app-window-controls";
-
 // Enable OS integration for Chrome app file associations.
 const char kEnableAppsFileAssociations[]    = "enable-apps-file-associations";
-
-// Show apps windows after the first paint. Windows will be shown significantly
-// later for heavy apps loading resources synchronously but it will be
-// insignificant for apps that load most of their resources asynchronously.
-const char kEnableAppsShowOnFirstPaint[]    = "enable-apps-show-on-first-paint";
 
 // Enables the experimental asynchronous DNS client.
 const char kEnableAsyncDns[]                = "enable-async-dns";
@@ -454,7 +446,9 @@ const char kEnhancedBookmarksExperiment[] = "enhanced-bookmarks-experiment";
 // installing in Chrome.
 const char kEnableEphemeralApps[]           = "enable-ephemeral-apps";
 
-// Enables experimental hotword detection features.
+// Enables experimental hotword detection features. These features include
+// using a new component extension for performing hotword detection, new UI
+// flows, and always-on detection.
 const char kEnableExperimentalHotwording[]  = "enable-experimental-hotwording";
 
 // Enables logging for extension activity.
@@ -536,9 +530,6 @@ const char kEnablePrivetStorage[]           = "enable-privet-storage";
 // during chrome_browser_main.
 const char kEnableProfiling[]               = "enable-profiling";
 
-// Enables showing a prominent UI for initiating the URL app creation flow.
-const char kEnableProminentURLAppFlow[]     = "enable-prominent-url-app-flow";
-
 // Enables query in the omnibox.
 const char kEnableQueryExtraction[]         = "enable-query-extraction";
 
@@ -557,6 +548,10 @@ const char kEnableQuicPortSelection[]       = "enable-quic-port-selection";
 // This only has an effect if QUIC protocol is enabled.
 const char kEnableQuicTimeBasedLossDetection[] =
     "enable-quic-time-based-loss-detection";
+
+// Enables context-sensitive reader mode button in the toolbar.
+const char kEnableReaderModeToolbarIcon[] =
+    "enable-reader-mode-toolbar-icon";
 
 // Enables save password prompt bubble.
 const char kEnableSavePasswordBubble[]      = "enable-save-password-bubble";
@@ -612,12 +607,19 @@ const char kEnableStreamlinedHostedApps[]   = "enable-streamlined-hosted-apps";
 // Enables the suggestions service.
 const char kEnableSuggestionsService[]      = "enable-suggestions-service";
 
+// Enables the supervised user host blacklist.
+const char kEnableSupervisedUserBlacklist[] =
+    "enable-supervised-user-blacklist";
+
 // Enables synced notifications.
 const char kEnableSyncSyncedNotifications[] =
     "enable-sync-synced-notifications";
 
 // Enables synced articles.
 const char kEnableSyncArticles[]            = "enable-sync-articles";
+
+// Enables user control over muting tab audio from the tab strip.
+const char kEnableTabAudioMuting[]  = "enable-tab-audio-muting";
 
 // Enables fanciful thumbnail processing. Used with NTP for
 // instant-extended-api, where thumbnails are generally smaller.
@@ -754,7 +756,9 @@ const char kInstallChromeApp[]              = "install-chrome-app";
 
 // Causes Chrome to attempt to get metadata from the webstore for the
 // app/extension ID given, and then prompt the user to download and install it.
-const char kInstallFromWebstore[]           = "install-from-webstore";
+// This is allowed *only* for ephemeral apps. All other ids will be ignored.
+const char kInstallEphemeralAppFromWebstore[] =
+    "install-ephemeral-app-from-webstore";
 
 // Marks a renderer as an Instant process.
 const char kInstantProcess[]                = "instant-process";
@@ -762,6 +766,9 @@ const char kInstantProcess[]                = "instant-process";
 // Invalidation service should use GCM network channel even if experiment is not
 // enabled.
 const char kInvalidationUseGCMChannel[]     = "invalidation-use-gcm-channel";
+
+// Enables experimental Harmony (ECMAScript 6) features.
+const char kJavaScriptHarmony[]             = "javascript-harmony";
 
 // Specifies the testcase used by the IPC fuzzer.
 const char kIpcFuzzerTestcase[]             = "ipc-fuzzer-testcase";
@@ -775,18 +782,6 @@ const char kKioskMode[]                     = "kiosk";
 // Print automatically in kiosk mode. |kKioskMode| must be set as well.
 // See http://crbug.com/31395.
 const char kKioskModePrinting[]             = "kiosk-printing";
-
-// Address for the ledger (Copresence) server.
-// Ledger is deprecated; use the chrome.copresence API instead.
-const char kLedgerServer[]                  = "ledger-server";
-
-// Tracing token for calls to the ledger (Copresence) server.
-// Ledger is deprecated; use the chrome.copresence API instead.
-const char kLedgerTracingToken[]            = "ledger-tracing-token";
-
-// Causes Chrome to attempt to get metadata from the webstore for the
-// given item, and then prompt the user to download and install it.
-const char kLimitedInstallFromWebstore[]    = "limited-install-from-webstore";
 
 // Comma-separated list of directories with component extensions to load.
 const char kLoadComponentExtension[]        = "load-component-extension";
@@ -896,15 +891,6 @@ const char kPackExtensionKey[]              = "pack-extension-key";
 
 // Specifies the path to the user data folder for the parent profile.
 const char kParentProfile[]                 = "parent-profile";
-
-// Launches PerformanceMonitor at startup, which will gather statistics about
-// Chrome's CPU and memory usage, page load times, startup times, and network
-// usage, and will also store information about events which may be of interest,
-// such as extension-related occurrences and crashes. Optionally, this may be
-// run with an integer value representing the interval between the timed
-// metric gatherings, measured in seconds (if invalid or not provided, the
-// default interval is used).
-const char kPerformanceMonitorGathering[]   = "performance-monitor-gathering";
 
 // Development flag for permission request API. This flag is needed until
 // the API is finalized.
@@ -1029,10 +1015,6 @@ const char kRecordMode[]                    = "record-mode";
 // time delta to remember certificates should be specified in seconds.
 const char kRememberCertErrorDecisions[]    = "remember-cert-error-decisions";
 
-// Enables print preview in the renderer. This flag is generated internally by
-// Chrome and does nothing when directly passed to the browser.
-const char kRendererPrintPreview[]          = "renderer-print-preview";
-
 // If set, the app list will forget it has been installed on startup. Note this
 // doesn't prevent the app list from running, it just makes Chrome think the app
 // list hasn't been enabled (as in kEnableAppList) yet.
@@ -1105,6 +1087,20 @@ const char kSimulateOutdated[]               = "simulate-outdated";
 // Simulates that current version is outdated and auto-update is off.
 const char kSimulateOutdatedNoAU[]           = "simulate-outdated-no-au";
 
+// Speculative resource prefetching.
+const char kSpeculativeResourcePrefetching[] =
+    "speculative-resource-prefetching";
+
+// Speculative resource prefetching is disabled.
+const char kSpeculativeResourcePrefetchingDisabled[] = "disabled";
+
+// Speculative resource prefetching will only learn about resources that need to
+// be prefetched but will not prefetch them.
+const char kSpeculativeResourcePrefetchingLearning[] = "learning";
+
+// Speculative resource prefetching is enabled.
+const char kSpeculativeResourcePrefetchingEnabled[] = "enabled";
+
 // Specifies the URL where spelling service feedback data will be sent instead
 // of the default URL. This switch is for temporary testing only.
 // TODO(rouslan): Remove this flag when feedback testing is complete. Revisit by
@@ -1126,6 +1122,10 @@ const char kSSLVersionMax[]                 = "ssl-version-max";
 // Specifies the minimum SSL/TLS version ("ssl3", "tls1", "tls1.1", or
 // "tls1.2").
 const char kSSLVersionMin[]                 = "ssl-version-min";
+
+// Specifies the minimum SSL/TLS version ("ssl3", "tls1", "tls1.1", or
+// "tls1.2") that TLS fallback will accept.
+const char kSSLVersionFallbackMin[]         = "ssl-version-fallback-min";
 
 // Starts the browser maximized, regardless of any previous settings.
 const char kStartMaximized[]                = "start-maximized";
@@ -1298,9 +1298,6 @@ const char kDisableSystemFullscreenForTesting[] =
 // window in OSX Yosemite.
 const char kEnableFullSizeContentView[]     = "enable-full-size-content-view";
 
-// Enables a simplified fullscreen UI on Mac.
-const char kEnableSimplifiedFullscreen[]    = "enable-simplified-fullscreen";
-
 // A process type (switches::kProcessType) that relaunches the browser. See
 // chrome/browser/mac/relauncher.h.
 const char kRelauncherProcess[]             = "relauncher";
@@ -1328,9 +1325,6 @@ const char kForceDesktop[]                  = "force-desktop";
 
 // Relaunches metro Chrome on Windows 8 and higher using a given shortcut.
 const char kRelaunchShortcut[]              = "relaunch-shortcut";
-
-// Requests that Chrome connect to the running Metro viewer process.
-const char kViewerConnect[]                 = "viewer-connect";
 
 // Requests that Chrome launch the Metro viewer process via the given appid
 // (which is assumed to be registered as default browser) and synchronously

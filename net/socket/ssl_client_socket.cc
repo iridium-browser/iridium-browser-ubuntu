@@ -33,8 +33,8 @@ NextProto SSLClientSocket::NextProtoFromString(
     return kProtoSPDY3;
   } else if (proto_string == "spdy/3.1") {
     return kProtoSPDY31;
-  } else if (proto_string == "h2-13") {
-    // This is the HTTP/2 draft 13 identifier. For internal
+  } else if (proto_string == "h2-14") {
+    // This is the HTTP/2 draft 14 identifier. For internal
     // consistency, HTTP/2 is named SPDY4 within Chromium.
     return kProtoSPDY4;
   } else if (proto_string == "quic/1+spdy/3") {
@@ -56,9 +56,9 @@ const char* SSLClientSocket::NextProtoToString(NextProto next_proto) {
     case kProtoSPDY31:
       return "spdy/3.1";
     case kProtoSPDY4:
-      // This is the HTTP/2 draft 13 identifier. For internal
+      // This is the HTTP/2 draft 14 identifier. For internal
       // consistency, HTTP/2 is named SPDY4 within Chromium.
-      return "h2-13";
+      return "h2-14";
     case kProtoQUIC1SPDY3:
       return "quic/1+spdy/3";
     case kProtoUnknown:
@@ -87,16 +87,6 @@ bool SSLClientSocket::WasNpnNegotiated() const {
 
 NextProto SSLClientSocket::GetNegotiatedProtocol() const {
   return protocol_negotiated_;
-}
-
-// static
-std::string SSLClientSocket::CreateSessionCacheKey(
-    const HostPortPair& host_and_port,
-    const std::string& ssl_session_cache_shard) {
-  std::string result = host_and_port.ToString();
-  result.append("/");
-  result.append(ssl_session_cache_shard);
-  return result;
 }
 
 bool SSLClientSocket::IgnoreCertError(int error, int load_flags) {

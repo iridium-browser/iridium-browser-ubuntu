@@ -34,13 +34,14 @@
     }],
     [ 'use_seccomp_bpf==1', {
       'sources': [
+        'bpf_dsl/bpf_dsl_more_unittest.cc',
         'bpf_dsl/bpf_dsl_unittest.cc',
         'bpf_dsl/cons_unittest.cc',
         'seccomp-bpf-helpers/baseline_policy_unittest.cc',
+        'seccomp-bpf-helpers/syscall_parameters_restrictions_unittests.cc',
         'seccomp-bpf/bpf_tests_unittest.cc',
         'seccomp-bpf/codegen_unittest.cc',
         'seccomp-bpf/errorcode_unittest.cc',
-        'seccomp-bpf/sandbox_bpf_unittest.cc',
         'seccomp-bpf/syscall_iterator_unittest.cc',
         'seccomp-bpf/syscall_unittest.cc',
       ],

@@ -142,7 +142,6 @@ class CONTENT_EXPORT RenderWidget
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // blink::WebWidgetClient
-  virtual void suppressCompositorScheduling(bool enable);
   virtual void willBeginCompositorFrame();
   virtual void didAutoResize(const blink::WebSize& new_size);
   virtual void initializeLayerTreeView();
@@ -172,6 +171,9 @@ class CONTENT_EXPORT RenderWidget
 
   // Begins the compositor's scheduler to start producing frames.
   void StartCompositor();
+
+  // Stop compositing.
+  void DestroyLayerTreeView();
 
   // Called when a plugin is moved.  These events are queued up and sent with
   // the next paint or scroll message to the host.
@@ -259,6 +261,10 @@ class CONTENT_EXPORT RenderWidget
   void OnSwapBuffersComplete();
   void OnSwapBuffersAborted();
 
+  // Checks if the text input state and compose inline mode have been changed.
+  // If they are changed, the new value will be sent to the browser process.
+  void UpdateTextInputType();
+
   // Checks if the selection bounds have been changed. If they are changed,
   // the new value will be sent to the browser process.
   void UpdateSelectionBounds();
@@ -267,6 +273,7 @@ class CONTENT_EXPORT RenderWidget
 
   void OnShowHostContextMenu(ContextMenuParams* params);
 
+#if defined(OS_ANDROID) || defined(USE_AURA)
   enum ShowIme {
     SHOW_IME_IF_NEEDED,
     NO_SHOW_IME,
@@ -284,6 +291,7 @@ class CONTENT_EXPORT RenderWidget
   // IME events. This is when the text change did not originate from the IME in
   // the browser side, such as changes by JavaScript or autofill.
   void UpdateTextInputState(ShowIme show_ime, ChangeSource change_source);
+#endif
 
 #if defined(OS_MACOSX) || defined(USE_AURA)
   // Checks if the composition range or composition character bounds have been
@@ -334,6 +342,10 @@ class CONTENT_EXPORT RenderWidget
   // active RenderWidgets.
   void SetSwappedOut(bool is_swapped_out);
 
+  // Allows the process to exit once the unload handler has finished, if there
+  // are no other active RenderWidgets.
+  void WasSwappedOut();
+
   void FlushPendingInputEventAck();
   void DoDeferredClose();
   void DoDeferredSetWindowRect(const blink::WebRect& pos);
@@ -341,7 +353,7 @@ class CONTENT_EXPORT RenderWidget
   // Resizes the render widget.
   void Resize(const gfx::Size& new_size,
               const gfx::Size& physical_backing_size,
-              float overdraw_bottom_height,
+              float top_controls_layout_height,
               const gfx::Size& visible_viewport_size,
               const gfx::Rect& resizer_rect,
               bool is_fullscreen,
@@ -371,7 +383,6 @@ class CONTENT_EXPORT RenderWidget
   virtual void OnWasHidden();
   virtual void OnWasShown(bool needs_repainting,
                           const ui::LatencyInfo& latency_info);
-  virtual void OnWasSwappedOut();
   void OnCreateVideoAck(int32 video_id);
   void OnUpdateVideoAck(int32 video_id);
   void OnRequestMoveAck();
@@ -413,6 +424,7 @@ class CONTENT_EXPORT RenderWidget
 
   virtual void SetDeviceScaleFactor(float device_scale_factor);
   virtual bool SetDeviceColorProfile(const std::vector<char>& color_profile);
+  virtual void ResetDeviceColorProfileForTesting();
 
   virtual void OnOrientationChange();
 
@@ -572,9 +584,9 @@ class CONTENT_EXPORT RenderWidget
   // The size of the view's backing surface in non-DPI-adjusted pixels.
   gfx::Size physical_backing_size_;
 
-  // The height of the physical backing surface that is overdrawn opaquely in
-  // the browser, for example by an on-screen-keyboard (in DPI-adjusted pixels).
-  float overdraw_bottom_height_;
+  // The amount that the viewport size given to Blink was shrunk by the URL-bar
+  // (always 0 on platforms where URL-bar hiding isn't supported).
+  float top_controls_layout_height_;
 
   // The size of the visible viewport in DPI-adjusted pixels.
   gfx::Size visible_viewport_size_;
@@ -623,6 +635,9 @@ class CONTENT_EXPORT RenderWidget
   // True if we have requested this widget be closed.  No more messages will
   // be sent, except for a Close.
   bool closing_;
+
+  // True if it is known that the host is in the process of being shut down.
+  bool host_closing_;
 
   // Whether this RenderWidget is currently swapped out, such that the view is
   // being rendered by another process.  If all RenderWidgets in a process are

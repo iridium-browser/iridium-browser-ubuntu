@@ -89,10 +89,17 @@ class FrameReceiver : public RtpPayloadFeedback,
   // EmitAvailableEncodedFrames().
   void EmitAvailableEncodedFramesAfterWaiting();
 
+  // Helper that runs |callback|, passing ownership of |encoded_frame| to it.
+  // This method is used by EmitAvailableEncodedFrames() to return to the event
+  // loop, but make sure that FrameReceiver is still alive before the callback
+  // is run.
+  void EmitOneFrame(const ReceiveEncodedFrameCallback& callback,
+                    scoped_ptr<EncodedFrame> encoded_frame) const;
+
   // Computes the playout time for a frame with the given |rtp_timestamp|.
   // Because lip-sync info is refreshed regularly, calling this method with the
   // same argument may return different results.
-  base::TimeTicks GetPlayoutTime(uint32 rtp_timestamp) const;
+  base::TimeTicks GetPlayoutTime(const EncodedFrame& frame) const;
 
   // Schedule timing for the next cast message.
   void ScheduleNextCastMessage();
@@ -130,7 +137,7 @@ class FrameReceiver : public RtpPayloadFeedback,
   // transmit/retransmit, receive, decode, and render; given its run-time
   // environment (sender/receiver hardware performance, network conditions,
   // etc.).
-  const base::TimeDelta target_playout_delay_;
+  base::TimeDelta target_playout_delay_;
 
   // Hack: This is used in logic that determines whether to skip frames.
   // TODO(miu): Revisit this.  Logic needs to also account for expected decode

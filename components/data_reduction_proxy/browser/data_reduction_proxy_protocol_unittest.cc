@@ -13,6 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/common/data_reduction_proxy_headers.h"
+#include "components/data_reduction_proxy/common/data_reduction_proxy_headers_test_utils.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
@@ -37,18 +38,6 @@ using net::StaticSocketDataProvider;
 using net::TestDelegate;
 using net::URLRequest;
 using net::TestURLRequestContext;
-
-
-namespace {
-// Transform "normal"-looking headers (\n-separated) to the appropriate
-// input format for ParseRawHeaders (\0-separated).
-void HeadersToRaw(std::string* headers) {
-  std::replace(headers->begin(), headers->end(), '\n', '\0');
-  if (!headers->empty())
-    *headers += '\0';
-}
-
-} // namespace
 
 
 namespace data_reduction_proxy {
@@ -95,7 +84,8 @@ class DataReductionProxyProtocolTest : public testing::Test {
             DataReductionProxyParams::kFallbackAllowed |
             DataReductionProxyParams::kPromoAllowed,
             TestDataReductionProxyParams::HAS_EVERYTHING &
-            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN));
+            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
   }
 
   // Sets up the |TestURLRequestContext| with the provided |ProxyService| and
@@ -146,7 +136,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
                            "Host: www.google.com\r\n"
                            "Proxy-Connection: keep-alive\r\n%s"
                            "User-Agent:\r\n"
-                           "Accept-Encoding: gzip,deflate\r\n\r\n",
+                           "Accept-Encoding: gzip, deflate\r\n\r\n",
                            method, trailer.c_str());
     MockWrite data_writes[] = {
       MockWrite(request1.c_str()),
@@ -166,7 +156,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
                              "Host: www.google.com\r\n"
                              "Connection: keep-alive\r\n%s"
                              "User-Agent:\r\n"
-                             "Accept-Encoding: gzip,deflate\r\n\r\n",
+                             "Accept-Encoding: gzip, deflate\r\n\r\n",
                              method, trailer.c_str());
       MockWrite data_writes2[] = {
           MockWrite(request2.c_str()),
@@ -197,26 +187,27 @@ class DataReductionProxyProtocolTest : public testing::Test {
                                                const std::string& value,
                                                bool expected_retry) {
     TestDelegate d;
-    URLRequest r(GURL("http://www.google.com/"),
-                 net::DEFAULT_PRIORITY,
-                 &d,
-                 context_.get());
-    r.set_method(method);
-    r.SetLoadFlags(net::LOAD_NORMAL);
+    scoped_ptr<URLRequest> r(context_->CreateRequest(
+        GURL("http://www.google.com/"),
+        net::DEFAULT_PRIORITY,
+        &d,
+        NULL));
+    r->set_method(method);
+    r->SetLoadFlags(net::LOAD_NORMAL);
 
-    r.Start();
+    r->Start();
     base::RunLoop().Run();
 
-    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r.status().status());
-    EXPECT_EQ(net::OK, r.status().error());
+    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r->status().status());
+    EXPECT_EQ(net::OK, r->status().error());
     if (expected_retry)
-      EXPECT_EQ(2U, r.url_chain().size());
+      EXPECT_EQ(2U, r->url_chain().size());
     else
-      EXPECT_EQ(1U, r.url_chain().size());
+      EXPECT_EQ(1U, r->url_chain().size());
 
     if (!header.empty()) {
       // We also have a server header here that isn't set by the proxy.
-      EXPECT_TRUE(r.response_headers()->HasHeaderValue(header, value));
+      EXPECT_TRUE(r->response_headers()->HasHeaderValue(header, value));
     }
 
     EXPECT_EQ(content, d.data_received());
@@ -247,8 +238,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
     if (duration_seconds == 0) {
       expected_min_duration = base::TimeDelta::FromMinutes(1);
       expected_max_duration = base::TimeDelta::FromMinutes(5);
-    }
-    else {
+    } else {
       expected_min_duration = base::TimeDelta::FromSeconds(duration_seconds);
       expected_max_duration = base::TimeDelta::FromSeconds(duration_seconds);
     }
@@ -298,12 +288,13 @@ TEST_F(DataReductionProxyProtocolTest, TestIdempotency) {
       { "CONNECT", false },
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    net::TestURLRequest request(GURL("http://www.google.com/"),
-                                net::DEFAULT_PRIORITY,
-                                NULL,
-                                &context);
-    request.set_method(tests[i].method);
-    EXPECT_EQ(tests[i].expected_result, IsRequestIdempotent(&request));
+    scoped_ptr<net::URLRequest> request(
+        context.CreateRequest(GURL("http://www.google.com/"),
+                              net::DEFAULT_PRIORITY,
+                              NULL,
+                              NULL));
+    request->set_method(tests[i].method);
+    EXPECT_EQ(tests[i].expected_result, IsRequestIdempotent(request.get()));
   }
 }
 
@@ -347,15 +338,15 @@ TEST_F(DataReductionProxyProtocolTest, OverrideResponseAsRedirect) {
         new HttpResponseHeaders(headers));
     scoped_refptr<HttpResponseHeaders> override_response_headers;
     TestDelegate test_delegate;
-    net::TestURLRequest request(GURL("http://www.google.com/"),
-                           net::DEFAULT_PRIORITY,
-                           NULL,
-                           &context);
-    OverrideResponseAsRedirect(&request,
-                               original_response_headers,
+    scoped_ptr<net::URLRequest> request(
+        context.CreateRequest(GURL("http://www.google.com/"),
+                              net::DEFAULT_PRIORITY,
+                              NULL,
+                              NULL));
+    OverrideResponseAsRedirect(request.get(), original_response_headers.get(),
                                &override_response_headers);
     int expected_flags = net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_PROXY;
-    EXPECT_EQ(expected_flags, request.load_flags());
+    EXPECT_EQ(expected_flags, request->load_flags());
     std::string override_headers;
     override_response_headers->GetNormalizedHeaders(&override_headers);
     EXPECT_EQ(std::string(tests[i].expected_headers), override_headers);
@@ -790,25 +781,26 @@ TEST_F(DataReductionProxyProtocolTest,
               "Host: www.google.com\r\n"
               "Connection: keep-alive\r\n"
               "User-Agent:\r\n"
-              "Accept-Encoding: gzip,deflate\r\n\r\n"),
+              "Accept-Encoding: gzip, deflate\r\n\r\n"),
   };
   StaticSocketDataProvider data1(data_reads, arraysize(data_reads),
                                  data_writes, arraysize(data_writes));
   mock_socket_factory_.AddSocketDataProvider(&data1);
 
   TestDelegate d;
-  URLRequest r(GURL("http://www.google.com/"),
-               net::DEFAULT_PRIORITY,
-               &d,
-               context_.get());
-   r.set_method("GET");
-   r.SetLoadFlags(net::LOAD_NORMAL);
+  scoped_ptr<URLRequest> r(context_->CreateRequest(
+      GURL("http://www.google.com/"),
+      net::DEFAULT_PRIORITY,
+      &d,
+      NULL));
+  r->set_method("GET");
+  r->SetLoadFlags(net::LOAD_NORMAL);
 
-   r.Start();
-   base::RunLoop().Run();
+  r->Start();
+  base::RunLoop().Run();
 
-   EXPECT_EQ(net::URLRequestStatus::SUCCESS, r.status().status());
-   EXPECT_EQ(net::OK, r.status().error());
+  EXPECT_EQ(net::URLRequestStatus::SUCCESS, r->status().status());
+  EXPECT_EQ(net::OK, r->status().error());
 
   EXPECT_EQ("Bypass message", d.data_received());
 
@@ -835,7 +827,8 @@ TEST_F(DataReductionProxyProtocolTest, OnResolveProxyHandler) {
             DataReductionProxyParams::kFallbackAllowed |
             DataReductionProxyParams::kPromoAllowed,
             TestDataReductionProxyParams::HAS_EVERYTHING &
-            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN);
+            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN);
 
   // Data reduction proxy info
   net::ProxyInfo data_reduction_proxy_info;
@@ -890,17 +883,22 @@ TEST_F(DataReductionProxyProtocolTest, OnResolveProxyHandler) {
    // afterwards.
    // Another proxy is used. It should be used afterwards.
    result.Use(direct_proxy_info);
+   net::ProxyConfig::ID prev_id = result.config_id();
    OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
                          empty_proxy_retry_info, &test_params, &result);
    EXPECT_EQ(data_reduction_proxy_info.proxy_server(), result.proxy_server());
+   // Only the proxy list should be updated, not he proxy info.
+   EXPECT_EQ(result.config_id(), prev_id);
 
    // A direct connection is used, but the data reduction proxy is on the retry
    // list. A direct connection should be used afterwards.
    result.Use(direct_proxy_info);
+   prev_id = result.config_id();
    OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
                          data_reduction_proxy_retry_info, &test_params,
                          &result);
    EXPECT_TRUE(result.proxy_server().is_direct());
+   EXPECT_EQ(result.config_id(), prev_id);
 
 
   // Without DataCompressionProxyCriticalBypass Finch trial set, should never
@@ -930,8 +928,6 @@ TEST_F(DataReductionProxyProtocolTest, OnResolveProxyHandler) {
   // With Finch trial set, should only bypass if LOAD flag is set and the
   // effective proxy is the data compression proxy.
   base::FieldTrialList field_trial_list(new BadEntropyProvider());
-  base::FieldTrialList::CreateFieldTrial("DataCompressionProxyRollout",
-                                         "Enabled");
   base::FieldTrialList::CreateFieldTrial("DataCompressionProxyCriticalBypass",
                                          "Enabled");
   EXPECT_TRUE(

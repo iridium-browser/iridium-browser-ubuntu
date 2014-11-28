@@ -27,6 +27,7 @@
 
 #include "core/HTMLNames.h"
 #include "core/fetch/ImageResource.h"
+#include "core/paint/TableRowPainter.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/PaintInfo.h"
@@ -76,7 +77,7 @@ void RenderTableRow::styleDidChange(StyleDifference diff, const RenderStyle* old
     propagateStyleToAnonymousChildren();
 
     if (section() && oldStyle && style()->logicalHeight() != oldStyle->logicalHeight())
-        section()->rowLogicalHeightChanged(rowIndex());
+        section()->rowLogicalHeightChanged(this);
 
     // If border was changed, notify table.
     if (parent()) {
@@ -184,11 +185,11 @@ void RenderTableRow::layout()
     // We only ever need to issue paint invalidations if our cells didn't, which means that they didn't need
     // layout, so we know that our bounds didn't change. This code is just making up for
     // the fact that we did not invalidate paints in setStyle() because we had a layout hint.
-    // We cannot call repaint() because our clippedOverflowRectForPaintInvalidation() is taken from the
+    // We cannot call paintInvalidationForWholeRenderer() because our clippedOverflowRectForPaintInvalidation() is taken from the
     // parent table, and being mid-layout, that is invalid. Instead, we issue paint invalidations for our cells.
     if (selfNeedsLayout() && checkForPaintInvalidation()) {
         for (RenderTableCell* cell = firstCell(); cell; cell = cell->nextCell()) {
-            // FIXME: Is this needed with Repaint After Layout?
+            // FIXME: Is this needed when issuing paint invalidations after layout?
             cell->setShouldDoFullPaintInvalidation(true);
         }
     }
@@ -219,33 +220,15 @@ bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& r
     return false;
 }
 
-void RenderTableRow::paintOutlineForRowIfNeeded(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
-    PaintPhase paintPhase = paintInfo.phase;
-    if ((paintPhase == PaintPhaseOutline || paintPhase == PaintPhaseSelfOutline) && style()->visibility() == VISIBLE)
-        paintOutline(paintInfo, LayoutRect(adjustedPaintOffset, size()));
-}
-
 void RenderTableRow::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ASSERT(hasSelfPaintingLayer());
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, this);
-
-    paintOutlineForRowIfNeeded(paintInfo, paintOffset);
-    for (RenderTableCell* cell = firstCell(); cell; cell = cell->nextCell()) {
-        // Paint the row background behind the cell.
-        if (paintInfo.phase == PaintPhaseBlockBackground || paintInfo.phase == PaintPhaseChildBlockBackground)
-            cell->paintBackgroundsBehindCell(paintInfo, paintOffset, this);
-        if (!cell->hasSelfPaintingLayer())
-            cell->paint(paintInfo, paintOffset);
-    }
+    TableRowPainter(*this).paint(paintInfo, paintOffset);
 }
 
 void RenderTableRow::imageChanged(WrappedImagePtr, const IntRect*)
 {
-    // FIXME: Examine cells and repaint only the rect the image paints in.
-    paintInvalidationForWholeRenderer();
+    // FIXME: Examine cells and issue paint invalidations of only the rect the image paints in.
+    setShouldDoFullPaintInvalidation(true);
 }
 
 RenderTableRow* RenderTableRow::createAnonymous(Document* document)

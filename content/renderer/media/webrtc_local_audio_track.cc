@@ -42,13 +42,14 @@ void WebRtcLocalAudioTrack::Capture(const int16* audio_data,
                                     base::TimeDelta delay,
                                     int volume,
                                     bool key_pressed,
-                                    bool need_audio_processing) {
+                                    bool need_audio_processing,
+                                    bool force_report_nonzero_energy) {
   DCHECK(capture_thread_checker_.CalledOnValidThread());
 
   // Calculate the signal level regardless if the track is disabled or enabled.
   int signal_level = level_calculator_->Calculate(
       audio_data, audio_parameters_.channels(),
-      audio_parameters_.frames_per_buffer());
+      audio_parameters_.frames_per_buffer(), force_report_nonzero_energy);
   adapter_->SetSignalLevel(signal_level);
 
   scoped_refptr<WebRtcAudioCapturer> capturer;
@@ -86,7 +87,7 @@ void WebRtcLocalAudioTrack::Capture(const int16* audio_data,
                                    volume,
                                    need_audio_processing,
                                    key_pressed);
-    if (new_volume != 0 && capturer.get() && !webaudio_source_) {
+    if (new_volume != 0 && capturer.get() && !webaudio_source_.get()) {
       // Feed the new volume to WebRtc while changing the volume on the
       // browser.
       capturer->SetVolume(new_volume);
@@ -135,7 +136,7 @@ void WebRtcLocalAudioTrack::AddSink(MediaStreamAudioSink* sink) {
   // we remember to call OnSetFormat() on the new sink.
   scoped_refptr<MediaStreamAudioTrackSink> sink_owner(
       new MediaStreamAudioSinkOwner(sink));
-  sinks_.AddAndTag(sink_owner);
+  sinks_.AddAndTag(sink_owner.get());
 }
 
 void WebRtcLocalAudioTrack::RemoveSink(MediaStreamAudioSink* sink) {
@@ -169,7 +170,7 @@ void WebRtcLocalAudioTrack::AddSink(PeerConnectionAudioSink* sink) {
   // we remember to call OnSetFormat() on the new sink.
   scoped_refptr<MediaStreamAudioTrackSink> sink_owner(
       new PeerConnectionAudioSinkOwner(sink));
-  sinks_.AddAndTag(sink_owner);
+  sinks_.AddAndTag(sink_owner.get());
 }
 
 void WebRtcLocalAudioTrack::RemoveSink(PeerConnectionAudioSink* sink) {

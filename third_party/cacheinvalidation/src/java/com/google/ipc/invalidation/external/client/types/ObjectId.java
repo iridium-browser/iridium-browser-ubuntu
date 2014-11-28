@@ -16,7 +16,7 @@
 
 package com.google.ipc.invalidation.external.client.types;
 
-import com.google.common.base.Preconditions;
+import com.google.ipc.invalidation.util.Preconditions;
 
 import java.util.Arrays;
 

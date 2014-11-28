@@ -69,7 +69,7 @@ String DataTransferItem::type() const
     return m_item->type();
 }
 
-void DataTransferItem::getAsString(ExecutionContext* context, PassOwnPtr<StringCallback> callback) const
+void DataTransferItem::getAsString(ExecutionContext* context, StringCallback* callback) const
 {
     if (!m_dataTransfer->canReadData())
         return;
@@ -91,7 +91,6 @@ DataTransferItem::DataTransferItem(PassRefPtrWillBeRawPtr<DataTransfer> dataTran
     : m_dataTransfer(dataTransfer)
     , m_item(item)
 {
-    ScriptWrappable::init(this);
 }
 
 void DataTransferItem::trace(Visitor* visitor)

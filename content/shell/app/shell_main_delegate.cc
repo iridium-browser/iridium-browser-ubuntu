@@ -17,12 +17,13 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/layouttest_support.h"
-#include "content/shell/app/shell_breakpad_client.h"
+#include "content/shell/app/shell_crash_reporter_client.h"
 #include "content/shell/app/webkit_test_platform_support.h"
 #include "content/shell/browser/shell_browser_main.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/shell_content_renderer_client.h"
+#include "media/base/media_switches.h"
 #include "net/cookies/cookie_monster.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -48,7 +49,7 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/os_crash_dumps.h"
-#include "components/breakpad/app/breakpad_mac.h"
+#include "components/crash/app/breakpad_mac.h"
 #include "content/shell/app/paths_mac.h"
 #include "content/shell/app/shell_main_delegate_mac.h"
 #endif  // OS_MACOSX
@@ -57,17 +58,17 @@
 #include <initguid.h>
 #include <windows.h>
 #include "base/logging_win.h"
-#include "components/breakpad/app/breakpad_win.h"
+#include "components/crash/app/breakpad_win.h"
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "components/breakpad/app/breakpad_linux.h"
+#include "components/crash/app/breakpad_linux.h"
 #endif
 
 namespace {
 
-base::LazyInstance<content::ShellBreakpadClient>::Leaky
-    g_shell_breakpad_client = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<content::ShellCrashReporterClient>::Leaky
+    g_shell_crash_client = LAZY_INSTANCE_INITIALIZER;
 
 #if defined(OS_WIN)
 // If "Content Shell" doesn't show up in your list of trace providers in
@@ -175,6 +176,9 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 
     command_line.AppendSwitch(switches::kEnablePreciseMemoryInfo);
 
+    command_line.AppendSwitchASCII(switches::kHostResolverRules,
+                                   "MAP *.test 127.0.0.1");
+
     // Unless/until WebM files are added to the media layout tests, we need to
     // avoid removing MP4/H264/AAC so that layout tests can run on Android.
 #if !defined(OS_ANDROID)
@@ -202,7 +206,7 @@ void ShellMainDelegate::PreSandboxStartup() {
     std::string process_type =
         CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kProcessType);
-    breakpad::SetBreakpadClient(g_shell_breakpad_client.Pointer());
+    crash_reporter::SetCrashReporterClient(g_shell_crash_client.Pointer());
 #if defined(OS_MACOSX)
     base::mac::DisableOSCrashDumps();
     breakpad::InitCrashReporter(process_type);

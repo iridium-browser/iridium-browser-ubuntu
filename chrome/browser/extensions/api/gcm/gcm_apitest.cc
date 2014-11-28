@@ -13,6 +13,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "extensions/test/result_catcher.h"
+
+using extensions::ResultCatcher;
 
 namespace {
 
@@ -168,12 +171,12 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, SendMessageDefaultTTL) {
       service()->last_sent_message();
   gcm::GCMClient::MessageData::const_iterator iter;
 
-  EXPECT_EQ(2419200, message.time_to_live);
+  EXPECT_EQ(gcm::GCMClient::OutgoingMessage::kMaximumTTL, message.time_to_live);
 }
 
 IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessagesDeleted) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
 
   const extensions::Extension* extension =
       LoadTestExtension(kEventsExtension, "on_messages_deleted.html");
@@ -186,7 +189,7 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessagesDeleted) {
 
 IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessage) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
 
   const extensions::Extension* extension =
       LoadTestExtension(kEventsExtension, "on_message.html");
@@ -209,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessage) {
 
 IN_PROC_BROWSER_TEST_F(GcmApiTest, OnSendError) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
 
   const extensions::Extension* extension =
       LoadTestExtension(kEventsExtension, "on_send_error.html");
@@ -248,9 +251,10 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnSendError) {
 
 IN_PROC_BROWSER_TEST_F(GcmApiTest, Incognito) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
   ResultCatcher incognito_catcher;
-  incognito_catcher.RestrictToProfile(profile()->GetOffTheRecordProfile());
+  incognito_catcher.RestrictToBrowserContext(
+      profile()->GetOffTheRecordProfile());
 
   ASSERT_TRUE(RunExtensionTestIncognito("gcm/functions/incognito"));
 

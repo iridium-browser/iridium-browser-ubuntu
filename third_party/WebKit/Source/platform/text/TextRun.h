@@ -66,8 +66,10 @@ public:
         , m_direction(direction)
         , m_directionalOverride(directionalOverride)
         , m_characterScanForCodePath(characterScanForCodePath)
+        , m_useComplexCodePath(false)
         , m_disableSpacing(false)
         , m_tabSize(0)
+        , m_normalizeSpace(false)
     {
         m_data.characters8 = c;
     }
@@ -84,13 +86,15 @@ public:
         , m_direction(direction)
         , m_directionalOverride(directionalOverride)
         , m_characterScanForCodePath(characterScanForCodePath)
+        , m_useComplexCodePath(false)
         , m_disableSpacing(false)
         , m_tabSize(0)
+        , m_normalizeSpace(false)
     {
         m_data.characters16 = c;
     }
 
-    TextRun(const String& string, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = AllowTrailingExpansion | ForbidLeadingExpansion, TextDirection direction = LTR, bool directionalOverride = false, bool characterScanForCodePath = true)
+    TextRun(const String& string, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = AllowTrailingExpansion | ForbidLeadingExpansion, TextDirection direction = LTR, bool directionalOverride = false, bool characterScanForCodePath = true, bool normalizeSpace = false)
         : m_charactersLength(string.length())
         , m_len(string.length())
         , m_xpos(xpos)
@@ -101,8 +105,10 @@ public:
         , m_direction(direction)
         , m_directionalOverride(directionalOverride)
         , m_characterScanForCodePath(characterScanForCodePath)
+        , m_useComplexCodePath(false)
         , m_disableSpacing(false)
         , m_tabSize(0)
+        , m_normalizeSpace(normalizeSpace)
     {
         if (!m_charactersLength) {
             m_is8Bit = true;
@@ -116,7 +122,7 @@ public:
         }
     }
 
-    TextRun(const StringView& string, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = AllowTrailingExpansion | ForbidLeadingExpansion, TextDirection direction = LTR, bool directionalOverride = false, bool characterScanForCodePath = true)
+    TextRun(const StringView& string, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = AllowTrailingExpansion | ForbidLeadingExpansion, TextDirection direction = LTR, bool directionalOverride = false, bool characterScanForCodePath = true, bool normalizeSpace = false)
         : m_charactersLength(string.length())
         , m_len(string.length())
         , m_xpos(xpos)
@@ -127,8 +133,10 @@ public:
         , m_direction(direction)
         , m_directionalOverride(directionalOverride)
         , m_characterScanForCodePath(characterScanForCodePath)
+        , m_useComplexCodePath(false)
         , m_disableSpacing(false)
         , m_tabSize(0)
+        , m_normalizeSpace(normalizeSpace)
     {
         if (!m_charactersLength) {
             m_is8Bit = true;
@@ -167,6 +175,9 @@ public:
     int length() const { return m_len; }
     int charactersLength() const { return m_charactersLength; }
 
+    bool normalizeSpace() const { return m_normalizeSpace; }
+    void setNormalizeSpace(bool normalizeSpace) { m_normalizeSpace = normalizeSpace; }
+
     void setText(const LChar* c, unsigned len) { m_data.characters8 = c; m_len = len; m_is8Bit = true;}
     void setText(const UChar* c, unsigned len) { m_data.characters16 = c; m_len = len; m_is8Bit = false;}
     void setText(const String&);
@@ -189,12 +200,14 @@ public:
     bool ltr() const { return m_direction == LTR; }
     bool directionalOverride() const { return m_directionalOverride; }
     bool characterScanForCodePath() const { return m_characterScanForCodePath; }
+    bool useComplexCodePath() const { return m_useComplexCodePath; }
     bool spacingDisabled() const { return m_disableSpacing; }
 
     void disableSpacing() { m_disableSpacing = true; }
     void setDirection(TextDirection direction) { m_direction = direction; }
     void setDirectionalOverride(bool override) { m_directionalOverride = override; }
     void setCharacterScanForCodePath(bool scan) { m_characterScanForCodePath = scan; }
+    void setUseComplexCodePath(bool useComplex) { m_useComplexCodePath = useComplex; }
 
     class RenderingContext : public RefCounted<RenderingContext> {
     public:
@@ -229,8 +242,10 @@ private:
     unsigned m_direction : 1;
     unsigned m_directionalOverride : 1; // Was this direction set by an override character.
     unsigned m_characterScanForCodePath : 1;
+    unsigned m_useComplexCodePath : 1;
     unsigned m_disableSpacing : 1;
     unsigned m_tabSize;
+    bool m_normalizeSpace;
     RefPtr<RenderingContext> m_renderingContext;
 };
 

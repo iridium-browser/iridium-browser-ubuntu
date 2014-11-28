@@ -17,18 +17,18 @@
 #include "base/prefs/pref_member.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/permission_context_base.h"
-#include "chrome/browser/notifications/extension_welcome_notification.h"
-#include "chrome/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "extensions/browser/extension_registry_observer.h"
 #include "third_party/WebKit/public/platform/WebNotificationPermission.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
 #include "ui/message_center/notifier_settings.h"
 #include "url/gurl.h"
 
-class ContentSettingsPattern;
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/browser/extension_registry_observer.h"
+#endif
+
 class Notification;
 class NotificationDelegate;
 class NotificationUIManager;
@@ -40,9 +40,11 @@ class RenderFrameHost;
 struct ShowDesktopNotificationHostMsgParams;
 }
 
+#if defined(ENABLE_EXTENSIONS)
 namespace extensions {
 class ExtensionRegistry;
 }
+#endif
 
 namespace gfx {
 class Image;
@@ -58,15 +60,26 @@ typedef base::Callback<void(blink::WebNotificationPermission)>
 
 // The DesktopNotificationService is an object, owned by the Profile,
 // which provides the creation of desktop "toasts" to web pages and workers.
-class DesktopNotificationService
-    : public PermissionContextBase,
-      public extensions::ExtensionRegistryObserver {
+class DesktopNotificationService : public PermissionContextBase
+#if defined(ENABLE_EXTENSIONS)
+                                   ,
+                                   public extensions::ExtensionRegistryObserver
+#endif
+                                   {
  public:
   // Register profile-specific prefs of notifications.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* prefs);
 
-  DesktopNotificationService(Profile* profile,
-                             NotificationUIManager* ui_manager);
+    // Add a desktop notification.
+  static std::string AddIconNotification(const GURL& origin_url,
+                                         const base::string16& title,
+                                         const base::string16& message,
+                                         const gfx::Image& icon,
+                                         const base::string16& replace_id,
+                                         NotificationDelegate* delegate,
+                                         Profile* profile);
+
+  explicit DesktopNotificationService(Profile* profile);
   virtual ~DesktopNotificationService();
 
   // Requests Web Notification permission for |requesting_frame|. The |callback|
@@ -86,29 +99,6 @@ class DesktopNotificationService
       scoped_ptr<content::DesktopNotificationDelegate> delegate,
       base::Closure* cancel_callback);
 
-  // Creates a data:xxxx URL which contains the full HTML for a notification
-  // using supplied icon, title, and text, run through a template which contains
-  // the standard formatting for notifications.
-  static base::string16 CreateDataUrl(const GURL& icon_url,
-                                      const base::string16& title,
-                                      const base::string16& body,
-                                      blink::WebTextDirection dir);
-
-  // Creates a data:xxxx URL which contains the full HTML for a notification
-  // using resource template which contains the standard formatting for
-  // notifications.
-  static base::string16 CreateDataUrl(int resource,
-                                const std::vector<std::string>& subst);
-
-  // Add a desktop notification.
-  static std::string AddIconNotification(const GURL& origin_url,
-                                         const base::string16& title,
-                                         const base::string16& message,
-                                         const gfx::Image& icon,
-                                         const base::string16& replace_id,
-                                         NotificationDelegate* delegate,
-                                         Profile* profile);
-
   // Returns true if the notifier with |notifier_id| is allowed to send
   // notifications.
   bool IsNotifierEnabled(const message_center::NotifierId& notifier_id);
@@ -117,17 +107,12 @@ class DesktopNotificationService
   void SetNotifierEnabled(const message_center::NotifierId& notifier_id,
                           bool enabled);
 
-  // Adds in a the welcome notification if required for components built
-  // into Chrome that show notifications like Chrome Now.
-  void ShowWelcomeNotificationIfNecessary(const Notification& notification);
-
  private:
   // Returns a display name for an origin in the process id, to be used in
   // permission infobar or on the frame of the notification toast.  Different
   // from the origin itself when dealing with extensions.
   base::string16 DisplayNameForOriginInProcessId(const GURL& origin,
                                                  int process_id);
-  NotificationUIManager* GetUIManager();
 
   // Called when the string list pref has been changed.
   void OnStringListPrefChanged(
@@ -146,11 +131,13 @@ class DesktopNotificationService
       const message_center::NotifierId& notifier_id,
       bool enabled);
 
+#if defined(ENABLE_EXTENSIONS)
   // extensions::ExtensionRegistryObserver:
   virtual void OnExtensionUninstalled(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
       extensions::UninstallReason reason) OVERRIDE;
+#endif
 
   // PermissionContextBase:
   virtual void UpdateContentSetting(const GURL& requesting_origin,
@@ -159,10 +146,6 @@ class DesktopNotificationService
 
   // The profile which owns this object.
   Profile* profile_;
-
-  // Non-owned pointer to the notification manager which manages the
-  // UI for desktop toasts.
-  NotificationUIManager* ui_manager_;
 
   // Prefs listener for disabled_extension_id.
   StringListPrefMember disabled_extension_id_pref_;
@@ -176,13 +159,12 @@ class DesktopNotificationService
   // On-memory data for the availability of system_component.
   std::set<std::string> disabled_system_component_ids_;
 
+#if defined(ENABLE_EXTENSIONS)
   // An observer to listen when extension is uninstalled.
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>
       extension_registry_observer_;
-
-  // Welcome Notification
-  scoped_ptr<ExtensionWelcomeNotification> chrome_now_welcome_notification_;
+#endif
 
   base::WeakPtrFactory<DesktopNotificationService> weak_factory_;
 

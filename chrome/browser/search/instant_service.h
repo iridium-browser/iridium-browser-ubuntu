@@ -11,7 +11,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/history/history_types.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "content/public/browser/notification_observer.h"
@@ -162,13 +162,13 @@ class InstantService : public KeyedService,
   // Set to NULL if the default search provider does not support Instant.
   scoped_ptr<InstantSearchPrerenderer> instant_prerenderer_;
 
-  // Used for Top Sites async retrieval.
-  base::WeakPtrFactory<InstantService> weak_ptr_factory_;
-
   // Used to check whether notifications from TemplateURLService indicate a
   // change that affects the default search provider.
   scoped_ptr<TemplateURLData> previous_default_search_provider_;
   GURL previous_google_base_url_;
+
+  // Used for Top Sites async retrieval.
+  base::WeakPtrFactory<InstantService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantService);
 };

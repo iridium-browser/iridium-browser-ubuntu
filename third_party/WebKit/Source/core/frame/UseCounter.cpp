@@ -437,9 +437,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyVectorEffect: return 393;
     case CSSPropertyWritingMode: return 394;
     // CSSPropertyWebkitSvgShadow has been removed, was return 395;
-#if defined(ENABLE_CURSOR_VISIBILITY) && ENABLE_CURSOR_VISIBILITY
-    case CSSPropertyWebkitCursorVisibility: return 396;
-#endif
+    // CSSPropertyWebkitCursorVisibility has been removed, was return 396;
     // CSSPropertyImageOrientation has been removed, was return 397;
     // CSSPropertyImageResolution has been removed, was return 398;
 #if defined(ENABLE_CSS_COMPOSITING) && ENABLE_CSS_COMPOSITING
@@ -483,7 +481,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyMaskSourceType: return 435;
     case CSSPropertyIsolation: return 436;
     case CSSPropertyObjectPosition: return 437;
-    case CSSPropertyInternalCallback: return 438;
+    // case CSSPropertyInternalCallback: return 438;
     case CSSPropertyShapeImageThreshold: return 439;
     case CSSPropertyColumnFill: return 440;
     case CSSPropertyTextJustify: return 441;
@@ -767,12 +765,6 @@ String UseCounter::deprecationMessage(Feature feature)
     case SyncXHRWithCredentials:
         return "Setting 'XMLHttpRequest.withCredentials' for synchronous requests is deprecated.";
 
-    case OpenWebDatabaseInWorker:
-        return "'openDatabase' in Workers is deprecated. Please switch to Indexed Database API.";
-
-    case OpenWebDatabaseSyncInWorker:
-        return "'openDatabaseSync' is deprecated. Please switch to Indexed Database API.";
-
     case EventSourceURL:
         return "'EventSource.URL' is deprecated. Please use 'EventSource.url' instead.";
 
@@ -787,6 +779,18 @@ String UseCounter::deprecationMessage(Feature feature)
 
     case PictureSourceSrc:
         return "<source src> with a <picture> parent is invalid and therefore ignored. Please use <source srcset> instead.";
+
+    case XHRProgressEventPosition:
+        return "The XMLHttpRequest progress event property 'position' is deprecated. Please use 'loaded' instead.";
+
+    case XHRProgressEventTotalSize:
+        return "The XMLHttpRequest progress event property 'totalSize' is deprecated. Please use 'total' instead.";
+
+    case ConsoleTimeline:
+        return "console.timeline is deprecated. Please use the console.time instead.";
+
+    case ConsoleTimelineEnd:
+        return "console.timelineEnd is deprecated. Please use the console.timeEnd instead.";
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

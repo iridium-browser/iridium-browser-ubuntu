@@ -25,6 +25,7 @@
 #include "cc/test/pixel_test_utils.h"
 #include "cc/test/test_in_process_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/trees/blocking_task_runner.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,8 +34,10 @@ namespace cc {
 PixelTest::PixelTest()
     : device_viewport_size_(gfx::Size(200, 200)),
       disable_picture_quad_image_filtering_(false),
-      output_surface_client_(new FakeOutputSurfaceClient) {}
-
+      output_surface_client_(new FakeOutputSurfaceClient),
+      main_thread_task_runner_(
+          BlockingTaskRunner::Create(base::MessageLoopProxy::current())) {
+}
 PixelTest::~PixelTest() {}
 
 bool PixelTest::RunPixelTest(RenderPassList* pass_list,
@@ -112,8 +115,13 @@ void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend) {
   output_surface_->BindToClient(output_surface_client_.get());
 
   shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-  resource_provider_ = ResourceProvider::Create(
-      output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1, false);
+  resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                shared_bitmap_manager_.get(),
+                                                main_thread_task_runner_.get(),
+                                                0,
+                                                false,
+                                                1,
+                                                false);
 
   texture_mailbox_deleter_ = make_scoped_ptr(
       new TextureMailboxDeleter(base::MessageLoopProxy::current()));
@@ -149,37 +157,18 @@ void PixelTest::EnableExternalStencilTest() {
       ->set_has_external_stencil_test(true);
 }
 
-void PixelTest::RunOnDemandRasterTask(Task* on_demand_raster_task) {
-  TaskGraphRunner task_graph_runner;
-  NamespaceToken on_demand_task_namespace =
-      task_graph_runner.GetNamespaceToken();
-
-  // Construct a task graph that contains this single raster task.
-  TaskGraph graph;
-  graph.nodes.push_back(
-      TaskGraph::Node(on_demand_raster_task,
-                      RasterWorkerPool::kOnDemandRasterTaskPriority,
-                      0u));
-
-  // Schedule task and wait for task graph runner to finish running it.
-  task_graph_runner.ScheduleTasks(on_demand_task_namespace, &graph);
-  task_graph_runner.RunUntilIdle();
-
-  // Collect task now that it has finished running.
-  Task::Vector completed_tasks;
-  task_graph_runner.CollectCompletedTasks(on_demand_task_namespace,
-                                          &completed_tasks);
-  DCHECK_EQ(1u, completed_tasks.size());
-  DCHECK_EQ(completed_tasks[0], on_demand_raster_task);
-}
-
 void PixelTest::SetUpSoftwareRenderer() {
   scoped_ptr<SoftwareOutputDevice> device(new PixelTestSoftwareOutputDevice());
   output_surface_.reset(new PixelTestOutputSurface(device.Pass()));
   output_surface_->BindToClient(output_surface_client_.get());
   shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-  resource_provider_ = ResourceProvider::Create(
-      output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1, false);
+  resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                shared_bitmap_manager_.get(),
+                                                main_thread_task_runner_.get(),
+                                                0,
+                                                false,
+                                                1,
+                                                false);
   renderer_ =
       SoftwareRenderer::Create(
           this, &settings_, output_surface_.get(), resource_provider_.get())

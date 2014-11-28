@@ -5,7 +5,7 @@
 #include "chrome/test/remoting/remote_desktop_browsertest.h"
 
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/path_service.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -152,7 +152,7 @@ void RemoteDesktopBrowserTest::VerifyChromotingLoaded(bool expected) {
 
   if (installed) {
     if (extension_)
-      EXPECT_EQ(extension, extension_);
+      EXPECT_EQ(extension.get(), extension_);
     else
       extension_ = extension.get();
 
@@ -309,9 +309,8 @@ void RemoteDesktopBrowserTest::Approve() {
               &RemoteDesktopBrowserTest::IsAuthenticatedInWindow,
               browser()->tab_strip_model()->GetActiveWebContents()));
 
-    ExecuteScript(
-        "lso.approveButtonAction();"
-        "document.forms[\"connect-approve\"].submit();");
+    // Click to Approve the web-app.
+    ClickOnControl("submit_approve_access");
 
     observer.Wait();
 
@@ -468,8 +467,8 @@ void RemoteDesktopBrowserTest::SetUpTestForMe2Me() {
   VerifyInternetAccess();
   Install();
   LaunchChromotingApp();
-  LoadScript(app_web_content(), FILE_PATH_LITERAL("browser_test.js"));
   Auth();
+  LoadScript(app_web_content(), FILE_PATH_LITERAL("browser_test.js"));
   ExpandMe2Me();
   EnsureRemoteConnectionEnabled();
 }
@@ -708,6 +707,20 @@ void RemoteDesktopBrowserTest::RunJavaScriptTest(
 void RemoteDesktopBrowserTest::ClickOnControl(const std::string& name) {
   ASSERT_TRUE(HtmlElementVisible(name));
 
+  std::string has_disabled_attribute =
+    "document.getElementById('" + name + "').hasAttribute('disabled')";
+
+  if (ExecuteScriptAndExtractBool(active_web_contents(),
+                                  has_disabled_attribute)) {
+    // This element has a disabled attribute. Wait for it become enabled.
+    ConditionalTimeoutWaiter waiter(
+          base::TimeDelta::FromSeconds(5),
+          base::TimeDelta::FromMilliseconds(500),
+          base::Bind(&RemoteDesktopBrowserTest::IsEnabled,
+            active_web_contents(), name));
+    ASSERT_TRUE(waiter.Wait());
+  }
+
   ExecuteScript("document.getElementById(\"" + name + "\").click();");
 }
 
@@ -799,6 +812,15 @@ bool RemoteDesktopBrowserTest::IsHostActionComplete(
   return ExecuteScriptAndExtractBool(
       client_web_content,
       host_action_var);
+}
+
+// static
+bool RemoteDesktopBrowserTest::IsEnabled(
+    content::WebContents* client_web_content,
+    const std::string& element_name) {
+  return !ExecuteScriptAndExtractBool(
+    client_web_content,
+    "document.getElementById(\"" + element_name + "\").disabled");
 }
 
 }  // namespace remoting

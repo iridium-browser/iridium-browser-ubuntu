@@ -27,6 +27,7 @@ public:
     StencilResource(GrGpu* gpu, int id)
         : INHERITED(gpu, false)
         , fID(id) {
+        this->registerWithCache();
     }
 
     virtual ~StencilResource() { this->release(); }
@@ -51,6 +52,7 @@ public:
     TextureResource(GrGpu* gpu, int id)
         : INHERITED(gpu, false)
         , fID(id) {
+        this->registerWithCache();
     }
 
     virtual ~TextureResource() { this->release(); }
@@ -144,7 +146,7 @@ static void check_cache_contents_or_die(GrResourceCache* cache, int k) {
         desc.fHeight |= 1;
         GrResourceKey key = TextureResource::ComputeKey(desc);
         GrGpuResource* item = cache->find(key);
-        if (NULL != item) {
+        if (item) {
             SkFAIL("cache add does not work as expected");
             return;
         }
@@ -155,7 +157,7 @@ static void check_cache_contents_or_die(GrResourceCache* cache, int k) {
         h |= 1;
         GrResourceKey key = StencilResource::ComputeKey(w, h, s);
         GrGpuResource* item = cache->find(key);
-        if (NULL != item) {
+        if (item) {
             SkFAIL("cache add does not work as expected");
             return;
         }

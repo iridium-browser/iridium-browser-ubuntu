@@ -10,10 +10,10 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/common/frame_navigate_params.h"
-#include "content/public/common/page_transition_types.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace content {
@@ -129,14 +129,6 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
       bool is_error_page,
       bool is_iframe_srcdoc) {}
 
-  // This method is invoked right after the DidStartProvisionalLoadForFrame if
-  // the provisional load affects the main frame, or if the provisional load
-  // was redirected. The latter use case is DEPRECATED. You should listen to
-  // WebContentsObserver::DidGetRedirectForResourceRequest instead.
-  virtual void ProvisionalChangeToMainFrameUrl(
-      const GURL& url,
-      RenderFrameHost* render_frame_host) {}
-
   // This method is invoked when the provisional load was successfully
   // committed.
   //
@@ -146,7 +138,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   virtual void DidCommitProvisionalLoadForFrame(
       RenderFrameHost* render_frame_host,
       const GURL& url,
-      PageTransition transition_type) {}
+      ui::PageTransition transition_type) {}
 
   // This method is invoked when the provisional load failed.
   virtual void DidFailProvisionalLoad(
@@ -226,7 +218,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
                                    const GURL& url,
                                    const Referrer& referrer,
                                    WindowOpenDisposition disposition,
-                                   PageTransition transition,
+                                   ui::PageTransition transition,
                                    int64 source_frame_id) {}
 
   virtual void FrameDetached(RenderFrameHost* render_frame_host) {}
@@ -336,6 +328,8 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   virtual bool Send(IPC::Message* message) OVERRIDE;
   int routing_id() const;
 
+  WebContents* web_contents() const;
+
  protected:
   // Use this constructor when the object is tied to a single WebContents for
   // its entire lifetime.
@@ -350,8 +344,6 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
 
   // Start observing a different WebContents; used with the default constructor.
   void Observe(WebContents* web_contents);
-
-  WebContents* web_contents() const;
 
  private:
   friend class WebContentsImpl;

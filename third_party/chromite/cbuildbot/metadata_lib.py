@@ -4,6 +4,8 @@
 
 """Module containing class for recording metadata about a run."""
 
+from __future__ import print_function
+
 import collections
 import datetime
 import json
@@ -31,6 +33,52 @@ ARCHIVE_ROOT = 'gs://chromeos-image-archive/%(target)s'
 METADATA_URL_GLOB = os.path.join(ARCHIVE_ROOT,
                                  'R%(milestone)s**//metadata.json')
 LATEST_URL = os.path.join(ARCHIVE_ROOT, 'LATEST-master')
+
+
+GerritPatchTuple = collections.namedtuple('GerritPatchTuple',
+                                          ['gerrit_number', 'patch_number',
+                                           'internal'])
+GerritChangeTuple = collections.namedtuple('GerritChangeTuple',
+                                           ['gerrit_number', 'internal'])
+CLActionTuple = collections.namedtuple('CLActionTuple',
+                                       ['change', 'action', 'timestamp',
+                                        'reason'])
+CLActionWithBuildTuple = collections.namedtuple('CLActionWithBuildTuple',
+    ['change', 'action', 'timestamp', 'reason', 'bot_type', 'build'])
+
+
+def GetChangeAsSmallDictionary(change):
+  """Returns a small dictionary representation of a gerrit change.
+
+  Args:
+    change: A GerritPatch or GerritPatchTuple object.
+
+  Returns:
+    A dictionary of the form {'gerrit_number': change.gerrit_number,
+                              'patch_number': change.patch_number,
+                              'internal': change.internal}
+  """
+  return  {'gerrit_number': change.gerrit_number,
+           'patch_number': change.patch_number,
+           'internal': change.internal}
+
+
+def GetCLActionTuple(change, action, timestamp=None, reason=None):
+  """Returns a CLActionTuple suitable for recording in metadata or cidb.
+
+  Args:
+    change: A GerritPatch or GerritPatchTuple object.
+    action: The action taken, should be one of constants.CL_ACTIONS
+    timestamp: An integer timestamp such as int(time.time()) at which
+               the action was taken. Default: Now.
+    reason: Description of the reason the action was taken. Default: ''
+  """
+  return CLActionTuple(
+      GetChangeAsSmallDictionary(change),
+      action,
+      timestamp or int(time.time()),
+      reason)
+
 
 class _DummyLock(object):
   """A Dummy clone of RLock that does nothing."""
@@ -132,6 +180,9 @@ class CBuildbotMetadata(object):
     # store a multiprocess dict proxy inside another multiprocess dict proxy.
     # That is why we are using this flattened representation of board dicts.
     assert not ':' in board
+    # Even if board_dict is {}, ensure that an entry with this board
+    # gets written.
+    self._per_board_dict[board + ':'] = None
     for k, v in board_dict.items():
       assert not ':' in k
       self._per_board_dict['%s:%s' % (board, k)] = v
@@ -179,10 +230,24 @@ class CBuildbotMetadata(object):
     for k, v in self._per_board_dict.items():
       board, key = k.split(':')
       board_dict = per_board_dict.setdefault(board, {})
-      board_dict[key] = v
+      if key:
+        board_dict[key] = v
 
     temp['board-metadata'] = per_board_dict
     return temp
+
+  # TODO(akeshet): crbug.com/406522 special case cl_actions and board-metadata
+  # so that GetValue can work with them as well.
+  def GetValue(self, key):
+    """Get an item from the metadata dictionary.
+
+    This method is in most cases an inexpensive equivalent to:
+    GetDict()[key]
+
+    However, it cannot be used for items like 'cl_actions' or 'board-metadata'
+    which are not stored directly in the metadata dictionary.
+    """
+    return self._metadata_dict[key]
 
   def GetJSON(self):
     """Return a JSON string representation of metadata."""
@@ -201,29 +266,9 @@ class CBuildbotMetadata(object):
     Returns:
       self
     """
-    cl_action = (self._ChangeAsSmallDictionary(change),
-                 action,
-                 timestamp or int(time.time()),
-                 reason or '')
-
-    self._cl_action_list.append(cl_action)
+    self._cl_action_list.append(
+        GetCLActionTuple(change, action, timestamp, reason))
     return self
-
-  @staticmethod
-  def _ChangeAsSmallDictionary(change):
-    """Returns a small dictionary representation of a gerrit change.
-
-    Args:
-      change: A GerritPatch or GerritPatchTuple object.
-
-    Returns:
-      A dictionary of the form {'gerrit_number': change.gerrit_number,
-                                'patch_number': change.patch_number,
-                                'internal': change.internal}
-    """
-    return  {'gerrit_number': change.gerrit_number,
-             'patch_number': change.patch_number,
-             'internal': change.internal}
 
   @staticmethod
   def GetReportMetadataDict(builder_run, get_changes_from_pool,
@@ -433,10 +478,6 @@ class BuildData(object):
       if bd.build_number is None:
         cros_build_lib.Warning('Metadata at %s was missing build number.',
                                url)
-        # metadata.json can be missing a build number if the build died before
-        # ReportBuildStartStage. See crbug.com/369748. As a workaround so that
-        # gather_builder_stats can still record these builds in the spreadsheet
-        # try to infer the build number from the file's url.
         m = re.match(r'.*-b([0-9]*)/.*', url)
         if m:
           inferred_number = int(m.groups()[0])
@@ -835,12 +876,3 @@ def GetMetadataURLsSince(target, start_date):
   return urls
 
 
-GerritPatchTuple = collections.namedtuple('GerritPatchTuple',
-                                          'gerrit_number patch_number internal')
-GerritChangeTuple = collections.namedtuple('GerritChangeTuple',
-                                           'gerrit_number internal')
-CLActionTuple = collections.namedtuple('CLActionTuple',
-                                       'change action timestamp reason')
-CLActionWithBuildTuple = collections.namedtuple('CLActionWithBuildTuple',
-                                                'change action timestamp '
-                                                'reason bot_type build')

@@ -26,6 +26,7 @@ class SkPaint;
 class SkPath;
 class SkPictureStateTree;
 class SkReadBuffer;
+class SkTextBlob;
 
 struct SkPictInfo {
     enum Flags {
@@ -36,8 +37,7 @@ struct SkPictInfo {
 
     char        fMagic[8];
     uint32_t    fVersion;
-    uint32_t    fWidth;
-    uint32_t    fHeight;
+    SkRect      fCullRect;
     uint32_t    fFlags;
 };
 
@@ -49,9 +49,10 @@ struct SkPictInfo {
 // This tag specifies the size of the ReadBuffer, needed for the following tags
 #define SK_PICT_BUFFER_SIZE_TAG     SkSetFourByteTag('a', 'r', 'a', 'y')
 // these are all inside the ARRAYS tag
-#define SK_PICT_BITMAP_BUFFER_TAG  SkSetFourByteTag('b', 't', 'm', 'p')
-#define SK_PICT_PAINT_BUFFER_TAG   SkSetFourByteTag('p', 'n', 't', ' ')
-#define SK_PICT_PATH_BUFFER_TAG    SkSetFourByteTag('p', 't', 'h', ' ')
+#define SK_PICT_BITMAP_BUFFER_TAG   SkSetFourByteTag('b', 't', 'm', 'p')
+#define SK_PICT_PAINT_BUFFER_TAG    SkSetFourByteTag('p', 'n', 't', ' ')
+#define SK_PICT_PATH_BUFFER_TAG     SkSetFourByteTag('p', 't', 'h', ' ')
+#define SK_PICT_TEXTBLOB_BUFFER_TAG SkSetFourByteTag('b', 'l', 'o', 'b')
 
 // Always write this guy last (with no length field afterwards)
 #define SK_PICT_EOF_TAG     SkSetFourByteTag('e', 'o', 'f', ' ')
@@ -82,12 +83,14 @@ public:
 
     virtual ~SkPictureData();
 
-    const SkPicture::OperationList* getActiveOps(const SkIRect& queryRect) const;
+    const SkPicture::OperationList* getActiveOps(const SkRect& queryRect) const;
 
     void serialize(SkWStream*, SkPicture::EncodeBitmap) const;
     void flatten(SkWriteBuffer&) const;
 
     bool containsBitmaps() const;
+
+    bool hasText() const { return fContentInfo.hasText(); }
 
     int opCount() const { return fContentInfo.numOperations(); }
 
@@ -130,10 +133,16 @@ public:
         return &(*fPaints)[index - 1];
     }
 
+    const SkTextBlob* getTextBlob(SkReader32* reader) const {
+        int index = reader->readInt();
+        SkASSERT(index > 0 && index <= fTextBlobCount);
+        return fTextBlobRefs[index - 1];
+    }
+
     void initIterator(SkPictureStateTree::Iterator* iter,
                       const SkTDArray<void*>& draws,
                       SkCanvas* canvas) const {
-        if (NULL != fStateTree) {
+        if (fStateTree) {
             fStateTree->initIterator(iter, draws, canvas);
         }
     }
@@ -181,6 +190,8 @@ private:
 
     const SkPicture** fPictureRefs;
     int fPictureCount;
+    const SkTextBlob** fTextBlobRefs;
+    int fTextBlobCount;
 
     SkBBoxHierarchy* fBoundingHierarchy;
     SkPictureStateTree* fStateTree;

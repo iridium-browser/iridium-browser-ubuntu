@@ -271,17 +271,14 @@ public:
         fBackend = kNone_BackEndType;
     }
 
-    virtual SkCanvas* createCanvas(SampleWindow::DeviceType dType,
-                                   SampleWindow* win) {
+    virtual SkSurface* createSurface(SampleWindow::DeviceType dType,
+                                     SampleWindow* win) SK_OVERRIDE {
 #if SK_SUPPORT_GPU
-        if (IsGpuDeviceType(dType) && NULL != fCurContext) {
-            SkAutoTUnref<SkBaseDevice> device(new SkGpuDevice(fCurContext, fCurRenderTarget));
-            return new SkCanvas(device);
-        } else
-#endif
-        {
-            return NULL;
+        if (IsGpuDeviceType(dType) && fCurContext) {
+            return SkSurface::NewRenderTargetDirect(fCurRenderTarget);
         }
+#endif
+        return NULL;
     }
 
     virtual void publishCanvas(SampleWindow::DeviceType dType,
@@ -999,7 +996,7 @@ void SampleWindow::listTitles() {
 
 static SkBitmap capture_bitmap(SkCanvas* canvas) {
     SkBitmap bm;
-    if (bm.allocPixels(canvas->imageInfo())) {
+    if (bm.tryAllocPixels(canvas->imageInfo())) {
         canvas->readPixels(&bm, 0, 0);
     }
     return bm;
@@ -1376,7 +1373,7 @@ void SampleWindow::afterChildren(SkCanvas* orig) {
                 orig->drawPicture(pict.get());
             }
         } else {
-            picture->draw(orig);
+            picture->playback(orig);
         }
     }
 
@@ -1410,7 +1407,13 @@ void SampleWindow::beforeChild(SkView* child, SkCanvas* canvas) {
         t = SkScalarMul(SkScalarDiv(t, gAnimPeriod), gAnimMag);
         SkMatrix m;
         m.reset();
+#if 1
         m.setPerspY(t);
+#else
+        m.setPerspY(SK_Scalar1 / 1000);
+        m.setSkewX(SkScalarDiv(8, 25));
+        m.dump();
+#endif
         canvas->concat(m);
     }
 
@@ -2053,7 +2056,7 @@ void SampleWindow::updateTitle() {
 
 #if SK_SUPPORT_GPU
     if (IsGpuDeviceType(fDeviceType) &&
-        NULL != fDevManager &&
+        fDevManager &&
         fDevManager->getGrRenderTarget() &&
         fDevManager->getGrRenderTarget()->numSamples() > 0) {
         title.appendf(" [MSAA: %d]",

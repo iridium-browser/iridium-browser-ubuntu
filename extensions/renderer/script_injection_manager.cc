@@ -17,6 +17,7 @@
 #include "extensions/renderer/script_injection.h"
 #include "extensions/renderer/scripts_run_info.h"
 #include "ipc/ipc_message_macros.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -48,6 +49,10 @@ class ScriptInjectionManager::RVOHelper : public content::RenderViewObserver {
   virtual void OnDestruct() OVERRIDE;
 
   virtual void OnExecuteCode(const ExtensionMsg_ExecuteCode_Params& params);
+  virtual void OnExecuteDeclarativeScript(int tab_id,
+                                          const ExtensionId& extension_id,
+                                          int script_id,
+                                          const GURL& url);
   virtual void OnPermitScriptInjection(int64 request_id);
 
   // Tells the ScriptInjectionManager to run tasks associated with
@@ -87,6 +92,8 @@ bool ScriptInjectionManager::RVOHelper::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ExtensionMsg_ExecuteCode, OnExecuteCode)
     IPC_MESSAGE_HANDLER(ExtensionMsg_PermitScriptInjection,
                         OnPermitScriptInjection)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_ExecuteDeclarativeScript,
+                        OnExecuteDeclarativeScript)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -148,6 +155,26 @@ void ScriptInjectionManager::RVOHelper::OnDestruct() {
 void ScriptInjectionManager::RVOHelper::OnExecuteCode(
     const ExtensionMsg_ExecuteCode_Params& params) {
   manager_->HandleExecuteCode(params, render_view());
+}
+
+void ScriptInjectionManager::RVOHelper::OnExecuteDeclarativeScript(
+    int tab_id,
+    const ExtensionId& extension_id,
+    int script_id,
+    const GURL& url) {
+  blink::WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
+  CHECK(main_frame);
+
+  // TODO(markdittmer): This would be cleaner if we compared page_ids instead.
+  // Begin script injeciton workflow only if the current URL is identical to
+  // the one that matched declarative conditions in the browser.
+  if (main_frame->top()->document().url() == url) {
+    manager_->HandleExecuteDeclarativeScript(main_frame,
+                                             tab_id,
+                                             extension_id,
+                                             script_id,
+                                             url);
+  }
 }
 
 void ScriptInjectionManager::RVOHelper::OnPermitScriptInjection(
@@ -294,7 +321,11 @@ void ScriptInjectionManager::InjectScripts(
 void ScriptInjectionManager::HandleExecuteCode(
     const ExtensionMsg_ExecuteCode_Params& params,
     content::RenderView* render_view) {
-  blink::WebFrame* main_frame = render_view->GetWebView()->mainFrame();
+  // TODO(dcheng): Not sure how this can happen today. In an OOPI world, it
+  // would indicate a logic error--the browser must direct this request to the
+  // right renderer process to begin with.
+  blink::WebLocalFrame* main_frame =
+      render_view->GetWebView()->mainFrame()->toWebLocalFrame();
   if (!main_frame) {
     render_view->Send(
         new ExtensionHostMsg_ExecuteCodeFinished(render_view->GetRoutingID(),
@@ -320,6 +351,32 @@ void ScriptInjectionManager::HandleExecuteCode(
           extensions_->GetByID(injection->extension_id()),
           &scripts_run_info)) {
     pending_injections_.push_back(injection.release());
+  }
+}
+
+void ScriptInjectionManager::HandleExecuteDeclarativeScript(
+    blink::WebFrame* web_frame,
+    int tab_id,
+    const ExtensionId& extension_id,
+    int script_id,
+    const GURL& url) {
+  const Extension* extension = extensions_->GetByID(extension_id);
+  // TODO(dcheng): This function signature should really be a WebLocalFrame,
+  // rather than trying to coerce it here.
+  scoped_ptr<ScriptInjection> injection =
+      user_script_set_manager_->GetInjectionForDeclarativeScript(
+          script_id,
+          web_frame->toWebLocalFrame(),
+          tab_id,
+          url,
+          extension);
+  if (injection.get()) {
+    ScriptsRunInfo scripts_run_info;
+    // TODO(markdittmer): Use return value of TryToInject for error handling.
+    injection->TryToInject(UserScript::BROWSER_DRIVEN,
+                           extension,
+                           &scripts_run_info);
+    scripts_run_info.LogRun(web_frame, UserScript::BROWSER_DRIVEN);
   }
 }
 

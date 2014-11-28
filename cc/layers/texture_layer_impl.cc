@@ -11,7 +11,7 @@
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/platform_color.h"
 #include "cc/resources/scoped_resource.h"
-#include "cc/resources/single_release_callback.h"
+#include "cc/resources/single_release_callback_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/occlusion_tracker.h"
 
@@ -37,7 +37,7 @@ TextureLayerImpl::~TextureLayerImpl() { FreeTextureMailbox(); }
 
 void TextureLayerImpl::SetTextureMailbox(
     const TextureMailbox& mailbox,
-    scoped_ptr<SingleReleaseCallback> release_callback) {
+    scoped_ptr<SingleReleaseCallbackImpl> release_callback) {
   DCHECK_EQ(mailbox.IsValid(), !!release_callback);
   FreeTextureMailbox();
   texture_mailbox_ = mailbox;
@@ -103,7 +103,7 @@ bool TextureLayerImpl::WillDraw(DrawMode draw_mode,
 
     if (!texture_copy_->id()) {
       texture_copy_->Allocate(texture_mailbox_.shared_memory_size(),
-                              ResourceProvider::TextureUsageAny,
+                              ResourceProvider::TextureHintImmutable,
                               resource_provider->best_texture_format());
     }
 
@@ -158,8 +158,10 @@ void TextureLayerImpl::AppendQuads(
 
   gfx::Rect quad_rect(content_bounds());
   gfx::Rect opaque_rect = opaque ? quad_rect : gfx::Rect();
-  gfx::Rect visible_quad_rect = occlusion_tracker.UnoccludedContentRect(
-      quad_rect, draw_properties().target_space_transform);
+  gfx::Rect visible_quad_rect =
+      occlusion_tracker.GetCurrentOcclusionForLayer(
+                            draw_properties().target_space_transform)
+          .GetUnoccludedContentRect(quad_rect);
   if (visible_quad_rect.IsEmpty())
     return;
 
@@ -180,14 +182,14 @@ void TextureLayerImpl::AppendQuads(
                flipped_);
 }
 
-Region TextureLayerImpl::VisibleContentOpaqueRegion() const {
+SimpleEnclosedRegion TextureLayerImpl::VisibleContentOpaqueRegion() const {
   if (contents_opaque())
-    return visible_content_rect();
+    return SimpleEnclosedRegion(visible_content_rect());
 
   if (blend_background_color_ && (SkColorGetA(background_color()) == 0xFF))
-    return visible_content_rect();
+    return SimpleEnclosedRegion(visible_content_rect());
 
-  return Region();
+  return SimpleEnclosedRegion();
 }
 
 void TextureLayerImpl::ReleaseResources() {
@@ -240,8 +242,11 @@ const char* TextureLayerImpl::LayerTypeAsString() const {
 void TextureLayerImpl::FreeTextureMailbox() {
   if (own_mailbox_) {
     DCHECK(!external_texture_resource_);
-    if (release_callback_)
-      release_callback_->Run(texture_mailbox_.sync_point(), false);
+    if (release_callback_) {
+      release_callback_->Run(texture_mailbox_.sync_point(),
+                             false,
+                             layer_tree_impl()->BlockingMainThreadTaskRunner());
+    }
     texture_mailbox_ = TextureMailbox();
     release_callback_.reset();
   } else if (external_texture_resource_) {

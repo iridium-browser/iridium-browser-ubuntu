@@ -15,6 +15,7 @@ class WebRtcContentBrowserTest: public ContentBrowserTest {
  public:
   virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
   virtual void SetUp() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
 
  protected:
   // Executes |javascript|. The script is required to use
@@ -25,6 +26,8 @@ class WebRtcContentBrowserTest: public ContentBrowserTest {
   // Waits for the javascript to return OK via the automation controller.
   // If the javascript returns != OK or times out, we fail the test.
   void ExecuteJavascriptAndWaitForOk(const std::string& javascript);
+
+  void DisableOpusIfOnAndroid();
 
   // Generates javascript code for a getUserMedia call.
   std::string GenerateGetUserMediaCall(const char* function_name,

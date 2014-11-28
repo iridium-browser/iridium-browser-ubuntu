@@ -5,6 +5,7 @@
 /**
  * @constructor
  * @extends {WebInspector.App}
+ * @implements {WebInspector.ToolboxDelegate}
  */
 WebInspector.AdvancedApp = function()
 {
@@ -44,7 +45,7 @@ WebInspector.AdvancedApp.prototype = {
         this._toggleEmulationButton.element.classList.toggle("warning", !!message);
     },
 
-    createRootView: function()
+    presentUI: function()
     {
         var rootView = new WebInspector.RootView();
 
@@ -63,18 +64,12 @@ WebInspector.AdvancedApp.prototype = {
         WebInspector.dockController.addEventListener(WebInspector.DockController.Events.AfterDockSideChanged, this._onAfterDockSideChange, this);
         this._onDockSideChange();
 
+        this._overridesWarningUpdated();
+
+        WebInspector.inspectorView.showInitialPanel();
         console.timeStamp("AdvancedApp.attachToBody");
         rootView.attachToBody();
         this._inspectedPagePlaceholder.update();
-    },
-
-    /**
-     * @param {!WebInspector.Target} mainTarget
-     */
-    presentUI: function(mainTarget)
-    {
-        WebInspector.App.prototype.presentUI.call(this, mainTarget);
-        this._overridesWarningUpdated();
     },
 
     /**
@@ -88,9 +83,11 @@ WebInspector.AdvancedApp.prototype = {
         if (this._toolboxWindow)
             return;
 
+        // FIXME: Remove toolbox=true and fix the check in DevToolsWindow::WebContentsCreated().
         var toolbox = (window.location.search ? "&" : "?") + "toolbox=true";
         var hash = window.location.hash;
         var url = window.location.href.replace(hash, "") + toolbox + hash;
+        url = url.replace("devtools.html", "toolbox.html");
         this._toolboxWindow = window.open(url, undefined);
     },
 
@@ -209,7 +206,7 @@ WebInspector.AdvancedApp.prototype = {
  */
 WebInspector.AdvancedApp.DeviceCounter = function()
 {
-    if (!WebInspector.experimentsSettings.devicesPanel.isEnabled() || !(WebInspector.app instanceof WebInspector.AdvancedApp)) {
+    if (!Runtime.experiments.isEnabled("devicesPanel") || !(WebInspector.app instanceof WebInspector.AdvancedApp)) {
         this._counter = null;
         return;
     }

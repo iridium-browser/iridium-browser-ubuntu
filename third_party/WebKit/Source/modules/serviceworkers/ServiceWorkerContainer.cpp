@@ -40,7 +40,6 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MessagePort.h"
 #include "core/events/MessageEvent.h"
-#include "modules/serviceworkers/RegistrationOptionList.h"
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
@@ -48,17 +47,37 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebServiceWorker.h"
 #include "public/platform/WebServiceWorkerProvider.h"
+#include "public/platform/WebServiceWorkerRegistration.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 
-using blink::WebServiceWorker;
-using blink::WebServiceWorkerProvider;
-
 namespace blink {
 
-PassRefPtrWillBeRawPtr<ServiceWorkerContainer> ServiceWorkerContainer::create(ExecutionContext* executionContext)
+// This wraps CallbackPromiseAdapter and resolves the promise with undefined
+// when nullptr is given to onSuccess.
+class GetRegistrationCallback : public WebServiceWorkerProvider::WebServiceWorkerGetRegistrationCallbacks {
+public:
+    explicit GetRegistrationCallback(PassRefPtr<ScriptPromiseResolver> resolver)
+        : m_resolver(resolver)
+        , m_adapter(m_resolver) { }
+    virtual ~GetRegistrationCallback() { }
+    virtual void onSuccess(WebServiceWorkerRegistration* registration) OVERRIDE
+    {
+        if (registration)
+            m_adapter.onSuccess(registration);
+        else if (m_resolver->executionContext() && !m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            m_resolver->resolve();
+    }
+    virtual void onError(WebServiceWorkerError* error) OVERRIDE { m_adapter.onError(error); }
+private:
+    RefPtr<ScriptPromiseResolver> m_resolver;
+    CallbackPromiseAdapter<ServiceWorkerRegistration, ServiceWorkerError> m_adapter;
+    WTF_MAKE_NONCOPYABLE(GetRegistrationCallback);
+};
+
+ServiceWorkerContainer* ServiceWorkerContainer::create(ExecutionContext* executionContext)
 {
-    return adoptRefWillBeNoop(new ServiceWorkerContainer(executionContext));
+    return new ServiceWorkerContainer(executionContext);
 }
 
 ServiceWorkerContainer::~ServiceWorkerContainer()
@@ -76,16 +95,13 @@ void ServiceWorkerContainer::willBeDetachedFromFrame()
 
 void ServiceWorkerContainer::trace(Visitor* visitor)
 {
-    visitor->trace(m_active);
     visitor->trace(m_controller);
-    visitor->trace(m_installing);
-    visitor->trace(m_waiting);
+    visitor->trace(m_readyRegistration);
     visitor->trace(m_ready);
 }
 
-ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptState, const String& url, const Dictionary& dictionary)
+ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptState, const String& url, const RegistrationOptionList& options)
 {
-    RegistrationOptionList options(dictionary);
     ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
@@ -105,7 +121,7 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
         return promise;
     }
 
-    KURL patternURL = executionContext->completeURL(options.scope);
+    KURL patternURL = executionContext->completeURL(options.scope());
     patternURL.removeFragmentIdentifier();
     if (!documentOrigin->canRequest(patternURL)) {
         resolver->reject(DOMException::create(SecurityError, "The scope must match the current origin."));
@@ -124,51 +140,42 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
     return promise;
 }
 
-class UndefinedValue {
+class BooleanValue {
 public:
-    typedef WebServiceWorkerRegistration WebType;
-    static V8UndefinedType take(ScriptPromiseResolver* resolver, WebType* registration)
+    typedef bool WebType;
+    static bool take(ScriptPromiseResolver* resolver, WebType* boolean)
     {
-        ASSERT(!registration); // Anything passed here will be leaked.
-        return V8UndefinedType();
+        return *boolean;
     }
-    static void dispose(WebType* registration)
-    {
-        ASSERT(!registration); // Anything passed here will be leaked.
-    }
+    static void dispose(WebType* boolean) { }
 
 private:
-    UndefinedValue();
+    BooleanValue();
 };
 
-ScriptPromise ServiceWorkerContainer::unregisterServiceWorker(ScriptState* scriptState, const String& pattern)
+ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, const String& documentURL)
 {
     ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
-    if (!m_provider) {
-        resolver->reject(DOMException::create(InvalidStateError, "No associated provider is available"));
-        return promise;
-    }
-
     // FIXME: This should use the container's execution context, not
     // the callers.
-    RefPtr<SecurityOrigin> documentOrigin = scriptState->executionContext()->securityOrigin();
+    ExecutionContext* executionContext = scriptState->executionContext();
+    RefPtr<SecurityOrigin> documentOrigin = executionContext->securityOrigin();
     String errorMessage;
     if (!documentOrigin->canAccessFeatureRequiringSecureOrigin(errorMessage)) {
         resolver->reject(DOMException::create(NotSupportedError, errorMessage));
         return promise;
     }
 
-    KURL patternURL = scriptState->executionContext()->completeURL(pattern);
-    patternURL.removeFragmentIdentifier();
-    if (!pattern.isEmpty() && !documentOrigin->canRequest(patternURL)) {
-        resolver->reject(DOMException::create(SecurityError, "The scope must match the current origin."));
+    KURL completedURL = executionContext->completeURL(documentURL);
+    if (!documentOrigin->canRequest(completedURL)) {
+        resolver->reject(DOMException::create(SecurityError, "The documentURL must match the current origin."));
         return promise;
     }
+    m_provider->getRegistration(completedURL, new GetRegistrationCallback(resolver));
 
-    m_provider->unregisterServiceWorker(patternURL, new CallbackPromiseAdapter<UndefinedValue, ServiceWorkerError>(resolver));
     return promise;
 }
 
@@ -200,32 +207,10 @@ static void deleteIfNoExistingOwner(WebServiceWorker* serviceWorker)
         delete serviceWorker;
 }
 
-void ServiceWorkerContainer::setActive(WebServiceWorker* serviceWorker)
+static void deleteIfNoExistingOwner(WebServiceWorkerRegistration* registration)
 {
-    if (!executionContext()) {
-        deleteIfNoExistingOwner(serviceWorker);
-        return;
-    }
-    RefPtrWillBeRawPtr<ServiceWorker> previousReadyWorker = m_active;
-    m_active = ServiceWorker::from(executionContext(), serviceWorker);
-    checkReadyChanged(previousReadyWorker.release());
-}
-
-void ServiceWorkerContainer::checkReadyChanged(PassRefPtrWillBeRawPtr<ServiceWorker> previousReadyWorker)
-{
-    ServiceWorker* currentReadyWorker = m_active.get();
-
-    if (previousReadyWorker == currentReadyWorker)
-        return;
-
-    if (m_ready->state() != ReadyProperty::Pending) {
-        // Already resolved Promises are now stale because the
-        // ready worker changed
-        m_ready = createReadyProperty();
-    }
-
-    if (currentReadyWorker)
-        m_ready->resolve(currentReadyWorker);
+    if (registration && !registration->proxy())
+        delete registration;
 }
 
 void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker)
@@ -237,22 +222,24 @@ void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker)
     m_controller = ServiceWorker::from(executionContext(), serviceWorker);
 }
 
-void ServiceWorkerContainer::setInstalling(WebServiceWorker* serviceWorker)
+void ServiceWorkerContainer::setReadyRegistration(WebServiceWorkerRegistration* registration)
 {
     if (!executionContext()) {
-        deleteIfNoExistingOwner(serviceWorker);
+        deleteIfNoExistingOwner(registration);
         return;
     }
-    m_installing = ServiceWorker::from(executionContext(), serviceWorker);
-}
 
-void ServiceWorkerContainer::setWaiting(WebServiceWorker* serviceWorker)
-{
-    if (!executionContext()) {
-        deleteIfNoExistingOwner(serviceWorker);
+    ServiceWorkerRegistration* readyRegistration = ServiceWorkerRegistration::from(executionContext(), registration);
+    ASSERT(readyRegistration->active());
+
+    if (m_readyRegistration) {
+        ASSERT(m_readyRegistration == readyRegistration);
+        ASSERT(m_ready->state() == ReadyProperty::Resolved);
         return;
     }
-    m_waiting = ServiceWorker::from(executionContext(), serviceWorker);
+
+    m_readyRegistration = readyRegistration;
+    m_ready->resolve(readyRegistration);
 }
 
 void ServiceWorkerContainer::dispatchMessageEvent(const WebString& message, const WebMessagePortChannelArray& webChannels)
@@ -269,7 +256,6 @@ ServiceWorkerContainer::ServiceWorkerContainer(ExecutionContext* executionContex
     : ContextLifecycleObserver(executionContext)
     , m_provider(0)
 {
-    ScriptWrappable::init(this);
 
     if (!executionContext)
         return;

@@ -31,11 +31,11 @@ namespace blink {
 DOMMimeTypeArray::DOMMimeTypeArray(LocalFrame* frame)
     : DOMWindowProperty(frame)
 {
-    ScriptWrappable::init(this);
 }
 
-DOMMimeTypeArray::~DOMMimeTypeArray()
+void DOMMimeTypeArray::trace(Visitor* visitor)
 {
+    DOMWindowProperty::trace(visitor);
 }
 
 unsigned DOMMimeTypeArray::length() const

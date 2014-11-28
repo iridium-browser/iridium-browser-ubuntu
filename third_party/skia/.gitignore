@@ -4,6 +4,9 @@
 .android_config
 .gclient*
 .gm-actuals
+.cproject
+.project
+.settings/
 TAGS
 common
 gyp/build
@@ -13,3 +16,4 @@ platform_tools/chromeos/toolchain
 third_party/externals
 tools/bug_chomper/oauth_client_secret.json
 xcodebuild
+bower_components

@@ -7,10 +7,6 @@
 #define RTCD_EXTERN extern
 #endif
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /*
  * VP8
  */
@@ -25,6 +21,10 @@ struct macroblock;
 struct variance_vtable;
 union int_mv;
 struct yv12_buffer_config;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void vp8_bilinear_predict16x16_c(unsigned char *src, int src_pitch, int xofst, int yofst, unsigned char *dst, int dst_pitch);
 #define vp8_bilinear_predict16x16 vp8_bilinear_predict16x16_c
@@ -322,9 +322,6 @@ unsigned int vp8_variance_halfpixvar16x16_hv_c(const unsigned char *src_ptr, int
 
 unsigned int vp8_variance_halfpixvar16x16_v_c(const unsigned char *src_ptr, int source_stride, const unsigned char *ref_ptr, int  ref_stride, unsigned int *sse);
 #define vp8_variance_halfpixvar16x16_v vp8_variance_halfpixvar16x16_v_c
-
-void vp8_yv12_copy_partial_frame_c(struct yv12_buffer_config *src_ybc, struct yv12_buffer_config *dst_ybc);
-#define vp8_yv12_copy_partial_frame vp8_yv12_copy_partial_frame_c
 
 void vp8_rtcd(void);
 

@@ -71,7 +71,7 @@ static NSAttributedString* attributedSubstringFromRange(const Range* range)
         if (!numCharacters)
             continue;
 
-        Node* container = it.range()->startContainer();
+        Node* container = it.startContainer();
         RenderObject* renderer = container->renderer();
         ASSERT(renderer);
         if (!renderer)
@@ -114,9 +114,9 @@ namespace blink {
 NSAttributedString* WebSubstringUtil::attributedWordAtPoint(WebView* view, WebPoint point, WebPoint& baselinePoint)
 {
     HitTestResult result = static_cast<WebViewImpl*>(view)->coreHitTestResultAt(point);
-    if (!result.targetNode())
+    if (!result.innerNode())
       return nil;
-    LocalFrame* frame = result.targetNode()->document().frame();
+    LocalFrame* frame = result.innerNode()->document().frame();
     FrameView* frameView = frame->view();
 
     RefPtrWillBeRawPtr<Range> range = frame->rangeForPoint(result.roundedPointInInnerNodeFrame());

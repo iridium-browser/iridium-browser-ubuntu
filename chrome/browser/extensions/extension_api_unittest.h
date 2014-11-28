@@ -35,6 +35,8 @@ namespace extensions {
 // needed, this could be expanded to allow for alternate WebContents).
 // When calling RunFunction[AndReturn*], |args| should be in JSON format,
 // wrapped in a list. See also RunFunction* in extension_function_test_utils.h.
+// TODO(yoz): Move users of this base class to use the equivalent base class
+// in extensions/browser/api_unittest.h.
 class ExtensionApiUnittest : public BrowserWithTestWindowTest {
  public:
   ExtensionApiUnittest();

@@ -19,8 +19,6 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_system_observer.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/message_center_tray_delegate.h"
@@ -41,8 +39,7 @@ FORWARD_DECLARE_TEST(WebNotificationTrayTest, ManuallyCloseMessageCenter);
 // of notifications to MessageCenter, doing necessary conversions.
 class MessageCenterNotificationManager
     : public NotificationUIManager,
-      public message_center::MessageCenterObserver,
-      public content::NotificationObserver {
+      public message_center::MessageCenterObserver {
  public:
   MessageCenterNotificationManager(
       message_center::MessageCenter* message_center,
@@ -90,12 +87,6 @@ class MessageCenterNotificationManager
   // Takes ownership of |delegate|.
   void SetMessageCenterTrayDelegateForTest(
       message_center::MessageCenterTrayDelegate* delegate);
-
- protected:
-  // content::NotificationObserver override.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(message_center::WebNotificationTrayTest,
@@ -177,10 +168,6 @@ class MessageCenterNotificationManager
     Profile* profile() const { return profile_; }
     const Notification& notification() const { return notification_; }
 
-    // Returns extension_id if the notification originates from an extension,
-    // empty string otherwise.
-    std::string GetExtensionId();
-
     // Route a new notification to an app/extension.
     void AddToAlternateProvider(const std::string extension_id);
 
@@ -239,9 +226,6 @@ class MessageCenterNotificationManager
 
   // To own the blockers.
   ScopedVector<message_center::NotificationBlocker> blockers_;
-
-  // Registrar for the other kind of notifications (event signaling).
-  content::NotificationRegistrar registrar_;
 
   NotificationSystemObserver system_observer_;
 

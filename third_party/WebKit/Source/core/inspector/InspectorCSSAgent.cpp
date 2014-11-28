@@ -130,18 +130,26 @@ public:
 
 class InspectorCSSAgent::InspectorResourceContentLoaderCallback FINAL : public VoidCallback {
 public:
-    InspectorResourceContentLoaderCallback(InspectorCSSAgent*, PassRefPtr<EnableCallback>);
+    InspectorResourceContentLoaderCallback(InspectorCSSAgent*, PassRefPtrWillBeRawPtr<EnableCallback>);
+    virtual void trace(Visitor*) OVERRIDE;
     virtual void handleEvent() OVERRIDE;
 
 private:
-    InspectorCSSAgent* m_cssAgent;
-    RefPtr<EnableCallback> m_callback;
+    RawPtrWillBeMember<InspectorCSSAgent> m_cssAgent;
+    RefPtrWillBeMember<EnableCallback> m_callback;
 };
 
-InspectorCSSAgent::InspectorResourceContentLoaderCallback::InspectorResourceContentLoaderCallback(InspectorCSSAgent* cssAgent, PassRefPtr<EnableCallback> callback)
+InspectorCSSAgent::InspectorResourceContentLoaderCallback::InspectorResourceContentLoaderCallback(InspectorCSSAgent* cssAgent, PassRefPtrWillBeRawPtr<EnableCallback> callback)
     : m_cssAgent(cssAgent)
     , m_callback(callback)
 {
+}
+
+void InspectorCSSAgent::InspectorResourceContentLoaderCallback::trace(Visitor* visitor)
+{
+    visitor->trace(m_cssAgent);
+    visitor->trace(m_callback);
+    VoidCallback::trace(visitor);
 }
 
 void InspectorCSSAgent::InspectorResourceContentLoaderCallback::handleEvent()
@@ -445,7 +453,7 @@ void InspectorCSSAgent::resetNonPersistentData()
     resetPseudoStates();
 }
 
-void InspectorCSSAgent::enable(ErrorString*, PassRefPtr<EnableCallback> prpCallback)
+void InspectorCSSAgent::enable(ErrorString*, PassRefPtrWillBeRawPtr<EnableCallback> prpCallback)
 {
     m_state->setBoolean(CSSAgentState::cssAgentEnabled, true);
     if (!m_pageAgent->resourceContentLoader()) {
@@ -453,7 +461,7 @@ void InspectorCSSAgent::enable(ErrorString*, PassRefPtr<EnableCallback> prpCallb
         prpCallback->sendSuccess();
         return;
     }
-    m_pageAgent->resourceContentLoader()->ensureResourcesContentLoaded(adoptPtr(new InspectorCSSAgent::InspectorResourceContentLoaderCallback(this, prpCallback)));
+    m_pageAgent->resourceContentLoader()->ensureResourcesContentLoaded(new InspectorCSSAgent::InspectorResourceContentLoaderCallback(this, prpCallback));
 }
 
 void InspectorCSSAgent::wasEnabled()
@@ -999,8 +1007,11 @@ PassRefPtr<TypeBuilder::CSS::CSSMedia> InspectorCSSAgent::buildMediaObject(const
 
     const MediaQuerySet* queries = media->queries();
     const WillBeHeapVector<OwnPtrWillBeMember<MediaQuery> >& queryVector = queries->queryVector();
+    OwnPtr<MediaQueryEvaluator> mediaEvaluator = adoptPtr(new MediaQueryEvaluator(parentStyleSheet->ownerDocument()->frame()));
+
+    RefPtr<TypeBuilder::Array<TypeBuilder::CSS::MediaQuery> > mediaListArray = TypeBuilder::Array<TypeBuilder::CSS::MediaQuery>::create();
+    RefPtr<MediaValues> mediaValues = MediaValues::createDynamicIfFrameExists(parentStyleSheet->ownerDocument()->frame());
     bool hasMediaQueryItems = false;
-    RefPtr<TypeBuilder::Array<TypeBuilder::Array<TypeBuilder::CSS::MediaQueryExpression> > > mediaListArray = TypeBuilder::Array<TypeBuilder::Array<TypeBuilder::CSS::MediaQueryExpression> >::create();
     for (size_t i = 0; i < queryVector.size(); ++i) {
         MediaQuery* query = queryVector.at(i).get();
         const ExpressionHeapVector& expressions = query->expressions();
@@ -1016,7 +1027,7 @@ PassRefPtr<TypeBuilder::CSS::CSSMedia> InspectorCSSAgent::buildMediaObject(const
                 .setValue(expValue.value)
                 .setUnit(String(valueName))
                 .setFeature(mediaQueryExp->mediaFeature());
-            RefPtr<MediaValues> mediaValues = MediaValues::createDynamicIfFrameExists(parentStyleSheet->ownerDocument()->frame());
+
             int computedLength;
             if (mediaValues->computeLength(expValue.value, expValue.unit, computedLength))
                 mediaQueryExpression->setComputedLength(computedLength);
@@ -1024,10 +1035,13 @@ PassRefPtr<TypeBuilder::CSS::CSSMedia> InspectorCSSAgent::buildMediaObject(const
             expressionArray->addItem(mediaQueryExpression);
             hasExpressionItems = true;
         }
-        if (hasExpressionItems) {
-            mediaListArray->addItem(expressionArray);
-            hasMediaQueryItems = true;
-        }
+        if (!hasExpressionItems)
+            continue;
+        RefPtr<TypeBuilder::CSS::MediaQuery> mediaQuery = TypeBuilder::CSS::MediaQuery::create()
+            .setActive(mediaEvaluator->eval(query, nullptr))
+            .setExpressions(expressionArray);
+        mediaListArray->addItem(mediaQuery);
+        hasMediaQueryItems = true;
     }
 
     RefPtr<TypeBuilder::CSS::CSSMedia> mediaObject = TypeBuilder::CSS::CSSMedia::create()

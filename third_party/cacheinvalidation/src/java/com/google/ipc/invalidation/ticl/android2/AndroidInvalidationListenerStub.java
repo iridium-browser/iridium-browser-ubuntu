@@ -67,7 +67,7 @@ public class AndroidInvalidationListenerStub extends IntentService {
    */
   @Override
   public void onHandleIntent(Intent intent) {
-    logger.fine("onHandleIntent({0})", AndroidStrings.toLazyCompactString(intent));
+    logger.fine("onHandleIntent({0})", intent);
     intentMapper.handleIntent(intent);
   }
 

@@ -11,7 +11,7 @@
 #import "base/mac/scoped_sending_event.h"
 #include "base/message_loop/message_loop.h"
 #import "base/message_loop/message_pump_mac.h"
-#include "content/browser/renderer_host/popup_menu_helper_mac.h"
+#include "content/browser/frame_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
@@ -68,6 +68,7 @@ COMPILE_ASSERT_MATCHING_ENUM(DragOperationEvery);
 @end
 
 namespace content {
+
 WebContentsView* CreateWebContentsView(
     WebContentsImpl* web_contents,
     WebContentsViewDelegate* delegate,
@@ -81,7 +82,6 @@ WebContentsViewMac::WebContentsViewMac(WebContentsImpl* web_contents,
                                        WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
       delegate_(delegate),
-      allow_overlapping_views_(false),
       allow_other_views_(false) {
 }
 
@@ -220,7 +220,7 @@ void WebContentsViewMac::TakeFocus(bool reverse) {
 }
 
 void WebContentsViewMac::ShowContextMenu(
-    content::RenderFrameHost* render_frame_host,
+    RenderFrameHost* render_frame_host,
     const ContextMenuParams& params) {
   // Allow delegates to handle the context menu operation first.
   if (web_contents_->GetDelegate() &&
@@ -234,8 +234,8 @@ void WebContentsViewMac::ShowContextMenu(
     DLOG(ERROR) << "Cannot show context menus without a delegate.";
 }
 
-// Display a popup menu for WebKit using Cocoa widgets.
 void WebContentsViewMac::ShowPopupMenu(
+    RenderFrameHost* render_frame_host,
     const gfx::Rect& bounds,
     int item_height,
     double item_font_size,
@@ -243,8 +243,7 @@ void WebContentsViewMac::ShowPopupMenu(
     const std::vector<MenuItem>& items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  popup_menu_helper_.reset(
-      new PopupMenuHelper(web_contents_->GetRenderViewHost()));
+  popup_menu_helper_.reset(new PopupMenuHelper(render_frame_host));
   popup_menu_helper_->ShowPopupMenu(bounds, item_height, item_font_size,
                                     selected_item, items, right_aligned,
                                     allow_multiple_selection);
@@ -260,21 +259,6 @@ gfx::Rect WebContentsViewMac::GetViewBounds() const {
   // This method is not currently used on mac.
   NOTIMPLEMENTED();
   return gfx::Rect();
-}
-
-void WebContentsViewMac::SetAllowOverlappingViews(bool overlapping) {
-  if (allow_overlapping_views_ == overlapping)
-    return;
-
-  allow_overlapping_views_ = overlapping;
-  RenderWidgetHostViewMac* view = static_cast<RenderWidgetHostViewMac*>(
-      web_contents_->GetRenderWidgetHostView());
-  if (view)
-    view->SetAllowOverlappingViews(allow_overlapping_views_);
-}
-
-bool WebContentsViewMac::GetAllowOverlappingViews() const {
-  return allow_overlapping_views_;
 }
 
 void WebContentsViewMac::SetAllowOtherViews(bool allow) {
@@ -321,7 +305,6 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
 
     view->SetDelegate(rw_delegate.get());
   }
-  view->SetAllowOverlappingViews(allow_overlapping_views_);
   view->SetAllowPauseForResizeOrRepaint(!allow_other_views_);
 
   // Fancy layout comes later; for now just make it our size and resize it

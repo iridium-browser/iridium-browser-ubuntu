@@ -213,6 +213,23 @@
 #define GL_TEXTURE_SAMPLES_IMG                           0x9136
 #endif
 
+#ifndef GL_CHROMIUM_path_rendering
+// These match the corresponding values in NV_path_rendering
+// extension, eg tokens with CHROMIUM replaced with NV.
+#define GL_PATH_MODELVIEW_MATRIX_CHROMIUM 0x0BA6
+#define GL_PATH_PROJECTION_MATRIX_CHROMIUM 0x0BA7
+#define GL_PATH_MODELVIEW_CHROMIUM 0x1700
+#define GL_PATH_PROJECTION_CHROMIUM 0x1701
+#endif
+
+#ifndef GL_EXT_disjoint_timer_query
+#define GL_EXT_disjoint_timer_query 1
+#define GL_QUERY_COUNTER_BITS_EXT         0x8864
+#define GL_TIME_ELAPSED_EXT               0x88BF
+#define GL_TIMESTAMP_EXT                  0x8E28
+#define GL_GPU_DISJOINT_EXT               0x8FBB
+#endif
+
 #define GL_GLEXT_PROTOTYPES 1
 
 #if defined(OS_WIN)

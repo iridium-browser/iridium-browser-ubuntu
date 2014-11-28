@@ -19,7 +19,7 @@ namespace printing {
 // Java side through JNI.
 class PRINTING_EXPORT PrintingContextAndroid : public PrintingContext {
  public:
-  explicit PrintingContextAndroid(const std::string& app_locale);
+  explicit PrintingContextAndroid(Delegate* delegate);
   virtual ~PrintingContextAndroid();
 
   // Called when the page is successfully written to a PDF using the file
@@ -32,13 +32,13 @@ class PRINTING_EXPORT PrintingContextAndroid : public PrintingContext {
 
   // PrintingContext implementation.
   virtual void AskUserForSettings(
-      gfx::NativeView parent_view,
       int max_pages,
       bool has_selection,
       const PrintSettingsCallback& callback) OVERRIDE;
   virtual Result UseDefaultSettings() OVERRIDE;
   virtual gfx::Size GetPdfPaperSizeDeviceUnits() OVERRIDE;
-  virtual Result UpdatePrinterSettings(bool external_preview) OVERRIDE;
+  virtual Result UpdatePrinterSettings(bool external_preview,
+                                       bool show_system_dialog) OVERRIDE;
   virtual Result InitWithSettings(const PrintSettings& settings) OVERRIDE;
   virtual Result NewDocument(const base::string16& document_name) OVERRIDE;
   virtual Result NewPage() OVERRIDE;

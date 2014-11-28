@@ -41,10 +41,6 @@ struct CastTransportRtpConfig {
   // RTP payload type enum: Specifies the type/encoding of frame data.
   int rtp_payload_type;
 
-  // The number of most-recent frames that must be stored in the transport
-  // layer, to facilitate re-transmissions.
-  int stored_frames;
-
   // The AES crypto key and initialization vector.  Each of these strings
   // contains the data in binary form, of size kAesKeySize.  If they are empty
   // strings, crypto is not being used.
@@ -117,6 +113,10 @@ struct EncodedFrame {
   // timestamps; and it may not necessarily increment with precise regularity.
   base::TimeTicks reference_time;
 
+  // Playout delay for this and all future frames. Used by the Adaptive
+  // Playout delay extension. Zero means no change.
+  uint16 new_playout_delay_ms;
+
   // The encoded signal data.
   std::string data;
 };
@@ -135,6 +135,10 @@ class PacketSender {
   // occur will be reported through side channels, in such cases, this function
   // will return true indicating that the channel is not blocked.
   virtual bool SendPacket(PacketRef packet, const base::Closure& cb) = 0;
+
+  // Returns the number of bytes ever sent.
+  virtual int64 GetBytesSent() = 0;
+
   virtual ~PacketSender() {}
 };
 

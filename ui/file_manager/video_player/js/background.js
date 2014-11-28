@@ -13,7 +13,7 @@ var initializeQueue = new AsyncUtil.Queue();
 
 // Initializes the strings. This needs for the volume manager.
 initializeQueue.run(function(fulfill) {
-  chrome.fileBrowserPrivate.getStrings(function(stringData) {
+  chrome.fileManagerPrivate.getStrings(function(stringData) {
     loadTimeData.data = stringData;
     fulfill();
   }.wrap());
@@ -41,7 +41,7 @@ function onLaunched(launchData) {
       return item.entry;
     });
 
-    chrome.fileBrowserPrivate.resolveIsolatedEntries(isolatedEntries,
+    chrome.fileManagerPrivate.resolveIsolatedEntries(isolatedEntries,
         function(externalEntries) {
           videos = externalEntries.map(function(entry) {
             return Object.freeze({
@@ -68,21 +68,47 @@ function onLaunched(launchData) {
 /**
  * Opens player window.
  * @param {Array.<Object>} videos List of videos to play.
+ * @return {Promise} Promise to be fulfilled on success, or rejected on error.
  */
 function open(videos) {
-  chrome.app.window.create('video_player.html', {
-    id: 'video',
-    frame: 'none',
-    singleton: false,
-    minWidth: 480,
-    minHeight: 270
-  },
-  function(createdWindow) {
+  return new Promise(function(fulfill, reject) {
+    chrome.app.window.create('video_player.html', {
+      id: 'video',
+      frame: 'none',
+      singleton: false,
+      minWidth: 480,
+      minHeight: 270
+    },
+    fulfill);
+  }).then(function(createdWindow) {
     // Stores the window for test purpose.
     appWindowsForTest[videos[0].entry.name] = createdWindow;
 
-    createdWindow.setIcon('images/icon/video-player-64.png');
     createdWindow.contentWindow.videos = videos;
-    chrome.runtime.sendMessage({ready: true}, function() {});
-  }.wrap());
+    createdWindow.setIcon('images/icon/video-player-64.png');
+
+    if (chrome.test)
+      createdWindow.contentWindow.loadMockCastExtensionForTest = true;
+
+    chrome.runtime.sendMessage({ready: true});
+  }).catch(function(error) {
+    console.error('Launch failed', error.stack || error);
+    return Promise.reject(error);
+  });
+}
+
+// If is is run in the browser test, wait for the test resources are installed
+// as a component extension, and then load the test resources.
+if (chrome.test) {
+  /** @type {string} */
+  window.testExtensionId = 'ljoplibgfehghmibaoaepfagnmbbfiga';
+  chrome.runtime.onMessageExternal.addListener(function(message) {
+    if (message.name !== 'testResourceLoaded')
+      return;
+    var script = document.createElement('script');
+    script.src =
+        'chrome-extension://' + window.testExtensionId +
+        '/common/test_loader.js';
+    document.documentElement.appendChild(script);
+  });
 }

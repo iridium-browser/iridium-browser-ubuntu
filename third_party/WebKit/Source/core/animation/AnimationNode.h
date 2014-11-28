@@ -60,6 +60,7 @@ static inline double nullValue()
 }
 
 class AnimationNode : public RefCountedWillBeGarbageCollectedFinalized<AnimationNode>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
     friend class AnimationPlayer; // Calls attach/detach, updateInheritedTime.
 public:
     // Note that logic in CSSAnimations depends on the order of these values.
@@ -112,6 +113,9 @@ public:
     double localTime(bool& isNull) const { isNull = !m_player; return ensureCalculated().localTime * 1000; }
     double currentIteration(bool& isNull) const { isNull = !ensureCalculated().isInEffect; return ensureCalculated().currentIteration; }
 
+    void setName(const String& name) { m_name = name; }
+    const String& name() const { return m_name; }
+
     virtual void trace(Visitor*);
 
 protected:
@@ -163,6 +167,7 @@ protected:
     } m_calculated;
     mutable bool m_needsUpdate;
     mutable double m_lastUpdateTime;
+    String m_name;
 
     const CalculatedTiming& ensureCalculated() const;
 };

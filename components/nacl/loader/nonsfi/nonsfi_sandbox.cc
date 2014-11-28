@@ -6,12 +6,14 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/futex.h>
 #include <linux/net.h>
+#include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
-#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -20,7 +22,7 @@
 #include "content/public/common/sandbox_init.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf-helpers/sigsys_handlers.h"
-#include "sandbox/linux/seccomp-bpf/sandbox_bpf_policy.h"
+#include "sandbox/linux/seccomp-bpf-helpers/syscall_parameters_restrictions.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 
 #if defined(__arm__) && !defined(MAP_STACK)
@@ -28,19 +30,18 @@
 #define MAP_STACK 0x20000
 #endif
 
+#define CASES SANDBOX_BPF_DSL_CASES
+
 using sandbox::CrashSIGSYS;
 using sandbox::CrashSIGSYSClone;
+using sandbox::CrashSIGSYSFutex;
 using sandbox::CrashSIGSYSPrctl;
 using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::Arg;
+using sandbox::bpf_dsl::BoolExpr;
 using sandbox::bpf_dsl::Error;
 using sandbox::bpf_dsl::If;
 using sandbox::bpf_dsl::ResultExpr;
-
-// TODO(mdempsky): Make BoolExpr a standalone class so these operators can
-// be resolved via argument-dependent lookup.
-using sandbox::bpf_dsl::operator&&;
-using sandbox::bpf_dsl::operator||;
 
 namespace nacl {
 namespace nonsfi {
@@ -60,30 +61,10 @@ ResultExpr RestrictFcntlCommands() {
   // libevent and SetNonBlocking. As the latter mix O_NONBLOCK to
   // the return value of F_GETFL, so we need to allow O_ACCMODE in
   // addition to O_NONBLOCK.
-  const unsigned long denied_mask = ~(O_ACCMODE | O_NONBLOCK);
+  const uint64_t kAllowedMask = O_ACCMODE | O_NONBLOCK;
   return If((cmd == F_SETFD && long_arg == FD_CLOEXEC) || cmd == F_GETFL ||
-                (cmd == F_SETFL && (long_arg & denied_mask) == 0),
+                (cmd == F_SETFL && (long_arg & ~kAllowedMask) == 0),
             Allow()).Else(CrashSIGSYS());
-}
-
-ResultExpr RestrictClockID() {
-  // We allow accessing only CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID,
-  // CLOCK_REALTIME, and CLOCK_THREAD_CPUTIME_ID.  In particular, this disallows
-  // access to arbitrary per-{process,thread} CPU-time clock IDs (such as those
-  // returned by {clock,pthread}_getcpuclockid), which can leak information
-  // about the state of the host OS.
-  COMPILE_ASSERT(4 == sizeof(clockid_t), clockid_is_not_32bit);
-  const Arg<clockid_t> clockid(0);
-  return If(
-#if defined(OS_CHROMEOS)
-             // Allow the special clock for Chrome OS used by Chrome tracing.
-             clockid == base::TimeTicks::kClockSystemTrace ||
-#endif
-                 clockid == CLOCK_MONOTONIC ||
-                 clockid == CLOCK_PROCESS_CPUTIME_ID ||
-                 clockid == CLOCK_REALTIME ||
-                 clockid == CLOCK_THREAD_CPUTIME_ID,
-             Allow()).Else(CrashSIGSYS());
 }
 
 ResultExpr RestrictClone() {
@@ -93,6 +74,22 @@ ResultExpr RestrictClone() {
                       CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
                       CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID),
             Allow()).Else(CrashSIGSYSClone());
+}
+
+ResultExpr RestrictFutexOperation() {
+  // TODO(hamaji): Allow only FUTEX_PRIVATE_FLAG futexes.
+  const uint64_t kAllowedFutexFlags = FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME;
+  const Arg<int> op(1);
+  return Switch(op & ~kAllowedFutexFlags)
+      .CASES((FUTEX_WAIT,
+              FUTEX_WAKE,
+              FUTEX_REQUEUE,
+              FUTEX_CMP_REQUEUE,
+              FUTEX_WAKE_OP,
+              FUTEX_WAIT_BITSET,
+              FUTEX_WAKE_BITSET),
+             Allow())
+      .Default(CrashSIGSYSFutex());
 }
 
 ResultExpr RestrictPrctl() {
@@ -115,20 +112,20 @@ ResultExpr RestrictSocketcall() {
 ResultExpr RestrictMprotect() {
   // TODO(jln, keescook, drewry): Limit the use of mprotect by adding
   // some features to linux kernel.
-  const uint32_t denied_mask = ~(PROT_READ | PROT_WRITE | PROT_EXEC);
+  const uint64_t kAllowedMask = PROT_READ | PROT_WRITE | PROT_EXEC;
   const Arg<int> prot(2);
-  return If((prot & denied_mask) == 0, Allow()).Else(CrashSIGSYS());
+  return If((prot & ~kAllowedMask) == 0, Allow()).Else(CrashSIGSYS());
 }
 
 ResultExpr RestrictMmap() {
-  const uint32_t denied_flag_mask = ~(MAP_SHARED | MAP_PRIVATE |
-                                      MAP_ANONYMOUS | MAP_STACK | MAP_FIXED);
+  const uint64_t kAllowedFlagMask =
+      MAP_SHARED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK | MAP_FIXED;
   // When PROT_EXEC is specified, IRT mmap of Non-SFI NaCl helper
   // calls mmap without PROT_EXEC and then adds PROT_EXEC by mprotect,
   // so we do not need to allow PROT_EXEC in mmap.
-  const uint32_t denied_prot_mask = ~(PROT_READ | PROT_WRITE);
+  const uint64_t kAllowedProtMask = PROT_READ | PROT_WRITE;
   const Arg<int> prot(2), flags(3);
-  return If((prot & denied_prot_mask) == 0 && (flags & denied_flag_mask) == 0,
+  return If((prot & ~kAllowedProtMask) == 0 && (flags & ~kAllowedFlagMask) == 0,
             Allow()).Else(CrashSIGSYS());
 }
 
@@ -162,8 +159,10 @@ bool IsGracefullyDenied(int sysno) {
     // tcmalloc calls madvise in TCMalloc_SystemRelease.
     case __NR_madvise:
     // EPERM instead of SIGSYS as glibc tries to open files in /proc.
+    // openat via opendir via get_nprocs_conf and open via get_nprocs.
     // TODO(hamaji): Remove this when we switch to newlib.
     case __NR_open:
+    case __NR_openat:
     // For RunSandboxSanityChecks().
     case __NR_ptrace:
     // glibc uses this for its pthread implementation. If we return
@@ -212,8 +211,6 @@ ResultExpr NaClNonSfiBPFSandboxPolicy::EvaluateSyscall(int sysno) const {
 #elif defined(__x86_64__)
     case __NR_fstat:
 #endif
-    // TODO(hamaji): Allow only FUTEX_PRIVATE_FLAG.
-    case __NR_futex:
     // TODO(hamaji): Remove the need of gettid. Currently, this is
     // called from PlatformThread::CurrentId().
     case __NR_gettid:
@@ -241,7 +238,7 @@ ResultExpr NaClNonSfiBPFSandboxPolicy::EvaluateSyscall(int sysno) const {
 
     case __NR_clock_getres:
     case __NR_clock_gettime:
-      return RestrictClockID();
+      return sandbox::RestrictClockID();
 
     case __NR_clone:
       return RestrictClone();
@@ -253,6 +250,9 @@ ResultExpr NaClNonSfiBPFSandboxPolicy::EvaluateSyscall(int sysno) const {
     case __NR_fcntl64:
 #endif
       return RestrictFcntlCommands();
+
+    case __NR_futex:
+      return RestrictFutexOperation();
 
 #if defined(__x86_64__)
     case __NR_mmap:
@@ -302,7 +302,7 @@ ResultExpr NaClNonSfiBPFSandboxPolicy::InvalidSyscall() const {
 
 bool InitializeBPFSandbox() {
   bool sandbox_is_initialized = content::InitializeSandbox(
-      scoped_ptr<sandbox::SandboxBPFPolicy>(
+      scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy>(
           new nacl::nonsfi::NaClNonSfiBPFSandboxPolicy()));
   if (!sandbox_is_initialized)
     return false;

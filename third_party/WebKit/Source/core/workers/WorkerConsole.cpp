@@ -43,17 +43,20 @@ namespace blink {
 WorkerConsole::WorkerConsole(WorkerGlobalScope* scope)
     : m_scope(scope)
 {
-    ScriptWrappable::init(this);
 }
 
 WorkerConsole::~WorkerConsole()
 {
 }
 
-void WorkerConsole::reportMessageToClient(MessageLevel level, const String& message, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
+void WorkerConsole::reportMessageToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage> consoleMessage)
 {
-    const ScriptCallFrame& lastCaller = callStack->at(0);
-    m_scope->thread()->workerReportingProxy().reportConsoleMessage(ConsoleMessage::create(ConsoleAPIMessageSource, level, message, lastCaller.sourceURL(), lastCaller.lineNumber()));
+    if (RefPtrWillBeRawPtr<ScriptCallStack> callStack = consoleMessage->callStack()) {
+        const ScriptCallFrame& lastCaller = callStack->at(0);
+        consoleMessage->setURL(lastCaller.sourceURL());
+        consoleMessage->setLineNumber(lastCaller.lineNumber());
+    }
+    m_scope->addConsoleMessage(consoleMessage);
 }
 
 ExecutionContext* WorkerConsole::context()

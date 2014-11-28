@@ -27,12 +27,14 @@ cr.define('options', function() {
   /**
    * Encapsulated handling of the keyboard overlay.
    * @constructor
+   * @extends {options.SettingsDialog}
    */
   function KeyboardOverlay() {
     options.SettingsDialog.call(this, 'keyboard-overlay',
         loadTimeData.getString('keyboardOverlayTabTitle'),
         'keyboard-overlay',
-        $('keyboard-confirm'), $('keyboard-cancel'));
+        assertInstanceof($('keyboard-confirm'), HTMLButtonElement),
+        assertInstanceof($('keyboard-cancel'), HTMLButtonElement));
   }
 
   cr.addSingletonGetter(KeyboardOverlay);
@@ -160,15 +162,10 @@ cr.define('options', function() {
   };
 
   // Forward public APIs to private implementations.
-  [
+  cr.makePublic(KeyboardOverlay, [
     'showCapsLockOptions',
     'showDiamondKeyOptions',
-  ].forEach(function(name) {
-    KeyboardOverlay[name] = function() {
-      var instance = KeyboardOverlay.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
-    };
-  });
+  ]);
 
   // Export
   return {

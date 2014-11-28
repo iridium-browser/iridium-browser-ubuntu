@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/location_bar/origin_chip_info.h"
 
+#include <string>
+
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,14 +18,14 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_icon_image.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
-#include "grit/chromium_strings.h"
 #include "grit/components_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -69,8 +71,10 @@ int StringForChromeHost(const GURL& url) {
     return IDS_PLUGINS_TITLE;
   if (host == chrome::kChromeUIPolicyHost)
     return IDS_POLICY_TITLE;
+#if defined(ENABLE_FULL_PRINTING)
   if (host == chrome::kChromeUIPrintHost)
     return IDS_PRINT_PREVIEW_TITLE;
+#endif  // ENABLE_FULL_PRINTING
   if (host == chrome::kChromeUISettingsHost)
     return IDS_SETTINGS_TITLE;
   if (host == chrome::kChromeUIVersionHost)
@@ -251,7 +255,7 @@ base::string16 OriginChip::LabelFromURLForProfile(const GURL& provided_url,
 
 #if defined(OS_CHROMEOS)
   if (url.SchemeIs(chrome::kCrosScheme) ||
-      url.SchemeIs(chrome::kDriveScheme))
+      url.SchemeIs(chrome::kExternalFileScheme))
     return base::UTF8ToUTF16(url.spec());
 #endif
 

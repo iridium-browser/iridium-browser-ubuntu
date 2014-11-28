@@ -130,7 +130,7 @@ class AppListViewTestContext {
   const TestType test_type_;
   scoped_ptr<base::RunLoop> run_loop_;
   app_list::AppListView* view_;  // Owned by native widget.
-  app_list::test::AppListTestViewDelegate* delegate_;  // Owned by |view_|;
+  scoped_ptr<app_list::test::AppListTestViewDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListViewTestContext);
 };
@@ -175,8 +175,8 @@ AppListViewTestContext::AppListViewTestContext(int test_type,
       break;
   }
 
-  delegate_ = new UnitTestViewDelegate(this);
-  view_ = new app_list::AppListView(delegate_);
+  delegate_.reset(new UnitTestViewDelegate(this));
+  view_ = new app_list::AppListView(delegate_.get());
 
   // Initialize centered around a point that ensures the window is wholly shown.
   view_->InitAsBubbleAtFixedLocation(parent,
@@ -238,6 +238,28 @@ void AppListViewTestContext::RunDisplayTest() {
   delegate_->GetTestModel()->PopulateApps(kInitialItems);
 
   Show();
+
+  // Explicitly enforce the exact dimensions of the app list. Feel free to
+  // change these if you need to (they are just here to prevent against
+  // accidental changes to the window size).
+  switch (test_type_) {
+    case NORMAL:
+      EXPECT_EQ("400x500", view_->bounds().size().ToString());
+      break;
+    case LANDSCAPE:
+      // NOTE: Height should not exceed 402, because otherwise there might not
+      // be enough space to accomodate the virtual keyboard. (LANDSCAPE mode is
+      // enabled by default when the virtual keyboard is enabled.)
+      EXPECT_EQ("576x402", view_->bounds().size().ToString());
+      break;
+    case EXPERIMENTAL:
+      EXPECT_EQ("768x560", view_->bounds().size().ToString());
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+
   if (is_landscape())
     EXPECT_EQ(2, GetPaginationModel()->total_pages());
   else
@@ -336,7 +358,7 @@ void AppListViewTestContext::RunStartPageTest() {
     model->results()->Add(new TestTileSearchResult());
     start_page_view->UpdateForTesting();
     EXPECT_EQ(1u, GetVisibleTileItemViews(start_page_view->tile_views()));
-    model->results()->RemoveAll();
+    model->results()->DeleteAll();
     start_page_view->UpdateForTesting();
     EXPECT_EQ(0u, GetVisibleTileItemViews(start_page_view->tile_views()));
   } else {

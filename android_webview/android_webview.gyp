@@ -7,67 +7,13 @@
   },
   'targets': [
     {
-      'target_name': 'libwebviewchromium',
-      'type': 'shared_library',
-      'android_unmangled_name': 1,
-      'dependencies': [
-        'android_webview_common',
-      ],
-      'conditions': [
-        # Avoid clashes between the versions of this library built with
-        # android_webview_build==1 by using a different name prefix.
-        [ 'android_webview_build==0', {
-          'product_prefix': 'libstandalone',
-        }],
-        [ 'android_webview_build==1', {
-          # When building inside the android tree we also need to depend on all
-          # the java sources generated from templates which will be needed by
-          # android_webview_java in android_webview/java_library_common.mk.
-          'dependencies': [
-            '../base/base.gyp:base_java_application_state',
-            '../base/base.gyp:base_java_memory_pressure_level_list',
-            '../content/content.gyp:content_gamepad_mapping',
-            '../content/content.gyp:gesture_event_type_java',
-            '../content/content.gyp:page_transition_types_java',
-            '../content/content.gyp:popup_item_type_java',
-            '../content/content.gyp:result_codes_java',
-            '../content/content.gyp:screen_orientation_values_java',
-            '../content/content.gyp:selection_event_type_java',
-            '../content/content.gyp:speech_recognition_error_java',
-            '../media/media.gyp:media_android_imageformat_list',
-            '../net/net.gyp:cert_verify_status_android_java',
-            '../net/net.gyp:certificate_mime_types_java',
-            '../net/net.gyp:net_errors_java',
-            '../net/net.gyp:private_key_types_java',
-            '../ui/android/ui_android.gyp:bitmap_format_java',
-            '../ui/android/ui_android.gyp:window_open_disposition_java',
-          ],
-        }],
-        [ 'android_webview_build==1 and use_system_skia==0', {
-          # When not using the system skia there are linker warnings about
-          # overriden hidden symbols which there's no easy way to eliminate;
-          # disable them. http://crbug.com/157326
-          'ldflags': [
-            '-Wl,--no-fatal-warnings',
-          ],
-          'ldflags!': [
-            '-Wl,--fatal-warnings',
-          ],
-        }],
-      ],
-      'sources': [
-        'lib/main/webview_entry_point.cc',
-      ],
-    },
-    {
       'target_name': 'android_webview_pak',
       'type': 'none',
       'dependencies': [
-        '<(DEPTH)/content/content_resources.gyp:content_resources',
+        '<(DEPTH)/content/app/resources/content_resources.gyp:content_resources',
         '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/third_party/WebKit/public/blink_resources.gyp:blink_resources',
         '<(DEPTH)/ui/resources/ui_resources.gyp:ui_resources',
-        '<(DEPTH)/webkit/glue/resources/webkit_resources.gyp:webkit_resources',
       ],
       'actions': [
         {
@@ -75,12 +21,12 @@
           'variables': {
             'pak_inputs': [
               '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/content/app/resources/content_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_resources_100_percent.pak',
-              '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_100_percent.pak',
             ],
-            'pak_output': '<(PRODUCT_DIR)/android_webview_apk/assets/webviewchromium.pak',
+            'pak_output': '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
           },
          'includes': [ '../build/repack_action.gypi' ],
         },
@@ -88,10 +34,21 @@
           'action_name': 'add_en_US_pak_locale',
           'variables': {
             'pak_inputs': ['<(SHARED_INTERMEDIATE_DIR)/content/app/strings/content_strings_en-US.pak'],
-            'pak_output': '<(PRODUCT_DIR)/android_webview_apk/assets/en-US.pak',
+            'pak_output': '<(PRODUCT_DIR)/android_webview_assets/en-US.pak',
           },
          'includes': [ '../build/repack_action.gypi' ],
         }
+      ],
+    },
+    {
+      'target_name': 'android_webview_strings_grd',
+      'android_unmangled_name': 1,
+      'type': 'none',
+      'variables': {
+        'grd_file': '../android_webview/java/strings/android_webview_strings.grd',
+      },
+      'includes': [
+          '../build/java_strings_grd.gypi',
       ],
     },
     {
@@ -141,6 +98,8 @@
         'browser/aw_contents_io_thread_client.h',
         'browser/aw_cookie_access_policy.cc',
         'browser/aw_cookie_access_policy.h',
+        'browser/aw_dev_tools_manager_delegate.cc',
+        'browser/aw_dev_tools_manager_delegate.h',
         'browser/aw_download_manager_delegate.cc',
         'browser/aw_download_manager_delegate.h',
         'browser/aw_form_database_service.cc',
@@ -257,11 +216,18 @@
         'renderer/print_render_frame_observer.h',
       ],
     },
+    {
+      'target_name': 'libwebviewchromium',
+      'includes': [
+          'libwebviewchromium.gypi',
+      ],
+    }
   ],
   'conditions': [
     ['android_webview_build==0', {
       'includes': [
         'android_webview_tests.gypi',
+        '../third_party/android_webview_glue/android_webview_glue.gypi',
       ],
       'targets': [
         {
@@ -272,6 +238,7 @@
             '../components/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
             '../ui/android/ui_android.gyp:ui_java',
+            'android_webview_strings_grd',
           ],
           'variables': {
             'java_in_dir': '../android_webview/java',
@@ -308,8 +275,9 @@
           'dependencies': [
             '../content/content.gyp:content_strings_grd',
             '../ui/android/ui_android.gyp:ui_strings_grd',
+            'android_webview_jarjar_content_resources',
             'android_webview_jarjar_ui_resources',
-            'android_webview_jarjar_content_resources'
+            'android_webview_strings_grd',
           ],
         },
       ],

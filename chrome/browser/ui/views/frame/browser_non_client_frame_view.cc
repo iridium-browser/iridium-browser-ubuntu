@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -147,10 +146,8 @@ void BrowserNonClientFrameView::UpdateNewStyleAvatarInfo(
 
   if (browser_view_->ShouldShowAvatar()) {
     if (!new_avatar_button_) {
-      base::string16 profile_name = profiles::GetAvatarNameForProfile(
-          browser_view_->browser()->profile()->GetPath());
-      new_avatar_button_ = new NewAvatarButton(
-          listener, profile_name, style, browser_view_->browser());
+      new_avatar_button_ =
+          new NewAvatarButton(listener, style, browser_view_->browser());
       new_avatar_button_->set_id(VIEW_ID_NEW_AVATAR_BUTTON);
       AddChildView(new_avatar_button_);
       frame_->GetRootView()->Layout();

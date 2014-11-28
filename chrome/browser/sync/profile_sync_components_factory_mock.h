@@ -16,7 +16,7 @@ namespace sync_driver {
 class AssociatorInterface;
 class ChangeProcessor;
 class DataTypeEncryptionHandler;
-class FailedDataTypesHandler;
+class DataTypeStatusTable;
 }
 
 class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
@@ -28,15 +28,13 @@ class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
   virtual ~ProfileSyncComponentsFactoryMock();
 
   MOCK_METHOD1(RegisterDataTypes, void(ProfileSyncService*));
-  MOCK_METHOD6(CreateDataTypeManager,
+  MOCK_METHOD5(CreateDataTypeManager,
                sync_driver::DataTypeManager*(
                    const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&,
                    const sync_driver::DataTypeController::TypeMap*,
                    const sync_driver::DataTypeEncryptionHandler*,
                    browser_sync::SyncBackendHost*,
-                   sync_driver::DataTypeManagerObserver* observer,
-                   sync_driver::FailedDataTypesHandler*
-                       failed_datatypes_handler));
+                   sync_driver::DataTypeManagerObserver* observer));
   MOCK_METHOD5(CreateSyncBackendHost,
                browser_sync::SyncBackendHost*(
                    const std::string& name,
@@ -45,14 +43,15 @@ class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
                    const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
                    const base::FilePath& sync_folder));
 
-  virtual scoped_ptr<browser_sync::LocalDeviceInfoProvider>
+  virtual scoped_ptr<sync_driver::LocalDeviceInfoProvider>
       CreateLocalDeviceInfoProvider() OVERRIDE;
   void SetLocalDeviceInfoProvider(
-      scoped_ptr<browser_sync::LocalDeviceInfoProvider> local_device);
+      scoped_ptr<sync_driver::LocalDeviceInfoProvider> local_device);
 
   MOCK_METHOD1(GetSyncableServiceForType,
                base::WeakPtr<syncer::SyncableService>(syncer::ModelType));
   virtual scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
+      const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
       syncer::AttachmentService::Delegate* delegate) OVERRIDE;
   MOCK_METHOD2(CreateBookmarkSyncComponents,
@@ -76,7 +75,7 @@ class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
   scoped_ptr<sync_driver::ChangeProcessor> change_processor_;
   // LocalDeviceInfoProvider is initially owned by this class,
   // transferred to caller when CreateLocalDeviceInfoProvider is called.
-  scoped_ptr<browser_sync::LocalDeviceInfoProvider> local_device_;
+  scoped_ptr<sync_driver::LocalDeviceInfoProvider> local_device_;
 };
 
 #endif  // CHROME_BROWSER_SYNC_PROFILE_SYNC_COMPONENTS_FACTORY_MOCK_H__

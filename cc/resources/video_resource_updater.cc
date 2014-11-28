@@ -193,11 +193,11 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
     if (resource_id == 0) {
       // TODO(danakj): Abstract out hw/sw resource create/delete from
       // ResourceProvider and stop using ResourceProvider in this class.
-      resource_id =
-          resource_provider_->CreateResource(output_plane_resource_size,
-                                             GL_CLAMP_TO_EDGE,
-                                             ResourceProvider::TextureUsageAny,
-                                             output_resource_format);
+      resource_id = resource_provider_->CreateResource(
+          output_plane_resource_size,
+          GL_CLAMP_TO_EDGE,
+          ResourceProvider::TextureHintImmutable,
+          output_resource_format);
 
       DCHECK(mailbox.IsZero());
 
@@ -249,7 +249,7 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
     {
       ResourceProvider::ScopedWriteLockSoftware lock(
           resource_provider_, plane_resources[0].resource_id);
-      video_renderer_->Copy(video_frame.get(), lock.sk_canvas());
+      video_renderer_->Copy(video_frame, lock.sk_canvas());
     }
 
     RecycleResourceData recycle_data = {
@@ -306,7 +306,8 @@ void VideoResourceUpdater::ReturnTexture(
     base::WeakPtr<VideoResourceUpdater> updater,
     const scoped_refptr<media::VideoFrame>& video_frame,
     uint32 sync_point,
-    bool lost_resource) {
+    bool lost_resource,
+    BlockingTaskRunner* main_thread_task_runner) {
   // TODO(dshwang) this case should be forwarded to the decoder as lost
   // resource.
   if (lost_resource || !updater.get())
@@ -362,7 +363,8 @@ void VideoResourceUpdater::RecycleResource(
     base::WeakPtr<VideoResourceUpdater> updater,
     RecycleResourceData data,
     uint32 sync_point,
-    bool lost_resource) {
+    bool lost_resource,
+    BlockingTaskRunner* main_thread_task_runner) {
   if (!updater.get()) {
     // Resource was already deleted.
     return;

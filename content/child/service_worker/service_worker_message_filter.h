@@ -16,6 +16,7 @@ namespace content {
 
 class ThreadSafeSender;
 struct ServiceWorkerObjectInfo;
+struct ServiceWorkerRegistrationObjectInfo;
 struct ServiceWorkerVersionAttributes;
 
 class CONTENT_EXPORT ServiceWorkerMessageFilter
@@ -37,14 +38,14 @@ class CONTENT_EXPORT ServiceWorkerMessageFilter
   void OnStaleRegistered(
       int thread_id,
       int request_id,
-      int registration_handle_id,
-      const ServiceWorkerObjectInfo& info);
+      const ServiceWorkerRegistrationObjectInfo& info,
+      const ServiceWorkerVersionAttributes& attrs);
   void OnStaleSetVersionAttributes(
       int thread_id,
       int provider_id,
       int registration_handle_id,
       int changed_mask,
-      const ServiceWorkerVersionAttributes& attributes);
+      const ServiceWorkerVersionAttributes& attrs);
   void OnStaleSetControllerServiceWorker(
       int thread_id,
       int provider_id,

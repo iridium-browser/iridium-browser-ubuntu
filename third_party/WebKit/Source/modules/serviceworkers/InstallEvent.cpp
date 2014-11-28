@@ -43,7 +43,7 @@ PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create()
     return adoptRefWillBeNoop(new InstallEvent());
 }
 
-PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create(const AtomicString& type, const EventInit& initializer, PassRefPtr<WaitUntilObserver> observer)
+PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create(const AtomicString& type, const EventInit& initializer, WaitUntilObserver* observer)
 {
     return adoptRefWillBeNoop(new InstallEvent(type, initializer, observer));
 }
@@ -70,18 +70,16 @@ const AtomicString& InstallEvent::interfaceName() const
 
 InstallEvent::InstallEvent()
 {
-    ScriptWrappable::init(this);
 }
 
-InstallEvent::InstallEvent(const AtomicString& type, const EventInit& initializer, PassRefPtr<WaitUntilObserver> observer)
-    : InstallPhaseEvent(type, initializer, observer)
+InstallEvent::InstallEvent(const AtomicString& type, const EventInit& initializer, WaitUntilObserver* observer)
+    : ExtendableEvent(type, initializer, observer)
 {
-    ScriptWrappable::init(this);
 }
 
 void InstallEvent::trace(Visitor* visitor)
 {
-    InstallPhaseEvent::trace(visitor);
+    ExtendableEvent::trace(visitor);
 }
 
 } // namespace blink

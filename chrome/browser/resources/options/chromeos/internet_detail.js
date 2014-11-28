@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// require: onc_data.js
+
 // NOTE(stevenjb): This code is in the process of being converted to be
 // compatible with the networkingPrivate extension API:
 // * The network property dictionaries are being converted to use ONC values.
@@ -9,53 +11,39 @@
 //   networkingPrivate API. See network_config.js.
 // See crbug.com/279351 for more info.
 
+/** @typedef {{address: (string|undefined),
+ *             gateway: (string|undefined),
+ *             nameServers: (string|undefined),
+ *             netmask: (string|undefined),
+ *             prefixLength: (number|undefined)}}
+ * @see chrome/browser/ui/webui/options/chromeos/internet_options_handler.cc
+ */
+var IPInfo;
+
+/**
+ * InternetDetailedInfo argument passed to showDetailedInfo.
+ * @see chrome/browser/ui/webui/options/chromeos/internet_options_handler.cc
+ * @typedef {{
+ *   servicePath: string,
+ *   showCarrierSelect: (boolean|undefined),
+ *   showViewAccountButton: (boolean|undefined)
+ * }}
+ */
+var InternetDetailedInfo;
+
 cr.define('options.internet', function() {
+  var OncData = cr.onc.OncData;
   var Page = cr.ui.pageManager.Page;
   var PageManager = cr.ui.pageManager.PageManager;
-  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
   /** @const */ var IPAddressField = options.internet.IPAddressField;
 
-  /**
-   * Helper function to get the "Active" value of a property from a dictionary
-   * that includes ONC managed properties, e.g. getActiveValue(data, 'Name').
-   * We use (data, key) instead of getActiveValue(data[key]) so that we can
-   * (possibly) add ONC key validation once all properties use ONC.
-   * @param {object} data The properties dictionary.
-   * @param {string} key The property key.
-   * @return {*} the property value or undefined.
-   */
-  function getActiveValue(data, key) {
-    if (!(key in data))
-      return undefined;
-    var property = data[key];
-    if (typeof property != 'object')
-      return property;
-    if ('Active' in property)
-      return property['Active'];
-    if ('Effective' in property) {
-      var effective = property.Effective;
-      if (effective in property)
-        return property[effective];
-    }
-    return undefined;
-  }
-
-  /**
-   * Helper function for nested ONC properties, e.g. data[WiFi][Strength].
-   * @param {object|string} property The property which must ether be
-   *   a dictionary object or not be present.
-   * @return {*} the property value or undefined.
-   */
-  function getActiveDictionaryValue(data, dict, key) {
-    if (!(dict in data))
-      return undefined;
-    return getActiveValue(data[dict], key);
-  }
+  /** @const */ var GoogleNameServersString = '8.8.4.4,8.8.8.8';
+  /** @const */ var CarrierGenericUMTS = 'Generic UMTS';
 
   /**
    * Helper function to set hidden attribute for elements matching a selector.
    * @param {string} selector CSS selector for extracting a list of elements.
-   * @param {bool} hidden New hidden value.
+   * @param {boolean} hidden New hidden value.
    */
   function updateHidden(selector, hidden) {
     var elements = cr.doc.querySelectorAll(selector);
@@ -64,11 +52,11 @@ cr.define('options.internet', function() {
     }
   }
 
-  /*
+  /**
    * Helper function to update the properties of the data object from the
    * properties in the update object.
-   * @param {object} data object to update.
-   * @param {object} object containing the updated properties.
+   * @param {Object} data Object to update.
+   * @param {Object} update Object containing the updated properties.
    */
   function updateDataObject(data, update) {
     for (var prop in update) {
@@ -96,7 +84,7 @@ cr.define('options.internet', function() {
   /**
    * Simple helper method for converting a field to a string. It is used to
    * easily assign an empty string from fields that may be unknown or undefined.
-   * @param {object} value that should be converted to a string.
+   * @param {Object} value that should be converted to a string.
    * @return {string} the result.
    */
   function stringFromValue(value) {
@@ -104,38 +92,75 @@ cr.define('options.internet', function() {
   }
 
   /**
+   * @param {string} action An action to send to coreOptionsUserMetricsAction.
+   */
+  function sendChromeMetricsAction(action) {
+    chrome.send('coreOptionsUserMetricsAction', [action]);
+  }
+
+  /**
    * Sends the 'checked' state of a control to chrome for a network.
    * @param {string} path The service path of the network.
    * @param {string} message The message to send to chrome.
-   * @param {HTMLInputElement} checkbox The checkbox storing the value to send.
+   * @param {string} checkboxId The id of the checkbox with the value to send.
+   * @param {string=} opt_action Optional action to record.
    */
-  function sendCheckedIfEnabled(path, message, checkbox) {
-    if (!checkbox.hidden && !checkbox.disabled)
+  function sendCheckedIfEnabled(path, message, checkboxId, opt_action) {
+    var checkbox = assertInstanceof($(checkboxId), HTMLInputElement);
+    if (!checkbox.hidden && !checkbox.disabled) {
       chrome.send(message, [path, checkbox.checked ? 'true' : 'false']);
+      if (opt_action)
+        sendChromeMetricsAction(opt_action);
+    }
   }
 
   /**
-   * Looks up the string to display for 'state' in loadTimeData.
-   * @param {string} state The ONC State property of a network.
+   * Send metrics to Chrome when the detailed page is opened.
+   * @param {string} type The ONC type of the network being shown.
+   * @param {string} state The ONC network state.
    */
-  function networkOncStateString(state) {
-    if (state == 'NotConnected')
-      return loadTimeData.getString('OncStateNotConnected');
-    else if (state == 'Connecting')
-      return loadTimeData.getString('OncStateConnecting');
-    else if (state == 'Connected')
-      return loadTimeData.getString('OncStateConnected');
-    return loadTimeData.getString('OncStateUnknown');
+  function sendShowDetailsMetrics(type, state) {
+    if (type == 'WiFi') {
+      sendChromeMetricsAction('Options_NetworkShowDetailsWifi');
+      if (state != 'NotConnected')
+        sendChromeMetricsAction('Options_NetworkShowDetailsWifiConnected');
+    } else if (type == 'Cellular') {
+      sendChromeMetricsAction('Options_NetworkShowDetailsCellular');
+      if (state != 'NotConnected')
+        sendChromeMetricsAction('Options_NetworkShowDetailsCellularConnected');
+    } else if (type == 'VPN') {
+      sendChromeMetricsAction('Options_NetworkShowDetailsVPN');
+      if (state != 'NotConnected')
+        sendChromeMetricsAction('Options_NetworkShowDetailsVPNConnected');
+    }
   }
 
   /**
-   * Returns the display name for the network represented by 'data'.
-   * @param {Object} data The network ONC dictionary.
+   * Returns the netmask as a string for a given prefix length.
+   * @param {number} prefixLength The ONC routing prefix length.
+   * @return {string} The corresponding netmask.
    */
-  function getNetworkName(data) {
-    if (data.type == 'Ethernet')
-      return loadTimeData.getString('ethernetName');
-    return getActiveValue(data, 'Name');
+  function prefixLengthToNetmask(prefixLength) {
+    // Return the empty string for invalid inputs.
+    if (prefixLength < 0 || prefixLength > 32)
+      return '';
+    var netmask = '';
+    for (var i = 0; i < 4; ++i) {
+      var remainder = 8;
+      if (prefixLength >= 8) {
+        prefixLength -= 8;
+      } else {
+        remainder = prefixLength;
+        prefixLength = 0;
+      }
+      if (i > 0)
+        netmask += '.';
+      var value = 0;
+      if (remainder != 0)
+        value = ((2 << (remainder - 1)) - 1) << (8 - remainder);
+      netmask += value.toString();
+    }
+    return netmask;
   }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -144,9 +169,22 @@ cr.define('options.internet', function() {
   /**
    * Encapsulated handling of ChromeOS internet details overlay page.
    * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function DetailsInternetPage() {
-    Page.call(this, 'detailsInternetPage', null, 'details-internet-page');
+    // Cached Apn properties
+    this.userApnIndex_ = -1;
+    this.selectedApnIndex_ = -1;
+    this.userApn_ = {};
+    // We show the Proxy configuration tab for remembered networks and when
+    // configuring a proxy from the login screen.
+    this.showProxy_ = false;
+    // In Chrome we sometimes want to enable the Cellular carrier select UI.
+    this.showCarrierSelect_ = false;
+    // In Chrome we sometimes want to show the 'View Account' button.
+    this.showViewAccountButton_ = false;
+
+    Page.call(this, 'detailsInternetPage', '', 'details-internet-page');
   }
 
   cr.addSingletonGetter(DetailsInternetPage);
@@ -157,27 +195,26 @@ cr.define('options.internet', function() {
     /** @override */
     initializePage: function() {
       Page.prototype.initializePage.call(this);
-      var params = parseQueryParams(window.location);
-      this.initializePageContents_(params);
-      this.showNetworkDetails_(params);
+      this.initializePageContents_();
+      this.showNetworkDetails_();
     },
 
     /**
      * Auto-activates the network details dialog if network information
      * is included in the URL.
      */
-    showNetworkDetails_: function(params) {
-      var servicePath = params.servicePath;
+    showNetworkDetails_: function() {
+      var servicePath = parseQueryParams(window.location).servicePath;
       if (!servicePath || !servicePath.length)
         return;
-      var networkType = '';  // ignored for 'options'
-      chrome.send('networkCommand', [networkType, servicePath, 'options']);
+      var networkType = '';  // ignored for 'showDetails'
+      chrome.send('networkCommand', [networkType, servicePath, 'showDetails']);
     },
 
     /**
      * Initializes the contents of the page.
      */
-    initializePageContents_: function(params) {
+    initializePageContents_: function() {
       $('details-internet-dismiss').addEventListener('click', function(event) {
         DetailsInternetPage.setDetails();
       });
@@ -203,118 +240,26 @@ cr.define('options.internet', function() {
         DetailsInternetPage.activateFromDetails();
       });
 
-      $('buyplan-details').addEventListener('click', function(event) {
-        var data = $('connection-state').data;
-        chrome.send('buyDataPlan', [data.servicePath]);
-        PageManager.closeOverlay();
-      });
-
       $('view-account-details').addEventListener('click', function(event) {
-        var data = $('connection-state').data;
-        chrome.send('showMorePlanInfo', [data.servicePath]);
+        chrome.send('showMorePlanInfo',
+                    [DetailsInternetPage.getInstance().servicePath_]);
         PageManager.closeOverlay();
       });
 
       $('cellular-apn-use-default').addEventListener('click', function(event) {
-        var data = $('connection-state').data;
-        var apnSelector = $('select-apn');
-
-        if (data.userApnIndex != -1) {
-          apnSelector.remove(data.userApnIndex);
-          data.userApnIndex = -1;
-        }
-
-        if (data.providerApnList.value.length > 0) {
-          var iApn = 0;
-          var defaultApn = data.providerApnList.value[iApn];
-          data.apn.apn = stringFromValue(defaultApn.apn);
-          data.apn.username = stringFromValue(defaultApn.username);
-          data.apn.password = stringFromValue(defaultApn.password);
-          chrome.send('setApn', [data.servicePath,
-                                 data.apn.apn,
-                                 data.apn.username,
-                                 data.apn.password]);
-          apnSelector.selectedIndex = iApn;
-          data.selectedApn = iApn;
-        } else {
-          data.apn.apn = '';
-          data.apn.username = '';
-          data.apn.password = '';
-          apnSelector.selectedIndex = -1;
-          data.selectedApn = -1;
-        }
-        updateHidden('.apn-list-view', false);
-        updateHidden('.apn-details-view', true);
+        DetailsInternetPage.getInstance().setDefaultApn_();
       });
 
       $('cellular-apn-set').addEventListener('click', function(event) {
-        if ($('cellular-apn').value == '')
-          return;
-
-        var data = $('connection-state').data;
-        var apnSelector = $('select-apn');
-
-        data.apn.apn = stringFromValue($('cellular-apn').value);
-        data.apn.username = stringFromValue($('cellular-apn-username').value);
-        data.apn.password = stringFromValue($('cellular-apn-password').value);
-        data.userApn = {
-          'apn': data.apn.apn,
-          'username': data.apn.username,
-          'password': data.apn.password
-        };
-        chrome.send('setApn', [data.servicePath,
-                               data.apn.apn,
-                               data.apn.username,
-                               data.apn.password]);
-
-        if (data.userApnIndex != -1) {
-          apnSelector.remove(data.userApnIndex);
-          data.userApnIndex = -1;
-        }
-
-        var option = document.createElement('option');
-        option.textContent = data.apn.apn;
-        option.value = -1;
-        option.selected = true;
-        apnSelector.add(option, apnSelector[apnSelector.length - 1]);
-        data.userApnIndex = apnSelector.length - 2;
-        data.selectedApn = data.userApnIndex;
-
-        updateHidden('.apn-list-view', false);
-        updateHidden('.apn-details-view', true);
+        DetailsInternetPage.getInstance().setApn_($('cellular-apn').value);
       });
 
       $('cellular-apn-cancel').addEventListener('click', function(event) {
-        $('select-apn').selectedIndex = $('connection-state').data.selectedApn;
-        updateHidden('.apn-list-view', false);
-        updateHidden('.apn-details-view', true);
+        DetailsInternetPage.getInstance().cancelApn_();
       });
 
       $('select-apn').addEventListener('change', function(event) {
-        var data = $('connection-state').data;
-        var apnSelector = $('select-apn');
-        if (apnSelector[apnSelector.selectedIndex].value != -1) {
-          var apnList = data.providerApnList.value;
-          chrome.send('setApn', [data.servicePath,
-              stringFromValue(apnList[apnSelector.selectedIndex].apn),
-              stringFromValue(apnList[apnSelector.selectedIndex].username),
-              stringFromValue(apnList[apnSelector.selectedIndex].password)]
-          );
-          data.selectedApn = apnSelector.selectedIndex;
-        } else if (apnSelector.selectedIndex == data.userApnIndex) {
-          chrome.send('setApn', [data.servicePath,
-                                 stringFromValue(data.userApn.apn),
-                                 stringFromValue(data.userApn.username),
-                                 stringFromValue(data.userApn.password)]);
-          data.selectedApn = apnSelector.selectedIndex;
-        } else {
-          $('cellular-apn').value = stringFromValue(data.apn.apn);
-          $('cellular-apn-username').value = stringFromValue(data.apn.username);
-          $('cellular-apn-password').value = stringFromValue(data.apn.password);
-
-          updateHidden('.apn-list-view', true);
-          updateHidden('.apn-details-view', false);
-        }
+        DetailsInternetPage.getInstance().selectApn_();
       });
 
       $('sim-card-lock-enabled').addEventListener('click', function(event) {
@@ -323,10 +268,11 @@ cr.define('options.internet', function() {
         // When PIN will be entered and value changed,
         // we'll update UI to reflect that change.
         $('sim-card-lock-enabled').checked = !newValue;
-        chrome.send('setSimCardLock', [newValue]);
+        var operation = newValue ? 'setLocked' : 'setUnlocked';
+        chrome.send('simOperation', [operation]);
       });
       $('change-pin').addEventListener('click', function(event) {
-        chrome.send('changePin');
+        chrome.send('simOperation', ['changePin']);
       });
 
       // Proxy
@@ -377,7 +323,7 @@ cr.define('options.internet', function() {
       // page is fixed. http://crbug.com/242865
       if (loadTimeData.data_) {
         $('google-dns-label').innerHTML =
-          loadTimeData.getString('googleNameServers');
+            loadTimeData.getString('googleNameServers');
       }
     },
 
@@ -429,7 +375,7 @@ cr.define('options.internet', function() {
 
     /**
      * Handler for when the name server selection changes.
-     * @param {Event} e The click event.
+     * @param {Event} event The click event.
      * @private
      */
     handleNameServerTypeChange_: function(event) {
@@ -438,14 +384,46 @@ cr.define('options.internet', function() {
     },
 
     /**
+     * Sends the IP Config info to chrome.
+     * @param {string} nameServerType The selected name server type:
+     *   'automatic', 'google', or 'user'.
+     * @private
+     */
+    sendIpConfig_: function(nameServerType) {
+      var userNameServerString = '';
+      if (nameServerType == 'user') {
+        var userNameServers = [];
+        for (var i = 1; i <= 4; ++i) {
+          var nameServerField = $('ipconfig-dns' + i);
+          // Skip empty values.
+          if (nameServerField && nameServerField.model &&
+              nameServerField.model.value) {
+            userNameServers.push(nameServerField.model.value);
+          }
+        }
+        userNameServerString = userNameServers.sort().join(',');
+      }
+      chrome.send('setIPConfig',
+                  [this.servicePath_,
+                   Boolean($('ip-automatic-configuration-checkbox').checked),
+                   $('ip-address').model.value || '',
+                   $('ip-netmask').model.value || '',
+                   $('ip-gateway').model.value || '',
+                   nameServerType,
+                   userNameServerString]);
+    },
+
+    /**
      * Creates an indicator event for controlled properties using
      * the same dictionary format as CoreOptionsHandler::CreateValueForPref.
      * @param {string} name The name for the Event.
-     * @param {Object} data Property dictionary with |value|, |controlledBy|,
-     *  and |recommendedValue| properties set.
+     * @param {{value: *, controlledBy: *, recommendedValue: *}} propData
+     *     Property dictionary.
      * @private
      */
     createControlledEvent_: function(name, propData) {
+      assert('value' in propData && 'controlledBy' in propData &&
+             'recommendedValue' in propData);
       var event = new Event(name);
       event.value = {
         value: propData.value,
@@ -459,7 +437,7 @@ cr.define('options.internet', function() {
      * Creates an indicator event for controlled properties using
      * the ONC getManagedProperties dictionary format.
      * @param {string} name The name for the Event.
-     * @param {Object} data ONC managed network property dictionary.
+     * @param {Object} propData ONC managed network property dictionary.
      * @private
      */
     createManagedEvent_: function(name, propData) {
@@ -475,7 +453,7 @@ cr.define('options.internet', function() {
 
       // If a property is editable then it is not enforced, and 'controlledBy'
       // is set to 'recommended' unless effective == {User|Shared}Setting, in
-      // which case the value was modifed from the recommended value.
+      // which case the value was modified from the recommended value.
       // Otherwise if 'Effective' is set to 'UserPolicy' or 'DevicePolicy' then
       // the set value is mandated by the policy.
       if (propData['UserEditable']) {
@@ -497,51 +475,52 @@ cr.define('options.internet', function() {
      * Update details page controls.
      */
     updateControls: function() {
-      // Only show ipconfig section if network is connected OR if nothing on
-      // this device is connected. This is so that you can fix the ip configs
-      // if you can't connect to any network.
-      // TODO(chocobo): Once ipconfig is moved to flimflam service objects,
-      //   we need to redo this logic to allow configuration of all networks.
-      $('ipconfig-section').hidden = !this.connected && this.deviceConnected;
-      $('ipconfig-dns-section').hidden =
-        !this.connected && this.deviceConnected;
+      // Note: onc may be undefined when called from a pref update before
+      // initialized in sendNetworkDetails.
+      var onc = this.onc_;
+
+      // Always show the ipconfig section. TODO(stevenjb): Improve the display
+      // for unconnected networks. Currently the IP address fields may be
+      // blank if the network is not connected.
+      $('ipconfig-section').hidden = false;
+      $('ipconfig-dns-section').hidden = false;
 
       // Network type related.
       updateHidden('#details-internet-page .cellular-details',
-                   this.type != 'Cellular');
+                   this.type_ != 'Cellular');
       updateHidden('#details-internet-page .wifi-details',
-                   this.type != 'WiFi');
+                   this.type_ != 'WiFi');
       updateHidden('#details-internet-page .wimax-details',
-                   this.type != 'Wimax');
-      updateHidden('#details-internet-page .vpn-details', this.type != 'VPN');
-      updateHidden('#details-internet-page .proxy-details', !this.showProxy);
+                   this.type_ != 'WiMAX');
+      updateHidden('#details-internet-page .vpn-details', this.type_ != 'VPN');
+      updateHidden('#details-internet-page .proxy-details', !this.showProxy_);
 
       // Cellular
-
-      // Conditionally call updateHidden on .gsm-only, so that we don't unhide
-      // a previously hidden element.
-      if (this.gsm)
-        updateHidden('#details-internet-page .cdma-only', true);
-      else
-        updateHidden('#details-internet-page .gsm-only', true);
+      if (onc && this.type_ == 'Cellular') {
+        // Hide gsm/cdma specific elements.
+        if (onc.getActiveValue('Cellular.Family') == 'GSM')
+          updateHidden('#details-internet-page .cdma-only', true);
+        else
+          updateHidden('#details-internet-page .gsm-only', true);
+      }
 
       // Wifi
 
       // Hide network tab for VPN.
       updateHidden('#details-internet-page .network-details',
-                   this.type == 'VPN');
+                   this.type_ == 'VPN');
 
       // Password and shared.
+      var source = onc ? onc.getSource() : 'None';
+      var shared = (source == 'Device' || source == 'DevicePolicy');
+      var security = onc ? onc.getWiFiSecurity() : 'None';
       updateHidden('#details-internet-page #password-details',
-                   this.type != 'WiFi' || !this.hasSecurity);
-      updateHidden('#details-internet-page #wifi-shared-network',
-          !this.shared);
-      updateHidden('#details-internet-page #prefer-network',
-                   !this.showPreferred);
+                   this.type_ != 'WiFi' || security == 'None');
+      updateHidden('#details-internet-page #wifi-shared-network', !shared);
+      updateHidden('#details-internet-page #prefer-network', source == 'None');
 
       // WiMAX.
-      updateHidden('#details-internet-page #wimax-shared-network',
-                   !this.shared);
+      updateHidden('#details-internet-page #wimax-shared-network', !shared);
 
       // Proxy
       this.updateProxyBannerVisibility_();
@@ -584,9 +563,8 @@ cr.define('options.internet', function() {
      * Handler for when the user clicks on the checkbox to allow a
      * single proxy usage.
      * @private
-     * @param {Event} e Click Event.
      */
-    toggleSingleProxy_: function(e) {
+    toggleSingleProxy_: function() {
       if ($('proxy-all-protocols').checked) {
         $('multi-proxy').hidden = true;
         $('single-proxy').hidden = false;
@@ -600,9 +578,8 @@ cr.define('options.internet', function() {
      * Handler for when the user clicks on the checkbox to enter
      * auto configuration URL.
      * @private
-     * @param {Event} e Click Event.
      */
-    handleAutoConfigProxy_: function(e) {
+    handleAutoConfigProxy_: function() {
       $('proxy-pac-url').disabled = !$('proxy-use-pac-url').checked;
     },
 
@@ -610,9 +587,8 @@ cr.define('options.internet', function() {
      * Handler for selecting a radio button that will disable the manual
      * controls.
      * @private
-     * @param {Event} e Click event.
      */
-    disableManualProxy_: function(e) {
+    disableManualProxy_: function() {
       $('ignored-host-list').disabled = true;
       $('new-host').disabled = true;
       $('remove-host').disabled = true;
@@ -634,17 +610,15 @@ cr.define('options.internet', function() {
                                     !$('proxy-use-pac-url').checked;
       $('auto-proxy-parms').hidden = !$('auto-proxy').checked;
       $('manual-proxy-parms').hidden = !$('manual-proxy').checked;
-      chrome.send('coreOptionsUserMetricsAction',
-                  ['Options_NetworkManualProxy_Disable']);
+      sendChromeMetricsAction('Options_NetworkManualProxy_Disable');
     },
 
     /**
      * Handler for selecting a radio button that will enable the manual
      * controls.
      * @private
-     * @param {Event} e Click event.
      */
-    enableManualProxy_: function(e) {
+    enableManualProxy_: function() {
       $('ignored-host-list').redraw();
       var allDisabled = $('manual-proxy').disabled;
       $('ignored-host-list').disabled = allDisabled;
@@ -666,8 +640,310 @@ cr.define('options.internet', function() {
       $('proxy-pac-url').disabled = true;
       $('auto-proxy-parms').hidden = !$('auto-proxy').checked;
       $('manual-proxy-parms').hidden = !$('manual-proxy').checked;
-      chrome.send('coreOptionsUserMetricsAction',
-                  ['Options_NetworkManualProxy_Enable']);
+      sendChromeMetricsAction('Options_NetworkManualProxy_Enable');
+    },
+
+    /**
+     * Helper method called from showDetailedInfo and updateConnectionData.
+     * Updates visibility/enabled of the login/disconnect/configure buttons.
+     * @private
+     */
+    updateConnectionButtonVisibilty_: function() {
+      var onc = this.onc_;
+      if (this.type_ == 'Ethernet') {
+        // Ethernet can never be connected or disconnected and can always be
+        // configured (e.g. to set security).
+        $('details-internet-login').hidden = true;
+        $('details-internet-disconnect').hidden = true;
+        $('details-internet-configure').hidden = false;
+        return;
+      }
+
+      var connectState = onc.getActiveValue('ConnectionState');
+      if (connectState == 'NotConnected') {
+        $('details-internet-login').hidden = false;
+        // Connecting to an unconfigured network might trigger certificate
+        // installation UI. Until that gets handled here, always enable the
+        // Connect button.
+        $('details-internet-login').disabled = false;
+        $('details-internet-disconnect').hidden = true;
+      } else {
+        $('details-internet-login').hidden = true;
+        $('details-internet-disconnect').hidden = false;
+      }
+
+      var connectable = onc.getActiveValue('Connectable');
+      if (connectState != 'Connected' &&
+          (!connectable || onc.getWiFiSecurity() != 'None' ||
+          (this.type_ == 'WiMAX' || this.type_ == 'VPN'))) {
+        $('details-internet-configure').hidden = false;
+      } else {
+        $('details-internet-configure').hidden = true;
+      }
+    },
+
+    /**
+     * Helper method called from showDetailedInfo and updateConnectionData.
+     * Updates the connection state property and account / sim card links.
+     * @private
+     */
+    updateDetails_: function() {
+      var onc = this.onc_;
+
+      var connectionStateString = onc.getTranslatedValue('ConnectionState');
+      $('connection-state').textContent = connectionStateString;
+
+      var type = this.type_;
+      var showViewAccount = false;
+      var showActivate = false;
+      if (type == 'WiFi') {
+        $('wifi-connection-state').textContent = connectionStateString;
+      } else if (type == 'WiMAX') {
+        $('wimax-connection-state').textContent = connectionStateString;
+      } else if (type == 'Cellular') {
+        $('activation-state').textContent =
+            onc.getTranslatedValue('Cellular.ActivationState');
+        if (onc.getActiveValue('Cellular.Family') == 'GSM') {
+          var lockEnabled =
+              onc.getActiveValue('Cellular.SIMLockStatus.LockEnabled');
+          $('sim-card-lock-enabled').checked = lockEnabled;
+          $('change-pin').hidden = !lockEnabled;
+        }
+        showViewAccount = this.showViewAccountButton_;
+        var activationState = onc.getActiveValue('Cellular.ActivationState');
+        showActivate = activationState == 'NotActivated' ||
+            activationState == 'PartiallyActivated';
+      }
+
+      $('view-account-details').hidden = !showViewAccount;
+      $('activate-details').hidden = !showActivate;
+      // If activation is not complete, hide the login button.
+      if (showActivate)
+        $('details-internet-login').hidden = true;
+    },
+
+    /**
+     * Helper method called from showDetailedInfo and updateConnectionData.
+     * Updates the fields in the header section of the details frame.
+     * @private
+     */
+    populateHeader_: function() {
+      var onc = this.onc_;
+
+      $('network-details-title').textContent = onc.getTranslatedValue('Name');
+      var connectionState = onc.getActiveValue('ConnectionState');
+      var connectionStateString = onc.getTranslatedValue('ConnectionState');
+      $('network-details-subtitle-status').textContent = connectionStateString;
+
+      var typeKey;
+      var type = this.type_;
+      if (type == 'Ethernet')
+        typeKey = 'ethernetTitle';
+      else if (type == 'WiFi')
+        typeKey = 'wifiTitle';
+      else if (type == 'WiMAX')
+        typeKey = 'wimaxTitle';
+      else if (type == 'Cellular')
+        typeKey = 'cellularTitle';
+      else if (type == 'VPN')
+        typeKey = 'vpnTitle';
+      else
+        typeKey = null;
+      var typeLabel = $('network-details-subtitle-type');
+      var typeSeparator = $('network-details-subtitle-separator');
+      if (typeKey) {
+        typeLabel.textContent = loadTimeData.getString(typeKey);
+        typeLabel.hidden = false;
+        typeSeparator.hidden = false;
+      } else {
+        typeLabel.hidden = true;
+        typeSeparator.hidden = true;
+      }
+    },
+
+    /**
+     * Helper method called from showDetailedInfo to initialize the Apn list.
+     * @private
+     */
+    initializeApnList_: function() {
+      var onc = this.onc_;
+
+      var apnSelector = $('select-apn');
+      // Clear APN lists, keep only last element that "other".
+      while (apnSelector.length != 1) {
+        apnSelector.remove(0);
+      }
+      var otherOption = apnSelector[0];
+      var activeApn = onc.getActiveValue('Cellular.APN.AccessPointName');
+      var activeUsername = onc.getActiveValue('Cellular.APN.Username');
+      var activePassword = onc.getActiveValue('Cellular.APN.Password');
+      var lastGoodApn =
+          onc.getActiveValue('Cellular.LastGoodAPN.AccessPointName');
+      var lastGoodUsername =
+          onc.getActiveValue('Cellular.LastGoodAPN.Username');
+      var lastGoodPassword =
+          onc.getActiveValue('Cellular.LastGoodAPN.Password');
+      var apnList = onc.getActiveValue('Cellular.APNList');
+      for (var i = 0; i < apnList.length; i++) {
+        var apnDict = apnList[i];
+        var option = document.createElement('option');
+        var localizedName = apnDict['LocalizedName'];
+        var name = localizedName ? localizedName : apnDict['Name'];
+        var accessPointName = apnDict['AccessPointName'];
+        option.textContent =
+            name ? (name + ' (' + accessPointName + ')') : accessPointName;
+        option.value = i;
+        // Insert new option before "other" option.
+        apnSelector.add(option, otherOption);
+        if (this.selectedApnIndex_ != -1)
+          continue;
+        // If this matches the active Apn, or LastGoodApn (or there is no last
+        // good APN), set it as the selected Apn.
+        if ((activeApn == accessPointName &&
+             activeUsername == apnDict['Username'] &&
+             activePassword == apnDict['Password']) ||
+            (!activeApn && !lastGoodApn) ||
+            (!activeApn &&
+             lastGoodApn == accessPointName &&
+             lastGoodUsername == apnDict['Username'] &&
+             lastGoodPassword == apnDict['Password'])) {
+          this.selectedApnIndex_ = i;
+        }
+      }
+      if (this.selectedApnIndex_ == -1 && activeApn) {
+        var activeOption = document.createElement('option');
+        activeOption.textContent = activeApn;
+        activeOption.value = -1;
+        apnSelector.add(activeOption, otherOption);
+        this.selectedApnIndex_ = apnSelector.length - 2;
+        this.userApnIndex_ = this.selectedApnIndex_;
+      }
+      assert(this.selectedApnIndex_ >= 0);
+      apnSelector.selectedIndex = this.selectedApnIndex_;
+      updateHidden('.apn-list-view', false);
+      updateHidden('.apn-details-view', true);
+    },
+
+    /**
+     * Event Listener for the cellular-apn-use-default button.
+     * @private
+     */
+    setDefaultApn_: function() {
+      var onc = this.onc_;
+      var apnSelector = $('select-apn');
+
+      if (this.userApnIndex_ != -1) {
+        apnSelector.remove(this.userApnIndex_);
+        this.userApnIndex_ = -1;
+      }
+
+      var iApn = -1;
+      var apnList = onc.getActiveValue('Cellular.APNList');
+      if (apnList != undefined && apnList.length > 0) {
+        iApn = 0;
+        var defaultApn = apnList[iApn];
+        var activeApn = {};
+        activeApn['AccessPointName'] =
+            stringFromValue(defaultApn['AccessPointName']);
+        activeApn['Username'] = stringFromValue(defaultApn['Username']);
+        activeApn['Password'] = stringFromValue(defaultApn['Password']);
+        onc.setManagedProperty('Cellular.APN', activeApn);
+        chrome.send('setApn', [this.servicePath_,
+                               activeApn['AccessPointName'],
+                               activeApn['Username'],
+                               activeApn['Password']]);
+      }
+      apnSelector.selectedIndex = iApn;
+      this.selectedApnIndex_ = iApn;
+
+      updateHidden('.apn-list-view', false);
+      updateHidden('.apn-details-view', true);
+    },
+
+    /**
+     * Event Listener for the cellular-apn-set button.
+     * @private
+     */
+    setApn_: function(apnValue) {
+      if (apnValue == '')
+        return;
+
+      var onc = this.onc_;
+      var apnSelector = $('select-apn');
+
+      var activeApn = {};
+      activeApn['AccessPointName'] = stringFromValue(apnValue);
+      activeApn['Username'] = stringFromValue($('cellular-apn-username').value);
+      activeApn['Password'] = stringFromValue($('cellular-apn-password').value);
+      onc.setManagedProperty('Cellular.APN', activeApn);
+      this.userApn_ = activeApn;
+      chrome.send('setApn', [this.servicePath_,
+                             activeApn['AccessPointName'],
+                             activeApn['Username'],
+                             activeApn['Password']]);
+
+      if (this.userApnIndex_ != -1) {
+        apnSelector.remove(this.userApnIndex_);
+        this.userApnIndex_ = -1;
+      }
+
+      var option = document.createElement('option');
+      option.textContent = activeApn['AccessPointName'];
+      option.value = -1;
+      option.selected = true;
+      apnSelector.add(option, apnSelector[apnSelector.length - 1]);
+      this.userApnIndex_ = apnSelector.length - 2;
+      this.selectedApnIndex_ = this.userApnIndex_;
+
+      updateHidden('.apn-list-view', false);
+      updateHidden('.apn-details-view', true);
+    },
+
+    /**
+     * Event Listener for the cellular-apn-cancel button.
+     * @private
+     */
+    cancelApn_: function() {
+      $('select-apn').selectedIndex = this.selectedApnIndex_;
+      updateHidden('.apn-list-view', false);
+      updateHidden('.apn-details-view', true);
+    },
+
+    /**
+     * Event Listener for the select-apn button.
+     * @private
+     */
+    selectApn_: function() {
+      var onc = this.onc_;
+      var apnSelector = $('select-apn');
+      var apnDict;
+      if (apnSelector[apnSelector.selectedIndex].value != -1) {
+        var apnList = onc.getActiveValue('Cellular.APNList');
+        var apnIndex = apnSelector.selectedIndex;
+        assert(apnIndex < apnList.length);
+        apnDict = apnList[apnIndex];
+        chrome.send('setApn', [this.servicePath_,
+                               stringFromValue(apnDict['AccessPointName']),
+                               stringFromValue(apnDict['Username']),
+                               stringFromValue(apnDict['Password'])]);
+        this.selectedApnIndex_ = apnIndex;
+      } else if (apnSelector.selectedIndex == this.userApnIndex_) {
+        apnDict = this.userApn_;
+        chrome.send('setApn', [this.servicePath_,
+                               stringFromValue(apnDict['AccessPointName']),
+                               stringFromValue(apnDict['Username']),
+                               stringFromValue(apnDict['Password'])]);
+        this.selectedApnIndex_ = apnSelector.selectedIndex;
+      } else {
+        $('cellular-apn').value =
+            stringFromValue(onc.getActiveValue('Cellular.APN.AccessPointName'));
+        $('cellular-apn-username').value =
+            stringFromValue(onc.getActiveValue('Cellular.APN.Username'));
+        $('cellular-apn-password').value =
+            stringFromValue(onc.getActiveValue('Cellular.APN.Password'));
+        updateHidden('.apn-list-view', true);
+        updateHidden('.apn-details-view', false);
+      }
     }
   };
 
@@ -681,7 +957,6 @@ cr.define('options.internet', function() {
                   'details-internet-disconnect',
                   'details-internet-configure',
                   'activate-details',
-                  'buyplan-details',
                   'view-account-details');
 
     for (var i = 0; i < buttonsToDisableList.length; ++i) {
@@ -706,17 +981,16 @@ cr.define('options.internet', function() {
     var carrierSelector = $('select-carrier');
     var carrier = carrierSelector[carrierSelector.selectedIndex].textContent;
     DetailsInternetPage.showCarrierChangeSpinner(true);
-    var data = $('connection-state').data;
-    chrome.send('setCarrier', [data.servicePath, carrier]);
+    chrome.send('setCarrier', [
+      DetailsInternetPage.getInstance().servicePath_, carrier]);
   };
 
   /**
    * Performs minimal initialization of the InternetDetails dialog in
-   * preparation for showing proxy-setttings.
+   * preparation for showing proxy-settings.
    */
   DetailsInternetPage.initializeProxySettings = function() {
-    var detailsPage = DetailsInternetPage.getInstance();
-    detailsPage.initializePageContents_();
+    DetailsInternetPage.getInstance().initializePageContents_();
   };
 
   /**
@@ -725,18 +999,16 @@ cr.define('options.internet', function() {
   DetailsInternetPage.showProxySettings = function() {
     var detailsPage = DetailsInternetPage.getInstance();
     $('network-details-header').hidden = true;
-    $('buyplan-details').hidden = true;
     $('activate-details').hidden = true;
     $('view-account-details').hidden = true;
     $('web-proxy-auto-discovery').hidden = true;
-    detailsPage.showProxy = true;
+    detailsPage.showProxy_ = true;
     updateHidden('#internet-tab', true);
     updateHidden('#details-tab-strip', true);
     updateHidden('#details-internet-page .action-area', true);
     detailsPage.updateControls();
     detailsPage.visible = true;
-    chrome.send('coreOptionsUserMetricsAction',
-                ['Options_NetworkShowProxyTab']);
+    sendChromeMetricsAction('Options_NetworkShowProxyTab');
   };
 
   /**
@@ -784,54 +1056,77 @@ cr.define('options.internet', function() {
   };
 
   DetailsInternetPage.loginFromDetails = function() {
-    var data = $('connection-state').data;
-    var servicePath = data.servicePath;
-    chrome.send('networkCommand', [data.type, servicePath, 'connect']);
+    var detailsPage = DetailsInternetPage.getInstance();
+    if (detailsPage.type_ == 'WiFi')
+      sendChromeMetricsAction('Options_NetworkConnectToWifi');
+    else if (detailsPage.type_ == 'VPN')
+      sendChromeMetricsAction('Options_NetworkConnectToVPN');
+    // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
+    chrome.send('startConnect', [detailsPage.servicePath_]);
     PageManager.closeOverlay();
   };
 
   DetailsInternetPage.disconnectNetwork = function() {
-    var data = $('connection-state').data;
-    var servicePath = data.servicePath;
-    chrome.send('networkCommand', [data.type, servicePath, 'disconnect']);
+    var detailsPage = DetailsInternetPage.getInstance();
+    if (detailsPage.type_ == 'WiFi')
+      sendChromeMetricsAction('Options_NetworkDisconnectWifi');
+    else if (detailsPage.type_ == 'VPN')
+      sendChromeMetricsAction('Options_NetworkDisconnectVPN');
+    // TODO(stevenjb): chrome.networkingPrivate.startDisconnect
+    chrome.send('startDisconnect', [detailsPage.servicePath_]);
     PageManager.closeOverlay();
   };
 
   DetailsInternetPage.configureNetwork = function() {
-    var data = $('connection-state').data;
-    var servicePath = data.servicePath;
-    chrome.send('networkCommand', [data.type, servicePath, 'configure']);
+    var detailsPage = DetailsInternetPage.getInstance();
+    chrome.send('networkCommand',
+                [detailsPage.type_, detailsPage.servicePath_, 'configure']);
     PageManager.closeOverlay();
   };
 
   DetailsInternetPage.activateFromDetails = function() {
-    var data = $('connection-state').data;
-    var servicePath = data.servicePath;
-    if (data.Type == 'Cellular')
-      chrome.send('networkCommand', [data.type, servicePath, 'activate']);
+    var detailsPage = DetailsInternetPage.getInstance();
+    if (detailsPage.type_ == 'Cellular') {
+      chrome.send('networkCommand',
+                  [detailsPage.type_, detailsPage.servicePath_, 'activate']);
+    }
     PageManager.closeOverlay();
   };
 
+  /**
+   * Event handler called when the details page is closed. Sends changed
+   * properties to Chrome and closes the overlay.
+   */
   DetailsInternetPage.setDetails = function() {
-    var data = $('connection-state').data;
-    var servicePath = data.servicePath;
-    if (data.type == 'WiFi') {
-      sendCheckedIfEnabled(servicePath, 'setPreferNetwork',
-                           $('prefer-network-wifi'));
-      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
-                           $('auto-connect-network-wifi'));
-    } else if (data.type == 'Wimax') {
-      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
-                           $('auto-connect-network-wimax'));
-    } else if (data.type == 'Cellular') {
-      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
-                           $('auto-connect-network-cellular'));
-    } else if (data.type == 'VPN') {
+    var detailsPage = DetailsInternetPage.getInstance();
+    var type = detailsPage.type_;
+    var servicePath = detailsPage.servicePath_;
+    if (type == 'WiFi') {
+      sendCheckedIfEnabled(servicePath,
+                           'setPreferNetwork',
+                           'prefer-network-wifi',
+                           'Options_NetworkSetPrefer');
+      sendCheckedIfEnabled(servicePath,
+                           'setAutoConnect',
+                           'auto-connect-network-wifi',
+                           'Options_NetworkAutoConnect');
+    } else if (type == 'WiMAX') {
+      sendCheckedIfEnabled(servicePath,
+                           'setAutoConnect',
+                           'auto-connect-network-wimax',
+                           'Options_NetworkAutoConnect');
+    } else if (type == 'Cellular') {
+      sendCheckedIfEnabled(servicePath,
+                           'setAutoConnect',
+                           'auto-connect-network-cellular',
+                           'Options_NetworkAutoConnect');
+    } else if (type == 'VPN') {
       chrome.send('setServerHostname',
-                  [servicePath,
-                   $('inet-server-hostname').value]);
-      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
-                           $('auto-connect-network-vpn'));
+                  [servicePath, $('inet-server-hostname').value]);
+      sendCheckedIfEnabled(servicePath,
+                           'setAutoConnect',
+                           'auto-connect-network-vpn',
+                           'Options_NetworkAutoConnect');
     }
 
     var nameServerTypes = ['automatic', 'google', 'user'];
@@ -842,30 +1137,16 @@ cr.define('options.internet', function() {
         break;
       }
     }
+    detailsPage.sendIpConfig_(nameServerType);
 
-    // Skip any empty values.
-    var userNameServers = [];
-    for (var i = 1; i <= 4; ++i) {
-      var nameServerField = $('ipconfig-dns' + i);
-      if (nameServerField && nameServerField.model &&
-          nameServerField.model.value) {
-        userNameServers.push(nameServerField.model.value);
-      }
-    }
-
-    userNameServers = userNameServers.join(',');
-
-    chrome.send('setIPConfig',
-                [servicePath,
-                 Boolean($('ip-automatic-configuration-checkbox').checked),
-                 $('ip-address').model.value || '',
-                 $('ip-netmask').model.value || '',
-                 $('ip-gateway').model.value || '',
-                 nameServerType,
-                 userNameServers]);
     PageManager.closeOverlay();
   };
 
+  /**
+   * Event handler called when the name server type changes.
+   * @param {string} type The selected name sever type, 'automatic', 'google',
+   *                      or 'user'.
+   */
   DetailsInternetPage.updateNameServerDisplay = function(type) {
     var editable = type == 'user';
     var fields = [$('ipconfig-dns1'), $('ipconfig-dns2'),
@@ -898,239 +1179,230 @@ cr.define('options.internet', function() {
     }
   };
 
-  DetailsInternetPage.updateConnectionButtonVisibilty = function(data) {
-    if (data.type == 'Ethernet') {
-      // Ethernet can never be connected or disconnected and can always be
-      // configured (e.g. to set security).
-      $('details-internet-login').hidden = true;
-      $('details-internet-disconnect').hidden = true;
-      $('details-internet-configure').hidden = false;
+  /**
+   * Method called from Chrome with a dictionary of non ONC configuration
+   * properties, including the HUID and service path to be used for requesting
+   * the ONC properties. Note: currently GUID is only used to confirm that the
+   * selected network still exists. It will be used instead of servicePath
+   * once switching to the networkingPrivate API (see TODO below).
+   * @param {InternetDetailedInfo} info
+   */
+  DetailsInternetPage.showDetailedInfo = function(info) {
+    if (!('GUID' in info)) {
+      // No network was found for, close the overlay.
+      PageManager.closeOverlay();
       return;
     }
-
-    var connectState = getActiveValue(data, 'ConnectionState');
-    if (connectState == 'NotConnected') {
-      $('details-internet-login').hidden = false;
-      // Connecting to an unconfigured network might trigger certificate
-      // installation UI. Until that gets handled here, always enable the
-      // Connect button.
-      $('details-internet-login').disabled = false;
-      $('details-internet-disconnect').hidden = true;
-    } else {
-      $('details-internet-login').hidden = true;
-      $('details-internet-disconnect').hidden = false;
-    }
-
-    var connectable = getActiveValue(data, 'Connectable');
-    if (connectState != 'Connected' &&
-        (!connectable || this.hasSecurity ||
-        (data.type == 'Wimax' || data.type == 'VPN'))) {
-      $('details-internet-configure').hidden = false;
-    } else {
-      $('details-internet-configure').hidden = true;
-    }
+    var detailsPage = DetailsInternetPage.getInstance();
+    detailsPage.servicePath_ = info.servicePath;
+    detailsPage.showCarrierSelect_ = info.showCarrierSelect;
+    detailsPage.showViewAccountButton_ = info.showViewAccountButton;
+    // Ask Chrome to call sendNetworkDetails with the ONC properties.
+    // TODO(stevenjb): Use networkingPrivate.getManagedProperties(info.guid).
+    chrome.send('getManagedProperties', [info.servicePath]);
   };
 
-  DetailsInternetPage.updateConnectionData = function(update) {
+  /**
+   * Method called from Chrome when the ONC properties for the displayed
+   * network may have changed.
+   * @param {Object} update The updated ONC dictionary for the network.
+   */
+  DetailsInternetPage.updateConnectionData = function(oncData) {
     var detailsPage = DetailsInternetPage.getInstance();
     if (!detailsPage.visible)
       return;
 
-    var data = $('connection-state').data;
-    if (!data)
-      return;
-
-    if (update.servicePath != data.servicePath)
+    if (oncData.servicePath != detailsPage.servicePath_)
       return;
 
     // Update our cached data object.
-    updateDataObject(data, update);
+    detailsPage.onc_ = new OncData(oncData);
 
-    var connectionState = getActiveValue(data, 'ConnectionState');
-    var connectionStateString = networkOncStateString(connectionState);
-    detailsPage.deviceConnected = data.deviceConnected;
-    detailsPage.connected = connectionState == 'Connected';
-    $('connection-state').textContent = connectionStateString;
-
-    this.updateConnectionButtonVisibilty(data);
-
-    if (data.type == 'WiFi') {
-      $('wifi-connection-state').textContent = connectionStateString;
-    } else if (data.type == 'Wimax') {
-      $('wimax-connection-state').textContent = connectionStateString;
-    } else if (data.type == 'Cellular') {
-      $('activation-state').textContent = data.activationState;
-
-      $('buyplan-details').hidden = !data.showBuyButton;
-      $('view-account-details').hidden = !data.showViewAccountButton;
-
-      $('activate-details').hidden = !data.showActivateButton;
-      if (data.showActivateButton)
-        $('details-internet-login').hidden = true;
-
-      if (detailsPage.gsm) {
-        // TODO(stevenjb): Use managed properties for policy controlled values.
-        var lockEnabled = data.simCardLockEnabled.value;
-        $('sim-card-lock-enabled').checked = lockEnabled;
-        $('change-pin').hidden = !lockEnabled;
-      }
-    }
-
-    $('connection-state').data = data;
+    detailsPage.populateHeader_();
+    detailsPage.updateConnectionButtonVisibilty_();
+    detailsPage.updateDetails_();
   };
 
-  DetailsInternetPage.showDetailedInfo = function(data) {
+  /**
+   * Method called from Chrome when the initial dictionary of ONC configuration
+   * properties is available.
+   * @param {Object} oncData Dictionary of ONC properties.
+   */
+  DetailsInternetPage.sendNetworkDetails = function(oncData) {
+    var onc = new OncData(oncData);
+
     var detailsPage = DetailsInternetPage.getInstance();
+    detailsPage.onc_ = onc;
+    var type = onc.getActiveValue('Type');
+    detailsPage.type_ = type;
 
-    data.type = getActiveValue(data, 'Type');  // Get Active Type value.
+    sendShowDetailsMetrics(type, onc.getActiveValue('ConnectionState'));
 
-    // Populate header
-    $('network-details-title').textContent = getNetworkName(data);
-    var connectionState = getActiveValue(data, 'ConnectionState');
-    var connectionStateString = networkOncStateString(connectionState);
-    detailsPage.connected = connectionState == 'Connected';
-    $('network-details-subtitle-status').textContent = connectionStateString;
-    var typeKey = null;
-    switch (data.type) {
-      case 'Ethernet':
-        typeKey = 'ethernetTitle';
-        break;
-      case 'WiFi':
-        typeKey = 'wifiTitle';
-        break;
-      case 'Wimax':
-        typeKey = 'wimaxTitle';
-        break;
-      case 'Cellular':
-        typeKey = 'cellularTitle';
-        break;
-      case 'VPN':
-        typeKey = 'vpnTitle';
-        break;
-    }
-    var typeLabel = $('network-details-subtitle-type');
-    var typeSeparator = $('network-details-subtitle-separator');
-    if (typeKey) {
-      typeLabel.textContent = loadTimeData.getString(typeKey);
-      typeLabel.hidden = false;
-      typeSeparator.hidden = false;
+    detailsPage.populateHeader_();
+    detailsPage.updateConnectionButtonVisibilty_();
+    detailsPage.updateDetails_();
+
+    // TODO(stevenjb): Some of the setup below should be moved to
+    // updateDetails_() so that updates are reflected in the UI.
+
+    // Only show proxy for remembered networks.
+    var remembered = onc.getSource() != 'None';
+    if (remembered) {
+      detailsPage.showProxy_ = true;
+      // Inform Chrome which network to use for proxy configuration.
+      chrome.send('selectNetwork', [detailsPage.servicePath_]);
     } else {
-      typeLabel.hidden = true;
-      typeSeparator.hidden = true;
+      detailsPage.showProxy_ = false;
     }
-
-    // TODO(stevenjb): Find a more appropriate place to cache data.
-    $('connection-state').data = data;
-
-    $('buyplan-details').hidden = true;
-    $('activate-details').hidden = true;
-    $('view-account-details').hidden = true;
-
-    this.updateConnectionButtonVisibilty(data);
 
     $('web-proxy-auto-discovery').hidden = true;
 
-    detailsPage.deviceConnected = data.deviceConnected;
-    detailsPage.connected = connectionState == 'Connected';
+    var restricted = onc.getActiveValue('RestrictedConnectivity');
+    var restrictedString = loadTimeData.getString(
+        restricted ? 'restrictedYes' : 'restrictedNo');
 
-    // Only show proxy for remembered networks.
-    if (data.remembered) {
-      detailsPage.showProxy = true;
-      chrome.send('selectNetwork', [data.servicePath]);
-    } else {
-      detailsPage.showProxy = false;
-    }
-    $('connection-state').textContent = connectionStateString;
+    var inetAddress = {};
+    var inetNetmask = {};
+    var inetGateway = {};
 
-    var ipAutoConfig = data.ipAutoConfig ? 'automatic' : 'user';
-    $('ip-automatic-configuration-checkbox').checked = data.ipAutoConfig;
-    var inetAddress = {autoConfig: ipAutoConfig};
-    var inetNetmask = {autoConfig: ipAutoConfig};
-    var inetGateway = {autoConfig: ipAutoConfig};
+    var inetNameServersString;
 
-    if (data.ipconfig.value) {
-      inetAddress.automatic = data.ipconfig.value.address;
-      inetAddress.value = data.ipconfig.value.address;
-      inetNetmask.automatic = data.ipconfig.value.netmask;
-      inetNetmask.value = data.ipconfig.value.netmask;
-      inetGateway.automatic = data.ipconfig.value.gateway;
-      inetGateway.value = data.ipconfig.value.gateway;
-      if (data.ipconfig.value.webProxyAutoDiscoveryUrl) {
-        $('web-proxy-auto-discovery').hidden = false;
-        $('web-proxy-auto-discovery-url').value =
-            data.ipconfig.value.webProxyAutoDiscoveryUrl;
+    var ipconfigList = onc.getActiveValue('IPConfigs');
+    if (Array.isArray(ipconfigList)) {
+      for (var i = 0; i < ipconfigList.length; ++i) {
+        var ipconfig = ipconfigList[i];
+        var ipType = ipconfig['Type'];
+        if (ipType != 'IPv4') {
+          // TODO(stevenjb): Handle IPv6 properties.
+          continue;
+        }
+        var address = ipconfig['IPAddress'];
+        inetAddress.automatic = address;
+        inetAddress.value = address;
+        var netmask = prefixLengthToNetmask(ipconfig['RoutingPrefix']);
+        inetNetmask.automatic = netmask;
+        inetNetmask.value = netmask;
+        var gateway = ipconfig['Gateway'];
+        inetGateway.automatic = gateway;
+        inetGateway.value = gateway;
+        if ('WebProxyAutoDiscoveryUrl' in ipconfig) {
+          $('web-proxy-auto-discovery').hidden = false;
+          $('web-proxy-auto-discovery-url').value =
+              ipconfig['WebProxyAutoDiscoveryUrl'];
+        }
+        if ('NameServers' in ipconfig) {
+          var inetNameServers = ipconfig['NameServers'];
+          inetNameServers = inetNameServers.sort();
+          inetNameServersString = inetNameServers.join(',');
+        }
+        break;  // Use the first IPv4 entry.
       }
     }
 
     // Override the "automatic" values with the real saved DHCP values,
     // if they are set.
-    if (data.savedIP.address) {
-      inetAddress.automatic = data.savedIP.address;
-      inetAddress.value = data.savedIP.address;
+    var savedNameServersString;
+    var savedIpAddress = onc.getActiveValue('SavedIPConfig.IPAddress');
+    if (savedIpAddress != undefined) {
+      inetAddress.automatic = savedIpAddress;
+      inetAddress.value = savedIpAddress;
     }
-    if (data.savedIP.netmask) {
-      inetNetmask.automatic = data.savedIP.netmask;
-      inetNetmask.value = data.savedIP.netmask;
+    var savedPrefix = onc.getActiveValue('SavedIPConfig.RoutingPrefix');
+    if (savedPrefix != undefined) {
+      var savedNetmask = prefixLengthToNetmask(savedPrefix);
+      inetNetmask.automatic = savedNetmask;
+      inetNetmask.value = savedNetmask;
     }
-    if (data.savedIP.gateway) {
-      inetGateway.automatic = data.savedIP.gateway;
-      inetGateway.value = data.savedIP.gateway;
+    var savedGateway = onc.getActiveValue('SavedIPConfig.Gateway');
+    if (savedGateway != undefined) {
+      inetGateway.automatic = savedGateway;
+      inetGateway.value = savedGateway;
+    }
+    var savedNameServers = onc.getActiveValue('SavedIPConfig.NameServers');
+    if (savedNameServers) {
+      savedNameServers = savedNameServers.sort();
+      savedNameServersString = savedNameServers.join(',');
     }
 
-    if (ipAutoConfig == 'user') {
-      if (data.staticIP.value.address) {
-        inetAddress.value = data.staticIP.value.address;
-        inetAddress.user = data.staticIP.value.address;
-      }
-      if (data.staticIP.value.netmask) {
-        inetNetmask.value = data.staticIP.value.netmask;
-        inetNetmask.user = data.staticIP.value.netmask;
-      }
-      if (data.staticIP.value.gateway) {
-        inetGateway.value = data.staticIP.value.gateway;
-        inetGateway.user = data.staticIP.value.gateway;
-      }
+    var ipAutoConfig = 'automatic';
+
+    var staticNameServersString;
+    var staticIpAddress = onc.getActiveValue('StaticIPConfig.IPAddress');
+    if (staticIpAddress != undefined) {
+      ipAutoConfig = 'user';
+      inetAddress.user = staticIpAddress;
+      inetAddress.value = staticIpAddress;
     }
+    var staticPrefix = onc.getActiveValue('StaticIPConfig.RoutingPrefix');
+    if (staticPrefix != undefined) {
+      var staticNetmask = prefixLengthToNetmask(staticPrefix);
+      inetNetmask.user = staticNetmask;
+      inetNetmask.value = staticNetmask;
+    }
+    var staticGateway = onc.getActiveValue('StaticIPConfig.Gateway');
+    if (staticGateway != undefined) {
+      inetGateway.user = staticGateway;
+      inetGateway.value = staticGateway;
+    }
+    var staticNameServers = onc.getActiveValue('StaticIPConfig.NameServers');
+    if (staticNameServers) {
+      staticNameServers = staticNameServers.sort();
+      staticNameServersString = staticNameServers.join(',');
+    }
+
+    $('ip-automatic-configuration-checkbox').checked =
+        ipAutoConfig == 'automatic';
+
+    inetAddress.autoConfig = ipAutoConfig;
+    inetNetmask.autoConfig = ipAutoConfig;
+    inetGateway.autoConfig = ipAutoConfig;
 
     var configureAddressField = function(field, model) {
       IPAddressField.decorate(field);
       field.model = model;
       field.editable = model.autoConfig == 'user';
     };
-
     configureAddressField($('ip-address'), inetAddress);
     configureAddressField($('ip-netmask'), inetNetmask);
     configureAddressField($('ip-gateway'), inetGateway);
 
-    var inetNameServers = '';
-    if (data.ipconfig.value && data.ipconfig.value.nameServers) {
-      inetNameServers = data.ipconfig.value.nameServers;
-      $('automatic-dns-display').textContent = inetNameServers;
+    // Set Nameserver fields.
+    var nameServerType = 'automatic';
+    if (staticNameServersString) {
+      // If static nameservers are defined and match the google name servers,
+      // show that in the UI, otherwise show the custom static nameservers.
+      if (staticNameServersString == GoogleNameServersString)
+        nameServerType = 'google';
+      else if (staticNameServersString == inetNameServersString)
+        nameServerType = 'user';
     }
-
-    if (data.savedIP && data.savedIP.nameServers)
-      $('automatic-dns-display').textContent = data.savedIP.nameServers;
-
-    if (data.nameServersGoogle)
-      $('google-dns-display').textContent = data.nameServersGoogle;
+    if (nameServerType == 'automatic')
+      $('automatic-dns-display').textContent = inetNameServersString;
+    else
+      $('automatic-dns-display').textContent = savedNameServersString;
+    $('google-dns-display').textContent = GoogleNameServersString;
 
     var nameServersUser = [];
-    if (data.staticIP.value.nameServers)
-      nameServersUser = data.staticIP.value.nameServers.split(',');
+    if (staticNameServers) {
+      nameServersUser = staticNameServers;
+    } else if (savedNameServers) {
+      // Pre-populate with values provided by DHCP server.
+      nameServersUser = savedNameServers;
+    }
 
     var nameServerModels = [];
     for (var i = 0; i < 4; ++i)
       nameServerModels.push({value: nameServersUser[i] || ''});
 
-    $(data.nameServerType + '-dns-radio').checked = true;
+    $(nameServerType + '-dns-radio').checked = true;
     configureAddressField($('ipconfig-dns1'), nameServerModels[0]);
     configureAddressField($('ipconfig-dns2'), nameServerModels[1]);
     configureAddressField($('ipconfig-dns3'), nameServerModels[2]);
     configureAddressField($('ipconfig-dns4'), nameServerModels[3]);
 
-    DetailsInternetPage.updateNameServerDisplay(data.nameServerType);
+    DetailsInternetPage.updateNameServerDisplay(nameServerType);
 
-    var macAddress = getActiveValue(data, 'MacAddress');
+    var macAddress = onc.getActiveValue('MacAddress');
     if (macAddress) {
       $('hardware-address').textContent = macAddress;
       $('hardware-address-row').style.display = 'table-row';
@@ -1140,7 +1412,7 @@ cr.define('options.internet', function() {
     }
 
     var setOrHideParent = function(field, property) {
-      if (property) {
+      if (property != undefined) {
         $(field).textContent = property;
         $(field).parentElement.hidden = false;
       } else {
@@ -1148,39 +1420,29 @@ cr.define('options.internet', function() {
       }
     };
 
-    var networkName = getNetworkName(data);
+    var networkName = onc.getTranslatedValue('Name');
 
-    // Signal strength as percentage (for WiFi and Wimax).
+    // Signal strength as percentage (for WiFi and WiMAX).
     var signalStrength;
-    if (data.type == 'WiFi') {
-      signalStrength =
-          getActiveDictionaryValue(data, data.type, 'SignalStrength');
-    } else if (data.type == 'Wimax') {
-      // Wimax is not yet translated to ONC.
-      signalStrength = data.strength;
-    }
+    if (type == 'WiFi' || type == 'WiMAX')
+      signalStrength = onc.getActiveValue(type + '.SignalStrength');
     if (!signalStrength)
       signalStrength = 0;
     var strengthFormat = loadTimeData.getString('inetSignalStrengthFormat');
     var strengthString = strengthFormat.replace('$1', signalStrength);
 
-    detailsPage.type = data.type;
-    if (data.type == 'WiFi') {
-      assert(data.WiFi, 'WiFi network has no WiFi object: ' + networkName);
+    if (type == 'WiFi') {
       OptionsPage.showTab($('wifi-network-nav-tab'));
-      detailsPage.gsm = false;
-      detailsPage.shared = data.shared;
-      $('wifi-connection-state').textContent = connectionStateString;
-      var ssid = getActiveDictionaryValue(data, 'WiFi', 'SSID');
+      $('wifi-restricted-connectivity').textContent = restrictedString;
+      var ssid = onc.getActiveValue('WiFi.SSID');
       $('wifi-ssid').textContent = ssid ? ssid : networkName;
-      setOrHideParent('wifi-bssid',
-                      getActiveDictionaryValue(data, 'WiFi', 'BSSID'));
-      var security = getActiveDictionaryValue(data, 'WiFi', 'Security');
+      setOrHideParent('wifi-bssid', onc.getActiveValue('WiFi.BSSID'));
+      var security = onc.getWiFiSecurity();
       if (security == 'None')
         security = undefined;
       setOrHideParent('wifi-security', security);
       // Frequency is in MHz.
-      var frequency = getActiveDictionaryValue(data, 'WiFi', 'Frequency');
+      var frequency = onc.getActiveValue('WiFi.Frequency');
       if (!frequency)
         frequency = 0;
       var frequencyFormat = loadTimeData.getString('inetFrequencyFormat');
@@ -1188,66 +1450,80 @@ cr.define('options.internet', function() {
       $('wifi-frequency').textContent = frequencyFormat;
       $('wifi-signal-strength').textContent = strengthString;
       setOrHideParent('wifi-hardware-address',
-                      getActiveValue(data, 'MacAddress'));
-      detailsPage.showPreferred = data.remembered;
-      $('prefer-network-wifi').checked = data.preferred.value;
-      $('prefer-network-wifi').disabled = !data.remembered;
+                      onc.getActiveValue('MacAddress'));
+      var priority = onc.getActiveValue('Priority');
+      $('prefer-network-wifi').checked = priority > 0;
+      $('prefer-network-wifi').disabled = !remembered;
       $('auto-connect-network-wifi').checked =
-          getActiveValue(data, 'AutoConnect');
-      $('auto-connect-network-wifi').disabled = !data.remembered;
-      detailsPage.hasSecurity = security != undefined;
-    } else if (data.type == 'Wimax') {
-      // Note: Wimax is not yet translated to ONC.
+          onc.getActiveValue('WiFi.AutoConnect');
+      $('auto-connect-network-wifi').disabled = !remembered;
+    } else if (type == 'WiMAX') {
       OptionsPage.showTab($('wimax-network-nav-tab'));
-      detailsPage.gsm = false;
-      detailsPage.shared = data.shared;
-      detailsPage.showPreferred = data.remembered;
-      $('wimax-connection-state').textContent = connectionStateString;
+      $('wimax-restricted-connectivity').textContent = restrictedString;
+
       $('auto-connect-network-wimax').checked =
-          getActiveValue(data, 'AutoConnect');
-      $('auto-connect-network-wimax').disabled = !data.remembered;
-      setOrHideParent('wimax-eap-identity', data.identity);
+          onc.getActiveValue('WiMAX.AutoConnect');
+      $('auto-connect-network-wimax').disabled = !remembered;
+      var identity = onc.getActiveValue('WiMAX.EAP.Identity');
+      setOrHideParent('wimax-eap-identity', identity);
       $('wimax-signal-strength').textContent = strengthString;
-    } else if (data.type == 'Cellular') {
-      assert(data.Cellular,
-             'Cellular network has no Cellular object: ' + networkName);
+    } else if (type == 'Cellular') {
       OptionsPage.showTab($('cellular-conn-nav-tab'));
-      if (data.showCarrierSelect && data.currentCarrierIndex != -1) {
-        var carrierSelector = $('select-carrier');
-        carrierSelector.onchange = DetailsInternetPage.handleCarrierChanged;
-        carrierSelector.options.length = 0;
-        for (var i = 0; i < data.carriers.length; ++i) {
-          var option = document.createElement('option');
-          option.textContent = data.carriers[i];
-          carrierSelector.add(option);
+
+      var isGsm = onc.getActiveValue('Cellular.Family') == 'GSM';
+
+      var currentCarrierIndex = -1;
+      if (this.showCarrierSelect_) {
+        var currentCarrier =
+            isGsm ? CarrierGenericUMTS : onc.getActiveValue('Cellular.Carrier');
+        var supportedCarriers =
+            onc.getActiveValue('Cellular.SupportedCarriers');
+        for (var c1 = 0; c1 < supportedCarriers.length; ++c1) {
+          if (supportedCarriers[c1] == currentCarrier) {
+            currentCarrierIndex = c1;
+            break;
+          }
         }
-        carrierSelector.selectedIndex = data.currentCarrierIndex;
-      } else {
-        $('service-name').textContent = networkName;
+        if (currentCarrierIndex != -1) {
+          var carrierSelector = $('select-carrier');
+          carrierSelector.onchange = DetailsInternetPage.handleCarrierChanged;
+          carrierSelector.options.length = 0;
+          for (var c2 = 0; c2 < supportedCarriers.length; ++c2) {
+            var option = document.createElement('option');
+            option.textContent = supportedCarriers[c2];
+            carrierSelector.add(option);
+          }
+          carrierSelector.selectedIndex = currentCarrierIndex;
+        }
       }
+      if (currentCarrierIndex == -1)
+        $('service-name').textContent = networkName;
 
       $('network-technology').textContent =
-          getActiveDictionaryValue(data, 'Cellular', 'NetworkTechnology');
-      $('activation-state').textContent = data.activationState;
-      $('roaming-state').textContent = data.roamingState;
-      $('restricted-pool').textContent = data.restrictedPool;
-      $('error-state').textContent = data.errorMessage;
+          onc.getActiveValue('Cellular.NetworkTechnology');
+      $('roaming-state').textContent =
+          onc.getTranslatedValue('Cellular.RoamingState');
+      $('cellular-restricted-connectivity').textContent = restrictedString;
+      // 'errorMessage' is a non ONC property added by Chrome.
+      $('error-state').textContent = onc.getActiveValue('errorMessage');
       $('manufacturer').textContent =
-          getActiveDictionaryValue(data, 'Cellular', 'Manufacturer');
-      $('model-id').textContent =
-          getActiveDictionaryValue(data, 'Cellular', 'ModelID');
+          onc.getActiveValue('Cellular.Manufacturer');
+      $('model-id').textContent = onc.getActiveValue('Cellular.ModelID');
       $('firmware-revision').textContent =
-          getActiveDictionaryValue(data, 'Cellular', 'FirmwareRevision');
+          onc.getActiveValue('Cellular.FirmwareRevision');
       $('hardware-revision').textContent =
-          getActiveDictionaryValue(data, 'Cellular', 'HardwareRevision');
-      $('mdn').textContent = getActiveDictionaryValue(data, 'Cellular', 'MDN');
+          onc.getActiveValue('Cellular.HardwareRevision');
+      $('mdn').textContent = onc.getActiveValue('Cellular.MDN');
 
       // Show ServingOperator properties only if available.
-      if (data.Cellular.ServingOperator) {
-        $('operator-name').textContent =
-            getActiveValue(data.Cellular.ServingOperator, 'Name');
-        $('operator-code').textContent =
-            getActiveValue(data.Cellular.ServingOperator, 'Code');
+      var servingOperatorName =
+          onc.getActiveValue('Cellular.ServingOperator.Name');
+      var servingOperatorCode =
+          onc.getActiveValue('Cellular.ServingOperator.Code');
+      if (servingOperatorName != undefined &&
+          servingOperatorCode != undefined) {
+        $('operator-name').textContent = servingOperatorName;
+        $('operator-code').textContent = servingOperatorCode;
       } else {
         $('operator-name').parentElement.hidden = true;
         $('operator-code').parentElement.hidden = true;
@@ -1258,95 +1534,48 @@ cr.define('options.internet', function() {
       updateHidden('#details-internet-page .cdma-only', false);
 
       // Show IMEI/ESN/MEID/MIN/PRL only if they are available.
-      setOrHideParent('esn', getActiveDictionaryValue(data, 'Cellular', 'ESN'));
-      setOrHideParent(
-          'imei', getActiveDictionaryValue(data, 'Cellular', 'IMEI'));
-      setOrHideParent(
-          'meid', getActiveDictionaryValue(data, 'Cellular', 'MEID'));
-      setOrHideParent('min', getActiveDictionaryValue(data, 'Cellular', 'MIN'));
-      setOrHideParent(
-          'prl-version',
-          getActiveDictionaryValue(data, 'Cellular', 'PRLVersion'));
+      setOrHideParent('esn', onc.getActiveValue('Cellular.ESN'));
+      setOrHideParent('imei', onc.getActiveValue('Cellular.IMEI'));
+      setOrHideParent('meid', onc.getActiveValue('Cellular.MEID'));
+      setOrHideParent('min', onc.getActiveValue('Cellular.MIN'));
+      setOrHideParent('prl-version', onc.getActiveValue('Cellular.PRLVersion'));
 
-      var family = getActiveDictionaryValue(data, 'Cellular', 'Family');
-      detailsPage.gsm = family == 'GSM';
-      if (detailsPage.gsm) {
-        $('iccid').textContent =
-            getActiveDictionaryValue(data, 'Cellular', 'ICCID');
-        $('imsi').textContent =
-            getActiveDictionaryValue(data, 'Cellular', 'IMSI');
-
-        var apnSelector = $('select-apn');
-        // Clear APN lists, keep only last element that "other".
-        while (apnSelector.length != 1)
-          apnSelector.remove(0);
-        var otherOption = apnSelector[0];
-        data.selectedApn = -1;
-        data.userApnIndex = -1;
-        var apnList = data.providerApnList.value;
-        for (var i = 0; i < apnList.length; i++) {
-          var option = document.createElement('option');
-          var localizedName = apnList[i].localizedName;
-          var name = localizedName ? localizedName : apnList[i].name;
-          var apn = apnList[i].apn;
-          option.textContent = name ? (name + ' (' + apn + ')') : apn;
-          option.value = i;
-          // data.apn and data.lastGoodApn will always be defined, however
-          // data.apn.apn and data.lastGoodApn.apn may not be. This is not a
-          // problem, as apnList[i].apn will always be defined and the
-          // comparisons below will work as expected.
-          if ((data.apn.apn == apn &&
-               data.apn.username == apnList[i].username &&
-               data.apn.password == apnList[i].password) ||
-              (!data.apn.apn &&
-               data.lastGoodApn.apn == apn &&
-               data.lastGoodApn.username == apnList[i].username &&
-               data.lastGoodApn.password == apnList[i].password)) {
-            data.selectedApn = i;
-          }
-          // Insert new option before "other" option.
-          apnSelector.add(option, otherOption);
-        }
-        if (data.selectedApn == -1 && data.apn.apn) {
-          var option = document.createElement('option');
-          option.textContent = data.apn.apn;
-          option.value = -1;
-          apnSelector.add(option, otherOption);
-          data.selectedApn = apnSelector.length - 2;
-          data.userApnIndex = data.selectedApn;
-        }
-        apnSelector.selectedIndex = data.selectedApn;
-        updateHidden('.apn-list-view', false);
-        updateHidden('.apn-details-view', true);
-        // TODO(stevenjb): Used managed properties for policy controlled value.
-        var lockEnabled = data.simCardLockEnabled.value;
-        $('sim-card-lock-enabled').checked = lockEnabled;
-        $('change-pin').hidden = !lockEnabled;
+      if (isGsm) {
+        $('iccid').textContent = onc.getActiveValue('Cellular.ICCID');
+        $('imsi').textContent = onc.getActiveValue('Cellular.IMSI');
+        detailsPage.initializeApnList_();
       }
       $('auto-connect-network-cellular').checked =
-          getActiveValue(data, 'AutoConnect');
+          onc.getActiveValue('Cellular.AutoConnect');
       $('auto-connect-network-cellular').disabled = false;
-
-      $('buyplan-details').hidden = !data.showBuyButton;
-      $('view-account-details').hidden = !data.showViewAccountButton;
-      $('activate-details').hidden = !data.showActivateButton;
-      if (data.showActivateButton) {
-        $('details-internet-login').hidden = true;
-      }
-    } else if (data.type == 'VPN') {
+    } else if (type == 'VPN') {
       OptionsPage.showTab($('vpn-nav-tab'));
-      detailsPage.gsm = false;
       $('inet-service-name').textContent = networkName;
-      $('inet-provider-type').textContent = data.providerType;
-      $('inet-username').textContent = data.username;
+      $('inet-provider-type').textContent =
+          onc.getTranslatedValue('VPN.Type');
+      var providerType = onc.getActiveValue('VPN.Type');
+      var usernameKey;
+      if (providerType == 'OpenVPN')
+        usernameKey = 'VPN.OpenVPN.Username';
+      else if (providerType == 'L2TP-IPsec')
+        usernameKey = 'VPN.L2TP.Username';
+
+      if (usernameKey) {
+        $('inet-username').parentElement.hidden = false;
+        $('inet-username').textContent = onc.getActiveValue(usernameKey);
+      } else {
+        $('inet-username').parentElement.hidden = true;
+      }
       var inetServerHostname = $('inet-server-hostname');
-      inetServerHostname.value = data.serverHostname.value;
+      inetServerHostname.value = onc.getActiveValue('VPN.Host');
       inetServerHostname.resetHandler = function() {
         PageManager.hideBubble();
-        inetServerHostname.value = data.serverHostname.recommendedValue;
+        var recommended = onc.getRecommendedValue('VPN.Host');
+        if (recommended != undefined)
+          inetServerHostname.value = recommended;
       };
       $('auto-connect-network-vpn').checked =
-          getActiveValue(data, 'AutoConnect');
+          onc.getActiveValue('VPN.AutoConnect');
       $('auto-connect-network-vpn').disabled = false;
     } else {
       OptionsPage.showTab($('internet-nav-tab'));
@@ -1356,16 +1585,25 @@ cr.define('options.internet', function() {
     var indicators = cr.doc.querySelectorAll(
         '#details-internet-page .controlled-setting-indicator');
     for (var i = 0; i < indicators.length; i++) {
-      var attributeName =
-          indicators[i].hasAttribute('managed') ? 'managed' : 'data';
+      var managed = indicators[i].hasAttribute('managed');
+      // TODO(stevenjb): Eliminate support for 'data' once 39 is stable.
+      var attributeName = managed ? 'managed' : 'data';
       var propName = indicators[i].getAttribute(attributeName);
-      if (!propName || !data[propName])
+      if (!propName)
+        continue;
+      var propValue = managed ?
+          onc.getManagedProperty(propName) :
+          onc.getActiveValue(propName);
+      // If the property is unset or unmanaged (i.e. not an Object) skip it.
+      if (propValue == undefined || (typeof propValue != 'object'))
         continue;
       var event;
-      if (attributeName == 'managed')
-        event = detailsPage.createManagedEvent_(propName, data[propName]);
+      if (managed)
+        event = detailsPage.createManagedEvent_(propName, propValue);
       else
-        event = detailsPage.createControlledEvent_(propName, data[propName]);
+        event = detailsPage.createControlledEvent_(propName,
+            /** @type {{value: *, controlledBy: *, recommendedValue: *}} */(
+                propValue));
       indicators[i].handlePrefChange(event);
       var forElement = $(indicators[i].getAttribute('for'));
       if (forElement) {

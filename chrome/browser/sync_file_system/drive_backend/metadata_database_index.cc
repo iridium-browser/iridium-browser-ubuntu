@@ -204,8 +204,10 @@ MetadataDatabaseIndex::Create(LevelDBWrapper* db) {
   DCHECK(db);
 
   scoped_ptr<ServiceMetadata> service_metadata = InitializeServiceMetadata(db);
-  DatabaseContents contents;
+  if (!service_metadata)
+    return scoped_ptr<MetadataDatabaseIndex>();
 
+  DatabaseContents contents;
   PutVersionToDB(kCurrentDatabaseVersion, db);
   ReadDatabaseContents(db, &contents);
   RemoveUnreachableItems(&contents,
@@ -414,7 +416,7 @@ bool MetadataDatabaseIndex::PromoteDemotedDirtyTrackers() {
 }
 
 size_t MetadataDatabaseIndex::CountDirtyTracker() const {
-  return dirty_trackers_.size() + demoted_dirty_trackers_.size();
+  return dirty_trackers_.size();
 }
 
 size_t MetadataDatabaseIndex::CountFileMetadata() const {

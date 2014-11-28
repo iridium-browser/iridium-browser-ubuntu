@@ -23,19 +23,18 @@
 
 #include "core/SVGNames.h"
 #include "core/fetch/ImageResource.h"
+#include "core/fetch/ImageResourceClient.h"
 #include "core/fetch/ResourcePtr.h"
-#include "core/svg/SVGAnimatedBoolean.h"
 #include "core/svg/SVGAnimatedPreserveAspectRatio.h"
 #include "core/svg/SVGFilterPrimitiveStandardAttributes.h"
 #include "core/svg/SVGURIReference.h"
-#include "core/svg/graphics/filters/SVGFEImage.h"
-#include "platform/graphics/ImageBuffer.h"
 
 namespace blink {
 
 class SVGFEImageElement FINAL : public SVGFilterPrimitiveStandardAttributes,
                                 public SVGURIReference,
                                 public ImageResourceClient {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     DECLARE_NODE_FACTORY(SVGFEImageElement);
 
@@ -68,4 +67,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // SVGFEImageElement_h

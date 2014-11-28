@@ -4,10 +4,16 @@
 
 package org.chromium.base;
 
+import android.animation.ValueAnimator;
+import android.app.ActivityOptions;
+import android.app.Notification;
 import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup.MarginLayoutParams;
 import android.view.ViewTreeObserver;
@@ -77,11 +83,22 @@ public class ApiCompatibilityUtils {
     }
 
     /**
-     * @see android.view.View#setTextDirection(int)
+     * @see android.view.View#setTextAlignment(int)
      */
     public static void setTextAlignment(View view, int textAlignment) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
             view.setTextAlignment(textAlignment);
+        } else {
+            // Do nothing. RTL text isn't supported before JB MR1.
+        }
+    }
+
+    /**
+     * @see android.view.View#setTextDirection(int)
+     */
+    public static void setTextDirection(View view, int textDirection) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            view.setTextDirection(textDirection);
         } else {
             // Do nothing. RTL text isn't supported before JB MR1.
         }
@@ -234,6 +251,37 @@ public class ApiCompatibilityUtils {
     }
 
     /**
+     * @see android.view.View#postOnAnimation()
+     */
+    public static void postOnAnimation(View view, Runnable action) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            view.postOnAnimation(action);
+        } else {
+            view.postDelayed(action, getFrameTime());
+        }
+    }
+
+    /**
+     * @see android.view.View#postOnAnimationDelayed()
+     */
+    public static void postOnAnimationDelayed(View view, Runnable action, long delayMillis) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            view.postOnAnimationDelayed(action, delayMillis);
+        } else {
+            view.postDelayed(action, getFrameTime() + delayMillis);
+        }
+    }
+
+    private static long getFrameTime() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+            return ValueAnimator.getFrameDelay();
+        } else {
+            // Any reasonable fake frame delay will have to do.
+            return 10;
+        }
+    }
+
+    /**
      * @see android.widget.RemoteViews#setContentDescription(int, CharSequence)
      */
     public static void setContentDescriptionForRemoteView(RemoteViews remoteViews, int viewId,
@@ -242,6 +290,28 @@ public class ApiCompatibilityUtils {
             remoteViews.setContentDescription(viewId, contentDescription);
         } else {
             // setContentDescription() is unavailable in earlier versions.
+        }
+    }
+
+    /**
+     * @see android.app.Activity#startActivity(Intent, Bundle)
+     */
+    public static void startActivity(Context context, Intent intent, Bundle options) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            context.startActivity(intent, options);
+        } else {
+            context.startActivity(intent);
+        }
+    }
+
+    /**
+     * @see android.app.ActivityOptions#toBundle()
+     */
+    public static Bundle toBundle(ActivityOptions options) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            return options.toBundle();
+        } else {
+            return null;
         }
     }
 
@@ -293,6 +363,18 @@ public class ApiCompatibilityUtils {
             return intent.getCreatorPackage();
         } else {
             return intent.getTargetPackage();
+        }
+    }
+
+    /**
+     * @see android.app.Notification.Builder#setLocalOnly(boolean)
+     */
+    @SuppressWarnings("deprecation")
+    public static Notification build(Notification.Builder builder) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            return builder.build();
+        } else {
+            return builder.getNotification();
         }
     }
 }

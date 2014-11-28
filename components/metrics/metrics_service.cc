@@ -191,8 +191,7 @@
 #include "components/metrics/metrics_state_manager.h"
 #include "components/variations/entropy_provider.h"
 
-using base::Time;
-using metrics::MetricsLogManager;
+namespace metrics {
 
 namespace {
 
@@ -255,8 +254,9 @@ ResponseStatus ResponseCodeToStatus(int response_code) {
   }
 }
 
-void MarkAppCleanShutdownAndCommit(PrefService* local_state) {
-  local_state->SetBoolean(metrics::prefs::kStabilityExitedCleanly, true);
+void MarkAppCleanShutdownAndCommit(CleanExitBeacon* clean_exit_beacon,
+                                   PrefService* local_state) {
+  clean_exit_beacon->WriteBeaconValue(true);
   local_state->SetInteger(metrics::prefs::kStabilityExecutionPhase,
                           MetricsService::SHUTDOWN_COMPLETE);
   // Start writing right away (write happens on a different thread).
@@ -303,8 +303,6 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
 
   registry->RegisterListPref(metrics::prefs::kMetricsInitialLogs);
   registry->RegisterListPref(metrics::prefs::kMetricsOngoingLogs);
-  registry->RegisterListPref(metrics::prefs::kMetricsInitialLogsOld);
-  registry->RegisterListPref(metrics::prefs::kMetricsOngoingLogsOld);
 
   registry->RegisterInt64Pref(metrics::prefs::kUninstallLaunchCount, 0);
   registry->RegisterInt64Pref(metrics::prefs::kUninstallMetricsUptimeSec, 0);
@@ -318,6 +316,7 @@ MetricsService::MetricsService(metrics::MetricsStateManager* state_manager,
       state_manager_(state_manager),
       client_(client),
       local_state_(local_state),
+      clean_exit_beacon_(client->GetRegistryBackupKey(), local_state),
       recording_active_(false),
       reporting_active_(false),
       test_mode_active_(false),
@@ -501,7 +500,7 @@ void MetricsService::RecordCompletedSessionEnd() {
 void MetricsService::OnAppEnterBackground() {
   scheduler_->Stop();
 
-  MarkAppCleanShutdownAndCommit(local_state_);
+  MarkAppCleanShutdownAndCommit(&clean_exit_beacon_, local_state_);
 
   // At this point, there's no way of knowing when the process will be
   // killed, so this has to be treated similar to a shutdown, closing and
@@ -517,12 +516,12 @@ void MetricsService::OnAppEnterBackground() {
 }
 
 void MetricsService::OnAppEnterForeground() {
-  local_state_->SetBoolean(metrics::prefs::kStabilityExitedCleanly, false);
+  clean_exit_beacon_.WriteBeaconValue(false);
   StartSchedulerIfNecessary();
 }
 #else
-void MetricsService::LogNeedForCleanShutdown(PrefService* local_state) {
-  local_state->SetBoolean(metrics::prefs::kStabilityExitedCleanly, false);
+void MetricsService::LogNeedForCleanShutdown() {
+  clean_exit_beacon_.WriteBeaconValue(false);
   // Redundant setting to be sure we call for a clean shutdown.
   clean_shutdown_status_ = NEED_TO_SHUTDOWN;
 }
@@ -559,21 +558,28 @@ void MetricsService::RecordBreakpadHasDebugger(bool has_debugger) {
 // Initialization methods
 
 void MetricsService::InitializeMetricsState() {
-  local_state_->SetString(metrics::prefs::kStabilityStatsVersion,
-                          client_->GetVersionString());
-  local_state_->SetInt64(metrics::prefs::kStabilityStatsBuildTime,
-                         MetricsLog::GetBuildTime());
+  const int64 buildtime = MetricsLog::GetBuildTime();
+  const std::string version = client_->GetVersionString();
+  bool version_changed = false;
+  if (local_state_->GetInt64(prefs::kStabilityStatsBuildTime) != buildtime ||
+      local_state_->GetString(prefs::kStabilityStatsVersion) != version) {
+    local_state_->SetString(metrics::prefs::kStabilityStatsVersion, version);
+    local_state_->SetInt64(metrics::prefs::kStabilityStatsBuildTime, buildtime);
+    version_changed = true;
+  }
 
   log_manager_.LoadPersistedUnsentLogs();
 
   session_id_ = local_state_->GetInteger(metrics::prefs::kMetricsSessionID);
 
-  if (!local_state_->GetBoolean(metrics::prefs::kStabilityExitedCleanly)) {
+  if (!clean_exit_beacon_.exited_cleanly()) {
     IncrementPrefValue(metrics::prefs::kStabilityCrashCount);
     // Reset flag, and wait until we call LogNeedForCleanShutdown() before
     // monitoring.
-    local_state_->SetBoolean(metrics::prefs::kStabilityExitedCleanly, true);
+    clean_exit_beacon_.WriteBeaconValue(true);
+  }
 
+  if (!clean_exit_beacon_.exited_cleanly() || ProvidersHaveStabilityMetrics()) {
     // TODO(rtenneti): On windows, consider saving/getting execution_phase from
     // the registry.
     int execution_phase =
@@ -581,10 +587,30 @@ void MetricsService::InitializeMetricsState() {
     UMA_HISTOGRAM_SPARSE_SLOWLY("Chrome.Browser.CrashedExecutionPhase",
                                 execution_phase);
 
-    // If the previous session didn't exit cleanly, then prepare an initial
-    // stability log if UMA is enabled.
+    // If the previous session didn't exit cleanly, or if any provider
+    // explicitly requests it, prepare an initial stability log -
+    // provided UMA is enabled.
     if (state_manager_->IsMetricsReportingEnabled())
       PrepareInitialStabilityLog();
+  }
+
+  // If no initial stability log was generated and there was a version upgrade,
+  // clear the stability stats from the previous version (so that they don't get
+  // attributed to the current version). This could otherwise happen due to a
+  // number of different edge cases, such as if the last version crashed before
+  // it could save off a system profile or if UMA reporting is disabled (which
+  // normally results in stats being accumulated).
+  if (!has_initial_stability_log_ && version_changed) {
+    for (size_t i = 0; i < metrics_providers_.size(); ++i)
+      metrics_providers_[i]->ClearSavedStabilityMetrics();
+
+    // Reset the prefs that are managed by MetricsService/MetricsLog directly.
+    local_state_->SetInteger(prefs::kStabilityCrashCount, 0);
+    local_state_->SetInteger(prefs::kStabilityExecutionPhase,
+                             UNINITIALIZED_PHASE);
+    local_state_->SetInteger(prefs::kStabilityIncompleteSessionEndCount, 0);
+    local_state_->SetInteger(prefs::kStabilityLaunchCount, 0);
+    local_state_->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
   }
 
   // Update session ID.
@@ -615,7 +641,7 @@ void MetricsService::InitializeMetricsState() {
   // them.  metrics::prefs::kStabilityLastTimestampSec may also be useless now.
   // TODO(jar): Delete these if they have no uses.
   local_state_->SetInt64(metrics::prefs::kStabilityLaunchTimeSec,
-                         Time::Now().ToTimeT());
+                         base::Time::Now().ToTimeT());
 
   // Bookkeeping for the uninstall metrics.
   IncrementLongPrefsValue(metrics::prefs::kUninstallLaunchCount);
@@ -669,20 +695,8 @@ void MetricsService::GetUptimes(PrefService* pref,
   }
 }
 
-void MetricsService::AddObserver(MetricsServiceObserver* observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  observers_.AddObserver(observer);
-}
-
-void MetricsService::RemoveObserver(MetricsServiceObserver* observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  observers_.RemoveObserver(observer);
-}
-
 void MetricsService::NotifyOnDidCreateMetricsLog() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  FOR_EACH_OBSERVER(
-      MetricsServiceObserver, observers_, OnDidCreateMetricsLog());
+  DCHECK(IsSingleThreaded());
   for (size_t i = 0; i < metrics_providers_.size(); ++i)
     metrics_providers_[i]->OnDidCreateMetricsLog();
 }
@@ -762,8 +776,8 @@ void MetricsService::CloseCurrentLog() {
   current_log->RecordStabilityMetrics(metrics_providers_.get(),
                                       incremental_uptime, uptime);
 
-  RecordCurrentHistograms();
   current_log->RecordGeneralMetrics(metrics_providers_.get());
+  RecordCurrentHistograms();
 
   log_manager_.FinishCurrentLog();
 }
@@ -911,9 +925,18 @@ void MetricsService::StageNewLog() {
   DCHECK(log_manager_.has_staged_log());
 }
 
+bool MetricsService::ProvidersHaveStabilityMetrics() {
+  // Check whether any metrics provider has stability metrics.
+  for (size_t i = 0; i < metrics_providers_.size(); ++i) {
+    if (metrics_providers_[i]->HasStabilityMetrics())
+      return true;
+  }
+
+  return false;
+}
+
 void MetricsService::PrepareInitialStabilityLog() {
   DCHECK_EQ(INITIALIZED, state_);
-  DCHECK_NE(0, local_state_->GetInteger(metrics::prefs::kStabilityCrashCount));
 
   scoped_ptr<MetricsLog> initial_stability_log(
       CreateLog(MetricsLog::INITIAL_STABILITY_LOG));
@@ -968,9 +991,8 @@ void MetricsService::PrepareInitialMetricsLog() {
   MetricsLog* current_log = log_manager_.current_log();
   current_log->RecordStabilityMetrics(metrics_providers_.get(),
                                       base::TimeDelta(), base::TimeDelta());
-  RecordCurrentHistograms();
-
   current_log->RecordGeneralMetrics(metrics_providers_.get());
+  RecordCurrentHistograms();
 
   log_manager_.FinishCurrentLog();
   log_manager_.ResumePausedLog();
@@ -1029,7 +1051,9 @@ void MetricsService::OnLogUploadComplete(int response_code) {
   // Provide boolean for error recovery (allow us to ignore response_code).
   bool discard_log = false;
   const size_t log_size = log_manager_.staged_log().length();
-  if (!upload_succeeded && log_size > kUploadLogAvoidRetransmitSize) {
+  if (upload_succeeded) {
+    UMA_HISTOGRAM_COUNTS_10000("UMA.LogSize.OnSuccess", log_size / 1024);
+  } else if (log_size > kUploadLogAvoidRetransmitSize) {
     UMA_HISTOGRAM_COUNTS("UMA.Large Rejected Log was Discarded",
                          static_cast<int>(log_size));
     discard_log = true;
@@ -1166,13 +1190,14 @@ void MetricsService::RecordCurrentStabilityHistograms() {
 
 void MetricsService::LogCleanShutdown() {
   // Redundant hack to write pref ASAP.
-  MarkAppCleanShutdownAndCommit(local_state_);
+  MarkAppCleanShutdownAndCommit(&clean_exit_beacon_, local_state_);
 
   // Redundant setting to assure that we always reset this value at shutdown
   // (and that we don't use some alternate path, and not call LogCleanShutdown).
   clean_shutdown_status_ = CLEANLY_SHUTDOWN;
 
-  RecordBooleanPrefValue(metrics::prefs::kStabilityExitedCleanly, true);
+  clean_exit_beacon_.WriteBeaconValue(true);
+  RecordCurrentState(local_state_);
   local_state_->SetInteger(metrics::prefs::kStabilityExecutionPhase,
                            MetricsService::SHUTDOWN_COMPLETE);
 }
@@ -1192,5 +1217,7 @@ void MetricsService::RecordBooleanPrefValue(const char* path, bool value) {
 
 void MetricsService::RecordCurrentState(PrefService* pref) {
   pref->SetInt64(metrics::prefs::kStabilityLastTimestampSec,
-                 Time::Now().ToTimeT());
+                 base::Time::Now().ToTimeT());
 }
+
+}  // namespace metrics

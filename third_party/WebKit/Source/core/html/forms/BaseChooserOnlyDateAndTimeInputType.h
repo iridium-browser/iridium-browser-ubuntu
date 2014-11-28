@@ -29,13 +29,12 @@
 #if !ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/html/forms/BaseClickableWithKeyInputType.h"
 #include "core/html/forms/BaseDateAndTimeInputType.h"
-#include "platform/DateTimeChooser.h"
-#include "platform/DateTimeChooserClient.h"
+#include "core/html/forms/DateTimeChooser.h"
+#include "core/html/forms/DateTimeChooserClient.h"
 
 namespace blink {
 
 class BaseChooserOnlyDateAndTimeInputType : public BaseDateAndTimeInputType, public DateTimeChooserClient {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(BaseChooserOnlyDateAndTimeInputType);
 protected:
     BaseChooserOnlyDateAndTimeInputType(HTMLInputElement& element) : BaseDateAndTimeInputType(element) { }
     virtual ~BaseChooserOnlyDateAndTimeInputType();
@@ -55,6 +54,7 @@ private:
     virtual void updateView() OVERRIDE;
 
     // DateTimeChooserClient functions:
+    virtual Element& ownerElement() const OVERRIDE;
     virtual void didChooseValue(const String&) OVERRIDE;
     virtual void didChooseValue(double) OVERRIDE;
     virtual void didEndChooser() OVERRIDE;

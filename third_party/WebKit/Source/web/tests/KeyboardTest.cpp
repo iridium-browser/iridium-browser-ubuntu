@@ -42,7 +42,6 @@
 #include "web/WebInputEventConversion.h"
 
 using namespace blink;
-using namespace blink;
 
 namespace {
 
@@ -169,7 +168,7 @@ TEST_F(KeyboardTest, TestOSModifierV)
 TEST_F(KeyboardTest, TestEscape)
 {
     WebKeyboardEvent keyboardEvent;
-    setupKeyDownEvent(&keyboardEvent, blink::VKEY_ESCAPE, noModifiers);
+    setupKeyDownEvent(&keyboardEvent, VKEY_ESCAPE, noModifiers);
 
     const char* result = interpretKeyEvent(keyboardEvent,
                                            PlatformEvent::RawKeyDown);

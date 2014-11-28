@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
@@ -555,7 +555,8 @@ class SimpleGetRunner {
     int rv;
     int i = 0;
     while (true) {
-      rv = parser_->ReadResponseBody(buffer, user_buf_len, callback.callback());
+      rv = parser_->ReadResponseBody(
+          buffer.get(), user_buf_len, callback.callback());
       EXPECT_EQ(read_lengths[i], rv);
       i++;
       if (rv <= 0)

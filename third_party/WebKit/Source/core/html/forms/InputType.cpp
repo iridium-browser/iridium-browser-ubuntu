@@ -42,6 +42,7 @@
 #include "core/html/HTMLShadowElement.h"
 #include "core/html/forms/ButtonInputType.h"
 #include "core/html/forms/CheckboxInputType.h"
+#include "core/html/forms/ColorChooser.h"
 #include "core/html/forms/ColorInputType.h"
 #include "core/html/forms/DateInputType.h"
 #include "core/html/forms/DateTimeLocalInputType.h"
@@ -65,7 +66,6 @@
 #include "core/html/forms/WeekInputType.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/rendering/RenderTheme.h"
-#include "platform/ColorChooser.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/text/PlatformLocale.h"
 #include "platform/text/TextBreakIterator.h"
@@ -138,16 +138,6 @@ InputType::~InputType()
 }
 
 bool InputType::isTextField() const
-{
-    return false;
-}
-
-bool InputType::isTextType() const
-{
-    return false;
-}
-
-bool InputType::isRangeControl() const
 {
     return false;
 }
@@ -240,6 +230,11 @@ bool InputType::valueMissing(const String&) const
 }
 
 bool InputType::hasBadInput() const
+{
+    return false;
+}
+
+bool InputType::tooLong(const String&, HTMLTextFormControlElement::NeedsToCheckDirtyFlag) const
 {
     return false;
 }
@@ -586,6 +581,18 @@ String InputType::sanitizeValue(const String& proposedValue) const
     return proposedValue;
 }
 
+void InputType::warnIfValueIsInvalidAndElementIsVisible(const String& value) const
+{
+    // Don't warn if the value is set in Modernizr.
+    RenderStyle* style = element().renderStyle();
+    if (style && style->visibility() != HIDDEN)
+        warnIfValueIsInvalid(value);
+}
+
+void InputType::warnIfValueIsInvalid(const String&) const
+{
+}
+
 bool InputType::receiveDroppedFiles(const DragData*)
 {
     ASSERT_NOT_REACHED();
@@ -613,89 +620,9 @@ bool InputType::isTextButton() const
     return false;
 }
 
-bool InputType::isRadioButton() const
-{
-    return false;
-}
-
-bool InputType::isSearchField() const
-{
-    return false;
-}
-
-bool InputType::isHiddenType() const
-{
-    return false;
-}
-
-bool InputType::isPasswordField() const
-{
-    return false;
-}
-
-bool InputType::isCheckbox() const
-{
-    return false;
-}
-
-bool InputType::isEmailField() const
-{
-    return false;
-}
-
-bool InputType::isFileUpload() const
-{
-    return false;
-}
-
-bool InputType::isImageButton() const
-{
-    return false;
-}
-
 bool InputType::isInteractiveContent() const
 {
     return true;
-}
-
-bool InputType::isNumberField() const
-{
-    return false;
-}
-
-bool InputType::isTelephoneField() const
-{
-    return false;
-}
-
-bool InputType::isURLField() const
-{
-    return false;
-}
-
-bool InputType::isDateField() const
-{
-    return false;
-}
-
-bool InputType::isDateTimeLocalField() const
-{
-    return false;
-}
-
-bool InputType::isMonthField() const
-{
-    return false;
-}
-
-bool InputType::isTimeField() const
-{
-    return false;
-}
-
-bool InputType::isWeekField() const
-{
-    return false;
 }
 
 bool InputType::isEnumeratable()
@@ -713,14 +640,14 @@ bool InputType::isSteppable() const
     return false;
 }
 
-bool InputType::isColorControl() const
+bool InputType::shouldRespectHeightAndWidthAttributes()
 {
     return false;
 }
 
-bool InputType::shouldRespectHeightAndWidthAttributes()
+int InputType::maxLength() const
 {
-    return false;
+    return HTMLInputElement::maximumLength;
 }
 
 bool InputType::supportsPlaceholder() const
@@ -758,7 +685,7 @@ const QualifiedName& InputType::subResourceAttributeName() const
     return QualifiedName::null();
 }
 
-bool InputType::supportsIndeterminateAppearance() const
+bool InputType::shouldAppearIndeterminate() const
 {
     return false;
 }
@@ -786,6 +713,11 @@ unsigned InputType::width() const
 TextDirection InputType::computedTextDirection()
 {
     return element().computedStyle()->direction();
+}
+
+ColorChooserClient* InputType::colorChooserClient()
+{
+    return 0;
 }
 
 void InputType::applyStep(const Decimal& current, int count, AnyStepHandling anyStepHandling, TextFieldEventBehavior eventBehavior, ExceptionState& exceptionState)

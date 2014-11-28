@@ -16,30 +16,6 @@
 
 static const int W = 1920, H = 1080;
 
-static void draw_pos_text(SkCanvas* canvas, const char* text, bool constantY) {
-    const size_t len = strlen(text);
-    SkAutoTMalloc<SkPoint> pos(len);
-    for (size_t i = 0; i < len; i++) {
-        pos[i].fX = (SkScalar)i;
-        pos[i].fY = constantY ? SK_Scalar1 : (SkScalar)i;
-    }
-    canvas->drawPosText(text, len, pos, SkPaint());
-}
-
-DEF_TEST(RecordOpts_StrengthReduction, r) {
-    SkRecord record;
-    SkRecorder recorder(&record, W, H);
-
-    // We can convert a drawPosText into a drawPosTextH when all the Ys are the same.
-    draw_pos_text(&recorder, "This will be reduced to drawPosTextH.", true);
-    draw_pos_text(&recorder, "This cannot be reduced to drawPosTextH.", false);
-
-    SkRecordReduceDrawPosTextStrength(&record);
-
-    assert_type<SkRecords::DrawPosTextH>(r, record, 0);
-    assert_type<SkRecords::DrawPosText>(r, record, 1);
-}
-
 DEF_TEST(RecordOpts_NoopDrawSaveRestore, r) {
     SkRecord record;
     SkRecorder recorder(&record, W, H);
@@ -97,6 +73,23 @@ DEF_TEST(RecordOpts_NoopSaveRestores, r) {
     for (unsigned index = 0; index < 8; index++) {
         assert_type<SkRecords::NoOp>(r, record, index);
     }
+}
+
+DEF_TEST(RecordOpts_SaveSaveLayerRestoreRestore, r) {
+    SkRecord record;
+    SkRecorder recorder(&record, W, H);
+
+    // A previous bug NoOp'd away the first 3 commands.
+    recorder.save();
+        recorder.saveLayer(NULL, NULL);
+        recorder.restore();
+    recorder.restore();
+
+    SkRecordNoopSaveRestores(&record);
+    assert_type<SkRecords::Save>     (r, record, 0);
+    assert_type<SkRecords::SaveLayer>(r, record, 1);
+    assert_type<SkRecords::Restore>  (r, record, 2);
+    assert_type<SkRecords::Restore>  (r, record, 3);
 }
 
 static void assert_savelayer_restore(skiatest::Reporter* r,

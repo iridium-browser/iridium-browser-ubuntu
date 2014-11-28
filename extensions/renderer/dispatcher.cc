@@ -14,6 +14,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "content/grit/content_resources.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_thread.h"
@@ -31,6 +32,7 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/externally_connectable.h"
+#include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 #include "extensions/common/message_bundle.h"
 #include "extensions/common/permissions/permission_set.h"
@@ -40,6 +42,7 @@
 #include "extensions/renderer/api_activity_logger.h"
 #include "extensions/renderer/api_definitions_natives.h"
 #include "extensions/renderer/app_runtime_custom_bindings.h"
+#include "extensions/renderer/app_window_custom_bindings.h"
 #include "extensions/renderer/binding_generating_native_handler.h"
 #include "extensions/renderer/blob_native_handler.h"
 #include "extensions/renderer/content_watcher.h"
@@ -53,6 +56,7 @@
 #include "extensions/renderer/extension_helper.h"
 #include "extensions/renderer/extensions_renderer_client.h"
 #include "extensions/renderer/file_system_natives.h"
+#include "extensions/renderer/guest_view/guest_view_internal_custom_bindings.h"
 #include "extensions/renderer/i18n_custom_bindings.h"
 #include "extensions/renderer/id_generator_custom_bindings.h"
 #include "extensions/renderer/lazy_background_page_native_handler.h"
@@ -75,7 +79,6 @@
 #include "extensions/renderer/user_gestures_native_handler.h"
 #include "extensions/renderer/utils_native_handler.h"
 #include "extensions/renderer/v8_context_native_handler.h"
-#include "grit/content_resources.h"
 #include "grit/extensions_renderer_resources.h"
 #include "mojo/public/js/bindings/constants.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -182,7 +185,8 @@ Dispatcher::Dispatcher(DispatcherDelegate* delegate)
       source_map_(&ResourceBundle::GetSharedInstance()),
       v8_schema_registry_(new V8SchemaRegistry),
       is_webkit_initialized_(false),
-      user_script_set_manager_observer_(this) {
+      user_script_set_manager_observer_(this),
+      webrequest_used_(false) {
   const CommandLine& command_line = *(CommandLine::ForCurrentProcess());
   is_extension_process_ =
       command_line.HasSwitch(extensions::switches::kExtensionProcess) ||
@@ -218,31 +222,23 @@ bool Dispatcher::IsExtensionActive(const std::string& extension_id) const {
   return is_active;
 }
 
-std::string Dispatcher::GetExtensionID(const WebFrame* frame, int world_id) {
+const Extension* Dispatcher::GetExtensionFromFrameAndWorld(
+    const WebFrame* frame,
+    int world_id,
+    bool use_effective_url) {
+  std::string extension_id;
   if (world_id != 0) {
     // Isolated worlds (content script).
-    return ScriptInjection::GetExtensionIdForIsolatedWorld(world_id);
+    extension_id = ScriptInjection::GetExtensionIdForIsolatedWorld(world_id);
+  } else if (!frame->document().securityOrigin().isUnique()) {
+    // TODO(kalman): Delete the above check.
+
+    // Extension pages (chrome-extension:// URLs).
+    GURL frame_url = ScriptContext::GetDataSourceURLForFrame(frame);
+    frame_url = ScriptContext::GetEffectiveDocumentURL(
+        frame, frame_url, use_effective_url);
+    extension_id = extensions_.GetExtensionOrAppIDByURL(frame_url);
   }
-
-  // TODO(kalman): Delete this check.
-  if (frame->document().securityOrigin().isUnique())
-    return std::string();
-
-  // Extension pages (chrome-extension:// URLs).
-  GURL frame_url = ScriptContext::GetDataSourceURLForFrame(frame);
-  return extensions_.GetExtensionOrAppIDByURL(frame_url);
-}
-
-void Dispatcher::DidCreateScriptContext(
-    WebFrame* frame,
-    const v8::Handle<v8::Context>& v8_context,
-    int extension_group,
-    int world_id) {
-#if !defined(ENABLE_EXTENSIONS)
-  return;
-#endif
-
-  std::string extension_id = GetExtensionID(frame, world_id);
 
   const Extension* extension = extensions_.GetByID(extension_id);
   if (!extension && !extension_id.empty()) {
@@ -255,19 +251,43 @@ void Dispatcher::DidCreateScriptContext(
       RenderThread::Get()->RecordAction(
           UserMetricsAction("ExtensionNotFound_ED"));
     }
-
-    extension_id = "";
   }
+  return extension;
+}
 
+void Dispatcher::DidCreateScriptContext(
+    WebFrame* frame,
+    const v8::Handle<v8::Context>& v8_context,
+    int extension_group,
+    int world_id) {
+#if !defined(ENABLE_EXTENSIONS)
+  return;
+#endif
+
+  const Extension* extension =
+      GetExtensionFromFrameAndWorld(frame, world_id, false);
+  const Extension* effective_extension =
+      GetExtensionFromFrameAndWorld(frame, world_id, true);
+
+  GURL frame_url = ScriptContext::GetDataSourceURLForFrame(frame);
   Feature::Context context_type =
       ClassifyJavaScriptContext(extension,
                                 extension_group,
-                                ScriptContext::GetDataSourceURLForFrame(frame),
+                                frame_url,
                                 frame->document().securityOrigin());
+  Feature::Context effective_context_type = ClassifyJavaScriptContext(
+      effective_extension,
+      extension_group,
+      ScriptContext::GetEffectiveDocumentURL(frame, frame_url, true),
+      frame->document().securityOrigin());
 
   ScriptContext* context =
-      delegate_->CreateScriptContext(v8_context, frame, extension, context_type)
-          .release();
+      delegate_->CreateScriptContext(v8_context,
+                                     frame,
+                                     extension,
+                                     context_type,
+                                     effective_extension,
+                                     effective_context_type).release();
   script_context_set_.Add(context);
 
   // Initialize origin permissions for content scripts, which can't be
@@ -304,6 +324,18 @@ void Dispatcher::DidCreateScriptContext(
     module_system->Require("platformApp");
   }
 
+  // Note: setting up the WebView class here, not the chrome.webview API.
+  // The API will be automatically set up when first used.
+  if (context->GetAvailability("webViewInternal").is_available()) {
+    module_system->Require("webView");
+    if (context->GetAvailability("webViewExperimentalInternal")
+            .is_available()) {
+      module_system->Require("webViewExperimental");
+    }
+  } else if (context_type == extensions::Feature::BLESSED_EXTENSION_CONTEXT) {
+    module_system->Require("denyWebView");
+  }
+
   delegate_->RequireAdditionalModules(context, is_within_platform_app);
 
   VLOG(1) << "Num tracked contexts: " << script_context_set_.size();
@@ -331,13 +363,14 @@ void Dispatcher::DidCreateDocumentElement(blink::WebFrame* frame) {
   // are hosted in the extension process.
   GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
       frame, frame->document().url(), true /* match_about_blank */);
+
   const Extension* extension =
       extensions_.GetExtensionOrAppByURL(effective_document_url);
 
   if (extension &&
       (extension->is_extension() || extension->is_platform_app())) {
-    int resource_id =
-        extension->is_platform_app() ? IDR_PLATFORM_APP_CSS : IDR_EXTENSION_CSS;
+    int resource_id = extension->is_platform_app() ? IDR_PLATFORM_APP_CSS
+                                                   : IDR_EXTENSION_FONTS_CSS;
     std::string stylesheet = ResourceBundle::GetSharedInstance()
                                  .GetRawDataResource(resource_id)
                                  .as_string();
@@ -351,6 +384,23 @@ void Dispatcher::DidCreateDocumentElement(blink::WebFrame* frame) {
     // documents that are loaded in each app or extension.
     frame->document().insertStyleSheet(WebString::fromUTF8(stylesheet));
   }
+
+  // This preprocessor directive is because this file is still built in Android
+  // builds, but OptionsPageInfo is not. For Android builds, exclude this block
+  // of code to prevent link errors.
+#if defined(ENABLE_EXTENSIONS)
+  // If this is an extension options page, and the extension has opted into
+  // using Chrome styles, then insert the Chrome extension stylesheet.
+  if (extension && extension->is_extension() &&
+      OptionsPageInfo::ShouldUseChromeStyle(extension) &&
+      effective_document_url == OptionsPageInfo::GetOptionsPage(extension)) {
+    frame->document().insertStyleSheet(
+        WebString::fromUTF8(ResourceBundle::GetSharedInstance()
+                                .GetRawDataResource(IDR_EXTENSION_CSS)
+                                .as_string()));
+  }
+#endif
+
   content_watcher_->DidCreateDocumentElement(frame);
 }
 
@@ -482,6 +532,20 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
                                      IDR_UNCAUGHT_EXCEPTION_HANDLER_JS));
   resources.push_back(std::make_pair("unload_event", IDR_UNLOAD_EVENT_JS));
   resources.push_back(std::make_pair("utils", IDR_UTILS_JS));
+  resources.push_back(std::make_pair("webRequest",
+                                     IDR_WEB_REQUEST_CUSTOM_BINDINGS_JS));
+  resources.push_back(
+       std::make_pair("webRequestInternal",
+                      IDR_WEB_REQUEST_INTERNAL_CUSTOM_BINDINGS_JS));
+  // Note: webView not webview so that this doesn't interfere with the
+  // chrome.webview API bindings.
+  resources.push_back(std::make_pair("webView", IDR_WEB_VIEW_JS));
+  resources.push_back(std::make_pair("webViewEvents", IDR_WEB_VIEW_EVENTS_JS));
+  resources.push_back(
+      std::make_pair("webViewExperimental", IDR_WEB_VIEW_EXPERIMENTAL_JS));
+  resources.push_back(std::make_pair("webViewInternal",
+                                     IDR_WEB_VIEW_INTERNAL_CUSTOM_BINDINGS_JS));
+  resources.push_back(std::make_pair("denyWebView", IDR_WEB_VIEW_DENY_JS));
   resources.push_back(
       std::make_pair(mojo::kBufferModuleName, IDR_MOJO_BUFFER_JS));
   resources.push_back(
@@ -501,6 +565,11 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
   resources.push_back(
       std::make_pair("app.runtime", IDR_APP_RUNTIME_CUSTOM_BINDINGS_JS));
   resources.push_back(
+      std::make_pair("app.window", IDR_APP_WINDOW_CUSTOM_BINDINGS_JS));
+  resources.push_back(
+      std::make_pair("declarativeWebRequest",
+                     IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS));
+  resources.push_back(
       std::make_pair("contextMenus", IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS));
   resources.push_back(
       std::make_pair("extension", IDR_EXTENSION_CUSTOM_BINDINGS_JS));
@@ -509,6 +578,7 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
       std::make_pair("permissions", IDR_PERMISSIONS_CUSTOM_BINDINGS_JS));
   resources.push_back(
       std::make_pair("runtime", IDR_RUNTIME_CUSTOM_BINDINGS_JS));
+  resources.push_back(std::make_pair("windowControls", IDR_WINDOW_CONTROLS_JS));
   resources.push_back(std::make_pair("binding", IDR_BINDING_JS));
 
   // Custom types sources.
@@ -584,6 +654,10 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
       "app_runtime",
       scoped_ptr<NativeHandler>(new AppRuntimeCustomBindings(context)));
   module_system->RegisterNativeHandler(
+      "app_window_natives",
+      scoped_ptr<NativeHandler>(
+          new AppWindowCustomBindings(dispatcher, context)));
+  module_system->RegisterNativeHandler(
       "blob_natives",
       scoped_ptr<NativeHandler>(new BlobNativeHandler(context)));
   module_system->RegisterNativeHandler(
@@ -594,6 +668,10 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
   module_system->RegisterNativeHandler(
       "document_natives",
       scoped_ptr<NativeHandler>(new DocumentCustomBindings(context)));
+  module_system->RegisterNativeHandler(
+      "guest_view_internal",
+      scoped_ptr<NativeHandler>(
+          new GuestViewInternalCustomBindings(context)));
   module_system->RegisterNativeHandler(
       "i18n", scoped_ptr<NativeHandler>(new I18NCustomBindings(context)));
   module_system->RegisterNativeHandler(
@@ -913,7 +991,7 @@ void Dispatcher::OnUpdateTabSpecificPermissions(
 }
 
 void Dispatcher::OnUsingWebRequestAPI(bool webrequest_used) {
-  delegate_->HandleWebRequestAPIUsage(webrequest_used);
+  webrequest_used_ = webrequest_used;
 }
 
 void Dispatcher::OnUserScriptsUpdated(
@@ -1055,11 +1133,15 @@ void Dispatcher::UpdateBindingsForContext(ScriptContext* context) {
         if (api_feature_provider->GetParent(feature) != NULL)
           continue;
 
+        // Skip chrome.test if this isn't a test.
+        if (api_name == "test" &&
+            !CommandLine::ForCurrentProcess()->HasSwitch(
+                ::switches::kTestType)) {
+          continue;
+        }
+
         if (context->IsAnyFeatureAvailableToContext(*feature))
           RegisterBinding(api_name, context);
-      }
-      if (CommandLine::ForCurrentProcess()->HasSwitch(::switches::kTestType)) {
-        RegisterBinding("test", context);
       }
       break;
     }

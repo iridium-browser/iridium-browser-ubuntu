@@ -114,6 +114,10 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#if defined(OPENSSL_WINDOWS)
+#include <Windows.h>
+#endif
+
 #include <openssl/lhash.h>
 #include <openssl/mem.h>
 #include <openssl/thread.h>
@@ -271,7 +275,30 @@ void ERR_clear_error(void) {
   state->top = state->bottom = 0;
 }
 
-int ERR_get_next_error_library() {
+void ERR_remove_thread_state(const CRYPTO_THREADID *tid) {
+  CRYPTO_THREADID current;
+  ERR_STATE *state;
+  unsigned i;
+
+  if (tid == NULL) {
+    CRYPTO_THREADID_current(&current);
+    tid = &current;
+  }
+
+  err_fns_check();
+  state = ERRFN(release_state)(tid);
+  if (state == NULL) {
+    return;
+  }
+
+  for (i = 0; i < ERR_NUM_ERRORS; i++) {
+    err_clear(&state->errors[i]);
+  }
+
+  OPENSSL_free(state);
+}
+
+int ERR_get_next_error_library(void) {
   err_fns_check();
   return ERRFN(get_next_library)();
 }
@@ -636,6 +663,7 @@ static ERR_STRING_DATA kGlobalErrors[] = {
     {ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED, "function should not be called"},
     {ERR_R_PASSED_NULL_PARAMETER, "passed a null parameter"},
     {ERR_R_INTERNAL_ERROR, "internal error"},
+    {ERR_R_OVERFLOW, "overflow"},
 
     {ERR_PACK(ERR_LIB_SYS, SYS_F_fopen, 0), "fopen"},
     {ERR_PACK(ERR_LIB_SYS, SYS_F_fclose, 0), "fclose"},
@@ -666,6 +694,7 @@ extern const ERR_STRING_DATA EC_error_string_data[];
 extern const ERR_STRING_DATA EVP_error_string_data[];
 extern const ERR_STRING_DATA OBJ_error_string_data[];
 extern const ERR_STRING_DATA PEM_error_string_data[];
+extern const ERR_STRING_DATA PKCS8_error_string_data[];
 extern const ERR_STRING_DATA RSA_error_string_data[];
 extern const ERR_STRING_DATA X509V3_error_string_data[];
 extern const ERR_STRING_DATA X509_error_string_data[];
@@ -718,6 +747,7 @@ static void err_load_strings(void) {
   ERR_load_strings(EVP_error_string_data);
   ERR_load_strings(OBJ_error_string_data);
   ERR_load_strings(PEM_error_string_data);
+  ERR_load_strings(PKCS8_error_string_data);
   ERR_load_strings(RSA_error_string_data);
   ERR_load_strings(X509V3_error_string_data);
   ERR_load_strings(X509_error_string_data);
@@ -732,11 +762,11 @@ void ERR_load_strings(const ERR_STRING_DATA *str) {
   }
 }
 
-void ERR_load_crypto_strings() { err_load_strings(); }
+void ERR_load_crypto_strings(void) { err_load_strings(); }
 
-void ERR_free_strings() {
+void ERR_free_strings(void) {
   err_fns_check();
   ERRFN(shutdown)();
 }
 
-void ERR_load_BIO_strings() {}
+void ERR_load_BIO_strings(void) {}

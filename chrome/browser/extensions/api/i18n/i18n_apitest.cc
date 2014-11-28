@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "extensions/common/extension.h"
+#include "extensions/test/result_catcher.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18N) {
@@ -38,7 +39,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18NUpdate) {
 
   const extensions::Extension* extension = LoadExtension(extension_dir.path());
 
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
 
   // Test that the messages.json file is loaded and the i18n message is loaded.
   ui_test_utils::NavigateToURL(

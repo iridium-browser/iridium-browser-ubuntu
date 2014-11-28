@@ -6,8 +6,8 @@
 
 #include <sstream>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
@@ -16,6 +16,7 @@
 #include "cc/layers/nine_patch_layer.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/texture_layer.h"
+#include "cc/resources/single_release_callback.h"
 #include "cc/resources/texture_mailbox.h"
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/layer_tree_json_parser.h"
@@ -39,9 +40,8 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
                     kTimeCheckInterval),
         commit_timer_(0, base::TimeDelta(), 1),
         full_damage_each_frame_(false),
-        animation_driven_drawing_(false),
+        begin_frame_driven_drawing_(false),
         measure_commit_cost_(false) {
-    fake_content_layer_client_.set_paint_all_opaque(true);
   }
 
   virtual void InitializeSettings(LayerTreeSettings* settings) OVERRIDE {
@@ -53,8 +53,8 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
     PostSetNeedsCommitToMainThread();
   }
 
-  virtual void Animate(base::TimeTicks monotonic_time) OVERRIDE {
-    if (animation_driven_drawing_ && !TestEnded()) {
+  virtual void BeginMainFrame(const BeginFrameArgs& args) OVERRIDE {
+    if (begin_frame_driven_drawing_ && !TestEnded()) {
       layer_tree_host()->SetNeedsAnimate();
       layer_tree_host()->SetNextCommitForcesRedraw();
     }
@@ -79,7 +79,7 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
       CleanUpAndEndTest(impl);
       return;
     }
-    if (!animation_driven_drawing_)
+    if (!begin_frame_driven_drawing_)
       impl->SetNeedsRedraw();
     if (full_damage_each_frame_)
       impl->SetFullRootLayerDamage();
@@ -108,7 +108,7 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
   std::string test_name_;
   FakeContentLayerClient fake_content_layer_client_;
   bool full_damage_each_frame_;
-  bool animation_driven_drawing_;
+  bool begin_frame_driven_drawing_;
 
   bool measure_commit_cost_;
 };
@@ -184,16 +184,16 @@ class LayerTreeHostPerfTestLeafInvalidates
     // Find a leaf layer.
     for (layer_to_invalidate_ = layer_tree_host()->root_layer();
          layer_to_invalidate_->children().size();
-         layer_to_invalidate_ = layer_to_invalidate_->children()[0]) {}
+         layer_to_invalidate_ = layer_to_invalidate_->children()[0].get()) {
+    }
   }
 
   virtual void DidCommitAndDrawFrame() OVERRIDE {
     if (TestEnded())
       return;
 
-    static bool flip = true;
-    layer_to_invalidate_->SetOpacity(flip ? 1.f : 0.5f);
-    flip = !flip;
+    layer_to_invalidate_->SetOpacity(
+        layer_to_invalidate_->opacity() != 1.f ? 1.f : 0.5f);
   }
 
  protected:
@@ -228,6 +228,8 @@ class ScrollingLayerTreePerfTest : public LayerTreeHostPerfTestJsonReader {
   }
 
   virtual void Layout() OVERRIDE {
+    if (TestEnded())
+      return;
     static const gfx::Vector2d delta = gfx::Vector2d(0, 10);
     scrollable_->SetScrollOffset(scrollable_->scroll_offset() + delta);
   }
@@ -324,7 +326,7 @@ TEST_F(BrowserCompositorInvalidateLayerTreePerfTest, DenseBrowserUI) {
 
 // Simulates a page with several large, transformed and animated layers.
 TEST_F(LayerTreeHostPerfTestJsonReader, HeavyPageThreadedImplSide) {
-  animation_driven_drawing_ = true;
+  begin_frame_driven_drawing_ = true;
   measure_commit_cost_ = true;
   SetTestName("heavy_page");
   ReadTestFile("heavy_layer_tree");

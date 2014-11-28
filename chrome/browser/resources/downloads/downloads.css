@@ -2,48 +2,10 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-body {
-  margin: 10px 10px 34px 10px;
-}
-
-.header {
-  clear: both;
-  overflow: auto;
-}
-
-.header .logo {
-  float: left;
-}
-
-html[dir='rtl'] .logo,
-html[dir='rtl'] .form {
-  float: right;
-}
-
-.header .form {
-  -webkit-margin-start: 12px;
-  float: left;
-  margin-top: 4px;
-}
-
-#downloads-summary {
-  background-color: rgb(235, 239, 249);
-  border-top: 1px solid rgb(156, 194, 239);
-  margin-bottom: 6px;
-  margin-top: 12px;
-  padding: 3px;
-}
+<include src="../search_header.css">
 
 #downloads-summary-text {
   font-weight: bold;
-}
-
-#downloads-actions {
-  float: right;
-}
-
-html[dir=rtl] #downloads-actions {
-  float: left;
 }
 
 .disabled-link {
@@ -66,6 +28,7 @@ html[dir=rtl] #downloads-actions {
 
 #downloads-display {
   max-width: 740px;
+  padding: 0 10px 34px;
 }
 
 .download {

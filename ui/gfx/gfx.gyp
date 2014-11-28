@@ -169,11 +169,12 @@
         'font_list.h',
         'font_list_impl.cc',
         'font_list_impl.h',
-        'font_render_params_android.cc',
-        'font_render_params_linux.cc',
-        'font_render_params_win.cc',
         'font_render_params.cc',
         'font_render_params.h',
+        'font_render_params_android.cc',
+        'font_render_params_linux.cc',
+        'font_render_params_mac.cc',
+        'font_render_params_win.cc',
         'frame_time.h',
         'gfx_export.h',
         'gfx_paths.cc',
@@ -308,6 +309,9 @@
       ],
       'conditions': [
         ['OS=="ios"', {
+          'dependencies': [
+            '<(DEPTH)/ui/ios/ui_ios.gyp:ui_ios',
+          ],
           # iOS only uses a subset of UI.
           'sources/': [
             ['exclude', '^codec/jpeg_codec\\.cc$'],
@@ -422,6 +426,10 @@
       'target_name': 'gfx_test_support',
       'type': 'static_library',
       'sources': [
+        'image/image_unittest_util.cc',
+        'image/image_unittest_util.h',
+        'image/image_unittest_util_ios.mm',
+        'image/image_unittest_util_mac.mm',
         'test/fontconfig_util_linux.cc',
         'test/fontconfig_util_linux.h',
         'test/gfx_util.cc',

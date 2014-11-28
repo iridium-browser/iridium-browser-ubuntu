@@ -16,8 +16,8 @@
 #include "chrome/common/extensions/api/file_system_provider.h"
 #include "chrome/common/extensions/api/file_system_provider_internal.h"
 #include "extensions/browser/event_router.h"
+#include "storage/browser/fileapi/async_file_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/async_file_util.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -35,20 +35,20 @@ class CallbackLogger {
   class Event {
    public:
     Event(base::File::Error result,
-          const fileapi::AsyncFileUtil::EntryList& entry_list,
+          const storage::AsyncFileUtil::EntryList& entry_list,
           bool has_more)
         : result_(result), entry_list_(entry_list), has_more_(has_more) {}
     virtual ~Event() {}
 
     base::File::Error result() { return result_; }
-    const fileapi::AsyncFileUtil::EntryList& entry_list() {
+    const storage::AsyncFileUtil::EntryList& entry_list() {
       return entry_list_;
     }
     bool has_more() { return has_more_; }
 
    private:
     base::File::Error result_;
-    fileapi::AsyncFileUtil::EntryList entry_list_;
+    storage::AsyncFileUtil::EntryList entry_list_;
     bool has_more_;
 
     DISALLOW_COPY_AND_ASSIGN(Event);
@@ -58,7 +58,7 @@ class CallbackLogger {
   virtual ~CallbackLogger() {}
 
   void OnReadDirectory(base::File::Error result,
-                       const fileapi::AsyncFileUtil::EntryList& entry_list,
+                       const storage::AsyncFileUtil::EntryList& entry_list,
                        bool has_more) {
     events_.push_back(new Event(result, entry_list, has_more));
   }
@@ -92,6 +92,8 @@ class FileSystemProviderOperationsReadDirectoryTest : public testing::Test {
 };
 
 TEST_F(FileSystemProviderOperationsReadDirectoryTest, Execute) {
+  using extensions::api::file_system_provider::ReadDirectoryRequestedOptions;
+
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   CallbackLogger callback_logger;
 
@@ -114,20 +116,15 @@ TEST_F(FileSystemProviderOperationsReadDirectoryTest, Execute) {
   base::ListValue* event_args = event->event_args.get();
   ASSERT_EQ(1u, event_args->GetSize());
 
-  base::DictionaryValue* options = NULL;
-  ASSERT_TRUE(event_args->GetDictionary(0, &options));
+  const base::DictionaryValue* options_as_value = NULL;
+  ASSERT_TRUE(event_args->GetDictionary(0, &options_as_value));
 
-  std::string event_file_system_id;
-  EXPECT_TRUE(options->GetString("fileSystemId", &event_file_system_id));
-  EXPECT_EQ(kFileSystemId, event_file_system_id);
-
-  int event_request_id = -1;
-  EXPECT_TRUE(options->GetInteger("requestId", &event_request_id));
-  EXPECT_EQ(kRequestId, event_request_id);
-
-  std::string event_directory_path;
-  EXPECT_TRUE(options->GetString("directoryPath", &event_directory_path));
-  EXPECT_EQ(kDirectoryPath, event_directory_path);
+  ReadDirectoryRequestedOptions options;
+  ASSERT_TRUE(
+      ReadDirectoryRequestedOptions::Populate(*options_as_value, &options));
+  EXPECT_EQ(kFileSystemId, options.file_system_id);
+  EXPECT_EQ(kRequestId, options.request_id);
+  EXPECT_EQ(kDirectoryPath, options.directory_path);
 }
 
 TEST_F(FileSystemProviderOperationsReadDirectoryTest, Execute_NoListener) {
@@ -207,7 +204,7 @@ TEST_F(FileSystemProviderOperationsReadDirectoryTest, OnSuccess) {
   EXPECT_EQ(base::File::FILE_OK, event->result());
 
   ASSERT_EQ(1u, event->entry_list().size());
-  const fileapi::DirectoryEntry entry = event->entry_list()[0];
+  const storage::DirectoryEntry entry = event->entry_list()[0];
   EXPECT_FALSE(entry.is_directory);
   EXPECT_EQ("blueberries.txt", entry.name);
   EXPECT_EQ(4096, entry.size);

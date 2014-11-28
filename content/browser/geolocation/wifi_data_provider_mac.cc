@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/geolocation/osx_wifi.h"
 #include "content/browser/geolocation/wifi_data_provider_common.h"
+#include "content/browser/geolocation/wifi_data_provider_manager.h"
 
 namespace content {
 namespace {
@@ -159,21 +160,21 @@ bool Apple80211Api::GetAccessPointData(WifiData::AccessPointDataSet* data) {
 }  // namespace
 
 // static
-WifiDataProviderImplBase* WifiDataProvider::DefaultFactoryFunction() {
-  return new MacWifiDataProvider();
+WifiDataProvider* WifiDataProviderManager::DefaultFactoryFunction() {
+  return new WifiDataProviderMac();
 }
 
-MacWifiDataProvider::MacWifiDataProvider() {
+WifiDataProviderMac::WifiDataProviderMac() {
 }
 
-MacWifiDataProvider::~MacWifiDataProvider() {
+WifiDataProviderMac::~WifiDataProviderMac() {
 }
 
-MacWifiDataProvider::WlanApiInterface* MacWifiDataProvider::NewWlanApi() {
+WifiDataProviderMac::WlanApiInterface* WifiDataProviderMac::NewWlanApi() {
   // Try and find a API binding that works: first try the officially supported
   // CoreWLAN API, and if this fails (e.g. on OSX 10.5) fall back to the reverse
   // engineered Apple80211 API.
-  MacWifiDataProvider::WlanApiInterface* core_wlan_api = NewCoreWlanApi();
+  WifiDataProviderMac::WlanApiInterface* core_wlan_api = NewCoreWlanApi();
   if (core_wlan_api)
     return core_wlan_api;
 
@@ -181,11 +182,11 @@ MacWifiDataProvider::WlanApiInterface* MacWifiDataProvider::NewWlanApi() {
   if (wlan_api->Init())
     return wlan_api.release();
 
-  DVLOG(1) << "MacWifiDataProvider : failed to initialize any wlan api";
+  DVLOG(1) << "WifiDataProviderMac : failed to initialize any wlan api";
   return NULL;
 }
 
-WifiPollingPolicy* MacWifiDataProvider::NewPollingPolicy() {
+WifiPollingPolicy* WifiDataProviderMac::NewPollingPolicy() {
   return new GenericWifiPollingPolicy<kDefaultPollingInterval,
                                       kNoChangePollingInterval,
                                       kTwoNoChangePollingInterval,

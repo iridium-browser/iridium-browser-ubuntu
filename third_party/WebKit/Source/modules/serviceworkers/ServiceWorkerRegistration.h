@@ -23,15 +23,14 @@ class ScriptState;
 class WebServiceWorkerProvider;
 
 class ServiceWorkerRegistration FINAL
-    : public RefCountedWillBeRefCountedGarbageCollected<ServiceWorkerRegistration>
+    : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<ServiceWorkerRegistration>
     , public ActiveDOMObject
     , public EventTargetWithInlineData
     , public WebServiceWorkerRegistrationProxy {
-    REFCOUNTED_EVENT_TARGET(ServiceWorkerRegistration);
+    DEFINE_WRAPPERTYPEINFO();
+    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<ServiceWorkerRegistration>);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
 public:
-    virtual ~ServiceWorkerRegistration() { }
-
     // EventTarget overrides.
     virtual const AtomicString& interfaceName() const OVERRIDE;
     virtual ExecutionContext* executionContext() const OVERRIDE { return ActiveDOMObject::executionContext(); }
@@ -44,7 +43,8 @@ public:
 
     // For CallbackPromiseAdapter.
     typedef WebServiceWorkerRegistration WebType;
-    static PassRefPtrWillBeRawPtr<ServiceWorkerRegistration> take(ScriptPromiseResolver*, WebType* registration);
+    static ServiceWorkerRegistration* from(ExecutionContext*, WebType* registration);
+    static ServiceWorkerRegistration* take(ScriptPromiseResolver*, WebType* registration);
     static void dispose(WebType* registration);
 
     PassRefPtrWillBeRawPtr<ServiceWorker> installing() { return m_installing.get(); }
@@ -60,7 +60,7 @@ public:
     virtual void trace(Visitor*) OVERRIDE;
 
 private:
-    static PassRefPtrWillBeRawPtr<ServiceWorkerRegistration> getOrCreate(ExecutionContext*, WebServiceWorkerRegistration*);
+    static ServiceWorkerRegistration* getOrCreate(ExecutionContext*, WebServiceWorkerRegistration*);
     ServiceWorkerRegistration(ExecutionContext*, PassOwnPtr<WebServiceWorkerRegistration>);
 
     // ActiveDOMObject overrides.

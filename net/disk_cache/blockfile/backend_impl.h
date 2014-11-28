@@ -9,6 +9,7 @@
 
 #include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
 #include "base/timer/timer.h"
 #include "net/disk_cache/blockfile/block_files.h"
 #include "net/disk_cache/blockfile/eviction.h"
@@ -18,6 +19,10 @@
 #include "net/disk_cache/blockfile/stress_support.h"
 #include "net/disk_cache/blockfile/trace.h"
 #include "net/disk_cache/disk_cache.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
 
 namespace net {
 class NetLog;
@@ -44,11 +49,14 @@ enum BackendFlags {
 class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   friend class Eviction;
  public:
-  BackendImpl(const base::FilePath& path, base::MessageLoopProxy* cache_thread,
+  BackendImpl(const base::FilePath& path,
+              const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
               net::NetLog* net_log);
   // mask can be used to limit the usable size of the hash table, for testing.
-  BackendImpl(const base::FilePath& path, uint32 mask,
-              base::MessageLoopProxy* cache_thread, net::NetLog* net_log);
+  BackendImpl(const base::FilePath& path,
+              uint32 mask,
+              const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
+              net::NetLog* net_log);
   virtual ~BackendImpl();
 
   // Performs general initialization for this current instance of the cache.
@@ -58,10 +66,6 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   int SyncInit();
   void CleanupCache();
 
-  // Same behavior as OpenNextEntry but walks the list from back to front.
-  int OpenPrevEntry(void** iter, Entry** prev_entry,
-                    const CompletionCallback& callback);
-
   // Synchronous implementation of the asynchronous interface.
   int SyncOpenEntry(const std::string& key, Entry** entry);
   int SyncCreateEntry(const std::string& key, Entry** entry);
@@ -70,16 +74,14 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   int SyncDoomEntriesBetween(base::Time initial_time,
                              base::Time end_time);
   int SyncDoomEntriesSince(base::Time initial_time);
-  int SyncOpenNextEntry(void** iter, Entry** next_entry);
-  int SyncOpenPrevEntry(void** iter, Entry** prev_entry);
-  void SyncEndEnumeration(void* iter);
+  int SyncOpenNextEntry(Rankings::Iterator* iterator, Entry** next_entry);
+  void SyncEndEnumeration(scoped_ptr<Rankings::Iterator> iterator);
   void SyncOnExternalCacheHit(const std::string& key);
 
   // Open or create an entry for the given |key| or |iter|.
   EntryImpl* OpenEntryImpl(const std::string& key);
   EntryImpl* CreateEntryImpl(const std::string& key);
-  EntryImpl* OpenNextEntryImpl(void** iter);
-  EntryImpl* OpenPrevEntryImpl(void** iter);
+  EntryImpl* OpenNextEntryImpl(Rankings::Iterator* iter);
 
   // Sets the maximum size for the total amount of data stored by this instance.
   bool SetMaxSize(int max_bytes);
@@ -271,14 +273,21 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
                                  const CompletionCallback& callback) OVERRIDE;
   virtual int DoomEntriesSince(base::Time initial_time,
                                const CompletionCallback& callback) OVERRIDE;
-  virtual int OpenNextEntry(void** iter, Entry** next_entry,
-                            const CompletionCallback& callback) OVERRIDE;
-  virtual void EndEnumeration(void** iter) OVERRIDE;
+  // NOTE: The blockfile Backend::Iterator::OpenNextEntry method does not modify
+  // the last_used field of the entry, and therefore it does not impact the
+  // eviction ranking of the entry. However, an enumeration will go through all
+  // entries on the cache only if the cache is not modified while the
+  // enumeration is taking place. Significantly altering the entry pointed by
+  // the iterator (for example, deleting the entry) will invalidate the
+  // iterator. Performing operations on an entry that modify the entry may
+  // result in loops in the iteration, skipped entries or similar.
+  virtual scoped_ptr<Iterator> CreateIterator() OVERRIDE;
   virtual void GetStats(StatsItems* stats) OVERRIDE;
   virtual void OnExternalCacheHit(const std::string& key) OVERRIDE;
 
  private:
   typedef base::hash_map<CacheAddr, EntryImpl*> EntriesMap;
+  class IteratorImpl;
 
   // Creates a new backing file for the cache index.
   bool CreateBackingStore(disk_cache::File* file);
@@ -306,13 +315,10 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   EntryImpl* MatchEntry(const std::string& key, uint32 hash, bool find_parent,
                         Addr entry_addr, bool* match_error);
 
-  // Opens the next or previous entry on a cache iteration.
-  EntryImpl* OpenFollowingEntry(bool forward, void** iter);
-
   // Opens the next or previous entry on a single list. If successful,
   // |from_entry| will be updated to point to the new entry, otherwise it will
   // be set to NULL; in other words, it is used as an explicit iterator.
-  bool OpenFollowingEntryFromList(bool forward, Rankings::List list,
+  bool OpenFollowingEntryFromList(Rankings::List list,
                                   CacheRankingsBlock** from_entry,
                                   EntryImpl** next_entry);
 

@@ -34,10 +34,12 @@
 #include "platform/graphics/DashArray.h"
 #include "platform/graphics/DrawLooperBuilder.h"
 #include "platform/graphics/ImageBufferSurface.h"
+#include "platform/graphics/ImageFilter.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/graphics/GraphicsContextAnnotation.h"
 #include "platform/graphics/GraphicsContextState.h"
 #include "platform/graphics/RegionTracker.h"
+#include "platform/graphics/skia/SkiaUtils.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
@@ -47,6 +49,7 @@ class SkBitmap;
 class SkPaint;
 class SkPath;
 class SkRRect;
+class SkTextBlob;
 struct SkRect;
 
 namespace blink {
@@ -54,8 +57,6 @@ namespace blink {
 class DisplayList;
 class ImageBuffer;
 class KURL;
-
-typedef SkImageFilter ImageFilter;
 
 class PLATFORM_EXPORT GraphicsContext {
     WTF_MAKE_NONCOPYABLE(GraphicsContext); WTF_MAKE_FAST_ALLOCATED;
@@ -74,7 +75,11 @@ public:
         FullyDisabled = 1 // Do absolutely minimal work to remove the cost of the context from performance tests.
     };
 
+    // A 0 canvas is allowed, but in such cases the context must only have canvas
+    // related commands called when within a beginRecording/endRecording block.
+    // Furthermore, save/restore calls must be balanced any time the canvas is 0.
     explicit GraphicsContext(SkCanvas*, DisabledMode = NothingDisabled);
+
     ~GraphicsContext();
 
     // Returns the canvas used for painting. Must not be called if painting is disabled.
@@ -115,14 +120,14 @@ public:
     StrokeStyle strokeStyle() const { return immutableState()->strokeData().style(); }
     void setStrokeStyle(StrokeStyle style) { mutableState()->setStrokeStyle(style); }
 
-    Color strokeColor() const { return immutableState()->strokeData().color(); }
+    Color strokeColor() const { return immutableState()->strokeColor(); }
     void setStrokeColor(const Color& color) { mutableState()->setStrokeColor(color); }
     SkColor effectiveStrokeColor() const { return immutableState()->effectiveStrokeColor(); }
 
-    Pattern* strokePattern() const { return immutableState()->strokeData().pattern(); }
+    Pattern* strokePattern() const { return immutableState()->strokePattern(); }
     void setStrokePattern(PassRefPtr<Pattern>);
 
-    Gradient* strokeGradient() const { return immutableState()->strokeData().gradient(); }
+    Gradient* strokeGradient() const { return immutableState()->strokeGradient(); }
     void setStrokeGradient(PassRefPtr<Gradient>);
 
     void setLineCap(LineCap cap) { mutableState()->setLineCap(cap); }
@@ -161,12 +166,14 @@ public:
     void setShouldClampToSourceRect(bool clampToSourceRect) { mutableState()->setShouldClampToSourceRect(clampToSourceRect); }
     bool shouldClampToSourceRect() const { return immutableState()->shouldClampToSourceRect(); }
 
-    void setShouldSmoothFonts(bool smoothFonts) { mutableState()->setShouldSmoothFonts(smoothFonts); }
-    bool shouldSmoothFonts() const { return immutableState()->shouldSmoothFonts(); }
+    // FIXME: the setter is only used once, at construction time; convert to a constructor param,
+    // and possibly consolidate with other flags (paintDisabled, isPrinting, ...)
+    void setShouldSmoothFonts(bool smoothFonts) { m_shouldSmoothFonts = smoothFonts; }
+    bool shouldSmoothFonts() const { return m_shouldSmoothFonts; }
 
     // Turn off LCD text for the paint if not supported on this context.
-    void adjustTextRenderMode(SkPaint*);
-    bool couldUseLCDRenderedText();
+    void adjustTextRenderMode(SkPaint*) const;
+    bool couldUseLCDRenderedText() const;
 
     void setTextDrawingMode(TextDrawingModeFlags mode) { mutableState()->setTextDrawingMode(mode); }
     TextDrawingModeFlags textDrawingMode() const { return immutableState()->textDrawingMode(); }
@@ -301,15 +308,21 @@ public:
     void drawRect(const SkRect&, const SkPaint&);
     void drawPosText(const void* text, size_t byteLength, const SkPoint pos[], const SkRect& textRect, const SkPaint&);
     void drawPosTextH(const void* text, size_t byteLength, const SkScalar xpos[], SkScalar constY, const SkRect& textRect, const SkPaint&);
+    void drawTextBlob(const SkTextBlob*, const SkPoint& origin, const SkPaint&);
 
     void clip(const IntRect& rect) { clipRect(rect); }
     void clip(const FloatRect& rect) { clipRect(rect); }
     void clipRoundedRect(const RoundedRect&, SkRegion::Op = SkRegion::kIntersect_Op);
     void clipOut(const IntRect& rect) { clipRect(rect, NotAntiAliased, SkRegion::kDifference_Op); }
+    void clipOut(const Path&);
     void clipOutRoundedRect(const RoundedRect&);
     void clipPath(const Path&, WindRule = RULE_EVENODD);
     void clipConvexPolygon(size_t numPoints, const FloatPoint*, bool antialias = true);
     void clipRect(const SkRect&, AntiAliasingMode = NotAntiAliased, SkRegion::Op = SkRegion::kIntersect_Op);
+    // This clip function is used only by <canvas> code. It allows
+    // implementations to handle clipping on the canvas differently since
+    // the discipline is different.
+    void canvasClip(const Path&, WindRule = RULE_EVENODD);
 
     void drawText(const Font&, const TextRunPaintInfo&, const FloatPoint&);
     void drawEmphasisMarks(const Font&, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&);
@@ -331,8 +344,9 @@ public:
     void endCull();
 
     // Instead of being dispatched to the active canvas, draw commands following beginRecording()
-    // are stored in a display list that can be replayed at a later time.
-    void beginRecording(const FloatRect& bounds);
+    // are stored in a display list that can be replayed at a later time. Pass in the bounding
+    // rectangle for the content in the list.
+    void beginRecording(const FloatRect&, uint32_t = 0);
     PassRefPtr<DisplayList> endRecording();
 
     bool hasShadow() const;
@@ -360,12 +374,6 @@ public:
     typedef unsigned Edges;
     void drawInnerShadow(const RoundedRect&, const Color& shadowColor, const IntSize shadowOffset, int shadowBlur, int shadowSpread, Edges clippedEdges = NoEdge);
 
-    // This clip function is used only by <canvas> code. It allows
-    // implementations to handle clipping on the canvas differently since
-    // the discipline is different.
-    void canvasClip(const Path&, WindRule = RULE_EVENODD);
-    void clipOut(const Path&);
-
     // ---------- Transformation methods -----------------
     // Note that the getCTM method returns only the current transform from Blink's perspective,
     // which is not the final transform used to place content on screen. It cannot be relied upon
@@ -388,7 +396,6 @@ public:
     void setURLForRect(const KURL&, const IntRect&);
     void setURLFragmentForRect(const String& name, const IntRect&);
     void addURLTargetAtPoint(const String& name, const IntPoint&);
-    bool supportsURLFragments() { return printing(); }
 
     // Create an image buffer compatible with this context, with suitable resolution
     // for drawing into the buffer and then into this context.
@@ -433,9 +440,9 @@ private:
 #else
     static inline int focusRingOutset(int offset) { return 0; }
     static inline int focusRingWidth(int width) { return 1; }
-    static const SkPMColor lineColors(int);
-    static const SkPMColor antiColors1(int);
-    static const SkPMColor antiColors2(int);
+    static SkPMColor lineColors(int);
+    static SkPMColor antiColors1(int);
+    static SkPMColor antiColors2(int);
     static void draw1xMarker(SkBitmap*, int);
     static void draw2xMarker(SkBitmap*, int);
 #endif
@@ -444,7 +451,6 @@ private:
     float prepareFocusRingPaint(SkPaint&, const Color&, int width) const;
     void drawFocusRingPath(const SkPath&, const Color&, int width);
     void drawFocusRingRect(const SkRect&, const Color&, int width);
-
 
     // SkCanvas wrappers.
     void clipPath(const SkPath&, AntiAliasingMode = NotAntiAliased, SkRegion::Op = SkRegion::kIntersect_Op);
@@ -478,6 +484,7 @@ private:
         if (!m_pendingCanvasSave || contextDisabled())
             return;
 
+        ASSERT(m_canvas); // m_pendingCanvasSave should never be true when no canvas.
         m_canvas->save();
         m_pendingCanvasSave = false;
     }
@@ -535,6 +542,7 @@ private:
     bool m_isCertainlyOpaque : 1;
     bool m_printing : 1;
     bool m_antialiasHairlineImages : 1;
+    bool m_shouldSmoothFonts : 1;
 };
 
 } // namespace blink

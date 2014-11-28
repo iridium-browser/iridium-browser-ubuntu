@@ -14,6 +14,7 @@
 
 namespace net {
 
+class CachedNetworkParameters;
 class CryptoHandshakeMessage;
 class QuicCryptoServerConfig;
 class QuicCryptoServerStream;
@@ -51,7 +52,6 @@ class NET_EXPORT_PRIVATE QuicCryptoServerStream : public QuicCryptoStream {
  public:
   QuicCryptoServerStream(const QuicCryptoServerConfig& crypto_config,
                          QuicSession* session);
-  explicit QuicCryptoServerStream(QuicSession* session);
   virtual ~QuicCryptoServerStream();
 
   // Cancel any outstanding callbacks, such as asynchronous validation of client
@@ -74,7 +74,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerStream : public QuicCryptoStream {
   }
 
   // Sends the latest server config and source-address token to the client.
-  void SendServerConfigUpdate();
+  virtual void SendServerConfigUpdate(
+      const CachedNetworkParameters* cached_network_params);
 
   // Called by the ServerHello AckNotifier once the SHLO has been ACKed by the
   // client.

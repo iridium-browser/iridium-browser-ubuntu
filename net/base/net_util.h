@@ -81,8 +81,12 @@ NET_EXPORT_PRIVATE extern size_t GetCountOfExplicitlyAllowedPorts();
 // Saves the result into |*host| and |*port|. If the input did not have
 // the optional port, sets |*port| to -1.
 // Returns true if the parsing was successful, false otherwise.
-// The returned host is NOT canonicalized, and may be invalid. If <host> is
-// an IPv6 literal address, the returned host includes the square brackets.
+// The returned host is NOT canonicalized, and may be invalid.
+//
+// IPv6 literals must be specified in a bracketed form, for instance:
+//   [::1]:90 and [::1]
+//
+// The resultant |*host| in both cases will be "::1" (not bracketed).
 NET_EXPORT bool ParseHostAndPort(
     std::string::const_iterator host_and_port_begin,
     std::string::const_iterator host_and_port_end,
@@ -438,6 +442,24 @@ NET_EXPORT_PRIVATE int GetPortFromSockaddr(const struct sockaddr* address,
 // machine.
 NET_EXPORT_PRIVATE bool IsLocalhost(const std::string& host);
 
+// A subset of IP address attributes which are actionable by the
+// application layer. Currently unimplemented for all hosts;
+// IP_ADDRESS_ATTRIBUTE_NONE is always returned.
+enum IPAddressAttributes {
+  IP_ADDRESS_ATTRIBUTE_NONE = 0,
+
+  // A temporary address is dynamic by nature and will not contain MAC
+  // address. Presence of MAC address in IPv6 addresses can be used to
+  // track an endpoint and cause privacy concern. Please refer to
+  // RFC4941.
+  IP_ADDRESS_ATTRIBUTE_TEMPORARY = 1 << 0,
+
+  // A temporary address could become deprecated once the preferred
+  // lifetime is reached. It is still valid but shouldn't be used to
+  // create new connections.
+  IP_ADDRESS_ATTRIBUTE_DEPRECATED = 1 << 1,
+};
+
 // struct that is used by GetNetworkList() to represent a network
 // interface.
 struct NET_EXPORT NetworkInterface {
@@ -447,7 +469,8 @@ struct NET_EXPORT NetworkInterface {
                    uint32 interface_index,
                    NetworkChangeNotifier::ConnectionType type,
                    const IPAddressNumber& address,
-                   size_t network_prefix);
+                   uint32 network_prefix,
+                   int ip_address_attributes);
   ~NetworkInterface();
 
   std::string name;
@@ -455,7 +478,8 @@ struct NET_EXPORT NetworkInterface {
   uint32 interface_index;  // Always 0 on Android.
   NetworkChangeNotifier::ConnectionType type;
   IPAddressNumber address;
-  size_t network_prefix;
+  uint32 network_prefix;
+  int ip_address_attributes;  // Combination of |IPAddressAttributes|.
 };
 
 typedef std::vector<NetworkInterface> NetworkInterfaceList;
@@ -497,6 +521,28 @@ enum WifiPHYLayerProtocol {
 // Characterize the PHY mode of the currently associated access point.
 // Currently only available on OS_WIN.
 NET_EXPORT WifiPHYLayerProtocol GetWifiPHYLayerProtocol();
+
+enum WifiOptions {
+  // Disables background SSID scans.
+  WIFI_OPTIONS_DISABLE_SCAN =  1 << 0,
+  // Enables media streaming mode.
+  WIFI_OPTIONS_MEDIA_STREAMING_MODE = 1 << 1
+};
+
+class NET_EXPORT ScopedWifiOptions {
+ public:
+  ScopedWifiOptions() {}
+  virtual ~ScopedWifiOptions();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ScopedWifiOptions);
+};
+
+// Set temporary options on all wifi interfaces.
+// |options| is an ORed bitfield of WifiOptions.
+// Options are automatically disabled when the scoped pointer
+// is freed. Currently only available on OS_WIN.
+NET_EXPORT scoped_ptr<ScopedWifiOptions> SetWifiOptions(int options);
 
 // Returns number of matching initial bits between the addresses |a1| and |a2|.
 unsigned CommonPrefixLength(const IPAddressNumber& a1,

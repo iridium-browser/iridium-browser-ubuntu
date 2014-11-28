@@ -20,9 +20,10 @@
 #include "content/public/browser/notification_service.h"
 
 #include "ui/aura/remote_window_tree_host_win.h"
+#include "ui/base/ui_base_switches.h"
 
 BrowserProcessPlatformPart::BrowserProcessPlatformPart() {
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
     // Tell metro viewer to close when we are shutting down.
     registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                    content::NotificationService::AllSources());

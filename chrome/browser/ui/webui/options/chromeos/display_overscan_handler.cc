@@ -14,8 +14,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/display/overscan_calibrator.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
@@ -82,11 +82,17 @@ void DisplayOverscanHandler::RegisterMessages() {
 }
 
 void DisplayOverscanHandler::OnDisplayAdded(const gfx::Display& new_display) {
+  if (!overscan_calibrator_)
+    return;
+
   web_ui()->CallJavascriptFunction(
       "options.DisplayOverscan.onOverscanCanceled");
 }
 
 void DisplayOverscanHandler::OnDisplayRemoved(const gfx::Display& old_display) {
+  if (!overscan_calibrator_)
+    return;
+
   web_ui()->CallJavascriptFunction(
       "options.DisplayOverscan.onOverscanCanceled");
 }

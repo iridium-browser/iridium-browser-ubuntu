@@ -8,6 +8,10 @@ config("cld_config") {
 }
 
 static_library("cld") {
+  # This target includes its own copy of "base" which confuses the header
+  # checker.
+  check_includes = false
+
   sources = [
     "encodings/compact_lang_det/cldutil.cc",
     "encodings/compact_lang_det/cldutil.h",
@@ -87,7 +91,7 @@ static_library("cld") {
     "//build/config/compiler:chromium_code",
   ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
-  direct_dependent_configs = [ ":cld_config" ]
+  public_configs = [ ":cld_config" ]
 
   if (is_win) {
     defines = [ "COMPILER_MSVC" ]
@@ -101,11 +105,7 @@ static_library("cld") {
     defines = [ "COMPILER_GCC" ]
   }
 
-  deps = [
-    "//third_party/icu:icuuc",
-  ]
-
-  forward_dependent_configs_from = [
+  public_deps = [
     "//third_party/icu:icuuc",
   ]
 }

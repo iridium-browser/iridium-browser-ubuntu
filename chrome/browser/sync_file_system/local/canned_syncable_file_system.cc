@@ -9,8 +9,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/files/file.h"
+#include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -24,21 +24,21 @@
 #include "content/public/test/mock_blob_url_request_context.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_file_system_options.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/file_system_backend.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_operation_context.h"
+#include "storage/browser/fileapi/file_system_operation_runner.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/common/blob/shareable_file_reference.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/browser/fileapi/file_system_backend.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_operation_context.h"
-#include "webkit/browser/fileapi/file_system_operation_runner.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/common/blob/shareable_file_reference.h"
 
 using base::File;
-using fileapi::FileSystemContext;
-using fileapi::FileSystemOperationRunner;
-using fileapi::FileSystemURL;
-using fileapi::FileSystemURLSet;
-using quota::QuotaManager;
+using storage::FileSystemContext;
+using storage::FileSystemOperationRunner;
+using storage::FileSystemURL;
+using storage::FileSystemURLSet;
+using storage::QuotaManager;
 using content::MockBlobURLRequestContext;
 using content::ScopedTextBlob;
 
@@ -104,7 +104,7 @@ void OnCreateSnapshotFileAndVerifyData(
     base::File::Error result,
     const base::File::Info& file_info,
     const base::FilePath& platform_path,
-    const scoped_refptr<webkit_blob::ShareableFileReference>& /* file_ref */) {
+    const scoped_refptr<storage::ShareableFileReference>& /* file_ref */) {
   if (result != base::File::FILE_OK) {
     callback.Run(result);
     return;
@@ -124,7 +124,7 @@ void OnCreateSnapshotFile(
     base::File::Error result,
     const base::File::Info& file_info,
     const base::FilePath& platform_path,
-    const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref) {
+    const scoped_refptr<storage::ShareableFileReference>& file_ref) {
   DCHECK(!file_ref.get());
   DCHECK(file_info_out);
   DCHECK(platform_path_out);
@@ -133,12 +133,11 @@ void OnCreateSnapshotFile(
   callback.Run(result);
 }
 
-void OnReadDirectory(
-    CannedSyncableFileSystem::FileEntryList* entries_out,
-    const CannedSyncableFileSystem::StatusCallback& callback,
-    base::File::Error error,
-    const fileapi::FileSystemOperation::FileEntryList& entries,
-    bool has_more) {
+void OnReadDirectory(CannedSyncableFileSystem::FileEntryList* entries_out,
+                     const CannedSyncableFileSystem::StatusCallback& callback,
+                     base::File::Error error,
+                     const storage::FileSystemOperation::FileEntryList& entries,
+                     bool has_more) {
   DCHECK(entries_out);
   entries_out->reserve(entries_out->size() + entries.size());
   std::copy(entries.begin(), entries.end(), std::back_inserter(*entries_out));
@@ -187,10 +186,12 @@ class WriteHelper {
   DISALLOW_COPY_AND_ASSIGN(WriteHelper);
 };
 
-void DidGetUsageAndQuota(const quota::StatusCallback& callback,
-                         int64* usage_out, int64* quota_out,
-                         quota::QuotaStatusCode status,
-                         int64 usage, int64 quota) {
+void DidGetUsageAndQuota(const storage::StatusCallback& callback,
+                         int64* usage_out,
+                         int64* quota_out,
+                         storage::QuotaStatusCode status,
+                         int64 usage,
+                         int64 quota) {
   *usage_out = usage;
   *quota_out = quota;
   callback.Run(status);
@@ -208,10 +209,10 @@ void EnsureLastTaskRuns(base::SingleThreadTaskRunner* runner) {
 CannedSyncableFileSystem::CannedSyncableFileSystem(
     const GURL& origin,
     leveldb::Env* env_override,
-    base::SingleThreadTaskRunner* io_task_runner,
-    base::SingleThreadTaskRunner* file_task_runner)
+    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
+    const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner)
     : origin_(origin),
-      type_(fileapi::kFileSystemTypeSyncable),
+      type_(storage::kFileSystemTypeSyncable),
       result_(base::File::FILE_OK),
       sync_status_(sync_file_system::SYNC_STATUS_OK),
       env_override_(env_override),
@@ -228,36 +229,37 @@ void CannedSyncableFileSystem::SetUp(QuotaMode quota_mode) {
   ASSERT_FALSE(is_filesystem_set_up_);
   ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
 
-  scoped_refptr<quota::SpecialStoragePolicy> storage_policy =
+  scoped_refptr<storage::SpecialStoragePolicy> storage_policy =
       new content::MockSpecialStoragePolicy();
 
   if (quota_mode == QUOTA_ENABLED) {
     quota_manager_ = new QuotaManager(false /* is_incognito */,
                                       data_dir_.path(),
-                                      io_task_runner_,
+                                      io_task_runner_.get(),
                                       base::ThreadTaskRunnerHandle::Get().get(),
                                       storage_policy.get());
   }
 
   std::vector<std::string> additional_allowed_schemes;
   additional_allowed_schemes.push_back(origin_.scheme());
-  fileapi::FileSystemOptions options(
-      fileapi::FileSystemOptions::PROFILE_MODE_NORMAL,
+  storage::FileSystemOptions options(
+      storage::FileSystemOptions::PROFILE_MODE_NORMAL,
       additional_allowed_schemes,
       env_override_);
 
-  ScopedVector<fileapi::FileSystemBackend> additional_backends;
+  ScopedVector<storage::FileSystemBackend> additional_backends;
   additional_backends.push_back(SyncFileSystemBackend::CreateForTesting());
 
   file_system_context_ = new FileSystemContext(
-      io_task_runner_,
-      file_task_runner_,
-      fileapi::ExternalMountPoints::CreateRefCounted().get(),
+      io_task_runner_.get(),
+      file_task_runner_.get(),
+      storage::ExternalMountPoints::CreateRefCounted().get(),
       storage_policy.get(),
-      quota_manager_ ? quota_manager_->proxy() : NULL,
+      quota_manager_.get() ? quota_manager_->proxy() : NULL,
       additional_backends.Pass(),
-      std::vector<fileapi::URLRequestAutoMountHandler>(),
-      data_dir_.path(), options);
+      std::vector<storage::URLRequestAutoMountHandler>(),
+      data_dir_.path(),
+      options);
 
   is_filesystem_set_up_ = true;
 }
@@ -267,8 +269,8 @@ void CannedSyncableFileSystem::TearDown() {
   file_system_context_ = NULL;
 
   // Make sure we give some more time to finish tasks on other threads.
-  EnsureLastTaskRuns(io_task_runner_);
-  EnsureLastTaskRuns(file_task_runner_);
+  EnsureLastTaskRuns(io_task_runner_.get());
+  EnsureLastTaskRuns(file_task_runner_.get());
 }
 
 FileSystemURL CannedSyncableFileSystem::URL(const std::string& path) const {
@@ -296,7 +298,7 @@ File::Error CannedSyncableFileSystem::OpenFileSystem() {
   if (backend()->sync_context()) {
     // Register 'this' as a sync status observer.
     RunOnThread(
-        io_task_runner_,
+        io_task_runner_.get(),
         FROM_HERE,
         base::Bind(&CannedSyncableFileSystem::InitializeSyncStatusObserver,
                    base::Unretained(this)));
@@ -319,8 +321,8 @@ SyncStatusCode CannedSyncableFileSystem::MaybeInitializeFileSystemContext(
   DCHECK(sync_context);
   base::RunLoop run_loop;
   sync_status_ = sync_file_system::SYNC_STATUS_UNKNOWN;
-  VerifySameTaskRunner(io_task_runner_,
-                       sync_context->io_task_runner_);
+  VerifySameTaskRunner(io_task_runner_.get(),
+                       sync_context->io_task_runner_.get());
   sync_context->MaybeInitializeFileSystemContext(
       origin_,
       file_system_context_.get(),
@@ -334,7 +336,7 @@ SyncStatusCode CannedSyncableFileSystem::MaybeInitializeFileSystemContext(
 File::Error CannedSyncableFileSystem::CreateDirectory(
     const FileSystemURL& url) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoCreateDirectory,
                  base::Unretained(this),
@@ -343,7 +345,7 @@ File::Error CannedSyncableFileSystem::CreateDirectory(
 
 File::Error CannedSyncableFileSystem::CreateFile(const FileSystemURL& url) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoCreateFile,
                  base::Unretained(this),
@@ -352,30 +354,28 @@ File::Error CannedSyncableFileSystem::CreateFile(const FileSystemURL& url) {
 
 File::Error CannedSyncableFileSystem::Copy(
     const FileSystemURL& src_url, const FileSystemURL& dest_url) {
-  return RunOnThread<File::Error>(
-      io_task_runner_,
-      FROM_HERE,
-      base::Bind(&CannedSyncableFileSystem::DoCopy,
-                 base::Unretained(this),
-                 src_url,
-                 dest_url));
+  return RunOnThread<File::Error>(io_task_runner_.get(),
+                                  FROM_HERE,
+                                  base::Bind(&CannedSyncableFileSystem::DoCopy,
+                                             base::Unretained(this),
+                                             src_url,
+                                             dest_url));
 }
 
 File::Error CannedSyncableFileSystem::Move(
     const FileSystemURL& src_url, const FileSystemURL& dest_url) {
-  return RunOnThread<File::Error>(
-      io_task_runner_,
-      FROM_HERE,
-      base::Bind(&CannedSyncableFileSystem::DoMove,
-                 base::Unretained(this),
-                 src_url,
-                 dest_url));
+  return RunOnThread<File::Error>(io_task_runner_.get(),
+                                  FROM_HERE,
+                                  base::Bind(&CannedSyncableFileSystem::DoMove,
+                                             base::Unretained(this),
+                                             src_url,
+                                             dest_url));
 }
 
 File::Error CannedSyncableFileSystem::TruncateFile(
     const FileSystemURL& url, int64 size) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoTruncateFile,
                  base::Unretained(this),
@@ -388,7 +388,7 @@ File::Error CannedSyncableFileSystem::TouchFile(
     const base::Time& last_access_time,
     const base::Time& last_modified_time) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoTouchFile,
                  base::Unretained(this),
@@ -400,7 +400,7 @@ File::Error CannedSyncableFileSystem::TouchFile(
 File::Error CannedSyncableFileSystem::Remove(
     const FileSystemURL& url, bool recursive) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoRemove,
                  base::Unretained(this),
@@ -411,7 +411,7 @@ File::Error CannedSyncableFileSystem::Remove(
 File::Error CannedSyncableFileSystem::FileExists(
     const FileSystemURL& url) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoFileExists,
                  base::Unretained(this),
@@ -421,7 +421,7 @@ File::Error CannedSyncableFileSystem::FileExists(
 File::Error CannedSyncableFileSystem::DirectoryExists(
     const FileSystemURL& url) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoDirectoryExists,
                  base::Unretained(this),
@@ -432,7 +432,7 @@ File::Error CannedSyncableFileSystem::VerifyFile(
     const FileSystemURL& url,
     const std::string& expected_data) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoVerifyFile,
                  base::Unretained(this),
@@ -445,7 +445,7 @@ File::Error CannedSyncableFileSystem::GetMetadataAndPlatformPath(
     base::File::Info* info,
     base::FilePath* platform_path) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoGetMetadataAndPlatformPath,
                  base::Unretained(this),
@@ -455,22 +455,22 @@ File::Error CannedSyncableFileSystem::GetMetadataAndPlatformPath(
 }
 
 File::Error CannedSyncableFileSystem::ReadDirectory(
-    const fileapi::FileSystemURL& url,
+    const storage::FileSystemURL& url,
     FileEntryList* entries) {
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoReadDirectory,
-          base::Unretained(this),
-          url,
-          entries));
+                 base::Unretained(this),
+                 url,
+                 entries));
 }
 
 int64 CannedSyncableFileSystem::Write(
     net::URLRequestContext* url_request_context,
     const FileSystemURL& url,
-    scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle) {
-  return RunOnThread<int64>(io_task_runner_,
+    scoped_ptr<storage::BlobDataHandle> blob_data_handle) {
+  return RunOnThread<int64>(io_task_runner_.get(),
                             FROM_HERE,
                             base::Bind(&CannedSyncableFileSystem::DoWrite,
                                        base::Unretained(this),
@@ -481,7 +481,7 @@ int64 CannedSyncableFileSystem::Write(
 
 int64 CannedSyncableFileSystem::WriteString(
     const FileSystemURL& url, const std::string& data) {
-  return RunOnThread<int64>(io_task_runner_,
+  return RunOnThread<int64>(io_task_runner_.get(),
                             FROM_HERE,
                             base::Bind(&CannedSyncableFileSystem::DoWriteString,
                                        base::Unretained(this),
@@ -492,7 +492,7 @@ int64 CannedSyncableFileSystem::WriteString(
 File::Error CannedSyncableFileSystem::DeleteFileSystem() {
   EXPECT_TRUE(is_filesystem_set_up_);
   return RunOnThread<File::Error>(
-      io_task_runner_,
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&FileSystemContext::DeleteFileSystem,
                  file_system_context_,
@@ -500,10 +500,11 @@ File::Error CannedSyncableFileSystem::DeleteFileSystem() {
                  type_));
 }
 
-quota::QuotaStatusCode CannedSyncableFileSystem::GetUsageAndQuota(
-    int64* usage, int64* quota) {
-  return RunOnThread<quota::QuotaStatusCode>(
-      io_task_runner_,
+storage::QuotaStatusCode CannedSyncableFileSystem::GetUsageAndQuota(
+    int64* usage,
+    int64* quota) {
+  return RunOnThread<storage::QuotaStatusCode>(
+      io_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CannedSyncableFileSystem::DoGetUsageAndQuota,
                  base::Unretained(this),
@@ -513,37 +514,35 @@ quota::QuotaStatusCode CannedSyncableFileSystem::GetUsageAndQuota(
 
 void CannedSyncableFileSystem::GetChangedURLsInTracker(
     FileSystemURLSet* urls) {
-  RunOnThread(
-      file_task_runner_,
-      FROM_HERE,
-      base::Bind(&LocalFileChangeTracker::GetAllChangedURLs,
-                 base::Unretained(backend()->change_tracker()),
-                 urls));
+  RunOnThread(file_task_runner_.get(),
+              FROM_HERE,
+              base::Bind(&LocalFileChangeTracker::GetAllChangedURLs,
+                         base::Unretained(backend()->change_tracker()),
+                         urls));
 }
 
 void CannedSyncableFileSystem::ClearChangeForURLInTracker(
     const FileSystemURL& url) {
-  RunOnThread(
-      file_task_runner_,
-      FROM_HERE,
-      base::Bind(&LocalFileChangeTracker::ClearChangesForURL,
-                 base::Unretained(backend()->change_tracker()),
-                 url));
+  RunOnThread(file_task_runner_.get(),
+              FROM_HERE,
+              base::Bind(&LocalFileChangeTracker::ClearChangesForURL,
+                         base::Unretained(backend()->change_tracker()),
+                         url));
 }
 
 void CannedSyncableFileSystem::GetChangesForURLInTracker(
     const FileSystemURL& url,
     FileChangeList* changes) {
-  RunOnThread(
-      file_task_runner_,
-      FROM_HERE,
-      base::Bind(&LocalFileChangeTracker::GetChangesForURL,
-                 base::Unretained(backend()->change_tracker()),
-                 url, changes));
+  RunOnThread(file_task_runner_.get(),
+              FROM_HERE,
+              base::Bind(&LocalFileChangeTracker::GetChangesForURL,
+                         base::Unretained(backend()->change_tracker()),
+                         url,
+                         changes));
 }
 
 SyncFileSystemBackend* CannedSyncableFileSystem::backend() {
-  return SyncFileSystemBackend::GetBackend(file_system_context_);
+  return SyncFileSystemBackend::GetBackend(file_system_context_.get());
 }
 
 FileSystemOperationRunner* CannedSyncableFileSystem::operation_runner() {
@@ -565,8 +564,9 @@ void CannedSyncableFileSystem::DoOpenFileSystem(
   EXPECT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
   EXPECT_FALSE(is_filesystem_opened_);
   file_system_context_->OpenFileSystem(
-      origin_, type_,
-      fileapi::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
+      origin_,
+      type_,
+      storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
       callback);
 }
 
@@ -594,9 +594,11 @@ void CannedSyncableFileSystem::DoCopy(
   EXPECT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
   EXPECT_TRUE(is_filesystem_opened_);
   operation_runner()->Copy(
-      src_url, dest_url,
-      fileapi::FileSystemOperation::OPTION_NONE,
-      fileapi::FileSystemOperationRunner::CopyProgressCallback(), callback);
+      src_url,
+      dest_url,
+      storage::FileSystemOperation::OPTION_NONE,
+      storage::FileSystemOperationRunner::CopyProgressCallback(),
+      callback);
 }
 
 void CannedSyncableFileSystem::DoMove(
@@ -606,7 +608,7 @@ void CannedSyncableFileSystem::DoMove(
   EXPECT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
   EXPECT_TRUE(is_filesystem_opened_);
   operation_runner()->Move(
-      src_url, dest_url, fileapi::FileSystemOperation::OPTION_NONE, callback);
+      src_url, dest_url, storage::FileSystemOperation::OPTION_NONE, callback);
 }
 
 void CannedSyncableFileSystem::DoTruncateFile(
@@ -685,7 +687,7 @@ void CannedSyncableFileSystem::DoReadDirectory(
 void CannedSyncableFileSystem::DoWrite(
     net::URLRequestContext* url_request_context,
     const FileSystemURL& url,
-    scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle,
+    scoped_ptr<storage::BlobDataHandle> blob_data_handle,
     const WriteCallback& callback) {
   EXPECT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
   EXPECT_TRUE(is_filesystem_opened_);
@@ -714,10 +716,10 @@ void CannedSyncableFileSystem::DoWriteString(
 void CannedSyncableFileSystem::DoGetUsageAndQuota(
     int64* usage,
     int64* quota,
-    const quota::StatusCallback& callback) {
+    const storage::StatusCallback& callback) {
   EXPECT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
   EXPECT_TRUE(is_filesystem_opened_);
-  DCHECK(quota_manager_);
+  DCHECK(quota_manager_.get());
   quota_manager_->GetUsageAndQuota(
       origin_, storage_type(),
       base::Bind(&DidGetUsageAndQuota, callback, usage, quota));

@@ -4,9 +4,12 @@
 
 #include "sync/internal_api/public/attachments/attachment_service_impl.h"
 
+#include <iterator>
+
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "sync/api/attachments/attachment.h"
 #include "sync/api/attachments/fake_attachment_store.h"
 #include "sync/internal_api/public/attachments/fake_attachment_downloader.h"
@@ -108,37 +111,58 @@ AttachmentServiceImpl::GetOrDownloadState::PostResultIfAllRequestsCompleted() {
 }
 
 AttachmentServiceImpl::AttachmentServiceImpl(
-    scoped_ptr<AttachmentStore> attachment_store,
+    scoped_refptr<AttachmentStore> attachment_store,
     scoped_ptr<AttachmentUploader> attachment_uploader,
     scoped_ptr<AttachmentDownloader> attachment_downloader,
-    Delegate* delegate)
-    : attachment_store_(attachment_store.Pass()),
+    Delegate* delegate,
+    const base::TimeDelta& initial_backoff_delay,
+    const base::TimeDelta& max_backoff_delay)
+    : attachment_store_(attachment_store),
       attachment_uploader_(attachment_uploader.Pass()),
       attachment_downloader_(attachment_downloader.Pass()),
       delegate_(delegate),
       weak_ptr_factory_(this) {
   DCHECK(CalledOnValidThread());
-  DCHECK(attachment_store_);
+  DCHECK(attachment_store_.get());
+
+  // TODO(maniscalco): Observe network connectivity change events.  When the
+  // network becomes disconnected, consider suspending queue dispatch.  When
+  // connectivity is restored, consider clearing any dispatch backoff (bug
+  // 411981).
+  upload_task_queue_.reset(new TaskQueue<AttachmentId>(
+      base::Bind(&AttachmentServiceImpl::BeginUpload,
+                 weak_ptr_factory_.GetWeakPtr()),
+      initial_backoff_delay,
+      max_backoff_delay));
+
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
 }
 
 AttachmentServiceImpl::~AttachmentServiceImpl() {
   DCHECK(CalledOnValidThread());
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
 // Static.
 scoped_ptr<syncer::AttachmentService> AttachmentServiceImpl::CreateForTest() {
-  scoped_ptr<syncer::AttachmentStore> attachment_store(
+  scoped_refptr<syncer::AttachmentStore> attachment_store(
       new syncer::FakeAttachmentStore(base::ThreadTaskRunnerHandle::Get()));
   scoped_ptr<AttachmentUploader> attachment_uploader(
       new FakeAttachmentUploader);
   scoped_ptr<AttachmentDownloader> attachment_downloader(
       new FakeAttachmentDownloader());
   scoped_ptr<syncer::AttachmentService> attachment_service(
-      new syncer::AttachmentServiceImpl(attachment_store.Pass(),
+      new syncer::AttachmentServiceImpl(attachment_store,
                                         attachment_uploader.Pass(),
                                         attachment_downloader.Pass(),
-                                        NULL));
+                                        NULL,
+                                        base::TimeDelta(),
+                                        base::TimeDelta()));
   return attachment_service.Pass();
+}
+
+AttachmentStore* AttachmentServiceImpl::GetStore() {
+  return attachment_store_.get();
 }
 
 void AttachmentServiceImpl::GetOrDownloadAttachments(
@@ -161,25 +185,6 @@ void AttachmentServiceImpl::DropAttachments(
                           base::Bind(&AttachmentServiceImpl::DropDone,
                                      weak_ptr_factory_.GetWeakPtr(),
                                      callback));
-}
-
-void AttachmentServiceImpl::StoreAttachments(const AttachmentList& attachments,
-                                             const StoreCallback& callback) {
-  DCHECK(CalledOnValidThread());
-  attachment_store_->Write(attachments,
-                           base::Bind(&AttachmentServiceImpl::WriteDone,
-                                      weak_ptr_factory_.GetWeakPtr(),
-                                      callback));
-  if (attachment_uploader_.get()) {
-    for (AttachmentList::const_iterator iter = attachments.begin();
-         iter != attachments.end();
-         ++iter) {
-      attachment_uploader_->UploadAttachment(
-          *iter,
-          base::Bind(&AttachmentServiceImpl::UploadDone,
-                     weak_ptr_factory_.GetWeakPtr()));
-    }
-  }
 }
 
 void AttachmentServiceImpl::ReadDone(
@@ -226,26 +231,25 @@ void AttachmentServiceImpl::DropDone(const DropCallback& callback,
                                          base::Bind(callback, drop_result));
 }
 
-void AttachmentServiceImpl::WriteDone(const StoreCallback& callback,
-                                      const AttachmentStore::Result& result) {
-  AttachmentService::StoreResult store_result =
-      AttachmentService::STORE_UNSPECIFIED_ERROR;
-  if (result == AttachmentStore::SUCCESS) {
-    store_result = AttachmentService::STORE_SUCCESS;
-  }
-  // TODO(maniscalco): Deal with case where an error occurred (bug 361251).
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback, store_result));
-}
-
 void AttachmentServiceImpl::UploadDone(
     const AttachmentUploader::UploadResult& result,
     const AttachmentId& attachment_id) {
-  // TODO(pavely): crbug/372622: Deal with UploadAttachment failures.
-  if (result != AttachmentUploader::UPLOAD_SUCCESS)
-    return;
-  if (delegate_) {
-    delegate_->OnAttachmentUploaded(attachment_id);
+  DCHECK(CalledOnValidThread());
+  switch (result) {
+    case AttachmentUploader::UPLOAD_SUCCESS:
+      upload_task_queue_->MarkAsSucceeded(attachment_id);
+      if (delegate_) {
+        delegate_->OnAttachmentUploaded(attachment_id);
+      }
+      break;
+    case AttachmentUploader::UPLOAD_TRANSIENT_ERROR:
+      upload_task_queue_->MarkAsFailed(attachment_id);
+      upload_task_queue_->AddToQueue(attachment_id);
+      break;
+    case AttachmentUploader::UPLOAD_UNSPECIFIED_ERROR:
+      // TODO(pavely): crbug/372622: Deal with UploadAttachment failures.
+      upload_task_queue_->MarkAsFailed(attachment_id);
+      break;
   }
 }
 
@@ -254,11 +258,73 @@ void AttachmentServiceImpl::DownloadDone(
     const AttachmentId& attachment_id,
     const AttachmentDownloader::DownloadResult& result,
     scoped_ptr<Attachment> attachment) {
-  if (result == AttachmentDownloader::DOWNLOAD_SUCCESS) {
-    state->AddAttachment(*attachment.get());
-  } else {
-    state->AddUnavailableAttachmentId(attachment_id);
+  switch (result) {
+    case AttachmentDownloader::DOWNLOAD_SUCCESS:
+      state->AddAttachment(*attachment.get());
+      break;
+    case AttachmentDownloader::DOWNLOAD_TRANSIENT_ERROR:
+    case AttachmentDownloader::DOWNLOAD_UNSPECIFIED_ERROR:
+      state->AddUnavailableAttachmentId(attachment_id);
+      break;
   }
+}
+
+void AttachmentServiceImpl::BeginUpload(const AttachmentId& attachment_id) {
+  DCHECK(CalledOnValidThread());
+  AttachmentIdList attachment_ids;
+  attachment_ids.push_back(attachment_id);
+  attachment_store_->Read(attachment_ids,
+                          base::Bind(&AttachmentServiceImpl::ReadDoneNowUpload,
+                                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void AttachmentServiceImpl::UploadAttachments(
+    const AttachmentIdSet& attachment_ids) {
+  DCHECK(CalledOnValidThread());
+  if (!attachment_uploader_.get()) {
+    return;
+  }
+  AttachmentIdSet::const_iterator iter = attachment_ids.begin();
+  AttachmentIdSet::const_iterator end = attachment_ids.end();
+  for (; iter != end; ++iter) {
+    upload_task_queue_->AddToQueue(*iter);
+  }
+}
+
+void AttachmentServiceImpl::OnNetworkChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  if (type != net::NetworkChangeNotifier::CONNECTION_NONE) {
+    upload_task_queue_->ResetBackoff();
+  }
+}
+
+void AttachmentServiceImpl::ReadDoneNowUpload(
+    const AttachmentStore::Result& result,
+    scoped_ptr<AttachmentMap> attachments,
+    scoped_ptr<AttachmentIdList> unavailable_attachment_ids) {
+  DCHECK(CalledOnValidThread());
+  if (!unavailable_attachment_ids->empty()) {
+    // TODO(maniscalco): We failed to read some attachments. What should we do
+    // now?
+    AttachmentIdList::const_iterator iter = unavailable_attachment_ids->begin();
+    AttachmentIdList::const_iterator end = unavailable_attachment_ids->end();
+    for (; iter != end; ++iter) {
+      upload_task_queue_->Cancel(*iter);
+    }
+  }
+
+  AttachmentMap::const_iterator iter = attachments->begin();
+  AttachmentMap::const_iterator end = attachments->end();
+  for (; iter != end; ++iter) {
+    attachment_uploader_->UploadAttachment(
+        iter->second,
+        base::Bind(&AttachmentServiceImpl::UploadDone,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
+void AttachmentServiceImpl::SetTimerForTest(scoped_ptr<base::Timer> timer) {
+  upload_task_queue_->SetTimerForTest(timer.Pass());
 }
 
 }  // namespace syncer

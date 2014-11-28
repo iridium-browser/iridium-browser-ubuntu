@@ -93,8 +93,11 @@ views::View* TrayUser::CreateDefaultView(user::LoginStatus status) {
   const SessionStateDelegate* session_state_delegate =
       Shell::GetInstance()->session_state_delegate();
 
-  // If the screen is locked show only the currently active user.
-  if (multiprofile_index_ && session_state_delegate->IsUserSessionBlocked())
+  // If the screen is locked or a system modal dialog box is shown, show only
+  // the currently active user.
+  if (multiprofile_index_ &&
+      (session_state_delegate->IsUserSessionBlocked() ||
+       Shell::GetInstance()->IsSystemModalWindowOpen()))
     return NULL;
 
   CHECK(user_ == NULL);
@@ -134,6 +137,9 @@ void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
     return;
   bool need_label = false;
   bool need_avatar = false;
+  SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
+  if (delegate->IsUserSupervised())
+    need_label =  true;
   switch (status) {
     case user::LOGGED_IN_LOCKED:
     case user::LOGGED_IN_USER:
@@ -172,7 +178,7 @@ void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
     }
   }
 
-  if (status == user::LOGGED_IN_SUPERVISED) {
+  if (delegate->IsUserSupervised()) {
     label_->SetText(
         l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SUPERVISED_LABEL));
   } else if (status == user::LOGGED_IN_GUEST) {
@@ -263,9 +269,10 @@ void TrayUser::UpdateAvatarImage(user::LoginStatus status) {
       GetTrayIndex() >= session_state_delegate->NumberOfLoggedInUsers())
     return;
 
-  content::BrowserContext* context = session_state_delegate->
-      GetBrowserContextByIndex(GetTrayIndex());
-  avatar_->SetImage(session_state_delegate->GetUserInfo(context)->GetImage(),
+  const user_manager::UserInfo* user_info =
+      session_state_delegate->GetUserInfo(GetTrayIndex());
+  CHECK(user_info);
+  avatar_->SetImage(user_info->GetImage(),
                     gfx::Size(kTrayAvatarSize, kTrayAvatarSize));
 
   // Unit tests might come here with no images for some users.

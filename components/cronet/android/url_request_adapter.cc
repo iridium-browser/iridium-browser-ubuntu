@@ -4,6 +4,11 @@
 
 #include "url_request_adapter.h"
 
+#include <string.h>
+
+#include "base/bind.h"
+#include "base/location.h"
+#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/cronet/android/url_request_context_adapter.h"
 #include "components/cronet/android/wrapped_channel_upload_element_reader.h"
@@ -20,14 +25,14 @@ URLRequestAdapter::URLRequestAdapter(URLRequestContextAdapter* context,
                                      GURL url,
                                      net::RequestPriority priority)
     : method_("GET"),
-      url_request_(NULL),
       read_buffer_(new net::GrowableIOBuffer()),
       bytes_read_(0),
       total_bytes_read_(0),
       error_code_(0),
       http_status_code_(0),
       canceled_(false),
-      expected_size_(0) {
+      expected_size_(0),
+      chunked_upload_(false) {
   context_ = context;
   delegate_ = delegate;
   url_ = url;
@@ -62,6 +67,24 @@ void URLRequestAdapter::SetUploadChannel(JNIEnv* env, int64 content_length) {
       net::UploadDataStream::CreateWithReader(reader.Pass(), 0));
 }
 
+void URLRequestAdapter::EnableChunkedUpload() {
+  chunked_upload_ = true;
+}
+
+void URLRequestAdapter::AppendChunk(const char* bytes, int bytes_len,
+                                    bool is_last_chunk) {
+  VLOG(1) << "AppendChunk, len: " << bytes_len << ", last: " << is_last_chunk;
+  scoped_ptr<char[]> buf(new char[bytes_len]);
+  memcpy(buf.get(), bytes, bytes_len);
+  context_->GetNetworkTaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(&URLRequestAdapter::OnAppendChunk,
+                 base::Unretained(this),
+                 Passed(buf.Pass()),
+                 bytes_len,
+                 is_last_chunk));
+}
+
 std::string URLRequestAdapter::GetHeader(const std::string& name) const {
   std::string value;
   if (url_request_ != NULL) {
@@ -77,11 +100,22 @@ net::HttpResponseHeaders* URLRequestAdapter::GetResponseHeaders() const {
   return url_request_->response_headers();
 }
 
+std::string URLRequestAdapter::GetNegotiatedProtocol() const {
+  if (url_request_ == NULL)
+    return std::string();
+  return url_request_->response_info().npn_negotiated_protocol;
+}
+
 void URLRequestAdapter::Start() {
   context_->GetNetworkTaskRunner()->PostTask(
       FROM_HERE,
       base::Bind(&URLRequestAdapter::OnInitiateConnection,
                  base::Unretained(this)));
+}
+
+void URLRequestAdapter::OnAppendChunk(const scoped_ptr<char[]> bytes,
+                                      int bytes_len, bool is_last_chunk) {
+  url_request_->AppendChunkToUpload(bytes.get(), bytes_len, is_last_chunk);
 }
 
 void URLRequestAdapter::OnInitiateConnection() {
@@ -92,8 +126,8 @@ void URLRequestAdapter::OnInitiateConnection() {
   VLOG(1) << "Starting chromium request: "
           << url_.possibly_invalid_spec().c_str()
           << " priority: " << RequestPriorityToString(priority_);
-  url_request_ = new net::URLRequest(
-      url_, net::DEFAULT_PRIORITY, this, context_->GetURLRequestContext());
+  url_request_ = context_->GetURLRequestContext()->CreateRequest(
+      url_, net::DEFAULT_PRIORITY, this, NULL);
   url_request_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                              net::LOAD_DO_NOT_SAVE_COOKIES |
                              net::LOAD_DO_NOT_SEND_COOKIES);
@@ -106,8 +140,11 @@ void URLRequestAdapter::OnInitiateConnection() {
         net::HttpRequestHeaders::kUserAgent, user_agent, true /* override */);
   }
 
-  if (upload_data_stream_)
+  if (upload_data_stream_) {
     url_request_->set_upload(upload_data_stream_.Pass());
+  } else if (chunked_upload_) {
+    url_request_->EnableChunkedUpload();
+  }
 
   url_request_->SetPriority(priority_);
 
@@ -249,10 +286,7 @@ void URLRequestAdapter::OnRequestCanceled() {
 
 void URLRequestAdapter::OnRequestCompleted() {
   VLOG(1) << "Completed: " << url_.possibly_invalid_spec();
-  if (url_request_ != NULL) {
-    delete url_request_;
-    url_request_ = NULL;
-  }
+  url_request_.reset();
 
   delegate_->OnBytesRead(this);
   delegate_->OnRequestFinished(this);

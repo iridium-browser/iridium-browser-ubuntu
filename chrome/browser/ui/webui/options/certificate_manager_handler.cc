@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"  // for FileAccessProvider
+#include "base/files/file_util.h"  // for FileAccessProvider
 #include "base/i18n/string_compare.h"
 #include "base/id_map.h"
 #include "base/memory/scoped_vector.h"
@@ -24,9 +24,9 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/crypto_module_password_dialog_nss.h"
 #include "chrome/browser/ui/webui/certificate_viewer_webui.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"

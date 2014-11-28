@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
@@ -21,6 +22,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "net/base/url_util.h"
@@ -268,7 +270,7 @@ void DomDistillerViewerSource::StartDataRequest(
     const content::URLDataSource::GotDataCallback& callback) {
   content::RenderFrameHost* render_frame_host =
       content::RenderFrameHost::FromID(render_process_id, render_frame_id);
-  DCHECK(render_frame_host);
+  if (!render_frame_host) return;
   content::RenderViewHost* render_view_host =
       render_frame_host->GetRenderViewHost();
   DCHECK(render_view_host);
@@ -284,10 +286,13 @@ void DomDistillerViewerSource::StartDataRequest(
     callback.Run(base::RefCountedString::TakeString(&js));
     return;
   }
+  if (kViewerViewOriginalPath == path) {
+    content::RecordAction(base::UserMetricsAction("DomDistiller_ViewOriginal"));
+    callback.Run(NULL);
+    return;
+  }
   content::WebContents* web_contents =
-      content::WebContents::FromRenderFrameHost(
-          content::RenderFrameHost::FromID(render_process_id,
-                                           render_frame_id));
+      content::WebContents::FromRenderFrameHost(render_frame_host);
   DCHECK(web_contents);
   // An empty |path| is invalid, but guard against it. If not empty, assume
   // |path| starts with '?', which is stripped away.

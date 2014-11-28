@@ -11,6 +11,10 @@ import os
 import cPickle as pickle
 import re
 import string
+import subprocess
+
+
+KNOWN_COMPONENTS = frozenset(['core', 'modules'])
 
 
 class IdlBadFilenameError(Exception):
@@ -21,6 +25,16 @@ class IdlBadFilenameError(Exception):
 def idl_filename_to_interface_name(idl_filename):
     # interface name is the root of the basename: InterfaceName.idl
     return os.path.splitext(os.path.basename(idl_filename))[0]
+
+
+def idl_filename_to_component(idl_filename):
+    path = os.path.dirname(os.path.realpath(idl_filename))
+    while path:
+        dirname, basename = os.path.split(path)
+        if basename.lower() in KNOWN_COMPONENTS:
+            return basename.lower()
+        path = dirname
+    raise 'Unknown component type for %s' % idl_filename
 
 
 ################################################################################
@@ -38,6 +52,34 @@ def read_file_to_list(filename):
         return [line.rstrip('\n') for line in f]
 
 
+def resolve_cygpath(cygdrive_names):
+    if not cygdrive_names:
+        return []
+    cmd = ['cygpath', '-f', '-', '-wa']
+    process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    idl_file_names = []
+    for file_name in cygdrive_names:
+        process.stdin.write('%s\n' % file_name)
+        process.stdin.flush()
+        idl_file_names.append(process.stdout.readline().rstrip())
+    process.stdin.close()
+    process.wait()
+    return idl_file_names
+
+
+def read_idl_files_list_from_file(filename):
+    """Similar to read_file_to_list, but also resolves cygpath."""
+    with open(filename) as input_file:
+        file_names = sorted([os.path.realpath(line.rstrip('\n'))
+                             for line in input_file])
+        idl_file_names = [file_name for file_name in file_names
+                          if not file_name.startswith('/cygdrive')]
+        cygdrive_names = [file_name for file_name in file_names
+                          if file_name.startswith('/cygdrive')]
+        idl_file_names.extend(resolve_cygpath(cygdrive_names))
+        return idl_file_names
+
+
 def read_pickle_files(pickle_filenames):
     for pickle_filename in pickle_filenames:
         with open(pickle_filename) as pickle_file:
@@ -49,6 +91,9 @@ def write_file(new_text, destination_filename, only_if_changed):
         with open(destination_filename) as destination_file:
             if destination_file.read() == new_text:
                 return
+    destination_dirname = os.path.dirname(destination_filename)
+    if not os.path.exists(destination_dirname):
+        os.makedirs(destination_dirname)
     with open(destination_filename, 'w') as destination_file:
         destination_file.write(new_text)
 

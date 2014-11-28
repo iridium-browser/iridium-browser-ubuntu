@@ -104,6 +104,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   virtual void OnNativeWidgetBlur() OVERRIDE;
   virtual bool IsAnimatingClosed() const OVERRIDE;
   virtual bool IsTranslucentWindowOpacitySupported() const OVERRIDE;
+  virtual void SizeConstraintsChanged() OVERRIDE;
 
   // Overridden from aura::WindowTreeHost:
   virtual ui::EventSource* GetEventSource() OVERRIDE;
@@ -137,6 +138,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   virtual bool IsInactiveRenderingDisabled() OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
+  virtual bool CanMinimize() const OVERRIDE;
   virtual bool CanActivate() const OVERRIDE;
   virtual bool WidgetSizeIsClientSize() const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;

@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
+#include "ui/base/layout.h"
 
 namespace extensions {
 
@@ -100,6 +101,13 @@ extern const char kRulesStoreName[];
 // The URL query parameter key corresponding to multi-login user index.
 extern const char kAuthUserQueryKey[];
 
+// Mime type strings
+extern const char kMimeTypeJpeg[];
+extern const char kMimeTypePng[];
+
+// The extension id of the Web Store component application.
+extern const char kWebStoreAppId[];
+
 }  // namespace extensions
 
 namespace extension_misc {
@@ -128,9 +136,19 @@ enum ExtensionIcons {
 extern const int kExtensionIconSizes[];
 extern const size_t kNumExtensionIconSizes;
 
-// List of sizes for extension icons that can be defined in the manifest.
-extern const int kExtensionActionIconSizes[];
-extern const size_t kNumExtensionActionIconSizes;
+struct IconRepresentationInfo {
+  // Size in pixels.
+  const int size;
+  // Size as a string that will be used to retrieve representation value from
+  // ExtensionAction SetIcon function arguments.
+  const char* const size_string;
+  // Scale factor for which the representation should be used.
+  const ui::ScaleFactor scale;
+};
+
+// The icon representations for extension actions.
+extern const IconRepresentationInfo kExtensionActionIconSizes[];
+const size_t kNumExtensionActionIconSizes = 2u;
 
 }  // namespace extension_misc
 

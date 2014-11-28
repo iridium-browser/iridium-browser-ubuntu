@@ -9,13 +9,15 @@
 
 #include "base/message_loop/message_loop.h"
 #include "ui/events/event.h"
+#include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/ozone/evdev/event_modifiers_evdev.h"
-#include "ui/ozone/public/event_factory_ozone.h"
 
 namespace ui {
 
 namespace {
+
+const int kXkbKeycodeOffset = 8;
 
 ui::KeyboardCode KeyboardCodeFromButton(unsigned int code) {
   static const ui::KeyboardCode kLinuxBaseKeyMap[] = {
@@ -192,9 +194,8 @@ KeyEventConverterEvdev::KeyEventConverterEvdev(
     base::FilePath path,
     EventModifiersEvdev* modifiers,
     const EventDispatchCallback& callback)
-    : EventConverterEvdev(callback),
-      fd_(fd),
-      path_(path),
+    : EventConverterEvdev(fd, path),
+      callback_(callback),
       modifiers_(modifiers) {
   // TODO(spang): Initialize modifiers using EVIOCGKEY.
 }
@@ -202,15 +203,6 @@ KeyEventConverterEvdev::KeyEventConverterEvdev(
 KeyEventConverterEvdev::~KeyEventConverterEvdev() {
   Stop();
   close(fd_);
-}
-
-void KeyEventConverterEvdev::Start() {
-  base::MessageLoopForUI::current()->WatchFileDescriptor(
-      fd_, true, base::MessagePumpLibevent::WATCH_READ, &controller_, this);
-}
-
-void KeyEventConverterEvdev::Stop() {
-  controller_.StopWatchingFileDescriptor();
 }
 
 void KeyEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
@@ -225,12 +217,8 @@ void KeyEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
     return;
   }
 
-  CHECK_EQ(read_size % sizeof(*inputs), 0u);
+  DCHECK_EQ(read_size % sizeof(*inputs), 0u);
   ProcessEvents(inputs, read_size / sizeof(*inputs));
-}
-
-void KeyEventConverterEvdev::OnFileCanWriteWithoutBlocking(int fd) {
-  NOTREACHED();
 }
 
 void KeyEventConverterEvdev::ProcessEvents(const input_event* inputs,
@@ -263,8 +251,12 @@ void KeyEventConverterEvdev::ConvertKeyEvent(int key, int value) {
 
   int flags = modifiers_->GetModifierFlags();
 
-  KeyEvent key_event(down ? ET_KEY_PRESSED : ET_KEY_RELEASED, code, flags);
-  DispatchEventToCallback(&key_event);
+  KeyEvent key_event(
+      down ? ET_KEY_PRESSED : ET_KEY_RELEASED,
+      code,
+      KeycodeConverter::NativeKeycodeToCode(key + kXkbKeycodeOffset),
+      flags);
+  callback_.Run(&key_event);
 }
 
 }  // namespace ui

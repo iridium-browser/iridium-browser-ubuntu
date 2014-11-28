@@ -4,14 +4,14 @@
 
 #include "chrome/browser/extensions/api/file_handlers/mime_util.h"
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/mime_util.h"
-#include "webkit/browser/fileapi/file_system_url.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
@@ -153,7 +153,7 @@ MimeTypeCollector::~MimeTypeCollector() {
 }
 
 void MimeTypeCollector::CollectForURLs(
-    const std::vector<fileapi::FileSystemURL>& urls,
+    const std::vector<storage::FileSystemURL>& urls,
     const CompletionCallback& callback) {
   std::vector<base::FilePath> local_paths;
   for (size_t i = 0; i < urls.size(); ++i) {

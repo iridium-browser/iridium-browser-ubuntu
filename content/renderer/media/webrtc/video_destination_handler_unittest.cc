@@ -20,6 +20,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/web/WebHeap.h"
 
 using ::testing::_;
 
@@ -40,8 +41,9 @@ class VideoDestinationHandlerTest : public PpapiUnittest {
     registry_->Init(kTestStreamUrl);
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
     registry_.reset();
+    blink::WebHeap::collectAllGarbageForTesting();
     PpapiUnittest::TearDown();
   }
 
@@ -94,7 +96,7 @@ TEST_F(VideoDestinationHandlerTest, PutFrame) {
 
     EXPECT_CALL(sink, OnVideoFrame()).WillOnce(
         RunClosure(quit_closure));
-    frame_writer->PutFrame(image, 10);
+    frame_writer->PutFrame(image.get(), 10);
     run_loop.Run();
   }
   // TODO(perkj): Verify that the track output I420 when

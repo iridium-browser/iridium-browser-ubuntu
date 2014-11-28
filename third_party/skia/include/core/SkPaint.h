@@ -56,6 +56,10 @@ public:
 
     SkPaint& operator=(const SkPaint&);
 
+    /** operator== may give false negatives: two paints that draw equivalently
+        may return false.  It will never give false positives: two paints that
+        are not equivalent always return false.
+    */
     SK_API friend bool operator==(const SkPaint& a, const SkPaint& b);
     friend bool operator!=(const SkPaint& a, const SkPaint& b) {
         return !(a == b);
@@ -858,12 +862,9 @@ public:
      *  @param length       Number of bytes of text to measure
      *  @param bounds       If not NULL, returns the bounds of the text,
      *                      relative to (0, 0).
-     *  @param scale        If not 0, return width as if the canvas were scaled
-     *                      by this value
      *  @return             The advance width of the text
      */
-    SkScalar measureText(const void* text, size_t length,
-                         SkRect* bounds, SkScalar scale = 0) const;
+    SkScalar measureText(const void* text, size_t length, SkRect* bounds) const;
 
     /** Return the width of the text. This will return the vertical measure
      *  if isVerticalText() is true, in which case the returned value should
@@ -874,7 +875,7 @@ public:
      *  @return         The advance width of the text
      */
     SkScalar measureText(const void* text, size_t length) const {
-        return this->measureText(text, length, NULL, 0);
+        return this->measureText(text, length, NULL);
     }
 
     /** Specify the direction the text buffer should be processed in breakText()
@@ -1126,6 +1127,8 @@ private:
     friend class GrBitmapTextContext;
     friend class GrDistanceFieldTextContext;
     friend class GrStencilAndCoverTextContext;
+    friend class GrPathRendering;
+    friend class GrGLPathRendering;
     friend class SkTextToPathIter;
     friend class SkCanonicalizePaint;
 

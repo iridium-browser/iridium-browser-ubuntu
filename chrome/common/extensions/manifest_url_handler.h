@@ -30,15 +30,16 @@ struct ManifestURL : public Extension::ManifestData {
   // this returns a blank GURL.
   static const GURL GetHomepageURL(const Extension* extension);
 
+  // Returns true if the extension specified a valid home page url in the
+  // manifest.
+  static bool SpecifiedHomepageURL(const Extension* extension);
+
   // Returns the Update URL for this extension.
   static const GURL& GetUpdateURL(const Extension* extension);
 
   // Returns true if this extension's update URL is the extension gallery.
   static bool UpdatesFromGallery(const Extension* extension);
   static bool UpdatesFromGallery(const base::DictionaryValue* manifest);
-
-  // Returns the Options Page for this extension.
-  static const GURL& GetOptionsPage(const Extension* extension);
 
   // Returns the About Page for this extension.
   static const GURL& GetAboutPage(const Extension* extension);
@@ -104,23 +105,6 @@ class UpdateURLHandler : public ManifestHandler {
   virtual const std::vector<std::string> Keys() const OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateURLHandler);
-};
-
-// Parses the "options_page" manifest key.
-class OptionsPageHandler : public ManifestHandler {
- public:
-  OptionsPageHandler();
-  virtual ~OptionsPageHandler();
-
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
-  virtual bool Validate(const Extension* extension,
-                        std::string* error,
-                        std::vector<InstallWarning>* warnings) const OVERRIDE;
-
- private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
-
-  DISALLOW_COPY_AND_ASSIGN(OptionsPageHandler);
 };
 
 // Parses the "about_page" manifest key.

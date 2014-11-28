@@ -19,6 +19,12 @@
           '<(PRODUCT_DIR)/libclearkeycdm.so',
           '<(PRODUCT_DIR)/libclearkeycdmadapter.so',
           '<(PRODUCT_DIR)/libppapi_tests.so',
+        ],
+      },
+    }],
+    ['OS=="linux" and use_ozone==0', {
+      'variables': {
+        'isolate_dependency_tracked': [
           '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
         ],
       },
@@ -51,6 +57,7 @@
         ],
         'isolate_dependency_untracked': [
           '../content/test/data/',
+          '../google_apis/test/',
           '../media/test/data/',
           '../net/data/',
           '../net/tools/testserver/',
@@ -77,13 +84,19 @@
       'variables': {
         'isolate_dependency_tracked': [
           '<(PRODUCT_DIR)/mock_nacl_gdb<(EXECUTABLE_SUFFIX)',
-          '<(PRODUCT_DIR)/ppapi_nacl_tests_glibc_x64.nexe',
-          '<(PRODUCT_DIR)/ppapi_nacl_tests_newlib_x64.nexe',
-          '<(PRODUCT_DIR)/ppapi_nacl_tests_pnacl_newlib_x64.nexe',
         ],
         'isolate_dependency_untracked': [
           '../third_party/bidichecker/',
+        ],
+      },
+    }],
+    ['OS=="win" or (OS=="linux" and target_arch=="x64")', {
+      'variables': {
+        'isolate_dependency_tracked': [
           '<(PRODUCT_DIR)/lib64/',
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_glibc_x64.nexe',
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_newlib_x64.nexe',
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_pnacl_newlib_x64.nexe',
         ],
       },
     }],
@@ -91,17 +104,24 @@
       'variables': {
         'isolate_dependency_tracked': [
           '<(PRODUCT_DIR)/clearkeycdmadapter.plugin',
+          '<(PRODUCT_DIR)/content_shell.pak',
           '<(PRODUCT_DIR)/libclearkeycdm.dylib',
           '<(PRODUCT_DIR)/osmesa.so',
-          '<(PRODUCT_DIR)/ppapi_nacl_tests_glibc_x32.nexe',
-          '<(PRODUCT_DIR)/ppapi_nacl_tests_newlib_x32.nexe',
-          '<(PRODUCT_DIR)/ppapi_nacl_tests_pnacl_newlib_x32.nexe',
           '<(PRODUCT_DIR)/ppapi_tests.plugin/Contents/MacOS/ppapi_tests',
         ],
         'isolate_dependency_untracked': [
-          '<(PRODUCT_DIR)/lib32/',
           '<(PRODUCT_DIR)/plugins/npapi_test_plugin.plugin/',
           '<(PRODUCT_DIR)/plugins/test_netscape_plugin.plugin/',
+        ],
+      },
+    }],
+    ['OS=="mac" and target_arch=="ia32"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/lib32/',
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_glibc_x32.nexe',
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_newlib_x32.nexe',
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_pnacl_newlib_x32.nexe',
         ],
       },
     }],
@@ -129,6 +149,13 @@
         ],
       },
     }],
+    ['OS=="win" and (fastbuild==0 or fastbuild==1)', {
+      'variables': {
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/browser_tests.exe.pdb',
+        ],
+      },
+    }],
     ['OS=="win" and libpeer_target_type=="loadable_module"', {
       'variables': {
         'isolate_dependency_tracked': [
@@ -139,6 +166,7 @@
     ['chromeos==1', {
       'variables': {
         'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/content_shell.pak',
           '<(PRODUCT_DIR)/keyboard_resources.pak',
           '<(PRODUCT_DIR)/libexif.so',
           '<(PRODUCT_DIR)/nacl_helper',
@@ -147,7 +175,6 @@
         ],
         'isolate_dependency_untracked': [
           '../chromeos/test/data/',
-          '../google_apis/test/',
           '../ui/file_manager/file_manager/',
           '../ui/webui/resources/js/',
           '<(PRODUCT_DIR)/chromevox_test_data/',

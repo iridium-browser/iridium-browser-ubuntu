@@ -102,13 +102,12 @@ public:
     virtual void updateInspectorStateCookie(const WTF::String&) OVERRIDE;
     virtual void sendMessageToFrontend(PassRefPtr<JSONObject> message) OVERRIDE;
     virtual void flush() OVERRIDE;
+    virtual void resumeStartup() OVERRIDE;
 
     virtual void setDeviceMetricsOverride(int width, int height, float deviceScaleFactor, bool mobile, bool fitWindow, float scale, float offsetX, float offsetY) OVERRIDE;
     virtual void clearDeviceMetricsOverride() OVERRIDE;
     virtual void setTouchEventEmulationEnabled(bool) OVERRIDE;
 
-    virtual void getAllocatedObjects(HashSet<const void*>&) OVERRIDE;
-    virtual void dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>&) OVERRIDE;
     virtual void setTraceEventCallback(const WTF::String& categoryFilter, TraceEventCallback) OVERRIDE;
     virtual void resetTraceEventCallback() OVERRIDE;
     virtual void enableTracing(const WTF::String& categoryFilter) OVERRIDE;

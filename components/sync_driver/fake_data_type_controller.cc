@@ -24,6 +24,7 @@ FakeDataTypeController::~FakeDataTypeController() {
 // NOT_RUNNING ->MODEL_LOADED |MODEL_STARTING.
 void FakeDataTypeController::LoadModels(
     const ModelLoadCallback& model_load_callback) {
+  model_load_callback_ = model_load_callback;
   if (state_ != NOT_RUNNING) {
     ADD_FAILURE();
     return;
@@ -36,7 +37,6 @@ void FakeDataTypeController::LoadModels(
       state_ = MODEL_LOADED;
     model_load_callback.Run(type(), load_error_);
   } else {
-    model_load_callback_ = model_load_callback;
     state_ = MODEL_STARTING;
   }
 }
@@ -80,13 +80,15 @@ void FakeDataTypeController::FinishStart(ConfigureResult result) {
                           syncer::SyncError::UNRECOVERABLE_ERROR,
                           "Unrecoverable error",
                           type()));
-  } else {
+  } else if (result == NEEDS_CRYPTO) {
     state_ = NOT_RUNNING;
     local_merge_result.set_error(
         syncer::SyncError(FROM_HERE,
-                          syncer::SyncError::DATATYPE_ERROR,
-                          "Fake error",
+                          syncer::SyncError::CRYPTO_ERROR,
+                          "Crypto error",
                           type()));
+  } else {
+    NOTREACHED();
   }
   last_start_callback_.Run(result, local_merge_result, syncer_merge_result);
 }
@@ -124,10 +126,8 @@ DataTypeController::State FakeDataTypeController::state() const {
 
 void FakeDataTypeController::OnSingleDataTypeUnrecoverableError(
     const syncer::SyncError& error) {
-  syncer::SyncMergeResult local_merge_result(type());
-  local_merge_result.set_error(error);
-  last_start_callback_.Run(
-      RUNTIME_ERROR, local_merge_result, syncer::SyncMergeResult(type_));
+  if (!model_load_callback_.is_null())
+    model_load_callback_.Run(type(), error);
 }
 
 bool FakeDataTypeController::ReadyForStart() const {
@@ -143,9 +143,7 @@ void FakeDataTypeController::SetModelLoadError(syncer::SyncError error) {
 }
 
 void FakeDataTypeController::SimulateModelLoadFinishing() {
-  ModelLoadCallback model_load_callback = model_load_callback_;
-  model_load_callback.Run(type(), load_error_);
-  model_load_callback_.Reset();
+  model_load_callback_.Run(type(), load_error_);
 }
 
 void FakeDataTypeController::SetReadyForStart(bool ready) {

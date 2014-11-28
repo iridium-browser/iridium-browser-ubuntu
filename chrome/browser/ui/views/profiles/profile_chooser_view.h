@@ -88,6 +88,7 @@ class ProfileChooserView : public views::BubbleDelegateView,
   // views::BubbleDelegateView:
   virtual void Init() OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -131,14 +132,14 @@ class ProfileChooserView : public views::BubbleDelegateView,
       bool is_guest);
   views::View* CreateGuestProfileView();
   views::View* CreateOtherProfilesView(const Indexes& avatars_to_show);
-  views::View* CreateOptionsView(bool enable_lock);
+  views::View* CreateOptionsView(bool display_lock);
   views::View* CreateSupervisedUserDisclaimerView();
 
   // Account Management view for the profile |avatar_item|.
   views::View* CreateCurrentProfileAccountsView(
       const AvatarMenu::Item& avatar_item);
   void CreateAccountButton(views::GridLayout* layout,
-                           const std::string& account,
+                           const std::string& account_id,
                            bool is_primary_account,
                            bool reauth_required,
                            int width);

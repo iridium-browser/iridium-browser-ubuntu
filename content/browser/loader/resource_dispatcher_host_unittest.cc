@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
@@ -49,13 +49,13 @@
 #include "net/url_request/url_request_simple_job.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
+#include "storage/common/blob/shareable_file_reference.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/common/blob/shareable_file_reference.h"
 
 // TODO(eroman): Write unit tests for SafeBrowsing that exercise
 //               SafeBrowsingResourceHandler.
 
-using webkit_blob::ShareableFileReference;
+using storage::ShareableFileReference;
 
 namespace content {
 
@@ -142,7 +142,7 @@ static ResourceHostMsg_Request CreateResourceRequest(const char* method,
   request.is_main_frame = true;
   request.parent_is_main_frame = false;
   request.parent_render_frame_id = -1;
-  request.transition_type = PAGE_TRANSITION_LINK;
+  request.transition_type = ui::PAGE_TRANSITION_LINK;
   request.allow_download = true;
   return request;
 }
@@ -662,8 +662,6 @@ class TestResourceDispatcherHostDelegate
       ResourceContext* resource_context,
       AppCacheService* appcache_service,
       ResourceType resource_type,
-      int child_id,
-      int route_id,
       ScopedVector<ResourceThrottle>* throttles) OVERRIDE {
     if (user_data_) {
       const void* key = user_data_.get();
@@ -1171,9 +1169,9 @@ TEST_F(ResourceDispatcherHostTest, DeletedFilterDetached) {
       "GET", RESOURCE_TYPE_PING, net::URLRequestTestJob::test_url_3());
 
   ResourceHostMsg_RequestResource msg_prefetch(0, 1, request_prefetch);
-  host_.OnMessageReceived(msg_prefetch, filter_);
+  host_.OnMessageReceived(msg_prefetch, filter_.get());
   ResourceHostMsg_RequestResource msg_ping(0, 2, request_ping);
-  host_.OnMessageReceived(msg_ping, filter_);
+  host_.OnMessageReceived(msg_ping, filter_.get());
 
   // Remove the filter before processing the requests by simulating channel
   // closure.
@@ -1221,7 +1219,7 @@ TEST_F(ResourceDispatcherHostTest, DeletedFilterDetachedRedirect) {
       net::URLRequestTestJob::test_url_redirect_to_url_2());
 
   ResourceHostMsg_RequestResource msg(0, 1, request);
-  host_.OnMessageReceived(msg, filter_);
+  host_.OnMessageReceived(msg, filter_.get());
 
   // Remove the filter before processing the request by simulating channel
   // closure.
@@ -1763,15 +1761,17 @@ TEST_F(ResourceDispatcherHostTest, TestBlockedRequestsDontLeak) {
 // Test the private helper method "CalculateApproximateMemoryCost()".
 TEST_F(ResourceDispatcherHostTest, CalculateApproximateMemoryCost) {
   net::URLRequestContext context;
-  net::URLRequest req(
-      GURL("http://www.google.com"), net::DEFAULT_PRIORITY, NULL, &context);
-  EXPECT_EQ(4427,
-            ResourceDispatcherHostImpl::CalculateApproximateMemoryCost(&req));
+  scoped_ptr<net::URLRequest> req(context.CreateRequest(
+      GURL("http://www.google.com"), net::DEFAULT_PRIORITY, NULL, NULL));
+  EXPECT_EQ(
+      4427,
+      ResourceDispatcherHostImpl::CalculateApproximateMemoryCost(req.get()));
 
   // Add 9 bytes of referrer.
-  req.SetReferrer("123456789");
-  EXPECT_EQ(4436,
-            ResourceDispatcherHostImpl::CalculateApproximateMemoryCost(&req));
+  req->SetReferrer("123456789");
+  EXPECT_EQ(
+      4436,
+      ResourceDispatcherHostImpl::CalculateApproximateMemoryCost(req.get()));
 
   // Add 33 bytes of upload content.
   std::string upload_content;
@@ -1779,12 +1779,13 @@ TEST_F(ResourceDispatcherHostTest, CalculateApproximateMemoryCost) {
   std::fill(upload_content.begin(), upload_content.end(), 'x');
   scoped_ptr<net::UploadElementReader> reader(new net::UploadBytesElementReader(
       upload_content.data(), upload_content.size()));
-  req.set_upload(make_scoped_ptr(
+  req->set_upload(make_scoped_ptr(
       net::UploadDataStream::CreateWithReader(reader.Pass(), 0)));
 
   // Since the upload throttling is disabled, this has no effect on the cost.
-  EXPECT_EQ(4436,
-            ResourceDispatcherHostImpl::CalculateApproximateMemoryCost(&req));
+  EXPECT_EQ(
+      4436,
+      ResourceDispatcherHostImpl::CalculateApproximateMemoryCost(req.get()));
 }
 
 // Test that too much memory for outstanding requests for a particular
@@ -2520,7 +2521,7 @@ TEST_F(ResourceDispatcherHostTest, TransferNavigationWithTwoRedirects) {
   EXPECT_EQ(second_filter->child_id(), info->GetChildID());
   EXPECT_EQ(new_render_view_id, info->GetRouteID());
   EXPECT_EQ(new_request_id, info->GetRequestID());
-  EXPECT_EQ(second_filter, info->filter());
+  EXPECT_EQ(second_filter.get(), info->filter());
 
   // Let request complete.
   base::MessageLoop::current()->RunUntilIdle();
@@ -2761,7 +2762,7 @@ TEST_F(ResourceDispatcherHostTest, RegisterDownloadedTempFile) {
 
   // The child releases from the request.
   ResourceHostMsg_ReleaseDownloadedFile release_msg(kRequestID);
-  host_.OnMessageReceived(release_msg, filter_);
+  host_.OnMessageReceived(release_msg, filter_.get());
 
   // Still readable because there is another reference to the file. (The child
   // may take additional blob references.)
@@ -2819,7 +2820,7 @@ TEST_F(ResourceDispatcherHostTest, DownloadToFile) {
       "GET", RESOURCE_TYPE_SUB_RESOURCE, net::URLRequestTestJob::test_url_1());
   request.download_to_file = true;
   ResourceHostMsg_RequestResource request_msg(0, 1, request);
-  host_.OnMessageReceived(request_msg, filter_);
+  host_.OnMessageReceived(request_msg, filter_.get());
 
   // Running the message loop until idle does not work because
   // RedirectToFileResourceHandler posts things to base::WorkerPool. Instead,
@@ -2874,7 +2875,7 @@ TEST_F(ResourceDispatcherHostTest, DownloadToFile) {
   // RunUntilIdle doesn't work because base::WorkerPool is involved.
   ShareableFileReleaseWaiter waiter(response_head.download_file_path);
   ResourceHostMsg_ReleaseDownloadedFile release_msg(1);
-  host_.OnMessageReceived(release_msg, filter_);
+  host_.OnMessageReceived(release_msg, filter_.get());
   waiter.Wait();
   // The release callback runs before the delete is scheduled, so pump the
   // message loop for the delete itself. (This relies on the delete happening on

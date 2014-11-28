@@ -1,6 +1,4 @@
-<?xml version="1.0" ?>
-<!DOCTYPE translationbundle>
-<translationbundle lang="ms">
+<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ms">
 <translation id="7485870689360869515">Tiada data dijumpai.</translation>
 <translation id="3884278016824448484">Pengecam peranti bercanggah</translation>
 <translation id="6779575937362063477">Kad jenis ini tidak disokong oleh Google Wallet. Sila pilih kad yang lain.</translation>
@@ -13,6 +11,7 @@
 <translation id="7298195798382681320">Disyorkan</translation>
 <translation id="4058922952496707368">Kekunci &quot;<ph name="SUBKEY"/>&quot;: <ph name="ERROR"/></translation>
 <translation id="5299298092464848405">Ralat semasa menghuraikan dasar</translation>
+<translation id="6628463337424475685"><ph name="ENGINE"/> Carian</translation>
 <translation id="6831043979455480757">Terjemah</translation>
 <translation id="1228893227497259893">Pengecam entiti yang salah</translation>
 <translation id="6337534724793800597">Tapis dasar mengikut nama</translation>
@@ -39,6 +38,7 @@
 <translation id="719464814642662924">Visa</translation>
 <translation id="6839929833149231406">Kawasan</translation>
 <translation id="1871208020102129563">Proksi ditetapkan untuk menggunakan pelayan proksi tetap, bukannya URL skrip .pac.</translation>
+<translation id="8940229512486821554">Jalankan perintah <ph name="EXTENSION_NAME"/>: <ph name="SEARCH_TERMS"/></translation>
 <translation id="3380365263193509176">Ralat tidak diketahui</translation>
 <translation id="112840717907525620">Cache dasar OK</translation>
 <translation id="3452404311384756672">Selang masa ambil:</translation>
@@ -64,11 +64,13 @@
 <translation id="9207861905230894330">Gagal menambahkan artikel.</translation>
 <translation id="337363190475750230">Nyahperuntukkan</translation>
 <translation id="2367567093518048410">Tahap</translation>
+<translation id="7977590112176369853">&lt;masukkan pertanyaan&gt;</translation>
 <translation id="7610193165460212391">Nilai berada di luar julat <ph name="VALUE"/></translation>
 <translation id="370665806235115550">Memuatkan...</translation>
 <translation id="2096368010154057602">Jabatan</translation>
 <translation id="4258748452823770588">Tandatangan tidak elok</translation>
 <translation id="3024663005179499861">Jenis dasar salah</translation>
+<translation id="2030481566774242610">Adakah anda maksudkan <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">MasterCard</translation>
 <translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, Tamat Tempoh: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
@@ -90,6 +92,8 @@
 <translation id="3010559122411665027">Masukan senarai &quot;<ph name="ENTRY_INDEX"/>&quot;: <ph name="ERROR"/></translation>
 <translation id="6445051938772793705">Negara</translation>
 <translation id="5031870354684148875">Mengenai Terjemahan Google</translation>
+<translation id="1152921474424827756">Akses <ph name="BEGIN_LINK"/>salinan cache<ph name="END_LINK"/> <ph name="URL"/></translation>
+<translation id="8201077131113104583">URL kemas kini tidak sah untuk sambungan dengan ID &quot;<ph name="EXTENSION_ID"/>&quot;.</translation>
 <translation id="6891596781022320156">Tahap dasar tidak disokong.</translation>
 <translation id="2025186561304664664">Proksi ditetapkan kepada auto konfigurasi.</translation>
 <translation id="1853748787962613237">Gagal memaparkan artikel.</translation>
@@ -101,6 +105,7 @@
 <translation id="536296301121032821">Gagal menyimpan tetapan dasar</translation>
 <translation id="5439770059721715174">Ralat pengesahan skema di &quot;<ph name="ERROR_PATH"/>&quot;: <ph name="ERROR"/></translation>
 <translation id="8349305172487531364">Bar penanda halaman</translation>
+<translation id="7208899522964477531">Cari <ph name="SITE_NAME"/> untuk <ph name="SEARCH_TERMS"/></translation>
 <translation id="7956713633345437162">Penanda halaman mudah alih</translation>
 <translation id="5089810972385038852">Negeri</translation>
 <translation id="647261751007945333">Dasar peranti</translation>
@@ -122,6 +127,7 @@
 <translation id="1821930232296380041">Permintaan atau parameter permintaan tidak sah</translation>
 <translation id="1640180200866533862">Dasar pengguna</translation>
 <translation id="375403751935624634">Gagal menterjemah disebabkan ralat pelayan.</translation>
+<translation id="2597378329261239068">Dokumen ini dilindungi kata laluan.  Sila masukkan kata laluan.</translation>
 <translation id="5629630648637658800">Gagal memuatkan tetapan dasar</translation>
 <translation id="2354001756790975382">Penanda halaman lain</translation>
 <translation id="3650584904733503804">Pengesahan berjaya</translation>
@@ -134,6 +140,7 @@
 <translation id="5190835502935405962">Bar Penanda Halaman</translation>
 <translation id="6965978654500191972">Peranti</translation>
 <translation id="8249320324621329438">Diambil kali terakhir:</translation>
+<translation id="194030505837763158">Pergi ke <ph name="LINK"/></translation>
 <translation id="1285320974508926690">Jangan sekali-kali menterjemahkan tapak ini</translation>
 <translation id="1344588688991793829">Tetapan Auto Isi Chromium...</translation>
 <translation id="6282194474023008486">Poskod</translation>
@@ -142,6 +149,7 @@
 <translation id="9020542370529661692">Halaman ini telah diterjemahkan kepada <ph name="TARGET_LANGUAGE"/></translation>
 <translation id="5631439013527180824">Token pengurusan peranti tidak sah</translation>
 <translation id="560412284261940334">Pengurusan tidak disokong</translation>
+<translation id="1639239467298939599">Memuatkan</translation>
 <translation id="3169472444629675720">Temui</translation>
 <translation id="4923417429809017348">Halaman ini diterjemahkan dari bahasa yang tidak diketahui ke <ph name="LANGUAGE_LANGUAGE"/></translation>
 <translation id="4813512666221746211">Ralat rangkaian</translation>
@@ -175,6 +183,7 @@
 <translation id="2639739919103226564">Status:</translation>
 <translation id="1832546148887467272">Beralih kepada <ph name="NEW_GOOGLE_HOST"/></translation>
 <translation id="5095208057601539847">Wilayah</translation>
+<translation id="3934680773876859118">Gagal untuk memuatkan dokumen PDF</translation>
 <translation id="1152021252151287493">Tandatangan pengesahan tidak sah.</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="2721148159707890343">Permintaan berjaya</translation>

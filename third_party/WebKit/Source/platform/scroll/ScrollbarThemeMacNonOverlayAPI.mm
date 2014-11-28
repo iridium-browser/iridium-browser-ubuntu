@@ -33,6 +33,7 @@
 
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageBuffer.h"
+#include "platform/mac/ThemeMac.h"
 #include "platform/scroll/ScrollbarThemeClient.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebRect.h"
@@ -70,18 +71,6 @@ void ScrollbarThemeMacNonOverlayAPI::updateButtonPlacement()
     }
 }
 
-static blink::WebThemeEngine::State scrollbarStateToThemeState(ScrollbarThemeClient* scrollbar)
-{
-    if (!scrollbar->enabled())
-        return blink::WebThemeEngine::StateDisabled;
-    if (!scrollbar->isScrollableAreaActive())
-        return blink::WebThemeEngine::StateInactive;
-    if (scrollbar->pressedPart() == ThumbPart)
-        return blink::WebThemeEngine::StatePressed;
-
-    return blink::WebThemeEngine::StateActive;
-}
-
 // Override ScrollbarThemeMacCommon::paint() to add support for the following:
 //     - drawing using WebThemeEngine functions
 //     - drawing tickmarks
@@ -100,7 +89,8 @@ bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, Grap
     trackInfo.max = scrollbar->maximum();
     trackInfo.value = scrollbar->currentPos();
     trackInfo.trackInfo.scrollbar.viewsize = scrollbar->visibleSize();
-    trackInfo.attributes = 0;
+    trackInfo.attributes = hasThumb(scrollbar) ? kThemeTrackShowThumb : 0;
+
     if (scrollbar->orientation() == HorizontalScrollbar)
         trackInfo.attributes |= kThemeTrackHorizontal;
 
@@ -134,8 +124,11 @@ bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, Grap
         drawingContext = imageBuffer->context();
     }
 
-    // Draw thumbless.
-    gfx::SkiaBitLocker bitLocker(drawingContext->canvas());
+    // Draw the track and its thumb.
+    gfx::SkiaBitLocker bitLocker(
+        drawingContext->canvas(),
+        ThemeMac::inflateRectForAA(scrollbar->frameRect()),
+        drawingContext->deviceScaleFactor());
     CGContextRef cgContext = bitLocker.cgContext();
     HIThemeDrawTrack(&trackInfo, 0, cgContext, kHIThemeOrientationNormal);
 
@@ -150,24 +143,6 @@ bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, Grap
     tickmarkTrackRect.setX(tickmarkTrackRect.x() + 2);
     tickmarkTrackRect.setWidth(tickmarkTrackRect.width() - 5);
     paintGivenTickmarks(drawingContext, scrollbar, tickmarkTrackRect, tickmarks);
-
-    if (hasThumb(scrollbar)) {
-        blink::WebThemeEngine::ScrollbarInfo scrollbarInfo;
-        scrollbarInfo.orientation = scrollbar->orientation() == HorizontalScrollbar ? blink::WebThemeEngine::ScrollbarOrientationHorizontal : blink::WebThemeEngine::ScrollbarOrientationVertical;
-        scrollbarInfo.parent = scrollbar->isScrollViewScrollbar() ? blink::WebThemeEngine::ScrollbarParentScrollView : blink::WebThemeEngine::ScrollbarParentRenderLayer;
-        scrollbarInfo.maxValue = scrollbar->maximum();
-        scrollbarInfo.currentValue = scrollbar->currentPos();
-        scrollbarInfo.visibleSize = scrollbar->visibleSize();
-        scrollbarInfo.totalSize = scrollbar->totalSize();
-
-        blink::WebCanvas* webCanvas = drawingContext->canvas();
-        blink::Platform::current()->themeEngine()->paintScrollbarThumb(
-            webCanvas,
-            scrollbarStateToThemeState(scrollbar),
-            scrollbar->controlSize() == RegularScrollbar ? blink::WebThemeEngine::SizeRegular : blink::WebThemeEngine::SizeSmall,
-            blink::WebRect(scrollbar->frameRect()),
-            scrollbarInfo);
-    }
 
     if (!canDrawDirectly) {
         ASSERT(imageBuffer);

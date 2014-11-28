@@ -28,7 +28,7 @@ def print_landmines():
       builder() == 'ninja'):
     print 'Need to clobber winja goma due to backend cwd cache fix.'
   if platform() == 'android':
-    print 'Clobber: To delete generated class files (we just use jars now).'
+    print 'Clobber: To delete generated mojo class files.'
   if platform() == 'win' and builder() == 'ninja':
     print 'Compile on cc_unittests fails due to symbols removed in r185063.'
   if platform() == 'linux' and builder() == 'ninja':
@@ -55,6 +55,7 @@ def print_landmines():
   print 'Need to clobber everything due to build_nexe change in nacl r13424'
   print '[chromium-dev] PSA: clobber build needed for IDR_INSPECTOR_* compil...'
   print 'blink_resources.grd changed: crbug.com/400860'
+  print 'ninja dependency cycle: crbug.com/408192'
 
 
 def main():

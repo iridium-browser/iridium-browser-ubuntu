@@ -86,7 +86,7 @@ PassOwnPtrWillBeRawPtr<WebGLRenderingContext> WebGLRenderingContext::create(HTML
     }
     blink::WebGraphicsContext3D::Attributes attributes = attrs->attributes(document.topDocument().url().string(), settings, 1);
     OwnPtr<blink::WebGraphicsContext3D> context = adoptPtr(blink::Platform::current()->createOffscreenGraphicsContext3D(attributes, 0));
-    if (!context || !context->makeContextCurrent()) {
+    if (!context) {
         canvas->dispatchEvent(WebGLContextEvent::create(EventTypeNames::webglcontextcreationerror, false, true, "Could not create a WebGL context."));
         return nullptr;
     }
@@ -112,7 +112,6 @@ PassOwnPtrWillBeRawPtr<WebGLRenderingContext> WebGLRenderingContext::create(HTML
 WebGLRenderingContext::WebGLRenderingContext(HTMLCanvasElement* passedCanvas, PassOwnPtr<blink::WebGraphicsContext3D> context, WebGLContextAttributes* requestedAttributes)
     : WebGLRenderingContextBase(passedCanvas, context, requestedAttributes)
 {
-    ScriptWrappable::init(this);
 }
 
 WebGLRenderingContext::~WebGLRenderingContext()

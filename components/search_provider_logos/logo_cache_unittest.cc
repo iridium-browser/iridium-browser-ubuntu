@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
@@ -79,8 +79,8 @@ void ExpectMetadataEqual(const LogoMetadata& expected_metadata,
 
 void ExpectLogosEqual(const EncodedLogo& expected_logo,
                       const EncodedLogo& actual_logo) {
-  ASSERT_TRUE(expected_logo.encoded_image);
-  ASSERT_TRUE(actual_logo.encoded_image);
+  ASSERT_TRUE(expected_logo.encoded_image.get());
+  ASSERT_TRUE(actual_logo.encoded_image.get());
   EXPECT_TRUE(expected_logo.encoded_image->Equals(actual_logo.encoded_image));
   ExpectMetadataEqual(expected_logo.metadata, actual_logo.metadata);
 }

@@ -110,6 +110,11 @@ public:
         ASSERT_NOT_REACHED();
     }
 
+    static void registerDelayedMarkNoTracing(...)
+    {
+        ASSERT_NOT_REACHED();
+    }
+
     static void registerWeakMembers(...)
     {
         ASSERT_NOT_REACHED();
@@ -144,6 +149,9 @@ public:
     {
         return *other;
     }
+
+    static void enterNoAllocationScope() { }
+    static void leaveNoAllocationScope() { }
 
 private:
     WTF_EXPORT static void* backingAllocate(size_t);

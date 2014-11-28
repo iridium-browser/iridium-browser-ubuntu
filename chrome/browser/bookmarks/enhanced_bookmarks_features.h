@@ -9,7 +9,12 @@
 
 #include "extensions/common/extension.h"
 
+namespace about_flags {
+class FlagsStorage;
+}  // namespace about_flags
+
 class PrefService;
+class Profile;
 
 // States for bookmark experiment. They are set by Chrome sync into
 // sync_driver::prefs::kEnhancedBookmarksExperimentEnabled user preference and
@@ -30,25 +35,40 @@ enum BookmarksExperimentState {
 bool GetBookmarksExperimentExtensionID(const PrefService* user_prefs,
                                        std::string* extension_id);
 
-// Updates bookmark experiment state based on information from Chrome sync
-// and Finch experiments.
+// Updates bookmark experiment state based on information from Chrome sync,
+// Finch experiments, and command line flag.
 void UpdateBookmarksExperimentState(
     PrefService* user_prefs,
     PrefService* local_state,
     bool user_signed_in,
     BookmarksExperimentState experiment_enabled_from_sync);
 
+// Same as UpdateBookmarksExperimentState, but the last argument with
+// BOOKMARKS_EXPERIMENT_ENABLED_FROM_SYNC_UNKNOWN.
+// Intended for performing initial configuration of bookmarks experiments
+// when the browser is first initialized.
+void InitBookmarksExperimentState(Profile* profile);
+
 // Sets flag to opt-in user into Finch experiment.
 void ForceFinchBookmarkExperimentIfNeeded(
     PrefService* local_state,
     BookmarksExperimentState bookmarks_experiment_state);
 
-// Returns true if enhanced bookmarks experiment is enabled.
-// Experiment could be enable from Chrome sync or from Finch.
-bool IsEnhancedBookmarksExperimentEnabled();
+// Returns true if enhanced bookmarks experiment is running.
+// Experiment could run by Chrome sync or by Finch.
+// Note that this doesn't necessarily mean that enhanced bookmarks
+// is enabled, e.g., user can opt out using a flag.
+bool IsEnhancedBookmarksExperimentEnabled(
+    about_flags::FlagsStorage* flags_storage);
 
 #if defined(OS_ANDROID)
-bool IsEnhancedBookmarkImageFetchingEnabled();
+// Returns true if enhanced bookmark salient image prefetching is enabled.
+// This can be controlled by field trial.
+bool IsEnhancedBookmarkImageFetchingEnabled(const PrefService* user_prefs);
+
+// Returns true if enhanced bookmarks is enabled.
+bool IsEnhancedBookmarksEnabled(const PrefService* user_prefs);
+
 #endif
 
 // Returns true when flag enable-dom-distiller is set or enabled from Finch.

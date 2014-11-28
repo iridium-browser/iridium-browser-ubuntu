@@ -8,7 +8,6 @@
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/quic_protocol.h"
-#include "net/quic/quic_sent_packet_manager.h"
 #include "net/quic/quic_time.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
@@ -31,7 +30,6 @@ class QuicConfigTest : public ::testing::Test {
 };
 
 TEST_F(QuicConfigTest, ToHandshakeMessage) {
-  ValueRestore<bool> old_flag(&FLAGS_enable_quic_pacing, false);
   config_.SetDefaults();
   config_.SetInitialFlowControlWindowToSend(
       kInitialSessionFlowControlWindowForTest);
@@ -78,29 +76,14 @@ TEST_F(QuicConfigTest, ToHandshakeMessage) {
   EXPECT_EQ(kQBIC, *out);
 }
 
-TEST_F(QuicConfigTest, ToHandshakeMessageWithPacing) {
-  ValueRestore<bool> old_flag(&FLAGS_enable_quic_pacing, true);
-
-  config_.SetDefaults();
-  CryptoHandshakeMessage msg;
-  config_.ToHandshakeMessage(&msg);
-
-  const QuicTag* out;
-  size_t out_len;
-  EXPECT_EQ(QUIC_NO_ERROR, msg.GetTaglist(kCGST, &out, &out_len));
-  EXPECT_EQ(1u, out_len);
-  EXPECT_EQ(kQBIC, out[0]);
-}
-
 TEST_F(QuicConfigTest, ProcessClientHello) {
   QuicConfig client_config;
   QuicTagVector cgst;
-  cgst.push_back(kTSTP);
   cgst.push_back(kQBIC);
   client_config.set_congestion_feedback(cgst, kQBIC);
   client_config.set_idle_connection_state_lifetime(
-      QuicTime::Delta::FromSeconds(2 * kDefaultTimeoutSecs),
-      QuicTime::Delta::FromSeconds(kDefaultTimeoutSecs));
+      QuicTime::Delta::FromSeconds(2 * kMaximumIdleTimeoutSecs),
+      QuicTime::Delta::FromSeconds(kMaximumIdleTimeoutSecs));
   client_config.set_max_streams_per_connection(
       2 * kDefaultMaxStreamsPerConnection, kDefaultMaxStreamsPerConnection);
   client_config.SetInitialRoundTripTimeUsToSend(
@@ -124,7 +107,7 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
   EXPECT_EQ(QUIC_NO_ERROR, error);
   EXPECT_TRUE(config_.negotiated());
   EXPECT_EQ(kQBIC, config_.congestion_feedback());
-  EXPECT_EQ(QuicTime::Delta::FromSeconds(kDefaultTimeoutSecs),
+  EXPECT_EQ(QuicTime::Delta::FromSeconds(kMaximumIdleTimeoutSecs),
             config_.idle_connection_state_lifetime());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection,
             config_.max_streams_per_connection());
@@ -152,8 +135,8 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
   cgst.push_back(kQBIC);
   server_config.set_congestion_feedback(cgst, kQBIC);
   server_config.set_idle_connection_state_lifetime(
-      QuicTime::Delta::FromSeconds(kDefaultTimeoutSecs / 2),
-      QuicTime::Delta::FromSeconds(kDefaultTimeoutSecs / 2));
+      QuicTime::Delta::FromSeconds(kMaximumIdleTimeoutSecs / 2),
+      QuicTime::Delta::FromSeconds(kMaximumIdleTimeoutSecs / 2));
   server_config.set_max_streams_per_connection(
       kDefaultMaxStreamsPerConnection / 2,
       kDefaultMaxStreamsPerConnection / 2);
@@ -175,7 +158,7 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
   EXPECT_EQ(QUIC_NO_ERROR, error);
   EXPECT_TRUE(config_.negotiated());
   EXPECT_EQ(kQBIC, config_.congestion_feedback());
-  EXPECT_EQ(QuicTime::Delta::FromSeconds(kDefaultTimeoutSecs / 2),
+  EXPECT_EQ(QuicTime::Delta::FromSeconds(kMaximumIdleTimeoutSecs / 2),
             config_.idle_connection_state_lifetime());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection / 2,
             config_.max_streams_per_connection());
@@ -256,8 +239,8 @@ TEST_F(QuicConfigTest, MissingValueInSHLO) {
 TEST_F(QuicConfigTest, OutOfBoundSHLO) {
   QuicConfig server_config;
   server_config.set_idle_connection_state_lifetime(
-      QuicTime::Delta::FromSeconds(2 * kDefaultTimeoutSecs),
-      QuicTime::Delta::FromSeconds(2 * kDefaultTimeoutSecs));
+      QuicTime::Delta::FromSeconds(2 * kMaximumIdleTimeoutSecs),
+      QuicTime::Delta::FromSeconds(2 * kMaximumIdleTimeoutSecs));
 
   CryptoHandshakeMessage msg;
   server_config.ToHandshakeMessage(&msg);
@@ -271,7 +254,7 @@ TEST_F(QuicConfigTest, MultipleNegotiatedValuesInVectorTag) {
   QuicConfig server_config;
   QuicTagVector cgst;
   cgst.push_back(kQBIC);
-  cgst.push_back(kTSTP);
+  cgst.push_back(kTBBR);
   server_config.set_congestion_feedback(cgst, kQBIC);
 
   CryptoHandshakeMessage msg;
@@ -286,8 +269,8 @@ TEST_F(QuicConfigTest, NoOverLapInCGST) {
   QuicConfig server_config;
   server_config.SetDefaults();
   QuicTagVector cgst;
-  cgst.push_back(kTSTP);
-  server_config.set_congestion_feedback(cgst, kTSTP);
+  cgst.push_back(kTBBR);
+  server_config.set_congestion_feedback(cgst, kTBBR);
 
   CryptoHandshakeMessage msg;
   string error_details;

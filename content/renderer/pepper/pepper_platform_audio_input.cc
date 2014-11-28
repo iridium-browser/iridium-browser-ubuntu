@@ -172,7 +172,6 @@ bool PepperPlatformAudioInput::Initialize(
   params_.Reset(media::AudioParameters::AUDIO_PCM_LINEAR,
                 media::CHANNEL_LAYOUT_MONO,
                 ppapi::kAudioInputChannels,
-                0,
                 sample_rate,
                 ppapi::kBitsPerAudioInputSample,
                 frames_per_buffer);
@@ -290,7 +289,7 @@ PepperMediaDeviceManager* PepperPlatformAudioInput::GetMediaDeviceManager() {
   RenderFrameImpl* const render_frame =
       RenderFrameImpl::FromRoutingID(render_frame_id_);
   return render_frame ?
-      PepperMediaDeviceManager::GetForRenderFrame(render_frame) : NULL;
+      PepperMediaDeviceManager::GetForRenderFrame(render_frame).get() : NULL;
 }
 
 }  // namespace content

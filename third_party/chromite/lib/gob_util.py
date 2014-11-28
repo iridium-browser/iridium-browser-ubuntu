@@ -7,6 +7,8 @@
 https://gerrit-review.googlesource.com/Documentation/rest-api.html
 """
 
+from __future__ import print_function
+
 import base64
 import httplib
 import json
@@ -15,6 +17,7 @@ import netrc
 import os
 import socket
 import urllib
+import urlparse
 from cStringIO import StringIO
 
 from chromite.lib import retry_util
@@ -162,13 +165,13 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     home = os.environ.get('HOME', '~')
     url = 'https://%s/new-password' % host
     if response.status in (302, 303, 307):
-      err_prefix = ('Redirect found; missing/bad %s/.netrc credentials?\n'
-                    ' See %s' % (home, url))
+      err_prefix = ('Redirect found; missing/bad %s/.netrc credentials or '
+                    'permissions (0600)?\n See %s' % (home, url))
     elif response.status in (400,):
       err_prefix = 'Permission error; talk to the admins of the GoB instance'
     elif response.status in (401,):
-      err_prefix = ('Authorization error; missing/bad %s/.netrc credentials?\n'
-                    ' See %s' % (home, url))
+      err_prefix = ('Authorization error; missing/bad %s/.netrc credentials or '
+                    'permissions (0600)?\n See %s' % (home, url))
     elif response.status in (422,):
       err_prefix = ('Bad request body?  Response body: "%s"' % response.read())
 
@@ -458,3 +461,19 @@ def ResetReviewLabels(host, change, label, value='0', revision='current',
     elif new_revision != revision:
       raise GOBError(200, 'While resetting labels on change "%s", '
                      'a new patchset was uploaded.' % change)
+
+
+def GetTipOfTrunkRevision(git_url):
+  """Returns the current git revision on the master branch."""
+  parsed_url = urlparse.urlparse(git_url)
+  path = parsed_url[2].rstrip('/') + '/+log/master?n=1&format=JSON'
+  j = FetchUrlJson(parsed_url[1], path, ignore_404=False)
+  if not j:
+    raise GOBError(
+        'Could not find revision information from %s' % git_url)
+  try:
+    return j['log'][0]['commit']
+  except (IndexError, KeyError, TypeError):
+    msg = ('The json returned by https://%s%s has an unfamiliar structure:\n'
+           '%s\n' % (parsed_url[1], path, j))
+    raise GOBError(msg)

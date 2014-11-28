@@ -70,7 +70,6 @@ class LinphoneMediaEngine : public MediaEngineInterface {
   virtual VideoMediaChannel* CreateVideoChannel(VoiceMediaChannel* voice_ch);
   virtual SoundclipMedia* CreateSoundclip() { return NULL; }
   virtual bool SetAudioOptions(int options) { return true; }
-  virtual bool SetVideoOptions(int options) { return true; }
   virtual bool SetDefaultVideoEncoderConfig(const VideoEncoderConfig& config) {
     return true;
   }
@@ -81,7 +80,6 @@ class LinphoneMediaEngine : public MediaEngineInterface {
   virtual bool SetOutputVolume(int level) { return true; }
   virtual int GetInputLevel() { return 0; }
   virtual bool SetLocalMonitor(bool enable) { return true; }
-  virtual bool SetLocalRenderer(VideoRenderer* renderer) { return true; }
   // TODO: control channel send?
   virtual bool SetVideoCapture(bool capture) { return true; }
   virtual const std::vector<AudioCodec>& audio_codecs() {

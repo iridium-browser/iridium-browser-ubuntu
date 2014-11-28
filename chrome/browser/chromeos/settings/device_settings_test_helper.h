@@ -20,8 +20,8 @@
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
-#include "chrome/browser/chromeos/settings/mock_owner_key_util.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "components/ownership/mock_owner_key_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -29,7 +29,7 @@ class TestingProfile;
 
 namespace chromeos {
 
-class FakeDBusThreadManager;
+class DBusThreadManagerSetter;
 
 // A helper class for tests mocking out session_manager's device settings
 // interface. The pattern is to initialize DeviceSettingsService with the helper
@@ -41,9 +41,6 @@ class DeviceSettingsTestHelper : public SessionManagerClient {
   // Wraps a device settings service instance for testing.
   DeviceSettingsTestHelper();
   virtual ~DeviceSettingsTestHelper();
-
-  // Flushes operations on the current message loop and the blocking pool.
-  void FlushLoops();
 
   // Runs all pending store callbacks.
   void FlushStore();
@@ -189,12 +186,12 @@ class DeviceSettingsTestBase : public testing::Test {
   FakeUserManager* user_manager_;
   ScopedUserManagerEnabler user_manager_enabler_;
   scoped_ptr<TestingProfile> profile_;
-  scoped_refptr<MockOwnerKeyUtil> owner_key_util_;
+  scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util_;
   // Local DeviceSettingsService instance for tests. Avoid using in combination
   // with the global instance (DeviceSettingsService::Get()).
   DeviceSettingsService device_settings_service_;
 
-  chromeos::FakeDBusThreadManager* fake_dbus_thread_manager_;
+  scoped_ptr<DBusThreadManagerSetter> dbus_setter_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DeviceSettingsTestBase);

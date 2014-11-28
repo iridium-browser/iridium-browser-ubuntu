@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -12,6 +10,8 @@ replaces known old gerrit/gerrit-int URLs with Gerrit on Borg ones.
 It doesn't commit or push any changes, just updates files in a working
 directory.
 """
+
+from __future__ import print_function
 
 import collections
 import os
@@ -145,13 +145,13 @@ def main(argv):
     for manifest in EnumerateManifests(options.manifest_versions_dir):
       remotes.update(GetRemotes(manifest))
     # Pretty print a table.
-    print 'Remotes found:'
+    print('Remotes found:')
     row_formatter = lambda a, b, c: ''.join(
         [a, ' ' * (16 - len(a)), b, ' ' * (45 - len(b)), c])
-    print row_formatter('Name', 'Remote', 'Review')
-    print '-' * 80
+    print(row_formatter('Name', 'Remote', 'Review'))
+    print('-' * 80)
     for remote in sorted(remotes):
-      print row_formatter(remote.name, remote.fetch, remote.review or '')
+      print(row_formatter(remote.name, remote.fetch, remote.review or ''))
     return 0
 
   cros_build_lib.Info('Updating manifests...')

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -17,8 +18,9 @@
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
-#include "chromeos/dbus/fake_dbus_thread_manager.h"
+#include "content/public/test/test_utils.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -47,12 +49,13 @@ class DeviceCloudPolicyStoreChromeOSTest
             &device_settings_service_,
             install_attributes_.get(),
             base::MessageLoopProxy::current())) {
-    fake_dbus_thread_manager_->SetCryptohomeClient(
-        scoped_ptr<chromeos::CryptohomeClient>(fake_cryptohome_client_));
   }
 
   virtual void SetUp() OVERRIDE {
     DeviceSettingsTestBase::SetUp();
+
+    dbus_setter_->SetCryptohomeClient(
+        scoped_ptr<chromeos::CryptohomeClient>(fake_cryptohome_client_));
 
     base::RunLoop loop;
     EnterpriseInstallAttributes::LockResult result;
@@ -182,7 +185,7 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreKeyRotation) {
   device_policy_.SetDefaultNewSigningKey();
   device_policy_.Build();
   store_->Store(device_policy_.policy());
-  device_settings_test_helper_.FlushLoops();
+  content::RunAllBlockingPoolTasksUntilIdle();
   device_settings_test_helper_.FlushStore();
   owner_key_util_->SetPublicKeyFromPrivateKey(
       *device_policy_.GetNewSigningKey());

@@ -284,26 +284,15 @@ IntRect HitTestResult::imageRect() const
 
 KURL HitTestResult::absoluteImageURL() const
 {
-    return absoluteImageURLInternal(false);
-}
-
-KURL HitTestResult::absoluteImageURLIncludingCanvasDataURL() const
-{
-    return absoluteImageURLInternal(true);
-}
-
-KURL HitTestResult::absoluteImageURLInternal(bool allowCanvas) const
-{
     if (!m_innerNonSharedNode)
         return KURL();
 
     RenderObject* renderer = m_innerNonSharedNode->renderer();
-    if (!(renderer && (renderer->isImage() || renderer->isCanvas())))
+    if (!(renderer && renderer->isImage()))
         return KURL();
 
     AtomicString urlString;
-    if ((allowCanvas && isHTMLCanvasElement(*m_innerNonSharedNode))
-        || isHTMLEmbedElement(*m_innerNonSharedNode)
+    if (isHTMLEmbedElement(*m_innerNonSharedNode)
         || isHTMLImageElement(*m_innerNonSharedNode)
         || isHTMLInputElement(*m_innerNonSharedNode)
         || isHTMLObjectElement(*m_innerNonSharedNode)
@@ -350,9 +339,9 @@ bool HitTestResult::isLiveLink() const
 
 bool HitTestResult::isMisspelled() const
 {
-    if (!targetNode() || !targetNode()->renderer())
+    if (!innerNode() || !innerNode()->renderer())
         return false;
-    VisiblePosition pos(targetNode()->renderer()->positionForPoint(localPoint()));
+    VisiblePosition pos(innerNode()->renderer()->positionForPoint(localPoint()));
     if (pos.isNull())
         return false;
     return m_innerNonSharedNode->document().markers().markersInRange(
@@ -464,15 +453,19 @@ HitTestResult::NodeSet& HitTestResult::mutableRectBasedTestResult()
 
 void HitTestResult::resolveRectBasedTest(Node* resolvedInnerNode, const LayoutPoint& resolvedPointInMainFrame)
 {
-    // FIXME: For maximum fidelity with point-based hit tests we should probably make use
-    // of RenderObject::updateHitTestResult here. See http://crbug.com/398914.
     ASSERT(isRectBasedTest());
     ASSERT(m_hitTestLocation.containsPoint(resolvedPointInMainFrame));
-    setInnerNode(resolvedInnerNode);
-    setInnerNonSharedNode(resolvedInnerNode);
     m_hitTestLocation = HitTestLocation(resolvedPointInMainFrame);
     m_pointInInnerNodeFrame = resolvedPointInMainFrame;
+    m_innerNode = nullptr;
+    m_innerNonSharedNode = nullptr;
+    m_innerPossiblyPseudoNode = nullptr;
     m_rectBasedTestResult = nullptr;
+
+    // Update the HitTestResult as if the supplied node had been hit in normal point-based hit-test.
+    // Note that we don't know the local point after a rect-based hit-test, but we never use
+    // it so shouldn't bother with the cost of computing it.
+    resolvedInnerNode->renderer()->updateHitTestResult(*this, LayoutPoint());
     ASSERT(!isRectBasedTest());
 }
 

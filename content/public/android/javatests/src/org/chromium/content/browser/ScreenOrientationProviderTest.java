@@ -12,7 +12,7 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.MockOrientationObserver;
 import org.chromium.content.browser.test.util.OrientationChangeObserverCriteria;
-import org.chromium.content.common.ScreenOrientationValues;
+import org.chromium.content_public.common.ScreenOrientationValues;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
@@ -49,7 +49,7 @@ public class ScreenOrientationProviderTest extends ContentShellTestBase {
                 // The orientation should not change but might and the value could be anything.
                 return true;
             default:
-                return mObserver.mHasChanged == false;
+                return !mObserver.mHasChanged;
         }
     }
 
@@ -63,7 +63,7 @@ public class ScreenOrientationProviderTest extends ContentShellTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                ScreenOrientationProvider.lockOrientation((byte)orientations);
+                ScreenOrientationProvider.lockOrientation((byte) orientations);
             }
         });
         getInstrumentation().waitForIdleSync();

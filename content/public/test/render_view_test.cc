@@ -14,14 +14,15 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/public/test/frame_load_waiter.h"
 #include "content/renderer/history_controller.h"
 #include "content/renderer/history_serialization.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
-#include "content/test/frame_load_waiter.h"
 #include "content/test/mock_render_process.h"
+#include "content/test/test_content_client.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
@@ -340,8 +341,8 @@ void RenderViewTest::Reload(const GURL& url) {
   params.url = url;
   params.navigation_type = FrameMsg_Navigate_Type::RELOAD;
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->main_render_frame()->OnNavigate(params);
-  FrameLoadWaiter(impl->main_render_frame()).Wait();
+  impl->GetMainRenderFrame()->OnNavigate(params);
+  FrameLoadWaiter(impl->GetMainRenderFrame()).Wait();
 }
 
 uint32 RenderViewTest::GetNavigationIPCType() {
@@ -355,7 +356,7 @@ void RenderViewTest::Resize(gfx::Size new_size,
   params.screen_info = blink::WebScreenInfo();
   params.new_size = new_size;
   params.physical_backing_size = new_size;
-  params.overdraw_bottom_height = 0.f;
+  params.top_controls_layout_height = 0.f;
   params.resizer_rect = resizer_rect;
   params.is_fullscreen = is_fullscreen;
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(0, params));
@@ -372,7 +373,7 @@ void RenderViewTest::DidNavigateWithinPage(blink::WebLocalFrame* frame,
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   blink::WebHistoryItem item;
   item.initialize();
-  impl->main_render_frame()->didNavigateWithinPage(
+  impl->GetMainRenderFrame()->didNavigateWithinPage(
       frame,
       item,
       is_new_navigation ? blink::WebStandardCommit
@@ -391,7 +392,7 @@ blink::WebWidget* RenderViewTest::GetWebWidget() {
 
 
 ContentClient* RenderViewTest::CreateContentClient() {
-  return new ContentClient;
+  return new TestContentClient;
 }
 
 ContentBrowserClient* RenderViewTest::CreateContentBrowserClient() {
@@ -411,7 +412,7 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
 
   FrameMsg_Navigate_Params navigate_params;
   navigate_params.navigation_type = FrameMsg_Navigate_Type::NORMAL;
-  navigate_params.transition = PAGE_TRANSITION_FORWARD_BACK;
+  navigate_params.transition = ui::PAGE_TRANSITION_FORWARD_BACK;
   navigate_params.current_history_list_length = history_list_length;
   navigate_params.current_history_list_offset = impl->history_list_offset();
   navigate_params.pending_history_list_offset = pending_offset;
@@ -419,9 +420,9 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
   navigate_params.page_state = state;
   navigate_params.request_time = base::Time::Now();
 
-  FrameMsg_Navigate navigate_message(impl->main_render_frame()->GetRoutingID(),
+  FrameMsg_Navigate navigate_message(impl->GetMainRenderFrame()->GetRoutingID(),
                                      navigate_params);
-  impl->main_render_frame()->OnMessageReceived(navigate_message);
+  impl->GetMainRenderFrame()->OnMessageReceived(navigate_message);
 
   // The load actually happens asynchronously, so we pump messages to process
   // the pending continuation.

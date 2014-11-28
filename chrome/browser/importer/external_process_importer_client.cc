@@ -12,10 +12,10 @@
 #include "chrome/common/importer/firefox_importer_utils.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/common/importer/profile_import_process_messages.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "grit/components_strings.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
@@ -106,6 +106,10 @@ bool ExternalProcessImporterClient::OnMessageReceived(
                         OnKeywordsImportReady)
     IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyFirefoxSearchEngData,
                         OnFirefoxSearchEngineDataReceived)
+    IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_AutofillFormDataImportStart,
+                        OnAutofillFormDataImportStart)
+    IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_AutofillFormDataImportGroup,
+                        OnAutofillFormDataImportGroup)
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyIE7PasswordInfo,
                         OnIE7PasswordReceived)
@@ -248,6 +252,28 @@ void ExternalProcessImporterClient::OnFirefoxSearchEngineDataReceived(
   if (cancelled_)
     return;
   bridge_->SetFirefoxSearchEnginesXMLData(search_engine_data);
+}
+
+void ExternalProcessImporterClient::OnAutofillFormDataImportStart(
+    size_t total_autofill_form_data_entry_count) {
+  if (cancelled_)
+    return;
+
+  total_autofill_form_data_entry_count_ = total_autofill_form_data_entry_count;
+  autofill_form_data_.reserve(total_autofill_form_data_entry_count);
+}
+
+void ExternalProcessImporterClient::OnAutofillFormDataImportGroup(
+    const std::vector<ImporterAutofillFormDataEntry>&
+        autofill_form_data_entry_group) {
+  if (cancelled_)
+    return;
+
+  autofill_form_data_.insert(autofill_form_data_.end(),
+                             autofill_form_data_entry_group.begin(),
+                             autofill_form_data_entry_group.end());
+  if (autofill_form_data_.size() == total_autofill_form_data_entry_count_)
+    bridge_->SetAutofillFormData(autofill_form_data_);
 }
 
 #if defined(OS_WIN)

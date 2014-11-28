@@ -15,13 +15,13 @@
  */
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources;
 import com.google.ipc.invalidation.external.client.SystemResources.Storage;
 import com.google.ipc.invalidation.external.client.types.Callback;
 import com.google.ipc.invalidation.external.client.types.SimplePair;
 import com.google.ipc.invalidation.external.client.types.Status;
 import com.google.ipc.invalidation.ticl.InvalidationClientCore;
+import com.google.ipc.invalidation.util.Preconditions;
 
 import android.content.Context;
 

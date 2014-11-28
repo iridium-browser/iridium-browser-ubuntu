@@ -14,7 +14,23 @@ function NavigationModelItem(label) {
 }
 
 NavigationModelItem.prototype = {
-  get label() { return this.label_; },
+  get label() { return this.label_; }
+};
+
+/**
+ * Check whether given two model items are same.
+ * @param {NavigationModelItem} item1 The first item to be compared.
+ * @param {NavigationModelItem} item2 The second item to be compared.
+ * @return {boolean} True if given two model items are same.
+ */
+NavigationModelItem.isSame = function(item1, item2) {
+  if (item1.isVolume != item2.isVolume)
+    return false;
+
+  if (item1.isVolume)
+    return item1.volumeInfo === item2.volumeInfo;
+  else
+    return util.isSameEntry(item1.entry, item2.entry);
 };
 
 /**

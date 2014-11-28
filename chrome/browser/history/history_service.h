@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -32,9 +33,9 @@
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/common/page_transition_types.h"
 #include "sql/init_status.h"
 #include "sync/api/syncable_service.h"
+#include "ui/base/page_transition_types.h"
 
 #if defined(OS_ANDROID)
 class AndroidHistoryProviderService;
@@ -45,6 +46,7 @@ class PageUsageData;
 class PageUsageRequest;
 class Profile;
 struct ImportedFaviconUsage;
+class SkBitmap;
 
 namespace base {
 class FilePath;
@@ -62,6 +64,7 @@ class HistoryClient;
 class HistoryDatabase;
 class HistoryDBTask;
 class HistoryQueryTest;
+class HistoryTest;
 class InMemoryHistoryBackend;
 class InMemoryURLIndex;
 class InMemoryURLIndexTest;
@@ -110,17 +113,6 @@ class HistoryService : public content::NotificationObserver,
 
   // Returns true if the backend has finished loading.
   bool backend_loaded() const { return backend_loaded_; }
-
-  // Called on shutdown, this will tell the history backend to complete and
-  // will release pointers to it. No other functions should be called once
-  // cleanup has happened that may dispatch to the history thread (because it
-  // will be NULL).
-  //
-  // In practice, this will be called by the service manager (BrowserProcess)
-  // when it is being destroyed. Because that reference is being destroyed, it
-  // should be impossible for anybody else to call the service, even if it is
-  // still in memory (pending requests may be holding a reference to us).
-  void Cleanup();
 
   // Context ids are used to scope page IDs (see AddPage). These contexts
   // must tell us when they are being invalidated so that we can clear
@@ -190,7 +182,7 @@ class HistoryService : public content::NotificationObserver,
                int32 page_id,
                const GURL& referrer,
                const history::RedirectList& redirects,
-               content::PageTransition transition,
+               ui::PageTransition transition,
                history::VisitSource visit_source,
                bool did_replace_entry);
 
@@ -451,6 +443,16 @@ class HistoryService : public content::NotificationObserver,
 
   void NotifyVisitDBObserversOnAddVisit(const history::BriefVisitInfo& info);
 
+  // This callback is invoked when favicon change for urls.
+  typedef base::Callback<void(const std::set<GURL>&)> OnFaviconChangedCallback;
+
+  // Add a callback to the list. The callback will remain registered until the
+  // returned Subscription is destroyed. This must occurs before HistoryService
+  // is destroyed.
+  scoped_ptr<base::CallbackList<void(const std::set<GURL>&)>::Subscription>
+      AddFaviconChangedCallback(const OnFaviconChangedCallback& callback)
+      WARN_UNUSED_RESULT;
+
   // Testing -------------------------------------------------------------------
 
   // Runs |flushed| after bouncing off the history thread.
@@ -533,6 +535,7 @@ class HistoryService : public content::NotificationObserver,
   friend class history::HistoryQueryTest;
   friend class HistoryOperation;
   friend class HistoryQuickProviderTest;
+  friend class history::HistoryTest;
   friend class HistoryURLProvider;
   friend class HistoryURLProviderTest;
   friend class history::InMemoryURLIndexTest;
@@ -540,6 +543,17 @@ class HistoryService : public content::NotificationObserver,
   friend class PageUsageRequest;
   friend class RedirectRequest;
   friend class TestingProfile;
+
+  // Called on shutdown, this will tell the history backend to complete and
+  // will release pointers to it. No other functions should be called once
+  // cleanup has happened that may dispatch to the history thread (because it
+  // will be NULL).
+  //
+  // In practice, this will be called by the service manager (BrowserProcess)
+  // when it is being destroyed. Because that reference is being destroyed, it
+  // should be impossible for anybody else to call the service, even if it is
+  // still in memory (pending requests may be holding a reference to us).
+  void Cleanup();
 
   // Implementation of content::NotificationObserver.
   virtual void Observe(int type,
@@ -694,21 +708,16 @@ class HistoryService : public content::NotificationObserver,
                     scoped_refptr<base::RefCountedMemory> bitmap_data,
                     const gfx::Size& pixel_size);
 
-  // Used by the FaviconService to set the favicons for a page on the history
-  // backend.
-  // |favicon_bitmap_data| replaces all the favicon bitmaps mapped to
-  // |page_url|.
-  // |expired| and |icon_type| fields in FaviconBitmapData are ignored.
-  // Use MergeFavicon() if |favicon_bitmap_data| is incomplete, and favicon
-  // bitmaps in the database should be preserved if possible. For instance,
-  // favicon bitmaps from sync are 1x only. MergeFavicon() is used to avoid
-  // deleting the 2x favicon bitmap if it is present in the history backend.
-  // See HistoryBackend::ValidateSetFaviconsParams() for more details on the
-  // criteria for |favicon_bitmap_data| to be valid.
+  // Used by the FaviconService to replace all of the favicon bitmaps mapped to
+  // |page_url| for |icon_type|.
+  // Use MergeFavicon() if |bitmaps| is incomplete, and favicon bitmaps in the
+  // database should be preserved if possible. For instance, favicon bitmaps
+  // from sync are 1x only. MergeFavicon() is used to avoid deleting the 2x
+  // favicon bitmap if it is present in the history backend.
   void SetFavicons(const GURL& page_url,
                    favicon_base::IconType icon_type,
-                   const std::vector<favicon_base::FaviconRawBitmapData>&
-                       favicon_bitmap_data);
+                   const GURL& icon_url,
+                   const std::vector<SkBitmap>& bitmaps);
 
   // Used by the FaviconService to mark the favicon for the page as being out
   // of date.
@@ -735,6 +744,9 @@ class HistoryService : public content::NotificationObserver,
   // Call to schedule a given task for running on the history thread with the
   // specified priority. The task will have ownership taken.
   void ScheduleTask(SchedulePriority priority, const base::Closure& task);
+
+  // Invokes all callback registered by AddFaviconChangedCallback.
+  void NotifyFaviconChanged(const std::set<GURL>& changed_favicons);
 
   // ScheduleAndForget ---------------------------------------------------------
   //
@@ -815,9 +827,6 @@ class HistoryService : public content::NotificationObserver,
                                       a, b, c, d, e));
   }
 
-  // All vended weak pointers are invalidated in Cleanup().
-  base::WeakPtrFactory<HistoryService> weak_ptr_factory_;
-
   base::ThreadChecker thread_checker_;
 
   content::NotificationRegistrar registrar_;
@@ -866,7 +875,13 @@ class HistoryService : public content::NotificationObserver,
 
   ObserverList<history::VisitDatabaseObserver> visit_database_observers_;
 
+  base::CallbackList<void(const std::set<GURL>&)>
+      favicon_changed_callback_list_;
+
   history::DeleteDirectiveHandler delete_directive_handler_;
+
+  // All vended weak pointers are invalidated in Cleanup().
+  base::WeakPtrFactory<HistoryService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryService);
 };

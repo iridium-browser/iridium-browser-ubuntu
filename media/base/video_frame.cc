@@ -14,7 +14,10 @@
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/limits.h"
 #include "media/base/video_util.h"
+
+#if !defined(MEDIA_FOR_CAST_IOS)
 #include "third_party/skia/include/core/SkBitmap.h"
+#endif
 
 namespace media {
 
@@ -181,11 +184,13 @@ scoped_refptr<VideoFrame> VideoFrame::WrapNativeTexture(
   return frame;
 }
 
+#if !defined(MEDIA_FOR_CAST_IOS)
 void VideoFrame::ReadPixelsFromNativeTexture(const SkBitmap& pixels) {
   DCHECK_EQ(format_, NATIVE_TEXTURE);
   if (!read_pixels_cb_.is_null())
     read_pixels_cb_.Run(pixels);
 }
+#endif
 
 // static
 scoped_refptr<VideoFrame> VideoFrame::WrapExternalPackedMemory(
@@ -274,6 +279,51 @@ scoped_refptr<VideoFrame> VideoFrame::WrapExternalDmabufs(
   }
 
   frame->no_longer_needed_cb_ = no_longer_needed_cb;
+  return frame;
+}
+#endif
+
+#if defined(OS_MACOSX)
+// static
+scoped_refptr<VideoFrame> VideoFrame::WrapCVPixelBuffer(
+    CVPixelBufferRef cv_pixel_buffer,
+    base::TimeDelta timestamp) {
+  DCHECK(cv_pixel_buffer);
+  DCHECK(CFGetTypeID(cv_pixel_buffer) == CVPixelBufferGetTypeID());
+
+  OSType cv_format = CVPixelBufferGetPixelFormatType(cv_pixel_buffer);
+  Format format;
+  // There are very few compatible CV pixel formats, so just check each.
+  if (cv_format == kCVPixelFormatType_420YpCbCr8Planar) {
+    format = Format::I420;
+  } else if (cv_format == kCVPixelFormatType_444YpCbCr8) {
+    format = Format::YV24;
+  } else if (cv_format == '420v') {
+    // TODO(jfroy): Use kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange when the
+    // minimum OS X and iOS SDKs permits it.
+    format = Format::NV12;
+  } else {
+    DLOG(ERROR) << "CVPixelBuffer format not supported: " << cv_format;
+    return NULL;
+  }
+
+  gfx::Size coded_size(CVImageBufferGetEncodedSize(cv_pixel_buffer));
+  gfx::Rect visible_rect(CVImageBufferGetCleanRect(cv_pixel_buffer));
+  gfx::Size natural_size(CVImageBufferGetDisplaySize(cv_pixel_buffer));
+
+  if (!IsValidConfig(format, coded_size, visible_rect, natural_size))
+    return NULL;
+
+  scoped_refptr<VideoFrame> frame(
+      new VideoFrame(format,
+                     coded_size,
+                     visible_rect,
+                     natural_size,
+                     scoped_ptr<gpu::MailboxHolder>(),
+                     timestamp,
+                     false));
+
+  frame->cv_pixel_buffer_.reset(cv_pixel_buffer, base::scoped_policy::RETAIN);
   return frame;
 }
 #endif
@@ -381,7 +431,7 @@ scoped_refptr<VideoFrame> VideoFrame::CreateTransparentFrame(
   const base::TimeDelta kZero;
   scoped_refptr<VideoFrame> frame = VideoFrame::CreateFrame(
       VideoFrame::YV12A, size, gfx::Rect(size), size, kZero);
-  FillYUVA(frame, kBlackY, kBlackUV, kBlackUV, kTransparentA);
+  FillYUVA(frame.get(), kBlackY, kBlackUV, kBlackUV, kTransparentA);
   return frame;
 }
 
@@ -689,19 +739,21 @@ VideoFrame::~VideoFrame() {
     base::ResetAndReturn(&no_longer_needed_cb_).Run();
 }
 
-bool VideoFrame::IsValidPlane(size_t plane) const {
-  return (plane < NumPlanes(format_));
+// static
+bool VideoFrame::IsValidPlane(size_t plane, VideoFrame::Format format) {
+  return (plane < NumPlanes(format));
 }
 
 int VideoFrame::stride(size_t plane) const {
-  DCHECK(IsValidPlane(plane));
+  DCHECK(IsValidPlane(plane, format_));
   return strides_[plane];
 }
 
-int VideoFrame::row_bytes(size_t plane) const {
-  DCHECK(IsValidPlane(plane));
-  int width = coded_size_.width();
-  switch (format_) {
+// static
+size_t VideoFrame::RowBytes(size_t plane, VideoFrame::Format format,
+                            int width) {
+  DCHECK(IsValidPlane(plane, format));
+  switch (format) {
     case VideoFrame::YV24:
       switch (plane) {
         case kYPlane:
@@ -754,75 +806,83 @@ int VideoFrame::row_bytes(size_t plane) const {
     case VideoFrame::NATIVE_TEXTURE:
       break;
   }
-  NOTREACHED() << "Unsupported video frame format/plane: "
-               << format_ << "/" << plane;
+  NOTREACHED() << "Unsupported video frame format/plane: " << format << "/"
+               << plane;
+  return 0;
+}
+
+int VideoFrame::row_bytes(size_t plane) const {
+  return RowBytes(plane, format_, coded_size_.width());
+}
+
+// static
+size_t VideoFrame::Rows(size_t plane, VideoFrame::Format format, int height) {
+  DCHECK(IsValidPlane(plane, format));
+  switch (format) {
+    case VideoFrame::YV24:
+    case VideoFrame::YV16:
+      switch (plane) {
+        case kYPlane:
+        case kUPlane:
+        case kVPlane:
+          return height;
+        default:
+          break;
+      }
+      break;
+    case VideoFrame::YV12:
+    case VideoFrame::YV12J:
+    case VideoFrame::I420:
+      switch (plane) {
+        case kYPlane:
+          return height;
+        case kUPlane:
+        case kVPlane:
+          return RoundUp(height, 2) / 2;
+        default:
+          break;
+      }
+      break;
+    case VideoFrame::YV12A:
+      switch (plane) {
+        case kYPlane:
+        case kAPlane:
+          return height;
+        case kUPlane:
+        case kVPlane:
+          return RoundUp(height, 2) / 2;
+        default:
+          break;
+      }
+      break;
+    case VideoFrame::NV12:
+      switch (plane) {
+        case kYPlane:
+          return height;
+        case kUVPlane:
+          return RoundUp(height, 2) / 2;
+        default:
+          break;
+      }
+      break;
+    case VideoFrame::UNKNOWN:
+#if defined(VIDEO_HOLE)
+    case VideoFrame::HOLE:
+#endif  // defined(VIDEO_HOLE)
+    case VideoFrame::NATIVE_TEXTURE:
+      break;
+  }
+  NOTREACHED() << "Unsupported video frame format/plane: " << format << "/"
+               << plane;
   return 0;
 }
 
 int VideoFrame::rows(size_t plane) const {
-  DCHECK(IsValidPlane(plane));
-  int height = coded_size_.height();
-  switch (format_) {
-    case VideoFrame::YV24:
-    case VideoFrame::YV16:
-      switch (plane) {
-        case kYPlane:
-        case kUPlane:
-        case kVPlane:
-          return height;
-        default:
-          break;
-      }
-      break;
-    case VideoFrame::YV12:
-    case VideoFrame::YV12J:
-    case VideoFrame::I420:
-      switch (plane) {
-        case kYPlane:
-          return height;
-        case kUPlane:
-        case kVPlane:
-          return RoundUp(height, 2) / 2;
-        default:
-          break;
-      }
-      break;
-    case VideoFrame::YV12A:
-      switch (plane) {
-        case kYPlane:
-        case kAPlane:
-          return height;
-        case kUPlane:
-        case kVPlane:
-          return RoundUp(height, 2) / 2;
-        default:
-          break;
-      }
-      break;
-    case VideoFrame::NV12:
-      switch (plane) {
-        case kYPlane:
-          return height;
-        case kUVPlane:
-          return RoundUp(height, 2) / 2;
-        default:
-          break;
-      }
-      break;
-    case VideoFrame::UNKNOWN:
-#if defined(VIDEO_HOLE)
-    case VideoFrame::HOLE:
-#endif  // defined(VIDEO_HOLE)
-    case VideoFrame::NATIVE_TEXTURE:
-      break;
-  }
-  NOTREACHED() << "Unsupported video frame format/plane: "
-               << format_ << "/" << plane;
-  return 0;
+  return Rows(plane, format_, coded_size_.height());
 }
 
 uint8* VideoFrame::data(size_t plane) const {
-  DCHECK(IsValidPlane(plane));
+  DCHECK(IsValidPlane(plane, format_));
   return data_[plane];
 }
 
@@ -852,9 +912,15 @@ int VideoFrame::dmabuf_fd(size_t plane) const {
 }
 #endif
 
+#if defined(OS_MACOSX)
+CVPixelBufferRef VideoFrame::cv_pixel_buffer() const {
+  return cv_pixel_buffer_.get();
+}
+#endif
+
 void VideoFrame::HashFrameForTesting(base::MD5Context* context) {
   for (int plane = 0; plane < kMaxPlanes; ++plane) {
-    if (!IsValidPlane(plane))
+    if (!IsValidPlane(plane, format_))
       break;
     for (int row = 0; row < rows(plane); ++row) {
       base::MD5Update(context, base::StringPiece(

@@ -15,14 +15,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 
-namespace cc {
-class CompositorFrameAck;
-}
-
-namespace gpu {
-class GLInProcessContext;
-}
-
 namespace android_webview {
 
 namespace internal {
@@ -31,17 +23,6 @@ class RequestDrawGLTracker;
 
 class BrowserViewRendererClient;
 class InsideHardwareReleaseReset;
-
-// Set by BrowserViewRenderer and read by HardwareRenderer.
-struct DrawGLInput {
-  gfx::Vector2d scroll_offset;
-  int width;
-  int height;
-  cc::CompositorFrame frame;
-
-  DrawGLInput();
-  ~DrawGLInput();
-};
 
 // This class is used to pass data between UI thread and RenderThread.
 class SharedRendererState {
@@ -53,8 +34,14 @@ class SharedRendererState {
   void ClientRequestDrawGL();
   void DidDrawGLProcess();
 
-  void SetDrawGLInput(scoped_ptr<DrawGLInput> input);
-  scoped_ptr<DrawGLInput> PassDrawGLInput();
+  void SetScrollOffset(gfx::Vector2d scroll_offset);
+  gfx::Vector2d GetScrollOffset();
+
+  bool HasCompositorFrame() const;
+  void SetCompositorFrame(scoped_ptr<cc::CompositorFrame> frame,
+                          bool force_commit);
+  scoped_ptr<cc::CompositorFrame> PassCompositorFrame();
+  bool ForceCommit() const;
 
   bool IsInsideHardwareRelease() const;
   // Returns true if the draw constraints are updated.
@@ -62,11 +49,9 @@ class SharedRendererState {
       const ParentCompositorDrawConstraints& parent_draw_constraints);
   void PostExternalDrawConstraintsToChildCompositor(
       const ParentCompositorDrawConstraints& parent_draw_constraints);
+  void DidSkipCommitFrame();
 
   const ParentCompositorDrawConstraints ParentDrawConstraints() const;
-
-  void SetSharedContext(gpu::GLInProcessContext* context);
-  gpu::GLInProcessContext* GetSharedContext() const;
 
   void SetForceInvalidateOnNextDrawGL(
       bool needs_force_invalidate_on_next_draw_gl);
@@ -83,23 +68,26 @@ class SharedRendererState {
   void ResetRequestDrawGLCallback();
   void ClientRequestDrawGLOnUIThread();
   void UpdateParentDrawConstraintsOnUIThread();
+  void DidSkipCommitFrameOnUIThread();
   void SetInsideHardwareRelease(bool inside);
 
   scoped_refptr<base::MessageLoopProxy> ui_loop_;
   BrowserViewRendererClient* client_on_ui_;
-  base::WeakPtrFactory<SharedRendererState> weak_factory_on_ui_thread_;
   base::WeakPtr<SharedRendererState> ui_thread_weak_ptr_;
   base::CancelableClosure request_draw_gl_cancelable_closure_;
 
   // Accessed by both UI and RT thread.
   mutable base::Lock lock_;
-  scoped_ptr<DrawGLInput> draw_gl_input_;
+  gfx::Vector2d scroll_offset_;
+  scoped_ptr<cc::CompositorFrame> compositor_frame_;
+  bool force_commit_;
   bool inside_hardware_release_;
   bool needs_force_invalidate_on_next_draw_gl_;
   ParentCompositorDrawConstraints parent_draw_constraints_;
-  gpu::GLInProcessContext* share_context_;
   cc::ReturnedResourceArray returned_resources_;
   base::Closure request_draw_gl_closure_;
+
+  base::WeakPtrFactory<SharedRendererState> weak_factory_on_ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(SharedRendererState);
 };

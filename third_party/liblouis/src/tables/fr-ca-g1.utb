@@ -67,16 +67,7 @@ sign % 246					pour cent
 punctuation - 36		trait d'union
 sign # 3456					dièse
 
-digit 0 245		zéro				
-digit 1 1			un	
-digit 2 12		deux				
-digit 3 14		trois			
-digit 4 145		quatre			
-digit 5 15		cinq			
-digit 6 124		six			
-digit 7 1245	sept
-digit 8 125		huit			
-digit 9 24		neuf		
+include digits6Dots.uti
 
 sign \x00A8 46			diaeresis sign
 # always n 34				divisé par
@@ -128,10 +119,6 @@ sign \x00B8 45
 endnum # 56-3456
 
 sign _ 456		souligné 		
-
-repeated \s 0		espaces
-repeated \t 0		tabulations
-repeated \x00a0 0		espaces insécables
 
 repeated ... 256-256-256	points de suite		
 repeated --- 36-36-36

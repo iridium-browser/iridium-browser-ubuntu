@@ -17,41 +17,64 @@
 # Environment check: Make sure input is available.
 vpxdec_verify_environment() {
   if [ ! -e "${VP8_IVF_FILE}" ] || [ ! -e "${VP9_WEBM_FILE}" ]; then
-    echo "Libvpx test data must exist in LIBVPX_TEST_DATA_PATH."
+    elog "Libvpx test data must exist in LIBVPX_TEST_DATA_PATH."
+    return 1
+  fi
+  if [ -z "$(vpx_tool_path vpxdec)" ]; then
+    elog "vpxdec not found. It must exist in LIBVPX_BIN_PATH or its parent."
     return 1
   fi
 }
 
+# Wrapper function for running vpxdec with pipe input. Requires that
+# LIBVPX_BIN_PATH points to the directory containing vpxdec. $1 is used as the
+# input file path and shifted away. All remaining parameters are passed through
+# to vpxdec.
+vpxdec_pipe() {
+  local readonly decoder="$(vpx_tool_path vpxdec)"
+  local readonly input="$1"
+  shift
+  cat "${input}" | eval "${VPX_TEST_PREFIX}" "${decoder}" - "$@" ${devnull}
+}
+
+# Wrapper function for running vpxdec. Requires that LIBVPX_BIN_PATH points to
+# the directory containing vpxdec. $1 one is used as the input file path and
+# shifted away. All remaining parameters are passed through to vpxdec.
+vpxdec() {
+  local readonly decoder="$(vpx_tool_path vpxdec)"
+  local readonly input="$1"
+  shift
+  eval "${VPX_TEST_PREFIX}" "${decoder}" "$input" "$@" ${devnull}
+}
+
 vpxdec_can_decode_vp8() {
-  if [ "$(vpxdec_available)" = "yes" ] && \
-     [ "$(vp8_decode_available)" = "yes" ]; then
+  if [ "$(vp8_decode_available)" = "yes" ]; then
     echo yes
   fi
 }
 
 vpxdec_can_decode_vp9() {
-  if [ "$(vpxdec_available)" = "yes" ] && \
-     [ "$(vp9_decode_available)" = "yes" ]; then
+  if [ "$(vp9_decode_available)" = "yes" ]; then
     echo yes
   fi
 }
 
 vpxdec_vp8_ivf() {
   if [ "$(vpxdec_can_decode_vp8)" = "yes" ]; then
-    vpxdec "${VP8_IVF_FILE}"
+    vpxdec "${VP8_IVF_FILE}" --summary --noblit
   fi
 }
 
 vpxdec_vp8_ivf_pipe_input() {
   if [ "$(vpxdec_can_decode_vp8)" = "yes" ]; then
-    vpxdec "${VP8_IVF_FILE}" -
+    vpxdec_pipe "${VP8_IVF_FILE}" --summary --noblit
   fi
 }
 
 vpxdec_vp9_webm() {
   if [ "$(vpxdec_can_decode_vp9)" = "yes" ] && \
      [ "$(webm_io_available)" = "yes" ]; then
-    vpxdec "${VP9_WEBM_FILE}"
+    vpxdec "${VP9_WEBM_FILE}" --summary --noblit
   fi
 }
 

@@ -10,6 +10,20 @@
         ],
       },
     }],
+    ['chromeos==1', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/content_shell.pak',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="mac" or OS=="win"', {
+      'variables': {
+        'isolate_dependency_tracked': [
+          '<(PRODUCT_DIR)/content_shell.pak',
+        ],
+      },
+    }],
     ['OS=="android" or OS=="linux" or OS=="mac" or OS=="win"', {
       'variables': {
         'isolate_dependency_untracked': [
@@ -33,6 +47,12 @@
           '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
           '<(PRODUCT_DIR)/libppapi_tests.so',
+        ],
+      },
+    }],
+    ['OS=="linux" and use_ozone==0', {
+      'variables': {
+        'isolate_dependency_tracked': [
           '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
         ],
       },
@@ -87,8 +107,15 @@
         ],
       },
     }],
+    ['OS=="win" and (fastbuild==0 or fastbuild==1)', {
+      'variables': {
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/content_browsertests.exe.pdb',
+        ],
+      },
+    }],
   ],
   'includes': [
-    '../third_party/icu/icu.isolate',
+    '../base/base.isolate',
   ],
 }

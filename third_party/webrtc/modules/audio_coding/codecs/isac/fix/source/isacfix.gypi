@@ -89,6 +89,7 @@
         }],
         ['target_arch=="mipsel"', {
           'sources': [
+            'entropy_coding_mips.c',
             'filters_mips.c',
             'lattice_mips.c',
             'pitch_estimator_mips.c',
@@ -138,6 +139,15 @@
             'lattice_neon.S',
             'lpc_masking_model_neon.S',
             'transform_neon.S',
+          ],
+          'conditions': [
+            # Disable LTO in isac_neon target due to compiler bug
+            ['use_lto==1', {
+              'cflags!': [
+                '-flto',
+                '-ffat-lto-objects',
+              ],
+            }],
           ],
         },
       ],

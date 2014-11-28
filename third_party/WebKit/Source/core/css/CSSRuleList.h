@@ -34,8 +34,9 @@ class CSSRule;
 class CSSStyleSheet;
 
 class CSSRuleList : public NoBaseWillBeGarbageCollectedFinalized<CSSRuleList>, public ScriptWrappable {
-    WTF_MAKE_NONCOPYABLE(CSSRuleList);
+    DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(CSSRuleList);
 public:
     virtual ~CSSRuleList();
 
@@ -52,7 +53,7 @@ public:
     virtual void trace(Visitor*) { }
 
 protected:
-    CSSRuleList();
+    CSSRuleList() { }
 };
 
 class StaticCSSRuleList FINAL : public CSSRuleList {

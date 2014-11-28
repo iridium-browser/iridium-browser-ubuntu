@@ -14,11 +14,16 @@
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/guest_view/guest_view_constants.h"
+#include "extensions/browser/guest_view/app_view/app_view_guest.h"
+#include "extensions/browser/guest_view/extension_options/extension_options_guest.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
+#include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/process_map.h"
+#include "extensions/common/extension_messages.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
+#include "extensions/common/guest_view/guest_view_constants.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 
 using content::WebContents;
@@ -68,6 +73,12 @@ class GuestViewBase::EmbedderWebContentsObserver : public WebContentsObserver {
     Destroy();
   }
 
+  virtual void RenderViewHostChanged(
+      content::RenderViewHost* old_host,
+      content::RenderViewHost* new_host) OVERRIDE {
+    Destroy();
+  }
+
   virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
     Destroy();
   }
@@ -95,6 +106,7 @@ GuestViewBase::GuestViewBase(content::BrowserContext* browser_context,
       browser_context_(browser_context),
       guest_instance_id_(guest_instance_id),
       view_instance_id_(guestview::kInstanceIDNone),
+      element_instance_id_(guestview::kInstanceIDNone),
       initialized_(false),
       auto_size_enabled_(false),
       weak_ptr_factory_(this) {
@@ -124,18 +136,23 @@ void GuestViewBase::Init(const std::string& embedder_extension_id,
   int embedder_process_id =
       embedder_web_contents->GetRenderProcessHost()->GetID();
 
+  const GURL& embedder_site_url = embedder_web_contents->GetLastCommittedURL();
   Feature::Availability availability = feature->IsAvailableToContext(
       embedder_extension,
       process_map->GetMostLikelyContextType(embedder_extension,
                                             embedder_process_id),
-      embedder_web_contents->GetLastCommittedURL());
+      embedder_site_url);
   if (!availability.is_available()) {
+    // The derived class did not create a WebContents so this class serves no
+    // purpose. Let's self-destruct.
+    delete this;
     callback.Run(NULL);
     return;
   }
 
   CreateWebContents(embedder_extension_id,
                     embedder_process_id,
+                    embedder_site_url,
                     create_params,
                     base::Bind(&GuestViewBase::CompleteInit,
                                AsWeakPtr(),
@@ -185,7 +202,7 @@ void GuestViewBase::SetAutoSize(bool enabled,
   if (!attached())
     return;
 
-  content::RenderViewHost* rvh = guest_web_contents()->GetRenderViewHost();
+  content::RenderViewHost* rvh = web_contents()->GetRenderViewHost();
   if (auto_size_enabled_) {
     rvh->EnableAutoResize(min_auto_size_, max_auto_size_);
   } else {
@@ -281,7 +298,7 @@ void GuestViewBase::RenderProcessExited(content::RenderProcessHost* host,
 }
 
 void GuestViewBase::Destroy() {
-  DCHECK(guest_web_contents());
+  DCHECK(web_contents());
   content::RenderProcessHost* host =
       content::RenderProcessHost::FromID(embedder_render_process_id());
   if (host)
@@ -290,17 +307,23 @@ void GuestViewBase::Destroy() {
   if (!destruction_callback_.is_null())
     destruction_callback_.Run();
 
-  webcontents_guestview_map.Get().erase(guest_web_contents());
+  webcontents_guestview_map.Get().erase(web_contents());
   GuestViewManager::FromBrowserContext(browser_context_)->
       RemoveGuest(guest_instance_id_);
   pending_events_.clear();
 
-  delete guest_web_contents();
+  delete web_contents();
 }
 
-void GuestViewBase::DidAttach() {
+void GuestViewBase::DidAttach(int guest_proxy_routing_id) {
   // Give the derived class an opportunity to perform some actions.
   DidAttachToEmbedder();
+
+  // Inform the associated GuestViewContainer that the contentWindow is ready.
+  embedder_web_contents()->Send(new ExtensionMsg_GuestAttached(
+      embedder_web_contents()->GetMainFrame()->GetRoutingID(),
+      element_instance_id_,
+      guest_proxy_routing_id));
 
   SendQueuedEvents();
 }
@@ -310,16 +333,18 @@ void GuestViewBase::ElementSizeChanged(const gfx::Size& old_size,
   element_size_ = new_size;
 }
 
-int GuestViewBase::GetGuestInstanceID() const {
-  return guest_instance_id_;
-}
-
 void GuestViewBase::GuestSizeChanged(const gfx::Size& old_size,
                                      const gfx::Size& new_size) {
   if (!auto_size_enabled_)
     return;
   guest_size_ = new_size;
   GuestSizeChangedDueToAutoSize(old_size, new_size);
+}
+
+void GuestViewBase::SetAttachParams(const base::DictionaryValue& params) {
+  attach_params_.reset(params.DeepCopy());
+  attach_params_->GetInteger(guestview::kParameterInstanceId,
+                             &view_instance_id_);
 }
 
 void GuestViewBase::SetOpener(GuestViewBase* guest) {
@@ -336,7 +361,7 @@ void GuestViewBase::RegisterDestructionCallback(
 }
 
 void GuestViewBase::WillAttach(content::WebContents* embedder_web_contents,
-                               const base::DictionaryValue& extra_params) {
+                               int element_instance_id) {
   // After attachment, this GuestViewBase's lifetime is restricted to the
   // lifetime of its embedder WebContents. Observing the RenderProcessHost
   // of the embedder is no longer necessary.
@@ -344,8 +369,7 @@ void GuestViewBase::WillAttach(content::WebContents* embedder_web_contents,
   embedder_web_contents_ = embedder_web_contents;
   embedder_web_contents_observer_.reset(
       new EmbedderWebContentsObserver(this));
-  extra_params.GetInteger(guestview::kParameterInstanceId, &view_instance_id_);
-  extra_params_.reset(extra_params.DeepCopy());
+  element_instance_id_ = element_instance_id;
 
   WillAttachToEmbedder();
 }
@@ -363,7 +387,7 @@ void GuestViewBase::DidStopLoading(content::RenderViewHost* render_view_host) {
 
 void GuestViewBase::RenderViewReady() {
   GuestReady();
-  content::RenderViewHost* rvh = guest_web_contents()->GetRenderViewHost();
+  content::RenderViewHost* rvh = web_contents()->GetRenderViewHost();
   if (auto_size_enabled_) {
     rvh->EnableAutoResize(min_auto_size_, max_auto_size_);
   } else {
@@ -374,6 +398,30 @@ void GuestViewBase::RenderViewReady() {
 void GuestViewBase::WebContentsDestroyed() {
   GuestDestroyed();
   delete this;
+}
+
+void GuestViewBase::ActivateContents(WebContents* web_contents) {
+  if (!attached() || !embedder_web_contents()->GetDelegate())
+    return;
+
+  embedder_web_contents()->GetDelegate()->ActivateContents(
+      embedder_web_contents());
+}
+
+void GuestViewBase::DeactivateContents(WebContents* web_contents) {
+  if (!attached() || !embedder_web_contents()->GetDelegate())
+    return;
+
+  embedder_web_contents()->GetDelegate()->DeactivateContents(
+      embedder_web_contents());
+}
+
+void GuestViewBase::RunFileChooser(WebContents* web_contents,
+                                   const content::FileChooserParams& params) {
+  if (!attached() || !embedder_web_contents()->GetDelegate())
+    return;
+
+  embedder_web_contents()->GetDelegate()->RunFileChooser(web_contents, params);
 }
 
 bool GuestViewBase::ShouldFocusPageAfterCrash() {
@@ -443,7 +491,10 @@ void GuestViewBase::CompleteInit(const std::string& embedder_extension_id,
 
 // static
 void GuestViewBase::RegisterGuestViewTypes() {
-  ExtensionsAPIClient::Get()->RegisterGuestViewTypes();
+  AppViewGuest::Register();
+  ExtensionOptionsGuest::Register();
+  MimeHandlerViewGuest::Register();
+  WebViewGuest::Register();
 }
 
 }  // namespace extensions

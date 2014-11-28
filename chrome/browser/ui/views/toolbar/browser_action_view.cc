@@ -9,7 +9,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -18,9 +17,9 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/grit/generated_resources.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -46,14 +45,14 @@ const int kBorderInset = 4;
 // BrowserActionView
 
 BrowserActionView::BrowserActionView(const Extension* extension,
+                                     ExtensionAction* extension_action,
                                      Browser* browser,
                                      BrowserActionView::Delegate* delegate)
     : MenuButton(this, base::string16(), NULL, false),
       view_controller_(new ExtensionActionViewController(
           extension,
           browser,
-          extensions::ExtensionActionManager::Get(browser->profile())->
-              GetBrowserAction(*extension),
+          extension_action,
           this)),
       delegate_(delegate),
       called_registered_extension_command_(false),
@@ -65,9 +64,6 @@ BrowserActionView::BrowserActionView(const Extension* extension,
 
   content::NotificationSource notification_source =
       content::Source<Profile>(browser->profile()->GetOriginalProfile());
-  registrar_.Add(this,
-                 extensions::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-                 content::Source<ExtensionAction>(extension_action()));
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED,
                  notification_source);
@@ -134,13 +130,10 @@ void BrowserActionView::UpdateState() {
   if (tab_id < 0)
     return;
 
-  if (!IsEnabled(tab_id)) {
+  if (!IsEnabled(tab_id))
     SetState(views::CustomButton::STATE_DISABLED);
-  } else {
-    SetState(menu_visible_ ?
-             views::CustomButton::STATE_PRESSED :
-             views::CustomButton::STATE_NORMAL);
-  }
+  else if (state() == views::CustomButton::STATE_DISABLED)
+    SetState(views::CustomButton::STATE_NORMAL);
 
   gfx::ImageSkia icon = *view_controller_->GetIcon(tab_id).ToImageSkia();
 
@@ -163,6 +156,7 @@ void BrowserActionView::UpdateState() {
   SetTooltipText(name);
   SetAccessibleName(name);
 
+  Layout();  // We need to layout since we may have added an icon as a result.
   SchedulePaint();
 }
 
@@ -175,12 +169,6 @@ void BrowserActionView::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
   switch (type) {
-    case extensions::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED:
-      UpdateState();
-      // The browser action may have become visible/hidden so we need to make
-      // sure the state gets updated.
-      delegate_->OnBrowserActionVisibilityChanged();
-      break;
     case extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED:
     case extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED: {
       std::pair<const std::string, const std::string>* payload =
@@ -265,16 +253,6 @@ scoped_ptr<LabelButtonBorder> BrowserActionView::CreateDefaultBorder() const {
   return border.Pass();
 }
 
-void BrowserActionView::SetButtonPushed() {
-  SetState(views::CustomButton::STATE_PRESSED);
-  menu_visible_ = true;
-}
-
-void BrowserActionView::SetButtonNotPushed() {
-  SetState(views::CustomButton::STATE_NORMAL);
-  menu_visible_ = false;
-}
-
 bool BrowserActionView::IsEnabled(int tab_id) const {
   return view_controller_->extension_action()->GetIsVisible(tab_id);
 }
@@ -319,11 +297,23 @@ views::Widget* BrowserActionView::GetParentForContextMenu() {
       GetWidget();
 }
 
+ExtensionActionViewController*
+BrowserActionView::GetPreferredPopupViewController() {
+  return delegate_->ShownInsideMenu() ?
+      delegate_->GetMainViewForExtension(extension())->view_controller() :
+      view_controller();
+}
+
 views::View* BrowserActionView::GetReferenceViewForPopup() {
   // Browser actions in the overflow menu can still show popups, so we may need
   // a reference view other than this button's parent. If so, use the overflow
   // view.
   return visible() ? this : delegate_->GetOverflowReferenceView();
+}
+
+views::MenuButton* BrowserActionView::GetContextMenuButton() {
+  DCHECK(visible());  // We should never show a context menu for a hidden item.
+  return this;
 }
 
 content::WebContents* BrowserActionView::GetCurrentWebContents() {
@@ -336,8 +326,16 @@ void BrowserActionView::HideActivePopup() {
 
 void BrowserActionView::OnPopupShown(bool grant_tab_permissions) {
   delegate_->SetPopupOwner(this);
-  if (grant_tab_permissions)
-    SetButtonPushed();
+  // If this was through direct user action, we press the menu button.
+  if (grant_tab_permissions) {
+    // We set the state of the menu button we're using as a reference view,
+    // which is either this or the overflow reference view.
+    // This cast is safe because GetReferenceViewForPopup returns either |this|
+    // or delegate_->GetOverflowReferenceView(), which returns a MenuButton.
+    views::MenuButton* reference_view =
+        static_cast<views::MenuButton*>(GetReferenceViewForPopup());
+    pressed_lock_.reset(new views::MenuButton::PressedLock(reference_view));
+  }
 }
 
 void BrowserActionView::CleanupPopup() {
@@ -345,14 +343,6 @@ void BrowserActionView::CleanupPopup() {
   // performing the rest of the cleanup in OnWidgetDestroyed()) because
   // OnWidgetDestroyed() can be called asynchronously from Close(), and we need
   // to keep the delegate's popup owner up-to-date.
-  SetButtonNotPushed();
   delegate_->SetPopupOwner(NULL);
-}
-
-void BrowserActionView::OnWillShowContextMenus() {
-  SetButtonPushed();
-}
-
-void BrowserActionView::OnContextMenuDone() {
-  SetButtonNotPushed();
+  pressed_lock_.reset();  // Unpress the menu button if it was pressed.
 }

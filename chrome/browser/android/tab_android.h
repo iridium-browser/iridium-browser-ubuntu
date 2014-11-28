@@ -11,11 +11,12 @@
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/sessions/session_id.h"
+#include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "components/sessions/session_id.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -43,6 +44,7 @@ class PrerenderManager;
 }
 
 class TabAndroid : public CoreTabHelperDelegate,
+                   public InstantServiceObserver,
                    public SearchTabHelperDelegate,
                    public content::NotificationObserver {
  public:
@@ -113,6 +115,9 @@ class TabAndroid : public CoreTabHelperDelegate,
                                bool did_start_load,
                                bool did_finish_load) OVERRIDE;
 
+  // Overridden from InstantServiceObserver:
+  void DefaultSearchProviderChanged() OVERRIDE;
+
   // Overridden from SearchTabHelperDelegate:
   virtual void OnWebContentsInstantSupportDisabled(
       const content::WebContents* web_contents) OVERRIDE;
@@ -134,8 +139,6 @@ class TabAndroid : public CoreTabHelperDelegate,
   virtual void DestroyWebContents(JNIEnv* env,
                                   jobject obj,
                                   jboolean delete_native);
-  base::android::ScopedJavaLocalRef<jobject> GetWebContents(JNIEnv* env,
-                                                            jobject obj);
   base::android::ScopedJavaLocalRef<jobject> GetProfileAndroid(JNIEnv* env,
                                                                jobject obj);
   virtual TabLoadStatus LoadUrl(JNIEnv* env,
@@ -157,6 +160,7 @@ class TabAndroid : public CoreTabHelperDelegate,
   // avaliable for current tab.
   base::android::ScopedJavaLocalRef<jobject> GetFavicon(JNIEnv* env,
                                                         jobject obj);
+  jboolean IsFaviconValid(JNIEnv* env, jobject jobj);
 
   // Register the Tab's native methods through JNI.
   static bool RegisterTabAndroid(JNIEnv* env);

@@ -26,6 +26,7 @@
 #include "ui/app_list/views/contents_switcher_view.h"
 #include "ui/app_list/views/contents_view.h"
 #include "ui/app_list/views/search_box_view.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
@@ -35,8 +36,8 @@ namespace app_list {
 
 namespace {
 
-// Inner padding space in pixels of bubble contents.
-const int kInnerPadding = 1;
+// Border padding space around the bubble contents.
+const int kPadding = 1;
 
 // The maximum allowed time to wait for icon loading in milliseconds.
 const int kMaxIconLoadingWaitTimeInMs = 50;
@@ -95,10 +96,6 @@ class AppListMainView::IconLoader : public AppListItemObserver {
     owner_->OnItemIconLoaded(this);
     // Note that IconLoader is released here.
   }
-  virtual void ItemNameChanged() OVERRIDE {}
-  virtual void ItemHighlightedChanged() OVERRIDE {}
-  virtual void ItemIsInstallingChanged() OVERRIDE {}
-  virtual void ItemPercentDownloadedChanged() OVERRIDE {}
 
   AppListMainView* owner_;
   AppListItem* item_;
@@ -118,13 +115,20 @@ AppListMainView::AppListMainView(AppListViewDelegate* delegate,
       contents_view_(NULL),
       contents_switcher_view_(NULL),
       weak_ptr_factory_(this) {
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical,
-                                        kInnerPadding,
-                                        kInnerPadding,
-                                        kInnerPadding));
+  SetBorder(
+      views::Border::CreateEmptyBorder(kPadding, kPadding, kPadding, kPadding));
+  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
 
   search_box_view_ = new SearchBoxView(this, delegate);
-  AddChildView(new SearchBoxContainerView(this, search_box_view_));
+  views::View* container = new SearchBoxContainerView(this, search_box_view_);
+  if (switches::IsExperimentalAppListEnabled()) {
+    container->SetBorder(
+        views::Border::CreateEmptyBorder(kExperimentalWindowPadding,
+                                         kExperimentalWindowPadding,
+                                         0,
+                                         kExperimentalWindowPadding));
+  }
+  AddChildView(container);
   AddContentsViews();
 
   // Switch the apps grid view to the specified page.
@@ -177,6 +181,10 @@ void AppListMainView::ShowAppListWhenReady() {
 }
 
 void AppListMainView::ResetForShow() {
+  if (switches::IsExperimentalAppListEnabled()) {
+    contents_view_->SetActivePage(contents_view_->GetPageIndexForNamedPage(
+        ContentsView::NAMED_PAGE_START));
+  }
   contents_view_->apps_container_view()->ResetForShowApps();
   // We clear the search when hiding so when app list appears it is not showing
   // search results.

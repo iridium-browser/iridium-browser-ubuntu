@@ -53,6 +53,7 @@ using rtc::SocketAddress;
 using rtc::Thread;
 
 static const SocketAddress kClientAddr("11.11.11.11", 0);
+static const SocketAddress kPrivateAddr("192.168.1.11", 0);
 static const SocketAddress kClientIPv6Addr(
     "2401:fa00:4:1000:be30:5bff:fee5:c3", 0);
 static const SocketAddress kClientAddr2("22.22.22.22", 0);
@@ -132,9 +133,32 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
   bool SetPortRange(int min_port, int max_port) {
     return allocator_->SetPortRange(min_port, max_port);
   }
-  rtc::NATServer* CreateNatServer(const SocketAddress& addr,
-                                        rtc::NATType type) {
-    return new rtc::NATServer(type, vss_.get(), addr, vss_.get(), addr);
+  void ResetWithNatServer(const rtc::SocketAddress& stun_server) {
+    nat_server_.reset(new rtc::NATServer(
+        rtc::NAT_OPEN_CONE, vss_.get(), kNatAddr, vss_.get(), kNatAddr));
+
+    ServerAddresses stun_servers;
+    stun_servers.insert(stun_server);
+    allocator_.reset(new cricket::BasicPortAllocator(
+        &network_manager_, &nat_socket_factory_, stun_servers));
+    allocator().set_step_delay(cricket::kMinimumStepDelay);
+  }
+
+  void AddTurnServers(const rtc::SocketAddress& udp_turn,
+                      const rtc::SocketAddress& tcp_turn) {
+    cricket::RelayServerConfig relay_server(cricket::RELAY_TURN);
+    cricket::RelayCredentials credentials(kTurnUsername, kTurnPassword);
+    relay_server.credentials = credentials;
+
+    if (!udp_turn.IsNil()) {
+      relay_server.ports.push_back(cricket::ProtocolAddress(
+          kTurnUdpIntAddr, cricket::PROTO_UDP, false));
+    }
+    if (!tcp_turn.IsNil()) {
+      relay_server.ports.push_back(cricket::ProtocolAddress(
+          kTurnTcpIntAddr, cricket::PROTO_TCP, false));
+    }
+    allocator_->AddRelay(relay_server);
   }
 
   bool CreateSession(int component) {
@@ -253,6 +277,7 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
   rtc::scoped_ptr<rtc::VirtualSocketServer> vss_;
   rtc::scoped_ptr<rtc::FirewallSocketServer> fss_;
   rtc::SocketServerScope ss_scope_;
+  rtc::scoped_ptr<rtc::NATServer> nat_server_;
   rtc::NATSocketFactory nat_factory_;
   rtc::BasicPacketSocketFactory nat_socket_factory_;
   cricket::TestStunServer stun_server_;
@@ -538,12 +563,79 @@ TEST_F(PortAllocatorTest, TestCandidatePriorityOfMultipleInterfaces) {
 // Test to verify ICE restart process.
 TEST_F(PortAllocatorTest, TestGetAllPortsRestarts) {
   AddInterface(kClientAddr);
-  EXPECT_TRUE(CreateSession(1));
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
   session_->StartGettingPorts();
   EXPECT_EQ_WAIT(7U, candidates_.size(), kDefaultAllocationTimeout);
   EXPECT_EQ(4U, ports_.size());
   EXPECT_TRUE(candidate_allocation_done_);
   // TODO - Extend this to verify ICE restart.
+}
+
+// Test ICE candidate filter mechanism with options Relay/Host/Reflexive.
+TEST_F(PortAllocatorTest, TestCandidateFilterWithRelayOnly) {
+  AddInterface(kClientAddr);
+  allocator().set_candidate_filter(cricket::CF_RELAY);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+  EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
+  // Using GTURN, we will have 4 candidates.
+  EXPECT_EQ(4U, candidates_.size());
+  EXPECT_EQ(1U, ports_.size());  // Only Relay port will be in ready state.
+  for (size_t i = 0; i < candidates_.size(); ++i) {
+    EXPECT_EQ(std::string(cricket::RELAY_PORT_TYPE), candidates_[i].type());
+  }
+}
+
+TEST_F(PortAllocatorTest, TestCandidateFilterWithHostOnly) {
+  AddInterface(kClientAddr);
+  allocator().set_flags(cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
+                        cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET);
+  allocator().set_candidate_filter(cricket::CF_HOST);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+  EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
+  EXPECT_EQ(2U, candidates_.size()); // Host UDP/TCP candidates only.
+  EXPECT_EQ(2U, ports_.size()); // UDP/TCP ports only.
+  for (size_t i = 0; i < candidates_.size(); ++i) {
+    EXPECT_EQ(std::string(cricket::LOCAL_PORT_TYPE), candidates_[i].type());
+  }
+}
+
+// Host is behind the NAT.
+TEST_F(PortAllocatorTest, TestCandidateFilterWithReflexiveOnly) {
+  AddInterface(kPrivateAddr);
+  ResetWithNatServer(kStunAddr);
+
+  allocator().set_flags(cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
+                        cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET);
+  allocator().set_candidate_filter(cricket::CF_REFLEXIVE);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+  EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
+  // Host is behind NAT, no private address will be exposed. Hence only UDP
+  // port with STUN candidate will be sent outside.
+  EXPECT_EQ(1U, candidates_.size()); // Only STUN candidate.
+  EXPECT_EQ(1U, ports_.size());  // Only UDP port will be in ready state.
+  for (size_t i = 0; i < candidates_.size(); ++i) {
+    EXPECT_EQ(std::string(cricket::STUN_PORT_TYPE), candidates_[i].type());
+  }
+}
+
+// Host is not behind the NAT.
+TEST_F(PortAllocatorTest, TestCandidateFilterWithReflexiveOnlyAndNoNAT) {
+  AddInterface(kClientAddr);
+  allocator().set_flags(cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
+                        cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET);
+  allocator().set_candidate_filter(cricket::CF_REFLEXIVE);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+  EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
+  // Host has a public address, both UDP and TCP candidates will be exposed.
+  EXPECT_EQ(2U, candidates_.size()); // Local UDP + TCP candidate.
+  EXPECT_EQ(2U, ports_.size());  //  UDP and TCP ports will be in ready state.
+  for (size_t i = 0; i < candidates_.size(); ++i) {
+    EXPECT_EQ(std::string(cricket::LOCAL_PORT_TYPE), candidates_[i].type());
+  }
 }
 
 TEST_F(PortAllocatorTest, TestBasicMuxFeatures) {
@@ -698,13 +790,8 @@ TEST_F(PortAllocatorTest, TestSharedSocketWithoutNat) {
 // local candidates as client behind a nat.
 TEST_F(PortAllocatorTest, TestSharedSocketWithNat) {
   AddInterface(kClientAddr);
-  rtc::scoped_ptr<rtc::NATServer> nat_server(
-      CreateNatServer(kNatAddr, rtc::NAT_OPEN_CONE));
-  ServerAddresses stun_servers;
-  stun_servers.insert(kStunAddr);
-  allocator_.reset(new cricket::BasicPortAllocator(
-      &network_manager_, &nat_socket_factory_, stun_servers));
-  allocator_->set_step_delay(cricket::kMinimumStepDelay);
+  ResetWithNatServer(kStunAddr);
+
   allocator_->set_flags(allocator().flags() |
                         cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
                         cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET);
@@ -726,14 +813,8 @@ TEST_F(PortAllocatorTest, TestSharedSocketWithoutNatUsingTurn) {
   turn_server_.AddInternalSocket(kTurnTcpIntAddr, cricket::PROTO_TCP);
   AddInterface(kClientAddr);
   allocator_.reset(new cricket::BasicPortAllocator(&network_manager_));
-  cricket::RelayServerConfig relay_server(cricket::RELAY_TURN);
-  cricket::RelayCredentials credentials(kTurnUsername, kTurnPassword);
-  relay_server.credentials = credentials;
-  relay_server.ports.push_back(cricket::ProtocolAddress(
-      kTurnUdpIntAddr, cricket::PROTO_UDP, false));
-  relay_server.ports.push_back(cricket::ProtocolAddress(
-      kTurnTcpIntAddr, cricket::PROTO_TCP, false));
-  allocator_->AddRelay(relay_server);
+
+  AddTurnServers(kTurnUdpIntAddr, kTurnTcpIntAddr);
 
   allocator_->set_step_delay(cricket::kMinimumStepDelay);
   allocator_->set_flags(allocator().flags() |
@@ -790,20 +871,10 @@ TEST_F(PortAllocatorTest, TestSharedSocketWithServerAddressResolve) {
 // stun and turn candidates.
 TEST_F(PortAllocatorTest, TestSharedSocketWithNatUsingTurn) {
   AddInterface(kClientAddr);
-  rtc::scoped_ptr<rtc::NATServer> nat_server(
-      CreateNatServer(kNatAddr, rtc::NAT_OPEN_CONE));
-  ServerAddresses stun_servers;
-  stun_servers.insert(kStunAddr);
-  allocator_.reset(new cricket::BasicPortAllocator(
-      &network_manager_, &nat_socket_factory_, stun_servers));
-  cricket::RelayServerConfig relay_server(cricket::RELAY_TURN);
-  cricket::RelayCredentials credentials(kTurnUsername, kTurnPassword);
-  relay_server.credentials = credentials;
-  relay_server.ports.push_back(cricket::ProtocolAddress(
-      kTurnUdpIntAddr, cricket::PROTO_UDP, false));
-  allocator_->AddRelay(relay_server);
+  ResetWithNatServer(kStunAddr);
 
-  allocator_->set_step_delay(cricket::kMinimumStepDelay);
+  AddTurnServers(kTurnUdpIntAddr, rtc::SocketAddress());
+
   allocator_->set_flags(allocator().flags() |
                         cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
                         cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET |
@@ -822,6 +893,45 @@ TEST_F(PortAllocatorTest, TestSharedSocketWithNatUsingTurn) {
   EXPECT_PRED5(CheckCandidate, candidates_[2],
       cricket::ICE_CANDIDATE_COMPONENT_RTP, "relay", "udp",
       rtc::SocketAddress(kTurnUdpExtAddr.ipaddr(), 0));
+  EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
+  EXPECT_EQ(3U, candidates_.size());
+  // Local port will be created first and then TURN port.
+  EXPECT_EQ(2U, ports_[0]->Candidates().size());
+  EXPECT_EQ(1U, ports_[1]->Candidates().size());
+}
+
+// Test that when PORTALLOCATOR_ENABLE_SHARED_SOCKET is enabled and the TURN
+// server is also used as the STUN server, we should get 'local', 'stun', and
+// 'relay' candidates.
+TEST_F(PortAllocatorTest, TestSharedSocketWithNatUsingTurnAsStun) {
+  AddInterface(kClientAddr);
+  ResetWithNatServer(kTurnUdpIntAddr);
+  AddTurnServers(kTurnUdpIntAddr, rtc::SocketAddress());
+
+  // Must set the step delay to 0 to make sure the relay allocation phase is
+  // started before the STUN candidates are obtained, so that the STUN binding
+  // response is processed when both StunPort and TurnPort exist to reproduce
+  // webrtc issue 3537.
+  allocator_->set_step_delay(0);
+  allocator_->set_flags(allocator().flags() |
+                        cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
+                        cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET |
+                        cricket::PORTALLOCATOR_DISABLE_TCP);
+
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+
+  ASSERT_EQ_WAIT(3U, candidates_.size(), kDefaultAllocationTimeout);
+  EXPECT_PRED5(CheckCandidate, candidates_[0],
+      cricket::ICE_CANDIDATE_COMPONENT_RTP, "local", "udp", kClientAddr);
+  EXPECT_PRED5(CheckCandidate, candidates_[1],
+      cricket::ICE_CANDIDATE_COMPONENT_RTP, "stun", "udp",
+      rtc::SocketAddress(kNatAddr.ipaddr(), 0));
+  EXPECT_PRED5(CheckCandidate, candidates_[2],
+      cricket::ICE_CANDIDATE_COMPONENT_RTP, "relay", "udp",
+      rtc::SocketAddress(kTurnUdpExtAddr.ipaddr(), 0));
+  EXPECT_EQ(candidates_[2].related_address(), candidates_[1].address());
+
   EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
   EXPECT_EQ(3U, candidates_.size());
   // Local port will be created first and then TURN port.

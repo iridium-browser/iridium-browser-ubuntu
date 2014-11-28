@@ -15,6 +15,7 @@
 extern "C" {
 #endif
 
+#include "vpx/vpx_codec.h"
 #include "vpx/vpx_frame_buffer.h"
 #include "vpx/vpx_integer.h"
 
@@ -50,10 +51,13 @@ typedef struct yv12_buffer_config {
   int buffer_alloc_sz;
   int border;
   int frame_size;
+  unsigned int bit_depth;
 
   int corrupted;
   int flags;
 } YV12_BUFFER_CONFIG;
+
+#define YV12_FLAG_HIGHBITDEPTH 1
 
 int vp8_yv12_alloc_frame_buffer(YV12_BUFFER_CONFIG *ybf,
                                 int width, int height, int border);
@@ -63,6 +67,9 @@ int vp8_yv12_de_alloc_frame_buffer(YV12_BUFFER_CONFIG *ybf);
 
 int vp9_alloc_frame_buffer(YV12_BUFFER_CONFIG *ybf,
                            int width, int height, int ss_x, int ss_y,
+#if CONFIG_VP9_HIGHBITDEPTH
+                           int use_highbitdepth,
+#endif
                            int border);
 
 // Updates the yv12 buffer config with the frame buffer. If cb is not
@@ -73,6 +80,9 @@ int vp9_alloc_frame_buffer(YV12_BUFFER_CONFIG *ybf,
 // on failure.
 int vp9_realloc_frame_buffer(YV12_BUFFER_CONFIG *ybf,
                              int width, int height, int ss_x, int ss_y,
+#if CONFIG_VP9_HIGHBITDEPTH
+                             int use_highbitdepth,
+#endif
                              int border,
                              vpx_codec_frame_buffer_t *fb,
                              vpx_get_frame_buffer_cb_fn_t cb,

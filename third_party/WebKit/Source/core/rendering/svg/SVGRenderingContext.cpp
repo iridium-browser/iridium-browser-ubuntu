@@ -30,6 +30,7 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/paint/SVGImagePainter.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/svg/RenderSVGImage.h"
 #include "core/rendering/svg/RenderSVGResource.h"
@@ -37,6 +38,7 @@
 #include "core/rendering/svg/RenderSVGResourceMasker.h"
 #include "core/rendering/svg/SVGResources.h"
 #include "core/rendering/svg/SVGResourcesCache.h"
+#include "platform/FloatConversion.h"
 
 static int kMaxImageBufferSize = 4096;
 
@@ -63,19 +65,19 @@ SVGRenderingContext::~SVGRenderingContext()
 
         if (m_filter) {
             ASSERT(SVGResourcesCache::cachedResourcesForRenderObject(m_object)->filter() == m_filter);
-            m_filter->postApplyResource(m_object, m_paintInfo->context, ApplyToDefaultMode, 0, 0);
+            m_filter->postApplyResource(m_object, m_paintInfo->context);
             m_paintInfo->context = m_savedContext;
             m_paintInfo->rect = m_savedPaintRect;
         }
 
         if (m_clipper) {
             ASSERT(SVGResourcesCache::cachedResourcesForRenderObject(m_object)->clipper() == m_clipper);
-            m_clipper->postApplyStatefulResource(m_object, m_paintInfo->context, m_clipperContext);
+            m_clipper->postApplyStatefulResource(m_object, m_paintInfo->context, m_clipperState);
         }
 
         if (m_masker) {
             ASSERT(SVGResourcesCache::cachedResourcesForRenderObject(m_object)->masker() == m_masker);
-            m_masker->postApplyResource(m_object, m_paintInfo->context, ApplyToDefaultMode, 0, 0);
+            m_masker->postApplyResource(m_object, m_paintInfo->context);
         }
     }
 
@@ -86,7 +88,7 @@ SVGRenderingContext::~SVGRenderingContext()
         m_paintInfo->context->restore();
 }
 
-void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintInfo& paintInfo, NeedsGraphicsContextSave needsGraphicsContextSave)
+void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintInfo& paintInfo)
 {
     ASSERT(object);
 
@@ -99,12 +101,6 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
     m_object = object;
     m_paintInfo = &paintInfo;
     m_filter = 0;
-
-    // We need to save / restore the context even if the initialization failed.
-    if (needsGraphicsContextSave == SaveGraphicsContext) {
-        m_paintInfo->context->save();
-        m_renderingFlags |= RestoreGraphicsContext;
-    }
 
     RenderStyle* style = m_object->style();
     ASSERT(style);
@@ -163,7 +159,7 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
 
     RenderSVGResourceClipper* clipper = resources->clipper();
     if (!clipPathOperation && clipper) {
-        if (!clipper->applyStatefulResource(m_object, m_paintInfo->context, m_clipperContext))
+        if (!clipper->applyStatefulResource(m_object, m_paintInfo->context, m_clipperState))
             return;
         m_clipper = clipper;
         m_renderingFlags |= PostApplyResources;
@@ -299,7 +295,7 @@ bool SVGRenderingContext::bufferForeground(OwnPtr<ImageBuffer>& imageBuffer)
             bufferedRenderingContext->translate(-boundingBox.x(), -boundingBox.y());
             PaintInfo bufferedInfo(*m_paintInfo);
             bufferedInfo.context = bufferedRenderingContext;
-            toRenderSVGImage(m_object)->paintForeground(bufferedInfo);
+            SVGImagePainter::paintForeground(toRenderSVGImage(*m_object), bufferedInfo);
         } else
             return false;
     }

@@ -7,7 +7,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
@@ -2439,11 +2439,11 @@ TEST_P(SpdyNetworkTransactionTest, RedirectGetRequest) {
   scoped_ptr<SpdyHeaderBlock> headers(
       spdy_util_.ConstructGetHeaderBlock("http://www.google.com/"));
   (*headers)["user-agent"] = "";
-  (*headers)["accept-encoding"] = "gzip,deflate";
+  (*headers)["accept-encoding"] = "gzip, deflate";
   scoped_ptr<SpdyHeaderBlock> headers2(
       spdy_util_.ConstructGetHeaderBlock("http://www.foo.com/index.php"));
   (*headers2)["user-agent"] = "";
-  (*headers2)["accept-encoding"] = "gzip,deflate";
+  (*headers2)["accept-encoding"] = "gzip, deflate";
 
   // Setup writes/reads to www.google.com
   scoped_ptr<SpdyFrame> req(
@@ -2482,26 +2482,27 @@ TEST_P(SpdyNetworkTransactionTest, RedirectGetRequest) {
         GetParam().protocol,
         false  /* force_spdy_over_ssl*/,
         true  /* force_spdy_always */);
-    net::URLRequest r(GURL("http://www.google.com/"),
-                      DEFAULT_PRIORITY,
-                      &d,
-                      &spdy_url_request_context);
+    scoped_ptr<URLRequest> r(
+        spdy_url_request_context.CreateRequest(GURL("http://www.google.com/"),
+                                               DEFAULT_PRIORITY,
+                                               &d,
+                                               NULL));
     spdy_url_request_context.socket_factory().
         AddSocketDataProvider(&data);
     spdy_url_request_context.socket_factory().
         AddSocketDataProvider(&data2);
 
     d.set_quit_on_redirect(true);
-    r.Start();
+    r->Start();
     base::RunLoop().Run();
 
     EXPECT_EQ(1, d.received_redirect_count());
 
-    r.FollowDeferredRedirect();
+    r->FollowDeferredRedirect();
     base::RunLoop().Run();
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r->status().status());
     std::string contents("hello!");
     EXPECT_EQ(contents, d.data_received());
   }
@@ -2517,7 +2518,7 @@ TEST_P(SpdyNetworkTransactionTest, RedirectServerPush) {
   scoped_ptr<SpdyHeaderBlock> headers(
       spdy_util_.ConstructGetHeaderBlock("http://www.google.com/"));
   (*headers)["user-agent"] = "";
-  (*headers)["accept-encoding"] = "gzip,deflate";
+  (*headers)["accept-encoding"] = "gzip, deflate";
 
   // Setup writes/reads to www.google.com
   scoped_ptr<SpdyFrame> req(
@@ -2550,7 +2551,7 @@ TEST_P(SpdyNetworkTransactionTest, RedirectServerPush) {
   scoped_ptr<SpdyHeaderBlock> headers2(
       spdy_util_.ConstructGetHeaderBlock("http://www.foo.com/index.php"));
   (*headers2)["user-agent"] = "";
-  (*headers2)["accept-encoding"] = "gzip,deflate";
+  (*headers2)["accept-encoding"] = "gzip, deflate";
   scoped_ptr<SpdyFrame> req2(
       spdy_util_.ConstructSpdySyn(1, *headers2, LOWEST, false, true));
   scoped_ptr<SpdyFrame> resp2(spdy_util_.ConstructSpdyGetSynReply(NULL, 0, 1));
@@ -2576,37 +2577,40 @@ TEST_P(SpdyNetworkTransactionTest, RedirectServerPush) {
       false  /* force_spdy_over_ssl*/,
       true  /* force_spdy_always */);
   {
-    net::URLRequest r(GURL("http://www.google.com/"),
-                      DEFAULT_PRIORITY,
-                      &d,
-                      &spdy_url_request_context);
+    scoped_ptr<URLRequest> r(
+        spdy_url_request_context.CreateRequest(GURL("http://www.google.com/"),
+                                               DEFAULT_PRIORITY,
+                                               &d,
+                                               NULL));
     spdy_url_request_context.socket_factory().
         AddSocketDataProvider(&data);
 
-    r.Start();
+    r->Start();
     base::RunLoop().Run();
 
     EXPECT_EQ(0, d.received_redirect_count());
     std::string contents("hello!");
     EXPECT_EQ(contents, d.data_received());
 
-    net::URLRequest r2(GURL("http://www.google.com/foo.dat"),
-                       DEFAULT_PRIORITY,
-                       &d2,
-                       &spdy_url_request_context);
+    scoped_ptr<URLRequest> r2(
+        spdy_url_request_context.CreateRequest(
+            GURL("http://www.google.com/foo.dat"),
+            DEFAULT_PRIORITY,
+            &d2,
+            NULL));
     spdy_url_request_context.socket_factory().
         AddSocketDataProvider(&data2);
 
     d2.set_quit_on_redirect(true);
-    r2.Start();
+    r2->Start();
     base::RunLoop().Run();
     EXPECT_EQ(1, d2.received_redirect_count());
 
-    r2.FollowDeferredRedirect();
+    r2->FollowDeferredRedirect();
     base::RunLoop().Run();
     EXPECT_EQ(1, d2.response_started_count());
     EXPECT_FALSE(d2.received_data_before_response());
-    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r2.status().status());
+    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r2->status().status());
     std::string contents2("hello!");
     EXPECT_EQ(contents2, d2.data_received());
   }
@@ -6446,6 +6450,67 @@ TEST_P(SpdyNetworkTransactionTest, FlowControlNegativeSendWindowSize) {
   data.RunFor((GetParam().protocol >= kProtoSPDY31) ? 9 : 8);
   rv = callback.WaitForResult();
   helper.VerifyDataConsumed();
+}
+
+TEST_P(SpdyNetworkTransactionTest, GoAwayOnOddPushStreamId) {
+  if (spdy_util_.spdy_version() < SPDY3)
+    return;
+
+  scoped_ptr<SpdyHeaderBlock> push_headers(new SpdyHeaderBlock);
+  spdy_util_.AddUrlToHeaderBlock("http://www.google.com/a.dat",
+                                 push_headers.get());
+  scoped_ptr<SpdyFrame> push(
+      spdy_util_.ConstructInitialSpdyPushFrame(push_headers.Pass(), 3, 1));
+  MockRead reads[] = {CreateMockRead(*push, 1)};
+
+  scoped_ptr<SpdyFrame> req(
+      spdy_util_.ConstructSpdyGet(NULL, 0, false, 1, LOWEST, true));
+  scoped_ptr<SpdyFrame> goaway(spdy_util_.ConstructSpdyGoAway(
+      0, GOAWAY_PROTOCOL_ERROR, "Odd push stream id."));
+  MockWrite writes[] = {
+      CreateMockWrite(*req, 0), CreateMockWrite(*goaway, 2),
+  };
+
+  DelayedSocketData data(1, reads, arraysize(reads), writes, arraysize(writes));
+  NormalSpdyTransactionHelper helper(
+      CreateGetRequest(), DEFAULT_PRIORITY, BoundNetLog(), GetParam(), NULL);
+  helper.RunToCompletion(&data);
+  TransactionHelperResult out = helper.output();
+  EXPECT_EQ(ERR_SPDY_PROTOCOL_ERROR, out.rv);
+}
+
+TEST_P(SpdyNetworkTransactionTest,
+       GoAwayOnPushStreamIdLesserOrEqualThanLastAccepted) {
+  if (spdy_util_.spdy_version() < SPDY3)
+    return;
+
+  scoped_ptr<SpdyFrame> push_a(spdy_util_.ConstructSpdyPush(
+      NULL, 0, 4, 1, "http://www.google.com/a.dat"));
+  scoped_ptr<SpdyHeaderBlock> push_b_headers(new SpdyHeaderBlock);
+  spdy_util_.AddUrlToHeaderBlock("http://www.google.com/b.dat",
+                                 push_b_headers.get());
+  scoped_ptr<SpdyFrame> push_b(
+      spdy_util_.ConstructInitialSpdyPushFrame(push_b_headers.Pass(), 2, 1));
+  MockRead reads[] = {
+      CreateMockRead(*push_a, 1), CreateMockRead(*push_b, 2),
+  };
+
+  scoped_ptr<SpdyFrame> req(
+      spdy_util_.ConstructSpdyGet(NULL, 0, false, 1, LOWEST, true));
+  scoped_ptr<SpdyFrame> goaway(spdy_util_.ConstructSpdyGoAway(
+      4,
+      GOAWAY_PROTOCOL_ERROR,
+      "New push stream id must be greater than the last accepted."));
+  MockWrite writes[] = {
+      CreateMockWrite(*req, 0), CreateMockWrite(*goaway, 3),
+  };
+
+  DelayedSocketData data(1, reads, arraysize(reads), writes, arraysize(writes));
+  NormalSpdyTransactionHelper helper(
+      CreateGetRequest(), DEFAULT_PRIORITY, BoundNetLog(), GetParam(), NULL);
+  helper.RunToCompletion(&data);
+  TransactionHelperResult out = helper.output();
+  EXPECT_EQ(ERR_SPDY_PROTOCOL_ERROR, out.rv);
 }
 
 class SpdyNetworkTransactionNoTLSUsageCheckTest

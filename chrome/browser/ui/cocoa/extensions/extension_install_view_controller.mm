@@ -14,9 +14,10 @@
 #include "chrome/browser/extensions/bundle_installer.h"
 #import "chrome/browser/ui/chrome_style.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/page_navigator.h"
 #include "extensions/common/extension.h"
-#include "grit/generated_resources.h"
+#include "extensions/common/extension_urls.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
@@ -56,6 +57,13 @@ typedef NSUInteger CellAttributes;
 - (NSDictionary*)buildDetailToggleItem:(size_t)type
                  permissionsDetailIndex:(size_t)index;
 - (NSArray*)buildWarnings:(const ExtensionInstallPrompt::Prompt&)prompt;
+// Adds permissions of |type| from |prompt| to |children| and returns the
+// the appropriate permissions header. If no permissions are found, NULL is
+// returned.
+- (NSString*)
+appendPermissionsForPrompt:(const ExtensionInstallPrompt::Prompt&)prompt
+                  withType:(ExtensionInstallPrompt::PermissionsType)type
+                  children:(NSMutableArray*)children;
 - (void)updateViewFrame:(NSRect)frame;
 @end
 
@@ -210,7 +218,7 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
   GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
                  prompt_->extension()->id());
   navigator_->OpenURL(OpenURLParams(
-      store_url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
+      store_url, Referrer(), NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
       false));
 
   delegate_->InstallUIAbort(/*user_initiated=*/true);
@@ -592,37 +600,30 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
 - (NSArray*)buildWarnings:(const ExtensionInstallPrompt::Prompt&)prompt {
   NSMutableArray* warnings = [NSMutableArray array];
   NSString* heading = nil;
+  NSString* withheldHeading = nil;
 
   ExtensionInstallPrompt::DetailsType type =
       ExtensionInstallPrompt::PERMISSIONS_DETAILS;
+  bool hasPermissions = prompt.GetPermissionCount(
+      ExtensionInstallPrompt::PermissionsType::ALL_PERMISSIONS);
+  CellAttributes warningCellAttributes =
+      kBoldText | kAutoExpandCell | kNoExpandMarker;
   if (prompt.ShouldShowPermissions()) {
     NSMutableArray* children = [NSMutableArray array];
-    if (prompt.GetPermissionCount() > 0) {
-      for (size_t i = 0; i < prompt.GetPermissionCount(); ++i) {
-        [children addObject:
-            [self buildItemWithTitle:SysUTF16ToNSString(prompt.GetPermission(i))
-                      cellAttributes:kUseBullet
-                            children:nil]];
+    NSMutableArray* withheldChildren = [NSMutableArray array];
 
-        // If there are additional details, add them below this item.
-        if (!prompt.GetPermissionsDetails(i).empty()) {
-          if (prompt.GetIsShowingDetails(
-              ExtensionInstallPrompt::PERMISSIONS_DETAILS, i)) {
-            [children addObject:
-                [self buildItemWithTitle:SysUTF16ToNSString(
-                    prompt.GetPermissionsDetails(i))
-                          cellAttributes:kNoExpandMarker
-                                children:nil]];
-          }
+    heading =
+        [self appendPermissionsForPrompt:prompt
+                                withType:ExtensionInstallPrompt::PermissionsType
+                                             ::REGULAR_PERMISSIONS
+                                children:children];
+    withheldHeading =
+        [self appendPermissionsForPrompt:prompt
+                                withType:ExtensionInstallPrompt::PermissionsType
+                                             ::WITHHELD_PERMISSIONS
+                                children:withheldChildren];
 
-          // Add a row for the link.
-          [children addObject:
-              [self buildDetailToggleItem:type permissionsDetailIndex:i]];
-        }
-      }
-
-      heading = SysUTF16ToNSString(prompt.GetPermissionsHeading());
-    } else {
+    if (!hasPermissions) {
       [children addObject:
           [self buildItemWithTitle:
               l10n_util::GetNSString(IDS_EXTENSION_NO_SPECIAL_PERMISSIONS)
@@ -631,10 +632,18 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
       heading = @"";
     }
 
-    [warnings addObject:[self
-        buildItemWithTitle:heading
-            cellAttributes:kBoldText | kAutoExpandCell | kNoExpandMarker
-                  children:children]];
+    if (heading) {
+      [warnings addObject:[self buildItemWithTitle:heading
+                                    cellAttributes:warningCellAttributes
+                                          children:children]];
+    }
+
+    // Add withheld permissions to the prompt if they exist.
+    if (withheldHeading) {
+      [warnings addObject:[self buildItemWithTitle:withheldHeading
+                                    cellAttributes:warningCellAttributes
+                                          children:withheldChildren]];
+    }
   }
 
   if (prompt.GetRetainedFileCount() > 0) {
@@ -652,11 +661,11 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
       }
     }
 
-    [warnings addObject:
-        [self buildItemWithTitle:SysUTF16ToNSString(
-            prompt.GetRetainedFilesHeading())
-                  cellAttributes:kBoldText | kAutoExpandCell | kNoExpandMarker
-                        children:children]];
+    [warnings
+        addObject:[self buildItemWithTitle:SysUTF16ToNSString(
+                                               prompt.GetRetainedFilesHeading())
+                            cellAttributes:warningCellAttributes
+                                  children:children]];
 
     // Add a row for the link.
     [warnings addObject:
@@ -664,6 +673,42 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
   }
 
   return warnings;
+}
+
+- (NSString*)
+appendPermissionsForPrompt:(const ExtensionInstallPrompt::Prompt&)prompt
+                 withType:(ExtensionInstallPrompt::PermissionsType)type
+                 children:(NSMutableArray*)children {
+  size_t permissionsCount = prompt.GetPermissionCount(type);
+  if (permissionsCount == 0)
+    return NULL;
+
+  for (size_t i = 0; i < permissionsCount; ++i) {
+    NSDictionary* item = [self
+        buildItemWithTitle:SysUTF16ToNSString(prompt.GetPermission(i, type))
+            cellAttributes:kUseBullet
+                  children:nil];
+    [children addObject:item];
+
+    // If there are additional details, add them below this item.
+    if (!prompt.GetPermissionsDetails(i, type).empty()) {
+      if (prompt.GetIsShowingDetails(
+              ExtensionInstallPrompt::PERMISSIONS_DETAILS, i)) {
+        item =
+            [self buildItemWithTitle:SysUTF16ToNSString(
+                                         prompt.GetPermissionsDetails(i, type))
+                      cellAttributes:kNoExpandMarker
+                            children:nil];
+        [children addObject:item];
+      }
+
+      // Add a row for the link.
+      [children addObject:
+          [self buildDetailToggleItem:type permissionsDetailIndex:i]];
+    }
+  }
+
+  return SysUTF16ToNSString(prompt.GetPermissionsHeading(type));
 }
 
 - (void)updateViewFrame:(NSRect)frame {

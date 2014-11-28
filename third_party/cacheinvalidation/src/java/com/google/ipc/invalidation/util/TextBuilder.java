@@ -16,9 +16,6 @@
 
 package com.google.ipc.invalidation.util;
 
-import com.google.common.base.Preconditions;
-import com.google.protobuf.ByteString;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 
@@ -130,7 +127,7 @@ public class TextBuilder {
    * Appends the comma-separated {@code InternalBase#toCompactString} representations of
    * {@code objects} to this builder.
    */
-  public TextBuilder append(Iterable<InternalBase> objects) {
+  public TextBuilder append(Iterable<? extends InternalBase> objects) {
     if (objects == null) {
       return this;
     }
@@ -147,8 +144,11 @@ public class TextBuilder {
   }
 
   /** Appends the {@link Bytes#toString} representation of {@code bytes} to this builder. */
-  public TextBuilder append(ByteString bytes) {
-    builder.append(Bytes.toString(bytes));
+  public TextBuilder append(byte[] bytes) {
+    if (bytes == null) {
+      return append("null");
+    }
+    Bytes.toCompactString(this, bytes);
     return this;
   }
 

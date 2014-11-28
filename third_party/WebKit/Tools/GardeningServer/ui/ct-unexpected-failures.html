@@ -5,16 +5,13 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="../bower_components/paper-button/paper-button.html">
-<link rel="import" href="../model/ct-commit-log.html">
 <link rel="import" href="../model/tree-status.html">
-<link rel="import" href="ct-failure-analyzer.html">
 <link rel="import" href="ct-failure-stream.html">
 <link rel="import" href="ct-last-updated.html">
 <link rel="import" href="ct-party-time.html">
-<link rel="import" href="ct-revision-details.html">
 <link rel="import" href="ct-tree-status.html">
 
-<polymer-element name="ct-unexpected-failures" attributes="tree lastUpdateDate">
+<polymer-element name="ct-unexpected-failures" attributes="tree commitLog failures">
   <template>
     <style>
       ct-tree-status {
@@ -37,29 +34,26 @@ found in the LICENSE file.
         padding: 0 5px;
       }
     </style>
-    <ct-failure-analyzer id="analyzer" failures="{{ failures }}" builderLatestRevisions="{{ builderLatestRevisions }}" lastUpdateDate="{{ lastUpdateDate }}"></ct-failure-analyzer>
     <div class="toolbar">
-      <ct-revision-details id="revisionDetails" builderLatestRevisions="{{ builderLatestRevisions }}" revisionLog="{{ revisionLog }}" tree="{{ tree }}"></ct-revision-details>
       <a href="https://code.google.com/p/chromium/wiki/UsefulURLs">Useful URLs</a>
     </div>
     <ct-tree-status status="{{ treeStatuses['chromium'] }}" state="{{ treeStatuses['chromium'].status }}"></ct-tree-status>
     <ct-tree-status status="{{ treeStatuses['blink'] }}" state="{{ treeStatuses['blink'].status }}"></ct-tree-status>
-    <ct-party-time failures="{{ failures }}" tree="{{ tree }}"></ct-party-time>
-    <ct-failure-stream category="default" groups="{{ failures[tree] }}" commits="{{ revisionLog }}" tree="{{ tree }}"></ct-failure-stream>
-    <ct-failure-stream category="snoozed" groups="{{ failures[tree] }}" commits="{{ revisionLog }}" tree="{{ tree }}"></ct-failure-stream>
+    <template if="{{ failures && failures.failures && (!failures.failures[tree] || !failures.failures[tree].length) }}">
+      <ct-party-time></ct-party-time>
+    </template>
+    <ct-failure-stream title="Probably-hung bots" category="builders" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
+    <ct-failure-stream title="Reliable failures" category="default" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
+    <ct-failure-stream title="Failures that have only happened once (on one bot)" category="failedOnce" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
+    <ct-failure-stream title="Snoozed failures" category="snoozed" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
   </template>
   <script>
   (function() {
-    // FIXME: Make the update frequency 30 seconds again once we fix crbug.com/401358.
-    var kUpdateFrequency = 1000 * 30 * 10;
-
     Polymer({
-      revisionLog: new CTCommitLog(),
       tree: '',
 
       created: function() {
         this.treeStatuses = {};
-
         var projects = ['chromium', 'blink'];
         for (var i = 0; i < projects.length; i++) {
           this.treeStatuses[projects[i]] = new TreeStatus(projects[i]);
@@ -68,13 +62,10 @@ found in the LICENSE file.
 
       attached: function() {
         this.update();
-        setInterval(this.update.bind(this), kUpdateFrequency);
       },
 
       update: function() {
         // FIXME: These shouldn't update if there's already an update in progress.
-        this.revisionLog.update();
-        this.$.analyzer.update();
         Object.keys(this.treeStatuses, function(tree, status) {
           status.update();
         });

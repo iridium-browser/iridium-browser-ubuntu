@@ -47,13 +47,15 @@ class SANDBOX_EXPORT SyscallSets {
   static bool IsSocketCall(int sysno);
 #endif
 
-#if defined(__x86_64__) || defined(__arm__) || defined(__mips__)
+#if defined(__x86_64__) || defined(__arm__) || defined(__mips__) || \
+    defined(__aarch64__)
   static bool IsNetworkSocketInformation(int sysno);
 #endif
 
   static bool IsAllowedAddressSpaceAccess(int sysno);
   static bool IsAllowedGeneralIo(int sysno);
   static bool IsPrctl(int sysno);
+  static bool IsSeccomp(int sysno);
   static bool IsAllowedBasicScheduler(int sysno);
   static bool IsAdminOperation(int sysno);
   static bool IsKernelModule(int sysno);
@@ -68,15 +70,15 @@ class SANDBOX_EXPORT SyscallSets {
   // Asynchronous I/O API.
   static bool IsAsyncIo(int sysno);
   static bool IsKeyManagement(int sysno);
-#if defined(__x86_64__) || defined(__arm__)
+#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
   static bool IsSystemVSemaphores(int sysno);
 #endif
-#if defined(__x86_64__) || defined(__arm__)
+#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
   // These give a lot of ambient authority and bypass the setuid sandbox.
   static bool IsSystemVSharedMemory(int sysno);
 #endif
 
-#if defined(__x86_64__) || defined(__arm__)
+#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
   static bool IsSystemVMessageQueue(int sysno);
 #endif
 

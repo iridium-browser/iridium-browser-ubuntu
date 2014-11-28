@@ -10,13 +10,20 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "device/hid/hid_device_info.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/common/api/hid.h"
 
+namespace device {
+class HidDeviceFilter;
+}
+
 namespace extensions {
+
+class Extension;
 
 class HidDeviceManager : public BrowserContextKeyedAPI {
  public:
@@ -31,19 +38,22 @@ class HidDeviceManager : public BrowserContextKeyedAPI {
     return BrowserContextKeyedAPIFactory<HidDeviceManager>::Get(context);
   }
 
-  scoped_ptr<base::ListValue> GetApiDevices(uint16_t vendor_id,
-                                            uint16_t product_id);
+  scoped_ptr<base::ListValue> GetApiDevices(
+      const Extension* extension,
+      const std::vector<device::HidDeviceFilter>& filters);
 
   bool GetDeviceInfo(int resource_id, device::HidDeviceInfo* device_info);
+
+  bool HasPermission(const Extension* extension,
+                     const device::HidDeviceInfo& device_info);
 
  private:
   friend class BrowserContextKeyedAPIFactory<HidDeviceManager>;
 
   static const char* service_name() { return "HidDeviceManager"; }
+  static bool IsCalledOnValidThread();
 
   void UpdateDevices();
-
-  base::ThreadChecker thread_checker_;
 
   static const bool kServiceHasOwnInstanceInIncognito = true;
 

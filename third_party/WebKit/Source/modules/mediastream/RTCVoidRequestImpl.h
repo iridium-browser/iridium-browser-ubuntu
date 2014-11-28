@@ -43,7 +43,7 @@ class VoidCallback;
 
 class RTCVoidRequestImpl FINAL : public RTCVoidRequest, public ActiveDOMObject {
 public:
-    static PassRefPtr<RTCVoidRequestImpl> create(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<VoidCallback>, PassOwnPtr<RTCErrorCallback>);
+    static RTCVoidRequestImpl* create(ExecutionContext*, RTCPeerConnection*, VoidCallback*, RTCErrorCallback*);
     virtual ~RTCVoidRequestImpl();
 
     // RTCVoidRequest
@@ -53,15 +53,16 @@ public:
     // ActiveDOMObject
     virtual void stop() OVERRIDE;
 
+    virtual void trace(Visitor*) OVERRIDE;
+
 private:
-    RTCVoidRequestImpl(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<VoidCallback>, PassOwnPtr<RTCErrorCallback>);
+    RTCVoidRequestImpl(ExecutionContext*, RTCPeerConnection*, VoidCallback*, RTCErrorCallback*);
 
     void clear();
 
-    OwnPtr<VoidCallback> m_successCallback;
-    OwnPtr<RTCErrorCallback> m_errorCallback;
-
-    Persistent<RTCPeerConnection> m_requester;
+    Member<VoidCallback> m_successCallback;
+    Member<RTCErrorCallback> m_errorCallback;
+    Member<RTCPeerConnection> m_requester;
 };
 
 } // namespace blink

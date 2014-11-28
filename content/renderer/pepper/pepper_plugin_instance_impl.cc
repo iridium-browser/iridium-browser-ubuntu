@@ -17,6 +17,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "cc/base/latency_info_swap_promise.h"
+#include "cc/blink/web_layer_impl.h"
 #include "cc/layers/texture_layer.h"
 #include "cc/trees/layer_tree_host.h"
 #include "content/common/content_constants_internal.h"
@@ -24,7 +25,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/renderer/compositor_bindings/web_layer_impl.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/pepper/content_decryptor_delegate.h"
 #include "content/renderer/pepper/event_conversion.h"
@@ -33,12 +33,12 @@
 #include "content/renderer/pepper/host_dispatcher_wrapper.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/message_channel.h"
-#include "content/renderer/pepper/npapi_glue.h"
 #include "content/renderer/pepper/pepper_browser_connection.h"
 #include "content/renderer/pepper/pepper_compositor_host.h"
 #include "content/renderer/pepper/pepper_file_ref_renderer_host.h"
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 #include "content/renderer/pepper/pepper_in_process_router.h"
+#include "content/renderer/pepper/pepper_try_catch.h"
 #include "content/renderer/pepper/pepper_url_loader_host.h"
 #include "content/renderer/pepper/plugin_module.h"
 #include "content/renderer/pepper/plugin_object.h"
@@ -92,8 +92,8 @@
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_buffer_api.h"
-#include "printing/metafile.h"
 #include "printing/metafile_skia_wrapper.h"
+#include "printing/pdf_metafile_skia.h"
 #include "printing/units.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
@@ -115,6 +115,7 @@
 #include "third_party/WebKit/public/web/WebPrintParams.h"
 #include "third_party/WebKit/public/web/WebPrintScalingOption.h"
 #include "third_party/WebKit/public/web/WebScopedUserGesture.h"
+#include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -131,10 +132,6 @@
 #if defined(OS_CHROMEOS)
 #include "ui/events/keycodes/keyboard_codes_posix.h"
 #endif
-
-#if defined(OS_MACOSX)
-#include "printing/metafile_impl.h"
-#endif  // defined(OS_MACOSX)
 
 #if defined(OS_WIN)
 #include "base/metrics/histogram.h"
@@ -547,6 +544,7 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       fullscreen_container_(NULL),
       flash_fullscreen_(false),
       desired_fullscreen_state_(false),
+      message_channel_(NULL),
       sad_plugin_(NULL),
       input_event_mask_(0),
       filtered_input_event_mask_(0),
@@ -559,7 +557,6 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       pending_user_gesture_(0.0),
       document_loader_(NULL),
       external_document_load_(false),
-      npp_(new NPP_t),
       isolate_(v8::Isolate::GetCurrent()),
       is_deleted_(false),
       last_input_number_(0),
@@ -620,8 +617,8 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
 PepperPluginInstanceImpl::~PepperPluginInstanceImpl() {
   DCHECK(!fullscreen_container_);
 
-  // Free all the plugin objects. This will automatically clear the back-
-  // pointer from the NPObject so WebKit can't call into the plugin any more.
+  // Notify all the plugin objects of deletion. This will prevent blink from
+  // calling into the plugin any more.
   //
   // Swap out the set so we can delete from it (the objects will try to
   // unregister themselves inside the delete call).
@@ -629,8 +626,13 @@ PepperPluginInstanceImpl::~PepperPluginInstanceImpl() {
   live_plugin_objects_.swap(plugin_object_copy);
   for (PluginObjectSet::iterator i = plugin_object_copy.begin();
        i != plugin_object_copy.end();
-       ++i)
-    delete *i;
+       ++i) {
+    (*i)->InstanceDeleted();
+  }
+
+  if (message_channel_)
+    message_channel_->InstanceDeleted();
+  message_channel_object_.Reset();
 
   if (TrackedCallback::IsPending(lock_mouse_callback_))
     lock_mouse_callback_->Abort();
@@ -661,14 +663,30 @@ PepperPluginInstanceImpl::~PepperPluginInstanceImpl() {
 // If a method needs to access a member of the instance after the call has
 // returned, then it needs to keep its own reference on the stack.
 
-v8::Local<v8::Context> PepperPluginInstanceImpl::GetContext() {
+v8::Local<v8::Object> PepperPluginInstanceImpl::GetMessageChannelObject() {
+  return v8::Local<v8::Object>::New(isolate_, message_channel_object_);
+}
+
+void PepperPluginInstanceImpl::MessageChannelDestroyed() {
+  message_channel_ = NULL;
+  message_channel_object_.Reset();
+}
+
+v8::Local<v8::Context> PepperPluginInstanceImpl::GetMainWorldContext() {
   if (!container_)
     return v8::Handle<v8::Context>();
-  WebLocalFrame* frame = container_->element().document().frame();
-  if (!frame)
+
+  if (container_->element().isNull())
     return v8::Handle<v8::Context>();
 
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  if (container_->element().document().isNull())
+    return v8::Handle<v8::Context>();
+
+  if (!container_->element().document().frame())
+    return v8::Handle<v8::Context>();
+
+  v8::Local<v8::Context> context =
+      container_->element().document().frame()->mainWorldScriptContext();
   DCHECK(context->GetIsolate() == isolate_);
   return context;
 }
@@ -687,7 +705,8 @@ void PepperPluginInstanceImpl::Delete() {
   // release our last reference to the "InstanceObject" and will probably
   // destroy it. We want to do this prior to calling DidDestroy in case the
   // destructor of the instance object tries to use the instance.
-  message_channel_->SetPassthroughObject(NULL);
+  if (message_channel_)
+    message_channel_->SetPassthroughObject(v8::Handle<v8::Object>());
   // If this is a NaCl plugin instance, shut down the NaCl plugin by calling
   // its DidDestroy. Don't call DidDestroy on the untrusted plugin instance,
   // since there is little that it can do at this point.
@@ -747,7 +766,7 @@ void PepperPluginInstanceImpl::InvalidateRect(const gfx::Rect& rect) {
   }
 
   cc::Layer* layer =
-      texture_layer_ ? texture_layer_.get() : compositor_layer_.get();
+      texture_layer_.get() ? texture_layer_.get() : compositor_layer_.get();
   if (layer) {
     if (rect.IsEmpty()) {
       layer->SetNeedsDisplay();
@@ -761,7 +780,7 @@ void PepperPluginInstanceImpl::ScrollRect(int dx,
                                           int dy,
                                           const gfx::Rect& rect) {
   cc::Layer* layer =
-      texture_layer_ ? texture_layer_.get() : compositor_layer_.get();
+      texture_layer_.get() ? texture_layer_.get() : compositor_layer_.get();
   if (layer) {
     InvalidateRect(rect);
   } else if (fullscreen_container_) {
@@ -849,7 +868,7 @@ bool PepperPluginInstanceImpl::Initialize(
     bool full_frame) {
   if (!render_frame_)
     return false;
-  message_channel_.reset(new MessageChannel(this));
+  message_channel_ = MessageChannel::Create(this, &message_channel_object_);
 
   full_frame_ = full_frame;
 
@@ -872,9 +891,11 @@ bool PepperPluginInstanceImpl::Initialize(
   // messages. (E.g., NaCl trusted plugin starting a child NaCl app.)
   //
   // A host for external plugins will call ResetAsProxied later, at which point
-  // we can Start() the message_channel_.
-  if (success && (!module_->renderer_ppapi_host()->IsExternalPluginHost()))
-    message_channel_->Start();
+  // we can Start() the MessageChannel.
+  if (success && (!module_->renderer_ppapi_host()->IsExternalPluginHost())) {
+    if (message_channel_)
+      message_channel_->Start();
+  }
   return success;
 }
 
@@ -1177,6 +1198,8 @@ bool PepperPluginInstanceImpl::HandleInputEvent(
 
 void PepperPluginInstanceImpl::HandleMessage(ScopedPPVar message) {
   TRACE_EVENT0("ppapi", "PepperPluginInstanceImpl::HandleMessage");
+  if (is_deleted_)
+    return;
   ppapi::proxy::HostDispatcher* dispatcher =
       ppapi::proxy::HostDispatcher::GetForInstance(pp_instance());
   if (!dispatcher || (message.get().type == PP_VARTYPE_OBJECT)) {
@@ -1195,6 +1218,8 @@ void PepperPluginInstanceImpl::HandleMessage(ScopedPPVar message) {
 bool PepperPluginInstanceImpl::HandleBlockingMessage(ScopedPPVar message,
                                                      ScopedPPVar* result) {
   TRACE_EVENT0("ppapi", "PepperPluginInstanceImpl::HandleBlockingMessage");
+  if (is_deleted_)
+    return false;
   ppapi::proxy::HostDispatcher* dispatcher =
       ppapi::proxy::HostDispatcher::GetForInstance(pp_instance());
   if (!dispatcher || (message.get().type == PP_VARTYPE_OBJECT)) {
@@ -1218,9 +1243,11 @@ bool PepperPluginInstanceImpl::HandleBlockingMessage(ScopedPPVar message,
   return was_handled;
 }
 
-PP_Var PepperPluginInstanceImpl::GetInstanceObject() {
+PP_Var PepperPluginInstanceImpl::GetInstanceObject(v8::Isolate* isolate) {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PepperPluginInstanceImpl> ref(this);
+
+  DCHECK_EQ(isolate, isolate_);
 
   // If the plugin supports the private instance interface, try to retrieve its
   // instance object.
@@ -1357,13 +1384,24 @@ void PepperPluginInstanceImpl::SetTextInputType(ui::TextInputType type) {
 }
 
 void PepperPluginInstanceImpl::PostMessageToJavaScript(PP_Var message) {
-  message_channel_->PostMessageToJavaScript(message);
+  if (message_channel_)
+    message_channel_->PostMessageToJavaScript(message);
 }
 
 int32_t PepperPluginInstanceImpl::RegisterMessageHandler(
     PP_Instance instance,
     void* user_data,
-    const PPP_MessageHandler_0_1* handler,
+    const PPP_MessageHandler_0_2* handler,
+    PP_Resource message_loop) {
+  // Not supported in-process.
+  NOTIMPLEMENTED();
+  return PP_ERROR_FAILED;
+}
+
+int32_t PepperPluginInstanceImpl::RegisterMessageHandler_1_1_Deprecated(
+    PP_Instance instance,
+    void* user_data,
+    const PPP_MessageHandler_0_1_Deprecated* handler,
     PP_Resource message_loop) {
   // Not supported in-process.
   NOTIMPLEMENTED();
@@ -1529,7 +1567,7 @@ bool PepperPluginInstanceImpl::LoadPrivateInterface() {
   // If this is *not* a NaCl plugin, original_module_ will never be set; we talk
   // to the "real" module.
   scoped_refptr<PluginModule> module =
-      original_module_ ? original_module_ : module_;
+      original_module_.get() ? original_module_ : module_;
   // Only check for the interface if the plugin has private permission.
   if (!module->permissions().HasPermission(ppapi::PERMISSION_PRIVATE))
     return false;
@@ -1568,7 +1606,7 @@ bool PepperPluginInstanceImpl::LoadZoomInterface() {
 }
 
 void PepperPluginInstanceImpl::UpdateLayerTransform() {
-  if (!bound_graphics_2d_platform_ || !texture_layer_) {
+  if (!bound_graphics_2d_platform_ || !texture_layer_.get()) {
     // Currently the transform is only applied for Graphics2D.
     return;
   }
@@ -1668,6 +1706,12 @@ void PepperPluginInstanceImpl::SendDidChangeView() {
 
   UpdateLayerTransform();
 
+  if (bound_graphics_2d_platform_ &&
+      (!view_data_.is_page_visible ||
+       PP_ToGfxRect(view_data_.clip_rect).IsEmpty())) {
+    bound_graphics_2d_platform_->ClearCache();
+  }
+
   // It's possible that Delete() has been called but the renderer hasn't
   // released its reference to this object yet.
   if (instance_interface_) {
@@ -1750,10 +1794,9 @@ bool PepperPluginInstanceImpl::PrintPage(int page_number,
   // The canvas only has a metafile on it for print preview.
   bool save_for_later =
       (printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas) != NULL);
-#if defined(OS_MACOSX) || \
-    (defined(OS_WIN) && !defined(WIN_PDF_METAFILE_FOR_PRINTING))
+#if defined(OS_MACOSX)
   save_for_later = save_for_later && skia::IsPreviewMetafile(*canvas);
-#endif
+#endif  // defined(OS_MACOSX)
   if (save_for_later) {
     ranges_.push_back(page_range);
     canvas_ = skia::SharePtr(canvas);
@@ -1951,16 +1994,13 @@ bool PepperPluginInstanceImpl::PrintPDFOutput(PP_Resource print_output,
 
   bool ret = false;
 #if defined(OS_POSIX) && !defined(OS_ANDROID)
-  // On Linux we just set the final bits in the native metafile
-  // (NativeMetafile and PreviewMetafile must have compatible formats,
-  // i.e. both PDF for this to work).
-  printing::Metafile* metafile =
+  printing::PdfMetafileSkia* metafile =
       printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas);
   DCHECK(metafile != NULL);
   if (metafile)
     ret = metafile->InitFromData(mapper.data(), mapper.size());
 #elif defined(OS_WIN)
-  printing::Metafile* metafile =
+  printing::PdfMetafileSkia* metafile =
       printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas);
   if (metafile) {
     // We only have a metafile when doing print preview, so we just want to
@@ -2043,16 +2083,15 @@ void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
   bool want_texture_layer = want_3d_layer || want_2d_layer;
   bool want_compositor_layer = !!bound_compositor_;
 
-  if (!device_changed &&
-      (want_texture_layer == !!texture_layer_.get()) &&
+  if (!device_changed && (want_texture_layer == !!texture_layer_.get()) &&
       (want_3d_layer == layer_is_hardware_) &&
-      (want_compositor_layer == !!compositor_layer_) &&
+      (want_compositor_layer == !!compositor_layer_.get()) &&
       layer_bound_to_fullscreen_ == !!fullscreen_container_) {
     UpdateLayerTransform();
     return;
   }
 
-  if (texture_layer_ || compositor_layer_) {
+  if (texture_layer_.get() || compositor_layer_.get()) {
     if (!layer_bound_to_fullscreen_)
       container_->setWebLayer(NULL);
     else if (fullscreen_container_)
@@ -2083,10 +2122,10 @@ void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
     // wmode=transparent was specified.
     opaque = opaque || fullscreen_container_;
     texture_layer_->SetContentsOpaque(opaque);
-    web_layer_.reset(new WebLayerImpl(texture_layer_));
+    web_layer_.reset(new cc_blink::WebLayerImpl(texture_layer_));
   } else if (want_compositor_layer) {
     compositor_layer_ = bound_compositor_->layer();
-    web_layer_.reset(new WebLayerImpl(compositor_layer_));
+    web_layer_.reset(new cc_blink::WebLayerImpl(compositor_layer_));
   }
 
   if (web_layer_) {
@@ -2361,70 +2400,76 @@ PP_Var PepperPluginInstanceImpl::GetWindowObject(PP_Instance instance) {
   if (!container_)
     return PP_MakeUndefined();
 
+  PepperTryCatchVar try_catch(this, NULL);
   WebLocalFrame* frame = container_->element().document().frame();
-  if (!frame)
+  if (!frame) {
+    try_catch.SetException("No frame exists for window object.");
     return PP_MakeUndefined();
+  }
 
-  return NPObjectToPPVar(this, frame->windowObject());
+  ScopedPPVar result =
+      try_catch.FromV8(frame->mainWorldScriptContext()->Global());
+  DCHECK(!try_catch.HasException());
+  return result.Release();
 }
 
 PP_Var PepperPluginInstanceImpl::GetOwnerElementObject(PP_Instance instance) {
   if (!container_)
     return PP_MakeUndefined();
-  return NPObjectToPPVar(this, container_->scriptableObjectForElement());
+  PepperTryCatchVar try_catch(this, NULL);
+  ScopedPPVar result = try_catch.FromV8(container_->v8ObjectForElement());
+  DCHECK(!try_catch.HasException());
+  return result.Release();
 }
 
 PP_Var PepperPluginInstanceImpl::ExecuteScript(PP_Instance instance,
-                                               PP_Var script,
+                                               PP_Var script_var,
                                                PP_Var* exception) {
+  if (!container_)
+    return PP_MakeUndefined();
+
   // Executing the script may remove the plugin from the DOM, so we need to keep
   // a reference to ourselves so that we can still process the result after the
   // WebBindings::evaluate() below.
   scoped_refptr<PepperPluginInstanceImpl> ref(this);
-  TryCatch try_catch(exception);
-  if (try_catch.has_exception())
+  PepperTryCatchVar try_catch(this, exception);
+
+  // Check for an exception due to the context being destroyed.
+  if (try_catch.HasException())
     return PP_MakeUndefined();
 
-  // Convert the script into an inconvenient NPString object.
-  StringVar* script_string = StringVar::FromPPVar(script);
-  if (!script_string) {
+  WebLocalFrame* frame = container_->element().document().frame();
+  if (!frame) {
+    try_catch.SetException("No frame to execute script in.");
+    return PP_MakeUndefined();
+  }
+
+  StringVar* script_string_var = StringVar::FromPPVar(script_var);
+  if (!script_string_var) {
     try_catch.SetException("Script param to ExecuteScript must be a string.");
     return PP_MakeUndefined();
   }
-  NPString np_script;
-  np_script.UTF8Characters = script_string->value().c_str();
-  np_script.UTF8Length = script_string->value().length();
 
-  // Get the current frame to pass to the evaluate function.
-  WebLocalFrame* frame = NULL;
-  if (container_)
-    frame = container_->element().document().frame();
-  if (!frame || !frame->windowObject()) {
-    try_catch.SetException("No context in which to execute script.");
-    return PP_MakeUndefined();
-  }
-
-  NPVariant result;
-  bool ok = false;
+  std::string script_string = script_string_var->value();
+  blink::WebScriptSource script(
+      blink::WebString::fromUTF8(script_string.c_str()));
+  v8::Handle<v8::Value> result;
   if (IsProcessingUserGesture()) {
     blink::WebScopedUserGesture user_gesture(CurrentUserGestureToken());
-    ok =
-        WebBindings::evaluate(NULL, frame->windowObject(), &np_script, &result);
+    result = frame->executeScriptAndReturnValue(script);
   } else {
-    ok =
-        WebBindings::evaluate(NULL, frame->windowObject(), &np_script, &result);
-  }
-  if (!ok) {
-    // TryCatch doesn't catch the exceptions properly. Since this is only for
-    // a trusted API, just set to a general exception message.
-    try_catch.SetException("Exception caught");
-    WebBindings::releaseVariantValue(&result);
-    return PP_MakeUndefined();
+    result = frame->executeScriptAndReturnValue(script);
   }
 
-  PP_Var ret = NPVariantToPPVar(this, &result);
-  WebBindings::releaseVariantValue(&result);
-  return ret;
+  // Check for an exception due to the context being destroyed.
+  if (try_catch.HasException())
+    return PP_MakeUndefined();
+
+  ScopedPPVar var_result = try_catch.FromV8(result);
+  if (try_catch.HasException())
+    return PP_MakeUndefined();
+
+  return var_result.Release();
 }
 
 uint32_t PepperPluginInstanceImpl::GetAudioHardwareOutputSampleRate(
@@ -2463,6 +2508,13 @@ void PepperPluginInstanceImpl::PromiseResolvedWithSession(
                                                             web_session_id_var);
 }
 
+void PepperPluginInstanceImpl::PromiseResolvedWithKeyIds(PP_Instance instance,
+                                                         uint32 promise_id,
+                                                         PP_Var key_ids_var) {
+  content_decryptor_delegate_->OnPromiseResolvedWithKeyIds(promise_id,
+                                                           key_ids_var);
+}
+
 void PepperPluginInstanceImpl::PromiseRejected(
     PP_Instance instance,
     uint32 promise_id,
@@ -2479,6 +2531,22 @@ void PepperPluginInstanceImpl::SessionMessage(PP_Instance instance,
                                               PP_Var destination_url_var) {
   content_decryptor_delegate_->OnSessionMessage(
       web_session_id_var, message_var, destination_url_var);
+}
+
+void PepperPluginInstanceImpl::SessionKeysChange(
+    PP_Instance instance,
+    PP_Var web_session_id_var,
+    PP_Bool has_additional_usable_key) {
+  content_decryptor_delegate_->OnSessionKeysChange(web_session_id_var,
+                                                   has_additional_usable_key);
+}
+
+void PepperPluginInstanceImpl::SessionExpirationChange(
+    PP_Instance instance,
+    PP_Var web_session_id_var,
+    PP_Time new_expiry_time) {
+  content_decryptor_delegate_->OnSessionExpirationChange(web_session_id_var,
+                                                         new_expiry_time);
 }
 
 void PepperPluginInstanceImpl::SessionReady(PP_Instance instance,
@@ -2633,7 +2701,7 @@ ppapi::Resource* PepperPluginInstanceImpl::GetSingletonResource(
     case ppapi::GAMEPAD_SINGLETON_ID:
       return gamepad_impl_.get();
     case ppapi::UMA_SINGLETON_ID: {
-      if (!uma_private_impl_) {
+      if (!uma_private_impl_.get()) {
         RendererPpapiHostImpl* host_impl = module_->renderer_ppapi_host();
         if (host_impl->in_process_router()) {
           uma_private_impl_ = new ppapi::proxy::UMAPrivateResource(
@@ -2953,7 +3021,8 @@ PP_ExternalPluginResult PepperPluginInstanceImpl::ResetAsProxied(
   if (!instance_interface_->DidCreate(
           pp_instance(), argn_.size(), argn_array.get(), argv_array.get()))
     return PP_EXTERNAL_PLUGIN_ERROR_INSTANCE;
-  message_channel_->Start();
+  if (message_channel_)
+    message_channel_->Start();
 
   // Clear sent_initial_did_change_view_ and cancel any pending DidChangeView
   // event. This way, SendDidChangeView will send the "current" view
@@ -2981,8 +3050,6 @@ bool PepperPluginInstanceImpl::IsValidInstanceOf(PluginModule* module) {
   DCHECK(module);
   return module == module_.get() || module == original_module_.get();
 }
-
-NPP PepperPluginInstanceImpl::instanceNPP() { return npp_.get(); }
 
 PepperPluginInstance* PepperPluginInstance::Get(PP_Instance instance_id) {
   return HostGlobals::Get()->GetInstance(instance_id);
@@ -3157,7 +3224,7 @@ int32_t PepperPluginInstanceImpl::Navigate(
   web_request.setHasUserGesture(from_user_action);
 
   GURL gurl(web_request.url());
-  if (gurl.SchemeIs("javascript")) {
+  if (gurl.SchemeIs(url::kJavaScriptScheme)) {
     // In imitation of the NPAPI implementation, only |target_frame == frame| is
     // allowed for security reasons.
     WebFrame* target_frame =
@@ -3190,7 +3257,8 @@ int PepperPluginInstanceImpl::MakePendingFileRefRendererHost(
 }
 
 void PepperPluginInstanceImpl::SetEmbedProperty(PP_Var key, PP_Var value) {
-  message_channel_->SetReadOnlyProperty(key, value);
+  if (message_channel_)
+    message_channel_->SetReadOnlyProperty(key, value);
 }
 
 bool PepperPluginInstanceImpl::CanAccessMainFrame() const {

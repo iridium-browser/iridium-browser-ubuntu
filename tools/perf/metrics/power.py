@@ -5,6 +5,7 @@
 import time
 
 from metrics import Metric
+from telemetry.core.platform import process_statistic_timeline_data
 from telemetry.value import scalar
 
 
@@ -14,15 +15,16 @@ class PowerMetric(Metric):
   # System power draw while idle.
   _quiescent_power_draw_mwh = 0
 
-  def __init__(self, browser, quiescent_measurement_time_s=0):
+  def __init__(self, platform, quiescent_measurement_time_s=0):
     """PowerMetric Constructor.
 
     Args:
-        browser: browser object to use.
+        platform: platform object to use.
         quiescent_measurement_time_s: time to measure quiescent power,
             in seconds. 0 means don't measure quiescent power."""
     super(PowerMetric, self).__init__()
-    self._browser = browser
+    self._browser = None
+    self._platform = platform
     self._running = False
     self._starting_cpu_stats = None
     self._results = None
@@ -42,16 +44,15 @@ class PowerMetric(Metric):
     if not self._running:
       return
     self._running = False
-    self._results = self._browser.platform.StopMonitoringPower()
+    self._results = self._platform.StopMonitoringPower()
     if self._results: # StopMonitoringPower() can return None.
       self._results['cpu_stats'] = (
           _SubtractCpuStats(self._browser.cpu_stats, self._starting_cpu_stats))
 
   def _MeasureQuiescentPower(self, measurement_time_s):
     """Measure quiescent power draw for the system."""
-    platform = self._browser.platform
-    if not platform.CanMonitorPower() or \
-        platform.CanMeasurePerApplicationPower() or \
+    if not self._platform.CanMonitorPower() or \
+        self._platform.CanMeasurePerApplicationPower() or \
         not measurement_time_s:
       return
 
@@ -59,14 +60,16 @@ class PowerMetric(Metric):
     if PowerMetric._quiescent_power_draw_mwh:
       return
 
-    platform.StartMonitoringPower(self._browser)
+    self._platform.StartMonitoringPower(self._browser)
     time.sleep(measurement_time_s)
-    power_results = platform.StopMonitoringPower()
+    power_results = self._platform.StopMonitoringPower()
     PowerMetric._quiescent_power_draw_mwh = (
         power_results.get('energy_consumption_mwh', 0))
 
   def Start(self, _, tab):
-    if not tab.browser.platform.CanMonitorPower():
+    self._browser = tab.browser
+
+    if not self._platform.CanMonitorPower():
       return
 
     self._results = None
@@ -74,11 +77,11 @@ class PowerMetric(Metric):
 
     # This line invokes top a few times, call before starting power measurement.
     self._starting_cpu_stats = self._browser.cpu_stats
-    self._browser.platform.StartMonitoringPower(self._browser)
+    self._platform.StartMonitoringPower(self._browser)
     self._running = True
 
   def Stop(self, _, tab):
-    if not tab.browser.platform.CanMonitorPower():
+    if not self._platform.CanMonitorPower():
       return
 
     self._StopInternal()
@@ -138,6 +141,24 @@ class PowerMetric(Metric):
           results.current_page, 'board_temperature', 'celsius',
           board_temperature_c, important=False))
 
+    # Add CPU frequency measurements.
+    frequency_hz = whole_package_utilization.get('frequency_percent')
+    if frequency_hz is not None:
+      frequency_sum = 0.0
+      for freq, percent in frequency_hz.iteritems():
+        frequency_sum += freq * (percent / 100.0)
+      results.AddValue(scalar.ScalarValue(
+          results.current_page, 'cpu_average_frequency_hz', 'Hz',
+          frequency_sum, important=False))
+
+    # Add CPU c-state residency measurements.
+    cstate_percent = whole_package_utilization.get('cstate_residency_percent')
+    if cstate_percent is not None:
+      for state, percent in cstate_percent.iteritems():
+        results.AddValue(scalar.ScalarValue(
+            results.current_page, 'cpu_cstate_%s_residency_percent' % state,
+            '%', percent, important=False))
+
     self._results = None
 
 def _SubtractCpuStats(cpu_stats, start_cpu_stats):
@@ -151,6 +172,7 @@ def _SubtractCpuStats(cpu_stats, start_cpu_stats):
     over the period recorded by the input.
   """
   cpu_delta = {}
+  total = 0
   for process_type in cpu_stats:
     assert process_type in start_cpu_stats, 'Mismatching process types'
     # Skip any process_types that are empty.
@@ -160,7 +182,12 @@ def _SubtractCpuStats(cpu_stats, start_cpu_stats):
     if (('IdleWakeupCount' not in cpu_stats[process_type]) or
         ('IdleWakeupCount' not in start_cpu_stats[process_type])):
       continue
+
+    assert isinstance(cpu_stats[process_type]['IdleWakeupCount'],
+        process_statistic_timeline_data.IdleWakeupTimelineData)
     idle_wakeup_delta = (cpu_stats[process_type]['IdleWakeupCount'] -
                         start_cpu_stats[process_type]['IdleWakeupCount'])
-    cpu_delta[process_type] = idle_wakeup_delta
+    cpu_delta[process_type] = idle_wakeup_delta.total_sum()
+    total = total + cpu_delta[process_type]
+  cpu_delta['Total'] = total
   return cpu_delta

@@ -1,0 +1,71 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="../model/ct-builder-list.html">
+<link rel="import" href="ct-button.html">
+<link rel="import" href="../bower_components/paper-dialog/paper-dialog.html">
+<link rel="import" href="../bower_components/paper-dialog/paper-dialog-transition.html">
+<link rel="import" href="../bower_components/paper-input/paper-input.html">
+
+<polymer-element name="ct-failure-card-buttons" attributes="group bug">
+  <template>
+    <style>
+      :host {
+        display: flex;
+      }
+      :host > * {
+        margin-right: 5px;
+      }
+      ct-button {
+        white-space: nowrap;
+      }
+    </style>
+    <ct-button id="examine" on-tap="{{ examine }}" label="Examine"></ct-button>
+    <template if="{{ !group.isSnoozed }}">
+      <ct-button id="snooze" on-tap="{{ snooze }}" label="Snooze"></ct-button>
+    </template>
+    <template if="{{ group.isSnoozed }}">
+      <ct-button id="snooze" on-tap="{{ unsnooze }}" label="Unsnooze"></ct-button>
+    </template>
+    <ct-button id="link-bug" on-tap="{{ linkBug }}" label="Link Bug"></ct-button>
+
+    <paper-dialog heading="Enter bug number" transition="paper-transition-center" id="bugDialog">
+      <paper-input label="Bug# or URL" floatingLabel autofocus id="bug"></paper-input>
+      <ct-button label="Remove bug link" on-tap="{{ removeBug }}" dismissive id="dialogRemoveBug"></ct-button>
+      <ct-button label="OK" on-tap="{{ saveBug }}" affirmative id="dialogOk"></ct-button>
+    </paper-dialog>
+  </template>
+  <script>
+    Polymer({
+      group: null,
+
+      examine: function() {
+        this.fire('ct-examine-failures', this.group);
+      },
+
+      snooze: function() {
+        this.group.snoozeUntil(Date.now() + 60 * 60 * 1000);
+      },
+
+      unsnooze: function() {
+        this.group.unsnooze();
+      },
+
+      linkBug: function() {
+        this.$.bug.value = this.group.bug;
+        this.$.bugDialog.toggle();
+      },
+
+      saveBug: function() {
+        this.group.setBug(this.$.bug.value);
+      },
+
+      removeBug: function() {
+        this.group.clearBug();
+      },
+    });
+  </script>
+</polymer-element>

@@ -4,6 +4,8 @@
 
 """Module containing the completion stages."""
 
+from __future__ import print_function
+
 import logging
 
 from chromite.cbuildbot import commands
@@ -12,14 +14,14 @@ from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
-from chromite.cbuildbot import portage_utilities
+from chromite.cbuildbot import tree_status
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.lib import alerts
 from chromite.lib import cros_build_lib
 from chromite.lib import git
-
+from chromite.lib import portage_util
 
 
 def CreateBuildFailureMessage(overlays, builder_name, dashboard_url):
@@ -45,6 +47,8 @@ def CreateBuildFailureMessage(overlays, builder_name, dashboard_url):
       ex_str = x.exception.ToSummaryString()
     else:
       ex_str = str(x.exception)
+    # Truncate displayed failure reason to 1000 characters.
+    ex_str = ex_str[:200]
     details.append('The %s stage failed: %s' % (x.failed_stage, ex_str))
   if not details:
     details = ['cbuildbot failed']
@@ -131,11 +135,7 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
   """Stage that records whether we passed or failed to build/test manifest."""
 
   # Max wait time for results from slaves.
-  SLAVE_STATUS_TIMEOUT_SECONDS = 3 * 60 * 60
-  # Max wait time for results for Canary type builders. Canaries are
-  # scheduled to run every 8 hours, so this timeout must be smaller
-  # than that.
-  CANARY_SLAVE_STATUS_TIMEOUT_SECONDS = 460 * 60
+  SLAVE_STATUS_TIMEOUT_SECONDS = 4 * 60 * 60
   # Max wait time for results for PFQ type builders. Note that this
   # does not include Chrome PFQ or CQ.
   PFQ_SLAVE_STATUS_TIMEOUT_SECONDS = 20 * 60
@@ -157,17 +157,11 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
       will have a BuilderStatus with status MISSING.
     """
     if not self._run.config.master:
-      # This is a slave build, so return the status for this build.
-      if self._run.options.debug:
-        # In debug mode, nothing is uploaded to Google Storage, so we bypass
-        # the extra hop and just look at what we have locally.
-        status = manifest_version.BuilderStatus.GetCompletedStatus(self.success)
-        status_obj = manifest_version.BuilderStatus(status, self.message)
-        return {self._bot_id: status_obj}
-      else:
-        # Slaves only need to look at their own status.
-        return self._run.attrs.manifest_manager.GetBuildersStatus(
-            [self._bot_id])
+      # This is a slave build, so return the status for this
+      # build. The status is available locally.
+      status = manifest_version.BuilderStatus.GetCompletedStatus(self.success)
+      status_obj = manifest_version.BuilderStatus(status, self.message)
+      return {self._bot_id: status_obj}
     else:
       # This is a master build, so wait for all the slaves to finish
       # and return their statuses.
@@ -177,8 +171,6 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
         timeout = 3 * 60
       elif self._run.config.build_type == constants.PFQ_TYPE:
         timeout = self.PFQ_SLAVE_STATUS_TIMEOUT_SECONDS
-      elif cbuildbot_config.IsCanaryType(self._run.config.build_type):
-        timeout = self.CANARY_SLAVE_STATUS_TIMEOUT_SECONDS
       else:
         timeout = self.SLAVE_STATUS_TIMEOUT_SECONDS
 
@@ -189,7 +181,10 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
       if sync_stages.MasterSlaveLKGMSyncStage.sub_manager:
         manager = sync_stages.MasterSlaveLKGMSyncStage.sub_manager
 
-      return manager.GetBuildersStatus(builder_names, timeout=timeout)
+      return manager.GetBuildersStatus(
+          self._run.attrs.metadata.GetValue('build_id'),
+          builder_names,
+          timeout=timeout)
 
   def _HandleStageException(self, exc_info):
     """Decide whether an exception should be treated as fatal."""
@@ -319,12 +314,13 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
       statuses: A builder-name->status dictionary, which will provide
                 the dashboard_url values for any links.
     """
-    builders_to_link = failing or inflight or []
+    builders_to_link = set.union(failing, inflight)
     for builder in builders_to_link:
       if statuses[builder].dashboard_url:
-        text = builder
         if statuses[builder].message:
           text = '%s: %s' % (builder, statuses[builder].message.reason)
+        else:
+          text = '%s: timed out' % builder
 
         cros_build_lib.PrintBuildbotLink(text, statuses[builder].dashboard_url)
 
@@ -375,6 +371,10 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
 
 class CanaryCompletionStage(MasterSlaveSyncCompletionStage):
   """Collect build slave statuses and handle the failures."""
+  # This is used in MasterSlaveSyncCompletionStage._FetchSlaveStatuses()
+  # as the max wait time for results from slaves. Canaries are scheduled
+  # to run every 8 hours, so this timeout must be smaller than that.
+  SLAVE_STATUS_TIMEOUT_SECONDS = (7 * 60 + 50) * 60
 
   def HandleFailure(self, failing, inflight, no_stat):
     """Handle a build failure or timeout in the Canary builders.
@@ -410,14 +410,42 @@ class CanaryCompletionStage(MasterSlaveSyncCompletionStage):
     msgs.append('See %s' % self.ConstructDashboardURL())
     msg = '\n\n'.join(msgs)
     if not self.ShouldDisableAlerts():
-      # TODO(yjhong): The alert should be addressed to the tree
-      # sheriffs. For now, we send it to the build team instead to
-      # test the content and make improvements.
       alerts.SendEmail('%s failures' % (builder_name,),
-                       self._run.config.health_alert_recipients,
+                       tree_status.GetHealthAlertRecipients(self._run),
                        message=msg,
                        smtp_server=constants.GOLO_SMTP_SERVER,
                        extra_fields={'X-cbuildbot-alert': 'canary-fail-alert'})
+
+  def _ComposeTreeStatusMessage(self, failing, inflight, no_stat):
+    """Composes a tres status message.
+
+    Args:
+      failing: Names of the builders that failed.
+      inflight: Names of the builders that timed out.
+      no_stat: Set of builder names of slave builders that had status None.
+
+    Returns:
+      A string.
+    """
+    slave_status_list = [
+        ('did not start', list(no_stat)),
+        ('timed out', list(inflight)),
+        ('failed', list(failing)),]
+    # Print maximum 2 slaves for each category to not clutter the
+    # message.
+    max_num = 2
+    messages = []
+    for status, slaves in slave_status_list:
+      if not slaves:
+        continue
+      slaves_str = ','.join(slaves[:max_num])
+      if len(slaves) <= max_num:
+        messages.append('%s %s' % (slaves_str, status))
+      else:
+        messages.append('%s and %d others %s' % (slaves_str,
+                                                 len(slaves) - max_num,
+                                                 status))
+    return '; '.join(messages)
 
   def CanaryMasterHandleFailure(self, failing, inflight, no_stat):
     """Handles the failure by sending out an alert email.
@@ -427,7 +455,28 @@ class CanaryCompletionStage(MasterSlaveSyncCompletionStage):
       inflight: Names of the builders that timed out.
       no_stat: Set of builder names of slave builders that had status None.
     """
-    self.SendCanaryFailureAlert(failing, inflight, no_stat)
+    if self._run.manifest_branch == 'master':
+      self.SendCanaryFailureAlert(failing, inflight, no_stat)
+      tree_status.ThrottleOrCloseTheTree(
+          '"Canary master"',
+          self._ComposeTreeStatusMessage(failing, inflight, no_stat),
+          internal=self._run.config.internal,
+          buildnumber=self._run.buildnumber,
+          dryrun=self._run.debug)
+
+  def _HandleStageException(self, exc_info):
+    """Decide whether an exception should be treated as fatal."""
+    # Canary master already updates the tree status for slave
+    # failures. There is no need to mark this stage red. For slave
+    # builders, the build itself would already be red. In this case,
+    # report a warning instead.
+    # pylint: disable=W0212
+    exc_type = exc_info[0]
+    if issubclass(exc_type, ImportantBuilderFailedException):
+      return self._HandleExceptionAsWarning(exc_info)
+    else:
+      # In all other cases, exceptions should be treated as fatal.
+      return super(CanaryCompletionStage, self)._HandleStageException(exc_info)
 
 
 class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
@@ -457,7 +506,7 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
       # After submitting the pool, update the commit hashes for uprevved
       # ebuilds.
       manifest = git.ManifestCheckout.Cached(self._build_root)
-      portage_utilities.EBuild.UpdateCommitHashesForChanges(
+      portage_util.EBuild.UpdateCommitHashesForChanges(
           self.sync_stage.pool.changes, self._build_root, manifest)
       if cbuildbot_config.IsPFQType(self._run.config.build_type):
         super(CommitQueueCompletionStage, self).HandleSuccess()
@@ -600,7 +649,7 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
       msg = '\n\n'.join(msgs)
       if not self.ShouldDisableAlerts():
         alerts.SendEmail('%s infra failures' % (builder_name,),
-                         self._run.config.health_alert_recipients,
+                         tree_status.GetHealthAlertRecipients(self._run),
                          message=msg,
                          smtp_server=constants.GOLO_SMTP_SERVER,
                          extra_fields={'X-cbuildbot-alert': 'cq-infra-alert'})

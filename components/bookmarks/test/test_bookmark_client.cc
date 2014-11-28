@@ -11,14 +11,14 @@
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/bookmark_storage.h"
 
-namespace test {
+namespace bookmarks {
 
 TestBookmarkClient::TestBookmarkClient() {}
 
 TestBookmarkClient::~TestBookmarkClient() {}
 
-scoped_ptr<BookmarkModel> TestBookmarkClient::CreateModel(bool index_urls) {
-  scoped_ptr<BookmarkModel> bookmark_model(new BookmarkModel(this, index_urls));
+scoped_ptr<BookmarkModel> TestBookmarkClient::CreateModel() {
+  scoped_ptr<BookmarkModel> bookmark_model(new BookmarkModel(this));
   scoped_ptr<bookmarks::BookmarkLoadDetails> details =
       bookmark_model->CreateLoadDetails(std::string());
   details->LoadExtraNodes();
@@ -88,4 +88,4 @@ bookmarks::BookmarkPermanentNodeList TestBookmarkClient::LoadExtraNodes(
   return extra_nodes.Pass();
 }
 
-}  // namespace test
+}  // namespace bookmarks

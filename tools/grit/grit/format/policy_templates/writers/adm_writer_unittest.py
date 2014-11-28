@@ -147,6 +147,70 @@ MainPolicy_Policy="Caption of main."
 MainPolicy_Explain="Description of main."''')
     self.CompareOutputs(output, expected_output)
 
+  def testMainPolicyRecommendedOnly(self):
+    # Tests a policy group with a single policy of type 'main'.
+    grd = self.PrepareTest('''
+      {
+        'policy_definitions': [
+          {
+            'name': 'MainPolicy',
+            'type': 'main',
+            'supported_on': ['chrome.win:8-'],
+            'features': {
+              'can_be_recommended': True,
+              'can_be_mandatory': False
+            },
+            'caption': 'Caption of main.',
+            'desc': 'Description of main.',
+          },
+        ],
+        'placeholders': [],
+        'messages': {
+          'win_supported_winxpsp2': {
+            'text': 'At least Windows 3.12', 'desc': 'blah'
+          },
+          'doc_recommended': {
+            'text': 'Recommended', 'desc': 'bleh'
+          }
+        }
+      }''')
+    output = self.GetOutput(grd, 'fr', {'_google_chrome' : '1'}, 'adm', 'en')
+    expected_output = self.ConstructOutput(
+        ['MACHINE', 'USER'], '''
+  CATEGORY !!google
+    CATEGORY !!googlechrome
+      KEYNAME "Software\\Policies\\Google\\Chrome"
+
+    END CATEGORY
+  END CATEGORY
+
+  CATEGORY !!google
+    CATEGORY !!googlechrome_recommended
+      KEYNAME "Software\\Policies\\Google\\Chrome\\Recommended"
+
+      POLICY !!MainPolicy_Policy
+        #if version >= 4
+          SUPPORTED !!SUPPORTED_WINXPSP2
+        #endif
+        EXPLAIN !!MainPolicy_Explain
+        VALUENAME "MainPolicy"
+        VALUEON NUMERIC 1
+        VALUEOFF NUMERIC 0
+      END POLICY
+
+    END CATEGORY
+  END CATEGORY
+
+
+''', '''[Strings]
+SUPPORTED_WINXPSP2="At least Windows 3.12"
+google="Google"
+googlechrome="Google Chrome"
+googlechrome_recommended="Google Chrome - Recommended"
+MainPolicy_Policy="Caption of main."
+MainPolicy_Explain="Description of main."''')
+    self.CompareOutputs(output, expected_output)
+
   def testStringPolicy(self):
     # Tests a policy group with a single policy of type 'string'.
     grd = self.PrepareTest('''

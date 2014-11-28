@@ -77,10 +77,10 @@ WebInspector.ScreencastView.prototype = {
         this._tagNameElement = this._titleElement.createChild("span", "screencast-tag-name");
         this._nodeIdElement = this._titleElement.createChild("span", "screencast-node-id");
         this._classNameElement = this._titleElement.createChild("span", "screencast-class-name");
-        this._titleElement.appendChild(document.createTextNode(" "));
+        this._titleElement.createTextChild(" ");
         this._nodeWidthElement = this._titleElement.createChild("span");
         this._titleElement.createChild("span", "screencast-px").textContent = "px";
-        this._titleElement.appendChild(document.createTextNode(" \u00D7 "));
+        this._titleElement.createTextChild(" \u00D7 ");
         this._nodeHeightElement = this._titleElement.createChild("span");
         this._titleElement.createChild("span", "screencast-px").textContent = "px";
 
@@ -699,7 +699,7 @@ WebInspector.ScreencastView.prototype = {
     _createNavigationBar: function()
     {
         this._navigationBar = this.element.createChild("div", "toolbar-background toolbar-colors screencast-navigation");
-        if (WebInspector.queryParam("hideNavigation"))
+        if (Runtime.queryParam("hideNavigation"))
             this._navigationBar.classList.add("hidden");
 
         this._navigationBack = this._navigationBar.createChild("button", "back");
@@ -720,7 +720,7 @@ WebInspector.ScreencastView.prototype = {
         this._navigationProgressBar = new WebInspector.ScreencastView.ProgressTracker(this._navigationBar.createChild("div", "progress"));
 
         this._requestNavigationHistory();
-        WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.InspectedURLChanged, this._requestNavigationHistory, this);
+        WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.InspectedURLChanged, this._requestNavigationHistory, this);
     },
 
     _navigateToHistoryEntry: function(offset)

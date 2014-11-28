@@ -5,8 +5,10 @@
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 
 #include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
@@ -18,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
@@ -28,12 +31,12 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/ssl_status.h"
-#include "grit/component_scaled_resources.h"
-#include "grit/generated_resources.h"
+#include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/x509_certificate.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -45,6 +48,24 @@ using content::NavigationController;
 using content::NavigationEntry;
 using content::SSLStatus;
 using content::WebContents;
+
+namespace {
+
+// Converts a SHA-1 field trial group into the appropriate SecurityLevel.
+bool GetSecurityLevelForFieldTrialGroup(const std::string& group,
+                                        ToolbarModel::SecurityLevel* level) {
+  if (group == "Error")
+    *level = ToolbarModel::SECURITY_ERROR;
+  else if (group == "Warning")
+    *level = ToolbarModel::SECURITY_WARNING;
+  else if (group == "HTTP")
+    *level = ToolbarModel::NONE;
+  else
+    return false;
+  return true;
+}
+
+}  // namespace
 
 ToolbarModelImpl::ToolbarModelImpl(ToolbarModelDelegate* delegate)
     : delegate_(delegate) {
@@ -82,12 +103,53 @@ ToolbarModel::SecurityLevel ToolbarModelImpl::GetSecurityLevelForWebContents(
 #endif
       if (!!(ssl.content_status & SSLStatus::DISPLAYED_INSECURE_CONTENT))
         return SECURITY_WARNING;
+      scoped_refptr<net::X509Certificate> cert;
+      if (content::CertStore::GetInstance()->RetrieveCert(ssl.cert_id, &cert) &&
+          (ssl.cert_status & net::CERT_STATUS_SHA1_SIGNATURE_PRESENT)) {
+        // The internal representation of the dates for UI treatment of SHA-1.
+        // See http://crbug.com/401365 for details
+        static const int64_t kJanuary2017 = INT64_C(13127702400000000);
+        static const int64_t kJune2016 = INT64_C(13109213000000000);
+        static const int64_t kJanuary2016 = INT64_C(13096080000000000);
+
+        ToolbarModel::SecurityLevel security_level = NONE;
+        // Gated behind a field trial, so that it is possible to adjust the
+        // UI treatment (to be more or less severe, as necessary) over the
+        // course of multiple releases.
+        // See http://crbug.com/401365 for the timeline, with the end state
+        // being that > kJanuary2017 = Error, and > kJanuary2016 =
+        // Warning, and kJune2016 disappearing entirely.
+        if (cert->valid_expiry() >=
+                base::Time::FromInternalValue(kJanuary2017) &&
+            GetSecurityLevelForFieldTrialGroup(
+                base::FieldTrialList::FindFullName("SHA1ToolbarUIJanuary2017"),
+                &security_level)) {
+          return security_level;
+        }
+        if (cert->valid_expiry() >= base::Time::FromInternalValue(kJune2016) &&
+            GetSecurityLevelForFieldTrialGroup(
+                base::FieldTrialList::FindFullName("SHA1ToolbarUIJune2016"),
+                &security_level)) {
+          return security_level;
+        }
+        if (cert->valid_expiry() >=
+                base::Time::FromInternalValue(kJanuary2016) &&
+            GetSecurityLevelForFieldTrialGroup(
+                base::FieldTrialList::FindFullName("SHA1ToolbarUIJanuary2016"),
+                &security_level)) {
+          return security_level;
+        }
+      }
       if (net::IsCertStatusError(ssl.cert_status)) {
         DCHECK(net::IsCertStatusMinorError(ssl.cert_status));
         return SECURITY_WARNING;
       }
-      if ((ssl.cert_status & net::CERT_STATUS_IS_EV) &&
-          content::CertStore::GetInstance()->RetrieveCert(ssl.cert_id, NULL))
+      if (net::SSLConnectionStatusToVersion(ssl.connection_status) ==
+          net::SSL_CONNECTION_VERSION_SSL3) {
+        // SSLv3 will be removed in the future.
+        return SECURITY_WARNING;
+      }
+      if ((ssl.cert_status & net::CERT_STATUS_IS_EV) && cert.get())
         return EV_SECURE;
       return SECURE;
     }
@@ -264,9 +326,9 @@ bool ToolbarModelImpl::WouldOmitURLDueToOriginChip() const {
           visible_entry->GetPageType() == content::PAGE_TYPE_INTERSTITIAL &&
           !pending_entry->GetExtraData(kInterstitialShownKey, &unused))
         pending_entry->SetExtraData(kInterstitialShownKey, base::string16());
-      const content::PageTransition transition_type =
+      const ui::PageTransition transition_type =
           pending_entry->GetTransitionType();
-      if ((transition_type & content::PAGE_TRANSITION_TYPED) != 0 &&
+      if ((transition_type & ui::PAGE_TRANSITION_TYPED) != 0 &&
           !pending_entry->GetExtraData(kInterstitialShownKey, &unused))
         return false;
     }

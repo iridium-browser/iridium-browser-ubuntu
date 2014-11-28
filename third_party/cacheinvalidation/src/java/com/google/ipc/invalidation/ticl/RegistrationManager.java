@@ -16,23 +16,23 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.ipc.invalidation.common.CommonProtoStrings2;
-import com.google.ipc.invalidation.common.CommonProtos2;
 import com.google.ipc.invalidation.common.DigestFunction;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.ticl.Statistics.ClientErrorType;
 import com.google.ipc.invalidation.ticl.TestableInvalidationClient.RegistrationManagerState;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.RegistrationP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.RegistrationP.OpType;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.RegistrationStatus;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.RegistrationSubtree;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.RegistrationSummary;
+import com.google.ipc.invalidation.ticl.proto.CommonProtos;
+import com.google.ipc.invalidation.ticl.proto.JavaClient.RegistrationManagerStateP;
+import com.google.ipc.invalidation.util.Bytes;
 import com.google.ipc.invalidation.util.InternalBase;
 import com.google.ipc.invalidation.util.Marshallable;
 import com.google.ipc.invalidation.util.TextBuilder;
 import com.google.ipc.invalidation.util.TypedUtil;
-import com.google.protos.ipc.invalidation.ClientProtocol.ObjectIdP;
-import com.google.protos.ipc.invalidation.ClientProtocol.RegistrationP;
-import com.google.protos.ipc.invalidation.ClientProtocol.RegistrationP.OpType;
-import com.google.protos.ipc.invalidation.ClientProtocol.RegistrationStatus;
-import com.google.protos.ipc.invalidation.ClientProtocol.RegistrationSubtree;
-import com.google.protos.ipc.invalidation.ClientProtocol.RegistrationSummary;
-import com.google.protos.ipc.invalidation.JavaClient.RegistrationManagerStateP;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -62,7 +62,7 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
   private final Statistics statistics;
 
   /** Latest known server registration state summary. */
-  private ProtoWrapper<RegistrationSummary> lastKnownServerSummary;
+  private RegistrationSummary lastKnownServerSummary;
 
   /**
    * Map of object ids and operation types for which we have not yet issued any registration-status
@@ -75,8 +75,7 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
    * we issue, which isn't necessarily true (i.e., the server might send back an unregistration
    * status in response to a registration request).
    */
-  private final Map<ProtoWrapper<ObjectIdP>, RegistrationP.OpType> pendingOperations =
-      new HashMap<ProtoWrapper<ObjectIdP>, RegistrationP.OpType>();
+  private final Map<ObjectIdP, Integer> pendingOperations = new HashMap<ObjectIdP, Integer>();
 
   private final Logger logger;
 
@@ -90,13 +89,16 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
       // Initialize the server summary with a 0 size and the digest corresponding
       // to it.  Using defaultInstance would wrong since the server digest will
       // not match unnecessarily and result in an info message being sent.
-      this.lastKnownServerSummary = ProtoWrapper.of(getRegistrationSummary());
+      this.lastKnownServerSummary = getRegistrationSummary();
     } else {
-      this.lastKnownServerSummary =
-        ProtoWrapper.of(registrationManagerState.getLastKnownServerSummary());
-      desiredRegistrations.add(registrationManagerState.getRegistrationsList());
-      for (RegistrationP regOp : registrationManagerState.getPendingOperationsList()) {
-        pendingOperations.put(ProtoWrapper.of(regOp.getObjectId()), regOp.getOpType());
+      this.lastKnownServerSummary = registrationManagerState.getNullableLastKnownServerSummary();
+      if (this.lastKnownServerSummary == null) {
+        // If no server summary is set, use a default with size 0.
+        this.lastKnownServerSummary = getRegistrationSummary();
+      }
+      desiredRegistrations.add(registrationManagerState.getRegistrations());
+      for (RegistrationP regOp : registrationManagerState.getPendingOperations()) {
+        pendingOperations.put(regOp.getObjectId(), regOp.getOpType());
       }
     }
   }
@@ -108,14 +110,10 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
    * InvalidationClientImpl's internal thread.
    */
   
-  RegistrationManagerState getRegistrationManagerStateCopyForTest(DigestFunction digestFunction) {
+  RegistrationManagerState getRegistrationManagerStateCopyForTest() {
     List<ObjectIdP> registeredObjects = new ArrayList<ObjectIdP>();
-    for (ObjectIdP oid : desiredRegistrations.getElements(EMPTY_PREFIX, 0)) {
-      registeredObjects.add(oid);
-    }
-    return new RegistrationManagerState(
-        RegistrationSummary.newBuilder(getRegistrationSummary()).build(),
-        RegistrationSummary.newBuilder(lastKnownServerSummary.getProto()).build(),
+    registeredObjects.addAll(desiredRegistrations.getElements(EMPTY_PREFIX, 0));
+    return new RegistrationManagerState(getRegistrationSummary(), lastKnownServerSummary,
         registeredObjects);
   }
 
@@ -127,20 +125,14 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
   
   void setDigestStoreForTest(DigestStore<ObjectIdP> digestStore) {
     this.desiredRegistrations = digestStore;
-    this.lastKnownServerSummary = ProtoWrapper.of(getRegistrationSummary());
-  }
-
-  
-  Collection<ObjectIdP> getRegisteredObjectsForTest() {
-    return desiredRegistrations.getElements(EMPTY_PREFIX, 0);
+    this.lastKnownServerSummary = getRegistrationSummary();
   }
 
   /** Perform registration/unregistation for all objects in {@code objectIds}. */
-  Collection<ObjectIdP> performOperations(Collection<ObjectIdP> objectIds,
-      RegistrationP.OpType regOpType) {
+  Collection<ObjectIdP> performOperations(Collection<ObjectIdP> objectIds, int regOpType) {
     // Record that we have pending operations on the objects.
     for (ObjectIdP objectId : objectIds) {
-      pendingOperations.put(ProtoWrapper.of(objectId), regOpType);
+      pendingOperations.put(objectId, regOpType);
     }
     // Update the digest appropriately.
     if (regOpType == RegistrationP.OpType.REGISTER) {
@@ -156,11 +148,7 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
    * whose digest prefix does not match {@code digestPrefix}.
    */
   RegistrationSubtree getRegistrations(byte[] digestPrefix, int prefixLen) {
-    RegistrationSubtree.Builder builder = RegistrationSubtree.newBuilder();
-    for (ObjectIdP objectId : desiredRegistrations.getElements(digestPrefix, prefixLen)) {
-      builder.addRegisteredObject(objectId);
-    }
-    return builder.build();
+    return RegistrationSubtree.create(desiredRegistrations.getElements(digestPrefix, prefixLen));
   }
 
   /**
@@ -181,14 +169,14 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
       // The object is no longer pending, since we have received a server status for it, so
       // remove it from the pendingOperations map. (It may or may not have existed in the map,
       // since we can receive spontaneous status messages from the server.)
-      TypedUtil.remove(pendingOperations, ProtoWrapper.of(objectIdProto));
+      TypedUtil.remove(pendingOperations, objectIdProto);
 
       // We start off with the local-processing set as success, then potentially fail.
       boolean isSuccess = true;
 
       // if the server operation succeeded, then local processing fails on "incompatibility" as
       // defined above.
-      if (CommonProtos2.isSuccess(registrationStatus.getStatus())) {
+      if (CommonProtos.isSuccess(registrationStatus.getStatus())) {
         boolean appWantsRegistration = desiredRegistrations.contains(objectIdProto);
         boolean isOpRegistration =
             registrationStatus.getRegistration().getOpType() == RegistrationP.OpType.REGISTER;
@@ -200,15 +188,13 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
           statistics.recordError(ClientErrorType.REGISTRATION_DISCREPANCY);
           logger.info("Ticl discrepancy detected: registered = %s, requested = %s. " +
               "Removing %s from requested",
-              isOpRegistration, appWantsRegistration,
-              CommonProtoStrings2.toLazyCompactString(objectIdProto));
+              isOpRegistration, appWantsRegistration, objectIdProto);
           isSuccess = false;
         }
       } else {
         // If the server operation failed, then also local processing fails.
         desiredRegistrations.remove(objectIdProto);
-        logger.fine("Removing %s from committed",
-            CommonProtoStrings2.toLazyCompactString(objectIdProto));
+        logger.fine("Removing %s from committed", objectIdProto);
         isSuccess = false;
       }
       localStatuses.add(isSuccess);
@@ -223,12 +209,10 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
    * REQUIRES: the caller issue a permanent failure upcall to the listener for all returned object
    * ids.
    */
-  Collection<ProtoWrapper<ObjectIdP>> removeRegisteredObjects() {
+  Collection<ObjectIdP> removeRegisteredObjects() {
     int numObjects = desiredRegistrations.size() + pendingOperations.size();
-    Set<ProtoWrapper<ObjectIdP>> failureCalls = new HashSet<ProtoWrapper<ObjectIdP>>(numObjects);
-    for (ObjectIdP objectId : desiredRegistrations.removeAll()) {
-      failureCalls.add(ProtoWrapper.of(objectId));
-    }
+    Set<ObjectIdP> failureCalls = new HashSet<ObjectIdP>(numObjects);
+    failureCalls.addAll(desiredRegistrations.removeAll());
     failureCalls.addAll(pendingOperations.keySet());
     pendingOperations.clear();
     return failureCalls;
@@ -240,8 +224,8 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
 
   /** Returns a summary of the desired registrations. */
   RegistrationSummary getRegistrationSummary() {
-    return CommonProtos2.newRegistrationSummary(desiredRegistrations.size(),
-        desiredRegistrations.getDigest());
+    return RegistrationSummary.create(desiredRegistrations.size(),
+        new Bytes(desiredRegistrations.getDigest()));
   }
 
   /**
@@ -249,21 +233,19 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
    * Returns a possibly-empty map of <object-id, reg-op-type>. For each entry in the map,
    * the caller should make an inform-registration-status upcall on the listener.
    */
-  Set<ProtoWrapper<RegistrationP>> informServerRegistrationSummary(
+  Set<RegistrationP> informServerRegistrationSummary(
       RegistrationSummary regSummary) {
     if (regSummary != null) {
-      this.lastKnownServerSummary = ProtoWrapper.of(regSummary);
+      this.lastKnownServerSummary = regSummary;
     }
     if (isStateInSyncWithServer()) {
       // If we are now in sync with the server, then the caller should make inform-reg-status
       // upcalls for all operations that we had pending, if any; they are also no longer pending.
-      Set<ProtoWrapper<RegistrationP>> upcallsToMake =
-          new HashSet<ProtoWrapper<RegistrationP>>(pendingOperations.size());
-      for (Map.Entry<ProtoWrapper<ObjectIdP>, RegistrationP.OpType> entry :
-          pendingOperations.entrySet()) {
-        ObjectIdP objectId = entry.getKey().getProto();
+      Set<RegistrationP> upcallsToMake = new HashSet<RegistrationP>(pendingOperations.size());
+      for (Map.Entry<ObjectIdP, Integer> entry : pendingOperations.entrySet()) {
+        ObjectIdP objectId = entry.getKey();
         boolean isReg = entry.getValue() == OpType.REGISTER;
-        upcallsToMake.add(ProtoWrapper.of(CommonProtos2.newRegistrationP(objectId, isReg)));
+        upcallsToMake.add(CommonProtos.newRegistrationP(objectId, isReg));
       }
       pendingOperations.clear();
       return upcallsToMake;
@@ -278,7 +260,7 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
    * received server summary (from {@link #informServerRegistrationSummary}).
    */
   boolean isStateInSyncWithServer() {
-    return TypedUtil.equals(lastKnownServerSummary, ProtoWrapper.of(getRegistrationSummary()));
+    return TypedUtil.<RegistrationSummary>equals(lastKnownServerSummary, getRegistrationSummary());
   }
 
   @Override
@@ -289,15 +271,14 @@ class RegistrationManager extends InternalBase implements Marshallable<Registrat
 
   @Override
   public RegistrationManagerStateP marshal() {
-    RegistrationManagerStateP.Builder builder = RegistrationManagerStateP.newBuilder();
-    builder.setLastKnownServerSummary(lastKnownServerSummary.getProto());
-    builder.addAllRegistrations(desiredRegistrations.getElements(EMPTY_PREFIX, 0));
-    for (Map.Entry<ProtoWrapper<ObjectIdP>, RegistrationP.OpType> pendingOp :
-        pendingOperations.entrySet()) {
-      ObjectIdP objectId = pendingOp.getKey().getProto();
-      boolean isReg = pendingOp.getValue() == OpType.REGISTER;
-      builder.addPendingOperations(CommonProtos2.newRegistrationP(objectId, isReg));
+    List<ObjectIdP> desiredRegistrations =
+        new ArrayList<ObjectIdP>(this.desiredRegistrations.getElements(EMPTY_PREFIX, 0));
+    List<RegistrationP> pendingOperations =
+        new ArrayList<RegistrationP>(this.pendingOperations.size());
+    for (Map.Entry<ObjectIdP, Integer> entry : this.pendingOperations.entrySet()) {
+      pendingOperations.add(RegistrationP.create(entry.getKey(), entry.getValue()));
     }
-    return builder.build();
+    return RegistrationManagerStateP.create(desiredRegistrations, lastKnownServerSummary,
+        pendingOperations);
   }
 }

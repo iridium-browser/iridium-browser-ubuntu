@@ -23,11 +23,11 @@
 #include "chrome/browser/supervised_user/supervised_user_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
 namespace {
@@ -220,7 +220,7 @@ bool SupervisedUserImportHandler::IsAccountConnected() const {
   Profile* profile = Profile::FromWebUI(web_ui());
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile);
-  return signin_manager && !signin_manager->GetAuthenticatedUsername().empty();
+  return signin_manager && signin_manager->IsAuthenticated();
 }
 
 bool SupervisedUserImportHandler::HasAuthError() const {

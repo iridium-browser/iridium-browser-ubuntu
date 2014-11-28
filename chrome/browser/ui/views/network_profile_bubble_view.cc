@@ -13,6 +13,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
@@ -130,7 +131,7 @@ void NetworkProfileBubbleView::LinkClicked(views::Link* source,
             "common-problems-and-solutions#network_profile"),
       content::Referrer(),
       disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK, false);
+      ui::PAGE_TRANSITION_LINK, false);
   navigator_->OpenURL(params);
 
   // If the user interacted with the bubble we don't reduce the number of

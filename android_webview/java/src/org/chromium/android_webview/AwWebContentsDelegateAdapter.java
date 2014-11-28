@@ -139,8 +139,8 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         // TODO(mkosiba) We should be using something akin to the JsResultReceiver as the
         // callback parameter (instead of ContentViewCore) and implement a way of converting
         // that to a pair of messages.
-        final int MSG_CONTINUE_PENDING_RELOAD = 1;
-        final int MSG_CANCEL_PENDING_RELOAD = 2;
+        final int msgContinuePendingReload = 1;
+        final int msgCancelPendingReload = 2;
 
         // TODO(sgurun) Remember the URL to cancel the reload behavior
         // if it is different than the most recent NavigationController entry.
@@ -148,12 +148,14 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
             @Override
             public void handleMessage(Message msg) {
                 switch(msg.what) {
-                    case MSG_CONTINUE_PENDING_RELOAD: {
-                        contentViewCore.continuePendingReload();
+                    case msgContinuePendingReload: {
+                        contentViewCore.getWebContents().getNavigationController()
+                                .continuePendingReload();
                         break;
                     }
-                    case MSG_CANCEL_PENDING_RELOAD: {
-                        contentViewCore.cancelPendingReload();
+                    case msgCancelPendingReload: {
+                        contentViewCore.getWebContents().getNavigationController()
+                                .cancelPendingReload();
                         break;
                     }
                     default:
@@ -163,8 +165,8 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
             }
         };
 
-        Message resend = handler.obtainMessage(MSG_CONTINUE_PENDING_RELOAD);
-        Message dontResend = handler.obtainMessage(MSG_CANCEL_PENDING_RELOAD);
+        Message resend = handler.obtainMessage(msgContinuePendingReload);
+        Message dontResend = handler.obtainMessage(msgCancelPendingReload);
         mContentsClient.onFormResubmission(dontResend, resend);
     }
 

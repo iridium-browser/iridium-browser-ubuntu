@@ -70,8 +70,6 @@
       'child/fileapi/webfilewriter_impl.h',
       'child/fling_animator_impl_android.cc',
       'child/fling_animator_impl_android.h',
-      'child/fling_curve_configuration.cc',
-      'child/fling_curve_configuration.h',
       'child/ftp_directory_listing_response_delegate.cc',
       'child/ftp_directory_listing_response_delegate.h',
       'child/image_decoder.cc',
@@ -151,6 +149,8 @@
       'child/request_info.h',
       'child/resource_dispatcher.cc',
       'child/resource_dispatcher.h',
+      'child/resource_loader_bridge.cc',
+      'child/resource_loader_bridge.h',
       'child/runtime_features.cc',
       'child/runtime_features.h',
       'child/scoped_child_process_reference.cc',
@@ -268,6 +268,7 @@
     ],
     'webcrypto_openssl_sources': [
       'child/webcrypto/openssl/aes_cbc_openssl.cc',
+      'child/webcrypto/openssl/aes_ctr_openssl.cc',
       'child/webcrypto/openssl/aes_gcm_openssl.cc',
       'child/webcrypto/openssl/aes_key_openssl.cc',
       'child/webcrypto/openssl/aes_key_openssl.h',
@@ -321,13 +322,12 @@
       ],
     }, {  # OS!="ios"
       'dependencies': [
+        'app/resources/content_resources.gyp:content_resources',
         'app/strings/content_strings.gyp:content_strings',
+        '../storage/storage_common.gyp:storage_common',
         '../third_party/WebKit/public/blink.gyp:blink',
         '../third_party/WebKit/public/blink_resources.gyp:blink_resources',
         '../third_party/npapi/npapi.gyp:npapi',
-        '../webkit/child/webkit_child.gyp:webkit_child',
-        '../webkit/common/webkit_common.gyp:webkit_common',
-        '../webkit/glue/resources/webkit_resources.gyp:webkit_resources',
       ],
     }],
     ['use_aura==1', {

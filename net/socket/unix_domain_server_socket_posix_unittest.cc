@@ -71,6 +71,15 @@ TEST_F(UnixDomainServerSocketTest, ListenWithInvalidPathWithAbstractNamespace) {
 #endif
 }
 
+TEST_F(UnixDomainServerSocketTest, ListenAgainAfterFailureWithInvalidPath) {
+  const bool kUseAbstractNamespace = false;
+  UnixDomainServerSocket server_socket(CreateAuthCallback(true),
+                                       kUseAbstractNamespace);
+  EXPECT_EQ(ERR_FILE_NOT_FOUND,
+            server_socket.ListenWithAddressAndPort(kInvalidSocketPath, 0, 1));
+  EXPECT_EQ(OK, server_socket.ListenWithAddressAndPort(socket_path_, 0, 1));
+}
+
 TEST_F(UnixDomainServerSocketTest, AcceptWithForbiddenUser) {
   const bool kUseAbstractNamespace = false;
 
@@ -97,8 +106,8 @@ TEST_F(UnixDomainServerSocketTest, AcceptWithForbiddenUser) {
   const int read_buffer_size = 10;
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(read_buffer_size));
   TestCompletionCallback read_callback;
-  rv = read_callback.GetResult(client_socket.Read(read_buffer, read_buffer_size,
-                                                  read_callback.callback()));
+  rv = read_callback.GetResult(client_socket.Read(
+      read_buffer.get(), read_buffer_size, read_callback.callback()));
 
   // The server should have disconnected gracefully, without sending any data.
   ASSERT_EQ(0, rv);

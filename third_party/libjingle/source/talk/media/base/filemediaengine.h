@@ -88,7 +88,6 @@ class FileMediaEngine : public MediaEngineInterface {
   virtual SoundclipMedia* CreateSoundclip() { return NULL; }
   virtual AudioOptions GetAudioOptions() const { return AudioOptions(); }
   virtual bool SetAudioOptions(const AudioOptions& options) { return true; }
-  virtual bool SetVideoOptions(const VideoOptions& options) { return true; }
   virtual bool SetAudioDelayOffset(int offset) { return true; }
   virtual bool SetDefaultVideoEncoderConfig(const VideoEncoderConfig& config) {
     return true;
@@ -113,7 +112,6 @@ class FileMediaEngine : public MediaEngineInterface {
   virtual bool SetOutputVolume(int level) { return true; }
   virtual int GetInputLevel() { return 0; }
   virtual bool SetLocalMonitor(bool enable) { return true; }
-  virtual bool SetLocalRenderer(VideoRenderer* renderer) { return true; }
   // TODO(whyuan): control channel send?
   virtual bool SetVideoCapture(bool capture) { return true; }
   virtual const std::vector<AudioCodec>& audio_codecs() {

@@ -10,7 +10,6 @@
 namespace blink {
 
 class ContentSecurityPolicy;
-class KURL;
 
 class CSPDirective {
     WTF_MAKE_NONCOPYABLE(CSPDirective);
@@ -25,7 +24,7 @@ public:
     const String& text() const { return m_text; }
 
 protected:
-    const ContentSecurityPolicy* policy() const { return m_policy; }
+    ContentSecurityPolicy* policy() const { return m_policy; }
 
 private:
     String m_name;

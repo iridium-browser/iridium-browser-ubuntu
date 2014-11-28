@@ -22,6 +22,7 @@
 #include "content/common/content_constants_internal.h"
 #include "content/common/gpu/gpu_config.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/media/gpu_video_encode_accelerator.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
@@ -206,7 +207,9 @@ int GpuMain(const MainFunctionParams& parameters) {
   // consuming has completed, otherwise the process is liable to be aborted.
   if (enable_watchdog && !delayed_watchdog_enable) {
     watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
-    watchdog_thread->Start();
+    base::Thread::Options options;
+    options.timer_slack = base::TIMER_SLACK_MAXIMUM;
+    watchdog_thread->StartWithOptions(options);
   }
 
   gpu::GPUInfo gpu_info;
@@ -300,7 +303,9 @@ int GpuMain(const MainFunctionParams& parameters) {
 
     if (enable_watchdog && delayed_watchdog_enable) {
       watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
-      watchdog_thread->Start();
+      base::Thread::Options options;
+      options.timer_slack = base::TIMER_SLACK_MAXIMUM;
+      watchdog_thread->StartWithOptions(options);
     }
 
     // OSMesa is expected to run very slowly, so disable the watchdog in that
@@ -324,6 +329,9 @@ int GpuMain(const MainFunctionParams& parameters) {
 #elif defined(OS_MACOSX)
     gpu_info.sandboxed = Sandbox::SandboxIsCurrentlyActive();
 #endif
+
+    gpu_info.video_encode_accelerator_supported_profiles =
+        content::GpuVideoEncodeAccelerator::GetSupportedProfiles();
   } else {
     dead_on_arrival = true;
   }
@@ -348,7 +356,7 @@ int GpuMain(const MainFunctionParams& parameters) {
 
   gpu_process.set_main_thread(child_thread);
 
-  if (watchdog_thread)
+  if (watchdog_thread.get())
     watchdog_thread->AddPowerObserver();
 
   {
@@ -404,6 +412,9 @@ bool CollectGraphicsInfo(gpu::GPUInfo& gpu_info) {
       break;
     case gpu::kCollectInfoNonFatalFailure:
       VLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
+      break;
+    case gpu::kCollectInfoNone:
+      NOTREACHED();
       break;
     case gpu::kCollectInfoSuccess:
       break;
@@ -492,7 +503,9 @@ bool StartSandboxLinux(const gpu::GPUInfo& gpu_info,
   // with only one thread.
   res = LinuxSandbox::InitializeSandbox();
   if (watchdog_thread) {
-    watchdog_thread->Start();
+    base::Thread::Options options;
+    options.timer_slack = base::TIMER_SLACK_MAXIMUM;
+    watchdog_thread->StartWithOptions(options);
   }
 
   return res;

@@ -8,13 +8,6 @@ import sys
 
 from common_includes import *
 
-CONFIG = {
-  BRANCHNAME: "auto-tag-v8",
-  PERSISTFILE_BASENAME: "/tmp/v8-auto-tag-tempfile",
-  DOT_GIT_LOCATION: ".git",
-  VERSION_FILE: "src/version.cc",
-}
-
 
 class Preparation(Step):
   MESSAGE = "Preparation."
@@ -30,7 +23,7 @@ class GetTags(Step):
   MESSAGE = "Get all V8 tags."
 
   def RunStep(self):
-    self.GitCreateBranch(self._config[BRANCHNAME])
+    self.GitCreateBranch(self._config["BRANCHNAME"])
 
     # Get remote tags.
     tags = filter(lambda s: re.match(r"^svn/tags/[\d+\.]+$", s),
@@ -55,7 +48,7 @@ class GetOldestUntaggedVersion(Step):
         format="%H", grep="\\[Auto\\-roll\\] Bump up version to").splitlines():
 
       # Get the version.
-      if not self.GitCheckoutFileSafe(self._config[VERSION_FILE], git_hash):
+      if not self.GitCheckoutFileSafe(VERSION_FILE, git_hash):
         continue
 
       self.ReadAndPersistVersion()
@@ -66,7 +59,7 @@ class GetOldestUntaggedVersion(Step):
         version = version[:-2]
 
       # Clean up checked-out version file.
-      self.GitCheckoutFileSafe(self._config[VERSION_FILE], "HEAD")
+      self.GitCheckoutFileSafe(VERSION_FILE, "HEAD")
 
       if version in tags:
         if self["candidate"]:
@@ -184,6 +177,12 @@ class AutoTag(ScriptsBase):
     options.force_upload = True
     return True
 
+  def _Config(self):
+    return {
+      "BRANCHNAME": "auto-tag-v8",
+      "PERSISTFILE_BASENAME": "/tmp/v8-auto-tag-tempfile",
+    }
+
   def _Steps(self):
     return [
       Preparation,
@@ -197,4 +196,4 @@ class AutoTag(ScriptsBase):
 
 
 if __name__ == "__main__":  # pragma: no cover
-  sys.exit(AutoTag(CONFIG).Run())
+  sys.exit(AutoTag().Run())

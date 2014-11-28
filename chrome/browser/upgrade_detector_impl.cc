@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/build_time.h"
 #include "base/command_line.h"
-#include "base/cpu.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -188,10 +187,10 @@ base::Version GetCurrentlyInstalledVersionImpl(Version* critical_update) {
 }  // namespace
 
 UpgradeDetectorImpl::UpgradeDetectorImpl()
-    : weak_factory_(this),
-      is_unstable_channel_(false),
+    : is_unstable_channel_(false),
       is_auto_update_enabled_(true),
-      build_date_(base::GetBuildTime()) {
+      build_date_(base::GetBuildTime()),
+      weak_factory_(this) {
   CommandLine command_line(*CommandLine::ForCurrentProcess());
   // The different command line switches that affect testing can't be used
   // simultaneously, if they do, here's the precedence order, based on the order
@@ -359,7 +358,7 @@ void UpgradeDetectorImpl::StartUpgradeNotificationTimer() {
   if (upgrade_notification_timer_.IsRunning())
     return;
 
-  upgrade_detected_time_ = base::Time::Now();
+  upgrade_detected_time_ = base::TimeTicks::Now();
 
   // Start the repeating timer for notifying the user after a certain period.
   // The called function will eventually figure out that enough time has passed
@@ -403,11 +402,6 @@ bool UpgradeDetectorImpl::DetectOutdatedInstall() {
 #if defined(OS_WIN)
     // Don't show the update bubbles to enterprise users (i.e., on a domain).
     if (base::win::IsEnrolledToDomain())
-      return false;
-
-    // On Windows, we don't want to warn about outdated installs when the
-    // machine doesn't support SSE2, it's been deprecated starting with M35.
-    if (!base::CPU().has_sse2())
       return false;
 #endif
   }
@@ -512,7 +506,7 @@ void UpgradeDetectorImpl::NotifyOnUpgradeWithTimePassed(
 
 void UpgradeDetectorImpl::NotifyOnUpgrade() {
   const base::TimeDelta time_passed =
-      base::Time::Now() - upgrade_detected_time_;
+      base::TimeTicks::Now() - upgrade_detected_time_;
   NotifyOnUpgradeWithTimePassed(time_passed);
 }
 

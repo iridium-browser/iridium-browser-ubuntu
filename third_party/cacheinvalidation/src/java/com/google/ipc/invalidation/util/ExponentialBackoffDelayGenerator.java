@@ -16,8 +16,6 @@
 
 package com.google.ipc.invalidation.util;
 
-import com.google.common.base.Preconditions;
-
 import java.util.Random;
 
 /**
@@ -33,8 +31,8 @@ public class ExponentialBackoffDelayGenerator {
   /** Initial allowed delay time. */
   private final int initialMaxDelay;
 
-  /** Maximum allowed delay time as a factor of {@code initialMaxDelay} */
-  private final int maxExponentialFactor;
+  /** Maximum allowed delay time. */
+  private final int maxDelay;
 
   /** Next delay time to use. */
   private int currentMaxDelay;
@@ -52,9 +50,10 @@ public class ExponentialBackoffDelayGenerator {
       int maxExponentialFactor) {
     Preconditions.checkArgument(maxExponentialFactor > 0, "max factor must be positive");
     this.random = Preconditions.checkNotNull(random);
-    this.maxExponentialFactor = maxExponentialFactor;
-    this.initialMaxDelay = initialMaxDelay;
     Preconditions.checkArgument(initialMaxDelay > 0, "initial delay must be positive");
+    this.initialMaxDelay = initialMaxDelay;
+    this.maxDelay = initialMaxDelay * maxExponentialFactor;
+    Preconditions.checkState(maxDelay > 0, "max delay must be positive");
     reset();
   }
 
@@ -78,6 +77,25 @@ public class ExponentialBackoffDelayGenerator {
     this.inRetryMode = false;
   }
 
+  /**
+   * Resets the exponential backoff generator to start delays such that the specified number of
+   * retries have already been made. */
+  public void resetWithNumRetries(int numRetries) {
+    Preconditions.checkArgument(numRetries >= 0);
+    reset();
+    if (numRetries > 0) {
+      inRetryMode = true;
+      if (numRetries > Integer.SIZE) {
+        // Cap, otherwise Java will use the lower order 5 bits causing incorrect power of 2.
+        numRetries = Integer.SIZE;
+      }
+      currentMaxDelay = currentMaxDelay << (numRetries - 1);
+      if (currentMaxDelay <= 0 || currentMaxDelay > maxDelay) {
+        currentMaxDelay = maxDelay;
+      }
+    }
+  }
+
   /** Gets the next delay interval to use. */
   public int getNextDelay() {
     int delay = 0;  // After a reset, the delay is 0.
@@ -87,7 +105,6 @@ public class ExponentialBackoffDelayGenerator {
       delay = random.nextInt(currentMaxDelay) + 1;
 
       // Adjust the max for the next run.
-      int maxDelay = initialMaxDelay * maxExponentialFactor;
       if (currentMaxDelay <= maxDelay) {  // Guard against overflow.
         currentMaxDelay *= 2;
         if (currentMaxDelay > maxDelay) {

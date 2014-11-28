@@ -38,28 +38,48 @@
 namespace blink {
 
 class ConsoleMessage;
-class FrameHost;
+class ConsoleMessageStorage;
+class DocumentLoader;
+class ResourceResponse;
 class ScriptCallStack;
 class WorkerGlobalScopeProxy;
 
 // FrameConsole takes per-frame console messages and routes them up through the FrameHost to the ChromeClient and Inspector.
 // It's meant as an abstraction around ChromeClient calls and the way that Blink core/ can add messages to the console.
-class FrameConsole FINAL {
+class FrameConsole FINAL : public NoBaseWillBeGarbageCollected<FrameConsole> {
+    DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(FrameConsole);
 public:
-    static PassOwnPtr<FrameConsole> create(LocalFrame& frame) { return adoptPtr(new FrameConsole(frame)); }
+    static PassOwnPtrWillBeRawPtr<FrameConsole> create(LocalFrame& frame)
+    {
+        return adoptPtrWillBeNoop(new FrameConsole(frame));
+    }
 
     void addMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>);
-    void adoptWorkerConsoleMessages(WorkerGlobalScopeProxy*);
+    void adoptWorkerMessagesAfterTermination(WorkerGlobalScopeProxy*);
+
+    void reportResourceResponseReceived(DocumentLoader*, unsigned long requestIdentifier, const ResourceResponse&);
 
     static String formatStackTraceString(const String& originalMessage, PassRefPtrWillBeRawPtr<ScriptCallStack>);
 
     static void mute();
     static void unmute();
 
+    ConsoleMessageStorage* messageStorage();
+    void clearMessages();
+
+    void trace(Visitor*);
+
 private:
     explicit FrameConsole(LocalFrame&);
 
-    LocalFrame& m_frame;
+    LocalFrame& frame() const
+    {
+        ASSERT(m_frame);
+        return *m_frame;
+    }
+
+    RawPtrWillBeMember<LocalFrame> m_frame;
+    OwnPtrWillBeMember<ConsoleMessageStorage> m_consoleMessageStorage;
 };
 
 } // namespace blink

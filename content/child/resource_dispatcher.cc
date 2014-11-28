@@ -17,6 +17,7 @@
 #include "base/strings/string_util.h"
 #include "content/child/request_extra_data.h"
 #include "content/child/request_info.h"
+#include "content/child/resource_loader_bridge.h"
 #include "content/child/site_isolation_policy.h"
 #include "content/child/sync_load_response.h"
 #include "content/child/threaded_data_provider.h"
@@ -30,9 +31,6 @@
 #include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
-#include "webkit/child/resource_loader_bridge.h"
-
-using webkit_glue::ResourceLoaderBridge;
 
 namespace content {
 
@@ -128,6 +126,7 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.appcache_host_id = request_info.appcache_host_id;
   request_.download_to_file = request_info.download_to_file;
   request_.has_user_gesture = request_info.has_user_gesture;
+  request_.skip_service_worker = request_info.skip_service_worker;
   request_.enable_load_timing = request_info.enable_load_timing;
 
   const RequestExtraData kEmptyData;
@@ -270,9 +269,9 @@ void IPCResourceLoaderBridge::SyncLoad(SyncLoadResponse* response) {
 
 ResourceDispatcher::ResourceDispatcher(IPC::Sender* sender)
     : message_sender_(sender),
-      weak_factory_(this),
       delegate_(NULL),
-      io_timestamp_(base::TimeTicks()) {
+      io_timestamp_(base::TimeTicks()),
+      weak_factory_(this) {
 }
 
 ResourceDispatcher::~ResourceDispatcher() {
@@ -784,6 +783,29 @@ void ResourceDispatcher::ToResourceResponseInfo(
   RemoteToLocalTimeTicks(converter, &load_timing->send_start);
   RemoteToLocalTimeTicks(converter, &load_timing->send_end);
   RemoteToLocalTimeTicks(converter, &load_timing->receive_headers_end);
+  RemoteToLocalTimeTicks(converter,
+                         &renderer_info->service_worker_fetch_start);
+  RemoteToLocalTimeTicks(converter,
+                         &renderer_info->service_worker_fetch_ready);
+  RemoteToLocalTimeTicks(converter,
+                         &renderer_info->service_worker_fetch_end);
+
+  // Collect UMA on the inter-process skew.
+  bool is_skew_additive = false;
+  if (converter.IsSkewAdditiveForMetrics()) {
+    is_skew_additive = true;
+    base::TimeDelta skew = converter.GetSkewForMetrics();
+    if (skew >= base::TimeDelta()) {
+      UMA_HISTOGRAM_TIMES(
+          "InterProcessTimeTicks.BrowserAhead_BrowserToRenderer", skew);
+    } else {
+      UMA_HISTOGRAM_TIMES(
+          "InterProcessTimeTicks.BrowserBehind_BrowserToRenderer", -skew);
+    }
+  }
+  UMA_HISTOGRAM_BOOLEAN(
+      "InterProcessTimeTicks.IsSkewAdditive_BrowserToRenderer",
+      is_skew_additive);
 }
 
 base::TimeTicks ResourceDispatcher::ToRendererCompletionTime(

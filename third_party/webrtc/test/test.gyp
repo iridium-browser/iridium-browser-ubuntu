@@ -115,9 +115,7 @@
         'testsupport/trace_to_stderr.h',
       ],
       'conditions': [
-        # TODO(henrike): remove build_with_chromium==1 when the bots are using
-        # Chromium's buildbots.
-        ['build_with_chromium==1 and OS=="android"', {
+        ['OS=="android"', {
           'dependencies': [
             '<(DEPTH)/base/base.gyp:base',
           ],
@@ -179,6 +177,7 @@
         'channel_transport/udp_transport_unittest.cc',
         'channel_transport/udp_socket_manager_unittest.cc',
         'channel_transport/udp_socket_wrapper_unittest.cc',
+        'testsupport/always_passing_unittest.cc',
         'testsupport/unittest_utils.h',
         'testsupport/fileutils_unittest.cc',
         'testsupport/frame_reader_unittest.cc',
@@ -191,9 +190,7 @@
         4267,  # size_t to int truncation.
       ],
       'conditions': [
-        # TODO(henrike): remove build_with_chromium==1 when the bots are
-        # using Chromium's buildbots.
-        ['build_with_chromium==1 and OS=="android"', {
+        ['OS=="android"', {
           'dependencies': [
             '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
           ],
@@ -202,33 +199,7 @@
     },
   ],
   'conditions': [
-    ['build_with_chromium==0', {
-      'targets': [
-        {
-          'target_name': 'buildbot_tests_scripts',
-          'type': 'none',
-          'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)',
-              'files': [
-                'buildbot_tests.py',
-                '<(webrtc_root)/tools/e2e_quality/audio/run_audio_test.py',
-              ],
-            },
-            {
-              'destination': '<(PRODUCT_DIR)/perf',
-              'files': [
-                '<(DEPTH)/tools/perf/__init__.py',
-                '<(DEPTH)/tools/perf/perf_utils.py',
-              ],
-            },
-          ],
-        },  # target buildbot_tests_scripts
-      ],
-    }],
-    # TODO(henrike): remove build_with_chromium==1 when the bots are using
-    # Chromium's buildbots.
-    ['include_tests==1 and build_with_chromium==1 and OS=="android"', {
+    ['include_tests==1 and OS=="android"', {
       'targets': [
         {
           'target_name': 'test_support_unittests_apk_target',

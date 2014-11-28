@@ -82,19 +82,18 @@ int
 other_translate (const char *trantab, const widechar
 		 * inbuf,
 		 int *inlen, widechar * outbuf, int *outlen,
-		 char *typeform, char *spacing, int *outputPos, int
+		 formtype *typeform, char *spacing, int *outputPos, int
 		 *inputPos, int *cursorPos, int mode)
 {
   char transSpec[MAXSTRING];
-  char *afterColon;
   int action;
   strcpy (transSpec, trantab);
-  afterColon = findColon (transSpec);
+  findColon (transSpec);
   action = findAction (translators, transSpec);
   switch (action)
     {
     case -1:
-      lou_logPrint ("There is no translator called '%s'", transSpec);
+      logMessage (LOG_ERROR, "There is no translator called '%s'", transSpec);
       return 0;
     case 1:
       return 1;
@@ -112,19 +111,19 @@ int
 other_backTranslate (const char *trantab, const widechar
 		     * inbuf,
 		     int *inlen, widechar * outbuf, int *outlen,
-		     char *typeform, char *spacing, int *outputPos, int
+		     formtype *typeform, char *spacing, int *outputPos, 
+		     int
 		     *inputPos, int *cursorPos, int mode)
 {
   char transSpec[MAXSTRING];
-  char *afterColon;
   int action;
   strcpy (transSpec, trantab);
-  afterColon = findColon (transSpec);
+  findColon (transSpec);
   action = findAction (translators, transSpec);
   switch (action)
     {
     case -1:
-      lou_logPrint ("There is no translator called '%s'", transSpec);
+      logMessage (LOG_ERROR, "There is no translator called '%s'", transSpec);
       return 0;
     case 1:
       return 1;

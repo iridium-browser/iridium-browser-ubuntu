@@ -28,6 +28,12 @@
       'sources': [
         'ipc_channel_mojo.cc',
         'ipc_channel_mojo.h',
+        'ipc_channel_mojo_host.cc',
+        'ipc_channel_mojo_host.h',
+        'ipc_channel_mojo_readers.cc',
+        'ipc_channel_mojo_readers.h',
+        'ipc_mojo_bootstrap.cc',
+        'ipc_mojo_bootstrap.h',
         'ipc_message_pipe_reader.cc',
         'ipc_message_pipe_reader.h',
       ],
@@ -60,6 +66,32 @@
       'sources': [
         'run_all_unittests.cc',
         'ipc_channel_mojo_unittest.cc',
+        'ipc_mojo_bootstrap_unittest.cc',
+      ],
+      'conditions': [
+      ],
+    },
+    {
+      'target_name': 'ipc_mojo_perftests',
+      'type': '<(gtest_target_type)',
+      'dependencies': [
+        '../ipc.gyp:ipc',
+        '../ipc.gyp:test_support_ipc',
+        '../../base/base.gyp:base',
+        '../../base/base.gyp:base_i18n',
+        '../../base/base.gyp:test_support_base',
+        '../../base/base.gyp:test_support_perf',
+        '../../mojo/mojo_base.gyp:mojo_cpp_bindings',
+        '../../mojo/mojo_base.gyp:mojo_environment_chromium',
+        '../../mojo/mojo_base.gyp:mojo_system_impl',
+        '../../testing/gtest.gyp:gtest',
+        'ipc_mojo',
+      ],
+      'include_dirs': [
+        '..'
+      ],
+      'sources': [
+        'ipc_mojo_perftest.cc',
       ],
       'conditions': [
       ],

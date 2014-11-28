@@ -3,13 +3,13 @@
 # found in the LICENSE file.
 
 from telemetry.core import browser_options
-from telemetry.core.backends.chrome import cros_interface
+from telemetry.core import platform
 
 
 def CreateChromeBrowserOptions(br_options):
   browser_type = br_options.browser_type
 
-  if (cros_interface.IsRunningOnCrosDevice() or
+  if (platform.GetHostPlatform().GetOSName() == 'chromeos' or
       (browser_type and browser_type.startswith('cros'))):
     return CrosBrowserOptions(br_options)
 
@@ -34,6 +34,8 @@ class CrosBrowserOptions(ChromeBrowserOptions):
     self.create_browser_with_oobe = False
     # Clear enterprise policy before logging in.
     self.clear_enterprise_policy = True
+    # Disable GAIA/enterprise services.
+    self.disable_gaia_services = True
 
     self.auto_login = True
     self.gaia_login = False

@@ -4,6 +4,10 @@
 
 """Module containing the various individual commands a builder can run."""
 
+from __future__ import print_function
+
+import base64
+import collections
 import fnmatch
 import glob
 import logging
@@ -18,8 +22,8 @@ from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import constants
 from chromite.cros.tests import cros_vm_test
 from chromite.lib import cros_build_lib
-from chromite.lib import gclient
 from chromite.lib import git
+from chromite.lib import gob_util
 from chromite.lib import gs
 from chromite.lib import locking
 from chromite.lib import osutils
@@ -79,10 +83,12 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
     chromite_cmd: Whether the command should be evaluated relative to the
       chromite/bin subdir of the |buildroot|.
     kwargs: Optional args passed to RunCommand; see RunCommand for specifics.
+      In addition, if 'sudo' kwarg is True, SudoRunCommand will be used.
   """
   assert not kwargs.get('shell', False), 'Cannot execute shell commands'
   kwargs.setdefault('cwd', buildroot)
   enter_chroot = kwargs.get('enter_chroot', False)
+  sudo = kwargs.pop('sudo', False)
 
   if chromite_cmd:
     cmd = cmd[:]
@@ -102,8 +108,11 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
       status_file = stack.Add(tempfile.NamedTemporaryFile, dir=chroot_tmp)
       kwargs['extra_env']['PARALLEL_EMERGE_STATUS_FILE'] = \
           git.ReinterpretPathForChroot(status_file.name)
+    runcmd = cros_build_lib.RunCommand
+    if sudo:
+      runcmd = cros_build_lib.SudoRunCommand
     try:
-      return cros_build_lib.RunCommand(cmd, **kwargs)
+      return runcmd(cmd, **kwargs)
     except cros_build_lib.RunCommandError as ex:
       # Print the original exception.
       cros_build_lib.Error('\n%s', ex)
@@ -309,6 +318,26 @@ def SetSharedUserPassword(buildroot, password):
     osutils.SafeUnlink(passwd_file, sudo=True)
 
 
+def UpdateChroot(buildroot, usepkg, toolchain_boards=None, extra_env=None):
+  """Wrapper around update_chroot.
+
+  Args:
+    buildroot: The buildroot of the current build.
+    usepkg: Whether to use binary packages when setting up the toolchain.
+    toolchain_boards: List of boards to always include.
+    extra_env: A dictionary of environmental variables to set during generation.
+  """
+  cmd = ['./update_chroot']
+
+  if not usepkg:
+    cmd.extend(['--nousepkg'])
+
+  if toolchain_boards:
+    cmd.extend(['--toolchain_boards', ','.join(toolchain_boards)])
+
+  RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True)
+
+
 def SetupBoard(buildroot, board, usepkg, chrome_binhost_only=False,
                extra_env=None, force=False, profile=None, chroot_upgrade=True):
   """Wrapper around setup_board.
@@ -347,6 +376,30 @@ def SetupBoard(buildroot, board, usepkg, chrome_binhost_only=False,
     cmd.append('--force')
 
   RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True)
+
+
+class MissingBinpkg(failures_lib.InfrastructureFailure):
+  """Error class for when we are missing an essential binpkg."""
+
+
+def VerifyBinpkg(buildroot, board, pkg, extra_env=None):
+  """Verify that an appropriate binary package exists for |pkg|.
+
+  Args:
+    buildroot: The buildroot of the current build.
+    board: The board to set up.
+    pkg: The package to look for.
+    extra_env: A dictionary of environmental variables to set.
+  """
+  cmd = ['emerge-%s' % board, '-pegNv', '--color=n', 'virtual/target-os']
+  result = RunBuildScript(buildroot, cmd, capture_output=True,
+                          enter_chroot=True, extra_env=extra_env)
+  pattern = r'^\[(ebuild|binary).*%s' % re.escape(pkg)
+  m = re.search(pattern, result.output, re.MULTILINE)
+  if m and m.group(1) == 'ebuild':
+    cros_build_lib.Info('(output):\n%s', result.output)
+    msg = 'Cannot find prebuilts for %s on %s' % (pkg, board)
+    raise MissingBinpkg(msg)
 
 
 def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
@@ -394,6 +447,40 @@ def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
   cmd.extend(packages)
   RunBuildScript(buildroot, cmd, extra_env=extra_env, chroot_args=chroot_args,
                  enter_chroot=True)
+
+
+FirmwareVersions = collections.namedtuple(
+    'FirmwareVersions',
+    ['main', 'ec']
+)
+
+
+def GetFirmwareVersions(buildroot, board):
+  """Extract version information from the firmware updater, if one exists.
+
+  Args:
+    buildroot: The buildroot of the current build.
+    board: The board the firmware is for.
+
+  Returns:
+    (main fw version, ec fw version)
+    Each element will either be set to the string output by the firmware
+    updater shellball, or None if there is no firmware updater.
+  """
+  updater = os.path.join(buildroot, constants.DEFAULT_CHROOT_DIR,
+                         cros_build_lib.GetSysroot(board).lstrip(os.path.sep),
+                         'usr', 'sbin', 'chromeos-firmwareupdate')
+  if not os.path.isfile(updater):
+    return FirmwareVersions(None, None)
+  updater = git.ReinterpretPathForChroot(updater)
+
+  result = cros_build_lib.RunCommand([updater, '-V'], enter_chroot=True,
+                                     capture_output=True, log_output=True,
+                                     cwd=buildroot)
+  main = re.search(r'BIOS version:\s*(?P<version>.*)', result.output)
+  ec = re.search(r'EC version:\s*(?P<version>.*)', result.output)
+  return (main.group('version') if main else None,
+          ec.group('version') if ec else None)
 
 
 def BuildImage(buildroot, board, images_to_build, version=None,
@@ -450,20 +537,23 @@ def TestAuZip(buildroot, image_dir, extra_env=None):
                  extra_env=extra_env)
 
 
-def BuildVMImageForTesting(buildroot, board, extra_env=None, disk_layout=None):
+def BuildVMImageForTesting(buildroot, board, extra_env=None):
   cmd = ['./image_to_vm.sh', '--board=%s' % board, '--test_image']
-  if disk_layout:
-    cmd += ['--disk_layout=%s' % disk_layout]
   RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True)
 
 
 def RunTestImage(buildroot, board, image_dir, results_dir):
   """Executes test_image on the produced image in |image_dir|.
 
+  The "test_image" script will be run as root in chroot. Running the script as
+  root will allow the tests to read normally-forbidden files such as those
+  owned by root. Running tests inside the chroot allows us to control
+  dependencies better.
+
   Args:
     buildroot: The buildroot of the current build.
     board: The board the image was built for.
-    image_dir: The directory in which to find {,u}mount_image.sh and the image.
+    image_dir: The directory in which to find the image.
     results_dir: The directory to store result files.
 
   Raises:
@@ -472,10 +562,11 @@ def RunTestImage(buildroot, board, image_dir, results_dir):
   cmd = [
       'test_image',
       '--board', board,
-      '--test_results_root', results_dir,
-      image_dir,
+      '--test_results_root', cros_build_lib.ToChrootPath(results_dir),
+      cros_build_lib.ToChrootPath(image_dir),
   ]
-  RunBuildScript(buildroot, cmd, chromite_cmd=True)
+  RunBuildScript(buildroot, cmd, enter_chroot=True, chromite_cmd=True,
+                 sudo=True)
 
 
 def RunSignerTests(buildroot, board):
@@ -1742,7 +1833,6 @@ def GeneratePayloads(build_root, target_image_path, archive_dir):
 
     cmd = [
         os.path.join(path, 'cros_generate_update_payload'),
-        '--patch_kernel',
         '--image', chroot_target,
         '--output', os.path.join(chroot_temp_dir, 'update.gz')
     ]
@@ -1772,15 +1862,13 @@ def GeneratePayloads(build_root, target_image_path, archive_dir):
                 os.path.join(archive_dir, STATEFUL_FILE))
 
 
-def GetChromeLKGM(svn_revision):
-  """Returns the ChromeOS LKGM from Chrome given the SVN revision."""
-  svn_url = '/'.join([gclient.GetBaseURLs()[0], constants.SVN_CHROME_LKGM])
-  svn_revision_args = []
-  if svn_revision:
-    svn_revision_args = ['-r', str(svn_revision)]
-
-  svn_cmd = ['svn', 'cat', svn_url] + svn_revision_args
-  return cros_build_lib.RunCommand(svn_cmd, capture_output=True).output.strip()
+def GetChromeLKGM(revision):
+  """Returns the ChromeOS LKGM from Chrome given the git revision."""
+  revision = revision or 'refs/heads/master'
+  lkgm_url_path = '%s/+/%s/%s?format=text' % (
+      constants.CHROMIUM_SRC_PROJECT, revision, constants.PATH_TO_CHROME_LKGM)
+  contents_b64 = gob_util.FetchUrl(constants.EXTERNAL_GOB_HOST, lkgm_url_path)
+  return base64.b64decode(contents_b64.read()).strip()
 
 
 def SyncChrome(build_root, chrome_root, useflags, tag=None, revision=None):

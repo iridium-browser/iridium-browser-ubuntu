@@ -4,6 +4,9 @@
 
 #include "chromeos/cryptohome/mock_homedir_methods.h"
 
+#include <vector>
+
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 
 using ::testing::Invoke;
@@ -20,6 +23,8 @@ MockHomedirMethods::~MockHomedirMethods() {}
 void MockHomedirMethods::SetUp(bool success, MountError return_code) {
   success_ = success;
   return_code_ = return_code;
+  ON_CALL(*this, GetKeyDataEx(_, _, _)).WillByDefault(
+      WithArgs<2>(Invoke(this, &MockHomedirMethods::DoGetDataCallback)));
   ON_CALL(*this, CheckKeyEx(_, _, _)).WillByDefault(
       WithArgs<2>(Invoke(this, &MockHomedirMethods::DoCallback)));
   ON_CALL(*this, MountEx(_, _, _, _)).WillByDefault(
@@ -34,6 +39,10 @@ void MockHomedirMethods::SetUp(bool success, MountError return_code) {
 
 void MockHomedirMethods::DoCallback(const Callback& callback) {
   callback.Run(success_, return_code_);
+}
+
+void MockHomedirMethods::DoGetDataCallback(const GetKeyDataCallback& callback) {
+  callback.Run(success_, return_code_, std::vector<KeyDefinition>());
 }
 
 void MockHomedirMethods::DoMountCallback(const MountCallback& callback) {

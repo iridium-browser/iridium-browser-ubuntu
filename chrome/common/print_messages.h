@@ -287,11 +287,6 @@ IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintPage_Params)
   // Page number.
   IPC_STRUCT_MEMBER(int, page_number)
 
-#if defined(OS_WIN) && !defined(WIN_PDF_METAFILE_FOR_PRINTING)
-  // Shrink factor used to render this page.
-  IPC_STRUCT_MEMBER(double, actual_shrink)
-#endif  // OS_WIN && !WIN_PDF_METAFILE_FOR_PRINTING
-
   // The size of the page the page author specified.
   IPC_STRUCT_MEMBER(gfx::Size, page_size)
 
@@ -323,9 +318,14 @@ IPC_MESSAGE_ROUTED0(PrintMsg_PrintNodeUnderContextMenu)
 IPC_MESSAGE_ROUTED1(PrintMsg_PrintForPrintPreview,
                     base::DictionaryValue /* settings */)
 
+#if !defined(DISABLE_BASIC_PRINTING)
 // Tells the render view to switch the CSS to print media type, renders every
 // requested pages and switch back the CSS to display media type.
 IPC_MESSAGE_ROUTED0(PrintMsg_PrintPages)
+
+// Like PrintMsg_PrintPages, but using the print preview document's frame/node.
+IPC_MESSAGE_ROUTED0(PrintMsg_PrintForSystemDialog)
+#endif  // !DISABLE_BASIC_PRINTING
 
 // Tells the render view that printing is done so it can clean up.
 IPC_MESSAGE_ROUTED1(PrintMsg_PrintingDone,
@@ -340,12 +340,6 @@ IPC_MESSAGE_ROUTED1(PrintMsg_SetScriptedPrintingBlocked,
 // called multiple times as the user updates settings.
 IPC_MESSAGE_ROUTED1(PrintMsg_PrintPreview,
                     base::DictionaryValue /* settings */)
-
-// Like PrintMsg_PrintPages, but using the print preview document's frame/node.
-IPC_MESSAGE_ROUTED0(PrintMsg_PrintForSystemDialog)
-
-// Tells a renderer to stop blocking script initiated printing.
-IPC_MESSAGE_ROUTED0(PrintMsg_ResetScriptedPrintCount)
 
 // Messages sent from the renderer to the browser.
 
@@ -386,10 +380,11 @@ IPC_SYNC_MESSAGE_ROUTED0_1(PrintHostMsg_GetDefaultPrintSettings,
 
 // The renderer wants to update the current print settings with new
 // |job_settings|.
-IPC_SYNC_MESSAGE_ROUTED2_1(PrintHostMsg_UpdatePrintSettings,
+IPC_SYNC_MESSAGE_ROUTED2_2(PrintHostMsg_UpdatePrintSettings,
                            int /* document_cookie */,
                            base::DictionaryValue /* job_settings */,
-                           PrintMsg_PrintPages_Params /* current_settings */)
+                           PrintMsg_PrintPages_Params /* current_settings */,
+                           bool /* canceled */)
 
 // It's the renderer that controls the printing process when it is generated
 // by javascript. This step is about showing UI to the user to select the
@@ -402,7 +397,7 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PrintHostMsg_ScriptedPrint,
 
 #if defined(OS_CHROMEOS) || defined(OS_ANDROID)
 // Asks the browser to create a temporary file for the renderer to fill
-// in resulting NativeMetafile in printing.
+// in resulting PdfMetafileSkia in printing.
 IPC_SYNC_MESSAGE_CONTROL1_2(PrintHostMsg_AllocateTempFileForPrinting,
                             int /* render_view_id */,
                             base::FileDescriptor /* temp file fd */,

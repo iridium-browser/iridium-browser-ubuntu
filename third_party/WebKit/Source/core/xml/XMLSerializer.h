@@ -32,6 +32,7 @@ class ExceptionState;
 class Node;
 
 class XMLSerializer FINAL : public RefCountedWillBeGarbageCollected<XMLSerializer>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<XMLSerializer> create()
     {
@@ -43,10 +44,7 @@ public:
     void trace(Visitor*) { }
 
 private:
-    XMLSerializer()
-    {
-        ScriptWrappable::init(this);
-    }
+    XMLSerializer() { }
 };
 
 } // namespace blink

@@ -12,20 +12,20 @@
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/web_modal/web_contents_modal_dialog_host.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
-#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
+#include "components/web_modal/popup_manager.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_transition_types.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
+#include "grit/components_strings.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace chromeos {
 namespace attestation {
@@ -53,13 +53,13 @@ void PlatformVerificationDialog::ShowDialog(
       base::UTF8ToUTF16(origin),
       callback);
 
-  web_modal::WebContentsModalDialogManager* manager =
-      web_modal::WebContentsModalDialogManager::FromWebContents(web_contents);
-  const gfx::NativeWindow parent =
-      manager->delegate()->GetWebContentsModalDialogHost()->GetHostView();
-  views::Widget* widget = CreateDialogWidget(dialog, NULL, parent);
-  manager->ShowModalDialog(widget->GetNativeView());
-  widget->Show();
+  // Sets up the dialog widget to be shown.
+  web_modal::PopupManager* popup_manager =
+      web_modal::PopupManager::FromWebContents(web_contents);
+  DCHECK(popup_manager);
+  views::Widget* widget = views::DialogDelegate::CreateDialogWidget(
+      dialog, NULL, popup_manager->GetHostView());
+  popup_manager->ShowModalDialog(widget->GetNativeView(), web_contents);
 }
 
 PlatformVerificationDialog::~PlatformVerificationDialog() {
@@ -137,7 +137,7 @@ void PlatformVerificationDialog::StyledLabelLinkClicked(const gfx::Range& range,
     Profile* profile = Profile::FromBrowserContext(
         web_contents_->GetBrowserContext());
     chrome::NavigateParams params(
-        profile, learn_more_url, content::PAGE_TRANSITION_LINK);
+        profile, learn_more_url, ui::PAGE_TRANSITION_LINK);
     params.disposition = SINGLETON_TAB;
     chrome::Navigate(&params);
   } else {

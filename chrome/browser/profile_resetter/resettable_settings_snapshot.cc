@@ -16,20 +16,21 @@
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "components/feedback/feedback_data.h"
 #include "components/feedback/feedback_util.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using feedback::FeedbackData;
 
 namespace {
 
-// Feedback bucket label.
+// Feedback bucket labels.
+const char kProfileResetPromptBucket[] = "SamplingOfSettingsResetPrompt";
 const char kProfileResetWebUIBucket[] = "ProfileResetReport";
 
 // Dictionary keys for feedback report.
@@ -90,7 +91,7 @@ ResettableSettingsSnapshot::ResettableSettingsSnapshot(
 
 ResettableSettingsSnapshot::~ResettableSettingsSnapshot() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (cancellation_flag_)
+  if (cancellation_flag_.get())
     cancellation_flag_->data.Set();
 }
 
@@ -134,7 +135,7 @@ int ResettableSettingsSnapshot::FindDifferentFields(
 void ResettableSettingsSnapshot::RequestShortcuts(
     const base::Closure& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK(!cancellation_flag_ && !shortcuts_determined());
+  DCHECK(!cancellation_flag_.get() && !shortcuts_determined());
 
   cancellation_flag_ = new SharedCancellationFlag;
   content::BrowserThread::PostTaskAndReplyWithResult(
@@ -219,9 +220,19 @@ std::string SerializeSettingsReport(const ResettableSettingsSnapshot& snapshot,
 }
 
 void SendSettingsFeedback(const std::string& report,
-                          Profile* profile) {
+                          Profile* profile,
+                          SnapshotCaller caller) {
   scoped_refptr<FeedbackData> feedback_data = new FeedbackData();
-  feedback_data->set_category_tag(kProfileResetWebUIBucket);
+  std::string bucket;
+  switch (caller) {
+    case PROFILE_RESET_WEBUI:
+      bucket = kProfileResetWebUIBucket;
+      break;
+    case PROFILE_RESET_PROMPT:
+      bucket = kProfileResetPromptBucket;
+      break;
+  }
+  feedback_data->set_category_tag(bucket);
   feedback_data->set_description(report);
 
   feedback_data->set_image(make_scoped_ptr(new std::string));

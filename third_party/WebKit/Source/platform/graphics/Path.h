@@ -45,7 +45,6 @@ class AffineTransform;
 class FloatPoint;
 class FloatRect;
 class FloatSize;
-class GraphicsContext;
 class StrokeData;
 
 enum PathElementType {
@@ -56,7 +55,7 @@ enum PathElementType {
     PathElementCloseSubpath // The points member will contain no values.
 };
 
-// The points in the sturcture are the same as those that would be used with the
+// The points in the structure are the same as those that would be used with the
 // add... method. For example, a line returns the endpoint, while a cubic returns
 // two tangent points and the endpoint.
 struct PathElement {

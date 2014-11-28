@@ -8,10 +8,9 @@
 #include "chrome/browser/ui/panels/panel_constants.h"
 #include "chrome/browser/ui/views/panels/panel_view.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -20,6 +19,7 @@
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
@@ -487,6 +487,9 @@ void PanelFrameView::UpdateWindowIcon() {
 
 void PanelFrameView::UpdateWindowTitle() {
   title_label_->SetText(panel_view_->panel()->GetWindowTitle());
+}
+
+void PanelFrameView::SizeConstraintsChanged() {
 }
 
 gfx::Size PanelFrameView::GetPreferredSize() const {

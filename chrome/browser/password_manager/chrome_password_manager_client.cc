@@ -8,7 +8,9 @@
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/password_manager/password_manager_util.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/password_manager/save_password_infobar_delegate.h"
@@ -25,6 +27,8 @@
 #include "components/autofill/core/browser/password_generator.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
+#include "components/password_manager/content/common/credential_manager_messages.h"
+#include "components/password_manager/content/common/credential_manager_types.h"
 #include "components/password_manager/core/browser/log_receiver.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
@@ -36,6 +40,7 @@
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
+#include "third_party/re2/re2/re2.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/password_authentication_manager.h"
@@ -65,10 +70,10 @@ ChromePasswordManagerClient::ChromePasswordManagerClient(
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       driver_(web_contents, this, autofill_client),
       observer_(NULL),
-      weak_factory_(this),
       can_use_log_router_(false),
       autofill_sync_state_(ALLOW_SYNC_CREDENTIALS),
-      sync_credential_was_filtered_(false) {
+      sync_credential_was_filtered_(false),
+      weak_factory_(this) {
   PasswordManagerInternalsService* service =
       PasswordManagerInternalsServiceFactory::GetForBrowserContext(profile_);
   if (service)
@@ -145,8 +150,15 @@ void ChromePasswordManagerClient::AutofillResultsComputed() {
   sync_credential_was_filtered_ = false;
 }
 
-void ChromePasswordManagerClient::PromptUserToSavePassword(
+bool ChromePasswordManagerClient::PromptUserToSavePassword(
     scoped_ptr<password_manager::PasswordFormManager> form_to_save) {
+  // Save password infobar and the password bubble prompts in case of
+  // "webby" URLs and do not prompt in case of "non-webby" URLS (e.g. file://).
+  if (!BrowsingDataHelper::IsWebScheme(
+      web_contents()->GetLastCommittedURL().scheme())) {
+    return false;
+  }
+
   if (IsTheHotNewBubbleUIEnabled()) {
     ManagePasswordsUIController* manage_passwords_ui_controller =
         ManagePasswordsUIController::FromWebContents(web_contents());
@@ -159,6 +171,7 @@ void ChromePasswordManagerClient::PromptUserToSavePassword(
     SavePasswordInfoBarDelegate::Create(
         web_contents(), form_to_save.Pass(), uma_histogram_suffix);
   }
+  return true;
 }
 
 void ChromePasswordManagerClient::AutomaticPasswordSave(
@@ -282,6 +295,46 @@ bool ChromePasswordManagerClient::IsLoggingActive() const {
   return can_use_log_router_ && !web_contents()->GetWebUI();
 }
 
+void ChromePasswordManagerClient::OnNotifyFailedSignIn(
+    int request_id,
+    const password_manager::CredentialInfo&) {
+  // TODO(mkwst): This is a stub.
+  web_contents()->GetRenderViewHost()->Send(
+      new CredentialManagerMsg_AcknowledgeFailedSignIn(
+          web_contents()->GetRenderViewHost()->GetRoutingID(), request_id));
+}
+
+void ChromePasswordManagerClient::OnNotifySignedIn(
+    int request_id,
+    const password_manager::CredentialInfo&) {
+  // TODO(mkwst): This is a stub.
+  web_contents()->GetRenderViewHost()->Send(
+      new CredentialManagerMsg_AcknowledgeSignedIn(
+          web_contents()->GetRenderViewHost()->GetRoutingID(), request_id));
+}
+
+void ChromePasswordManagerClient::OnNotifySignedOut(int request_id) {
+  // TODO(mkwst): This is a stub.
+  web_contents()->GetRenderViewHost()->Send(
+      new CredentialManagerMsg_AcknowledgeSignedOut(
+          web_contents()->GetRenderViewHost()->GetRoutingID(), request_id));
+}
+
+void ChromePasswordManagerClient::OnRequestCredential(
+    int request_id,
+    bool zero_click_only,
+    const std::vector<GURL>& federations) {
+  // TODO(mkwst): This is a stub.
+  password_manager::CredentialInfo info(base::ASCIIToUTF16("id"),
+                                        base::ASCIIToUTF16("name"),
+                                        GURL("https://example.com/image.png"));
+  web_contents()->GetRenderViewHost()->Send(
+      new CredentialManagerMsg_SendCredential(
+          web_contents()->GetRenderViewHost()->GetRoutingID(),
+          request_id,
+          info));
+}
+
 // static
 password_manager::PasswordGenerationManager*
 ChromePasswordManagerClient::GetGenerationManagerFromWebContents(
@@ -313,6 +366,7 @@ bool ChromePasswordManagerClient::OnMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromePasswordManagerClient, message)
+    // Autofill messages:
     IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordGenerationPopup,
                         ShowPasswordGenerationPopup)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordEditingPopup,
@@ -321,6 +375,18 @@ bool ChromePasswordManagerClient::OnMessageReceived(
                         HidePasswordGenerationPopup)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_PasswordAutofillAgentConstructed,
                         NotifyRendererOfLoggingAvailability)
+
+    // Credential Manager messages:
+    IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_NotifyFailedSignIn,
+                        OnNotifyFailedSignIn);
+    IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_NotifySignedIn,
+                        OnNotifySignedIn);
+    IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_NotifySignedOut,
+                        OnNotifySignedOut);
+    IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_RequestCredential,
+                        OnRequestCredential);
+
+    // Default:
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -424,12 +490,15 @@ bool ChromePasswordManagerClient::IsURLPasswordWebsiteReauth(
   if (!net::GetValueForKeyInQuery(url, "continue", &param_value))
     return false;
 
-  return GURL(param_value).host() ==
-      GURL(chrome::kPasswordManagerAccountDashboardURL).host();
+  // All password sites, including test sites, have autofilling disabled.
+  CR_DEFINE_STATIC_LOCAL(RE2, account_dashboard_pattern,
+                         ("passwords(-([a-z-]+\\.corp))?\\.google\\.com"));
+
+  return RE2::FullMatch(GURL(param_value).host(), account_dashboard_pattern);
 }
 
 bool ChromePasswordManagerClient::IsTheHotNewBubbleUIEnabled() {
-#if !defined(USE_AURA)
+#if !defined(USE_AURA) && !defined(OS_MACOSX)
   return false;
 #endif
   CommandLine* command_line = CommandLine::ForCurrentProcess();

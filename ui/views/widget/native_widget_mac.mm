@@ -118,6 +118,9 @@ void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
   delegate_->OnNativeWidgetCreated(true);
 
   bridge_->SetFocusManager(GetWidget()->GetFocusManager());
+
+  DCHECK(GetWidget()->GetRootView());
+  bridge_->SetRootView(GetWidget()->GetRootView());
 }
 
 NonClientFrameView* NativeWidgetMac::CreateNonClientFrameView() {
@@ -337,7 +340,6 @@ void NativeWidgetMac::ShowWithWindowState(ui::WindowShowState state) {
     case ui::SHOW_STATE_FULLSCREEN:
       NOTIMPLEMENTED();
       break;
-    case ui::SHOW_STATE_DETACHED:
     case ui::SHOW_STATE_END:
       NOTREACHED();
       break;
@@ -503,6 +505,10 @@ void NativeWidgetMac::OnRootViewLayout() {
 
 bool NativeWidgetMac::IsTranslucentWindowOpacitySupported() const {
   return false;
+}
+
+void NativeWidgetMac::OnSizeConstraintsChanged() {
+  NOTIMPLEMENTED();
 }
 
 void NativeWidgetMac::RepostNativeEvent(gfx::NativeEvent native_event) {

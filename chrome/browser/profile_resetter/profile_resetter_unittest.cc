@@ -38,7 +38,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_WIN)
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/process/process_handle.h"
 #include "base/rand_util.h"
@@ -864,7 +864,7 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
       Manifest::INVALID_LOCATION,
       extensions::Manifest::TYPE_EXTENSION,
       false);
-  ASSERT_TRUE(ext);
+  ASSERT_TRUE(ext.get());
   service_->AddExtension(ext.get());
 
   std::string master_prefs(kDistributionConfig);
@@ -953,7 +953,7 @@ TEST_F(ProfileResetterTest, FeedbackSerializationTest) {
       Manifest::INVALID_LOCATION,
       extensions::Manifest::TYPE_EXTENSION,
       false);
-  ASSERT_TRUE(ext);
+  ASSERT_TRUE(ext.get());
   service_->AddExtension(ext.get());
 
   ShortcutHandler shortcut;
@@ -1032,7 +1032,7 @@ TEST_F(ProfileResetterTest, GetReadableFeedback) {
       Manifest::INVALID_LOCATION,
       extensions::Manifest::TYPE_EXTENSION,
       false);
-  ASSERT_TRUE(ext);
+  ASSERT_TRUE(ext.get());
   service_->AddExtension(ext.get());
 
   PrefService* prefs = profile()->GetPrefs();

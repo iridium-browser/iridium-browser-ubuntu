@@ -6,8 +6,8 @@
 
 #include <set>
 
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -18,6 +18,7 @@
 #include "chrome/common/importer/firefox_importer_utils.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/common/importer/imported_favicon_usage.h"
+#include "chrome/common/importer/importer_autofill_form_data_entry.h"
 #include "chrome/common/importer/importer_bridge.h"
 #include "chrome/common/importer/importer_url_row.h"
 #include "chrome/grit/generated_resources.h"
@@ -139,6 +140,11 @@ void FirefoxImporter::StartImport(
     bridge_->NotifyItemStarted(importer::PASSWORDS);
     ImportPasswords();
     bridge_->NotifyItemEnded(importer::PASSWORDS);
+  }
+  if ((items & importer::AUTOFILL_FORM_DATA) && !cancelled()) {
+    bridge_->NotifyItemStarted(importer::AUTOFILL_FORM_DATA);
+    ImportAutofillFormData();
+    bridge_->NotifyItemEnded(importer::AUTOFILL_FORM_DATA);
   }
   bridge_->NotifyEnded();
 }
@@ -382,6 +388,41 @@ void FirefoxImporter::ImportHomepage() {
   }
 }
 
+void FirefoxImporter::ImportAutofillFormData() {
+  base::FilePath file = source_path_.AppendASCII("formhistory.sqlite");
+  if (!base::PathExists(file))
+    return;
+
+  sql::Connection db;
+  if (!db.Open(file))
+    return;
+
+  const char query[] =
+      "SELECT fieldname, value, timesUsed, firstUsed, lastUsed FROM "
+      "moz_formhistory";
+
+  sql::Statement s(db.GetUniqueStatement(query));
+
+  std::vector<ImporterAutofillFormDataEntry> form_entries;
+  while (s.Step() && !cancelled()) {
+    ImporterAutofillFormDataEntry form_entry;
+    form_entry.name = s.ColumnString16(0);
+    form_entry.value = s.ColumnString16(1);
+    form_entry.times_used = s.ColumnInt(2);
+    form_entry.first_used = base::Time::FromTimeT(s.ColumnInt64(3) / 1000000);
+    form_entry.last_used = base::Time::FromTimeT(s.ColumnInt64(4) / 1000000);
+
+    // Don't import search bar history.
+    if (base::UTF16ToUTF8(form_entry.name) == "searchbar-history")
+      continue;
+
+    form_entries.push_back(form_entry);
+  }
+
+  if (!form_entries.empty() && !cancelled())
+    bridge_->SetAutofillFormData(form_entries);
+}
+
 void FirefoxImporter::GetSearchEnginesXMLData(
     std::vector<std::string>* search_engine_data) {
   base::FilePath file = source_path_.AppendASCII("search.sqlite");
@@ -480,6 +521,18 @@ void FirefoxImporter::GetSearchEnginesXMLData(
 
 void FirefoxImporter::GetSearchEnginesXMLDataFromJSON(
     std::vector<std::string>* search_engine_data) {
+  // search-metadata.json contains keywords for search engines. This
+  // file exists only if the user has set keywords for search engines.
+  base::FilePath search_metadata_json_file =
+      source_path_.AppendASCII("search-metadata.json");
+  JSONFileValueSerializer metadata_serializer(search_metadata_json_file);
+  scoped_ptr<base::Value> metadata_root(
+      metadata_serializer.Deserialize(NULL, NULL));
+  const base::DictionaryValue* search_metadata_root = NULL;
+  if (metadata_root)
+    metadata_root->GetAsDictionary(&search_metadata_root);
+
+  // search.json contains information about search engines to import.
   base::FilePath search_json_file = source_path_.AppendASCII("search.json");
   if (!base::PathExists(search_json_file))
     return;
@@ -556,6 +609,22 @@ void FirefoxImporter::GetSearchEnginesXMLDataFromJSON(
 
         std::string file_data;
         base::ReadFileToString(xml_file, &file_data);
+
+        // If a keyword is mentioned for this search engine, then add
+        // it to the XML string as an <Alias> element and use this updated
+        // string.
+        const base::DictionaryValue* search_xml_path = NULL;
+        if (search_metadata_root && search_metadata_root->HasKey(file_path) &&
+            search_metadata_root->GetDictionaryWithoutPathExpansion(
+                file_path, &search_xml_path)) {
+          std::string alias;
+          search_xml_path->GetString("alias", &alias);
+
+          // Add <Alias> element as the last child element.
+          size_t end_of_parent = file_data.find("</SearchPlugin>");
+          if (end_of_parent != std::string::npos && !alias.empty())
+            file_data.insert(end_of_parent, "<Alias>" + alias + "</Alias> \n");
+        }
         search_engine_data->push_back(file_data);
       }
     }

@@ -179,7 +179,6 @@ const SkScalar kUnderlineMetricsNotSet = -1.0f;
 SkiaTextRenderer::SkiaTextRenderer(Canvas* canvas)
     : canvas_(canvas),
       canvas_skia_(canvas->sk_canvas()),
-      started_drawing_(false),
       underline_thickness_(kUnderlineMetricsNotSet),
       underline_position_(0.0f) {
   DCHECK(canvas_skia_);
@@ -189,22 +188,9 @@ SkiaTextRenderer::SkiaTextRenderer(Canvas* canvas)
   paint_.setSubpixelText(true);
   paint_.setLCDRenderText(true);
   paint_.setHinting(SkPaint::kNormal_Hinting);
-  bounds_.setEmpty();
 }
 
 SkiaTextRenderer::~SkiaTextRenderer() {
-  // Work-around for http://crbug.com/122743, where non-ClearType text is
-  // rendered with incorrect gamma when using the fade shader. Draw the text
-  // to a layer and restore it faded by drawing a rect in kDstIn_Mode mode.
-  //
-  // TODO(asvitkine): Remove this work-around once the Skia bug is fixed.
-  //                  http://code.google.com/p/skia/issues/detail?id=590
-  if (deferred_fade_shader_.get()) {
-    paint_.setShader(deferred_fade_shader_.get());
-    paint_.setXfermodeMode(SkXfermode::kDstIn_Mode);
-    canvas_skia_->drawRect(bounds_, paint_);
-    canvas_skia_->restore();
-  }
 }
 
 void SkiaTextRenderer::SetDrawLooper(SkDrawLooper* draw_looper) {
@@ -213,12 +199,7 @@ void SkiaTextRenderer::SetDrawLooper(SkDrawLooper* draw_looper) {
 
 void SkiaTextRenderer::SetFontRenderParams(const FontRenderParams& params,
                                            bool background_is_transparent) {
-  paint_.setAntiAlias(params.antialiasing);
-  paint_.setLCDRenderText(!background_is_transparent &&
-      params.subpixel_rendering != FontRenderParams::SUBPIXEL_RENDERING_NONE);
-  paint_.setSubpixelText(params.subpixel_positioning);
-  paint_.setAutohinted(params.autohinter);
-  paint_.setHinting(FontRenderParamsHintingToSkPaintHinting(params.hinting));
+  ApplyRenderParams(params, background_is_transparent, &paint_);
 }
 
 void SkiaTextRenderer::SetTypeface(SkTypeface* typeface) {
@@ -248,8 +229,7 @@ void SkiaTextRenderer::SetForegroundColor(SkColor foreground) {
   paint_.setColor(foreground);
 }
 
-void SkiaTextRenderer::SetShader(SkShader* shader, const Rect& bounds) {
-  bounds_ = RectToSkRect(bounds);
+void SkiaTextRenderer::SetShader(SkShader* shader) {
   paint_.setShader(shader);
 }
 
@@ -262,26 +242,6 @@ void SkiaTextRenderer::SetUnderlineMetrics(SkScalar thickness,
 void SkiaTextRenderer::DrawPosText(const SkPoint* pos,
                                    const uint16* glyphs,
                                    size_t glyph_count) {
-  if (!started_drawing_) {
-    started_drawing_ = true;
-    // Work-around for http://crbug.com/122743, where non-ClearType text is
-    // rendered with incorrect gamma when using the fade shader. Draw the text
-    // to a layer and restore it faded by drawing a rect in kDstIn_Mode mode.
-    //
-    // Skip this when there is a looper which seems not working well with
-    // deferred paint. Currently a looper is only used for text shadows.
-    //
-    // TODO(asvitkine): Remove this work-around once the Skia bug is fixed.
-    //                  http://code.google.com/p/skia/issues/detail?id=590
-    if (!paint_.isLCDRenderText() &&
-        paint_.getShader() &&
-        !paint_.getLooper()) {
-      deferred_fade_shader_ = skia::SharePtr(paint_.getShader());
-      paint_.setShader(NULL);
-      canvas_skia_->saveLayer(&bounds_, NULL);
-    }
-  }
-
   const size_t byte_length = glyph_count * sizeof(glyphs[0]);
   canvas_skia_->drawPosText(&glyphs[0], byte_length, &pos[0], paint_);
 }
@@ -416,6 +376,17 @@ skia::RefPtr<SkTypeface> CreateSkiaTypeface(const std::string& family,
   return skia::AdoptRef(SkTypeface::CreateFromName(family.c_str(), skia_style));
 }
 
+void ApplyRenderParams(const FontRenderParams& params,
+                       bool background_is_transparent,
+                       SkPaint* paint) {
+  paint->setAntiAlias(params.antialiasing);
+  paint->setLCDRenderText(!background_is_transparent &&
+      params.subpixel_rendering != FontRenderParams::SUBPIXEL_RENDERING_NONE);
+  paint->setSubpixelText(params.subpixel_positioning);
+  paint->setAutohinted(params.autohinter);
+  paint->setHinting(FontRenderParamsHintingToSkPaintHinting(params.hinting));
+}
+
 }  // namespace internal
 
 RenderText::~RenderText() {
@@ -441,10 +412,15 @@ void RenderText::SetText(const base::string16& text) {
   text_ = text;
 
   // Adjust ranged styles and colors to accommodate a new text length.
+  // Clear style ranges as they might break new text graphemes and apply
+  // the first style to the whole text instead.
   const size_t text_length = text_.length();
   colors_.SetMax(text_length);
-  for (size_t style = 0; style < NUM_TEXT_STYLES; ++style)
-    styles_[style].SetMax(text_length);
+  for (size_t style = 0; style < NUM_TEXT_STYLES; ++style) {
+    BreakList<bool>& break_list = styles_[style];
+    break_list.SetValue(break_list.breaks().begin()->second);
+    break_list.SetMax(text_length);
+  }
   cached_bounds_and_offset_valid_ = false;
 
   // Reset selection model. SetText should always followed by SetSelectionModel
@@ -666,52 +642,29 @@ void RenderText::SetCompositionRange(const Range& composition_range) {
 
 void RenderText::SetColor(SkColor value) {
   colors_.SetValue(value);
-
-#if defined(OS_WIN)
-  // TODO(msw): Windows applies colors and decorations in the layout process.
-  cached_bounds_and_offset_valid_ = false;
-  ResetLayout();
-#endif
 }
 
 void RenderText::ApplyColor(SkColor value, const Range& range) {
   colors_.ApplyValue(value, range);
-
-#if defined(OS_WIN)
-  // TODO(msw): Windows applies colors and decorations in the layout process.
-  cached_bounds_and_offset_valid_ = false;
-  ResetLayout();
-#endif
 }
 
 void RenderText::SetStyle(TextStyle style, bool value) {
   styles_[style].SetValue(value);
 
-  // Only invalidate the layout on font changes; not for colors or decorations.
-  bool invalidate = (style == BOLD) || (style == ITALIC);
-#if defined(OS_WIN)
-  // TODO(msw): Windows applies colors and decorations in the layout process.
-  invalidate = true;
-#endif
-  if (invalidate) {
-    cached_bounds_and_offset_valid_ = false;
-    ResetLayout();
-  }
+  cached_bounds_and_offset_valid_ = false;
+  ResetLayout();
 }
 
 void RenderText::ApplyStyle(TextStyle style, bool value, const Range& range) {
-  styles_[style].ApplyValue(value, range);
+  // Do not change styles mid-grapheme to avoid breaking ligatures.
+  const size_t start = IsValidCursorIndex(range.start()) ? range.start() :
+      IndexOfAdjacentGrapheme(range.start(), CURSOR_BACKWARD);
+  const size_t end = IsValidCursorIndex(range.end()) ? range.end() :
+      IndexOfAdjacentGrapheme(range.end(), CURSOR_FORWARD);
+  styles_[style].ApplyValue(value, Range(start, end));
 
-  // Only invalidate the layout on font changes; not for colors or decorations.
-  bool invalidate = (style == BOLD) || (style == ITALIC);
-#if defined(OS_WIN)
-  // TODO(msw): Windows applies colors and decorations in the layout process.
-  invalidate = true;
-#endif
-  if (invalidate) {
-    cached_bounds_and_offset_valid_ = false;
-    ResetLayout();
-  }
+  cached_bounds_and_offset_valid_ = false;
+  ResetLayout();
 }
 
 bool RenderText::GetStyle(TextStyle style) const {
@@ -1169,7 +1122,7 @@ void RenderText::ApplyFadeEffects(internal::SkiaTextRenderer* renderer) {
   skia::RefPtr<SkShader> shader = CreateFadeShader(
       text_rect, left_part, right_part, colors_.breaks().front().second);
   if (shader)
-    renderer->SetShader(shader.get(), display_rect());
+    renderer->SetShader(shader.get());
 }
 
 void RenderText::ApplyTextShadows(internal::SkiaTextRenderer* renderer) {
@@ -1299,8 +1252,7 @@ base::string16 RenderText::Elide(const base::string16& text,
   size_t hi = text.length() - 1;
   const base::i18n::TextDirection text_direction = GetTextDirection();
   for (size_t guess = (lo + hi) / 2; lo <= hi; guess = (lo + hi) / 2) {
-    // Restore styles and colors. They will be truncated to size by SetText.
-    render_text->styles_ = styles_;
+    // Restore colors. They will be truncated to size by SetText.
     render_text->colors_ = colors_;
     base::string16 new_text =
         slicer.CutString(guess, insert_ellipsis && behavior != ELIDE_TAIL);
@@ -1324,6 +1276,25 @@ base::string16 RenderText::Elide(const base::string16& text,
           new_text += base::i18n::kRightToLeftMark;
       }
       render_text->SetText(new_text);
+    }
+
+    // Restore styles. Make sure style ranges don't break new text graphemes.
+    render_text->styles_ = styles_;
+    for (size_t style = 0; style < NUM_TEXT_STYLES; ++style) {
+      BreakList<bool>& break_list = render_text->styles_[style];
+      break_list.SetMax(render_text->text_.length());
+      Range range;
+      while (range.end() < break_list.max()) {
+        BreakList<bool>::const_iterator current_break =
+            break_list.GetBreak(range.end());
+        range = break_list.GetRange(current_break);
+        if (range.end() < break_list.max() &&
+            !render_text->IsValidCursorIndex(range.end())) {
+          range.set_end(render_text->IndexOfAdjacentGrapheme(range.end(),
+                                                             CURSOR_FORWARD));
+          break_list.ApplyValue(current_break->second, range);
+        }
+      }
     }
 
     // We check the width of the whole desired string at once to ensure we

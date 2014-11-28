@@ -43,12 +43,9 @@ class MockAudioMirroringManager : public AudioMirroringManager {
 
   MOCK_METHOD3(AddDiverter,
                void(int render_process_id,
-                    int render_view_id,
+                    int render_frame_id,
                     Diverter* diverter));
-  MOCK_METHOD3(RemoveDiverter,
-               void(int render_process_id,
-                    int render_view_id,
-                    Diverter* diverter));
+  MOCK_METHOD1(RemoveDiverter, void(Diverter* diverter));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioMirroringManager);
@@ -101,14 +98,9 @@ class MockAudioRendererHost : public AudioRendererHost {
     return true;
   }
 
-  void OnNotifyStreamCreated(int stream_id,
-                             base::SharedMemoryHandle handle,
-#if defined(OS_WIN)
-                             base::SyncSocket::Handle socket_handle,
-#else
-                             base::FileDescriptor socket_descriptor,
-#endif
-                             uint32 length) {
+  void OnNotifyStreamCreated(
+      int stream_id, base::SharedMemoryHandle handle,
+      base::SyncSocket::TransitDescriptor socket_descriptor, uint32 length) {
     // Maps the shared memory.
     shared_memory_.reset(new base::SharedMemory(handle, false));
     CHECK(shared_memory_->Map(length));
@@ -116,12 +108,8 @@ class MockAudioRendererHost : public AudioRendererHost {
     shared_memory_length_ = length;
 
     // Create the SyncSocket using the handle.
-    base::SyncSocket::Handle sync_socket_handle;
-#if defined(OS_WIN)
-    sync_socket_handle = socket_handle;
-#else
-    sync_socket_handle = socket_descriptor.fd;
-#endif
+    base::SyncSocket::Handle sync_socket_handle =
+        base::SyncSocket::UnwrapHandle(socket_descriptor);
     sync_socket_.reset(new base::SyncSocket(sync_socket_handle));
 
     // And then delegate the call to the mock method.
@@ -185,7 +173,7 @@ class AudioRendererHostTest : public testing::Test {
     EXPECT_CALL(*host_.get(), OnStreamCreated(kStreamId, _));
 
     EXPECT_CALL(mirroring_manager_,
-                AddDiverter(kRenderProcessId, kRenderViewId, NotNull()))
+                AddDiverter(kRenderProcessId, kRenderFrameId, NotNull()))
         .RetiresOnSaturation();
 
     // Send a create stream message to the audio output stream and wait until
@@ -199,7 +187,6 @@ class AudioRendererHostTest : public testing::Test {
       params = media::AudioParameters(
           media::AudioParameters::AUDIO_FAKE,
           media::CHANNEL_LAYOUT_STEREO,
-          2,
           media::AudioParameters::kAudioCDSampleRate, 16,
           media::AudioParameters::kAudioCDSampleRate / 10,
           media::AudioParameters::NO_EFFECTS);
@@ -216,8 +203,7 @@ class AudioRendererHostTest : public testing::Test {
 
     // At some point in the future, a corresponding RemoveDiverter() call must
     // be made.
-    EXPECT_CALL(mirroring_manager_,
-                RemoveDiverter(kRenderProcessId, kRenderViewId, NotNull()))
+    EXPECT_CALL(mirroring_manager_, RemoveDiverter(NotNull()))
         .RetiresOnSaturation();
     SyncWithAudioThread();
   }

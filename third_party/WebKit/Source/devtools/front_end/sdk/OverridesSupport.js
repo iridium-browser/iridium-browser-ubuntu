@@ -283,7 +283,7 @@ WebInspector.OverridesSupport.prototype = {
      */
     canEmulate: function()
     {
-        return !!this._target && !this._target.isMobile();
+        return !!this._target && this._target.canEmulate();
     },
 
     /**
@@ -473,8 +473,6 @@ WebInspector.OverridesSupport.prototype = {
         this.settings._emulationEnabled.addChangeListener(this._showRulersChanged, this);
         WebInspector.settings.showMetricsRulers.addChangeListener(this._showRulersChanged, this);
         this._showRulersChanged();
-
-        WebInspector.settings.disableOverridesWarning.addChangeListener(this._dispatchWarningChanged, this);
 
         if (!this.emulationEnabled())
             return;
@@ -761,7 +759,7 @@ WebInspector.OverridesSupport.prototype = {
      */
     warningMessage: function()
     {
-        return WebInspector.settings.disableOverridesWarning.get() ? "" : (this._deviceMetricsWarningMessage || this._userAgentWarningMessage || "");
+        return this._deviceMetricsWarningMessage || this._userAgentWarningMessage || "";
     },
 
     clearWarningMessage: function()

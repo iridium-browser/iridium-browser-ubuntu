@@ -50,6 +50,7 @@ class AudioManager;
 namespace content {
 
 class AudioInputDeviceManager;
+class BrowserContext;
 class FakeMediaStreamUIProxy;
 class MediaStreamDeviceSettings;
 class MediaStreamRequester;
@@ -129,15 +130,13 @@ class CONTENT_EXPORT MediaStreamManager
   // and video devices and also start monitoring device changes, such as
   // plug/unplug. The new device lists will be delivered via media observer to
   // MediaCaptureDevicesDispatcher.
-  // If |have_permission| is false, we remove the device label from the result.
   virtual std::string EnumerateDevices(MediaStreamRequester* requester,
                                        int render_process_id,
                                        int render_frame_id,
                                        const ResourceContext::SaltCallback& sc,
                                        int page_request_id,
                                        MediaStreamType type,
-                                       const GURL& security_origin,
-                                       bool have_permission);
+                                       const GURL& security_origin);
 
   // Open a device identified by |device_id|.  |type| must be either
   // MEDIA_DEVICE_AUDIO_CAPTURE or MEDIA_DEVICE_VIDEO_CAPTURE.
@@ -322,6 +321,8 @@ class CONTENT_EXPORT MediaStreamManager
                                   const MediaStreamDevices& devices);
   void FinalizeEnumerateDevices(const std::string& label,
                                 DeviceRequest* request);
+  void HandleCheckMediaAccessResponse(const std::string& label,
+                                      bool have_access);
 
   // This method is called when an audio or video device is plugged in or
   // removed. It make sure all MediaStreams that use a removed device is
@@ -362,6 +363,20 @@ class CONTENT_EXPORT MediaStreamManager
                                StreamDeviceInfoArray devices,
                                gfx::NativeViewId window_id);
 
+#if defined(OS_CHROMEOS)
+  // Ensures that we have checked for presence of a keyboard mic. This is only
+  // done once. This function should be called before posting a request on the
+  // UI thread.
+  void EnsureKeyboardMicChecked();
+
+  // Checks if the system has a keyboard mic, and if so, inform the audio
+  // manager via SetKeyboardMicOnDeviceThread().
+  void CheckKeyboardMicOnUIThread();
+
+  // Tells the audio mananger that the system supports a keyboard mic.
+  void SetKeyboardMicOnDeviceThread();
+#endif
+
   // Task runner shared by VideoCaptureManager and AudioInputDeviceManager and
   // used for enumerating audio output devices.
   // Note: Enumeration tasks may take seconds to complete so must never be run
@@ -374,6 +389,14 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Indicator of device monitoring state.
   bool monitoring_started_;
+
+#if defined(OS_CHROMEOS)
+  // Flag that's set when we have checked if the system has a keyboard mic. We
+  // only need to check it once, and not when constructing since that will
+  // affect startup time.
+  // Must be accessed on the IO thread;
+  bool has_checked_keyboard_mic_;
+#endif
 
   // Stores most recently enumerated device lists. The cache is cleared when
   // monitoring is stopped or there is no request for that type of device.

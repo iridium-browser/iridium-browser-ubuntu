@@ -204,11 +204,28 @@ bool SkPatchUtils::getVertexData(SkPatchUtils::VertexData* data, const SkPoint c
     if (lodX < 1 || lodY < 1 || NULL == cubics || NULL == data) {
         return false;
     }
-    
-    // number of indices is limited by size of uint16_t, so we clamp it to avoid overflow
-    data->fVertexCount = SkMin32((lodX + 1) * (lodY + 1), 65536);
-    lodX  = SkMin32(lodX, 255);
-    lodY  = SkMin32(lodY, 255);
+
+    // check for overflow in multiplication
+    const int64_t lodX64 = (lodX + 1),
+                   lodY64 = (lodY + 1),
+                   mult64 = lodX64 * lodY64;
+    if (mult64 > SK_MaxS32) {
+        return false;
+    }
+    data->fVertexCount = SkToS32(mult64);
+
+    // it is recommended to generate draw calls of no more than 65536 indices, so we never generate
+    // more than 60000 indices. To accomplish that we resize the LOD and vertex count
+    if (data->fVertexCount > 10000 || lodX > 200 || lodY > 200) {
+        SkScalar weightX = static_cast<SkScalar>(lodX) / (lodX + lodY);
+        SkScalar weightY = static_cast<SkScalar>(lodY) / (lodX + lodY);
+
+        // 200 comes from the 100 * 2 which is the max value of vertices because of the limit of
+        // 60000 indices ( sqrt(60000 / 6) that comes from data->fIndexCount = lodX * lodY * 6)
+        lodX = static_cast<int>(weightX * 200);
+        lodY = static_cast<int>(weightY * 200);
+        data->fVertexCount = (lodX + 1) * (lodY + 1);
+    }
     data->fIndexCount = lodX * lodY * 6;
     
     data->fPoints = SkNEW_ARRAY(SkPoint, data->fVertexCount);
@@ -216,7 +233,7 @@ bool SkPatchUtils::getVertexData(SkPatchUtils::VertexData* data, const SkPoint c
     
     // if colors is not null then create array for colors
     SkPMColor colorsPM[kNumCorners];
-    if (NULL != colors) {
+    if (colors) {
         // premultiply colors to avoid color bleeding.
         for (int i = 0; i < kNumCorners; i++) {
             colorsPM[i] = SkPreMultiplyColor(colors[i]);
@@ -225,7 +242,7 @@ bool SkPatchUtils::getVertexData(SkPatchUtils::VertexData* data, const SkPoint c
     }
     
     // if texture coordinates are not null then create array for them
-    if (NULL != texCoords) {
+    if (texCoords) {
         data->fTexCoords = SkNEW_ARRAY(SkPoint, data->fVertexCount);
     }
     
@@ -269,7 +286,7 @@ bool SkPatchUtils::getVertexData(SkPatchUtils::VertexData* data, const SkPoint c
                                               + u * fBottom.getCtrlPoints()[3].y()));
             data->fPoints[dataIndex] = s0 + s1 - s2;
             
-            if (NULL != colors) {
+            if (colors) {
                 uint8_t a = uint8_t(bilerp(u, v,
                                    SkScalar(SkColorGetA(colorsPM[kTopLeft_Corner])),
                                    SkScalar(SkColorGetA(colorsPM[kTopRight_Corner])),
@@ -293,7 +310,7 @@ bool SkPatchUtils::getVertexData(SkPatchUtils::VertexData* data, const SkPoint c
                 data->fColors[dataIndex] = SkPackARGB32(a,r,g,b);
             }
             
-            if (NULL != texCoords) {
+            if (texCoords) {
                 data->fTexCoords[dataIndex] = SkPoint::Make(
                                             bilerp(u, v, texCoords[kTopLeft_Corner].x(),
                                                    texCoords[kTopRight_Corner].x(),

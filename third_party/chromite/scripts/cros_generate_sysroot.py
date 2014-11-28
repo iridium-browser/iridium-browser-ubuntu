@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,6 +6,8 @@
 
 Meant for use after setup_board and build_packages have been run.
 """
+
+from __future__ import print_function
 
 import os
 

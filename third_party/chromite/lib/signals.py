@@ -4,7 +4,7 @@
 
 """Signal related functionality."""
 
-__all__ = ('RelaySignal', 'SignalModuleUsable', 'DeferSignals')
+from __future__ import print_function
 
 import signal
 import contextlib

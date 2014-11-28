@@ -22,7 +22,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/MediaFeatureNames.h"
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/MediaQuery.h"
 #include "core/css/MediaQueryExp.h"
@@ -72,11 +71,7 @@ PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQuerySet::create(const String& mediaS
     if (mediaString.isEmpty())
         return MediaQuerySet::create();
 
-    if (RuntimeEnabledFeatures::mediaQueryParserEnabled())
-        return MediaQueryParser::parseMediaQuerySet(mediaString);
-
-    BisonCSSParser parser(strictCSSParserContext());
-    return parser.parseMediaQueryList(mediaString);
+    return MediaQueryParser::parseMediaQuerySet(mediaString);
 }
 
 PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQuerySet::createOffMainThread(const String& mediaString)
@@ -183,7 +178,6 @@ MediaList::MediaList(MediaQuerySet* mediaQueries, CSSStyleSheet* parentSheet)
     , m_parentStyleSheet(parentSheet)
     , m_parentRule(nullptr)
 {
-    ScriptWrappable::init(this);
 }
 
 MediaList::MediaList(MediaQuerySet* mediaQueries, CSSRule* parentRule)
@@ -191,7 +185,6 @@ MediaList::MediaList(MediaQuerySet* mediaQueries, CSSRule* parentRule)
     , m_parentStyleSheet(nullptr)
     , m_parentRule(parentRule)
 {
-    ScriptWrappable::init(this);
 }
 
 MediaList::~MediaList()

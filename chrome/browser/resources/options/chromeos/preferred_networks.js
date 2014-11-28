@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+cr.exportPath('options');
+
+/**
+ * @typedef {{Name: string, Type: string, servicePath: string}}
+ */
+options.PreferredNetwork;
+
 cr.define('options', function() {
 
   var Page = cr.ui.pageManager.Page;
@@ -16,9 +23,10 @@ cr.define('options', function() {
   /**
    * Encapsulated handling of ChromeOS network preferences page.
    * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function PreferredNetworks(model) {
-    Page.call(this, 'preferredNetworksPage', null, 'preferredNetworksPage');
+    Page.call(this, 'preferredNetworksPage', '', 'preferredNetworksPage');
   }
 
   cr.addSingletonGetter(PreferredNetworks);
@@ -47,9 +55,9 @@ cr.define('options', function() {
 
   /**
    * Creates a list entry for a remembered network.
-   * @param {{Name: string, Type: string, servicePath: string}} data
-   *     Description of the network.
+   * @param {options.PreferredNetwork} data Description of the network.
    * @constructor
+   * @extends {options.DeletableItem}
    */
   function PreferredNetworkListItem(data) {
     var el = cr.doc.createElement('div');
@@ -66,7 +74,7 @@ cr.define('options', function() {
 
     /**
      * Description of the network.
-     * @type {{Name: string, Type: string, servicePath: string}}
+     * @type {?options.PreferredNetwork}
      */
     data: null,
 
@@ -106,7 +114,10 @@ cr.define('options', function() {
       this.selectionModel.unselectAll();
     },
 
-    /** @override */
+    /**
+     * @override
+     * @param {options.PreferredNetwork} entry
+     */
     createItem: function(entry) {
       return new PreferredNetworkListItem(entry);
     },
@@ -138,8 +149,7 @@ cr.define('options', function() {
 
     /**
      * Adds a remembered network to the list.
-     * @param {{Name: string, Type: string, servicePath: string}} data
-     *     Description of the network.
+     * @param {options.PreferredNetwork} data Description of the network.
      */
     append: function(data) {
       this.dataModel.push(data);

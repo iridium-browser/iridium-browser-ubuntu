@@ -427,6 +427,9 @@ gfx::Rect Label::GetTextBounds() const {
       NOTREACHED();
       break;
   }
+  if (!multi_line_)
+    text_size.set_height(available.height());
+  // Support vertical centering of multi-line labels: http://crbug.com/429595
   origin.Offset(0, std::max(0, (available.height() - text_size.height())) / 2);
   return gfx::Rect(origin, text_size);
 }

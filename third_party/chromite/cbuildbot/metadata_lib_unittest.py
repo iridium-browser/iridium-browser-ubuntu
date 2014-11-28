@@ -5,6 +5,8 @@
 
 """Test the archive_lib module."""
 
+from __future__ import print_function
+
 import logging
 import multiprocessing
 import os
@@ -64,6 +66,13 @@ class MetadataTest(cros_test_lib.TestCase):
         q.put(['my_dict', {k: v}])
 
     self.assertEqual(expected_dict, metadata.GetDict()['my_dict'])
+
+
+  def testUpdateBoardMetadataWithEmptyDict(self):
+    metadata = metadata_lib.CBuildbotMetadata()
+    metadata.UpdateBoardDictWithDict('someboard', {})
+    self.assertEqual(metadata.GetDict()['board-metadata']['someboard'], {})
+
 
   def testUpdateBoardMetadataWithMultiprocessDict(self):
     starting_dict = {'key1': 1,

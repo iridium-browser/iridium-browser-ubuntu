@@ -25,23 +25,23 @@
 #include "core/rendering/RenderReplaced.h"
 
 #include "core/editing/PositionWithAffinity.h"
+#include "core/paint/BoxPainter.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/RenderBlock.h"
 #include "core/rendering/RenderImage.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderView.h"
 #include "platform/LengthFunctions.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
 
-const int cDefaultWidth = 300;
-const int cDefaultHeight = 150;
+const int RenderReplaced::defaultWidth = 300;
+const int RenderReplaced::defaultHeight = 150;
 
 RenderReplaced::RenderReplaced(Element* element)
     : RenderBox(element)
-    , m_intrinsicSize(cDefaultWidth, cDefaultHeight)
+    , m_intrinsicSize(defaultWidth, defaultHeight)
 {
     setReplaced(true);
 }
@@ -79,6 +79,8 @@ void RenderReplaced::layout()
 {
     ASSERT(needsLayout());
 
+    LayoutRect oldContentRect = replacedContentRect();
+
     setHeight(minimumReplacedHeight());
 
     updateLogicalWidth();
@@ -90,12 +92,15 @@ void RenderReplaced::layout()
     invalidateBackgroundObscurationStatus();
 
     clearNeedsLayout();
+
+    if (replacedContentRect() != oldContentRect)
+        setShouldDoFullPaintInvalidation(true);
 }
 
 void RenderReplaced::intrinsicSizeChanged()
 {
-    int scaledWidth = static_cast<int>(cDefaultWidth * style()->effectiveZoom());
-    int scaledHeight = static_cast<int>(cDefaultHeight * style()->effectiveZoom());
+    int scaledWidth = static_cast<int>(defaultWidth * style()->effectiveZoom());
+    int scaledHeight = static_cast<int>(defaultHeight * style()->effectiveZoom());
     m_intrinsicSize = IntSize(scaledWidth, scaledHeight);
     setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
 }
@@ -148,7 +153,7 @@ void RenderReplaced::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
             paintInfo.context->save();
             RoundedRect roundedInnerRect = style()->getRoundedInnerBorderFor(paintRect,
                 paddingTop() + borderTop(), paddingBottom() + borderBottom(), paddingLeft() + borderLeft(), paddingRight() + borderRight(), true, true);
-            clipRoundedInnerRect(paintInfo.context, paintRect, roundedInnerRect);
+            BoxPainter::clipRoundedInnerRect(paintInfo.context, paintRect, roundedInnerRect);
         }
     }
 
@@ -285,9 +290,7 @@ LayoutRect RenderReplaced::replacedContentRect(const LayoutSize* overriddenIntri
     ObjectFit objectFit = style()->objectFit();
 
     if (objectFit == ObjectFitFill && style()->objectPosition() == RenderStyle::initialObjectPosition()) {
-        if (!isVideo() || RuntimeEnabledFeatures::objectFitPositionEnabled())
-            return contentRect;
-        objectFit = ObjectFitContain;
+        return contentRect;
     }
 
     LayoutSize intrinsicSize = overriddenIntrinsicSize ? *overriddenIntrinsicSize : this->intrinsicSize();
@@ -492,7 +495,7 @@ PositionWithAffinity RenderReplaced::positionForPoint(const LayoutPoint& point)
     return RenderBox::positionForPoint(point);
 }
 
-LayoutRect RenderReplaced::selectionRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, bool clipToVisibleContent)
+LayoutRect RenderReplaced::selectionRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer) const
 {
     ASSERT(!needsLayout());
 
@@ -500,11 +503,7 @@ LayoutRect RenderReplaced::selectionRectForPaintInvalidation(const RenderLayerMo
         return LayoutRect();
 
     LayoutRect rect = localSelectionRect();
-    if (clipToVisibleContent)
-        mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, ViewportConstraintDoesNotMatter, 0);
-    else
-        rect = localToContainerQuad(FloatRect(rect), paintInvalidationContainer).enclosingBoundingBox();
-
+    mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
     return rect;
 }
 
@@ -532,7 +531,7 @@ void RenderReplaced::setSelectionState(SelectionState state)
     if (!inlineBoxWrapper())
         return;
 
-    // We only include the space below the baseline in our layer's cached repaint rect if the
+    // We only include the space below the baseline in our layer's cached paint invalidation rect if the
     // image is selected. Since the selection state has changed update the rect.
     if (hasLayer())
         setPreviousPaintInvalidationRect(boundsRectForPaintInvalidation(containerForPaintInvalidation()));
@@ -569,9 +568,9 @@ LayoutRect RenderReplaced::clippedOverflowRectForPaintInvalidation(const RenderL
         return LayoutRect();
 
     // The selectionRect can project outside of the overflowRect, so take their union
-    // for repainting to avoid selection painting glitches.
+    // for paint invalidation to avoid selection painting glitches.
     LayoutRect r = isSelected() ? localSelectionRect() : visualOverflowRect();
-    mapRectToPaintInvalidationBacking(paintInvalidationContainer, r, ViewportConstraintDoesNotMatter, paintInvalidationState);
+    mapRectToPaintInvalidationBacking(paintInvalidationContainer, r, paintInvalidationState);
     return r;
 }
 

@@ -58,6 +58,7 @@ namespace blink {
 
 class Frame;
 class OpenedFrameTracker;
+class Visitor;
 class WebData;
 class WebDataSource;
 class WebDocument;
@@ -115,11 +116,16 @@ public:
     virtual bool isWebRemoteFrame() const = 0;
     virtual WebRemoteFrame* toWebRemoteFrame() = 0;
 
-    BLINK_EXPORT void swap(WebFrame*);
+    BLINK_EXPORT bool swap(WebFrame*);
 
-    // This method closes and deletes the WebFrame.
+    // This method closes and deletes the WebFrame. This is typically called by
+    // the embedder in response to a frame detached callback to the WebFrame
+    // client.
     virtual void close() = 0;
 
+    // Called by the embedder when it needs to detach the subtree rooted at this
+    // frame.
+    BLINK_EXPORT void detach();
 
     // Basic properties ---------------------------------------------------
 
@@ -153,7 +159,6 @@ public:
     virtual void setPermissionClient(WebPermissionClient*) = 0;
     virtual void setSharedWorkerRepositoryClient(WebSharedWorkerRepositoryClient*) = 0;
 
-
     // Geometry -----------------------------------------------------------
 
     // NOTE: These routines do not force page layout so their results may
@@ -181,7 +186,6 @@ public:
 
     virtual bool hasHorizontalScrollbar() const = 0;
     virtual bool hasVerticalScrollbar() const = 0;
-
 
     // Hierarchy ----------------------------------------------------------
 
@@ -362,9 +366,6 @@ public:
                                 const WebURL& baseURL,
                                 const WebURL& unreachableURL = WebURL(),
                                 bool replace = false) = 0;
-
-    // Returns true if the current frame is busy loading content.
-    virtual bool isLoading() const = 0;
 
     // Stops any pending loads on the frame and its children.
     virtual void stopLoading() = 0;
@@ -609,21 +610,6 @@ public:
     // default behavior will be restored.
     virtual void setTickmarks(const WebVector<WebRect>&) = 0;
 
-    // OrientationChange event ---------------------------------------------
-
-    // Notify the frame that the screen orientation has changed.
-    virtual void sendOrientationChangeEvent() = 0;
-
-    // FIXME: this is only there for backward compatibility, it will be removed.
-    // Orientation is the interface orientation in degrees.
-    // Some examples are:
-    //  0 is straight up; -90 is when the device is rotated 90 clockwise;
-    //  90 is when rotated counter clockwise.
-    void sendOrientationChangeEvent(int orientation)
-    {
-        sendOrientationChangeEvent();
-    }
-
     // Events --------------------------------------------------------------
 
     // Dispatches a message event on the current DOMWindow in this WebFrame.
@@ -675,6 +661,7 @@ public:
 
 #if BLINK_IMPLEMENTATION
     static WebFrame* fromFrame(Frame*);
+    static void traceChildren(Visitor*, WebFrame*);
 #endif
 
 protected:

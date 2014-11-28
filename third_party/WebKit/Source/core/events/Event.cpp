@@ -50,7 +50,6 @@ Event::Event()
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
 {
-    ScriptWrappable::init(this);
 }
 
 Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg)
@@ -66,7 +65,6 @@ Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableAr
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
 {
-    ScriptWrappable::init(this);
 }
 
 Event::Event(const AtomicString& eventType, const EventInit& initializer)
@@ -82,7 +80,6 @@ Event::Event(const AtomicString& eventType, const EventInit& initializer)
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
 {
-    ScriptWrappable::init(this);
 }
 
 Event::~Event()
@@ -225,7 +222,7 @@ EventPath& Event::ensureEventPath()
 PassRefPtrWillBeRawPtr<StaticNodeList> Event::path() const
 {
     if (!m_currentTarget) {
-        ASSERT(m_eventPhase == PhaseType::NONE);
+        ASSERT(m_eventPhase == Event::NONE);
         if (!m_eventPath) {
             // Before dispatching the event
             return StaticNodeList::createEmpty();

@@ -62,16 +62,20 @@ class Filesystem : public sdk_util::RefObject {
 
   // All paths in functions below are expected to containing a leading "/".
 
-  // Test whether a file or directory at a given path can be accessed.
-  // Returns 0 on success, or an appropriate errno value on failure.
-  virtual Error Access(const Path& path, int a_mode) = 0;
+  // Open a node at |path| with the specified open and modeflags. The resulting
+  // Node is created with a ref count of 1.
+  // Assumes that |out_node| is non-NULL.
+  virtual Error OpenWithMode(const Path& path,
+                             int open_flags,
+                             mode_t mode,
+                             ScopedNode* out_node) = 0;
 
   // Open a node at |path| with the specified open flags. The resulting
   // Node is created with a ref count of 1.
   // Assumes that |out_node| is non-NULL.
-  virtual Error Open(const Path& path,
-                     int open_flags,
-                     ScopedNode* out_node) = 0;
+  Error Open(const Path& path,
+             int open_flags,
+             ScopedNode* out_node);
 
   // OpenResource is only used to read files from the NaCl NMF file. No
   // filesystem except PassthroughFs should implement it.
@@ -91,10 +95,10 @@ class Filesystem : public sdk_util::RefObject {
   Error Filesystem_Ioctl(int request, ...);
 
   // Assumes that |node| is non-NULL.
-  void OnNodeCreated(Node* node);
+  virtual void OnNodeCreated(Node* node);
 
   // Assumes that |node| is non-NULL.
-  void OnNodeDestroyed(Node* node);
+  virtual void OnNodeDestroyed(Node* node);
 
  protected:
   // Device number for the filesystem.

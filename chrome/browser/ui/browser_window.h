@@ -32,10 +32,6 @@ class TemplateURL;
 
 struct WebApplicationInfo;
 
-namespace autofill {
-class PasswordGenerator;
-struct PasswordForm;
-}
 namespace content {
 class WebContents;
 struct NativeWebKeyboardEvent;
@@ -317,12 +313,13 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void Paste() = 0;
 
 #if defined(OS_MACOSX)
-  // Enters Mac specific fullscreen mode with chrome displayed (e.g. omnibox)
-  // on OSX 10.7+, a.k.a. Lion Fullscreen mode.
-  // Invalid to call on OSX earlier than 10.7.
-  // Enters either from non fullscreen, or from fullscreen without chrome.
-  // Exit to normal fullscreen with EnterFullscreen().
+  // The following two methods cause the browser window to enter AppKit
+  // Fullscreen. The methods are idempotent. The methods are invalid to call on
+  // OSX 10.6. One method displays chrome (e.g. omnibox, tabstrip), whereas the
+  // other method hides it.
   virtual void EnterFullscreenWithChrome() = 0;
+  virtual void EnterFullscreenWithoutChrome() = 0;
+
   virtual bool IsFullscreenWithChrome() = 0;
   virtual bool IsFullscreenWithoutChrome() = 0;
 #endif
@@ -380,15 +377,6 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode,
       const signin::ManageAccountsParams& manage_accounts_params) = 0;
 
-  // Show bubble for password generation positioned relative to |rect|. The
-  // subclasses implementing this interface do not own the |password_generator|
-  // object which is passed to generate the password. |form| is the form that
-  // contains the password field that the bubble will be associated with.
-  virtual void ShowPasswordGenerationBubble(
-      const gfx::Rect& rect,
-      const autofill::PasswordForm& form,
-      autofill::PasswordGenerator* password_generator) = 0;
-
   // Invoked when the amount of vertical overscroll changes. |delta_y| is the
   // amount of overscroll that has occured in the y-direction.
   virtual void OverscrollUpdate(int delta_y) {}
@@ -401,15 +389,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Executes |command| registered by |extension|.
   virtual void ExecuteExtensionCommand(const extensions::Extension* extension,
                                        const extensions::Command& command) = 0;
-
-  // Shows the page action for the extension.
-  virtual void ShowPageActionPopup(const extensions::Extension* extension) = 0;
-
-  // Shows the browser action for the extension. NOTE(wittman): This function
-  // grants tab permissions to the browser action popup, so it should only be
-  // invoked due to user action, not due to invocation from an extensions API.
-  virtual void ShowBrowserActionPopup(
-      const extensions::Extension* extension) = 0;
 
  protected:
   friend class BrowserCloseManager;

@@ -30,6 +30,16 @@ CONTENT_EXPORT bool IsGpuRasterizationEnabled();
 // Returns true if force-gpu-rasterization is on (via flags) for the renderer.
 CONTENT_EXPORT bool IsForceGpuRasterizationEnabled();
 
+// Returns the number of raster threads to use for compositing.
+CONTENT_EXPORT int NumberOfRendererRasterThreads();
+
+// Returns the number of raster threads to use for compositing that are forced
+// by the command line.
+CONTENT_EXPORT int ForceNumberOfRendererRasterThreads();
+
+// Returns true if using cc Surfaces is allowed.
+CONTENT_EXPORT bool UseSurfacesEnabled();
+
 CONTENT_EXPORT base::Value* GetFeatureStatus();
 CONTENT_EXPORT base::Value* GetProblems();
 CONTENT_EXPORT base::Value* GetDriverBugWorkarounds();

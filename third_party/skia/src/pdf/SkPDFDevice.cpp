@@ -8,6 +8,7 @@
 #include "SkPDFDevice.h"
 
 #include "SkAnnotation.h"
+#include "SkBitmapDevice.h"
 #include "SkColor.h"
 #include "SkClipStack.h"
 #include "SkData.h"
@@ -567,6 +568,15 @@ void GraphicStackState::updateDrawingState(const GraphicStateEntry& state) {
 }
 
 SkBaseDevice* SkPDFDevice::onCreateDevice(const SkImageInfo& info, Usage usage) {
+    // PDF does not support image filters, so render them on CPU.
+    // Note that this rendering is done at "screen" resolution (100dpi), not
+    // printer resolution.
+    // FIXME: It may be possible to express some filters natively using PDF
+    // to improve quality and file size (http://skbug.com/3043)
+    if (kImageFilter_Usage == usage) {
+        return SkBitmapDevice::Create(info);
+    }
+
     SkMatrix initialTransform;
     initialTransform.reset();
     SkISize size = SkISize::Make(info.width(), info.height());
@@ -1264,8 +1274,8 @@ void SkPDFDevice::onDetachFromCanvas() {
     fClipStack = NULL;
 }
 
-SkSurface* SkPDFDevice::newSurface(const SkImageInfo& info) {
-    return SkSurface::NewRaster(info);
+SkSurface* SkPDFDevice::newSurface(const SkImageInfo& info, const SkSurfaceProps& props) {
+    return SkSurface::NewRaster(info, &props);
 }
 
 ContentEntry* SkPDFDevice::getLastContentEntry() {
@@ -2123,7 +2133,7 @@ void SkPDFDevice::internalDrawBitmap(const SkMatrix& origMatrix,
 
         const int w = SkScalarCeilToInt(physicalPerspectiveOutline.getBounds().width());
         const int h = SkScalarCeilToInt(physicalPerspectiveOutline.getBounds().height());
-        if (!perspectiveBitmap.allocPixels(SkImageInfo::MakeN32Premul(w, h))) {
+        if (!perspectiveBitmap.tryAllocN32Pixels(w, h)) {
             return;
         }
         perspectiveBitmap.eraseColor(SK_ColorTRANSPARENT);
@@ -2185,8 +2195,8 @@ void SkPDFDevice::internalDrawBitmap(const SkMatrix& origMatrix,
         return;
     }
 
-    SkAutoTUnref<SkPDFImage> image(
-        SkPDFImage::CreateImage(*bitmap, subset, fEncoder));
+    SkAutoTUnref<SkPDFObject> image(
+            SkPDFCreateImageObject(*bitmap, subset, fEncoder));
     if (!image) {
         return;
     }

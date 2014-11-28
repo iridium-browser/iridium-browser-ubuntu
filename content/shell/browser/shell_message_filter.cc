@@ -4,7 +4,7 @@
 
 #include "content/shell/browser/shell_message_filter.h"
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/shell/browser/shell_browser_context.h"
@@ -16,16 +16,16 @@
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/browser/database/database_tracker.h"
-#include "webkit/browser/fileapi/isolated_context.h"
-#include "webkit/browser/quota/quota_manager.h"
+#include "storage/browser/database/database_tracker.h"
+#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/quota/quota_manager.h"
 
 namespace content {
 
 ShellMessageFilter::ShellMessageFilter(
     int render_process_id,
-    webkit_database::DatabaseTracker* database_tracker,
-    quota::QuotaManager* quota_manager,
+    storage::DatabaseTracker* database_tracker,
+    storage::QuotaManager* quota_manager,
     net::URLRequestContextGetter* request_context_getter)
     : BrowserMessageFilter(ShellMsgStart),
       render_process_id_(render_process_id),
@@ -74,7 +74,7 @@ void ShellMessageFilter::OnReadFileToString(const base::FilePath& local_file,
 void ShellMessageFilter::OnRegisterIsolatedFileSystem(
     const std::vector<base::FilePath>& absolute_filenames,
     std::string* filesystem_id) {
-  fileapi::IsolatedContext::FileInfoSet files;
+  storage::IsolatedContext::FileInfoSet files;
   ChildProcessSecurityPolicy* policy =
       ChildProcessSecurityPolicy::GetInstance();
   for (size_t i = 0; i < absolute_filenames.size(); ++i) {
@@ -83,7 +83,7 @@ void ShellMessageFilter::OnRegisterIsolatedFileSystem(
       policy->GrantReadFile(render_process_id_, absolute_filenames[i]);
   }
   *filesystem_id =
-      fileapi::IsolatedContext::GetInstance()->RegisterDraggedFileSystem(files);
+      storage::IsolatedContext::GetInstance()->RegisterDraggedFileSystem(files);
   policy->GrantReadFileSystem(render_process_id_, *filesystem_id);
 }
 
@@ -95,8 +95,8 @@ void ShellMessageFilter::OnClearAllDatabases() {
 
 void ShellMessageFilter::OnSetDatabaseQuota(int quota) {
   quota_manager_->SetTemporaryGlobalOverrideQuota(
-      quota * quota::QuotaManager::kPerHostTemporaryPortion,
-      quota::QuotaCallback());
+      quota * storage::QuotaManager::kPerHostTemporaryPortion,
+      storage::QuotaCallback());
 }
 
 void ShellMessageFilter::OnCheckWebNotificationPermission(const GURL& origin,

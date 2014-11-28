@@ -71,6 +71,8 @@ bool ToCastRtpPayloadParamsOrThrow(v8::Isolate* isolate,
                                    CastRtpPayloadParams* cast_params) {
   cast_params->payload_type = ext_params.payload_type;
   cast_params->max_latency_ms = ext_params.max_latency;
+  cast_params->min_latency_ms =
+      ext_params.min_latency ? *ext_params.min_latency : ext_params.max_latency;
   cast_params->codec_name = ext_params.codec_name;
   cast_params->ssrc = ext_params.ssrc;
   cast_params->feedback_ssrc = ext_params.feedback_ssrc;
@@ -183,6 +185,9 @@ CastStreamingNativeHandler::CastStreamingNativeHandler(ScriptContext* context)
                  base::Unretained(this)));
   RouteFunction("SetDestinationCastUdpTransport",
       base::Bind(&CastStreamingNativeHandler::SetDestinationCastUdpTransport,
+                 base::Unretained(this)));
+  RouteFunction("SetOptionsCastUdpTransport",
+      base::Bind(&CastStreamingNativeHandler::SetOptionsCastUdpTransport,
                  base::Unretained(this)));
   RouteFunction("ToggleLogging",
                 base::Bind(&CastStreamingNativeHandler::ToggleLogging,
@@ -456,6 +461,30 @@ void CastStreamingNativeHandler::SetDestinationCastUdpTransport(
     return;
   }
   transport->SetDestination(net::IPEndPoint(ip, destination->port));
+}
+
+void CastStreamingNativeHandler::SetOptionsCastUdpTransport(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  CHECK_EQ(2, args.Length());
+  CHECK(args[0]->IsInt32());
+  CHECK(args[1]->IsObject());
+
+  const int transport_id = args[0]->ToInt32()->Value();
+  CastUdpTransport* transport = GetUdpTransportOrThrow(transport_id);
+  if (!transport)
+    return;
+
+  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  base::Value* options_value =
+      converter->FromV8Value(args[1], context()->v8_context());
+  base::DictionaryValue* options;
+  if (!options_value || !options_value->GetAsDictionary(&options)) {
+    delete options_value;
+    args.GetIsolate()->ThrowException(v8::Exception::TypeError(
+        v8::String::NewFromUtf8(args.GetIsolate(), kUnableToConvertArgs)));
+    return;
+  }
+  transport->SetOptions(make_scoped_ptr(options));
 }
 
 void CastStreamingNativeHandler::ToggleLogging(

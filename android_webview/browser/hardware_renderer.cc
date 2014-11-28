@@ -38,8 +38,7 @@ using webkit::gpu::WebGraphicsContext3DImpl;
 
 scoped_refptr<cc::ContextProvider> CreateContext(
     scoped_refptr<gfx::GLSurface> surface,
-    scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
-    gpu::GLInProcessContext* share_context) {
+    scoped_refptr<gpu::InProcessCommandBuffer::Service> service) {
   const gfx::GpuPreference gpu_preference = gfx::PreferDiscreteGpu;
 
   blink::WebGraphicsContext3D::Attributes attributes;
@@ -59,7 +58,7 @@ scoped_refptr<cc::ContextProvider> CreateContext(
       surface->IsOffscreen(),
       gfx::kNullAcceleratedWidget,
       surface->GetSize(),
-      share_context,
+      NULL /* share_context */,
       false /* share_resources */,
       attribs_for_gles2,
       gpu_preference,
@@ -77,6 +76,8 @@ scoped_refptr<cc::ContextProvider> CreateContext(
 HardwareRenderer::HardwareRenderer(SharedRendererState* state)
     : shared_renderer_state_(state),
       last_egl_context_(eglGetCurrentContext()),
+      width_(0),
+      height_(0),
       stencil_enabled_(false),
       viewport_clip_valid_for_dcheck_(false),
       gl_surface_(new AwGLSurface),
@@ -96,6 +97,9 @@ HardwareRenderer::HardwareRenderer(SharedRendererState* state)
   // Webview does not own the surface so should not clear it.
   settings.should_clear_root_render_pass = false;
 
+  // TODO(enne): Update this this compositor to use a synchronous scheduler.
+  settings.single_thread_proxy_scheduler = false;
+
   layer_tree_host_ =
       cc::LayerTreeHost::CreateSingleThreaded(this, this, NULL, settings, NULL);
   layer_tree_host_->SetRootLayer(root_layer_);
@@ -104,6 +108,8 @@ HardwareRenderer::HardwareRenderer(SharedRendererState* state)
 }
 
 HardwareRenderer::~HardwareRenderer() {
+  SetFrameData();
+
   // Must reset everything before |resource_collection_| to ensure all
   // resources are returned before resetting |resource_collection_| client.
   layer_tree_host_.reset();
@@ -135,27 +141,40 @@ void HardwareRenderer::DidBeginMainFrame() {
 }
 
 void HardwareRenderer::CommitFrame() {
-  scoped_ptr<DrawGLInput> input = shared_renderer_state_->PassDrawGLInput();
+  scroll_offset_ = shared_renderer_state_->GetScrollOffset();
+  if (committed_frame_.get()) {
+    TRACE_EVENT_INSTANT0("android_webview",
+                         "EarlyOut_PreviousFrameUnconsumed",
+                         TRACE_EVENT_SCOPE_THREAD);
+    shared_renderer_state_->DidSkipCommitFrame();
+    return;
+  }
+
+  committed_frame_ = shared_renderer_state_->PassCompositorFrame();
   // Happens with empty global visible rect.
-  if (!input.get())
+  if (!committed_frame_.get())
     return;
 
-  DCHECK(!input->frame.gl_frame_data);
-  DCHECK(!input->frame.software_frame_data);
+  DCHECK(!committed_frame_->gl_frame_data);
+  DCHECK(!committed_frame_->software_frame_data);
 
   // DelegatedRendererLayerImpl applies the inverse device_scale_factor of the
   // renderer frame, assuming that the browser compositor will scale
   // it back up to device scale.  But on Android we put our browser layers in
   // physical pixels and set our browser CC device_scale_factor to 1, so this
   // suppresses the transform.
-  input->frame.delegated_frame_data->device_scale_factor = 1.0f;
+  committed_frame_->delegated_frame_data->device_scale_factor = 1.0f;
+}
 
+void HardwareRenderer::SetFrameData() {
+  if (!committed_frame_.get())
+    return;
+
+  scoped_ptr<cc::CompositorFrame> frame = committed_frame_.Pass();
   gfx::Size frame_size =
-      input->frame.delegated_frame_data->render_pass_list.back()
-          ->output_rect.size();
+      frame->delegated_frame_data->render_pass_list.back()->output_rect.size();
   bool size_changed = frame_size != frame_size_;
   frame_size_ = frame_size;
-  scroll_offset_ = input->scroll_offset;
 
   if (!frame_provider_ || size_changed) {
     if (delegated_layer_) {
@@ -163,15 +182,15 @@ void HardwareRenderer::CommitFrame() {
     }
 
     frame_provider_ = new cc::DelegatedFrameProvider(
-        resource_collection_.get(), input->frame.delegated_frame_data.Pass());
+        resource_collection_.get(), frame->delegated_frame_data.Pass());
 
     delegated_layer_ = cc::DelegatedRendererLayer::Create(frame_provider_);
-    delegated_layer_->SetBounds(gfx::Size(input->width, input->height));
+    delegated_layer_->SetBounds(frame_size_);
     delegated_layer_->SetIsDrawable(true);
 
     root_layer_->AddChild(delegated_layer_);
   } else {
-    frame_provider_->SetFrameData(input->frame.delegated_frame_data.Pass());
+    frame_provider_->SetFrameData(frame->delegated_frame_data.Pass());
   }
 }
 
@@ -183,14 +202,17 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
   // We need to watch if the current Android context has changed and enforce
   // a clean-up in the compositor.
   EGLContext current_context = eglGetCurrentContext();
-  if (!current_context) {
-    DLOG(ERROR) << "DrawGL called without EGLContext";
-    return;
-  }
+  DCHECK(current_context) << "DrawGL called without EGLContext";
 
   // TODO(boliu): Handle context loss.
   if (last_egl_context_ != current_context)
     DLOG(WARNING) << "EGLContextChanged";
+
+  SetFrameData();
+  if (shared_renderer_state_->ForceCommit()) {
+    CommitFrame();
+    SetFrameData();
+  }
 
   gfx::Transform transform(gfx::Transform::kSkipInitialization);
   transform.matrix().setColMajorf(draw_info->transform);
@@ -229,18 +251,17 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
   gl_surface_->ResetBackingFrameBufferObject();
 }
 
-scoped_ptr<cc::OutputSurface> HardwareRenderer::CreateOutputSurface(
-    bool fallback) {
+void HardwareRenderer::RequestNewOutputSurface(bool fallback) {
   // Android webview does not support losing output surface.
   DCHECK(!fallback);
   scoped_refptr<cc::ContextProvider> context_provider =
       CreateContext(gl_surface_,
-                    DeferredGpuCommandService::GetInstance(),
-                    shared_renderer_state_->GetSharedContext());
+                    DeferredGpuCommandService::GetInstance());
   scoped_ptr<ParentOutputSurface> output_surface_holder(
       new ParentOutputSurface(context_provider));
   output_surface_ = output_surface_holder.get();
-  return output_surface_holder.PassAs<cc::OutputSurface>();
+  layer_tree_host_->SetOutputSurface(
+      output_surface_holder.PassAs<cc::OutputSurface>());
 }
 
 void HardwareRenderer::UnusedResourcesAreAvailable() {

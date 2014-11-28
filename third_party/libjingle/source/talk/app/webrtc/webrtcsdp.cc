@@ -71,6 +71,7 @@ using cricket::kCodecParamUseInbandFec;
 using cricket::kCodecParamSctpProtocol;
 using cricket::kCodecParamSctpStreams;
 using cricket::kCodecParamMaxAverageBitrate;
+using cricket::kCodecParamMaxPlaybackRate;
 using cricket::kCodecParamAssociatedPayloadType;
 using cricket::kWildcardPayloadType;
 using cricket::MediaContentDescription;
@@ -155,6 +156,9 @@ static const char kAttributeRecvOnly[] = "recvonly";
 static const char kAttributeRtcpFb[] = "rtcp-fb";
 static const char kAttributeSendRecv[] = "sendrecv";
 static const char kAttributeInactive[] = "inactive";
+// draft-ietf-mmusic-sctp-sdp-07
+// a=sctp-port
+static const char kAttributeSctpPort[] = "sctp-port";
 
 // Experimental flags
 static const char kAttributeXGoogleFlag[] = "x-google-flag";
@@ -1100,6 +1104,26 @@ bool ParseIceOptions(const std::string& line,
   return true;
 }
 
+bool ParseSctpPort(const std::string& line,
+                   int* sctp_port,
+                   SdpParseError* error) {
+  // draft-ietf-mmusic-sctp-sdp-07
+  // a=sctp-port
+  std::vector<std::string> fields;
+  rtc::split(line.substr(kLinePrefixLength),
+                   kSdpDelimiterSpace, &fields);
+  const size_t expected_min_fields = 2;
+  if (fields.size() < expected_min_fields) {
+    return ParseFailedExpectMinFieldNum(line, expected_min_fields, error);
+  }
+  if (!rtc::FromString(fields[1], sctp_port)) {
+    return ParseFailed(line,
+                       "Invalid sctp port value.",
+                       error);
+  }
+  return true;
+}
+
 bool ParseExtmap(const std::string& line, RtpHeaderExtension* extmap,
                  SdpParseError* error) {
   // RFC 5285
@@ -1511,7 +1535,8 @@ bool IsFmtpParam(const std::string& name) {
     kCodecParamStereo, kCodecParamUseInbandFec, kCodecParamStartBitrate,
     kCodecParamMaxBitrate, kCodecParamMinBitrate, kCodecParamMaxQuantization,
     kCodecParamSctpProtocol, kCodecParamSctpStreams,
-    kCodecParamMaxAverageBitrate, kCodecParamAssociatedPayloadType
+    kCodecParamMaxAverageBitrate, kCodecParamMaxPlaybackRate,
+    kCodecParamAssociatedPayloadType
   };
   for (size_t i = 0; i < ARRAY_SIZE(kFmtpParams); ++i) {
     if (_stricmp(name.c_str(), kFmtpParams[i]) == 0) {
@@ -1561,6 +1586,24 @@ void AddRtcpFbLines(const T& codec, std::string* message) {
     }
     AddLine(os.str(), message);
   }
+}
+
+bool AddSctpDataCodec(DataContentDescription* media_desc,
+                      int sctp_port) {
+  if (media_desc->HasCodec(cricket::kGoogleSctpDataCodecId)) {
+    return ParseFailed("",
+                       "Can't have multiple sctp port attributes.",
+                       NULL);
+  }
+  // Add the SCTP Port number as a pseudo-codec "port" parameter
+  cricket::DataCodec codec_port(
+      cricket::kGoogleSctpDataCodecId, cricket::kGoogleSctpDataCodecName,
+      0);
+  codec_port.SetParam(cricket::kCodecParamPort, sctp_port);
+  LOG(INFO) << "AddSctpDataCodec: Got SCTP Port Number "
+            << sctp_port;
+  media_desc->AddCodec(codec_port);
+  return true;
 }
 
 bool GetMinValue(const std::vector<int>& values, int* value) {
@@ -2129,18 +2172,20 @@ bool ParseMediaDescription(const std::string& message,
 
     // <fmt>
     std::vector<int> codec_preference;
-    for (size_t j = 3 ; j < fields.size(); ++j) {
-      // TODO(wu): Remove when below bug is fixed.
-      // https://bugzilla.mozilla.org/show_bug.cgi?id=996329
-      if (fields[j] == "" && j == fields.size() - 1) {
-        continue;
-      }
+    if (!is_sctp) {
+      for (size_t j = 3 ; j < fields.size(); ++j) {
+        // TODO(wu): Remove when below bug is fixed.
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=996329
+        if (fields[j] == "" && j == fields.size() - 1) {
+          continue;
+        }
 
-      int pl = 0;
-      if (!GetValueFromString(line, fields[j], &pl, error)) {
-        return false;
+        int pl = 0;
+        if (!GetValueFromString(line, fields[j], &pl, error)) {
+          return false;
+        }
+        codec_preference.push_back(pl);
       }
-      codec_preference.push_back(pl);
     }
 
     // Make a temporary TransportDescription based on |session_td|.
@@ -2167,25 +2212,19 @@ bool ParseMediaDescription(const std::string& message,
                     codec_preference, pos, &content_name,
                     &transport, candidates, error));
     } else if (HasAttribute(line, kMediaTypeData)) {
-      DataContentDescription* desc =
+      DataContentDescription* data_desc =
           ParseContentDescription<DataContentDescription>(
                     message, cricket::MEDIA_TYPE_DATA, mline_index, protocol,
                     codec_preference, pos, &content_name,
                     &transport, candidates, error);
+      content.reset(data_desc);
 
-      if (desc && protocol == cricket::kMediaProtocolDtlsSctp) {
-        // Add the SCTP Port number as a pseudo-codec "port" parameter
-        cricket::DataCodec codec_port(
-            cricket::kGoogleSctpDataCodecId, cricket::kGoogleSctpDataCodecName,
-            0);
-        codec_port.SetParam(cricket::kCodecParamPort, fields[3]);
-        LOG(INFO) << "ParseMediaDescription: Got SCTP Port Number "
-                  << fields[3];
-        ASSERT(!desc->HasCodec(cricket::kGoogleSctpDataCodecId));
-        desc->AddCodec(codec_port);
+      int p;
+      if (data_desc && protocol == cricket::kMediaProtocolDtlsSctp &&
+          rtc::FromString(fields[3], &p)) {
+        if (!AddSctpDataCodec(data_desc, p))
+          return false;
       }
-
-      content.reset(desc);
 
       // We should always use the default bandwidth for RTP-based data
       // channels.  Don't allow SDP to set the bandwidth, because that
@@ -2516,6 +2555,15 @@ bool ParseContent(const std::string& message,
       transport->identity_fingerprint.reset(fingerprint);
     } else if (HasAttribute(line, kAttributeSetup)) {
       if (!ParseDtlsSetup(line, &(transport->connection_role), error)) {
+        return false;
+      }
+    } else if (HasAttribute(line, kAttributeSctpPort)) {
+      int sctp_port;
+      if (!ParseSctpPort(line, &sctp_port, error)) {
+        return false;
+      }
+      if (!AddSctpDataCodec(static_cast<DataContentDescription*>(media_desc),
+                            sctp_port)) {
         return false;
       }
     } else if (is_rtp) {

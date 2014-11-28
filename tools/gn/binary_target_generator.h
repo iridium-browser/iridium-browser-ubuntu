@@ -23,8 +23,11 @@ class BinaryTargetGenerator : public TargetGenerator {
   virtual void DoRun() OVERRIDE;
 
  private:
-  void FillOutputName();
-  void FillOutputExtension();
+  bool FillCheckIncludes();
+  bool FillCompleteStaticLib();
+  bool FillOutputName();
+  bool FillOutputExtension();
+  bool FillAllowCircularIncludesFrom();
 
   Target::OutputType output_type_;
 
@@ -32,4 +35,3 @@ class BinaryTargetGenerator : public TargetGenerator {
 };
 
 #endif  // TOOLS_GN_BINARY_TARGET_GENERATOR_H_
-

@@ -33,13 +33,13 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_creator.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -79,6 +79,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/locale_settings.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -92,7 +93,6 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_MACOSX)
@@ -201,8 +201,7 @@ bool GetAppLaunchContainer(
   extensions::LaunchContainer launch_container = extensions::GetLaunchContainer(
       extensions::ExtensionPrefs::Get(profile), extension);
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-           switches::kEnableStreamlinedHostedApps) &&
+  if (!extensions::util::IsStreamlinedHostedAppsEnabled() &&
       !extensions::HasPreferredLaunchContainer(
            extensions::ExtensionPrefs::Get(profile), extension)) {
     launch_container = extensions::LAUNCH_CONTAINER_WINDOW;
@@ -634,18 +633,11 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
     }
 #endif
 
-    // Pause the StartupTimer. Since the restore here is synchronous, we can
-    // keep these two metrics (browser startup time and session restore time)
-    // separate.
-    performance_monitor::StartupTimer::PauseTimer();
-
     // The startup code only executes for browsers launched in desktop mode.
     // i.e. HOST_DESKTOP_TYPE_NATIVE. Ash should never get here.
     Browser* browser = SessionRestore::RestoreSession(
         profile_, NULL, desktop_type, restore_behavior,
         urls_to_open);
-
-    performance_monitor::StartupTimer::UnpauseTimer();
 
     AddInfoBarsIfNecessary(browser, chrome::startup::IS_PROCESS_STARTUP);
     return true;
@@ -781,7 +773,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
       add_types |= TabStripModel::ADD_PINNED;
 
     chrome::NavigateParams params(browser, tabs[i].url,
-                                  content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+                                  ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
     params.disposition = first_tab ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
     params.tabstrip_add_types = add_types;
     params.extension_app_id = tabs[i].app_id;

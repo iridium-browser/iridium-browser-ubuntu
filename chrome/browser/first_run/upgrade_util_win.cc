@@ -14,10 +14,11 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/process/launch.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
@@ -27,16 +28,19 @@
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "google_update/google_update_idl.h"
+#include "ui/base/ui_base_switches.h"
 
 namespace {
 
@@ -110,6 +114,21 @@ RelaunchMode RelaunchModeStringToEnum(const std::string& relaunch_mode) {
   if (relaunch_mode == kRelaunchModeDesktop)
     return RELAUNCH_MODE_DESKTOP;
 
+  // On Windows 7 if the current browser is in Chrome OS mode, then restart
+  // into Chrome OS mode.
+  if ((base::win::GetVersion() == base::win::VERSION_WIN7) &&
+       CommandLine::ForCurrentProcess()->HasSwitch(switches::kViewerConnect) &&
+       g_browser_process->local_state()->HasPrefPath(prefs::kRelaunchMode)) {
+    // TODO(ananta)
+    // On Windows 8, the delegate execute process looks up the previously
+    // launched mode from the registry and relaunches into that mode. We need
+    // something similar on Windows 7. For now, set the pref to ensure that
+    // we get relaunched into Chrome OS mode.
+    g_browser_process->local_state()->SetString(
+        prefs::kRelaunchMode, upgrade_util::kRelaunchModeMetro);
+    return RELAUNCH_MODE_METRO;
+  }
+
   return RELAUNCH_MODE_DEFAULT;
 }
 
@@ -136,11 +155,15 @@ bool RelaunchChromeHelper(const CommandLine& command_line,
   chrome_exe_command_line.SetProgram(
       chrome_exe.DirName().Append(installer::kChromeExe));
 
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::VERSION_WIN8 &&
+      relaunch_mode != RELAUNCH_MODE_METRO &&
+      relaunch_mode != RELAUNCH_MODE_DESKTOP)
     return base::LaunchProcess(chrome_exe_command_line,
                                base::LaunchOptions(), NULL);
 
   // On Windows 8 we always use the delegate_execute for re-launching chrome.
+  // On Windows 7 we use delegate_execute for re-launching chrome into Windows
+  // ASH.
   //
   // Pass this Chrome's Start Menu shortcut path to the relauncher so it can re-
   // activate chrome via ShellExecute which will wait until we exit. Since
@@ -241,7 +264,7 @@ bool SwapNewChromeExeIfPresent() {
       options.start_hidden = true;
       if (base::LaunchProcess(rename_cmd, options, &handle)) {
         DWORD exit_code;
-        ::GetExitCodeProcess(handle, &exit_code);
+        ::GetExitCodeProcess(handle.Get(), &exit_code);
         if (exit_code == installer::RENAME_SUCCESSFUL)
           return true;
       }

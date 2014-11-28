@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.sync;
 
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
+
 import android.accounts.Account;
 import android.app.Activity;
 import android.content.ContentResolver;
@@ -12,11 +14,8 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.test.suitebuilder.annotation.SmallTest;
 
-import com.google.common.annotations.VisibleForTesting;
-
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.content.browser.test.util.Criteria;

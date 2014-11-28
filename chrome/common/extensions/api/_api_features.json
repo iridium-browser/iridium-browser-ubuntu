@@ -69,22 +69,6 @@
     "channel": "dev",
     "contexts": ["blessed_extension"]
   },
-  "app.window": {
-    "channel": "stable",
-    "contexts": ["blessed_extension"],
-    "extension_types": ["platform_app"],
-    "noparent": true
-  },
-  "app.currentWindowInternal": {
-    "noparent": true,
-    "internal": true,
-    "channel": "stable",
-    "contexts": ["blessed_extension"]
-  },
-  "app.currentWindowInternal.setShape": {
-    "dependencies": ["permission:app.window.shape"],
-    "contexts": ["blessed_extension"]
-  },
   "app.getDetails": {
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"],
     "matches": []
@@ -209,6 +193,16 @@
     "dependencies": ["permission:chromeosInfoPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "chromeWebViewInternal": [{
+    "internal": true,
+    "dependencies": ["permission:webview"],
+    "contexts": ["blessed_extension"]
+  }, {
+    "internal": true,
+    "channel": "dev",
+    "contexts": ["webui"],
+    "matches": ["chrome://chrome-signin/*"]
+  }],
   "cloudPrintPrivate": {
     "dependencies": ["permission:cloudPrintPrivate"],
     "contexts": ["blessed_extension"]
@@ -410,13 +404,13 @@
     "extension_types": ["platform_app"],
     "contexts": ["blessed_extension", "unblessed_extension"]
   },
-  "fileBrowserPrivate": {
-    "dependencies": ["permission:fileBrowserPrivate"],
+  "fileManagerPrivate": {
+    "dependencies": ["permission:fileManagerPrivate"],
     "contexts": ["blessed_extension"]
   },
-  "fileBrowserPrivateInternal": {
+  "fileManagerPrivateInternal": {
     "internal": true,
-    "dependencies": ["permission:fileBrowserPrivate"],
+    "dependencies": ["permission:fileManagerPrivate"],
     "contexts": ["blessed_extension"]
   },
   "fileSystem": {
@@ -448,22 +442,6 @@
     "dependencies": ["permission:gcm"],
     "contexts": ["blessed_extension"]
   },
-  "guestViewInternal": [{
-    "internal": true,
-    "channel": "stable",
-    "contexts": ["blessed_extension"]
-  }, {
-    // Component extensions can use the guestViewInternal API from iframes.
-    "location": "component",
-    "internal": true,
-    "dependencies": ["permission:webview"],
-    "contexts": ["unblessed_extension"]
-  }, {
-    "internal": true,
-    "channel": "trunk",
-    "contexts": ["webui"],
-    "matches": ["chrome://extensions-frame/*", "chrome://extensions/*"]
-  }],
   "hangoutsPrivate": {
     "channel": "stable",
     "contexts": ["blessed_extension"],
@@ -523,10 +501,6 @@
     "dependencies": ["permission:inputMethodPrivate"],
     "contexts": ["blessed_extension"]
   },
-  "ledger": {
-    "dependencies": ["permission:ledger"],
-    "contexts": ["blessed_extension"]
-  },
   "location": {
     "dependencies": ["permission:location"],
     "contexts": ["blessed_extension"]
@@ -544,6 +518,11 @@
     "contexts": ["blessed_extension"]
   },
   "management.getPermissionWarningsByManifest": {
+    "dependencies": [],
+    "channel": "stable",
+    "extension_types": ["extension", "legacy_packaged_app", "platform_app"]
+  },
+  "management.getSelf": {
     "dependencies": [],
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"]
@@ -579,6 +558,12 @@
   "mdns": {
     "dependencies": ["permission:mdns"],
     "contexts": ["blessed_extension"]
+  },
+  "mimeHandlerViewGuestInternal": {
+    "internal": true,
+    "contexts": "all",
+    "channel": "dev",
+    "matches": ["<all_urls>"]
   },
   "musicManagerPrivate": {
     "dependencies": ["permission:musicManagerPrivate"],
@@ -682,29 +667,6 @@
     "dependencies": ["manifest:system_indicator"],
     "contexts": ["blessed_extension"]
   },
-  "system.cpu": {
-    "dependencies": ["permission:system.cpu"],
-    "contexts": ["blessed_extension"]
-  },
-  "system.display": {
-    "dependencies": ["permission:system.display"],
-    "contexts": ["blessed_extension"]
-  },
-  "system.memory": {
-    "dependencies": ["permission:system.memory"],
-    "contexts": ["blessed_extension"]
-  },
-  "system.network": {
-    "dependencies": ["permission:system.network"],
-    "contexts": ["blessed_extension"]
-  },
-  "system.storage": {
-    "dependencies": ["permission:system.storage"],
-    "contexts": ["blessed_extension"]
-  },
-  "system.storage.getAvailableCapacity": {
-    "channel": "dev"
-  },
   "systemPrivate": {
     "dependencies": ["permission:systemPrivate"],
     "contexts": ["blessed_extension"]
@@ -774,8 +736,8 @@
     // webview uses webRequestInternal API.
     "channel": "stable",
     "internal": true,
-    "dependencies": ["permission:webview"],
-    "contexts": ["unblessed_extension"]
+    "contexts": ["webui"],
+    "matches": ["chrome://chrome-signin/*"]
   }],
   "webrtcAudioPrivate": {
     "dependencies": ["permission:webrtcAudioPrivate"],
@@ -804,25 +766,13 @@
     // given the blessed_extension denomination. Confusing.
     "contexts": ["blessed_extension"]
   },
-  "webViewInternal": [{
-    "internal": true,
-    "dependencies": ["permission:webview"],
-    "contexts": ["blessed_extension"]
-  }, {
-    // Component extensions can use the webViewInternal API from iframes.
-    "location": "component",
-    "internal": true,
-    "dependencies": ["permission:webview"],
-    "contexts": ["unblessed_extension"]
-  }],
   "webViewRequest": [{
     "dependencies": ["permission:webview"],
     "contexts": ["blessed_extension"]
   }, {
-    // Component extensions can use the webViewRequest API from iframes.
-    "location": "component",
-    "dependencies": ["permission:webview"],
-    "contexts": ["unblessed_extension"]
+    "channel": "stable",
+    "contexts": ["webui"],
+    "matches": ["chrome://chrome-signin/*"]
   }],
   "webviewTag": {
     "internal": true,

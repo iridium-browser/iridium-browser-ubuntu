@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef EXTENSIONS_RENDERER_DEFAULT_DISPATCHER_DELEGATE_H
-#define EXTENSIONS_RENDERER_DEFAULT_DISPATCHER_DELEGATE_H
+#ifndef EXTENSIONS_RENDERER_DEFAULT_DISPATCHER_DELEGATE_H_
+#define EXTENSIONS_RENDERER_DEFAULT_DISPATCHER_DELEGATE_H_
 
 #include "extensions/renderer/dispatcher_delegate.h"
 
@@ -19,9 +19,11 @@ class DefaultDispatcherDelegate : public DispatcherDelegate {
       const v8::Handle<v8::Context>& v8_context,
       blink::WebFrame* frame,
       const Extension* extension,
-      Feature::Context context_type) OVERRIDE;
+      Feature::Context context_type,
+      const Extension* effective_extension,
+      Feature::Context effective_context_type) OVERRIDE;
 };
 
 }  // namespace extensions
 
-#endif  // EXTENSIONS_RENDERER_DEFAULT_DISPATCHER_DELEGATE_H
+#endif  // EXTENSIONS_RENDERER_DEFAULT_DISPATCHER_DELEGATE_H_

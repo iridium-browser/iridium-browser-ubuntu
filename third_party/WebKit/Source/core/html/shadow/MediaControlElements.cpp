@@ -210,6 +210,18 @@ const AtomicString& MediaControlOverlayEnclosureElement::shadowPseudoId() const
     return id;
 }
 
+void* MediaControlOverlayEnclosureElement::preDispatchEventHandler(Event* event)
+{
+    // When the media element is clicked or touched we want to make the overlay cast button visible
+    // (if the other requirements are right) even if JavaScript is doing its own handling of the event.
+    // Doing it in preDispatchEventHandler prevents any interference from JavaScript.
+    // Note that we can't simply test for click, since JS handling of touch events can prevent their translation to click events.
+    if (event && (event->type() == EventTypeNames::click || event->type() == EventTypeNames::touchstart) && mediaElement().hasRemoteRoutes() && !mediaElement().shouldShowControls())
+        mediaControls().showOverlayCastButton();
+    return MediaControlDivElement::preDispatchEventHandler(event);
+}
+
+
 // ----------------------------
 
 MediaControlMuteButtonElement::MediaControlMuteButtonElement(MediaControls& mediaControls)
@@ -308,9 +320,9 @@ void MediaControlOverlayPlayButtonElement::defaultEventHandler(Event* event)
 
 void MediaControlOverlayPlayButtonElement::updateDisplayType()
 {
-    if (mediaElement().shouldShowControls() && mediaElement().togglePlayStateWillPlay()) {
+    if (mediaElement().shouldShowControls() && mediaElement().togglePlayStateWillPlay())
         show();
-    } else
+    else
         hide();
 }
 
@@ -407,7 +419,7 @@ void MediaControlTimelineElement::defaultEventHandler(Event* event)
         // FIXME: This will need to take the timeline offset into consideration
         // once that concept is supported, see https://crbug.com/312699
         if (mediaElement().controller())
-            mediaElement().controller()->setCurrentTime(time, IGNORE_EXCEPTION);
+            mediaElement().controller()->setCurrentTime(time);
         else
             mediaElement().setCurrentTime(time, IGNORE_EXCEPTION);
     }
@@ -548,6 +560,50 @@ const AtomicString& MediaControlFullscreenButtonElement::shadowPseudoId() const
 void MediaControlFullscreenButtonElement::setIsFullscreen(bool isFullscreen)
 {
     setDisplayType(isFullscreen ? MediaExitFullscreenButton : MediaEnterFullscreenButton);
+}
+
+// ----------------------------
+
+MediaControlCastButtonElement::MediaControlCastButtonElement(MediaControls& mediaControls, bool isOverlayButton)
+    : MediaControlInputElement(mediaControls, MediaCastOnButton), m_isOverlayButton(isOverlayButton)
+{
+}
+
+PassRefPtrWillBeRawPtr<MediaControlCastButtonElement> MediaControlCastButtonElement::create(MediaControls& mediaControls, bool isOverlayButton)
+{
+    RefPtrWillBeRawPtr<MediaControlCastButtonElement> button = adoptRefWillBeNoop(new MediaControlCastButtonElement(mediaControls, isOverlayButton));
+    button->ensureUserAgentShadowRoot();
+    button->setType("button");
+    return button.release();
+}
+
+void MediaControlCastButtonElement::defaultEventHandler(Event* event)
+{
+    if (event->type() == EventTypeNames::click) {
+        if (mediaElement().isPlayingRemotely()) {
+            mediaElement().requestRemotePlaybackControl();
+        } else {
+            mediaElement().requestRemotePlayback();
+        }
+    }
+    HTMLInputElement::defaultEventHandler(event);
+}
+
+const AtomicString& MediaControlCastButtonElement::shadowPseudoId() const
+{
+    DEFINE_STATIC_LOCAL(AtomicString, id_nonOverlay, ("-internal-media-controls-cast-button", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, id_overlay, ("-internal-media-controls-overlay-cast-button", AtomicString::ConstructFromLiteral));
+    return m_isOverlayButton ? id_overlay : id_nonOverlay;
+}
+
+void MediaControlCastButtonElement::setIsPlayingRemotely(bool isPlayingRemotely)
+{
+    setDisplayType(isPlayingRemotely ? MediaCastOnButton : MediaCastOffButton);
+}
+
+bool MediaControlCastButtonElement::keepEventInNode(Event* event)
+{
+    return isUserInteractionEvent(event);
 }
 
 // ----------------------------

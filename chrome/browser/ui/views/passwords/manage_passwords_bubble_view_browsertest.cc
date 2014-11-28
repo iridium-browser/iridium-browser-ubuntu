@@ -6,12 +6,15 @@
 
 #include "base/metrics/histogram_samples.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/passwords/manage_passwords_test.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/views/passwords/manage_passwords_view_test.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
+#include "chrome/browser/ui/views/passwords/manage_passwords_icon_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,8 +25,23 @@ const char kDisplayDispositionMetric[] = "PasswordBubble.DisplayDisposition";
 
 }  // namespace
 
-typedef ManagePasswordsViewTest ManagePasswordsBubbleViewTest;
 namespace metrics_util = password_manager::metrics_util;
+
+class ManagePasswordsBubbleViewTest : public ManagePasswordsTest {
+ public:
+  ManagePasswordsBubbleViewTest() {}
+  virtual ~ManagePasswordsBubbleViewTest() {}
+
+  virtual ManagePasswordsIcon* view() OVERRIDE {
+    BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
+    return browser_view->GetToolbarView()
+        ->location_bar()
+        ->manage_passwords_icon_view();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ManagePasswordsBubbleViewTest);
+};
 
 IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, BasicOpenAndClose) {
   EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
@@ -36,7 +54,6 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, BasicOpenAndClose) {
   EXPECT_TRUE(bubble->initially_focused_view());
   EXPECT_EQ(bubble->initially_focused_view(),
             bubble->GetFocusManager()->GetFocusedView());
-  EXPECT_FALSE(bubble->IsTimerRunning());
   ManagePasswordsBubbleView::CloseBubble();
   EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
 
@@ -104,8 +121,6 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
   // Bubble can be active if user clicks it.
   EXPECT_TRUE(ManagePasswordsBubbleView::manage_password_bubble()->
       CanActivate());
-  EXPECT_TRUE(ManagePasswordsBubbleView::manage_password_bubble()->
-      IsTimerRunning());
 
   scoped_ptr<base::HistogramSamples> samples(
       GetSamples(kDisplayDispositionMetric));
@@ -194,5 +209,23 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, CloseOnKey) {
   EXPECT_TRUE(web_contents->GetRenderViewHost()->IsFocusedElementEditable());
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_K,
       false, false, false, false));
+  EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, TwoTabsWithBubble) {
+  // Set up the first tab with the bubble.
+  SetupPendingPassword();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+  // Set up the second tab.
+  AddTabAtIndex(0, GURL("chrome://newtab"), ui::PAGE_TRANSITION_TYPED);
+  EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
+  ManagePasswordsBubbleView::ShowBubble(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      ManagePasswordsBubble::AUTOMATIC);
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+  TabStripModel* tab_model = browser()->tab_strip_model();
+  EXPECT_EQ(0, tab_model->active_index());
+  // Back to the first tab.
+  tab_model->ActivateTabAt(1, true);
   EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
 }

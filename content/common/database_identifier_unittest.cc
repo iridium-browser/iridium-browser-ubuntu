@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "webkit/common/database/database_identifier.h"
+#include "storage/common/database/database_identifier.h"
 
 #include "base/basictypes.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-using webkit_database::DatabaseIdentifier;
+using storage::DatabaseIdentifier;
 
 namespace content {
 namespace {

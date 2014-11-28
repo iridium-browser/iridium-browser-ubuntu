@@ -22,10 +22,10 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "chrome/browser/extensions/updater/extension_downloader_delegate.h"
-#include "chrome/browser/extensions/updater/manifest_fetch_data.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/updater/manifest_fetch_data.h"
 #include "url/gurl.h"
 
 class ExtensionServiceInterface;
@@ -241,8 +241,6 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   // Whether Start() has been called but not Stop().
   bool alive_;
 
-  base::WeakPtrFactory<ExtensionUpdater> weak_ptr_factory_;
-
   // Pointer back to the service that owns this ExtensionUpdater.
   ExtensionServiceInterface* service_;
 
@@ -289,6 +287,8 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   // Keeps track of extensions (by ID) whose update should be forced during the
   // next update check.
   std::set<std::string> forced_updates_;
+
+  base::WeakPtrFactory<ExtensionUpdater> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionUpdater);
 };

@@ -68,6 +68,7 @@ typedef unsigned short u_short;
 #include <sys/socket.h>
 #else
 #include <WinSock2.h>
+#include <WS2tcpip.h>
 #endif
 
 #if defined(__cplusplus)
@@ -91,7 +92,7 @@ int bio_socket_nbio(int sock, int on);
 /* BIO_clear_socket_error clears the last system socket error.
  *
  * TODO(fork): remove all callers of this. */
-void bio_clear_socket_error();
+void bio_clear_socket_error(void);
 
 /* BIO_sock_error returns the last socket error on |sock|. */
 int bio_sock_error(int sock);

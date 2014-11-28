@@ -57,7 +57,7 @@ static void write_image_file(const vpx_image_t *img, FILE *file) {
   for (plane = 0; plane < 3; ++plane) {
     const unsigned char *buf = img->planes[plane];
     const int stride = img->stride[plane];
-    const int bytes_per_sample = (img->fmt & VPX_IMG_FMT_HIGH) ? 2 : 1;
+    const int bytes_per_sample = (img->fmt & VPX_IMG_FMT_HIGHBITDEPTH) ? 2 : 1;
     const int h = (plane ? (img->d_h + img->y_chroma_shift) >>
                    img->y_chroma_shift : img->d_h);
     const int w = (plane ? (img->d_w + img->x_chroma_shift) >>
@@ -141,8 +141,16 @@ class Y4mVideoWriteTest
   Y4mVideoWriteTest() {}
 
   virtual ~Y4mVideoWriteTest() {
-    CloseSource();
     delete tmpfile_;
+    input_file_ = NULL;
+  }
+
+  void ReplaceInputFile(FILE *input_file) {
+    CloseSource();
+    frame_ = 0;
+    input_file_ = input_file;
+    rewind(input_file_);
+    ReadSourceToStart();
   }
 
   // Writes out a y4m file and then reads it back
@@ -163,8 +171,7 @@ class Y4mVideoWriteTest
       write_image_file(img(), tmpfile_->file());
       Next();
     }
-    tmpfile_->CloseFile();
-    Y4mVideoSourceTest::Init(tmpfile_->file_name(), limit_);
+    ReplaceInputFile(tmpfile_->file());
   }
 
   virtual void Init(const std::string &file_name, int limit) {

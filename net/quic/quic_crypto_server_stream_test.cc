@@ -41,7 +41,7 @@ class QuicCryptoServerConfigPeer {
  public:
   static string GetPrimaryOrbit(const QuicCryptoServerConfig& config) {
     base::AutoLock lock(config.configs_lock_);
-    CHECK(config.primary_config_ != NULL);
+    CHECK(config.primary_config_.get() != NULL);
     return string(reinterpret_cast<const char*>(config.primary_config_->orbit),
                   kOrbitSize);
   }
@@ -273,6 +273,12 @@ TEST_P(QuicCryptoServerStreamTest, ChannelIDAsync) {
   EXPECT_EQ(2, CompleteCryptoHandshake());
   EXPECT_TRUE(stream_.encryption_established());
   EXPECT_TRUE(stream_.handshake_confirmed());
+}
+
+TEST_P(QuicCryptoServerStreamTest, OnlySendSCUPAfterHandshakeComplete) {
+  // An attempt to send a SCUP before completing handshake should fail.
+  stream_.SendServerConfigUpdate(NULL);
+  EXPECT_EQ(0, stream_.num_server_config_update_messages_sent());
 }
 
 }  // namespace

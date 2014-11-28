@@ -10,15 +10,32 @@ the design documentation at http://goo.gl/Q0rGM6
 """
 
 import argparse
+import datetime
+import inspect
 import json
 import os
 import subprocess
 import sys
 import time
 import unittest
+import _winreg
 
 from variable_expander import VariableExpander
 import verifier_runner
+
+
+def LogMessage(message):
+  """Logs a message to stderr.
+
+  Args:
+    message: The message string to be logged.
+  """
+  now = datetime.datetime.now()
+  frameinfo = inspect.getframeinfo(inspect.currentframe().f_back)
+  filename = os.path.basename(frameinfo.filename)
+  line = frameinfo.lineno
+  sys.stderr.write('[%s:%s(%s)] %s\n' % (now.strftime('%m%d/%H%M%S'),
+                                         filename, line, message))
 
 
 class Config:
@@ -40,7 +57,7 @@ class Config:
 class InstallerTest(unittest.TestCase):
   """Tests a test case in the config file."""
 
-  def __init__(self, name, test, config, variable_expander):
+  def __init__(self, name, test, config, variable_expander, quiet):
     """Constructor.
 
     Args:
@@ -55,6 +72,7 @@ class InstallerTest(unittest.TestCase):
     self._test = test
     self._config = config
     self._variable_expander = variable_expander
+    self._quiet = quiet
     self._verifier_runner = verifier_runner.VerifierRunner()
     self._clean_on_teardown = True
 
@@ -87,7 +105,11 @@ class InstallerTest(unittest.TestCase):
     # Starting at index 1, we loop through pairs of (action, state).
     for i in range(1, len(self._test), 2):
       action = self._test[i]
+      if not self._quiet:
+        LogMessage('Beginning action %s' % action)
       RunCommand(self._config.actions[action], self._variable_expander)
+      if not self._quiet:
+        LogMessage('Finished action %s' % action)
 
       state = self._test[i + 1]
       self._VerifyState(state)
@@ -117,6 +139,8 @@ class InstallerTest(unittest.TestCase):
     Args:
       state: A state name.
     """
+    if not self._quiet:
+      LogMessage('Verifying state %s' % state)
     try:
       self._verifier_runner.VerifyAll(self._config.states[state],
                                       self._variable_expander)
@@ -144,6 +168,26 @@ def RunCommand(command, variable_expander):
         expanded_command, exit_status))
 
 
+def DeleteGoogleUpdateRegistration(system_level, variable_expander):
+  """Deletes Chrome's registration with Google Update.
+
+  Args:
+    system_level: True if system-level Chrome is to be deleted.
+    variable_expander: A VariableExpander object.
+  """
+  root = (_winreg.HKEY_LOCAL_MACHINE if system_level
+          else _winreg.HKEY_CURRENT_USER)
+  key_name = variable_expander.Expand('$CHROME_UPDATE_REGISTRY_SUBKEY')
+  try:
+    key_handle = _winreg.OpenKey(root, key_name, 0,
+                                 _winreg.KEY_SET_VALUE |
+                                 _winreg.KEY_WOW64_32KEY)
+    _winreg.DeleteValue(key_handle, 'pv')
+  except WindowsError:
+    # The key isn't present, so there is no value to delete.
+    pass
+
+
 def RunCleanCommand(force_clean, variable_expander):
   """Puts the machine in the clean state (i.e. Chrome not installed).
 
@@ -152,17 +196,17 @@ def RunCleanCommand(force_clean, variable_expander):
         installations.
     variable_expander: A VariableExpander object.
   """
-  # TODO(sukolsak): Read the clean state from the config file and clean
-  # the machine according to it.
   # TODO(sukolsak): Handle Chrome SxS installs.
-  commands = []
   interactive_option = '--interactive' if not force_clean else ''
-  for level_option in ('', '--system-level'):
-    commands.append('python uninstall_chrome.py '
-                    '--chrome-long-name="$CHROME_LONG_NAME" '
-                    '--no-error-if-absent %s %s' %
-                    (level_option, interactive_option))
-  RunCommand(' && '.join(commands), variable_expander)
+  for system_level in (False, True):
+    level_option = '--system-level' if system_level else ''
+    command = ('python uninstall_chrome.py '
+               '--chrome-long-name="$CHROME_LONG_NAME" '
+               '--no-error-if-absent %s %s' %
+               (level_option, interactive_option))
+    RunCommand(command, variable_expander)
+    if force_clean:
+      DeleteGoogleUpdateRegistration(system_level, variable_expander)
 
 
 def MergePropertyDictionaries(current_property, new_property):
@@ -255,8 +299,8 @@ def main():
                       help='Build target (Release or Debug)')
   parser.add_argument('--force-clean', action='store_true', default=False,
                       help='Force cleaning existing installations')
-  parser.add_argument('-v', '--verbose', action='count', default=0,
-                      help='Increase test runner verbosity level')
+  parser.add_argument('-q', '--quiet', action='store_true', default=False,
+                      help='Reduce test runner output')
   parser.add_argument('--write-full-results-to', metavar='FILENAME',
                       help='Path to write the list of full results to.')
   parser.add_argument('--config', metavar='FILENAME',
@@ -284,21 +328,22 @@ def main():
     RunCleanCommand(args.force_clean, variable_expander)
     for test in config.tests:
       # If tests were specified via |tests|, their names are formatted like so:
-      test_name = '%s.%s.%s' % (InstallerTest.__module__,
+      test_name = '%s/%s/%s' % (InstallerTest.__module__,
                                 InstallerTest.__name__,
                                 test['name'])
       if not args.test or test_name in args.test:
         suite.addTest(InstallerTest(test['name'], test['traversal'], config,
-                                    variable_expander))
+                                    variable_expander, args.quiet))
 
-  result = unittest.TextTestRunner(verbosity=(args.verbose + 1)).run(suite)
+  verbosity = 2 if not args.quiet else 1
+  result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
   if is_component_build:
-    print ('Component build is currently unsupported by the mini_installer: '
-           'http://crbug.com/377839')
+    sys.stderr.write('Component build is currently unsupported by the '
+                     'mini_installer: http://crbug.com/377839\n')
   if args.write_full_results_to:
     with open(args.write_full_results_to, 'w') as fp:
       json.dump(_FullResults(suite, result, {}), fp, indent=2)
-      fp.write("\n")
+      fp.write('\n')
   return 0 if result.wasSuccessful() else 1
 
 

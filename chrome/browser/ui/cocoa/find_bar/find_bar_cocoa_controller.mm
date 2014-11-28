@@ -8,8 +8,6 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -18,15 +16,17 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
-#import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/theme_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #import "ui/base/cocoa/find_pasteboard.h"
 #import "ui/base/cocoa/focus_tracker.h"
+#import "ui/base/cocoa/nsview_additions.h"
+#include "ui/resources/grit/ui_resources.h"
 
 using content::NativeWebKeyboardEvent;
 
@@ -451,7 +451,6 @@ const float kRightEdgeOffset = 25;
   // If the find bar is not visible, make it actually hidden, so it'll no longer
   // respond to key events.
   [[self view] setHidden:![self isFindBarVisible]];
-  [[self browserWindowController] onFindBarVisibilityChanged];
 }
 
 - (gfx::Point)findBarWindowPosition {
@@ -507,7 +506,6 @@ const float kRightEdgeOffset = 25;
   if (!animate) {
     [findBarView_ setFrame:endFrame];
     [[self view] setHidden:![self isFindBarVisible]];
-    [[self browserWindowController] onFindBarVisibilityChanged];
     showHideAnimation_.reset(nil);
     return;
   }
@@ -515,12 +513,9 @@ const float kRightEdgeOffset = 25;
   // If animating, ensure that the find bar is not hidden. Hidden status will be
   // updated at the end of the animation.
   [[self view] setHidden:NO];
-  //[[self browserWindowController] onFindBarVisibilityChanged];
 
   // Reset the frame to what was saved above.
   [findBarView_ setFrame:startFrame];
-
-  [[self browserWindowController] onFindBarVisibilityChanged];
 
   showHideAnimation_.reset([self createAnimationForView:findBarView_
                                                 toFrame:endFrame

@@ -25,11 +25,11 @@ class SkPictureContentLayerUpdater : public ContentLayerUpdater {
       int layer_id);
   virtual ~SkPictureContentLayerUpdater();
 
-  virtual void PrepareToUpdate(const gfx::Rect& content_rect,
+  virtual void PrepareToUpdate(const gfx::Size& content_size,
+                               const gfx::Rect& paint_rect,
                                const gfx::Size& tile_size,
                                float contents_width_scale,
-                               float contents_height_scale,
-                               gfx::Rect* resulting_opaque_rect) OVERRIDE;
+                               float contents_height_scale) OVERRIDE;
   void DrawPicture(SkCanvas* canvas);
 
  private:

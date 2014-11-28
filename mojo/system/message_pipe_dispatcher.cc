@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "mojo/system/channel.h"
+#include "mojo/system/channel_endpoint.h"
 #include "mojo/system/constants.h"
 #include "mojo/system/local_message_pipe_endpoint.h"
 #include "mojo/system/memory.h"
@@ -70,7 +71,7 @@ MojoResult MessagePipeDispatcher::ValidateCreateOptions(
 
 void MessagePipeDispatcher::Init(scoped_refptr<MessagePipe> message_pipe,
                                  unsigned port) {
-  DCHECK(message_pipe);
+  DCHECK(message_pipe.get());
   DCHECK(port == 0 || port == 1);
 
   message_pipe_ = message_pipe;
@@ -82,16 +83,15 @@ Dispatcher::Type MessagePipeDispatcher::GetType() const {
 }
 
 // static
-std::pair<scoped_refptr<MessagePipeDispatcher>, scoped_refptr<MessagePipe> >
-MessagePipeDispatcher::CreateRemoteMessagePipe() {
-  scoped_refptr<MessagePipe> message_pipe(new MessagePipe(
-      scoped_ptr<MessagePipeEndpoint>(new LocalMessagePipeEndpoint()),
-      scoped_ptr<MessagePipeEndpoint>(new ProxyMessagePipeEndpoint())));
+scoped_refptr<MessagePipeDispatcher>
+MessagePipeDispatcher::CreateRemoteMessagePipe(
+    scoped_refptr<ChannelEndpoint>* channel_endpoint) {
+  scoped_refptr<MessagePipe> message_pipe(
+      MessagePipe::CreateLocalProxy(channel_endpoint));
   scoped_refptr<MessagePipeDispatcher> dispatcher(
       new MessagePipeDispatcher(MessagePipeDispatcher::kDefaultCreateOptions));
   dispatcher->Init(message_pipe, 0);
-
-  return std::make_pair(dispatcher, message_pipe);
+  return dispatcher;
 }
 
 // static
@@ -104,8 +104,9 @@ scoped_refptr<MessagePipeDispatcher> MessagePipeDispatcher::Deserialize(
     return scoped_refptr<MessagePipeDispatcher>();
   }
 
-  std::pair<scoped_refptr<MessagePipeDispatcher>, scoped_refptr<MessagePipe> >
-      remote_message_pipe = CreateRemoteMessagePipe();
+  scoped_refptr<ChannelEndpoint> channel_endpoint;
+  scoped_refptr<MessagePipeDispatcher> dispatcher =
+      CreateRemoteMessagePipe(&channel_endpoint);
 
   MessageInTransit::EndpointId remote_id =
       static_cast<const SerializedMessagePipeDispatcher*>(source)->endpoint_id;
@@ -118,7 +119,7 @@ scoped_refptr<MessagePipeDispatcher> MessagePipeDispatcher::Deserialize(
     return scoped_refptr<MessagePipeDispatcher>();
   }
   MessageInTransit::EndpointId local_id =
-      channel->AttachMessagePipeEndpoint(remote_message_pipe.second, 1);
+      channel->AttachEndpoint(channel_endpoint);
   if (local_id == MessageInTransit::kInvalidEndpointId) {
     LOG(ERROR) << "Failed to deserialize message pipe dispatcher (failed to "
                   "attach; remote ID = " << remote_id << ")";
@@ -135,12 +136,12 @@ scoped_refptr<MessagePipeDispatcher> MessagePipeDispatcher::Deserialize(
 
   // TODO(vtl): FIXME -- Need some error handling here.
   channel->RunRemoteMessagePipeEndpoint(local_id, remote_id);
-  return remote_message_pipe.first;
+  return dispatcher;
 }
 
 MessagePipeDispatcher::~MessagePipeDispatcher() {
   // |Close()|/|CloseImplNoLock()| should have taken care of the pipe.
-  DCHECK(!message_pipe_);
+  DCHECK(!message_pipe_.get());
 }
 
 MessagePipe* MessagePipeDispatcher::GetMessagePipeNoLock() const {
@@ -161,7 +162,7 @@ void MessagePipeDispatcher::CancelAllWaitersNoLock() {
 void MessagePipeDispatcher::CloseImplNoLock() {
   lock().AssertAcquired();
   message_pipe_->Close(port_);
-  message_pipe_ = NULL;
+  message_pipe_ = nullptr;
   port_ = kInvalidPort;
 }
 
@@ -175,7 +176,7 @@ MessagePipeDispatcher::CreateEquivalentDispatcherAndCloseImplNoLock() {
   scoped_refptr<MessagePipeDispatcher> rv =
       new MessagePipeDispatcher(kDefaultCreateOptions);
   rv->Init(message_pipe_, port_);
-  message_pipe_ = NULL;
+  message_pipe_ = nullptr;
   port_ = kInvalidPort;
   return scoped_refptr<Dispatcher>(rv.get());
 }
@@ -247,12 +248,10 @@ bool MessagePipeDispatcher::EndSerializeAndCloseImplNoLock(
     embedder::PlatformHandleVector* /*platform_handles*/) {
   DCHECK(HasOneRef());  // Only one ref => no need to take the lock.
 
-  // Convert the local endpoint to a proxy endpoint (moving the message queue).
-  message_pipe_->ConvertLocalToProxy(port_);
-
-  // Attach the new proxy endpoint to the channel.
+  // Convert the local endpoint to a proxy endpoint (moving the message queue)
+  // and attach it to the channel.
   MessageInTransit::EndpointId endpoint_id =
-      channel->AttachMessagePipeEndpoint(message_pipe_, port_);
+      channel->AttachEndpoint(message_pipe_->ConvertLocalToProxy(port_));
   // Note: It's okay to get an endpoint ID of |kInvalidEndpointId|. (It's
   // possible that the other endpoint -- the one that we're not sending -- was
   // closed in the intervening time.) In that case, we need to deserialize a
@@ -266,7 +265,7 @@ bool MessagePipeDispatcher::EndSerializeAndCloseImplNoLock(
   static_cast<SerializedMessagePipeDispatcher*>(destination)->endpoint_id =
       endpoint_id;
 
-  message_pipe_ = NULL;
+  message_pipe_ = nullptr;
   port_ = kInvalidPort;
 
   *actual_size = sizeof(SerializedMessagePipeDispatcher);

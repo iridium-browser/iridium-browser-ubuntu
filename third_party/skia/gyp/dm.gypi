@@ -19,7 +19,7 @@
     'jsoncpp.gyp:jsoncpp',
     'skia_lib.gyp:skia_lib',
     'tools.gyp:crash_handler',
-    'tools.gyp:sk_tool_proc_stats',
+    'tools.gyp:proc_stats',
     'tools.gyp:sk_tool_utils',
   ],
   'includes': [
@@ -30,7 +30,6 @@
   'sources': [
     '../dm/DM.cpp',
     '../dm/DMCpuGMTask.cpp',
-    '../dm/DMExpectationsTask.cpp',
     '../dm/DMGpuGMTask.cpp',
     '../dm/DMPDFRasterizeTask.cpp',
     '../dm/DMPDFTask.cpp',
@@ -45,7 +44,8 @@
     '../dm/DMUtil.cpp',
     '../dm/DMWriteTask.cpp',
     '../gm/gm.cpp',
-    '../gm/gm_expectations.cpp',
+
+    '../src/utils/SkTaskGroup.cpp',
 
     '../src/pipe/utils/SamplePipeControllers.cpp',
     '../src/utils/debugger/SkDebugCanvas.cpp',

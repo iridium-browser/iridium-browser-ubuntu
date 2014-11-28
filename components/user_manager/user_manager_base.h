@@ -33,6 +33,8 @@ class RemoveUserDelegate;
 // Base implementation of the UserManager interface.
 class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
  public:
+  // Creates UserManagerBase with |task_runner| for UI thread and
+  // |blocking_task_runner| for SequencedWorkerPool.
   UserManagerBase(scoped_refptr<base::TaskRunner> task_runner,
                   scoped_refptr<base::TaskRunner> blocking_task_runner);
   virtual ~UserManagerBase();
@@ -50,6 +52,7 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
                             const std::string& user_id_hash,
                             bool browser_restart) OVERRIDE;
   virtual void SwitchActiveUser(const std::string& user_id) OVERRIDE;
+  virtual void SwitchToLastActiveUser() OVERRIDE;
   virtual void SessionStarted() OVERRIDE;
   virtual void RemoveUser(const std::string& user_id,
                           RemoveUserDelegate* delegate) OVERRIDE;
@@ -100,6 +103,7 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   virtual void RemoveSessionStateObserver(
       UserManager::UserSessionStateObserver* obs) OVERRIDE;
   virtual void NotifyLocalStateChanged() OVERRIDE;
+  virtual void ForceUpdateState() OVERRIDE;
 
   // Helper function that copies users from |users_list| to |users_vector| and
   // |users_set|. Duplicates and users already present in |existing_users| are
@@ -110,8 +114,6 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
                             std::set<std::string>* users_set);
 
  protected:
-  UserManagerBase();
-
   // Adds |user| to users list, and adds it to front of LRU list. It is assumed
   // that there is no user with same id.
   virtual void AddUserRecord(User* user);
@@ -311,15 +313,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   virtual void UpdateUserAccountLocale(const std::string& user_id,
                                        const std::string& locale);
 
-  // Runs on SequencedWorkerPool thread. Passes resolved locale to
-  // |on_resolve_callback| on UI thread.
-  void ResolveLocale(
-      const std::string& raw_locale,
-      base::Callback<void(const std::string&)> on_resolve_callback);
-
   // Updates user account after locale was resolved.
   void DoUpdateAccountLocale(const std::string& user_id,
-                             const std::string& resolved_locale);
+                             scoped_ptr<std::string> resolved_locale);
 
   // Indicates stage of loading user from prefs.
   UserLoadStage user_loading_stage_;
@@ -374,7 +370,16 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // as soon as user's profile is loaded.
   std::string pending_user_switch_;
 
+  // ID of the user that was active in the previous session.
+  // Preference value is stored here before first user signs in
+  // because pref will be overidden once session restore starts.
+  std::string last_session_active_user_;
+  bool last_session_active_user_initialized_;
+
+  // TaskRunner for UI thread.
   scoped_refptr<base::TaskRunner> task_runner_;
+
+  // TaskRunner for SequencedWorkerPool.
   scoped_refptr<base::TaskRunner> blocking_task_runner_;
 
   base::WeakPtrFactory<UserManagerBase> weak_factory_;

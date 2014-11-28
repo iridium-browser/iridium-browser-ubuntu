@@ -45,6 +45,7 @@ class ErrorCallback;
 class VoidCallback;
 
 class DirectoryEntry FINAL : public Entry {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static DirectoryEntry* create(DOMFileSystemBase* fileSystem, const String& fullPath)
     {
@@ -53,9 +54,9 @@ public:
     virtual bool isDirectory() const OVERRIDE { return true; }
 
     DirectoryReader* createReader();
-    void getFile(const String& path, const Dictionary&, PassOwnPtr<EntryCallback> = nullptr, PassOwnPtr<ErrorCallback> = nullptr);
-    void getDirectory(const String& path, const Dictionary&, PassOwnPtr<EntryCallback> = nullptr, PassOwnPtr<ErrorCallback> = nullptr);
-    void removeRecursively(PassOwnPtr<VoidCallback> successCallback = nullptr, PassOwnPtr<ErrorCallback> = nullptr) const;
+    void getFile(const String& path, const Dictionary&, EntryCallback* = nullptr, ErrorCallback* = nullptr);
+    void getDirectory(const String& path, const Dictionary&, EntryCallback* = nullptr, ErrorCallback* = nullptr);
+    void removeRecursively(VoidCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
 
     virtual void trace(Visitor*) OVERRIDE;
 
@@ -65,6 +66,6 @@ private:
 
 DEFINE_TYPE_CASTS(DirectoryEntry, Entry, entry, entry->isDirectory(), entry.isDirectory());
 
-} // namespace
+} // namespace blink
 
 #endif // DirectoryEntry_h

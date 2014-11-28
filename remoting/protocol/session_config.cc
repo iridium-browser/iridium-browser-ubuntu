@@ -10,10 +10,7 @@ namespace remoting {
 namespace protocol {
 
 const int kDefaultStreamVersion = 2;
-
-// The control channel version that supports the "capabilities" message.
 const int kControlStreamVersion = 3;
-const int kControlStreamVersionNoCapabilities = kDefaultStreamVersion;
 
 ChannelConfig ChannelConfig::None() {
   return ChannelConfig();
@@ -39,10 +36,6 @@ bool ChannelConfig::operator==(const ChannelConfig& b) const {
 }
 
 SessionConfig::SessionConfig() {
-}
-
-bool SessionConfig::SupportsCapabilities() const {
-  return control_config_.version >= kControlStreamVersion;
 }
 
 // static
@@ -180,10 +173,6 @@ scoped_ptr<CandidateSessionConfig> CandidateSessionConfig::CreateDefault() {
       ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
                     kControlStreamVersion,
                     ChannelConfig::CODEC_UNDEFINED));
-  result->mutable_control_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
-                    kControlStreamVersionNoCapabilities,
-                    ChannelConfig::CODEC_UNDEFINED));
 
   // Event channel.
   result->mutable_event_configs()->push_back(
@@ -192,10 +181,12 @@ scoped_ptr<CandidateSessionConfig> CandidateSessionConfig::CreateDefault() {
                     ChannelConfig::CODEC_UNDEFINED));
 
   // Video channel.
+#if !defined(MEDIA_DISABLE_LIBVPX)
   result->mutable_video_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_VP8));
+#endif  // !defined(MEDIA_DISABLE_LIBVPX)
 
   // Audio channel.
   result->mutable_audio_configs()->push_back(

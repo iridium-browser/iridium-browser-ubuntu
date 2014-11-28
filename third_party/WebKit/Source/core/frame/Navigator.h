@@ -38,7 +38,6 @@ namespace blink {
 class DOMMimeTypeArray;
 class DOMPluginArray;
 class LocalFrame;
-class PluginData;
 
 typedef int ExceptionCode;
 
@@ -51,6 +50,7 @@ class Navigator FINAL
     , public ScriptWrappable
     , public DOMWindowProperty
     , public WillBeHeapSupplementable<Navigator> {
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Navigator);
 public:
     static PassRefPtrWillBeRawPtr<Navigator> create(LocalFrame* frame)
@@ -77,7 +77,7 @@ public:
     // NavigatorLanguage
     virtual Vector<String> languages() OVERRIDE;
 
-    virtual void trace(Visitor*);
+    virtual void trace(Visitor*) OVERRIDE;
 
 private:
     explicit Navigator(LocalFrame*);
@@ -86,6 +86,6 @@ private:
     mutable RefPtrWillBeMember<DOMMimeTypeArray> m_mimeTypes;
 };
 
-}
+} // namespace blink
 
-#endif
+#endif // Navigator_h

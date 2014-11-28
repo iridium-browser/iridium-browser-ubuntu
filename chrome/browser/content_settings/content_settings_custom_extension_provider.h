@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/content_settings/content_settings_observable_provider.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_store.h"
+#include "components/content_settings/core/browser/content_settings_observable_provider.h"
 
 namespace content_settings {
 
@@ -17,9 +17,9 @@ namespace content_settings {
 class CustomExtensionProvider : public ObservableProvider,
                           public extensions::ContentSettingsStore::Observer {
  public:
-  CustomExtensionProvider(
-      extensions::ContentSettingsStore* extensions_settings,
-      bool incognito);
+  CustomExtensionProvider(const scoped_refptr<extensions::ContentSettingsStore>&
+                              extensions_settings,
+                          bool incognito);
 
   virtual ~CustomExtensionProvider();
 

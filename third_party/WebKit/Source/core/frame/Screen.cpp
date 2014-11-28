@@ -43,7 +43,6 @@ namespace blink {
 Screen::Screen(LocalFrame* frame)
     : DOMWindowProperty(frame)
 {
-    ScriptWrappable::init(this);
 }
 
 unsigned Screen::height() const
@@ -122,7 +121,10 @@ unsigned Screen::availWidth() const
 
 void Screen::trace(Visitor* visitor)
 {
-    WillBeHeapSupplementable<Screen>::trace(visitor);
+#if ENABLE(OILPAN)
+    HeapSupplementable<Screen>::trace(visitor);
+#endif
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

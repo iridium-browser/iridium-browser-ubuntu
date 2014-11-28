@@ -12,7 +12,7 @@ cr.define('options', function() {
    * Encapsulated handling of the 'Import existing supervised user' overlay
    * page.
    * @constructor
-   * @class
+   * @extends {cr.ui.pageManager.Page}
    */
   function SupervisedUserImportOverlay() {
     var title = loadTimeData.getString('supervisedUserImportTitle');
@@ -175,15 +175,9 @@ cr.define('options', function() {
 
     /**
      * Sets the data model of the supervised user list to |supervisedUsers|.
-     * @param {Array.<Object>} supervisedUsers Array of supervised user objects.
-     *     Each object is of the form:
-     *       supervisedUser = {
-     *         id: "Supervised User ID",
-     *         name: "Supervised User Name",
-     *         iconURL: "chrome://path/to/icon/image",
-     *         onCurrentDevice: true or false,
-     *         needAvatar: true or false
-     *       }
+     * @param {Array.<{id: string, name: string, iconURL: string,
+     *     onCurrentDevice: boolean, needAvatar: boolean}>} supervisedUsers
+     *     Array of supervised user objects.
      * @private
      */
     receiveExistingSupervisedUsers_: function(supervisedUsers) {
@@ -236,14 +230,10 @@ cr.define('options', function() {
   };
 
   // Forward public APIs to private implementations.
-  [
+  cr.makePublic(SupervisedUserImportOverlay, [
+    'onError',
     'onSuccess',
-  ].forEach(function(name) {
-    SupervisedUserImportOverlay[name] = function() {
-      var instance = SupervisedUserImportOverlay.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
-    };
-  });
+  ]);
 
   // Export
   return {

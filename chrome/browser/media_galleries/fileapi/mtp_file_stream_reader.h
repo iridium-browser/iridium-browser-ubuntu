@@ -9,23 +9,23 @@
 #include "base/files/file.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "webkit/browser/blob/file_stream_reader.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/webkit_storage_browser_export.h"
+#include "storage/browser/blob/file_stream_reader.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/storage_browser_export.h"
 
 namespace base {
 class FilePath;
 }
 
-namespace fileapi {
+namespace storage {
 class FileSystemContext;
 }
 
 class MTPFileStreamReader
-    : public NON_EXPORTED_BASE(webkit_blob::FileStreamReader) {
+    : public NON_EXPORTED_BASE(storage::FileStreamReader) {
  public:
-  MTPFileStreamReader(fileapi::FileSystemContext* file_system_context,
-                      const fileapi::FileSystemURL& url,
+  MTPFileStreamReader(storage::FileSystemContext* file_system_context,
+                      const storage::FileSystemURL& url,
                       int64 initial_offset,
                       const base::Time& expected_modification_time,
                       bool do_media_header_validation);
@@ -52,8 +52,8 @@ class MTPFileStreamReader
   void FinishGetLength(const net::Int64CompletionCallback& callback,
                        const base::File::Info& file_info);
 
-  scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  fileapi::FileSystemURL url_;
+  scoped_refptr<storage::FileSystemContext> file_system_context_;
+  storage::FileSystemURL url_;
   int64 current_offset_;
   const base::Time expected_modification_time_;
 

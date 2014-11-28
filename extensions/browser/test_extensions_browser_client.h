@@ -49,7 +49,6 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual bool CanExtensionCrossIncognito(
       const extensions::Extension* extension,
       content::BrowserContext* context) const OVERRIDE;
-  virtual bool IsWebViewRequest(net::URLRequest* request) const OVERRIDE;
   virtual net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate,
@@ -82,6 +81,9 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context) const OVERRIDE;
   virtual ComponentExtensionResourceManager*
   GetComponentExtensionResourceManager() OVERRIDE;
+  virtual void BroadcastEventToRenderers(
+      const std::string& event_name,
+      scoped_ptr<base::ListValue> args) OVERRIDE;
   virtual net::NetLog* GetNetLog() OVERRIDE;
 
  private:

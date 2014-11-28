@@ -33,11 +33,12 @@
 
 namespace blink {
 
-class TypeConversions : public RefCountedWillBeGarbageCollectedFinalized<TypeConversions>, public ScriptWrappable {
+class TypeConversions FINAL : public GarbageCollectedFinalized<TypeConversions>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<TypeConversions> create()
+    static TypeConversions* create()
     {
-        return adoptRefWillBeNoop(new TypeConversions());
+        return new TypeConversions();
     }
 
     long testLong() { return m_long; }
@@ -70,9 +71,15 @@ public:
 
 private:
     TypeConversions()
-    {
-        ScriptWrappable::init(this);
-    }
+        : m_long(0)
+        , m_unsignedLong(0)
+        , m_longLong(0)
+        , m_unsignedLongLong(0)
+        , m_byte(0)
+        , m_octet(0)
+        , m_short(0)
+        , m_unsignedShort(0)
+    { }
 
     long m_long;
     unsigned long m_unsignedLong;
@@ -88,4 +95,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // TypeConversions_h

@@ -5,6 +5,8 @@
 from telemetry import benchmark
 from telemetry.core import exceptions
 from telemetry.core import util
+from telemetry.core.platform import tracing_category_filter
+from telemetry.core.platform import tracing_options
 from telemetry.page.actions import action_runner as action_runner_module
 from telemetry.page.actions import page_action
 from telemetry.timeline import model
@@ -24,14 +26,18 @@ class ActionRunnerInteractionTest(tab_test_case.TabTestCase):
         ]
 
   def VerifyIssuingInteractionRecords(self, **interaction_kwargs):
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
     self.Navigate('interaction_enabled_page.html')
     action_runner.Wait(1)
-    self._browser.StartTracing()
+    options = tracing_options.TracingOptions()
+    options.enable_chrome_trace = True
+    self._browser.platform.tracing_controller.Start(
+        options, tracing_category_filter.CreateNoOverheadFilter())
     interaction = action_runner.BeginInteraction('InteractionName',
                                                  **interaction_kwargs)
     interaction.End()
-    trace_data = self._browser.StopTracing()
+    trace_data = self._browser.platform.tracing_controller.Stop()
 
     records = self.GetInteractionRecords(trace_data)
     self.assertEqual(
@@ -42,6 +48,7 @@ class ActionRunnerInteractionTest(tab_test_case.TabTestCase):
     for attribute_name in interaction_kwargs:
       self.assertTrue(getattr(records[0], attribute_name))
 
+  @benchmark.Disabled('chromeos')
   def testIssuingMultipleMeasurementInteractionRecords(self):
     self.VerifyIssuingInteractionRecords(is_fast=True)
     self.VerifyIssuingInteractionRecords(is_responsive=True)
@@ -51,14 +58,16 @@ class ActionRunnerInteractionTest(tab_test_case.TabTestCase):
 
 class ActionRunnerTest(tab_test_case.TabTestCase):
   def testExecuteJavaScript(self):
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
     self.Navigate('blank.html')
     action_runner.ExecuteJavaScript('var testing = 42;')
     self.assertEqual(42, self._tab.EvaluateJavaScript('testing'))
 
   def testWaitForNavigate(self):
     self.Navigate('page_with_link.html')
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
     action_runner.ClickElement('#clickme')
     action_runner.WaitForNavigate()
 
@@ -84,7 +93,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
     self.assertEqual(102, self._tab.EvaluateJavaScript('window.testing'))
 
   def testWaitForJavaScriptCondition(self):
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
     self.Navigate('blank.html')
 
     action_runner.ExecuteJavaScript('window.testing = 219;')
@@ -97,7 +107,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
     self.assertEqual(220, self._tab.EvaluateJavaScript('window.testing'))
 
   def testWaitForElement(self):
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
     self.Navigate('blank.html')
 
     action_runner.ExecuteJavaScript(
@@ -133,7 +144,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
         element_function='document.getElementById("test3")')
 
   def testWaitForElementWithWrongText(self):
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
     self.Navigate('blank.html')
 
     action_runner.ExecuteJavaScript(
@@ -150,7 +162,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
 
   def testClickElement(self):
     self.Navigate('page_with_clickables.html')
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
 
     action_runner.ExecuteJavaScript('valueSettableByTest = 1;')
     action_runner.ClickElement('#test')
@@ -172,7 +185,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
   @benchmark.Disabled('debug')
   def testTapElement(self):
     self.Navigate('page_with_clickables.html')
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
 
     action_runner.ExecuteJavaScript('valueSettableByTest = 1;')
     action_runner.TapElement('#test')
@@ -197,7 +211,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
       return
 
     self.Navigate('page_with_swipeables.html')
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
 
     action_runner.ScrollElement(
         selector='#left-right', direction='right', left_start_ratio=0.9)
@@ -219,7 +234,8 @@ class ActionRunnerTest(tab_test_case.TabTestCase):
       return
 
     self.Navigate('page_with_swipeables.html')
-    action_runner = action_runner_module.ActionRunner(self._tab)
+    action_runner = action_runner_module.ActionRunner(self._tab,
+                                                      skip_waits=True)
 
     action_runner.SwipeElement(
         selector='#left-right', direction='left', left_start_ratio=0.9)

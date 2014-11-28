@@ -9,12 +9,13 @@
 #ifndef LIBGLESV2_FORMATUTILS_H_
 #define LIBGLESV2_FORMATUTILS_H_
 
-#include "angle_gl.h"
-
 #include "libGLESv2/Caps.h"
 #include "libGLESv2/angletypes.h"
 
+#include "angle_gl.h"
+
 #include <cstddef>
+#include <cstdint>
 
 typedef void (*MipGenerationFunction)(size_t sourceWidth, size_t sourceHeight, size_t sourceDepth,
                                       const uint8_t *sourceData, size_t sourceRowPitch, size_t sourceDepthPitch,
@@ -27,11 +28,11 @@ typedef void (*LoadImageFunction)(size_t width, size_t height, size_t depth,
 typedef void (*InitializeTextureDataFunction)(size_t width, size_t height, size_t depth,
                                               uint8_t *output, size_t outputRowPitch, size_t outputDepthPitch);
 
-typedef void (*ColorReadFunction)(const void *source, void *dest);
-typedef void (*ColorWriteFunction)(const void *source, void *dest);
-typedef void (*ColorCopyFunction)(const void *source, void *dest);
+typedef void (*ColorReadFunction)(const uint8_t *source, uint8_t *dest);
+typedef void (*ColorWriteFunction)(const uint8_t *source, uint8_t *dest);
+typedef void (*ColorCopyFunction)(const uint8_t *source, uint8_t *dest);
 
-typedef void (*VertexCopyFunction)(const void *input, size_t stride, size_t count, void *output);
+typedef void (*VertexCopyFunction)(const uint8_t *input, size_t stride, size_t count, uint8_t *output);
 
 namespace gl
 {
@@ -102,4 +103,4 @@ const FormatSet &GetAllSizedInternalFormats();
 
 }
 
-#endif LIBGLESV2_FORMATUTILS_H_
+#endif // LIBGLESV2_FORMATUTILS_H_

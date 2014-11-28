@@ -23,6 +23,7 @@
 #include "core/css/MediaList.h"
 #include "core/css/MediaQueryEvaluator.h"
 #include "core/css/MediaQueryList.h"
+#include "core/css/MediaQueryListEvent.h"
 #include "core/css/MediaQueryListListener.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
@@ -101,14 +102,14 @@ void MediaQueryMatcher::removeMediaQueryList(MediaQueryList* query)
     m_mediaLists.remove(query);
 }
 
-void MediaQueryMatcher::addViewportListener(MediaQueryListListener* listener)
+void MediaQueryMatcher::addViewportListener(PassRefPtrWillBeRawPtr<MediaQueryListListener> listener)
 {
     if (!m_document)
         return;
     m_viewportListeners.add(listener);
 }
 
-void MediaQueryMatcher::removeViewportListener(MediaQueryListListener* listener)
+void MediaQueryMatcher::removeViewportListener(PassRefPtrWillBeRawPtr<MediaQueryListListener> listener)
 {
     if (!m_document)
         return;
@@ -121,8 +122,13 @@ void MediaQueryMatcher::mediaFeaturesChanged()
         return;
 
     WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener> > listenersToNotify;
-    for (MediaQueryListSet::iterator it = m_mediaLists.begin(); it != m_mediaLists.end(); ++it)
-        (*it)->mediaFeaturesChanged(&listenersToNotify);
+    for (MediaQueryListSet::iterator it = m_mediaLists.begin(); it != m_mediaLists.end(); ++it) {
+        if ((*it)->mediaFeaturesChanged(&listenersToNotify)) {
+            RefPtrWillBeRawPtr<Event> event(MediaQueryListEvent::create(*it));
+            event->setTarget(*it);
+            m_document->enqueueUniqueAnimationFrameEvent(event);
+        }
+    }
     m_document->enqueueMediaQueryChangeListeners(listenersToNotify);
 }
 

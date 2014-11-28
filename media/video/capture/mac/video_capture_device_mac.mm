@@ -16,7 +16,7 @@
 #include "base/mac/scoped_ioplugininterface.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
-#import "media/video/capture/mac/avfoundation_glue.h"
+#import "media/base/mac/avfoundation_glue.h"
 #import "media/video/capture/mac/platform_video_capturing_mac.h"
 #import "media/video/capture/mac/video_capture_device_avfoundation_mac.h"
 #import "media/video/capture/mac/video_capture_device_qtkit_mac.h"
@@ -331,6 +331,8 @@ const std::string VideoCaptureDevice::Name::GetModel() const {
   // Skip the AVFoundation's not USB nor built-in devices.
   if (capture_api_type() == AVFOUNDATION && transport_type() != USB_OR_BUILT_IN)
     return "";
+  if (capture_api_type() == DECKLINK)
+    return "";
   // Both PID and VID are 4 characters.
   if (unique_id_.size() < 2 * kVidPidSize)
     return "";
@@ -370,7 +372,7 @@ void VideoCaptureDeviceMac::AllocateAndStart(
   }
   int width = params.requested_format.frame_size.width();
   int height = params.requested_format.frame_size.height();
-  int frame_rate = params.requested_format.frame_rate;
+  float frame_rate = params.requested_format.frame_rate;
 
   // QTKit API can scale captured frame to any size requested, which would lead
   // to undesired aspect ratio changes. Try to open the camera with a known
@@ -440,7 +442,6 @@ void VideoCaptureDeviceMac::AllocateAndStart(
 void VideoCaptureDeviceMac::StopAndDeAllocate() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(state_ == kCapturing || state_ == kError) << state_;
-  [capture_device_ stopCapture];
 
   [capture_device_ setCaptureDevice:nil];
   [capture_device_ setFrameReceiver:nil];
@@ -560,7 +561,6 @@ void VideoCaptureDeviceMac::ReceiveError(const std::string& reason) {
 
 void VideoCaptureDeviceMac::SetErrorState(const std::string& reason) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DLOG(ERROR) << reason;
   state_ = kError;
   client_->OnError(reason);
 }

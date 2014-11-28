@@ -11,6 +11,7 @@ from telemetry.core import exceptions
 from telemetry.core import util
 from telemetry.core import video
 from telemetry.core.platform import tracing_category_filter
+from telemetry.core.platform import tracing_options
 from telemetry.timeline import model
 from telemetry.unittest import tab_test_case
 
@@ -101,12 +102,16 @@ class TabTest(tab_test_case.TabTestCase):
     finally:
       self._tab.browser._platform_backend = original_platform_backend
 
+  @benchmark.Disabled('chromeos') # crbug.com/412713.
   def testHighlight(self):
     self.assertEquals(self._tab.url, 'about:blank')
-    self._browser.StartTracing()
+    options = tracing_options.TracingOptions()
+    options.enable_chrome_trace = True
+    self._browser.platform.tracing_controller.Start(
+        options, tracing_category_filter.CreateNoOverheadFilter())
     self._tab.Highlight(bitmap.WEB_PAGE_TEST_ORANGE)
     self._tab.ClearHighlight(bitmap.WEB_PAGE_TEST_ORANGE)
-    trace_data = self._browser.StopTracing()
+    trace_data = self._browser.platform.tracing_controller.Stop()
     timeline_model = model.TimelineModel(trace_data)
     renderer_thread = timeline_model.GetRendererThreadFromTabId(
         self._tab.id)
@@ -118,9 +123,11 @@ class TabTest(tab_test_case.TabTestCase):
     self.assertTrue(found_video_start_event)
 
   @benchmark.Enabled('has tabs')
+  @benchmark.Disabled('chromeos') # crbug.com/412713.
   def testGetRendererThreadFromTabId(self):
     self.assertEquals(self._tab.url, 'about:blank')
-    # Create 3 tabs. The third tab is closed before we call StartTracing.
+    # Create 3 tabs. The third tab is closed before we call
+    # tracing_controller.Start.
     first_tab = self._tab
     second_tab = self._browser.tabs.New()
     second_tab.Navigate('about:blank')
@@ -129,14 +136,15 @@ class TabTest(tab_test_case.TabTestCase):
     third_tab.Navigate('about:blank')
     third_tab.WaitForDocumentReadyStateToBeInteractiveOrBetter()
     third_tab.Close()
-
-    self._browser.StartTracing(
-        tracing_category_filter.CreateNoOverheadFilter())
+    options = tracing_options.TracingOptions()
+    options.enable_chrome_trace = True
+    self._browser.platform.tracing_controller.Start(
+        options, tracing_category_filter.CreateNoOverheadFilter())
     first_tab.ExecuteJavaScript('console.time("first-tab-marker");')
     first_tab.ExecuteJavaScript('console.timeEnd("first-tab-marker");')
     second_tab.ExecuteJavaScript('console.time("second-tab-marker");')
     second_tab.ExecuteJavaScript('console.timeEnd("second-tab-marker");')
-    trace_data = self._browser.StopTracing()
+    trace_data = self._browser.platform.tracing_controller.Stop()
     timeline_model = model.TimelineModel(trace_data)
 
     # Assert that the renderer_thread of the first tab contains

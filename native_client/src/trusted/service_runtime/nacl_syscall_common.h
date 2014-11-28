@@ -39,14 +39,14 @@ int32_t NaClSysExit(struct NaClAppThread  *natp,
                     int                   status);
 
 int32_t NaClSysThreadExit(struct NaClAppThread  *natp,
-                          int32_t               *stack_flag);
+                          uint32_t              stack_flag_addr);
 
 extern int NaClAclBypassChecks;
 
 void NaClInsecurelyBypassAllAclChecks(void);
 
 int32_t NaClSysNameService(struct NaClAppThread *natp,
-                           int32_t              *desc_addr);
+                           uint32_t             desc_addr);
 
 /* bool */
 int NaClSysCommonAddrRangeContainsExecutablePages(struct NaClApp *nap,
@@ -58,9 +58,10 @@ int NaClSysCommonAddrRangeInAllowedDynamicCodeSpace(struct NaClApp *nap,
                                                     uintptr_t usraddr,
                                                     size_t length);
 
-int32_t NaClSysGetTimeOfDay(struct NaClAppThread      *natp,
-                            struct nacl_abi_timeval   *tv,
-                            struct nacl_abi_timezone  *tz);
+int32_t NaClSysClock(struct NaClAppThread *natp);
+
+int32_t NaClSysGetTimeOfDay(struct NaClAppThread *natp,
+                            uint32_t             tv_addr);
 
 int32_t NaClSysClockGetRes(struct NaClAppThread *natp,
                            int                  clk_id,
@@ -74,7 +75,7 @@ int32_t NaClSysTlsInit(struct NaClAppThread  *natp,
                        uint32_t              thread_ptr);
 
 int32_t NaClSysThreadCreate(struct NaClAppThread *natp,
-                            void                 *eip,
+                            uint32_t             prog_ctr,
                             uint32_t             stack_ptr,
                             uint32_t             thread_ptr,
                             uint32_t             second_thread_ptr);
@@ -116,15 +117,10 @@ int32_t NaClSysCondSignal(struct NaClAppThread *natp,
 int32_t NaClSysCondBroadcast(struct NaClAppThread *natp,
                              int32_t              cond_handle);
 
-int32_t NaClSysCondTimedWaitRel(struct NaClAppThread     *natp,
-                                int32_t                  cond_handle,
-                                int32_t                  mutex_handle,
-                                struct nacl_abi_timespec *ts);
-
-int32_t NaClSysCondTimedWaitAbs(struct NaClAppThread     *natp,
-                                int32_t                  cond_handle,
-                                int32_t                  mutex_handle,
-                                struct nacl_abi_timespec *ts);
+int32_t NaClSysCondTimedWaitAbs(struct NaClAppThread *natp,
+                                int32_t              cond_handle,
+                                int32_t              mutex_handle,
+                                uint32_t             ts_addr);
 
 /* Semaphores */
 int32_t NaClSysSemCreate(struct NaClAppThread *natp,
@@ -139,15 +135,15 @@ int32_t NaClSysSemPost(struct NaClAppThread *natp,
 int32_t NaClSysSemGetValue(struct NaClAppThread *natp,
                            int32_t              sem_handle);
 
-int32_t NaClSysNanosleep(struct NaClAppThread     *natp,
-                         struct nacl_abi_timespec *req,
-                         struct nacl_abi_timespec *rem);
+int32_t NaClSysNanosleep(struct NaClAppThread *natp,
+                         uint32_t             req_addr,
+                         uint32_t             rem_addr);
 
 int32_t NaClSysSchedYield(struct NaClAppThread *natp);
 
 int32_t NaClSysSysconf(struct NaClAppThread *natp,
                        int32_t              name,
-                       int32_t              *result);
+                       uint32_t             result_addr);
 
 int32_t NaClSysTestInfoLeak(struct NaClAppThread *natp);
 

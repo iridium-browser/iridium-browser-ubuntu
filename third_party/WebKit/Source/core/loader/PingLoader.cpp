@@ -138,16 +138,16 @@ PingLoader::PingLoader(LocalFrame* frame, ResourceRequest& request, const FetchI
 {
     frame->loader().client()->didDispatchPingLoader(request.url());
 
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceSendRequest", "data", InspectorSendRequestEvent::data(m_identifier, frame, request));
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
+    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
+    InspectorInstrumentation::willSendRequest(frame, m_identifier, frame->loader().documentLoader(), request, ResourceResponse(), initiatorInfo);
+
     m_loader = adoptPtr(blink::Platform::current()->createURLLoader());
     ASSERT(m_loader);
     blink::WrappedResourceRequest wrappedRequest(request);
     wrappedRequest.setAllowStoredCredentials(credentialsAllowed == AllowStoredCredentials);
     m_loader->loadAsynchronously(wrappedRequest, this);
-
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceSendRequest", "data", InspectorSendRequestEvent::data(m_identifier, frame, request));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
-    InspectorInstrumentation::willSendRequest(frame, m_identifier, frame->loader().documentLoader(), request, ResourceResponse(), initiatorInfo);
 
     // If the server never responds, FrameLoader won't be able to cancel this load and
     // we'll sit here waiting forever. Set a very generous timeout, just in case.
@@ -160,11 +160,12 @@ PingLoader::~PingLoader()
         m_loader->cancel();
 }
 
-void PingLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse&)
+void PingLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse& response)
 {
     if (Page* page = this->page()) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
+        const ResourceResponse& resourceResponse = response.toResourceResponse();
+        InspectorInstrumentation::didReceiveResourceResponse(page->deprecatedLocalMainFrame(), m_identifier, 0, resourceResponse, 0);
         InspectorInstrumentation::didFailLoading(page->deprecatedLocalMainFrame(), m_identifier, ResourceError::cancelledError(m_url));
     }
     delete this;
@@ -174,7 +175,6 @@ void PingLoader::didReceiveData(blink::WebURLLoader*, const char*, int, int)
 {
     if (Page* page = this->page()) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didFailLoading(page->deprecatedLocalMainFrame(), m_identifier, ResourceError::cancelledError(m_url));
     }
     delete this;
@@ -184,7 +184,6 @@ void PingLoader::didFinishLoading(blink::WebURLLoader*, double, int64_t)
 {
     if (Page* page = this->page()) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didFailLoading(page->deprecatedLocalMainFrame(), m_identifier, ResourceError::cancelledError(m_url));
     }
     delete this;
@@ -194,7 +193,6 @@ void PingLoader::didFail(blink::WebURLLoader*, const blink::WebURLError& resourc
 {
     if (Page* page = this->page()) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didFailLoading(page->deprecatedLocalMainFrame(), m_identifier, ResourceError(resourceError));
     }
     delete this;
@@ -204,7 +202,6 @@ void PingLoader::timeout(Timer<PingLoader>*)
 {
     if (Page* page = this->page()) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didFailLoading(page->deprecatedLocalMainFrame(), m_identifier, ResourceError::cancelledError(m_url));
     }
     delete this;

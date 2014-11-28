@@ -15,6 +15,8 @@
 #include "base/values.h"
 #include "chromeos/ime/component_extension_ime_manager.h"
 
+class Profile;
+
 namespace chromeos {
 
 // The implementation class of ComponentExtensionIMEManagerDelegate.
@@ -26,10 +28,12 @@ class ComponentExtensionIMEManagerImpl
 
   // ComponentExtensionIMEManagerDelegate overrides:
   virtual std::vector<ComponentExtensionIME> ListIME() OVERRIDE;
-  virtual bool Load(const std::string& extension_id,
+  virtual void Load(Profile* profile,
+                    const std::string& extension_id,
                     const std::string& manifest,
                     const base::FilePath& file_path) OVERRIDE;
-  virtual void Unload(const std::string& extension_id,
+  virtual void Unload(Profile* profile,
+                      const std::string& extension_id,
                       const base::FilePath& file_path) OVERRIDE;
 
  private:
@@ -58,10 +62,6 @@ class ComponentExtensionIMEManagerImpl
 
   // The list of component extension IME.
   std::vector<ComponentExtensionIME> component_extension_list_;
-
-  // For checking the function should be called on UI thread.
-  base::ThreadChecker thread_checker_;
-  base::WeakPtrFactory<ComponentExtensionIMEManagerImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ComponentExtensionIMEManagerImpl);
 };

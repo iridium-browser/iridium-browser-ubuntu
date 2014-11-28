@@ -46,6 +46,7 @@ class MEDIA_EXPORT VideoCaptureDevice {
     enum CaptureApiType {
       MEDIA_FOUNDATION,
       DIRECT_SHOW,
+      DIRECT_SHOW_WDM_CROSSBAR,
       API_TYPE_UNKNOWN
     };
 #endif
@@ -54,6 +55,7 @@ class MEDIA_EXPORT VideoCaptureDevice {
     enum CaptureApiType {
       AVFOUNDATION,
       QTKIT,
+      DECKLINK,
       API_TYPE_UNKNOWN
     };
     // For AVFoundation Api, identify devices that are built-in or USB.
@@ -105,6 +107,16 @@ class MEDIA_EXPORT VideoCaptureDevice {
       return capture_api_class_.capture_api_type();
     }
 #endif
+#if defined(OS_WIN)
+    // Certain devices need an ID different from the |unique_id_| for
+    // capabilities retrieval.
+    const std::string& capabilities_id() const {
+      return capabilities_id_;
+    }
+    void set_capabilities_id(const std::string& id) {
+      capabilities_id_ = id;
+    }
+#endif
 #if defined(OS_MACOSX)
     TransportType transport_type() const {
       return transport_type_;
@@ -137,6 +149,10 @@ class MEDIA_EXPORT VideoCaptureDevice {
     };
 
     CaptureApiClass capture_api_class_;
+#endif
+#if defined(OS_WIN)
+    // ID used for capabilities retrieval. By default is equal to |unique_id|.
+    std::string capabilities_id_;
 #endif
 #if defined(OS_MACOSX)
     TransportType transport_type_;
@@ -217,22 +233,7 @@ class MEDIA_EXPORT VideoCaptureDevice {
     virtual void OnLog(const std::string& message) {}
   };
 
-  // Creates a VideoCaptureDevice object.
-  // Return NULL if the hardware is not available.
-  static VideoCaptureDevice* Create(
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-      const Name& device_name);
   virtual ~VideoCaptureDevice();
-
-  // Gets the names of all video capture devices connected to this computer.
-  static void GetDeviceNames(Names* device_names);
-
-  // Gets the supported formats of a particular device attached to the system.
-  // This method should be called before allocating or starting a device. In
-  // case format enumeration is not supported, or there was a problem, the
-  // formats array will be empty.
-  static void GetDeviceSupportedFormats(const Name& device,
-                                        VideoCaptureFormats* supported_formats);
 
   // Prepares the camera for use. After this function has been called no other
   // applications can use the camera. StopAndDeAllocate() must be called before

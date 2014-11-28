@@ -53,7 +53,7 @@ PassRefPtrWillBeRawPtr<MessageEvent> createConnectEvent(PassRefPtrWillBeRawPtr<M
 // static
 PassRefPtrWillBeRawPtr<SharedWorkerGlobalScope> SharedWorkerGlobalScope::create(const String& name, SharedWorkerThread* thread, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData)
 {
-    RefPtrWillBeRawPtr<SharedWorkerGlobalScope> context = adoptRefWillBeRefCountedGarbageCollected(new SharedWorkerGlobalScope(name, startupData->m_scriptURL, startupData->m_userAgent, thread, startupData->m_workerClients.release()));
+    RefPtrWillBeRawPtr<SharedWorkerGlobalScope> context = adoptRefWillBeNoop(new SharedWorkerGlobalScope(name, startupData->m_scriptURL, startupData->m_userAgent, thread, startupData->m_workerClients.release()));
     context->applyContentSecurityPolicyFromString(startupData->m_contentSecurityPolicy, startupData->m_contentSecurityPolicyType);
     return context.release();
 }
@@ -62,7 +62,6 @@ SharedWorkerGlobalScope::SharedWorkerGlobalScope(const String& name, const KURL&
     : WorkerGlobalScope(url, userAgent, thread, monotonicallyIncreasingTime(), workerClients)
     , m_name(name)
 {
-    ScriptWrappable::init(this);
 }
 
 SharedWorkerGlobalScope::~SharedWorkerGlobalScope()
@@ -79,10 +78,11 @@ SharedWorkerThread* SharedWorkerGlobalScope::thread()
     return static_cast<SharedWorkerThread*>(Base::thread());
 }
 
-void SharedWorkerGlobalScope::logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
+void SharedWorkerGlobalScope::logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
 {
-    WorkerGlobalScope::logExceptionToConsole(errorMessage, sourceURL, lineNumber, columnNumber, callStack);
+    WorkerGlobalScope::logExceptionToConsole(errorMessage, scriptId, sourceURL, lineNumber, columnNumber, callStack);
     RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage, sourceURL, lineNumber);
+    consoleMessage->setScriptId(scriptId);
     consoleMessage->setCallStack(callStack);
     addMessageToWorkerConsole(consoleMessage.release());
 }

@@ -165,7 +165,6 @@ class Thread : public MessageQueue {
   // See ScopedDisallowBlockingCalls for details.
   template <class ReturnT, class FunctorT>
   ReturnT Invoke(const FunctorT& functor) {
-    AssertBlockingIsAllowedOnCurrentThread();
     FunctorMessageHandler<ReturnT, FunctorT> handler(functor);
     Send(&handler);
     return handler.result();
@@ -202,15 +201,6 @@ class Thread : public MessageQueue {
   }
 #endif
 
-  // This method should be called when thread is created using non standard
-  // method, like derived implementation of rtc::Thread and it can not be
-  // started by calling Start(). This will set started flag to true and
-  // owned to false. This must be called from the current thread.
-  // NOTE: These methods should be used by the derived classes only, added here
-  // only for testing.
-  bool WrapCurrent();
-  void UnwrapCurrent();
-
   // Expose private method running() for tests.
   //
   // DANGER: this is a terrible public API.  Most callers that might want to
@@ -219,13 +209,25 @@ class Thread : public MessageQueue {
   // of whatever code is conditionally executing because of the return value!
   bool RunningForTest() { return running(); }
 
- protected:
-  // Blocks the calling thread until this thread has terminated.
-  void Join();
-
   // Sets the per-thread allow-blocking-calls flag and returns the previous
   // value.
   bool SetAllowBlockingCalls(bool allow);
+
+ protected:
+  // This method should be called when thread is created using non standard
+  // method, like derived implementation of rtc::Thread and it can not be
+  // started by calling Start(). This will set started flag to true and
+  // owned to false. This must be called from the current thread.
+  bool WrapCurrent();
+  void UnwrapCurrent();
+
+  // Same as WrapCurrent except that it never fails as it does not try to
+  // acquire the synchronization access of the thread. The caller should never
+  // call Stop() or Join() on this thread.
+  void SafeWrapCurrent();
+
+  // Blocks the calling thread until this thread has terminated.
+  void Join();
 
   static void AssertBlockingIsAllowedOnCurrentThread();
 
@@ -237,10 +239,23 @@ class Thread : public MessageQueue {
   // ThreadManager calls this instead WrapCurrent() because
   // ThreadManager::Instance() cannot be used while ThreadManager is
   // being created.
-  bool WrapCurrentWithThreadManager(ThreadManager* thread_manager);
+  // The method tries to get synchronization rights of the thread on Windows if
+  // |need_synchronize_access| is true.
+  bool WrapCurrentWithThreadManager(ThreadManager* thread_manager,
+                                    bool need_synchronize_access);
 
   // Return true if the thread was started and hasn't yet stopped.
   bool running() { return running_.Wait(0); }
+
+  // Processes received "Send" requests. If |source| is not NULL, only requests
+  // from |source| are processed, otherwise, all requests are processed.
+  void ReceiveSendsFromThread(const Thread* source);
+
+  // If |source| is not NULL, pops the first "Send" message from |source| in
+  // |sendlist_|, otherwise, pops the first "Send" message of |sendlist_|.
+  // The caller must lock |crit_| before calling.
+  // Returns true if there is such a message.
+  bool PopSendMessageFromThread(const Thread* source, _SendMessage* msg);
 
   std::list<_SendMessage> sendlist_;
   std::string name_;

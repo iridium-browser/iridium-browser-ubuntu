@@ -5,8 +5,11 @@
 #include "tools/gn/binary_target_generator.h"
 
 #include "tools/gn/config_values_generator.h"
+#include "tools/gn/deps_iterator.h"
 #include "tools/gn/err.h"
+#include "tools/gn/functions.h"
 #include "tools/gn/scope.h"
+#include "tools/gn/value_extractors.h"
 #include "tools/gn/variables.h"
 
 BinaryTargetGenerator::BinaryTargetGenerator(
@@ -25,28 +28,31 @@ BinaryTargetGenerator::~BinaryTargetGenerator() {
 void BinaryTargetGenerator::DoRun() {
   target_->set_output_type(output_type_);
 
-  FillOutputName();
-  if (err_->has_error())
+  if (!FillOutputName())
     return;
 
-  FillOutputExtension();
-  if (err_->has_error())
+  if (!FillOutputExtension())
     return;
 
-  FillSources();
-  if (err_->has_error())
+  if (!FillSources())
     return;
 
-  FillPublic();
-  if (err_->has_error())
+  if (!FillPublic())
     return;
 
-  FillInputs();
-  if (err_->has_error())
+  if (!FillCheckIncludes())
     return;
 
-  FillConfigs();
-  if (err_->has_error())
+  if (!FillInputs())
+    return;
+
+  if (!FillConfigs())
+    return;
+
+  if (!FillAllowCircularIncludesFrom())
+    return;
+
+  if (!FillCompleteStaticLib())
     return;
 
   // Config values (compiler flags, etc.) set directly on this target.
@@ -57,20 +63,82 @@ void BinaryTargetGenerator::DoRun() {
     return;
 }
 
-void BinaryTargetGenerator::FillOutputName() {
-  const Value* value = scope_->GetValue(variables::kOutputName, true);
+bool BinaryTargetGenerator::FillCheckIncludes() {
+  const Value* value = scope_->GetValue(variables::kCheckIncludes, true);
   if (!value)
-    return;
-  if (!value->VerifyTypeIs(Value::STRING, err_))
-    return;
-  target_->set_output_name(value->string_value());
+    return true;
+  if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
+    return false;
+  target_->set_check_includes(value->boolean_value());
+  return true;
 }
 
-void BinaryTargetGenerator::FillOutputExtension() {
+bool BinaryTargetGenerator::FillCompleteStaticLib() {
+  if (target_->output_type() == Target::STATIC_LIBRARY) {
+    const Value* value = scope_->GetValue(variables::kCompleteStaticLib, true);
+    if (!value)
+      return true;
+    if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
+      return false;
+    target_->set_complete_static_lib(value->boolean_value());
+  }
+  return true;
+}
+
+bool BinaryTargetGenerator::FillOutputName() {
+  const Value* value = scope_->GetValue(variables::kOutputName, true);
+  if (!value)
+    return true;
+  if (!value->VerifyTypeIs(Value::STRING, err_))
+    return false;
+  target_->set_output_name(value->string_value());
+  return true;
+}
+
+bool BinaryTargetGenerator::FillOutputExtension() {
   const Value* value = scope_->GetValue(variables::kOutputExtension, true);
   if (!value)
-    return;
+    return true;
   if (!value->VerifyTypeIs(Value::STRING, err_))
-    return;
+    return false;
   target_->set_output_extension(value->string_value());
+  return true;
+}
+
+bool BinaryTargetGenerator::FillAllowCircularIncludesFrom() {
+  const Value* value = scope_->GetValue(
+      variables::kAllowCircularIncludesFrom, true);
+  if (!value)
+    return true;
+
+  UniqueVector<Label> circular;
+  ExtractListOfUniqueLabels(*value, scope_->GetSourceDir(),
+                            ToolchainLabelForScope(scope_), &circular, err_);
+  if (err_->has_error())
+    return false;
+
+  // Validate that all circular includes entries are in the deps.
+  for (size_t circular_i = 0; circular_i < circular.size(); circular_i++) {
+    bool found_dep = false;
+    for (DepsIterator iter(target_, DepsIterator::LINKED_ONLY);
+         !iter.done(); iter.Advance()) {
+      if (iter.label() == circular[circular_i]) {
+        found_dep = true;
+        break;
+      }
+    }
+    if (!found_dep) {
+      *err_ = Err(*value, "Label not in deps.",
+          "The label \"" + circular[circular_i].GetUserVisibleName(false) +
+          "\"\nwas not in the deps of this target. "
+          "allow_circular_includes_from only allows\ntargets present in the "
+          "deps.");
+      return false;
+    }
+  }
+
+  // Add to the set.
+  for (size_t i = 0; i < circular.size(); i++)
+    target_->allow_circular_includes_from().insert(circular[i]);
+  return true;
 }

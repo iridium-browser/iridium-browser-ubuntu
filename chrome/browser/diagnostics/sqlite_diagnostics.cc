@@ -5,7 +5,7 @@
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 
 #include "base/base_paths.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
@@ -22,8 +22,8 @@
 #include "content/public/common/content_constants.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
+#include "storage/browser/database/database_tracker.h"
 #include "third_party/sqlite/sqlite3.h"
-#include "webkit/browser/database/database_tracker.h"
 
 namespace diagnostics {
 
@@ -207,9 +207,9 @@ DiagnosticsTest* MakeSqliteCookiesDbTest() {
 }
 
 DiagnosticsTest* MakeSqliteWebDatabaseTrackerDbTest() {
-  base::FilePath databases_dir(webkit_database::kDatabaseDirectoryName);
+  base::FilePath databases_dir(storage::kDatabaseDirectoryName);
   base::FilePath tracker_db =
-      databases_dir.Append(webkit_database::kTrackerDatabaseFileName);
+      databases_dir.Append(storage::kTrackerDatabaseFileName);
   return new SqliteIntegrityTest(
       SqliteIntegrityTest::NO_FLAGS_SET,
       DIAGNOSTICS_SQLITE_INTEGRITY_DATABASE_TRACKER_TEST,

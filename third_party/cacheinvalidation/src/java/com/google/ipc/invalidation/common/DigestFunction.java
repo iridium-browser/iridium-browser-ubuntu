@@ -15,12 +15,10 @@
  */
 package com.google.ipc.invalidation.common;
 
-
 /**
  * Interface specifying a function to compute digests.
  *
  */
-
 public interface DigestFunction {
   /** Clears the digest state. */
   void reset();

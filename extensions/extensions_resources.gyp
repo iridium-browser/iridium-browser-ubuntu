@@ -7,9 +7,6 @@
     {
       'target_name': 'extensions_resources',
       'type': 'none',
-      'dependencies': [
-        '../device/serial/serial.gyp:device_serial_mojo',
-      ],
       'variables': {
         'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/extensions',
       },
@@ -18,6 +15,13 @@
           'action_name': 'generate_extensions_resources',
           'variables': {
             'grit_grd_file': 'extensions_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'generate_extensions_browser_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/extensions_browser_resources.grd',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -33,6 +37,13 @@
         },
       ],
       'includes': [ '../build/grit_target.gypi' ],
+      'conditions': [
+        ['enable_extensions==1', {
+          'dependencies': [
+            '../device/serial/serial.gyp:device_serial_mojo',
+          ],
+        }],
+      ],
     }
   ]
 }

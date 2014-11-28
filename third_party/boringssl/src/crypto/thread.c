@@ -58,6 +58,10 @@
 
 #include <errno.h>
 
+#if defined(OPENSSL_WINDOWS)
+#include <Windows.h>
+#endif
+
 #include <openssl/mem.h>
 #include <openssl/type_check.h>
 
@@ -163,7 +167,7 @@ void CRYPTO_THREADID_current(CRYPTO_THREADID *id) {
     return;
   }
 
-#if defined(OPENSSL_SYS_WIN32)
+#if defined(OPENSSL_WINDOWS)
   CRYPTO_THREADID_set_numeric(id, (unsigned long)GetCurrentThreadId());
 #else
   /* For everything else, default to using the address of 'errno' */

@@ -114,6 +114,7 @@ BrowserHeaderPainterAsh::BrowserHeaderPainterAsh()
       is_incognito_(false),
       view_(NULL),
       window_icon_(NULL),
+      window_icon_x_inset_(ash::HeaderPainterUtil::GetDefaultLeftViewXInset()),
       caption_button_container_(NULL),
       painted_height_(0),
       initial_paint_(true),
@@ -245,10 +246,13 @@ void BrowserHeaderPainterAsh::LayoutHeader() {
   if (window_icon_) {
     // Vertically center the window icon with respect to the caption button
     // container.
-    int icon_size = ash::HeaderPainterUtil::GetDefaultIconSize();
-    int icon_offset_y = (caption_button_container_->height() - icon_size) / 2;
-    window_icon_->SetBounds(ash::HeaderPainterUtil::GetIconXOffset(),
-        icon_offset_y, icon_size, icon_size);
+    gfx::Size icon_size(window_icon_->GetPreferredSize());
+    int icon_offset_y = (caption_button_container_->height() -
+                         icon_size.height()) / 2;
+    window_icon_->SetBounds(window_icon_x_inset_,
+                            icon_offset_y,
+                            icon_size.width(),
+                            icon_size.height());
   }
 }
 
@@ -262,6 +266,10 @@ void BrowserHeaderPainterAsh::SetHeaderHeightForPainting(int height) {
 
 void BrowserHeaderPainterAsh::SchedulePaintForTitle() {
   view_->SchedulePaintInRect(GetTitleBounds());
+}
+
+void BrowserHeaderPainterAsh::UpdateLeftViewXInset(int left_view_x_inset) {
+  window_icon_x_inset_ = left_view_x_inset;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -401,12 +409,19 @@ void BrowserHeaderPainterAsh::UpdateCaptionButtonImages() {
       IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_MINIMIZE,
       hover_background_id,
       pressed_background_id);
+
+  int size_icon_id = 0;
+  if (frame_->IsMaximized() || frame_->IsFullscreen())
+    size_icon_id = IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_RESTORE;
+  else
+    size_icon_id = IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZE;
   caption_button_container_->SetButtonImages(
       ash::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
-      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_SIZE,
-      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_SIZE,
+      size_icon_id,
+      size_icon_id,
       hover_background_id,
       pressed_background_id);
+
   caption_button_container_->SetButtonImages(
       ash::CAPTION_BUTTON_ICON_CLOSE,
       IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_CLOSE,

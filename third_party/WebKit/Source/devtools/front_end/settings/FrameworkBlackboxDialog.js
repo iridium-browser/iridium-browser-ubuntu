@@ -22,6 +22,9 @@ WebInspector.FrameworkBlackboxDialog = function()
 
     var contents = this.element.createChild("div", "contents");
 
+    var contentScriptsSection = contents.createChild("div", "blackbox-content-scripts");
+    contentScriptsSection.appendChild(WebInspector.SettingsUI.createSettingCheckbox(WebInspector.UIString("Blackbox content scripts"), WebInspector.settings.skipContentScripts, true));
+
     var blockHeader = contents.createChild("div", "columns-header");
     blockHeader.createChild("span").textContent = WebInspector.UIString("URI pattern");
     blockHeader.createChild("span").textContent = WebInspector.UIString("Behavior");
@@ -129,7 +132,7 @@ WebInspector.FrameworkBlackboxDialog.prototype = {
         var oldPattern = itemId;
         var newPattern = data["pattern"];
         try {
-            if (newPattern && (oldPattern === newPattern || !this._entries.contains(newPattern)))
+            if (newPattern && (oldPattern === newPattern || !this._entries.has(newPattern)))
                 regex = new RegExp(newPattern);
         } catch (e) {
         }
@@ -162,7 +165,7 @@ WebInspector.FrameworkBlackboxDialog.prototype = {
         WebInspector.settings.skipStackFramesPattern.setAsArray(patterns);
 
         if (oldPattern && oldPattern === newPattern) {
-            this._entries.put(newPattern, disabled ? this._disabledLabel : this._blackboxLabel)
+            this._entries.set(newPattern, disabled ? this._disabledLabel : this._blackboxLabel)
             this._patternsList.itemForId(oldPattern).classList.toggle("disabled", disabled);
             this._patternsList.refreshItem(newPattern);
             return;
@@ -201,9 +204,9 @@ WebInspector.FrameworkBlackboxDialog.prototype = {
      */
     _addPattern: function(pattern, disabled)
     {
-        if (!pattern || this._entries.contains(pattern))
+        if (!pattern || this._entries.has(pattern))
             return;
-        this._entries.put(pattern, disabled ? this._disabledLabel : this._blackboxLabel);
+        this._entries.set(pattern, disabled ? this._disabledLabel : this._blackboxLabel);
         var listItem = this._patternsList.addItem(pattern, null);
         listItem.classList.toggle("disabled", disabled);
         this._resize();

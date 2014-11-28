@@ -928,10 +928,6 @@ body.platform-linux .source-code {
     margin-left: -18px;
 }
 
-.console-message-text {
-    white-space: pre-wrap;
-}
-
 .console-async-trace-text {
     margin-left: -10px;
     font-style: italic;
@@ -1162,6 +1158,8 @@ ol.watch-expressions > li.hovered {
 }
 
 .console-formatted-object,
+.console-formatted-map,
+.console-formatted-set,
 .console-formatted-node,
 .console-formatted-array {
     position: relative;
@@ -1175,6 +1173,8 @@ ol.watch-expressions > li.hovered {
 }
 
 .console-formatted-object .section,
+.console-formatted-map .section,
+.console-formatted-set .section,
 .console-formatted-node .section,
 .console-formatted-array .section {
     position: static;
@@ -1185,6 +1185,8 @@ ol.watch-expressions > li.hovered {
 }
 
 .console-formatted-object .properties,
+.console-formatted-map .properties,
+.console-formatted-set .properties,
 .console-formatted-node .properties {
     padding-left: 0 !important;
 }
@@ -1344,6 +1346,10 @@ iframe.panel.extension {
 .source-code {
     font-family: monospace;
     font-size: 11px !important;
+    white-space: pre-wrap;
+}
+
+.console-message-text {
     white-space: pre-wrap;
 }
 
@@ -1737,7 +1743,7 @@ li.editing-sub-part .delete-button {
 
 .section .properties .name,
 .event-properties .name,
-.console-formatted-object .name {
+.console-object-preview .name {
     color: rgb(136, 19, 145);
 }
 
@@ -2370,6 +2376,10 @@ body.platform-mac .search-drawer-header input[type="search"].search-config-searc
     flex: auto;
 }
 
+.search-results .empty-view {
+    pointer-events:none;
+}
+
 #search-results-pane-file-based li {
     list-style: none;
 }
@@ -2787,4 +2797,61 @@ body.inactive select.chrome-select,
     box-shadow: 0 1px 0 rgba(80, 80, 80, 0.08),
     inset 0 1px 2px rgba(255, 255, 255, 0.75);
     color: #aaa;
+}
+
+.resources-dividers {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    z-index: -100;
+    bottom: 0;
+}
+
+.resources-event-dividers {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 100%;
+    top: 0;
+    z-index: 300;
+    pointer-events: none;
+}
+
+.resources-dividers-label-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background-color: rgba(255, 255, 255, 0.85);
+    background-clip: padding-box;
+    height: 20px;
+    z-index: 200;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.resources-divider {
+    position: absolute;
+    width: 1px;
+    top: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.resources-event-divider {
+    position: absolute;
+    width: 2px;
+    top: 0;
+    bottom: 0;
+    z-index: 300;
+}
+
+.resources-divider-label {
+    position: absolute;
+    top: 4px;
+    right: 3px;
+    font-size: 80%;
+    white-space: nowrap;
+    pointer-events: none;
 }

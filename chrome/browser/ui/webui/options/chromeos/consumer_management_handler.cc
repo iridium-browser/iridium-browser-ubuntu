@@ -9,11 +9,11 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -64,7 +64,6 @@ void ConsumerManagementHandler::GetLocalizedValues(
 }
 
 void ConsumerManagementHandler::RegisterMessages() {
-  // Callback to show keyboard overlay.
   web_ui()->RegisterMessageCallback(
       "enrollConsumerManagement",
       base::Bind(&ConsumerManagementHandler::HandleEnrollConsumerManagement,
@@ -84,8 +83,8 @@ void ConsumerManagementHandler::HandleEnrollConsumerManagement(
   }
 
   CHECK(management_service_);
-  management_service_->SetEnrollmentState(
-      policy::ConsumerManagementService::ENROLLMENT_ENROLLING);
+  management_service_->SetEnrollmentStage(
+      policy::ConsumerManagementService::ENROLLMENT_STAGE_REQUESTED);
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
 }
 

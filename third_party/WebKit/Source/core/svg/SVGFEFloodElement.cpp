@@ -19,10 +19,10 @@
  */
 
 #include "config.h"
-
 #include "core/svg/SVGFEFloodElement.h"
 
 #include "core/SVGNames.h"
+#include "core/rendering/RenderObject.h"
 #include "core/rendering/style/RenderStyle.h"
 #include "core/rendering/style/SVGRenderStyle.h"
 
@@ -31,7 +31,6 @@ namespace blink {
 inline SVGFEFloodElement::SVGFEFloodElement(Document& document)
     : SVGFilterPrimitiveStandardAttributes(SVGNames::feFloodTag, document)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(SVGFEFloodElement)

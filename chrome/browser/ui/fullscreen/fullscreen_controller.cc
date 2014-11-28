@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 
-#include "apps/ui/web_contents_sizer.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/fullscreen/fullscreen_within_tab_helper.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -122,25 +122,25 @@ void FullscreenController::ToggleFullscreenModeForTab(WebContents* web_contents,
 #endif
 
   bool in_browser_or_tab_fullscreen_mode = window_->IsFullscreen();
-  bool window_is_fullscreen_with_chrome = false;
-#if defined(OS_MACOSX)
-  window_is_fullscreen_with_chrome = window_->IsFullscreenWithChrome();
-#endif
 
   if (enter_fullscreen) {
     SetFullscreenedTab(web_contents);
     if (!in_browser_or_tab_fullscreen_mode) {
       state_prior_to_tab_fullscreen_ = STATE_NORMAL;
       ToggleFullscreenModeInternal(TAB);
-    } else if (window_is_fullscreen_with_chrome) {
-#if defined(OS_MACOSX)
-      state_prior_to_tab_fullscreen_ = STATE_BROWSER_FULLSCREEN_WITH_CHROME;
-      EnterFullscreenModeInternal(TAB);
-#else
-      NOTREACHED();
-#endif
     } else {
+#if defined(OS_MACOSX)
+      state_prior_to_tab_fullscreen_ =
+          window_->IsFullscreenWithChrome()
+              ? STATE_BROWSER_FULLSCREEN_WITH_CHROME
+              : STATE_BROWSER_FULLSCREEN_NO_CHROME;
+
+      // The browser is in AppKit fullscreen. Remove the chrome, if it's
+      // present.
+      window_->EnterFullscreenWithoutChrome();
+#else
       state_prior_to_tab_fullscreen_ = STATE_BROWSER_FULLSCREEN_NO_CHROME;
+#endif  // defined(OS_MACOSX)
 
       // We need to update the fullscreen exit bubble, e.g., going from browser
       // fullscreen to tab fullscreen will need to show different content.
@@ -163,12 +163,15 @@ void FullscreenController::ToggleFullscreenModeForTab(WebContents* web_contents,
 #if defined(OS_MACOSX)
         if (state_prior_to_tab_fullscreen_ ==
             STATE_BROWSER_FULLSCREEN_WITH_CHROME) {
-          EnterFullscreenModeInternal(BROWSER_WITH_CHROME);
-        } else {
-          // Clear the bubble URL, which forces the Mac UI to redraw.
-          UpdateFullscreenExitBubbleContent();
+          // The browser is still in AppKit Fullscreen. This just adds back the
+          // chrome.
+          window_->EnterFullscreenWithChrome();
         }
-#endif
+
+        // Clear the bubble URL, which forces the Mac UI to redraw.
+        UpdateFullscreenExitBubbleContent();
+#endif  // defined(OS_MACOSX)
+
         // If currently there is a tab in "tab fullscreen" mode and fullscreen
         // was not caused by it (i.e., previously it was in "browser fullscreen"
         // mode), we need to switch back to "browser fullscreen" mode. In this
@@ -208,9 +211,6 @@ void FullscreenController::SetMetroSnapMode(bool enable) {
 
 #if defined(OS_MACOSX)
 void FullscreenController::ToggleBrowserFullscreenWithChrome() {
-  // This method cannot be called if simplified fullscreen is enabled.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  DCHECK(!command_line->HasSwitch(switches::kEnableSimplifiedFullscreen));
   ToggleFullscreenModeInternal(BROWSER_WITH_CHROME);
 }
 #endif
@@ -311,7 +311,7 @@ void FullscreenController::OnTabDetachedFromView(WebContents* old_contents) {
       old_contents->GetFullscreenRenderWidgetHostView();
   if (current_fs_view)
     current_fs_view->SetSize(old_contents->GetPreferredSize());
-  apps::ResizeWebContents(old_contents, old_contents->GetPreferredSize());
+  ResizeWebContents(old_contents, old_contents->GetPreferredSize());
 }
 
 void FullscreenController::OnTabClosing(WebContents* web_contents) {

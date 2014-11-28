@@ -65,8 +65,7 @@ class QuicPacketGeneratorPeer;
 
 class QuicAckNotifier;
 
-class NET_EXPORT_PRIVATE QuicPacketGenerator
-    : public QuicSentPacketManager::NetworkChangeVisitor {
+class NET_EXPORT_PRIVATE QuicPacketGenerator {
  public:
   class NET_EXPORT_PRIVATE DelegateInterface {
    public:
@@ -78,7 +77,7 @@ class NET_EXPORT_PRIVATE QuicPacketGenerator
     virtual QuicCongestionFeedbackFrame* CreateFeedbackFrame() = 0;
     virtual QuicStopWaitingFrame* CreateStopWaitingFrame() = 0;
     // Takes ownership of |packet.packet| and |packet.retransmittable_frames|.
-    virtual bool OnSerializedPacket(const SerializedPacket& packet) = 0;
+    virtual void OnSerializedPacket(const SerializedPacket& packet) = 0;
     virtual void CloseConnection(QuicErrorCode error, bool from_peer) = 0;
   };
 
@@ -100,9 +99,8 @@ class NET_EXPORT_PRIVATE QuicPacketGenerator
 
   virtual ~QuicPacketGenerator();
 
-  // QuicSentPacketManager::NetworkChangeVisitor methods.
-  virtual void OnCongestionWindowChange(QuicByteCount congestion_window)
-      OVERRIDE;
+  // Called by the connection in the event of the congestion window changing.
+  void OnCongestionWindowChange(QuicByteCount congestion_window);
 
   // Indicates that an ACK frame should be sent.  If |also_send_feedback| is
   // true, then it also indicates a CONGESTION_FEEDBACK frame should be sent.

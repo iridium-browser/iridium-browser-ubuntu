@@ -36,6 +36,25 @@ IPC_STRUCT_TRAITS_BEGIN(safe_browsing::zip_analyzer::Results)
   IPC_STRUCT_TRAITS_MEMBER(has_archive)
 IPC_STRUCT_TRAITS_END()
 
+#if defined(OS_WIN)
+
+// A vector of filters, each being a Tuple2 containing a display string (i.e.
+// "Text Files") and a filter pattern (i.e. "*.txt").
+typedef std::vector<Tuple2<base::string16, base::string16> >
+    GetOpenFileNameFilter;
+
+IPC_STRUCT_BEGIN(ChromeUtilityMsg_GetSaveFileName_Params)
+  IPC_STRUCT_MEMBER(HWND, owner)
+  IPC_STRUCT_MEMBER(DWORD, flags)
+  IPC_STRUCT_MEMBER(GetOpenFileNameFilter, filters)
+  IPC_STRUCT_MEMBER(int, one_based_filter_index)
+  IPC_STRUCT_MEMBER(base::FilePath, suggested_filename)
+  IPC_STRUCT_MEMBER(base::FilePath, initial_directory)
+  IPC_STRUCT_MEMBER(base::string16, default_extension)
+IPC_STRUCT_END()
+
+#endif  // OS_WIN
+
 //------------------------------------------------------------------------------
 // Utility process messages:
 // These are messages from the browser to the utility process.
@@ -46,8 +65,9 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_UnpackWebResource,
                      std::string /* JSON data */)
 
 // Tell the utility process to decode the given image data.
-IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_DecodeImage,
-                     std::vector<unsigned char>)  // encoded image contents
+IPC_MESSAGE_CONTROL2(ChromeUtilityMsg_DecodeImage,
+                     std::vector<unsigned char> /* encoded image contents */,
+                     bool /* shrink image if needed for IPC msg limit */)
 
 // Tell the utility process to decode the given JPEG image data with a robust
 // libjpeg codec.
@@ -91,10 +111,8 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
 #endif
 
 #if defined(OS_WIN)
-// A vector of filters, each being a Tuple2a display string (i.e. "Text Files")
-// and a filter pattern (i.e. "*.txt")..
-typedef std::vector<Tuple2<base::string16, base::string16> >
-    GetOpenFileNameFilter;
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_OpenItemViaShell,
+                     base::FilePath /* full_path */)
 
 // Instructs the utility process to invoke GetOpenFileName. |owner| is the
 // parent of the modal dialog, |flags| are OFN_* flags. |filter| constrains the
@@ -110,6 +128,8 @@ IPC_MESSAGE_CONTROL5(ChromeUtilityMsg_GetOpenFileName,
                      GetOpenFileNameFilter /* filter */,
                      base::FilePath /* initial_directory */,
                      base::FilePath /* filename */)
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_GetSaveFileName,
+                     ChromeUtilityMsg_GetSaveFileName_Params /* params */)
 #endif  // defined(OS_WIN)
 
 //------------------------------------------------------------------------------
@@ -160,4 +180,8 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_GetOpenFileName_Failed)
 IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetOpenFileName_Result,
                      base::FilePath /* directory */,
                      std::vector<base::FilePath> /* filenames */)
+IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_GetSaveFileName_Failed)
+IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetSaveFileName_Result,
+                     base::FilePath /* path */,
+                     int /* one_based_filter_index  */)
 #endif  // defined(OS_WIN)

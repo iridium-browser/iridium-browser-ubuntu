@@ -10,7 +10,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/renderer/accessibility/blink_ax_enum_conversion.h"
+#include "content/renderer/browser_plugin/browser_plugin.h"
 #include "content/renderer/render_frame_impl.h"
+#include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
@@ -22,9 +24,11 @@
 #include "third_party/WebKit/public/web/WebDocumentType.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
-#include "third_party/WebKit/public/web/WebInputElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
+#include "third_party/WebKit/public/web/WebPlugin.h"
+#include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
 using base::ASCIIToUTF16;
@@ -33,9 +37,10 @@ using blink::WebAXObject;
 using blink::WebDocument;
 using blink::WebDocumentType;
 using blink::WebElement;
-using blink::WebFrame;
 using blink::WebLocalFrame;
 using blink::WebNode;
+using blink::WebPlugin;
+using blink::WebPluginContainer;
 using blink::WebVector;
 using blink::WebView;
 
@@ -70,6 +75,8 @@ std::string GetEquivalentAriaRoleString(const ui::AXRole role) {
     case ui::AX_ROLE_CONTENT_INFO:
     case ui::AX_ROLE_FOOTER:
       return "contentinfo";
+    case ui::AX_ROLE_IMAGE:
+      return "img";
     case ui::AX_ROLE_MAIN:
       return "main";
     case ui::AX_ROLE_NAVIGATION:
@@ -96,7 +103,9 @@ void AddIntListAttributeFromWebObjects(ui::AXIntListAttribute attr,
 }  // Anonymous namespace
 
 BlinkAXTreeSource::BlinkAXTreeSource(RenderFrameImpl* render_frame)
-    : render_frame_(render_frame) {
+    : render_frame_(render_frame),
+      node_to_frame_routing_id_map_(NULL),
+      node_to_browser_plugin_instance_id_map_(NULL) {
 }
 
 BlinkAXTreeSource::~BlinkAXTreeSource() {
@@ -110,6 +119,14 @@ bool BlinkAXTreeSource::IsInTree(blink::WebAXObject node) const {
     node = GetParent(node);
   }
   return false;
+}
+
+void BlinkAXTreeSource::CollectChildFrameIdMapping(
+    std::map<int32, int>* node_to_frame_routing_id_map,
+    std::map<int32, int>* node_to_browser_plugin_instance_id_map) {
+  node_to_frame_routing_id_map_ = node_to_frame_routing_id_map;
+  node_to_browser_plugin_instance_id_map_ =
+      node_to_browser_plugin_instance_id_map;
 }
 
 blink::WebAXObject BlinkAXTreeSource::GetRoot() const {
@@ -344,6 +361,16 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     live_busy = UTF16ToUTF8(element.getAttribute("aria-busy"));
     live_status = UTF16ToUTF8(element.getAttribute("aria-live"));
     live_relevant = UTF16ToUTF8(element.getAttribute("aria-relevant"));
+
+    // Browser plugin (used in a <webview>).
+    if (node_to_browser_plugin_instance_id_map_) {
+      BrowserPlugin* browser_plugin = BrowserPlugin::GetFromNode(element);
+      if (browser_plugin) {
+        (*node_to_browser_plugin_instance_id_map_)[dst->id] =
+            browser_plugin->browser_plugin_instance_id();
+        dst->AddBoolAttribute(ui::AX_ATTR_IS_AX_TREE_HOST, true);
+      }
+    }
   }
 
   // Walk up the parent chain to set live region attributes of containers
@@ -439,17 +466,35 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
                               UTF16ToUTF8(doctype.name()));
     }
 
-    const gfx::Size& scroll_offset = document.frame()->scrollOffset();
+    const gfx::Size& scroll_offset = document.scrollOffset();
     dst->AddIntAttribute(ui::AX_ATTR_SCROLL_X, scroll_offset.width());
     dst->AddIntAttribute(ui::AX_ATTR_SCROLL_Y, scroll_offset.height());
 
-    const gfx::Size& min_offset = document.frame()->minimumScrollOffset();
+    const gfx::Size& min_offset = document.minimumScrollOffset();
     dst->AddIntAttribute(ui::AX_ATTR_SCROLL_X_MIN, min_offset.width());
     dst->AddIntAttribute(ui::AX_ATTR_SCROLL_Y_MIN, min_offset.height());
 
-    const gfx::Size& max_offset = document.frame()->maximumScrollOffset();
+    const gfx::Size& max_offset = document.maximumScrollOffset();
     dst->AddIntAttribute(ui::AX_ATTR_SCROLL_X_MAX, max_offset.width());
     dst->AddIntAttribute(ui::AX_ATTR_SCROLL_Y_MAX, max_offset.height());
+
+    if (node_to_frame_routing_id_map_ && !src.equals(GetRoot())) {
+      WebLocalFrame* frame = document.frame();
+      RenderFrameImpl* render_frame = RenderFrameImpl::FromWebFrame(frame);
+      if (render_frame) {
+        (*node_to_frame_routing_id_map_)[dst->id] =
+            render_frame->GetRoutingID();
+        dst->AddBoolAttribute(ui::AX_ATTR_IS_AX_TREE_HOST, true);
+      } else {
+        RenderFrameProxy* render_frame_proxy =
+            RenderFrameProxy::FromWebFrame(frame);
+        if (render_frame_proxy) {
+          (*node_to_frame_routing_id_map_)[dst->id] =
+              render_frame_proxy->routing_id();
+          dst->AddBoolAttribute(ui::AX_ATTR_IS_AX_TREE_HOST, true);
+        }
+      }
+    }
   }
 
   if (dst->role == ui::AX_ROLE_TABLE) {
@@ -552,11 +597,8 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
 }
 
 blink::WebDocument BlinkAXTreeSource::GetMainDocument() const {
-  WebView* view = render_frame_->render_view()->GetWebView();
-  WebFrame* main_frame = view ? view->mainFrame() : NULL;
-
-  if (main_frame)
-    return main_frame->document();
+  if (render_frame_ && render_frame_->GetWebFrame())
+    return render_frame_->GetWebFrame()->document();
   return WebDocument();
 }
 

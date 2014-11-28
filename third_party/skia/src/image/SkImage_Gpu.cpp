@@ -11,7 +11,6 @@
 #include "SkCanvas.h"
 #include "GrContext.h"
 #include "GrTexture.h"
-#include "SkGrPixelRef.h"
 
 class SkImage_Gpu : public SkImage_Base {
 public:
@@ -31,6 +30,9 @@ public:
     virtual SkShader* onNewShader(SkShader::TileMode,
                                   SkShader::TileMode,
                                   const SkMatrix* localMatrix) const SK_OVERRIDE;
+
+    virtual bool isOpaque() const SK_OVERRIDE;
+
 private:
     SkBitmap    fBitmap;
 
@@ -42,7 +44,7 @@ private:
 SkImage_Gpu::SkImage_Gpu(const SkBitmap& bitmap)
     : INHERITED(bitmap.width(), bitmap.height())
     , fBitmap(bitmap) {
-    SkASSERT(NULL != fBitmap.getTexture());
+    SkASSERT(fBitmap.getTexture());
 }
 
 SkImage_Gpu::~SkImage_Gpu() {
@@ -70,6 +72,10 @@ GrTexture* SkImage_Gpu::onGetTexture() const {
 
 bool SkImage_Gpu::getROPixels(SkBitmap* dst) const {
     return fBitmap.copyTo(dst, kN32_SkColorType);
+}
+
+bool SkImage_Gpu::isOpaque() const {
+    return fBitmap.isOpaque();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -42,6 +42,7 @@
 #include "core/html/imports/HTMLImport.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/SubresourceIntegrity.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/svg/SVGScriptElement.h"
@@ -217,7 +218,10 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition, Legacy
         m_characterEncoding = elementDocument.charset();
 
     if (client->hasSourceAttribute()) {
-        if (!fetchScript(client->sourceAttributeValue()))
+        FetchRequest::DeferOption defer = FetchRequest::NoDefer;
+        if (!m_parserInserted || client->asyncAttributeValue() || client->deferAttributeValue())
+            defer = FetchRequest::LazyLoad;
+        if (!fetchScript(client->sourceAttributeValue(), defer))
             return false;
     }
 
@@ -246,7 +250,7 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition, Legacy
     return true;
 }
 
-bool ScriptLoader::fetchScript(const String& sourceUrl)
+bool ScriptLoader::fetchScript(const String& sourceUrl, FetchRequest::DeferOption defer)
 {
     ASSERT(m_element);
 
@@ -266,6 +270,7 @@ bool ScriptLoader::fetchScript(const String& sourceUrl)
         bool scriptPassesCSP = elementDocument->contentSecurityPolicy()->allowScriptWithNonce(m_element->fastGetAttribute(HTMLNames::nonceAttr));
         if (scriptPassesCSP)
             request.setContentSecurityCheck(DoNotCheckContentSecurityPolicy);
+        request.setDefer(defer);
 
         m_resource = elementDocument->fetcher()->fetchScript(request);
         m_isExternalScript = true;
@@ -290,7 +295,7 @@ bool isSVGScriptLoader(Element* element)
     return isSVGScriptElement(*element);
 }
 
-void ScriptLoader::executeScript(const ScriptSourceCode& sourceCode)
+void ScriptLoader::executeScript(const ScriptSourceCode& sourceCode, double* compilationFinishTime)
 {
     ASSERT(m_alreadyStarted);
 
@@ -318,6 +323,10 @@ void ScriptLoader::executeScript(const ScriptSourceCode& sourceCode)
             contextDocument->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Refused to execute script from '" + resource->url().elidedString() + "' because its MIME type ('" + resource->mimeType() + "') is not executable, and strict MIME type checking is enabled."));
             return;
         }
+
+        // FIXME: On failure, SRI should probably provide an error message for the console.
+        if (!SubresourceIntegrity::CheckSubresourceIntegrity(*m_element, sourceCode.source(), sourceCode.resource()->url()))
+            return;
     }
 
     // FIXME: Can this be moved earlier in the function?
@@ -340,7 +349,7 @@ void ScriptLoader::executeScript(const ScriptSourceCode& sourceCode)
     // Create a script from the script element node, using the script
     // block's source and the script block's type.
     // Note: This is where the script is compiled and actually executed.
-    frame->script().executeScriptInMainWorld(sourceCode, corsCheck);
+    frame->script().executeScriptInMainWorld(sourceCode, corsCheck, compilationFinishTime);
 
     if (isHTMLScriptLoader(m_element)) {
         ASSERT(contextDocument->currentScript() == m_element);

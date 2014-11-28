@@ -8,8 +8,8 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -288,7 +288,7 @@ void InProcessBrowserTest::AddTabAtIndexToBrowser(
     Browser* browser,
     int index,
     const GURL& url,
-    content::PageTransition transition) {
+    ui::PageTransition transition) {
   chrome::NavigateParams params(browser, url, transition);
   params.tabstrip_index = index;
   params.disposition = NEW_FOREGROUND_TAB;
@@ -300,7 +300,7 @@ void InProcessBrowserTest::AddTabAtIndexToBrowser(
 void InProcessBrowserTest::AddTabAtIndex(
     int index,
     const GURL& url,
-    content::PageTransition transition) {
+    ui::PageTransition transition) {
   AddTabAtIndexToBrowser(browser(), index, url, transition);
 }
 
@@ -351,7 +351,7 @@ void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
       content::NotificationService::AllSources());
   chrome::AddSelectedTabWithURL(browser,
                                 GURL(url::kAboutBlankURL),
-                                content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
   observer.Wait();
 
   browser->window()->Show();

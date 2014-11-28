@@ -246,10 +246,11 @@ extern "C" {
 /* ExtensionType value from RFC5746 */
 #define TLSEXT_TYPE_renegotiate                 0xff01
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
+/* ExtensionType value from RFC6962 */
+#define TLSEXT_TYPE_certificate_timestamp	18
+
 /* This is not an IANA defined extension number */
 #define TLSEXT_TYPE_next_proto_neg		13172
-#endif
 
 /* This is not an IANA defined extension number */
 #define TLSEXT_TYPE_channel_id			30031
@@ -331,27 +332,6 @@ SSL_callback_ctrl(ssl,SSL_CTRL_SET_TLSEXT_DEBUG_CB,(void (*)(void))cb)
 
 #define SSL_set_tlsext_debug_arg(ssl, arg) \
 SSL_ctrl(ssl,SSL_CTRL_SET_TLSEXT_DEBUG_ARG,0, (void *)arg)
-
-#define SSL_set_tlsext_status_type(ssl, type) \
-SSL_ctrl(ssl,SSL_CTRL_SET_TLSEXT_STATUS_REQ_TYPE,type, NULL)
-
-#define SSL_get_tlsext_status_exts(ssl, arg) \
-SSL_ctrl(ssl,SSL_CTRL_GET_TLSEXT_STATUS_REQ_EXTS,0, (void *)arg)
-
-#define SSL_set_tlsext_status_exts(ssl, arg) \
-SSL_ctrl(ssl,SSL_CTRL_SET_TLSEXT_STATUS_REQ_EXTS,0, (void *)arg)
-
-#define SSL_get_tlsext_status_ids(ssl, arg) \
-SSL_ctrl(ssl,SSL_CTRL_GET_TLSEXT_STATUS_REQ_IDS,0, (void *)arg)
-
-#define SSL_set_tlsext_status_ids(ssl, arg) \
-SSL_ctrl(ssl,SSL_CTRL_SET_TLSEXT_STATUS_REQ_IDS,0, (void *)arg)
-
-#define SSL_get_tlsext_status_ocsp_resp(ssl, arg) \
-SSL_ctrl(ssl,SSL_CTRL_GET_TLSEXT_STATUS_REQ_OCSP_RESP,0, (void *)arg)
-
-#define SSL_set_tlsext_status_ocsp_resp(ssl, arg, arglen) \
-SSL_ctrl(ssl,SSL_CTRL_SET_TLSEXT_STATUS_REQ_OCSP_RESP,arglen, (void *)arg)
 
 #define SSL_CTX_set_tlsext_servername_callback(ctx, cb) \
 SSL_CTX_callback_ctrl(ctx,SSL_CTRL_SET_TLSEXT_SERVERNAME_CB,(void (*)(void))cb)

@@ -65,9 +65,9 @@
 #define IDC_PRESENTATION_MODE           34039
 #define IDC_METRO_SNAP_ENABLE           34040
 #define IDC_METRO_SNAP_DISABLE          34041
-#define IDC_WIN8_DESKTOP_RESTART        34042
+#define IDC_WIN_DESKTOP_RESTART         34042
 #define IDC_WIN8_METRO_RESTART          34043
-#define IDC_TOGGLE_ASH_DESKTOP          34044
+#define IDC_WIN_CHROMEOS_RESTART        34044
 #define IDC_WINDOW_MENU                 34045
 #define IDC_MINIMIZE_WINDOW             34046
 #define IDC_MAXIMIZE_WINDOW             34047
@@ -84,8 +84,7 @@
 #define IDC_SAVE_PAGE                   35004
 #define IDC_ENCODING_MENU               35005
 #define IDC_EMAIL_PAGE_LOCATION         35006
-#define IDC_ADVANCED_PRINT              35007
-#define IDC_PRINT_TO_DESTINATION        35008
+#define IDC_BASIC_PRINT                 35007
 #define IDC_TRANSLATE_PAGE              35009
 #define IDC_MANAGE_PASSWORDS_FOR_PAGE   35010
 
@@ -214,6 +213,7 @@
 #define IDC_DISTILL_PAGE                40244
 #define IDC_HELP_MENU                   40245
 #define IDC_EXTENSIONS_OVERFLOW_MENU    40246
+#define IDC_SHOW_SRT_BUBBLE             40247
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.

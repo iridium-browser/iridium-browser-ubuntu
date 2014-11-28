@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
 #include <vector>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -101,7 +102,7 @@ TEST_F(CldComponentInstallerTest, GetBaseDirectory) {
 }
 
 TEST_F(CldComponentInstallerTest, GetHash) {
-  std::vector<uint8> hash;
+  std::vector<uint8_t> hash;
   traits_.GetHash(&hash);
   ASSERT_EQ(static_cast<size_t>(32), hash.size());
 }

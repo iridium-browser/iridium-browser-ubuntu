@@ -2,13 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "apps/ui/native_app_window.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
 #include "chrome/browser/prerender/prerender_link_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,14 +27,18 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/fake_speech_recognition_manager.h"
 #include "content/public/test/test_renderer_host.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/browser/guest_view/guest_view_manager_factory.h"
+#include "extensions/browser/guest_view/web_view/test_guest_view_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
+#include "extensions/test/extension_test_message_listener.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 
 #if defined(OS_CHROMEOS)
@@ -92,64 +94,6 @@ class TestInterstitialPageDelegate : public content::InterstitialPageDelegate {
   }
   virtual ~TestInterstitialPageDelegate() {}
   virtual std::string GetHTMLContents() OVERRIDE { return std::string(); }
-};
-
-class TestGuestViewManager : public extensions::GuestViewManager {
- public:
-  explicit TestGuestViewManager(content::BrowserContext* context) :
-      GuestViewManager(context),
-      web_contents_(NULL) {}
-
-  content::WebContents* WaitForGuestCreated() {
-    if (web_contents_)
-      return web_contents_;
-
-    message_loop_runner_ = new content::MessageLoopRunner;
-    message_loop_runner_->Run();
-    return web_contents_;
-  }
-
- private:
-  // GuestViewManager override:
-  virtual void AddGuest(int guest_instance_id,
-                        content::WebContents* guest_web_contents) OVERRIDE{
-    extensions::GuestViewManager::AddGuest(
-        guest_instance_id, guest_web_contents);
-    web_contents_ = guest_web_contents;
-
-    if (message_loop_runner_)
-      message_loop_runner_->Quit();
-  }
-
-  content::WebContents* web_contents_;
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-};
-
-// Test factory for creating test instances of GuestViewManager.
-class TestGuestViewManagerFactory :
-  public extensions::GuestViewManagerFactory {
- public:
-  TestGuestViewManagerFactory() :
-      test_guest_view_manager_(NULL) {}
-
-  virtual ~TestGuestViewManagerFactory() {}
-
-  virtual extensions::GuestViewManager* CreateGuestViewManager(
-      content::BrowserContext* context) OVERRIDE {
-    return GetManager(context);
-  }
-
-  TestGuestViewManager* GetManager(content::BrowserContext* context) {
-    if (!test_guest_view_manager_) {
-      test_guest_view_manager_ = new TestGuestViewManager(context);
-    }
-    return test_guest_view_manager_;
-  }
-
- private:
-  TestGuestViewManager* test_guest_view_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestGuestViewManagerFactory);
 };
 
 class WebContentsHiddenObserver : public content::WebContentsObserver {
@@ -679,7 +623,6 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   }
 
   void LoadAppWithGuest(const std::string& app_path) {
-
     ExtensionTestMessageListener launched_listener("WebViewTest.LAUNCHED",
                                                    false);
     launched_listener.set_failure_message("WebViewTest.FAILURE");
@@ -723,8 +666,10 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
     return embedder_web_contents_;
   }
 
-  TestGuestViewManager* GetGuestViewManager() {
-    return factory_.GetManager(browser()->profile());
+  extensions::TestGuestViewManager* GetGuestViewManager() {
+    return static_cast<extensions::TestGuestViewManager*>(
+        extensions::TestGuestViewManager::FromBrowserContext(
+            browser()->profile()));
   }
 
   WebViewTest() : guest_web_contents_(NULL),
@@ -745,10 +690,21 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   scoped_ptr<content::FakeSpeechRecognitionManager>
       fake_speech_recognition_manager_;
 
-  TestGuestViewManagerFactory factory_;
+  extensions::TestGuestViewManagerFactory factory_;
   // Note that these are only set if you launch app using LoadAppWithGuest().
   content::WebContents* guest_web_contents_;
   content::WebContents* embedder_web_contents_;
+};
+
+class WebViewDPITest : public WebViewTest {
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    WebViewTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kForceDeviceScaleFactor,
+                                    base::StringPrintf("%f", scale()));
+  }
+
+  static float scale() { return 2.0f; }
 };
 
 // This test verifies that hiding the guest triggers WebContents::WasHidden().
@@ -842,14 +798,80 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, AutoSize) {
       << message_;
 }
 
+// Tests that a <webview> that is set to "display: none" after load and then
+// setting "display: block" re-renders the plugin properly.
+//
+// Initially after loading the <webview> and the test sets <webview> to
+// "display: none".
+// This causes the browser plugin to be destroyed, we then set the
+// style.display of the <webview> to block again and check that loadstop
+// fires properly.
+IN_PROC_BROWSER_TEST_F(WebViewTest, DisplayNoneAndBack) {
+  LoadAppWithGuest("web_view/display_none_and_back");
+
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  WebContentsHiddenObserver observer(GetGuestWebContents(),
+                                     loop_runner->QuitClosure());
+
+  // Handled in platform_apps/web_view/display_none_and_back/main.js
+  SendMessageToEmbedder("hide-guest");
+  GetGuestViewManager()->WaitForGuestDeleted();
+  ExtensionTestMessageListener test_passed_listener("WebViewTest.PASSED",
+                                                    false);
+
+  SendMessageToEmbedder("show-guest");
+  GetGuestViewManager()->WaitForGuestCreated();
+  EXPECT_TRUE(test_passed_listener.WaitUntilSatisfied());
+}
+
+// Test for http://crbug.com/419611.
+IN_PROC_BROWSER_TEST_F(WebViewTest, DisplayNoneSetSrc) {
+  LoadAndLaunchPlatformApp("web_view/display_none_set_src",
+                           "WebViewTest.LAUNCHED");
+  // Navigate the guest while it's in "display: none" state.
+  SendMessageToEmbedder("navigate-guest");
+  GetGuestViewManager()->WaitForGuestCreated();
+
+  // Now attempt to navigate the guest again.
+  SendMessageToEmbedder("navigate-guest");
+
+  ExtensionTestMessageListener test_passed_listener("WebViewTest.PASSED",
+                                                    false);
+  // Making the guest visible would trigger loadstop.
+  SendMessageToEmbedder("show-guest");
+  EXPECT_TRUE(test_passed_listener.WaitUntilSatisfied());
+}
+
 // http://crbug.com/326332
 IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_Shim_TestAutosizeAfterNavigation) {
   TestHelper("testAutosizeAfterNavigation", "web_view/shim", NO_TEST_SERVER);
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAllowTransparencyAttribute) {
+  TestHelper("testAllowTransparencyAttribute", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewDPITest, Shim_TestAutosizeHeight) {
+  TestHelper("testAutosizeHeight", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeHeight) {
+  TestHelper("testAutosizeHeight", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewDPITest, Shim_TestAutosizeBeforeNavigation) {
+  TestHelper("testAutosizeBeforeNavigation", "web_view/shim", NO_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeBeforeNavigation) {
   TestHelper("testAutosizeBeforeNavigation", "web_view/shim", NO_TEST_SERVER);
 }
+
+IN_PROC_BROWSER_TEST_F(WebViewDPITest, Shim_TestAutosizeRemoveAttributes) {
+  TestHelper("testAutosizeRemoveAttributes", "web_view/shim", NO_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeRemoveAttributes) {
   TestHelper("testAutosizeRemoveAttributes", "web_view/shim", NO_TEST_SERVER);
 }
@@ -924,7 +946,13 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestInvalidChromeExtensionURL) {
   TestHelper("testInvalidChromeExtensionURL", "web_view/shim", NO_TEST_SERVER);
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestEventName) {
+// Disable on Chrome OS, as it is flaking a lot. See: http://crbug.com/413618.
+#if defined(OS_CHROMEOS)
+#define MAYBE_Shim_TestEventName DISABLED_Shim_TestEventName
+#else
+#define MAYBE_Shim_TestEventName Shim_TestEventName
+#endif
+IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_Shim_TestEventName) {
   TestHelper("testEventName", "web_view/shim", NO_TEST_SERVER);
 }
 
@@ -1111,11 +1139,15 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestLoadAbortNonWebSafeScheme) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestReload) {
-  TestHelper("testReload", "web_view/shim", NEEDS_TEST_SERVER);
+  TestHelper("testReload", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestReloadAfterTerminate) {
+  TestHelper("testReloadAfterTerminate", "web_view/shim", NO_TEST_SERVER);
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestGetProcessId) {
-  TestHelper("testGetProcessId", "web_view/shim", NEEDS_TEST_SERVER);
+  TestHelper("testGetProcessId", "web_view/shim", NO_TEST_SERVER);
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestHiddenBeforeNavigation) {
@@ -1233,7 +1265,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_InterstitialTeardown) {
   WaitForInterstitial(guest_web_contents);
 
   // Now close the app while interstitial page being shown in guest.
-  apps::AppWindow* window = GetFirstAppWindow();
+  extensions::AppWindow* window = GetFirstAppWindow();
   window->GetBaseWindow()->Close();
 }
 
@@ -1860,7 +1892,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, ChromeVoxInjection) {
 IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_TearDownTest) {
   const extensions::Extension* extension =
       LoadAndLaunchPlatformApp("web_view/teardown", "guest-loaded");
-  apps::AppWindow* window = NULL;
+  extensions::AppWindow* window = NULL;
   if (!GetAppWindowCount())
     window = CreateAppWindow(extension);
   else

@@ -8,7 +8,7 @@
 #include "base/strings/string16.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/common/page_transition_types.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
 class GURL;
@@ -49,16 +49,11 @@ class CONTENT_EXPORT NavigatorDelegate {
       int error_code,
       const base::string16& error_description) {}
 
-  // A redirect was processed in |render_frame_host| during a provisional load.
-  virtual void DidRedirectProvisionalLoad(
-      RenderFrameHostImpl* render_frame_host,
-      const GURL& validated_target_url) {}
-
   // A navigation was committed in |render_frame_host|.
   virtual void DidCommitProvisionalLoad(
       RenderFrameHostImpl* render_frame_host,
       const GURL& url,
-      PageTransition transition_type) {}
+      ui::PageTransition transition_type) {}
 
   // Handles post-navigation tasks in navigation BEFORE the entry has been
   // committed to the NavigationController.

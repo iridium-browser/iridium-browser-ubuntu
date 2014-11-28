@@ -5,6 +5,7 @@
 #include "components/password_manager/core/browser/password_form_manager.h"
 
 #include <algorithm>
+#include <set>
 
 #include "base/metrics/histogram.h"
 #include "base/metrics/user_metrics.h"
@@ -95,7 +96,7 @@ PasswordFormManager::~PasswordFormManager() {
 int PasswordFormManager::GetActionsTaken() {
   return user_action_ + kUserActionMax * (manager_action_ +
          kManagerActionMax * submit_result_);
-};
+}
 
 // TODO(timsteele): use a hash of some sort in the future?
 PasswordFormManager::MatchResultMask PasswordFormManager::DoesManage(
@@ -226,9 +227,8 @@ bool PasswordFormManager::HasValidPasswordForm() {
   // do not contain username_element and password_element values.
   if (observed_form_.scheme != PasswordForm::SCHEME_HTML)
     return true;
-  return !observed_form_.username_element.empty() &&
-         (!observed_form_.password_element.empty() ||
-          !observed_form_.new_password_element.empty());
+  return !observed_form_.password_element.empty() ||
+         !observed_form_.new_password_element.empty();
 }
 
 void PasswordFormManager::ProvisionallySave(
@@ -441,7 +441,13 @@ void PasswordFormManager::OnRequestDone(
 
   client_->AutofillResultsComputed();
 
+  // TODO(gcasto): Change this to check that best_matches_ is empty. This should
+  // be equivalent for the moment, but it's less clear and may not be
+  // equivalent in the future.
   if (best_score <= 0) {
+    // If no saved forms can be used, then it isn't blacklisted and generation
+    // should be allowed.
+    driver_->AllowPasswordGenerationForForm(observed_form_);
     return;
   }
 

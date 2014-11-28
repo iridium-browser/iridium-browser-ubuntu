@@ -100,7 +100,6 @@ MediaStream::MediaStream(ExecutionContext* context, PassRefPtr<MediaStreamDescri
     , m_descriptor(streamDescriptor)
     , m_scheduledEventTimer(this, &MediaStream::scheduledEventTimerFired)
 {
-    ScriptWrappable::init(this);
     m_descriptor->setClient(this);
 
     size_t numberOfAudioTracks = m_descriptor->numberOfAudioComponents();
@@ -125,8 +124,6 @@ MediaStream::MediaStream(ExecutionContext* context, const MediaStreamTrackVector
     , m_stopped(false)
     , m_scheduledEventTimer(this, &MediaStream::scheduledEventTimerFired)
 {
-    ScriptWrappable::init(this);
-
     MediaStreamComponentVector audioComponents;
     MediaStreamComponentVector videoComponents;
 
@@ -331,7 +328,7 @@ void MediaStream::addRemoteTrack(MediaStreamComponent* component)
 
 void MediaStream::removeRemoteTrack(MediaStreamComponent* component)
 {
-    if (ended())
+    if (m_stopped)
         return;
 
     MediaStreamTrackVector* tracks = 0;

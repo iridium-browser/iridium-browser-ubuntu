@@ -2,25 +2,119 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import atexit
 import cgi
 import ConfigParser
 import json
-import logging
 import os
+import Queue
+import threading
 import time
-import urllib2
 
+from common import utils
 from result import Result
 
 
 INFINITY = float('inf')
+
+MAX_THREAD_NUMBER = 10
+TASK_QUEUE = None
+
+
+def SignalWorkerThreads():
+  global TASK_QUEUE
+  if not TASK_QUEUE:
+    return
+
+  for i in range(MAX_THREAD_NUMBER):
+    TASK_QUEUE.put(None)
+
+  # Give worker threads a chance to exit.
+  # Workaround the harmless bug in python 2.7 below.
+  time.sleep(1)
+
+
+atexit.register(SignalWorkerThreads)
+
+
+def Worker():
+  global TASK_QUEUE
+  while True:
+    try:
+      task = TASK_QUEUE.get()
+      if not task:
+        return
+    except TypeError:
+      # According to http://bugs.python.org/issue14623, this is a harmless bug
+      # in python 2.7 which won't be fixed.
+      # The exception is raised on daemon threads when python interpreter is
+      # shutting down.
+      return
+
+    function, args, kwargs, result_semaphore = task
+    try:
+      function(*args, **kwargs)
+    except:
+      pass
+    finally:
+      # Signal one task is done in case of exception.
+      result_semaphore.release()
+
+
+def RunTasks(tasks):
+  """Run given tasks. Not thread-safe: no concurrent calls of this function.
+
+  Return after all tasks were completed. A task is a dict as below:
+    {
+      'function': the function to call,
+      'args': the positional argument to pass to the function,
+      'kwargs': the key-value arguments to pass to the function,
+    }
+  """
+  if not tasks:
+    return
+
+  global TASK_QUEUE
+  if not TASK_QUEUE:
+    TASK_QUEUE = Queue.Queue()
+    for index in range(MAX_THREAD_NUMBER):
+      thread = threading.Thread(target=Worker, name='worker_%s' % index)
+      # Set as daemon, so no join is needed.
+      thread.daemon = True
+      thread.start()
+
+  result_semaphore = threading.Semaphore(0)
+  # Push task to task queue for execution.
+  for task in tasks:
+    TASK_QUEUE.put(
+        (task['function'], task.get('args', []),
+         task.get('kwargs', {}), result_semaphore))
+
+  # Wait until all tasks to be executed.
+  for _ in tasks:
+    result_semaphore.acquire()
+
+
+def GetRepositoryType(revision_number):
+  """Returns the repository type of this revision number.
+
+  Args:
+    revision_number: A revision number or git hash.
+
+  Returns:
+    'git' or 'svn', depending on the revision_number.
+  """
+  if utils.IsGitHash(revision_number):
+    return 'git'
+  else:
+    return 'svn'
 
 
 def ParseURLsFromConfig(file_name):
   """Parses URLS from the config file.
 
   The file should be in python config format, where svn section is in the
-  format "svn:component_path", except for git URLs and codereview URL.
+  format "svn:component_path".
   Each of the section for svn should contain changelog_url, revision_url,
   diff_url and blame_url.
 
@@ -31,7 +125,6 @@ def ParseURLsFromConfig(file_name):
     A dictionary that maps repository type to list of URLs. For svn, it maps
     key 'svn' to another dictionary, which maps component path to the URLs
     as explained above. For git, it maps to the URLs as explained above.
-    Codereview maps to codereview API url.
   """
   config = ConfigParser.ConfigParser()
 
@@ -41,21 +134,20 @@ def ParseURLsFromConfig(file_name):
                                   file_name)
   config.read(config_file_path)
   if not config:
-    logging.error('Config file with URLs does not exist.')
     return None
 
   # Iterate through the config file, check for sections.
-  repository_type_to_url_map = {}
+  config_dict = {}
   for section in config.sections():
     # These two do not need another layer of dictionary, so add it and go
     # to next section.
-    if section == 'git' or section == 'codereview':
+    if ':' not in section:
       for option in config.options(section):
-        if section not in repository_type_to_url_map:
-          repository_type_to_url_map[section] = {}
+        if section not in config_dict:
+          config_dict[section] = {}
 
         url = config.get(section, option)
-        repository_type_to_url_map[section][option] = url
+        config_dict[section][option] = url
 
       continue
 
@@ -65,9 +157,9 @@ def ParseURLsFromConfig(file_name):
     component_path = repository_type_and_component[1]
 
     # Add 'svn' as the key, if it is not already there.
-    if repository_type not in repository_type_to_url_map:
-      repository_type_to_url_map[repository_type] = {}
-    url_map_for_repository = repository_type_to_url_map[repository_type]
+    if repository_type not in config_dict:
+      config_dict[repository_type] = {}
+    url_map_for_repository = config_dict[repository_type]
 
     # Add the path to the 'svn', if it is not already there.
     if component_path not in url_map_for_repository:
@@ -79,11 +171,11 @@ def ParseURLsFromConfig(file_name):
       url = config.get(section, option)
       type_to_url[option] = url
 
-  return repository_type_to_url_map
+  return config_dict
 
 
-def NormalizePathLinux(path, parsed_deps):
-  """Normalizes linux path.
+def NormalizePath(path, parsed_deps):
+  """Normalizes the path.
 
   Args:
     path: A string representing a path.
@@ -92,43 +184,53 @@ def NormalizePathLinux(path, parsed_deps):
 
   Returns:
     A tuple containing a component this path is in (e.g blink, skia, etc)
-    and a path in that component's repository.
+    and a path in that component's repository. Returns None if the component
+    repository is not supported, i.e from googlecode.
   """
-  # First normalize the path by retreiving the absolute path.
-  normalized_path = os.path.abspath(path)
+  # First normalize the path by retreiving the normalized path.
+  normalized_path = os.path.normpath(path).replace('\\', '/')
 
   # Iterate through all component paths in the parsed DEPS, in the decreasing
   # order of the length of the file path.
   for component_path in sorted(parsed_deps,
                                key=(lambda path: -len(path))):
-    # New_path is the component path with 'src/' removed.
-    new_path = component_path
-    if new_path.startswith('src/') and new_path != 'src/':
-      new_path = new_path[len('src/'):]
+    # new_component_path is the component path with 'src/' removed.
+    new_component_path = component_path
+    if new_component_path.startswith('src/') and new_component_path != 'src/':
+      new_component_path = new_component_path[len('src/'):]
+
+    # We need to consider when the lowercased component path is in the path,
+    # because syzyasan build returns lowercased file path.
+    lower_component_path = new_component_path.lower()
 
     # If this path is the part of file path, this file must be from this
     # component.
-    if new_path in normalized_path:
+    if new_component_path in normalized_path or \
+        lower_component_path in normalized_path:
 
-      # Currently does not support googlecode.
-      if 'googlecode' in parsed_deps[component_path]['repository']:
-        return (None, '', '')
+      # Case when the retreived path is in lowercase.
+      if lower_component_path in normalized_path:
+        current_component_path = lower_component_path
+      else:
+        current_component_path = new_component_path
 
       # Normalize the path by stripping everything off the component's relative
       # path.
-      normalized_path = normalized_path.split(new_path,1)[1]
+      normalized_path = normalized_path.split(current_component_path, 1)[1]
+      lower_normalized_path = normalized_path.lower()
 
       # Add 'src/' or 'Source/' at the front of the normalized path, depending
       # on what prefix the component path uses. For example, blink uses
       # 'Source' but chromium uses 'src/', and blink component path is
       # 'src/third_party/WebKit/Source', so add 'Source/' in front of the
       # normalized path.
-      if not normalized_path.startswith('src/') or \
-          normalized_path.startswith('Source/'):
+      if not (lower_normalized_path.startswith('src/') or
+              lower_normalized_path.startswith('source/')):
 
-        if (new_path.lower().endswith('src/') or
-            new_path.lower().endswith('source/')):
-          normalized_path = new_path.split('/')[-2] + '/' + normalized_path
+        if (lower_component_path.endswith('src/') or
+            lower_component_path.endswith('source/')):
+          normalized_path = (current_component_path.split('/')[-2] + '/' +
+                             normalized_path)
 
         else:
           normalized_path = 'src/' + normalized_path
@@ -160,9 +262,16 @@ def SplitRange(regression):
   if len(revisions) != 2:
     return None
 
-  # Strip 'r' from both start and end range.
-  range_start = revisions[0].lstrip('r')
-  range_end = revisions[1].lstrip('r')
+  range_start = revisions[0]
+  range_end = revisions[1]
+
+  # Strip 'r' off the range start/end. Not using lstrip to avoid the case when
+  # the range is in git hash and it starts with 'r'.
+  if range_start.startswith('r'):
+    range_start = range_start[1:]
+
+  if range_end.startswith('r'):
+    range_end = range_end[1:]
 
   return [range_start, range_end]
 
@@ -184,41 +293,26 @@ def LoadJSON(json_string):
   return data
 
 
-def GetDataFromURL(url, retries=10, sleep_time=0.1, timeout=10):
+def GetDataFromURL(url):
   """Retrieves raw data from URL, tries 10 times.
 
   Args:
     url: URL to get data from.
     retries: Number of times to retry connection.
-    sleep_time: Time in seconds to wait before retrying connection.
-    timeout: Time in seconds to wait before time out.
 
   Returns:
     None if the data retrieval fails, or the raw data.
   """
-  data = None
-  for i in range(retries):
-    # Retrieves data from URL.
-    try:
-      data = urllib2.urlopen(url, timeout=timeout)
-
-      # If retrieval is successful, return the data.
-      if data:
-        return data.read()
-
-    # If retrieval fails, try after sleep_time second.
-    except urllib2.URLError:
-      time.sleep(sleep_time)
-      continue
-    except IOError:
-      time.sleep(sleep_time)
-      continue
-
-  # Return None if it fails to read data from URL 'retries' times.
-  return None
+  status_code, data = utils.GetHttpClient().Get(url, retries=10)
+  if status_code == 200:
+    return data
+  else:
+    # Return None if it fails to read data.
+    return None
 
 
-def FindMinLineDistance(crashed_line_list, changed_line_numbers):
+def FindMinLineDistance(crashed_line_list, changed_line_numbers,
+                        line_range=3):
   """Calculates how far the changed line is from one of the crashes.
 
   Finds the minimum distance between the lines that the file crashed on
@@ -228,6 +322,7 @@ def FindMinLineDistance(crashed_line_list, changed_line_numbers):
   Args:
     crashed_line_list: A list of lines that the file crashed on.
     changed_line_numbers: A list of lines that the file changed.
+    line_range: Number of lines to look back for.
 
   Returns:
     The minimum distance. If either of the input lists is empty,
@@ -235,16 +330,26 @@ def FindMinLineDistance(crashed_line_list, changed_line_numbers):
 
   """
   min_distance = INFINITY
+  crashed_line = -1
+  changed_line = -1
 
-  for line in crashed_line_list:
+  crashed_line_numbers = set()
+  for crashed_line_range in crashed_line_list:
+    for crashed_line in crashed_line_range:
+      for line in range(crashed_line - line_range, crashed_line + 1):
+        crashed_line_numbers.add(line)
+
+  for line in crashed_line_numbers:
     for distance in changed_line_numbers:
       # Find the current distance and update the min if current distance is
       # less than current min.
       current_distance = abs(line - distance)
       if current_distance < min_distance:
         min_distance = current_distance
+        crashed_line = line
+        changed_line = distance
 
-  return min_distance
+  return (min_distance, crashed_line, changed_line)
 
 
 def GuessIfSameSubPath(path1, path2):
@@ -312,16 +417,24 @@ def AddHyperlink(text, link):
   return '<a href="%s">%s</a>' % (sanitized_link, sanitized_text)
 
 
-def PrettifyList(l):
+def PrettifyList(items):
   """Returns a string representation of a list.
 
   It adds comma in between the elements and removes the brackets.
   Args:
-    l: A list to prettify.
+    items: A list to prettify.
   Returns:
     A string representation of the list.
   """
-  return str(l)[1:-1]
+  return ', '.join(map(str, items))
+
+
+def PrettifyFrameInfo(frame_indices, functions):
+  """Return a string to represent the frames with functions."""
+  frames = []
+  for frame_index, function in zip(frame_indices, functions):
+    frames.append('frame #%s, "%s"' % (frame_index, function.split('(')[0]))
+  return '; '.join(frames)
 
 
 def PrettifyFiles(file_list):
@@ -339,7 +452,7 @@ def PrettifyFiles(file_list):
 
 
 def Intersection(crashed_line_list, stack_frame_index, changed_line_numbers,
-                 line_range=3):
+                 function, line_range=3):
   """Finds the overlap betwee changed lines and crashed lines.
 
   Finds the intersection of the lines that caused the crash and
@@ -350,42 +463,52 @@ def Intersection(crashed_line_list, stack_frame_index, changed_line_numbers,
     crashed_line_list: A list of lines that the file crashed on.
     stack_frame_index: A list of positions in stack for each of the lines.
     changed_line_numbers: A list of lines that the file changed.
+    function: A list of functions that the file crashed on.
     line_range: Number of lines to look backwards from crashed lines.
 
   Returns:
-    line_intersection: Intersection between crashed_line_list and
+    line_number_intersection: Intersection between crashed_line_list and
                        changed_line_numbers.
     stack_frame_index_intersection: Stack number for each of the intersections.
   """
-  line_intersection = []
+  line_number_intersection = []
   stack_frame_index_intersection = []
+  function_intersection = []
 
   # Iterate through the crashed lines, and its occurence in stack.
-  for (line, stack_frame_index) in zip(crashed_line_list, stack_frame_index):
-    # Also check previous 'line_range' lines.
-    line_minus_n = range(line - line_range, line + 1)
+  for (lines, stack_frame_index, function_name) in zip(
+      crashed_line_list, stack_frame_index, function):
+    # Also check previous 'line_range' lines. Create a set of all changed lines
+    # and lines within 3 lines range before the crashed line.
+    line_minus_n = set()
+    for line in lines:
+      for line_in_range in range(line - line_range, line + 1):
+        line_minus_n.add(line_in_range)
 
     for changed_line in changed_line_numbers:
       # If a CL does not change crahsed line, check next line.
       if changed_line not in line_minus_n:
         continue
 
+      intersected_line = set()
       # If the changed line is exactly the crashed line, add that line.
-      if line in changed_line_numbers:
-        intersected_line = line
+      for line in lines:
+        if line in changed_line_numbers:
+          intersected_line.add(line)
 
-      # If the changed line is in 3 lines of the crashed line, add the line.
-      else:
-        intersected_line = changed_line
+        # If the changed line is in 3 lines of the crashed line, add the line.
+        else:
+          intersected_line.add(changed_line)
 
       # Avoid adding the same line twice.
-      if intersected_line not in line_intersection:
-        line_intersection.append(intersected_line)
+      if intersected_line not in line_number_intersection:
+        line_number_intersection.append(list(intersected_line))
         stack_frame_index_intersection.append(stack_frame_index)
-
+        function_intersection.append(function_name)
       break
 
-  return (line_intersection, stack_frame_index_intersection)
+  return (line_number_intersection, stack_frame_index_intersection,
+          function_intersection)
 
 
 def MatchListToResultList(matches):
@@ -410,9 +533,10 @@ def MatchListToResultList(matches):
     reviewers = match.reviewers
     # For matches, line content do not exist.
     line_content = None
+    message = match.message
 
     result = Result(suspected_cl, revision_url, component_name, author, reason,
-                    review_url, reviewers, line_content)
+                    review_url, reviewers, line_content, message)
     result_list.append(result)
 
   return result_list
@@ -435,28 +559,16 @@ def BlameListToResultList(blame_list):
     component_name = blame.component_name
     author = blame.author
     reason = (
-        'The CL changes line %s of file %s from stack %d.' %
+        'The CL last changed line %s of file %s, which is stack frame %d.' %
         (blame.line_number, blame.file, blame.stack_frame_index))
     # Blame object does not have review url and reviewers.
     review_url = None
     reviewers = None
-    line_content = blame.content
+    line_content = blame.line_content
+    message = blame.message
 
     result = Result(suspected_cl, revision_url, component_name, author, reason,
-                    review_url, reviewers, line_content)
+                    review_url, reviewers, line_content, message)
     result_list.append(result)
 
   return result_list
-
-
-def ResultListToJSON(result_list):
-  """Converts result list to JSON format.
-
-  Args:
-    result_list: A list of result objects
-
-  Returns:
-    A string, JSON format of the result_list.
-
-  """
-  return json.dumps([result.ToDictionary() for result in result_list])

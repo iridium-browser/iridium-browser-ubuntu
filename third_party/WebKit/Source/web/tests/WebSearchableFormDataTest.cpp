@@ -32,17 +32,16 @@
 
 #include "public/web/WebSearchableFormData.h"
 
+#include "core/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "web/tests/FrameTestHelpers.h"
-#include "web/tests/URLTestHelpers.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-using namespace blink;
 using namespace blink;
 
 class WebSearchableFormDataTest : public testing::Test {

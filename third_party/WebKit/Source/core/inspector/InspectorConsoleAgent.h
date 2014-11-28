@@ -41,6 +41,7 @@
 namespace blink {
 
 class ConsoleMessage;
+class ConsoleMessageStorage;
 class DocumentLoader;
 class LocalDOMWindow;
 class LocalFrame;
@@ -48,7 +49,6 @@ class InspectorConsoleMessage;
 class InspectorFrontend;
 class InjectedScriptManager;
 class InspectorTimelineAgent;
-class InspectorTracingAgent;
 class InstrumentingAgents;
 class ResourceError;
 class ResourceLoader;
@@ -65,7 +65,7 @@ typedef String ErrorString;
 class InspectorConsoleAgent : public InspectorBaseAgent<InspectorConsoleAgent>, public InspectorBackendDispatcher::ConsoleCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorConsoleAgent);
 public:
-    InspectorConsoleAgent(InspectorTimelineAgent*, InspectorTracingAgent*, InjectedScriptManager*);
+    InspectorConsoleAgent(InspectorTimelineAgent*, InjectedScriptManager*);
     virtual ~InspectorConsoleAgent();
     virtual void trace(Visitor*) OVERRIDE;
 
@@ -74,30 +74,22 @@ public:
     virtual void disable(ErrorString*) OVERRIDE FINAL;
     virtual void clearMessages(ErrorString*) OVERRIDE;
     bool enabled() { return m_enabled; }
-    void reset();
 
     virtual void setFrontend(InspectorFrontend*) OVERRIDE FINAL;
     virtual void clearFrontend() OVERRIDE FINAL;
     virtual void restore() OVERRIDE FINAL;
 
-    void addConsoleAPIMessageToConsole(MessageType, MessageLevel, const String& message, ScriptState*, PassRefPtrWillBeRawPtr<ScriptArguments>, unsigned long requestIdentifier = 0);
     void addMessageToConsole(ConsoleMessage*);
-    void adoptWorkerConsoleMessages(WorkerGlobalScopeProxy*);
-    Vector<unsigned> consoleMessageArgumentCounts();
+    void consoleMessagesCleared();
 
-    void consoleTime(ExecutionContext*, const String& title);
-    void consoleTimeEnd(ExecutionContext*, const String& title, ScriptState*);
     void setTracingBasedTimeline(ErrorString*, bool enabled);
     void consoleTimeline(ExecutionContext*, const String& title, ScriptState*);
     void consoleTimelineEnd(ExecutionContext*, const String& title, ScriptState*);
-
-    void consoleCount(ScriptState*, PassRefPtrWillBeRawPtr<ScriptArguments>);
 
     void frameWindowDiscarded(LocalDOMWindow*);
     void didCommitLoad(LocalFrame*, DocumentLoader*);
 
     void didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long requestIdentifier, ScriptString, const AtomicString& method, const String& url, const String& sendURL, unsigned sendLineNumber);
-    void didReceiveResourceResponse(LocalFrame*, unsigned long requestIdentifier, DocumentLoader*, const ResourceResponse&, ResourceLoader*);
     void didFailLoading(unsigned long requestIdentifier, const ResourceError&);
     void addProfileFinishedMessageToConsole(PassRefPtrWillBeRawPtr<ScriptProfile>, unsigned lineNumber, const String& sourceURL);
     void addStartProfilingMessageToConsole(const String& title, unsigned lineNumber, const String& sourceURL);
@@ -108,16 +100,12 @@ public:
     virtual bool isWorkerAgent() = 0;
 
 protected:
-    void addConsoleMessage(PassOwnPtr<InspectorConsoleMessage>);
+    void sendConsoleMessageToFrontend(ConsoleMessage*, bool generatePreview);
+    virtual ConsoleMessageStorage* messageStorage() = 0;
 
     RawPtrWillBeMember<InspectorTimelineAgent> m_timelineAgent;
-    RawPtrWillBeMember<InspectorTracingAgent> m_tracingAgent;
     RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     InspectorFrontend::Console* m_frontend;
-    Vector<OwnPtr<InspectorConsoleMessage> > m_consoleMessages;
-    int m_expiredConsoleMessageCount;
-    HashCountedSet<String> m_counts;
-    HashMap<String, double> m_times;
     bool m_enabled;
 private:
     static int s_enabledAgentCount;

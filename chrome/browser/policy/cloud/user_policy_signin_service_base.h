@@ -83,7 +83,8 @@ class UserPolicySigninServiceBase : public KeyedService,
       const PolicyFetchCallback& callback);
 
   // SigninManagerBase::Observer implementation:
-  virtual void GoogleSignedOut(const std::string& username) OVERRIDE;
+  virtual void GoogleSignedOut(const std::string& account_id,
+                               const std::string& username) OVERRIDE;
 
   // content::NotificationObserver implementation:
   virtual void Observe(int type,
@@ -106,7 +107,7 @@ class UserPolicySigninServiceBase : public KeyedService,
 
  protected:
   net::URLRequestContextGetter* system_request_context() {
-    return system_request_context_;
+    return system_request_context_.get();
   }
 
   // Returns a CloudPolicyClient to perform a registration with the DM server,

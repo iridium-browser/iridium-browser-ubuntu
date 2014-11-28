@@ -121,7 +121,8 @@ cr.define('print_preview', function() {
     /**
      * Gets estimated height of the destination list for the given number of
      * items.
-     * @param {number} Number of items to render in the destination list.
+     * @param {number} numItems Number of items to render in the destination
+     *     list.
      * @return {number} Height (in pixels) of the destination list.
      */
     getEstimatedHeightInPixels: function(numItems) {
@@ -189,15 +190,9 @@ cr.define('print_preview', function() {
       this.renderDestinations_();
     },
 
-    /** @param {?string} query Query to update the filter with. */
+    /** @param {RegExp} query Query to update the filter with. */
     updateSearchQuery: function(query) {
-      if (!query) {
-        this.query_ = null;
-      } else {
-        // Generate regexp-safe query by escaping metacharacters.
-        var safeQuery = query.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-        this.query_ = new RegExp('(' + safeQuery + ')', 'ig');
-      }
+      this.query_ = query;
       this.renderDestinations_();
     },
 
@@ -233,15 +228,22 @@ cr.define('print_preview', function() {
       if (destinations.length > this.shortListSize_ && !this.isShowAll_) {
         numItems = this.shortListSize_ - 1;
         this.getChildElement('.total').textContent =
-            localStrings.getStringF('destinationCount', destinations.length);
+            loadTimeData.getStringF('destinationCount', destinations.length);
         setIsVisible(this.getChildElement('.destination-list > footer'), true);
       }
-      for (var i = 0; i < numItems; i++) {
-        var destListItem = new print_preview.DestinationListItem(
-            this.eventTarget_, destinations[i], this.query_);
-        this.addChild(destListItem);
-        destListItem.render(this.getChildElement('.destination-list > ul'));
-      }
+      for (var i = 0; i < numItems; i++)
+        this.renderListItemInternal(destinations[i]);
+    },
+
+    /**
+     * @param {!print_preview.Destination} destination Destination to render.
+     * @protected
+     */
+    renderListItemInternal: function(destination) {
+      var listItem = new print_preview.DestinationListItem(
+          this.eventTarget_, destination, this.query_);
+      this.addChild(listItem);
+      listItem.render(this.getChildElement('.destination-list > ul'));
     },
 
     /**

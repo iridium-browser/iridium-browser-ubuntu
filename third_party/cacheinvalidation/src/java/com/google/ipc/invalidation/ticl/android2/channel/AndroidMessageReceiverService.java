@@ -22,8 +22,8 @@ import com.google.ipc.invalidation.external.client.contrib.MultiplexingGcmListen
 import com.google.ipc.invalidation.ticl.android2.AndroidTiclManifest;
 import com.google.ipc.invalidation.ticl.android2.ProtocolIntents;
 import com.google.ipc.invalidation.ticl.android2.channel.AndroidChannelConstants.C2dmConstants;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.AndroidChannel.AddressedAndroidMessage;
+import com.google.ipc.invalidation.ticl.proto.AndroidChannel.AddressedAndroidMessage;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
 
 import android.content.Context;
 import android.content.Intent;
@@ -73,7 +73,7 @@ public class AndroidMessageReceiverService extends MultiplexingGcmListener.Abstr
             ProtocolIntents.InternalDowncalls.newServerMessageIntent(addrMessage.getMessage());
         msgIntent.setClassName(this, serviceClass);
         startService(msgIntent);
-      } catch (InvalidProtocolBufferException exception) {
+      } catch (ValidationException exception) {
         logger.warning("Failed parsing inbound message: %s", exception);
       }
     } else {
@@ -125,7 +125,7 @@ public class AndroidMessageReceiverService extends MultiplexingGcmListener.Abstr
     GCMRegistrar.checkDevice(context);
     GCMRegistrar.checkManifest(context);
     String regId = GCMRegistrar.getRegistrationId(context);
-    if (regId.equals("")) {
+    if (regId.isEmpty()) {
       logger.info("Not registered with GCM; registering");
       GCMRegistrar.register(context, senderId);
     } else {

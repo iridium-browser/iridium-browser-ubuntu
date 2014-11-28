@@ -23,8 +23,6 @@
 #include "content/browser/android/load_url_params.h"
 #include "content/browser/android/popup_touch_handle_drawable.h"
 #include "content/browser/frame_host/interstitial_page_impl.h"
-#include "content/browser/frame_host/navigation_controller_impl.h"
-#include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/geolocation/geolocation_dispatcher_host.h"
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
@@ -34,7 +32,6 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
-#include "content/browser/screen_orientation/screen_orientation_dispatcher_host.h"
 #include "content/browser/transition_request_manager.h"
 #include "content/browser/web_contents/web_contents_view_android.h"
 #include "content/common/frame_messages.h"
@@ -45,12 +42,12 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/screen_orientation_dispatcher_host.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/menu_item.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/user_agent.h"
 #include "jni/ContentViewCore_jni.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -358,13 +355,6 @@ jint ContentViewCoreImpl::GetBackgroundColor(JNIEnv* env, jobject obj) {
   return rwhva->GetCachedBackgroundColor();
 }
 
-void ContentViewCoreImpl::PauseVideo() {
-  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
-      web_contents_->GetRenderViewHost());
-  if (rvhi)
-    rvhi->media_web_contents_observer()->PauseVideo();
-}
-
 void ContentViewCoreImpl::PauseOrResumeGeolocation(bool should_pause) {
   web_contents_->geolocation_dispatcher_host()->PauseOrResume(should_pause);
 }
@@ -379,8 +369,7 @@ void ContentViewCoreImpl::UpdateFrameInfo(
     const gfx::SizeF& content_size,
     const gfx::SizeF& viewport_size,
     const gfx::Vector2dF& controls_offset,
-    const gfx::Vector2dF& content_offset,
-    float overdraw_bottom_height) {
+    const gfx::Vector2dF& content_offset) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -401,8 +390,7 @@ void ContentViewCoreImpl::UpdateFrameInfo(
       viewport_size.width(),
       viewport_size.height(),
       controls_offset.y(),
-      content_offset.y(),
-      overdraw_bottom_height);
+      content_offset.y());
 }
 
 void ContentViewCoreImpl::SetTitle(const base::string16& title) {
@@ -425,8 +413,12 @@ void ContentViewCoreImpl::OnBackgroundColorChanged(SkColor color) {
   Java_ContentViewCore_onBackgroundColorChanged(env, obj.obj(), color);
 }
 
-void ContentViewCoreImpl::ShowSelectPopupMenu(const gfx::Rect& bounds,
-    const std::vector<MenuItem>& items, int selected_item, bool multiple) {
+void ContentViewCoreImpl::ShowSelectPopupMenu(
+    RenderFrameHost* frame,
+    const gfx::Rect& bounds,
+    const std::vector<MenuItem>& items,
+    int selected_item,
+    bool multiple) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
@@ -470,7 +462,9 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(const gfx::Rect& bounds,
   }
   ScopedJavaLocalRef<jobjectArray> items_array(
       base::android::ToJavaArrayOfStrings(env, labels));
-  Java_ContentViewCore_showSelectPopup(env, j_obj.obj(),
+  Java_ContentViewCore_showSelectPopup(env,
+                                       j_obj.obj(),
+                                       reinterpret_cast<intptr_t>(frame),
                                        bounds_rect.obj(),
                                        items_array.obj(),
                                        enabled_array.obj(),
@@ -653,7 +647,7 @@ void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
 }
 
 void ContentViewCoreImpl::ShowDisambiguationPopup(
-    const gfx::Rect& target_rect,
+    const gfx::Rect& rect_pixels,
     const SkBitmap& zoomed_bitmap) {
   JNIEnv* env = AttachCurrentThread();
 
@@ -661,7 +655,7 @@ void ContentViewCoreImpl::ShowDisambiguationPopup(
   if (obj.is_null())
     return;
 
-  ScopedJavaLocalRef<jobject> rect_object(CreateJavaRect(env, target_rect));
+  ScopedJavaLocalRef<jobject> rect_object(CreateJavaRect(env, rect_pixels));
 
   ScopedJavaLocalRef<jobject> java_bitmap =
       gfx::ConvertToJavaBitmap(&zoomed_bitmap);
@@ -723,8 +717,7 @@ void ContentViewCoreImpl::DidStopFlinging() {
 
 gfx::Size ContentViewCoreImpl::GetViewSize() const {
   gfx::Size size = GetViewportSizeDip();
-  gfx::Size offset = GetViewportSizeOffsetDip();
-  size.Enlarge(-offset.width(), -offset.height());
+  size.Enlarge(0, -GetTopControlsLayoutHeightDip());
   return size;
 }
 
@@ -748,14 +741,12 @@ gfx::Size ContentViewCoreImpl::GetViewportSizePix() const {
       Java_ContentViewCore_getViewportHeightPix(env, j_obj.obj()));
 }
 
-gfx::Size ContentViewCoreImpl::GetViewportSizeOffsetPix() const {
+int ContentViewCoreImpl::GetTopControlsLayoutHeightPix() const {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
-    return gfx::Size();
-  return gfx::Size(
-      Java_ContentViewCore_getViewportSizeOffsetWidthPix(env, j_obj.obj()),
-      Java_ContentViewCore_getViewportSizeOffsetHeightPix(env, j_obj.obj()));
+    return 0;
+  return Java_ContentViewCore_getTopControlsLayoutHeightPix(env, j_obj.obj());
 }
 
 gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
@@ -763,18 +754,8 @@ gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
       gfx::ScaleSize(GetViewportSizePix(), 1.0f / dpi_scale()));
 }
 
-gfx::Size ContentViewCoreImpl::GetViewportSizeOffsetDip() const {
-  return gfx::ToCeiledSize(
-      gfx::ScaleSize(GetViewportSizeOffsetPix(), 1.0f / dpi_scale()));
-}
-
-float ContentViewCoreImpl::GetOverdrawBottomHeightDip() const {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
-  if (j_obj.is_null())
-    return 0.f;
-  return Java_ContentViewCore_getOverdrawBottomHeightPix(env, j_obj.obj())
-      / dpi_scale();
+float ContentViewCoreImpl::GetTopControlsLayoutHeightDip() const {
+  return GetTopControlsLayoutHeightPix() / dpi_scale();
 }
 
 void ContentViewCoreImpl::AttachLayer(scoped_refptr<cc::Layer> layer) {
@@ -802,11 +783,6 @@ void ContentViewCoreImpl::SelectBetweenCoordinates(const gfx::PointF& start,
   web_contents_->SelectRange(start_point, end_point);
 }
 
-void ContentViewCoreImpl::LoadUrl(
-    NavigationController::LoadURLParams& params) {
-  GetWebContents()->GetController().LoadURLWithParams(params);
-}
-
 ui::ViewAndroid* ContentViewCoreImpl::GetViewAndroid() const {
   return view_android_;
 }
@@ -825,12 +801,13 @@ scoped_refptr<cc::Layer> ContentViewCoreImpl::GetLayer() const {
 
 void ContentViewCoreImpl::SelectPopupMenuItems(JNIEnv* env,
                                                jobject obj,
+                                               jlong selectPopupSourceFrame,
                                                jintArray indices) {
-  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
-      web_contents_->GetRenderViewHost());
-  DCHECK(rvhi);
+  RenderFrameHostImpl* rfhi =
+      reinterpret_cast<RenderFrameHostImpl*>(selectPopupSourceFrame);
+  DCHECK(rfhi);
   if (indices == NULL) {
-    rvhi->DidCancelPopupMenu();
+    rfhi->DidCancelPopupMenu();
     return;
   }
 
@@ -840,64 +817,7 @@ void ContentViewCoreImpl::SelectPopupMenuItems(JNIEnv* env,
   for (int i = 0; i < selected_count; ++i)
     selected_indices.push_back(indices_ptr[i]);
   env->ReleaseIntArrayElements(indices, indices_ptr, JNI_ABORT);
-  rvhi->DidSelectPopupMenuItems(selected_indices);
-}
-
-void ContentViewCoreImpl::LoadUrl(
-    JNIEnv* env, jobject obj,
-    jstring url,
-    jint load_url_type,
-    jint transition_type,
-    jstring j_referrer_url,
-    jint referrer_policy,
-    jint ua_override_option,
-    jstring extra_headers,
-    jbyteArray post_data,
-    jstring base_url_for_data_url,
-    jstring virtual_url_for_data_url,
-    jboolean can_load_local_resources,
-    jboolean is_renderer_initiated) {
-  DCHECK(url);
-  NavigationController::LoadURLParams params(
-      GURL(ConvertJavaStringToUTF8(env, url)));
-
-  params.load_type = static_cast<NavigationController::LoadURLType>(
-      load_url_type);
-  params.transition_type = PageTransitionFromInt(transition_type);
-  params.override_user_agent =
-      static_cast<NavigationController::UserAgentOverrideOption>(
-          ua_override_option);
-
-  if (extra_headers)
-    params.extra_headers = ConvertJavaStringToUTF8(env, extra_headers);
-
-  if (post_data) {
-    std::vector<uint8> http_body_vector;
-    base::android::JavaByteArrayToByteVector(env, post_data, &http_body_vector);
-    params.browser_initiated_post_data =
-        base::RefCountedBytes::TakeVector(&http_body_vector);
-  }
-
-  if (base_url_for_data_url) {
-    params.base_url_for_data_url =
-        GURL(ConvertJavaStringToUTF8(env, base_url_for_data_url));
-  }
-
-  if (virtual_url_for_data_url) {
-    params.virtual_url_for_data_url =
-        GURL(ConvertJavaStringToUTF8(env, virtual_url_for_data_url));
-  }
-
-  params.can_load_local_resources = can_load_local_resources;
-  if (j_referrer_url) {
-    params.referrer = content::Referrer(
-        GURL(ConvertJavaStringToUTF8(env, j_referrer_url)),
-        static_cast<blink::WebReferrerPolicy>(referrer_policy));
-  }
-
-  params.is_renderer_initiated = is_renderer_initiated;
-
-  LoadUrl(params);
+  rfhi->DidSelectPopupMenuItems(selected_indices);
 }
 
 WebContents* ContentViewCoreImpl::GetWebContents() const {
@@ -943,11 +863,16 @@ jboolean ContentViewCoreImpl::OnTouchEvent(JNIEnv* env,
                                            jint pointer_id_1,
                                            jfloat touch_major_0,
                                            jfloat touch_major_1,
+                                           jfloat touch_minor_0,
+                                           jfloat touch_minor_1,
+                                           jfloat orientation_0,
+                                           jfloat orientation_1,
                                            jfloat raw_pos_x,
                                            jfloat raw_pos_y,
                                            jint android_tool_type_0,
                                            jint android_tool_type_1,
                                            jint android_button_state,
+                                           jint android_meta_state,
                                            jboolean is_touch_handle_event) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   // Avoid synthesizing a touch event if it cannot be forwarded.
@@ -970,11 +895,16 @@ jboolean ContentViewCoreImpl::OnTouchEvent(JNIEnv* env,
                            pointer_id_1,
                            touch_major_0,
                            touch_major_1,
+                           touch_minor_0,
+                           touch_minor_1,
+                           orientation_0,
+                           orientation_1,
                            raw_pos_x,
                            raw_pos_y,
                            android_tool_type_0,
                            android_tool_type_1,
-                           android_button_state);
+                           android_button_state,
+                           android_meta_state);
 
   return is_touch_handle_event ? rwhv->OnTouchHandleEvent(event)
                                : rwhv->OnTouchEvent(event);
@@ -1180,12 +1110,6 @@ void ContentViewCoreImpl::SetMultiTouchZoomSupportEnabled(JNIEnv* env,
     rwhv->SetMultiTouchZoomSupportEnabled(enabled);
 }
 
-void ContentViewCoreImpl::ClearHistory(JNIEnv* env, jobject obj) {
-  // TODO(creis): Do callers of this need to know if it fails?
-  if (web_contents_->GetController().CanPruneAllButLastCommitted())
-    web_contents_->GetController().PruneAllButLastCommitted();
-}
-
 void ContentViewCoreImpl::SetAllowJavascriptInterfacesInspection(
     JNIEnv* env,
     jobject obj,
@@ -1227,79 +1151,6 @@ void ContentViewCoreImpl::WasResized(JNIEnv* env, jobject obj) {
   }
 }
 
-namespace {
-
-static void AddNavigationEntryToHistory(JNIEnv* env, jobject obj,
-                                        jobject history,
-                                        NavigationEntry* entry,
-                                        int index) {
-  // Get the details of the current entry
-  ScopedJavaLocalRef<jstring> j_url(
-      ConvertUTF8ToJavaString(env, entry->GetURL().spec()));
-  ScopedJavaLocalRef<jstring> j_virtual_url(
-      ConvertUTF8ToJavaString(env, entry->GetVirtualURL().spec()));
-  ScopedJavaLocalRef<jstring> j_original_url(
-      ConvertUTF8ToJavaString(env, entry->GetOriginalRequestURL().spec()));
-  ScopedJavaLocalRef<jstring> j_title(
-      ConvertUTF16ToJavaString(env, entry->GetTitle()));
-  ScopedJavaLocalRef<jobject> j_bitmap;
-  const FaviconStatus& status = entry->GetFavicon();
-  if (status.valid && status.image.ToSkBitmap()->getSize() > 0)
-    j_bitmap = gfx::ConvertToJavaBitmap(status.image.ToSkBitmap());
-
-  // Add the item to the list
-  Java_ContentViewCore_addToNavigationHistory(
-      env, obj, history, index, j_url.obj(), j_virtual_url.obj(),
-      j_original_url.obj(), j_title.obj(), j_bitmap.obj());
-}
-
-}  // namespace
-
-int ContentViewCoreImpl::GetNavigationHistory(JNIEnv* env,
-                                              jobject obj,
-                                              jobject history) {
-  // Iterate through navigation entries to populate the list
-  const NavigationController& controller = web_contents_->GetController();
-  int count = controller.GetEntryCount();
-  for (int i = 0; i < count; ++i) {
-    AddNavigationEntryToHistory(
-        env, obj, history, controller.GetEntryAtIndex(i), i);
-  }
-
-  return controller.GetCurrentEntryIndex();
-}
-
-void ContentViewCoreImpl::GetDirectedNavigationHistory(JNIEnv* env,
-                                                       jobject obj,
-                                                       jobject history,
-                                                       jboolean is_forward,
-                                                       jint max_entries) {
-  // Iterate through navigation entries to populate the list
-  const NavigationController& controller = web_contents_->GetController();
-  int count = controller.GetEntryCount();
-  int num_added = 0;
-  int increment_value = is_forward ? 1 : -1;
-  for (int i = controller.GetCurrentEntryIndex() + increment_value;
-       i >= 0 && i < count;
-       i += increment_value) {
-    if (num_added >= max_entries)
-      break;
-
-    AddNavigationEntryToHistory(
-        env, obj, history, controller.GetEntryAtIndex(i), i);
-    num_added++;
-  }
-}
-
-ScopedJavaLocalRef<jstring>
-ContentViewCoreImpl::GetOriginalUrlForActiveNavigationEntry(JNIEnv* env,
-                                                            jobject obj) {
-  NavigationEntry* entry = web_contents_->GetController().GetVisibleEntry();
-  if (entry == NULL)
-    return ScopedJavaLocalRef<jstring>(env, NULL);
-  return ConvertUTF8ToJavaString(env, entry->GetOriginalRequestURL().spec());
-}
-
 long ContentViewCoreImpl::GetNativeImeAdapter(JNIEnv* env, jobject obj) {
   RenderWidgetHostViewAndroid* rwhva = GetRenderWidgetHostViewAndroid();
   if (!rwhva)
@@ -1324,13 +1175,6 @@ void ContentViewCoreImpl::PostMessageToFrame(JNIEnv* env, jobject obj,
   params.is_data_raw_string = true;
   params.source_routing_id = MSG_ROUTING_NONE;
   host->Send(new ViewMsg_PostMessageEvent(host->GetRoutingID(), params));
-}
-
-
-bool ContentViewCoreImpl::GetUseDesktopUserAgent(
-    JNIEnv* env, jobject obj) {
-  NavigationEntry* entry = web_contents_->GetController().GetVisibleEntry();
-  return entry && entry->GetIsOverridingUserAgent();
 }
 
 void ContentViewCoreImpl::UpdateImeAdapter(long native_ime_adapter,
@@ -1361,42 +1205,6 @@ void ContentViewCoreImpl::UpdateImeAdapter(long native_ime_adapter,
                                         composition_end,
                                         show_ime_if_needed,
                                         is_non_ime_change);
-}
-
-void ContentViewCoreImpl::ClearSslPreferences(JNIEnv* env, jobject obj) {
-  content::SSLHostStateDelegate* delegate =
-      web_contents_->
-      GetController().
-      GetBrowserContext()->
-      GetSSLHostStateDelegate();
-  if (delegate)
-    delegate->Clear();
-}
-
-void ContentViewCoreImpl::SetUseDesktopUserAgent(
-    JNIEnv* env,
-    jobject obj,
-    jboolean enabled,
-    jboolean reload_on_state_change) {
-  if (GetUseDesktopUserAgent(env, obj) == enabled)
-    return;
-
-  // Make sure the navigation entry actually exists.
-  NavigationEntry* entry = web_contents_->GetController().GetVisibleEntry();
-  if (!entry)
-    return;
-
-  // Set the flag in the NavigationEntry.
-  entry->SetIsOverridingUserAgent(enabled);
-
-  // Send the override to the renderer.
-  if (reload_on_state_change) {
-    // Reloading the page will send the override down as part of the
-    // navigation IPC message.
-    NavigationControllerImpl& controller =
-        static_cast<NavigationControllerImpl&>(web_contents_->GetController());
-    controller.ReloadOriginalRequestURL(false);
-  }
 }
 
 void ContentViewCoreImpl::SetAccessibilityEnabled(JNIEnv* env, jobject obj,

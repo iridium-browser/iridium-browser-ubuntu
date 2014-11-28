@@ -20,7 +20,7 @@ class SkPath;
 class SkPicture;
 class SkXfermode;
 class GrContext;
-class GrEffect;
+class GrFragmentProcessor;
 
 /** \class SkShader
  *
@@ -184,6 +184,9 @@ public:
         bool canCallShadeSpan16() {
             return SkShader::CanCallShadeSpan16(this->getFlags());
         }
+
+        // Notification from blitter::blitMask in case we need to see the non-alpha channels
+        virtual void set3DMask(const SkMask*) {}
 
     protected:
         // Reference to shader, so we don't have to dupe information.
@@ -382,9 +385,18 @@ public:
      *  The GrContext may be used by the effect to create textures. The GPU device does not
      *  call createContext. Instead we pass the SkPaint here in case the shader needs paint info.
      */
-    virtual bool asNewEffect(GrContext* context, const SkPaint& paint,
-                             const SkMatrix* localMatrixOrNull, GrColor* paintColor,
-                             GrEffect** effect) const;
+    virtual bool asFragmentProcessor(GrContext*, const SkPaint&, const SkMatrix*, GrColor*,
+                                     GrFragmentProcessor**) const;
+
+    /**
+     *  If the shader can represent its "average" luminance in a single color, return true and
+     *  if color is not NULL, return that color. If it cannot, return false and ignore the color
+     *  parameter.
+     *
+     *  Note: if this returns true, the returned color will always be opaque, as only the RGB
+     *  components are used to compute luminance.
+     */
+    bool asLuminanceColor(SkColor*) const;
 
 #ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
     /**
@@ -401,6 +413,12 @@ public:
      *  Call this to create a new "empty" shader, that will not draw anything.
      */
     static SkShader* CreateEmptyShader();
+
+    /**
+     *  Call this to create a new shader that just draws the specified color. This should always
+     *  draw the same as a paint with this color (and no shader).
+     */
+    static SkShader* CreateColorShader(SkColor);
 
     /** Call this to create a new shader that will draw with the specified bitmap.
      *
@@ -461,7 +479,9 @@ public:
     SK_DEFINE_FLATTENABLE_TYPE(SkShader)
 
 protected:
+#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
     SkShader(SkReadBuffer& );
+#endif
     virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
 
     bool computeTotalInverse(const ContextRec&, SkMatrix* totalInverse) const;
@@ -472,6 +492,9 @@ protected:
      */
     virtual Context* onCreateContext(const ContextRec&, void* storage) const;
 
+    virtual bool onAsLuminanceColor(SkColor*) const {
+        return false;
+    }
 private:
     // This is essentially const, but not officially so it can be modified in
     // constructors.

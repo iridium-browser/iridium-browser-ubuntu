@@ -16,6 +16,8 @@
 #include "net/url_request/url_request.h"
 
 namespace net {
+class HttpResponseHeaders;
+class ProxyConfig;
 class ProxyServer;
 }
 
@@ -33,10 +35,18 @@ class DataReductionProxyUsageStats
       const net::ProxyServer& proxy_server,
       DataReductionProxyBypassType bypass_type);
 
+  // For the given response |headers| that are expected to include the data
+  // reduction proxy via header, records response code UMA if the data reduction
+  // proxy via header is not present.
+  static void DetectAndRecordMissingViaHeaderResponseCode(
+      bool is_primary,
+      const net::HttpResponseHeaders* headers);
+
   // MessageLoopProxy instance is owned by io_thread. |params| outlives
   // this class instance.
-  DataReductionProxyUsageStats(DataReductionProxyParams* params,
-                               base::MessageLoopProxy* ui_thread_proxy);
+  DataReductionProxyUsageStats(
+      DataReductionProxyParams* params,
+      const scoped_refptr<base::MessageLoopProxy>& ui_thread_proxy);
   virtual ~DataReductionProxyUsageStats();
 
   // Sets the callback to be called on the UI thread when the unavailability
@@ -55,12 +65,10 @@ class DataReductionProxyUsageStats
   // cause the current bypass.
   void SetBypassType(DataReductionProxyBypassType type);
 
-  // Given |data_reduction_proxy_enabled|, a |request|, and the
-  // |data_reduction_proxy_config| records the number of bypassed bytes for that
-  // |request| into UMAs based on bypass type. |data_reduction_proxy_enabled|
-  // tells us the state of the kDataReductionProxyEnabled preference.
-  void RecordBypassedBytesHistograms(
-      net::URLRequest& request,
+  // Records all the data reduction proxy bytes-related histograms for the
+  // completed URLRequest |request|.
+  void RecordBytesHistograms(
+      net::URLRequest* request,
       const BooleanPrefMember& data_reduction_proxy_enabled,
       const net::ProxyConfig& data_reduction_proxy_config);
 
@@ -70,6 +78,10 @@ class DataReductionProxyUsageStats
                        int net_error);
 
  private:
+  friend class DataReductionProxyUsageStatsTest;
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyUsageStatsTest,
+                           RecordMissingViaHeaderBytes);
+
   enum BypassedBytesType {
     NOT_BYPASSED = 0,         /* Not bypassed. */
     SSL,                      /* Bypass due to SSL. */
@@ -80,6 +92,20 @@ class DataReductionProxyUsageStats
     NETWORK_ERROR,            /* Network error. */
     BYPASSED_BYTES_TYPE_MAX   /* This must always be last.*/
   };
+
+  // Given |data_reduction_proxy_enabled|, a |request|, and the
+  // |data_reduction_proxy_config| records the number of bypassed bytes for that
+  // |request| into UMAs based on bypass type. |data_reduction_proxy_enabled|
+  // tells us the state of the kDataReductionProxyEnabled preference.
+  void RecordBypassedBytesHistograms(
+      net::URLRequest* request,
+      const BooleanPrefMember& data_reduction_proxy_enabled,
+      const net::ProxyConfig& data_reduction_proxy_config);
+
+  // Records UMA of the number of response bytes of responses that are expected
+  // to have the data reduction proxy via header, but where the data reduction
+  // proxy via header is not present.
+  void RecordMissingViaHeaderBytes(net::URLRequest* request);
 
   // NetworkChangeNotifier::NetworkChangeObserver:
   virtual void OnNetworkChanged(
@@ -106,7 +132,7 @@ class DataReductionProxyUsageStats
   DataReductionProxyBypassType last_bypass_type_;
   // True if the last request triggered the current bypass.
   bool triggering_request_;
-  base::MessageLoopProxy* ui_thread_proxy_;
+  const scoped_refptr<base::MessageLoopProxy> ui_thread_proxy_;
 
   // The following 2 fields are used to determine if data reduction proxy is
   // unreachable. We keep a count of requests which should go through

@@ -56,8 +56,9 @@
 
 #include <stdio.h>
 
-#include <openssl/sha.h>
+#include <openssl/crypto.h>
 #include <openssl/digest.h>
+#include <openssl/sha.h>
 
 
 static const char *const test[] = {
@@ -67,7 +68,7 @@ static const char *const expected[] = {
     "a9993e364706816aba3e25717850c26c9cd0d89d",
     "84983e441c3bd26ebaae4aa1f95129e5e54670f1", };
 
-static int test_incremental() {
+static int test_incremental(void) {
   EVP_MD_CTX ctx;
   char buf[1000];
   uint8_t md[SHA_DIGEST_LENGTH];
@@ -101,6 +102,8 @@ int main(int argc, char **argv) {
   uint8_t md[SHA_DIGEST_LENGTH];
   char md_hex[sizeof(md) * 2 + 1];
   int ok = 1;
+
+  CRYPTO_library_init();
 
   for (i = 0; test[i] != NULL; i++) {
     EVP_Digest(test[i], strlen(test[i]), md, NULL, EVP_sha1(), NULL);

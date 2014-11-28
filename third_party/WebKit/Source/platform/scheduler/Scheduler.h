@@ -6,7 +6,7 @@
 #define Scheduler_h
 
 #include "platform/PlatformExport.h"
-#include "platform/TraceLocation.h"
+#include "platform/scheduler/TracedTask.h"
 #include "wtf/DoubleBufferedDeque.h"
 #include "wtf/Functional.h"
 #include "wtf/Noncopyable.h"
@@ -14,9 +14,7 @@
 
 namespace blink {
 class WebThread;
-}
-
-namespace blink {
+struct WebBeginFrameArgs;
 
 // The scheduler is an opinionated gateway for arranging work to be run on the
 // main thread. It decides which tasks get priority over others based on a
@@ -32,12 +30,23 @@ public:
     static void initializeOnMainThread();
     static void shutdown();
 
+    // Called to notify about the start of a new frame.
+    void willBeginFrame(const WebBeginFrameArgs&);
+
+    // Called to notify that a previously begun frame was committed.
+    void didCommitFrameToCompositor();
+
     // The following entrypoints are used to schedule different types of tasks
     // to be run on the main thread. They can be called from any thread.
     void postInputTask(const TraceLocation&, const Task&);
     void postCompositorTask(const TraceLocation&, const Task&);
+    void postIpcTask(const TraceLocation&, const Task&);
     void postTask(const TraceLocation&, const Task&); // For generic (low priority) tasks.
     void postIdleTask(const TraceLocation&, const IdleTask&); // For non-critical tasks which may be reordered relative to other task types.
+
+    // Tells the scheduler that the system received an input event. This causes the scheduler to go into
+    // Compositor Priority mode for a short duration.
+    void didReceiveInputEvent();
 
     // Returns true if there is high priority work pending on the main thread
     // and the caller should yield to let the scheduler service that work.
@@ -50,50 +59,75 @@ public:
     void setSharedTimerFireInterval(double);
     void stopSharedTimer();
 
-private:
+protected:
     class MainThreadPendingTaskRunner;
     class MainThreadPendingHighPriorityTaskRunner;
     friend class MainThreadPendingTaskRunner;
     friend class MainThreadPendingHighPriorityTaskRunner;
 
+    enum SchedulerPolicy {
+        Normal,
+        CompositorPriority,
+    };
+
     Scheduler();
-    ~Scheduler();
+    virtual ~Scheduler();
 
     void scheduleIdleTask(const TraceLocation&, const IdleTask&);
+    void postHighPriorityTaskInternal(const TraceLocation&, const Task&, const char* traceName);
 
     static void sharedTimerAdapter();
+
+    // Start of main thread only members -----------------------------------
+
+    // Only does work in CompositorPriority mode. Returns true if any work was done.
+    bool runPendingHighPriorityTasksIfInCompositorPriority();
+
+    // Returns true if any work was done.
+    bool swapQueuesAndRunPendingTasks();
+
+    void swapQueuesRunPendingTasksAndAllowHighPriorityTaskRunnerPosting();
+
+    // Returns true if any work was done.
+    bool executeHighPriorityTasks(Deque<TracedTask>&);
+
+    // Return the current SchedulerPolicy.
+    SchedulerPolicy schedulerPolicy() const;
+
+    void maybeEnterNormalSchedulerPolicy();
+
+    // Must be called while m_pendingTasksMutex is locked.
+    void maybePostMainThreadPendingHighPriorityTaskRunner();
+
     void tickSharedTimer();
 
+    void (*m_sharedTimerFunction)();
+
+    // End of main thread only members -------------------------------------
+
     bool hasPendingHighPriorityWork() const;
-    void runHighPriorityTasks();
+
+    void enterSchedulerPolicyLocked(SchedulerPolicy);
+
+    void enterSchedulerPolicy(SchedulerPolicy);
 
     static Scheduler* s_sharedScheduler;
 
-    class TracedTask {
-    public:
-        TracedTask(const Task& task, const TraceLocation& location)
-            : m_task(task)
-            , m_location(location) { }
-
-        void run();
-
-    private:
-        Task m_task;
-        TraceLocation m_location;
-    };
-
-    // Should only be accessed from the main thread.
-    void (*m_sharedTimerFunction)();
-
-    // These members can be accessed from any thread.
     WebThread* m_mainThread;
 
-    // This mutex protects calls to the pending task queues.
+    // This mutex protects calls to the pending task queue, m_highPriorityTaskRunnerPosted and
+    // m_compositorPriorityPolicyEndTimeSeconds.
     Mutex m_pendingTasksMutex;
-    DoubleBufferedDeque<TracedTask> m_pendingInputTasks;
-    DoubleBufferedDeque<TracedTask> m_pendingCompositorTasks;
+    DoubleBufferedDeque<TracedTask> m_pendingHighPriorityTasks;
+    double m_compositorPriorityPolicyEndTimeSeconds;
 
+    // Declared volatile as it is atomically incremented.
     volatile int m_highPriorityTaskCount;
+
+    bool m_highPriorityTaskRunnerPosted;
+
+    // Don't access m_schedulerPolicy directly, use enterSchedulerPolicyLocked and SchedulerPolicy instead.
+    volatile int m_schedulerPolicy;
 };
 
 } // namespace blink

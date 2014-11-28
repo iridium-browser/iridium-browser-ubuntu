@@ -18,7 +18,6 @@
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "third_party/skia/include/core/SkRect.h"
 #include "ui/gfx/break_list.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/font_render_params.h"
@@ -58,7 +57,7 @@ class SkiaTextRenderer {
   void SetTextSize(SkScalar size);
   void SetFontFamilyWithStyle(const std::string& family, int font_style);
   void SetForegroundColor(SkColor foreground);
-  void SetShader(SkShader* shader, const Rect& bounds);
+  void SetShader(SkShader* shader);
   // Sets underline metrics to use if the text will be drawn with an underline.
   // If not set, default values based on the size of the text will be used. The
   // two metrics must be set together.
@@ -102,10 +101,7 @@ class SkiaTextRenderer {
 
   Canvas* canvas_;
   SkCanvas* canvas_skia_;
-  bool started_drawing_;
   SkPaint paint_;
-  SkRect bounds_;
-  skia::RefPtr<SkShader> deferred_fade_shader_;
   SkScalar underline_thickness_;
   SkScalar underline_position_;
   scoped_ptr<DiagonalStrike> diagonal_;
@@ -177,6 +173,11 @@ struct Line {
 // May return NULL.
 skia::RefPtr<SkTypeface> CreateSkiaTypeface(const std::string& family,
                                             int style);
+
+// Applies the given FontRenderParams to a Skia |paint|.
+void ApplyRenderParams(const FontRenderParams& params,
+                       bool background_is_transparent,
+                       SkPaint* paint);
 
 }  // namespace internal
 

@@ -131,12 +131,10 @@ void WebstoreInstallerTest::RunTestAsync(
   std::string script = base::StringPrintf(
       "%s('%s')", test_function_name.c_str(), test_gallery_url_.c_str());
   browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame()->
-      ExecuteJavaScript(base::UTF8ToUTF16(script));
+      ExecuteJavaScriptForTests(base::UTF8ToUTF16(script));
 }
 
 void WebstoreInstallerTest::AutoAcceptInstall() {
-  // TODO(tmdiep): Refactor and remove the use of the command line flag.
-  // See crbug.com/357774.
   ExtensionInstallPrompt::g_auto_confirm_for_tests =
       ExtensionInstallPrompt::ACCEPT;
 }

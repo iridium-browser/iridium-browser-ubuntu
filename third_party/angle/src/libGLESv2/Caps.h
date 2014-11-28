@@ -226,6 +226,46 @@ struct Caps
     GLfloat minAliasedLineWidth;
     GLfloat maxAliasedLineWidth;
 
+    // Table 6.29, implementation dependent values (cont.)
+    GLuint maxElementsIndices;
+    GLuint maxElementsVertices;
+    std::vector<GLenum> compressedTextureFormats;
+    std::vector<GLenum> programBinaryFormats;
+    std::vector<GLenum> shaderBinaryFormats;
+    GLuint64 maxServerWaitTimeout;
+
+    // Table 6.31, implementation dependent vertex shader limits
+    GLuint maxVertexAttributes;
+    GLuint maxVertexUniformComponents;
+    GLuint maxVertexUniformVectors;
+    GLuint maxVertexUniformBlocks;
+    GLuint maxVertexOutputComponents;
+    GLuint maxVertexTextureImageUnits;
+
+    // Table 6.32, implementation dependent fragment shader limits
+    GLuint maxFragmentUniformComponents;
+    GLuint maxFragmentUniformVectors;
+    GLuint maxFragmentUniformBlocks;
+    GLuint maxFragmentInputComponents;
+    GLuint maxTextureImageUnits;
+    GLint minProgramTexelOffset;
+    GLint maxProgramTexelOffset;
+
+    // Table 6.33, implementation dependent aggregate shader limits
+    GLuint maxUniformBufferBindings;
+    GLuint64 maxUniformBlockSize;
+    GLuint uniformBufferOffsetAlignment;
+    GLuint maxCombinedUniformBlocks;
+    GLuint64 maxCombinedVertexUniformComponents;
+    GLuint64 maxCombinedFragmentUniformComponents;
+    GLuint maxVaryingComponents;
+    GLuint maxVaryingVectors;
+    GLuint maxCombinedTextureImageUnits;
+
+    // Table 6.34, implementation dependent transform feedback limits
+    GLuint maxTransformFeedbackInterleavedComponents;
+    GLuint maxTransformFeedbackSeparateAttributes;
+    GLuint maxTransformFeedbackSeparateComponents;
 };
 
 }

@@ -100,13 +100,11 @@ struct SupplementableTraits;
 template<typename T>
 struct SupplementableTraits<T, true> {
     typedef RawPtr<SupplementBase<T, true> > SupplementArgumentType;
-    typedef HeapHashMap<const char*, Member<SupplementBase<T, true> >, PtrHash<const char*> > SupplementMap;
 };
 
 template<typename T>
 struct SupplementableTraits<T, false> {
     typedef PassOwnPtr<SupplementBase<T, false> > SupplementArgumentType;
-    typedef HashMap<const char*, OwnPtr<SupplementBase<T, false> >, PtrHash<const char*> > SupplementMap;
 };
 
 template<bool>
@@ -119,6 +117,12 @@ template<>
 class SupplementTracing<false> {
 public:
     virtual ~SupplementTracing() { }
+    // FIXME: Oilpan: this trace() method is only provided to minimize
+    // the use of ENABLE(OILPAN) for Supplements deriving from the
+    // transition type WillBeHeapSupplement<>.
+    //
+    // When that transition type is removed (or its use is substantially
+    // reduced), remove this dummy trace method also.
     virtual void trace(Visitor*) { }
 };
 
@@ -143,17 +147,34 @@ public:
     {
         return host ? host->requireSupplement(key) : 0;
     }
-
-    virtual void willBeDestroyed() { }
-
-    // FIXME: Oilpan: Remove this callback once PersistentHeapSupplementable is removed again.
-    virtual void persistentHostHasBeenDestroyed() { }
 };
 
-// Helper class for implementing Supplementable, HeapSupplementable, and
-// PersistentHeapSupplementable.
+template<typename T, bool isGarbageCollected>
+class SupplementableTracing;
+
+template<typename T>
+class SupplementableTracing<T, true> : public GarbageCollectedMixin {
+public:
+    virtual void trace(Visitor* visitor)
+    {
+        visitor->trace(m_supplements);
+    }
+
+protected:
+    typedef HeapHashMap<const char*, Member<SupplementBase<T, true> >, PtrHash<const char*> > SupplementMap;
+    SupplementMap m_supplements;
+};
+
+template<typename T>
+class SupplementableTracing<T, false> {
+protected:
+    typedef HashMap<const char*, OwnPtr<SupplementBase<T, false> >, PtrHash<const char*> > SupplementMap;
+    SupplementMap m_supplements;
+};
+
+// Helper class for implementing Supplementable and HeapSupplementable.
 template<typename T, bool isGarbageCollected = false>
-class SupplementableBase {
+class SupplementableBase : public SupplementableTracing<T, isGarbageCollected> {
 public:
     void provideSupplement(const char* key, typename SupplementableTraits<T, isGarbageCollected>::SupplementArgumentType supplement)
     {
@@ -181,24 +202,6 @@ public:
 #endif
     }
 
-    // We have a trace method in the SupplementableBase class to ensure we have
-    // the vtable at the first word of the object. However we don't trace the
-    // m_supplements here, but in the partially specialized template subclasses
-    // since we only want to trace it for garbage collected classes.
-    virtual void trace(Visitor*) { }
-
-    void willBeDestroyed()
-    {
-        typedef typename SupplementableTraits<T, isGarbageCollected>::SupplementMap::iterator SupplementIterator;
-        for (SupplementIterator it = m_supplements.begin(); it != m_supplements.end(); ++it)
-            it->value->willBeDestroyed();
-    }
-
-    // FIXME: Oilpan: Make private and remove this ignore once PersistentHeapSupplementable is removed again.
-protected:
-    GC_PLUGIN_IGNORE("")
-    typename SupplementableTraits<T, isGarbageCollected>::SupplementMap m_supplements;
-
 #if ENABLE(ASSERT)
 protected:
     SupplementableBase() : m_threadId(currentThread()) { }
@@ -208,71 +211,17 @@ private:
 #endif
 };
 
-// This class is used to make an on-heap class supplementable. Its supplements
-// must be HeapSupplement.
 template<typename T>
 class HeapSupplement : public SupplementBase<T, true> { };
 
-// FIXME: Oilpan: Move GarbageCollectedMixin to SupplementableBase<T, true> once PersistentHeapSupplementable is removed again.
 template<typename T>
-class GC_PLUGIN_IGNORE("http://crbug.com/395036") HeapSupplementable : public SupplementableBase<T, true>, public GarbageCollectedMixin {
-public:
-    virtual void trace(Visitor* visitor) OVERRIDE
-    {
-        visitor->trace(this->m_supplements);
-        SupplementableBase<T, true>::trace(visitor);
-    }
-};
-
-// This class is used to make an off-heap class supplementable with supplements
-// that are on-heap, aka. HeapSupplements.
-template<typename T>
-class GC_PLUGIN_IGNORE("http://crbug.com/395036") PersistentHeapSupplementable : public SupplementableBase<T, true> {
-public:
-    PersistentHeapSupplementable() : m_root(this) { }
-    virtual ~PersistentHeapSupplementable()
-    {
-        typedef typename SupplementableTraits<T, true>::SupplementMap::iterator SupplementIterator;
-        for (SupplementIterator it = this->m_supplements.begin(); it != this->m_supplements.end(); ++it)
-            it->value->persistentHostHasBeenDestroyed();
-    }
-
-    virtual void trace(Visitor* visitor)
-    {
-        visitor->trace(this->m_supplements);
-        SupplementableBase<T, true>::trace(visitor);
-    }
-
-private:
-    class TraceDelegate : PersistentBase<ThreadLocalPersistents<AnyThread>, TraceDelegate> {
-    public:
-        TraceDelegate(PersistentHeapSupplementable* owner) : m_owner(owner) { }
-        void trace(Visitor* visitor) { m_owner->trace(visitor); }
-    private:
-        PersistentHeapSupplementable* m_owner;
-    };
-
-    TraceDelegate m_root;
-};
+class HeapSupplementable : public SupplementableBase<T, true> { };
 
 template<typename T>
 class Supplement : public SupplementBase<T, false> { };
 
-// This class is used to make an off-heap class supplementable with off-heap
-// supplements (Supplement).
 template<typename T>
-class GC_PLUGIN_IGNORE("http://crbug.com/395036") Supplementable : public SupplementableBase<T, false> {
-public:
-    virtual void trace(Visitor* visitor)
-    {
-        // No tracing of off-heap supplements. We should not have any Supplementable
-        // object on the heap. Either the object is HeapSupplementable or if it is
-        // off heap it should use PersistentHeapSupplementable to trace any on-heap
-        // supplements.
-        COMPILE_ASSERT(!IsGarbageCollectedType<T>::value, GarbageCollectedObjectMustBeHeapSupplementable);
-        SupplementableBase<T, false>::trace(visitor);
-    }
-};
+class Supplementable : public SupplementableBase<T, false> { };
 
 template<typename T>
 struct ThreadingTrait<SupplementBase<T, true> > {

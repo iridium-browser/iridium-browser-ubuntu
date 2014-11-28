@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
@@ -839,7 +839,9 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest,
   EXPECT_EQ(1, ordinal);
 }
 
-IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindDisappearOnNavigate) {
+// Verify that the find bar is hidden on reload and navigation.
+IN_PROC_BROWSER_TEST_F(FindInPageControllerTest,
+                       HideFindBarOnNavigateAndReload) {
   // First we navigate to our special focus tracking page.
   GURL url = GetURL(kSimple);
   GURL url2 = GetURL(kFramePage);
@@ -854,7 +856,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindDisappearOnNavigate) {
   EXPECT_TRUE(GetFindBarWindowInfo(&position, &fully_visible));
   EXPECT_TRUE(fully_visible);
 
-  // Reload the tab and make sure Find window doesn't go away.
+  // Reload and make sure the find window goes away.
   content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
@@ -862,11 +864,17 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindDisappearOnNavigate) {
               GetController()));
   chrome::Reload(browser(), CURRENT_TAB);
   observer.Wait();
+  EXPECT_TRUE(GetFindBarWindowInfo(&position, &fully_visible));
+  EXPECT_FALSE(fully_visible);
 
+  // Open the find bar again.
+  chrome::ShowFindBar(browser());
+
+  // Make sure it is open.
   EXPECT_TRUE(GetFindBarWindowInfo(&position, &fully_visible));
   EXPECT_TRUE(fully_visible);
 
-  // Navigate and make sure the Find window goes away.
+  // Navigate and make sure the find window goes away.
   ui_test_utils::NavigateToURL(browser(), url2);
 
   EXPECT_TRUE(GetFindBarWindowInfo(&position, &fully_visible));
@@ -1195,7 +1203,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, PrepopulateInNewTab) {
   EXPECT_EQ(ASCIIToUTF16("1 of 1"), GetMatchCountText());
 
   // Now create a second tab and load the same page.
-  chrome::AddSelectedTabWithURL(browser(), url, content::PAGE_TRANSITION_TYPED);
+  chrome::AddSelectedTabWithURL(browser(), url, ui::PAGE_TRANSITION_TYPED);
   WebContents* web_contents_2 =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_NE(web_contents_1, web_contents_2);
@@ -1320,7 +1328,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, MAYBE_NoIncognitoPrepopulate) {
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
   chrome::AddSelectedTabWithURL(incognito_browser, url,
-                                content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
   observer.Wait();
   incognito_browser->window()->Show();
 
@@ -1341,7 +1349,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, MAYBE_NoIncognitoPrepopulate) {
       FindBarController::kKeepResultsInFindBox);
 
   // Now open a new tab in the original (non-incognito) browser.
-  chrome::AddSelectedTabWithURL(browser(), url, content::PAGE_TRANSITION_TYPED);
+  chrome::AddSelectedTabWithURL(browser(), url, ui::PAGE_TRANSITION_TYPED);
   WebContents* web_contents_2 =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_NE(web_contents_1, web_contents_2);
@@ -1384,7 +1392,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FitWindow) {
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
   chrome::AddSelectedTabWithURL(
-      popup, GURL(url::kAboutBlankURL), content::PAGE_TRANSITION_LINK);
+      popup, GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_LINK);
   // Wait for the page to finish loading.
   observer.Wait();
   popup->window()->Show();
@@ -1552,73 +1560,3 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, IncognitoFindNextShared) {
   EXPECT_EQ(ASCIIToUTF16("bar"),
             GetFindBarTextForBrowser(browser_incognito));
 }
-
-#if defined(OS_WIN)
-
-BOOL CALLBACK EnumerateChildren(HWND hwnd, LPARAM l_param) {
-  HWND* child = reinterpret_cast<HWND*>(l_param);
-  *child = hwnd;
-  // The first child window is the plugin, then its children. So stop
-  // enumerating after the first callback.
-  return FALSE;
-}
-
-// Ensure that the find bar is always over a windowed NPAPI plugin.
-IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, WindowedNPAPIPluginHidden) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kPluginsAlwaysAuthorize,
-                                               true);
-
-  // First load the page and wait for the NPAPI plugin's window to display.
-  base::string16 expected_title(ASCIIToUTF16("ready"));
-  content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  content::TitleWatcher title_watcher(tab, expected_title);
-
-  GURL url = ui_test_utils::GetTestUrl(
-      base::FilePath().AppendASCII("printing"),
-      base::FilePath().AppendASCII("npapi_plugin.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-
-  // Now get the region of the plugin before the find bar is shown.
-  HWND hwnd = tab->GetNativeView()->GetHost()->GetAcceleratedWidget();
-  HWND child = NULL;
-  EnumChildWindows(hwnd, EnumerateChildren, reinterpret_cast<LPARAM>(&child));
-
-  RECT region_before, region_after;
-  int result = GetWindowRgnBox(child, &region_before);
-  ASSERT_EQ(result, SIMPLEREGION);
-
-  // Create a new tab and open the find bar there.
-  chrome::NewTab(browser());
-  browser()->tab_strip_model()->ActivateTabAt(1, true);
-  ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
-
-  EnsureFindBoxOpen();
-
-  // Now switch back to the original tab with the plugin and show the find bar.
-  browser()->tab_strip_model()->ActivateTabAt(0, true);
-  EnsureFindBoxOpen();
-
-  result = GetWindowRgnBox(child, &region_after);
-  if (result == NULLREGION) {
-    // Depending on the browser window size, the plugin could be full covered.
-    return;
-  }
-
-  if (result == COMPLEXREGION) {
-    // Complex region, by definition not equal to the initial region.
-    return;
-  }
-
-  ASSERT_EQ(result, SIMPLEREGION);
-  bool rects_equal =
-      region_before.left == region_after.left &&
-      region_before.top == region_after.top &&
-      region_before.right == region_after.right &&
-      region_before.bottom == region_after.bottom;
-  ASSERT_FALSE(rects_equal);
-}
-
-#endif

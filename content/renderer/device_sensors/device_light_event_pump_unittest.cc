@@ -39,14 +39,15 @@ class MockDeviceLightListener : public blink::WebDeviceLightListener {
 
 class DeviceLightEventPumpForTesting : public DeviceLightEventPump {
  public:
-  DeviceLightEventPumpForTesting() {}
+  DeviceLightEventPumpForTesting()
+      : DeviceLightEventPump(0) {}
   virtual ~DeviceLightEventPumpForTesting() {}
 
   void OnDidStart(base::SharedMemoryHandle renderer_handle) {
     DeviceLightEventPump::OnDidStart(renderer_handle);
   }
-  virtual bool SendStartMessage() OVERRIDE { return true; }
-  virtual bool SendStopMessage() OVERRIDE { return true; }
+  virtual void SendStartMessage() OVERRIDE { }
+  virtual void SendStopMessage() OVERRIDE { }
   virtual void FireEvent() OVERRIDE {
     DeviceLightEventPump::FireEvent();
     Stop();
@@ -100,7 +101,7 @@ TEST_F(DeviceLightEventPumpTest, DidStartPolling) {
 
   InitBuffer();
 
-  light_pump()->SetListener(listener());
+  light_pump()->Start(listener());
   light_pump()->OnDidStart(handle());
 
   base::MessageLoop::current()->Run();
@@ -110,12 +111,25 @@ TEST_F(DeviceLightEventPumpTest, DidStartPolling) {
   EXPECT_EQ(1, static_cast<double>(received_data.value));
 }
 
+TEST_F(DeviceLightEventPumpTest, FireAllNullEvent) {
+  base::MessageLoopForUI loop;
+
+  light_pump()->Start(listener());
+  light_pump()->OnDidStart(handle());
+
+  base::MessageLoop::current()->Run();
+
+  const DeviceLightData& received_data = listener()->data();
+  EXPECT_TRUE(listener()->did_change_device_light());
+  EXPECT_FALSE(received_data.value);
+}
+
 TEST_F(DeviceLightEventPumpTest, DidStartPollingValuesEqual) {
   base::MessageLoopForUI loop;
 
   InitBuffer();
 
-  light_pump()->SetListener(listener());
+  light_pump()->Start(listener());
   light_pump()->OnDidStart(handle());
 
   base::MessageLoop::current()->Run();
@@ -128,6 +142,10 @@ TEST_F(DeviceLightEventPumpTest, DidStartPollingValuesEqual) {
   // Set next value to be same as previous value.
   buffer()->data.value = 1.0;
   listener()->set_did_change_device_light(false);
+
+  // Reset the pump's listener.
+  light_pump()->Start(listener());
+
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&DeviceLightEventPumpForTesting::FireEvent,

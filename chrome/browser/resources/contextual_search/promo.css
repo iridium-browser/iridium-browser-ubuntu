@@ -10,46 +10,101 @@
 }
 
 body {
+  color: #414141;
   font-family: 'Roboto2', sans-serif;
-  font-size: 1em;
   margin: 0;
 }
 
-p {
-  margin: 1.5em;
-  text-align: justify;
-}
-
 a {
-  color: black;
+  text-decoration: none;
 }
 
-.colored {
+a.colored-link {
   color: rgb(66, 133, 244);
 }
 
-.label {
-  display: inline-block;
-  padding: 1.5em;
-  white-space: nowrap;
-}
-
-.label a {
-  font-weight: bold;
-  text-decoration: none;
-  text-transform: uppercase;
-}
-
 #button-container {
-  position: fixed;
-  text-align: right;
-  top: calc(70% - 76px /* action bar */ - 69px /* height of content */);
+  text-align: end;
   width: 100%;
 }
 
 #container.hide {
   -webkit-transform: scale(0.95);
-  -webkit-transition-property: opacity, -webkit-transform;
   -webkit-transition-duration: 218ms;
+  -webkit-transition-property: opacity, -webkit-transform;
   opacity: 0;
+}
+
+#description {
+  font-size: 16px;
+  line-height: 1.4em;
+  margin: 24px 16px 4px 16px;
+}
+
+/* Some properties below can be overridden in landscape orientation. */
+#heading {
+  font-size: 24px;
+  letter-spacing: 1px;
+  margin-top: 0;
+  text-align: center;
+}
+#header-image {
+  height: 100px;
+  margin: 0 auto 24px auto;
+}
+.portrait {
+  display: block;
+}
+.landscape {
+  display: none;
+}
+
+/* Landscape */
+@media screen and (orientation:landscape) {
+  #heading {
+    padding-top: 16px;
+  }
+  #header-image {
+    margin: 0 24px;
+  }
+  .portrait {
+    display: none;
+  }
+  .landscape {
+    display: block;
+    float: left;
+  }
+  html[dir='rtl'] .landscape {
+    float: right;
+  }
+}
+
+.label {
+  display: inline-block;
+  font-size: 14px;
+  margin: 14px 0;
+  /* We use a slightly different top-bottom padding because Roboto has a
+     rendering bug which makes an extra padding to be rendered at the bottom of
+     text. */
+  padding: 17px 14px 13px 14px;
+  white-space: nowrap;
+}
+
+.label a {
+  text-transform: uppercase;
+}
+
+#optin-label {
+  background: rgb(66, 133, 244);
+  background-clip: padding-box;
+  border-radius: 3px;
+  margin-right: 24px;
+}
+
+#optin-label a {
+  color: white;
+}
+
+#optout-label a {
+  color: rgb(66, 133, 244);
 }

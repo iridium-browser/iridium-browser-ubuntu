@@ -22,6 +22,7 @@
 #include "content/browser/frame_host/navigator_delegate.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
 #include "content/browser/frame_host/render_frame_host_manager.h"
+#include "content/browser/media/audio_stream_monitor.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/common/accessibility_mode_enums.h"
@@ -30,13 +31,13 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/three_d_api_types.h"
 #include "net/base/load_states.h"
 #include "net/http/http_response_headers.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/gfx/rect_f.h"
 #include "ui/gfx/size.h"
 
@@ -53,6 +54,7 @@ class DownloadItem;
 class GeolocationDispatcherHost;
 class InterstitialPageImpl;
 class JavaScriptDialogManager;
+class ManifestManagerHost;
 class MidiDispatcherHost;
 class PowerSaveBlocker;
 class RenderViewHost;
@@ -63,6 +65,7 @@ class SavePackage;
 class ScreenOrientationDispatcherHost;
 class SiteInstance;
 class TestWebContents;
+class WebContentsAudioMuter;
 class WebContentsDelegate;
 class WebContentsImpl;
 class WebContentsObserver;
@@ -244,6 +247,8 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void IncrementCapturerCount(const gfx::Size& capture_size) OVERRIDE;
   virtual void DecrementCapturerCount() OVERRIDE;
   virtual int GetCapturerCount() const OVERRIDE;
+  virtual bool IsAudioMuted() const OVERRIDE;
+  virtual void SetAudioMuted(bool mute) OVERRIDE;
   virtual bool IsCrashed() const OVERRIDE;
   virtual void SetIsCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
@@ -329,13 +334,13 @@ class CONTENT_EXPORT WebContentsImpl
                     const blink::WebFindOptions& options) OVERRIDE;
   virtual void StopFinding(StopFindAction action) OVERRIDE;
   virtual void InsertCSS(const std::string& css) OVERRIDE;
+  virtual bool WasRecentlyAudible() OVERRIDE;
+  virtual void GetManifest(const GetManifestCallback&) OVERRIDE;
 #if defined(OS_ANDROID)
   virtual base::android::ScopedJavaLocalRef<jobject> GetJavaWebContents()
       OVERRIDE;
   virtual WebContentsAndroid* GetWebContentsAndroid();
 #elif defined(OS_MACOSX)
-  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
-  virtual bool GetAllowOverlappingViews() OVERRIDE;
   virtual void SetAllowOtherViews(bool allow) OVERRIDE;
   virtual bool GetAllowOtherViews() OVERRIDE;
 #endif
@@ -386,6 +391,8 @@ class CONTENT_EXPORT WebContentsImpl
   virtual AccessibilityMode GetAccessibilityMode() const OVERRIDE;
   virtual void AccessibilityEventReceived(
       const std::vector<AXEventNotificationDetails>& details) OVERRIDE;
+  virtual RenderFrameHost* GetGuestByInstanceID(int browser_plugin_instance_id)
+      OVERRIDE;
 #if defined(OS_WIN)
   virtual gfx::NativeViewAccessible GetParentNativeViewAccessible() OVERRIDE;
 #endif
@@ -407,7 +414,7 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void UpdateState(RenderViewHost* render_view_host,
                            int32 page_id,
                            const PageState& page_state) OVERRIDE;
-  virtual void UpdateTargetURL(int32 page_id, const GURL& url) OVERRIDE;
+  virtual void UpdateTargetURL(const GURL& url) OVERRIDE;
   virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RequestMove(const gfx::Rect& new_bounds) OVERRIDE;
   virtual void DidCancelLoading() OVERRIDE;
@@ -473,10 +480,14 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void RequestMediaAccessPermission(
       const MediaStreamRequest& request,
       const MediaResponseCallback& callback) OVERRIDE;
+  virtual bool CheckMediaAccessPermission(const GURL& security_origin,
+                                          MediaStreamType type) OVERRIDE;
   virtual SessionStorageNamespace* GetSessionStorageNamespace(
       SiteInstance* instance) OVERRIDE;
   virtual SessionStorageNamespaceMap GetSessionStorageNamespaceMap() OVERRIDE;
   virtual FrameTree* GetFrameTree() OVERRIDE;
+  virtual void SetIsVirtualKeyboardRequested(bool requested) OVERRIDE;
+  virtual bool IsVirtualKeyboardRequested() OVERRIDE;
 
   // NavigatorDelegate ---------------------------------------------------------
 
@@ -496,13 +507,10 @@ class CONTENT_EXPORT WebContentsImpl
       const GURL& url,
       int error_code,
       const base::string16& error_description) OVERRIDE;
-  virtual void DidRedirectProvisionalLoad(
-      RenderFrameHostImpl* render_frame_host,
-      const GURL& validated_target_url) OVERRIDE;
   virtual void DidCommitProvisionalLoad(
       RenderFrameHostImpl* render_frame_host,
       const GURL& url,
-      PageTransition transition_type) OVERRIDE;
+      ui::PageTransition transition_type) OVERRIDE;
   virtual void DidNavigateMainFramePreCommit(
       bool navigation_is_within_page) OVERRIDE;
   virtual void DidNavigateMainFramePostCommit(
@@ -542,7 +550,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual bool HandleGestureEvent(
       const blink::WebGestureEvent& event) OVERRIDE;
   virtual void DidSendScreenRects(RenderWidgetHostImpl* rwh) OVERRIDE;
-  virtual void OnTouchEmulationEnabled(bool enabled) OVERRIDE;
   virtual BrowserAccessibilityManager* GetRootBrowserAccessibilityManager()
       OVERRIDE;
   virtual BrowserAccessibilityManager*
@@ -669,6 +676,21 @@ class CONTENT_EXPORT WebContentsImpl
   // immediately at first response).
   void ResumeResponseDeferredAtStart();
 
+  // Forces overscroll to be disabled (used by touch emulation).
+  void SetForceDisableOverscrollContent(bool force_disable);
+
+  AudioStreamMonitor* audio_stream_monitor() {
+    return &audio_stream_monitor_;
+  }
+
+  bool has_audio_power_save_blocker_for_testing() const {
+    return audio_power_save_blocker_;
+  }
+
+  bool has_video_power_save_blocker_for_testing() const {
+    return video_power_save_blocker_;
+  }
+
  private:
   friend class TestNavigationObserver;
   friend class WebContentsAddedObserver;
@@ -687,6 +709,8 @@ class CONTENT_EXPORT WebContentsImpl
   FRIEND_TEST_ALL_PREFIXES(NavigationControllerTest, HistoryNavigate);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostManagerTest, PageDoesBackAndReload);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest, CrossSiteIframe);
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessAccessibilityBrowserTest,
+                           CrossSiteIframeAccessibility);
 
   // So InterstitialPageImpl can access SetIsLoading.
   friend class InterstitialPageImpl;
@@ -808,7 +832,8 @@ class CONTENT_EXPORT WebContentsImpl
   void OnFirstVisuallyNonEmptyPaint();
   void OnMediaPlayingNotification(int64 player_cookie,
                                   bool has_video,
-                                  bool has_audio);
+                                  bool has_audio,
+                                  bool is_remote);
   void OnMediaPausedNotification(int64 player_cookie);
   void OnShowValidationMessage(const gfx::Rect& anchor_in_root_view,
                                const base::string16& main_text,
@@ -902,11 +927,21 @@ class CONTENT_EXPORT WebContentsImpl
   // Removes browser plugin embedder if there is one.
   void RemoveBrowserPluginEmbedder();
 
-  // Clear |render_frame_host|'s PowerSaveBlockers.
+  // Clear |render_frame_host|'s tracking entry for its power save blockers.
   void ClearPowerSaveBlockers(RenderFrameHost* render_frame_host);
 
-  // Clear all PowerSaveBlockers, leave |power_save_blocker_| empty.
+  // Clear tracking entries for all RenderFrameHosts, clears
+  // |audio_power_save_blocker_| and |video_power_save_blocker_|.
   void ClearAllPowerSaveBlockers();
+
+  // Creates an audio or video power save blocker respectively.
+  void CreateAudioPowerSaveBlocker();
+  void CreateVideoPowerSaveBlocker();
+
+  // Releases the audio power save blockers if |active_audio_players_| is empty.
+  // Likewise, releases the video power save blockers if |active_video_players_|
+  // is empty.
+  void MaybeReleasePowerSaveBlockers();
 
   // Helper function to invoke WebContentsDelegate::GetSizeForNewRenderView().
   gfx::Size GetSizeForNewRenderView();
@@ -917,6 +952,18 @@ class CONTENT_EXPORT WebContentsImpl
   // |preferred_size_for_capture_| changes, to propagate the new value to the
   // |delegate_|.
   void OnPreferredSizeChanged(const gfx::Size& old_size);
+
+  // Helper methods for adding or removing player entries in |player_map| under
+  // the key |render_frame_message_source_|.
+  typedef std::vector<int64> PlayerList;
+  typedef std::map<uintptr_t, PlayerList> ActiveMediaPlayerMap;
+  void AddMediaPlayerEntry(int64 player_cookie,
+                           ActiveMediaPlayerMap* player_map);
+  void RemoveMediaPlayerEntry(int64 player_cookie,
+                              ActiveMediaPlayerMap* player_map);
+  // Removes all entries from |player_map| for |render_frame_host|.
+  void RemoveAllMediaPlayerEntries(RenderFrameHost* render_frame_host,
+                                   ActiveMediaPlayerMap* player_map);
 
   // Adds/removes a callback called on creation of each new WebContents.
   // Deprecated, about to remove.
@@ -972,18 +1019,11 @@ class CONTENT_EXPORT WebContentsImpl
 
   // Helper classes ------------------------------------------------------------
 
-#if !defined(OS_CHROMEOS)
-  // Maps the RenderFrameHost to its media_player_cookie and PowerSaveBlocker
-  // pairs. Key is the RenderFrameHost, value is the map which maps
-  // player_cookie on to PowerSaveBlocker.
-  //
-  // ChromeOS does its own detection of audio and video.
-  typedef base::ScopedPtrHashMap<int64, PowerSaveBlocker>
-      PowerSaveBlockerMapEntry;
-  typedef base::ScopedPtrHashMap<uintptr_t, PowerSaveBlockerMapEntry>
-      PowerSaveBlockerMap;
-  PowerSaveBlockerMap power_save_blockers_;
-#endif
+  // Tracking variables and associated power save blockers for media playback.
+  ActiveMediaPlayerMap active_audio_players_;
+  ActiveMediaPlayerMap active_video_players_;
+  scoped_ptr<PowerSaveBlocker> audio_power_save_blocker_;
+  scoped_ptr<PowerSaveBlocker> video_power_save_blocker_;
 
   // Manages the frame tree of the page and process swaps in each node.
   FrameTree frame_tree_;
@@ -1025,8 +1065,6 @@ class CONTENT_EXPORT WebContentsImpl
   double loading_total_progress_;
 
   base::TimeTicks loading_last_progress_update_;
-
-  base::WeakPtrFactory<WebContentsImpl> loading_weak_factory_;
 
   // Counter to track how many frames have sent start notifications but not
   // stop notifications.
@@ -1184,8 +1222,8 @@ class CONTENT_EXPORT WebContentsImpl
   // different process from its parent page.
   bool is_subframe_;
 
-  // Whether touch emulation is enabled in RenderWidgetHost.
-  bool touch_emulation_enabled_;
+  // Whether overscroll should be unconditionally disabled.
+  bool force_disable_overscroll_content_;
 
   // Whether the last JavaScript dialog shown was suppressed. Used for testing.
   bool last_dialog_suppressed_;
@@ -1197,9 +1235,21 @@ class CONTENT_EXPORT WebContentsImpl
   scoped_ptr<ScreenOrientationDispatcherHost>
       screen_orientation_dispatcher_host_;
 
+  scoped_ptr<ManifestManagerHost> manifest_manager_host_;
+
   // The accessibility mode for all frames. This is queried when each frame
   // is created, and broadcast to all frames when it changes.
   AccessibilityMode accessibility_mode_;
+
+  // Monitors power levels for audio streams associated with this WebContents.
+  AudioStreamMonitor audio_stream_monitor_;
+
+  // Created on-demand to mute all audio output from this WebContents.
+  scoped_ptr<WebContentsAudioMuter> audio_muter_;
+
+  base::WeakPtrFactory<WebContentsImpl> loading_weak_factory_;
+
+  bool virtual_keyboard_requested_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsImpl);
 };

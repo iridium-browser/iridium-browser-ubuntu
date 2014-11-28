@@ -33,7 +33,6 @@
 #include "core/inspector/ConsoleAPITypes.h"
 #include "core/frame/ConsoleBase.h"
 #include "core/frame/ConsoleTypes.h"
-#include "core/workers/WorkerGlobalScope.h"
 #include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
@@ -42,9 +41,12 @@
 
 namespace blink {
 
+class ConsoleMessage;
 class ScriptArguments;
+class WorkerGlobalScope;
 
 class WorkerConsole FINAL : public ConsoleBase {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<WorkerConsole> create(WorkerGlobalScope* scope)
     {
@@ -56,7 +58,7 @@ public:
 
 protected:
     virtual ExecutionContext* context() OVERRIDE;
-    virtual void reportMessageToClient(MessageLevel, const String& message, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE;
+    virtual void reportMessageToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE;
 
 private:
     explicit WorkerConsole(WorkerGlobalScope*);

@@ -33,6 +33,7 @@ namespace blink {
 class ExceptionState;
 
 class HTMLTableRowElement FINAL : public HTMLTablePartElement {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     DECLARE_NODE_FACTORY(HTMLTableRowElement);
 
@@ -40,7 +41,6 @@ public:
 
     int sectionRowIndex() const;
 
-    PassRefPtrWillBeRawPtr<HTMLElement> insertCell(ExceptionState&);
     PassRefPtrWillBeRawPtr<HTMLElement> insertCell(int index, ExceptionState&);
     void deleteCell(int index, ExceptionState&);
 
@@ -53,6 +53,6 @@ private:
     virtual const QualifiedName& subResourceAttributeName() const OVERRIDE;
 };
 
-} // namespace
+} // namespace blink
 
-#endif
+#endif // HTMLTableRowElement_h

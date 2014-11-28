@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -16,11 +16,11 @@
 #include "content/public/browser/storage_partition.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
-#include "webkit/common/database/database_identifier.h"
+#include "storage/common/database/database_identifier.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
-using webkit_database::DatabaseIdentifier;
+using storage::DatabaseIdentifier;
 
 BrowsingDataDatabaseHelper::DatabaseInfo::DatabaseInfo(
     const DatabaseIdentifier& identifier,
@@ -72,10 +72,12 @@ void BrowsingDataDatabaseHelper::DeleteDatabase(const std::string& origin,
 
 void BrowsingDataDatabaseHelper::FetchDatabaseInfoOnFileThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
-  std::vector<webkit_database::OriginInfo> origins_info;
+  std::vector<storage::OriginInfo> origins_info;
   if (tracker_.get() && tracker_->GetAllOriginsInfo(&origins_info)) {
-    for (std::vector<webkit_database::OriginInfo>::const_iterator ori =
-         origins_info.begin(); ori != origins_info.end(); ++ori) {
+    for (std::vector<storage::OriginInfo>::const_iterator ori =
+             origins_info.begin();
+         ori != origins_info.end();
+         ++ori) {
       DatabaseIdentifier identifier =
           DatabaseIdentifier::Parse(ori->GetOriginIdentifier());
       if (!BrowsingDataHelper::HasWebScheme(identifier.ToOrigin())) {
@@ -145,17 +147,7 @@ bool CannedBrowsingDataDatabaseHelper::PendingDatabaseInfo::operator<(
 
 CannedBrowsingDataDatabaseHelper::CannedBrowsingDataDatabaseHelper(
     Profile* profile)
-    : BrowsingDataDatabaseHelper(profile),
-      profile_(profile) {
-}
-
-CannedBrowsingDataDatabaseHelper* CannedBrowsingDataDatabaseHelper::Clone() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  CannedBrowsingDataDatabaseHelper* clone =
-      new CannedBrowsingDataDatabaseHelper(profile_);
-
-  clone->pending_database_info_ = pending_database_info_;
-  return clone;
+    : BrowsingDataDatabaseHelper(profile) {
 }
 
 void CannedBrowsingDataDatabaseHelper::AddDatabase(
@@ -217,7 +209,7 @@ void CannedBrowsingDataDatabaseHelper::DeleteDatabase(
     const std::string& origin_identifier,
     const std::string& name) {
   GURL origin =
-      webkit_database::DatabaseIdentifier::Parse(origin_identifier).ToOrigin();
+      storage::DatabaseIdentifier::Parse(origin_identifier).ToOrigin();
   for (std::set<PendingDatabaseInfo>::iterator it =
            pending_database_info_.begin();
        it != pending_database_info_.end();

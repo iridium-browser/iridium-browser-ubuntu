@@ -47,7 +47,19 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
       int guest_instance_id,
       int embedder_render_process_id);
 
+  // Associates the Browser Plugin with |element_instance_id| to a
+  // guest that has ID of |guest_instance_id| and sets initialization
+  // parameters, |params| for it.
+  void AttachGuest(int embedder_render_process_id,
+                   int embedder_routing_id,
+                   int element_instance_id,
+                   int guest_instance_id,
+                   const base::DictionaryValue& attach_params);
+
   int GetNextInstanceID();
+  int GetGuestInstanceIDForElementID(
+      content::WebContents* embedder_web_contents,
+      int element_instance_id);
 
   typedef base::Callback<void(content::WebContents*)>
       WebContentsCreatedCallback;
@@ -67,13 +79,11 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
       const GURL& guest_site);
 
   // BrowserPluginGuestManager implementation.
-  virtual void MaybeGetGuestByInstanceIDOrKill(
-      int guest_instance_id,
-      int embedder_render_process_id,
-      const GuestByInstanceIDCallback& callback) OVERRIDE;
+  virtual content::WebContents* GetGuestByInstanceID(
+      content::WebContents* embedder_web_contents,
+      int element_instance_id) OVERRIDE;
   virtual bool ForEachGuest(content::WebContents* embedder_web_contents,
                             const GuestCallback& callback) OVERRIDE;
-
  protected:
   friend class GuestViewBase;
   FRIEND_TEST_ALL_PREFIXES(GuestViewManagerTest, AddRemove);
@@ -82,7 +92,8 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   virtual void AddGuest(int guest_instance_id,
                         content::WebContents* guest_web_contents);
 
-  void RemoveGuest(int guest_instance_id);
+  // Can be overriden in tests.
+  virtual void RemoveGuest(int guest_instance_id);
 
   content::WebContents* GetGuestByInstanceID(int guest_instance_id);
 
@@ -105,6 +116,26 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   // Contains guests' WebContents, mapping from their instance ids.
   typedef std::map<int, content::WebContents*> GuestInstanceMap;
   GuestInstanceMap guest_web_contents_by_instance_id_;
+
+  struct ElementInstanceKey {
+    content::WebContents* embedder_web_contents;
+    int element_instance_id;
+    ElementInstanceKey(content::WebContents* embedder_web_contents,
+                       int element_instance_id)
+        : embedder_web_contents(embedder_web_contents),
+          element_instance_id(element_instance_id) {}
+    bool operator<(const ElementInstanceKey& other) const {
+      if (embedder_web_contents != other.embedder_web_contents)
+        return embedder_web_contents < other.embedder_web_contents;
+      return element_instance_id < other.element_instance_id;
+    }
+  };
+
+  typedef std::map<ElementInstanceKey, int> GuestInstanceIDMap;
+  GuestInstanceIDMap instance_id_map_;
+  // The reverse map of GuestInstanceIDMap.
+  typedef std::map<int, ElementInstanceKey> GuestInstanceIDReverseMap;
+  GuestInstanceIDReverseMap reverse_instance_id_map_;
 
   int current_instance_id_;
 

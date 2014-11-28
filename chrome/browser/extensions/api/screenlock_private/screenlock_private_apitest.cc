@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/strings/string16.h"
 #include "chrome/browser/extensions/api/screenlock_private/screenlock_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -63,11 +65,11 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
                        const content::NotificationDetails& details) OVERRIDE {
     const std::string& content = *content::Details<std::string>(details).ptr();
     if (content == kAttemptClickAuthMessage) {
-      extensions::ScreenlockPrivateEventRouter* router =
-          extensions::ScreenlockPrivateEventRouter::GetFactoryInstance()->Get(
-              profile());
-      router->OnAuthAttempted(
-          ScreenlockBridge::Get()->lock_handler()->GetAuthType(kTestUser), "");
+      ScreenlockBridge::Get()->lock_handler()->SetAuthType(
+          kTestUser,
+          ScreenlockBridge::LockHandler::USER_CLICK,
+          base::string16());
+      EasyUnlockService::Get(profile())->AttemptAuth(kTestUser);
     }
   }
 

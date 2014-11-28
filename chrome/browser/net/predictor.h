@@ -517,11 +517,11 @@ class Predictor {
   const bool predictor_enabled_;
 
   // This is set by InitNetworkPredictor and used for calling
-  // chrome_browser_net::CanPredictNetworkActionsUI.
+  // CanPrefetchAndPrerenderUI and CanPreresolveAndPreconnectUI.
   PrefService* user_prefs_;
 
   // This is set by InitNetworkPredictor and used for calling
-  // chrome_browser_net::CanPredictNetworkActionsIO.
+  // CanPrefetchAndPrerenderIO and CanPreresolveAndPreconnectIO.
   ProfileIOData* profile_io_data_;
 
   // work_queue_ holds a list of names we need to look up.
@@ -589,12 +589,12 @@ class Predictor {
   // A time after which we need to do more trimming of referrers.
   base::TimeTicks next_trim_time_;
 
-  scoped_ptr<base::WeakPtrFactory<Predictor> > weak_factory_;
-
   scoped_ptr<ProxyAdvisor> proxy_advisor_;
 
   // An observer for testing.
   PredictorObserver* observer_;
+
+  scoped_ptr<base::WeakPtrFactory<Predictor> > weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Predictor);
 };

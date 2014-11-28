@@ -15,35 +15,36 @@
  */
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.ipc.invalidation.common.CommonProtos2;
 import com.google.ipc.invalidation.external.client.types.ErrorInfo;
-import com.google.protobuf.ByteString;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidNetworkSendRequest;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidSchedulerEvent;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall.AckDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall.RegistrationDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall.StartDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall.StopDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.InternalDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.InternalDowncall.CreateClient;
-import com.google.protos.ipc.invalidation.AndroidService.InternalDowncall.NetworkStatus;
-import com.google.protos.ipc.invalidation.AndroidService.InternalDowncall.ServerMessage;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.ErrorUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.InvalidateUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.ReadyUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.RegistrationFailureUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.RegistrationStatusUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.ReissueRegistrationsUpcall;
-import com.google.protos.ipc.invalidation.Client.AckHandleP;
-import com.google.protos.ipc.invalidation.ClientProtocol.ClientConfigP;
-import com.google.protos.ipc.invalidation.ClientProtocol.InvalidationMessage;
-import com.google.protos.ipc.invalidation.ClientProtocol.InvalidationP;
-import com.google.protos.ipc.invalidation.ClientProtocol.ObjectIdP;
-import com.google.protos.ipc.invalidation.ClientProtocol.Version;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidNetworkSendRequest;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidSchedulerEvent;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall.AckDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall.RegistrationDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall.StartDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall.StopDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.InternalDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.InternalDowncall.CreateClient;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.InternalDowncall.NetworkStatus;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.InternalDowncall.ServerMessage;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.ErrorUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.InvalidateUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.ReadyUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.RegistrationFailureUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.RegistrationStatusUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.ReissueRegistrationsUpcall;
+import com.google.ipc.invalidation.ticl.proto.Client.AckHandleP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ClientConfigP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.InvalidationMessage;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.InvalidationP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.Version;
+import com.google.ipc.invalidation.util.Bytes;
 
 import android.content.Intent;
+
+import java.util.Collection;
 
 /**
  * Factory class for {@link Intent}s used between the application, Ticl, and listener in the
@@ -52,7 +53,7 @@ import android.content.Intent;
  */
 public class ProtocolIntents {
   /** Version of the on-device protocol. */
-  static final Version ANDROID_PROTOCOL_VERSION_VALUE = CommonProtos2.newVersion(1, 0);
+  static final Version ANDROID_PROTOCOL_VERSION_VALUE = Version.create(1, 0);
 
   /** Key of Intent byte[] extra holding a client downcall protocol buffer. */
   public static final String CLIENT_DOWNCALL_KEY = "ipcinv-downcall";
@@ -76,49 +77,42 @@ public class ProtocolIntents {
   public static class ClientDowncalls {
     public static Intent newStartIntent() {
       Intent intent = new Intent();
-      intent.putExtra(CLIENT_DOWNCALL_KEY, newBuilder()
-          .setStart(StartDowncall.getDefaultInstance())
-          .build().toByteArray());
+      intent.putExtra(CLIENT_DOWNCALL_KEY, ClientDowncall.createWithStart(
+          ANDROID_PROTOCOL_VERSION_VALUE, StartDowncall.DEFAULT_INSTANCE).toByteArray());
       return intent;
     }
 
     public static Intent newStopIntent() {
       Intent intent = new Intent();
-      intent.putExtra(CLIENT_DOWNCALL_KEY, newBuilder()
-          .setStop(StopDowncall.getDefaultInstance())
-          .build().toByteArray());
+      intent.putExtra(CLIENT_DOWNCALL_KEY, ClientDowncall.createWithStop(
+          ANDROID_PROTOCOL_VERSION_VALUE, StopDowncall.DEFAULT_INSTANCE).toByteArray());
       return intent;
     }
 
-    public static Intent newAcknowledgeIntent(AckHandleP ackHandle) {
-      AckDowncall ackDowncall = AckDowncall.newBuilder()
-          .setAckHandle(ackHandle.toByteString()).build();
+    public static Intent newAcknowledgeIntent(byte[] ackHandleData) {
+      AckDowncall ackDowncall = AckDowncall.create(new Bytes(ackHandleData));
       Intent intent = new Intent();
-      intent.putExtra(CLIENT_DOWNCALL_KEY,
-          newBuilder().setAck(ackDowncall).build().toByteArray());
+      intent.putExtra(CLIENT_DOWNCALL_KEY, ClientDowncall.createWithAck(
+          ANDROID_PROTOCOL_VERSION_VALUE, ackDowncall).toByteArray());
       return intent;
     }
 
-    public static Intent newRegistrationIntent(Iterable<ObjectIdP> registrations) {
-      RegistrationDowncall regDowncall = RegistrationDowncall.newBuilder()
-          .addAllRegistrations(registrations).build();
+    public static Intent newRegistrationIntent(Collection<ObjectIdP> registrations) {
+      RegistrationDowncall regDowncall =
+          RegistrationDowncall.createWithRegistrations(registrations);
       Intent intent = new Intent();
-      intent.putExtra(CLIENT_DOWNCALL_KEY,
-          newBuilder().setRegistrations(regDowncall).build().toByteArray());
+      intent.putExtra(CLIENT_DOWNCALL_KEY, ClientDowncall.createWithRegistrations(
+          ANDROID_PROTOCOL_VERSION_VALUE, regDowncall).toByteArray());
       return intent;
     }
 
-    public static Intent newUnregistrationIntent(Iterable<ObjectIdP> unregistrations) {
-      RegistrationDowncall unregDowncall = RegistrationDowncall.newBuilder()
-          .addAllUnregistrations(unregistrations).build();
+    public static Intent newUnregistrationIntent(Collection<ObjectIdP> unregistrations) {
+      RegistrationDowncall regDowncall =
+          RegistrationDowncall.createWithUnregistrations(unregistrations);
       Intent intent = new Intent();
-      intent.putExtra(CLIENT_DOWNCALL_KEY,
-          newBuilder().setRegistrations(unregDowncall).build().toByteArray());
+      intent.putExtra(CLIENT_DOWNCALL_KEY, ClientDowncall.createWithRegistrations(
+          ANDROID_PROTOCOL_VERSION_VALUE, regDowncall).toByteArray());
       return intent;
-    }
-
-    private static ClientDowncall.Builder newBuilder() {
-      return ClientDowncall.newBuilder().setVersion(ANDROID_PROTOCOL_VERSION_VALUE);
     }
 
     private ClientDowncalls() {
@@ -128,47 +122,36 @@ public class ProtocolIntents {
 
   /** Intents for non-public calls on the Ticl (currently, network-related calls. */
   public static class InternalDowncalls {
-    public static Intent newServerMessageIntent(ByteString serverMessage) {
+    public static Intent newServerMessageIntent(Bytes serverMessage) {
       Intent intent = new Intent();
-      intent.putExtra(INTERNAL_DOWNCALL_KEY,
-          newBuilder()
-            .setServerMessage(ServerMessage.newBuilder().setData(serverMessage))
-            .build().toByteArray());
+      intent.putExtra(INTERNAL_DOWNCALL_KEY, InternalDowncall.createWithServerMessage(
+          ANDROID_PROTOCOL_VERSION_VALUE, ServerMessage.create(serverMessage))
+          .toByteArray());
       return intent;
     }
 
     public static Intent newNetworkStatusIntent(Boolean status) {
       Intent intent = new Intent();
-      intent.putExtra(INTERNAL_DOWNCALL_KEY,
-          newBuilder()
-          .setNetworkStatus(NetworkStatus.newBuilder().setIsOnline(status))
-          .build().toByteArray());
+      intent.putExtra(INTERNAL_DOWNCALL_KEY, InternalDowncall.createWithNetworkStatus(
+          ANDROID_PROTOCOL_VERSION_VALUE, NetworkStatus.create(status)).toByteArray());
       return intent;
     }
 
     public static Intent newNetworkAddrChangeIntent() {
       Intent intent = new Intent();
-      intent.putExtra(INTERNAL_DOWNCALL_KEY,
-          newBuilder().setNetworkAddrChange(true).build().toByteArray());
+      intent.putExtra(INTERNAL_DOWNCALL_KEY, InternalDowncall.createWithNetworkAddrChange(
+          ANDROID_PROTOCOL_VERSION_VALUE, true).toByteArray());
       return intent;
     }
 
-    public static Intent newCreateClientIntent(int clientType, byte[] clientName,
+    public static Intent newCreateClientIntent(int clientType, Bytes clientName,
         ClientConfigP config, boolean skipStartForTest) {
-      CreateClient createClient = CreateClient.newBuilder()
-          .setClientType(clientType)
-          .setClientName(ByteString.copyFrom(clientName))
-          .setClientConfig(config)
-          .setSkipStartForTest(skipStartForTest)
-          .build();
+      CreateClient createClient =
+          CreateClient.create(clientType, clientName, config, skipStartForTest);
       Intent intent = new Intent();
-      intent.putExtra(INTERNAL_DOWNCALL_KEY,
-          newBuilder().setCreateClient(createClient).build().toByteArray());
+      intent.putExtra(INTERNAL_DOWNCALL_KEY, InternalDowncall.createWithCreateClient(
+          ANDROID_PROTOCOL_VERSION_VALUE, createClient).toByteArray());
       return intent;
-    }
-
-    private static InternalDowncall.Builder newBuilder() {
-      return InternalDowncall.newBuilder().setVersion(ANDROID_PROTOCOL_VERSION_VALUE);
     }
 
     private InternalDowncalls() {
@@ -180,87 +163,72 @@ public class ProtocolIntents {
   public static class ListenerUpcalls {
     public static Intent newReadyIntent() {
       Intent intent = new Intent();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setReady(ReadyUpcall.getDefaultInstance()).build().toByteArray());
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithReady(
+          ANDROID_PROTOCOL_VERSION_VALUE, ReadyUpcall.DEFAULT_INSTANCE).toByteArray());
       return intent;
     }
 
     public static Intent newInvalidateIntent(InvalidationP invalidation, AckHandleP ackHandle) {
       Intent intent = new Intent();
-      InvalidateUpcall invUpcall = InvalidateUpcall.newBuilder()
-          .setAckHandle(ackHandle.toByteString())
-          .setInvalidation(invalidation).build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setInvalidate(invUpcall).build().toByteArray());
+      InvalidateUpcall invUpcall =
+          InvalidateUpcall.createWithInvalidation(new Bytes(ackHandle.toByteArray()), invalidation);
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithInvalidate(
+          ANDROID_PROTOCOL_VERSION_VALUE, invUpcall).toByteArray());
       return intent;
     }
 
     public static Intent newInvalidateUnknownIntent(ObjectIdP object, AckHandleP ackHandle) {
       Intent intent = new Intent();
-      InvalidateUpcall invUpcall = InvalidateUpcall.newBuilder()
-          .setAckHandle(ackHandle.toByteString())
-          .setInvalidateUnknown(object).build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setInvalidate(invUpcall).build().toByteArray());
+      InvalidateUpcall invUpcall =
+          InvalidateUpcall.createWithInvalidateUnknown(new Bytes(ackHandle.toByteArray()), object);
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithInvalidate(
+          ANDROID_PROTOCOL_VERSION_VALUE, invUpcall).toByteArray());
       return intent;
     }
 
     public static Intent newInvalidateAllIntent(AckHandleP ackHandle) {
       Intent intent = new Intent();
-      InvalidateUpcall invUpcall = InvalidateUpcall.newBuilder()
-          .setAckHandle(ackHandle.toByteString())
-          .setInvalidateAll(true).build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setInvalidate(invUpcall).build().toByteArray());
+      InvalidateUpcall invUpcall = InvalidateUpcall.createWithInvalidateAll(
+          new Bytes(ackHandle.toByteArray()), true);
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithInvalidate(
+          ANDROID_PROTOCOL_VERSION_VALUE, invUpcall).toByteArray());
       return intent;
     }
 
     public static Intent newRegistrationStatusIntent(ObjectIdP object, boolean isRegistered) {
       Intent intent = new Intent();
-      RegistrationStatusUpcall regUpcall = RegistrationStatusUpcall.newBuilder()
-            .setObjectId(object)
-            .setIsRegistered(isRegistered).build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setRegistrationStatus(regUpcall).build().toByteArray());
+      RegistrationStatusUpcall regUpcall = RegistrationStatusUpcall.create(object, isRegistered);
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithRegistrationStatus(
+          ANDROID_PROTOCOL_VERSION_VALUE, regUpcall).toByteArray());
       return intent;
     }
 
     public static Intent newRegistrationFailureIntent(ObjectIdP object, boolean isTransient,
         String message) {
       Intent intent = new Intent();
-      RegistrationFailureUpcall regUpcall = RegistrationFailureUpcall.newBuilder()
-            .setObjectId(object)
-            .setTransient(isTransient)
-            .setMessage(message).build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setRegistrationFailure(regUpcall).build().toByteArray());
+      RegistrationFailureUpcall regUpcall =
+          RegistrationFailureUpcall.create(object, isTransient, message);
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithRegistrationFailure(
+          ANDROID_PROTOCOL_VERSION_VALUE, regUpcall).toByteArray());
       return intent;
     }
 
     public static Intent newReissueRegistrationsIntent(byte[] prefix, int length) {
       Intent intent = new Intent();
-      ReissueRegistrationsUpcall reissueRegistrations = ReissueRegistrationsUpcall.newBuilder()
-          .setPrefix(ByteString.copyFrom(prefix))
-          .setLength(length).build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setReissueRegistrations(reissueRegistrations).build().toByteArray());
+      ReissueRegistrationsUpcall reissueRegistrations =
+          ReissueRegistrationsUpcall.create(new Bytes(prefix), length);
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithReissueRegistrations(
+          ANDROID_PROTOCOL_VERSION_VALUE, reissueRegistrations).toByteArray());
       return intent;
     }
 
     public static Intent newErrorIntent(ErrorInfo errorInfo) {
       Intent intent = new Intent();
-      ErrorUpcall errorUpcall = ErrorUpcall.newBuilder()
-          .setErrorCode(errorInfo.getErrorReason())
-          .setErrorMessage(errorInfo.getErrorMessage())
-          .setIsTransient(errorInfo.isTransient())
-          .build();
-      intent.putExtra(LISTENER_UPCALL_KEY,
-          newBuilder().setError(errorUpcall).build().toByteArray());
+      ErrorUpcall errorUpcall = ErrorUpcall.create(errorInfo.getErrorReason(),
+          errorInfo.getErrorMessage(), errorInfo.isTransient());
+      intent.putExtra(LISTENER_UPCALL_KEY, ListenerUpcall.createWithError(
+          ANDROID_PROTOCOL_VERSION_VALUE, errorUpcall).toByteArray());
       return intent;
-    }
-
-    private static ListenerUpcall.Builder newBuilder() {
-      return ListenerUpcall.newBuilder().setVersion(ANDROID_PROTOCOL_VERSION_VALUE);
     }
 
     private ListenerUpcalls() {
@@ -270,19 +238,15 @@ public class ProtocolIntents {
 
   /** Returns a new intent encoding a request to execute the scheduled action {@code eventName}. */
   public static Intent newSchedulerIntent(String eventName, long ticlId) {
-    byte[] eventBytes =
-        AndroidSchedulerEvent.newBuilder()
-          .setVersion(ANDROID_PROTOCOL_VERSION_VALUE)
-          .setEventName(eventName)
-          .setTiclId(ticlId).build().toByteArray();
+    byte[] eventBytes = AndroidSchedulerEvent.create(ANDROID_PROTOCOL_VERSION_VALUE, eventName,
+        ticlId).toByteArray();
     return new Intent().putExtra(SCHEDULER_KEY, eventBytes);
   }
 
   /** Returns a new intent encoding a message to send to the data center. */
   public static Intent newOutboundMessageIntent(byte[] message) {
-    byte[] payloadBytes = AndroidNetworkSendRequest.newBuilder()
-        .setVersion(ANDROID_PROTOCOL_VERSION_VALUE)
-        .setMessage(ByteString.copyFrom(message)).build().toByteArray();
+    byte[] payloadBytes = AndroidNetworkSendRequest.create(ANDROID_PROTOCOL_VERSION_VALUE,
+        new Bytes(message)).toByteArray();
     return new Intent().putExtra(OUTBOUND_MESSAGE_KEY, payloadBytes);
   }
 

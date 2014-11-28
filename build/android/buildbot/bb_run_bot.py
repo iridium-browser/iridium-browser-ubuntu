@@ -116,6 +116,7 @@ def GetCommands(options, bot_config):
 def GetBotStepMap():
   compile_step = ['compile']
   chrome_proxy_tests = ['chrome_proxy']
+  chrome_sync_shell_tests = ['sync']
   std_host_tests = ['check_webview_licenses', 'findbugs']
   std_build_steps = ['compile', 'zip_build']
   std_test_steps = ['extract_build']
@@ -157,15 +158,16 @@ def GetBotStepMap():
         T(['chromedriver'], ['--install=ChromeShell', '--skip-wipe',
           '--cleanup'])),
       B('fyi-x86-builder-dbg',
-        H(compile_step + std_host_tests, experimental, target_arch='x86')),
+        H(compile_step + std_host_tests, experimental, target_arch='ia32')),
       B('fyi-builder-dbg',
         H(std_build_steps + std_host_tests, experimental,
           extra_gyp='emma_coverage=1')),
       B('x86-builder-dbg',
-        H(compile_step + std_host_tests, target_arch='x86')),
+        H(compile_step + std_host_tests, target_arch='ia32')),
       B('fyi-builder-rel', H(std_build_steps,  experimental)),
       B('fyi-tests', H(std_test_steps),
-        T(std_tests, ['--experimental', flakiness_server,
+        T(std_tests + chrome_sync_shell_tests,
+                      ['--experimental', flakiness_server,
                       '--coverage-bucket', CHROMIUM_COVERAGE_BUCKET,
                       '--cleanup'])),
       B('fyi-component-builder-tests-dbg',
@@ -185,18 +187,6 @@ def GetBotStepMap():
       B('webkit-latest-contentshell', H(compile_step),
         T(['webkit_layout'], ['--auto-reconnect'])),
       B('builder-unit-tests', H(compile_step), T(['unit'])),
-      B('webrtc-chromium-builder',
-        H(std_build_steps,
-          extra_args=['--build-targets=android_builder_chromium_webrtc'])),
-      B('webrtc-native-builder',
-        H(std_build_steps,
-          extra_args=['--build-targets=android_builder_webrtc'],
-          extra_gyp='include_tests=1 enable_tracing=1')),
-      B('webrtc-chromium-tests', H(std_test_steps),
-        T(['webrtc_chromium'],
-          [flakiness_server, '--gtest-filter=WebRtc*', '--cleanup'])),
-      B('webrtc-native-tests', H(std_test_steps),
-        T(['webrtc_native'], ['--cleanup', flakiness_server])),
 
       # Generic builder config (for substring match).
       B('builder', H(std_build_steps)),

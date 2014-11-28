@@ -11,9 +11,9 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -69,7 +69,7 @@ bool AlternateNavInfoBarDelegate::LinkClicked(
   // search and instead add one reflecting this navigation.
   scoped_refptr<ShortcutsBackend> shortcuts_backend(
       ShortcutsBackendFactory::GetForProfile(profile_));
-  if (shortcuts_backend) {  // May be NULL in incognito.
+  if (shortcuts_backend.get()) {  // May be NULL in incognito.
     shortcuts_backend->DeleteShortcutsWithURL(search_url_);
     shortcuts_backend->AddOrUpdateShortcut(text_, match_);
   }
@@ -84,7 +84,7 @@ bool AlternateNavInfoBarDelegate::LinkClicked(
   // default action when it's typed again in the future.
   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
       content::OpenURLParams(match_.destination_url, content::Referrer(),
-                             disposition, content::PAGE_TRANSITION_TYPED,
+                             disposition, ui::PAGE_TRANSITION_TYPED,
                              false));
 
   // We should always close, even if the navigation did not occur within this

@@ -28,24 +28,26 @@
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "grit/chrome_unscaled_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -137,7 +139,8 @@ void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
       // The compromise is to disable the item, avoiding the non-actionable
       // navigate to the extensions page and preserving the user model.
       if ((*cursor)->location() == extensions::Manifest::COMPONENT) {
-        GURL options_page = extensions::ManifestURL::GetOptionsPage(*cursor);
+        GURL options_page =
+            extensions::OptionsPageInfo::GetOptionsPage(cursor->get());
         if (!options_page.is_valid())
           menu->SetCommandIdEnabled(command_id, false);
       }
@@ -482,19 +485,48 @@ void BackgroundModeManager::OnProfileNameChanged(
   }
 }
 
+BackgroundModeManager::BackgroundModeData*
+BackgroundModeManager::GetBackgroundModeDataForLastProfile() const {
+  Profile* most_recent_profile = g_browser_process->profile_manager()->
+      GetLastUsedProfileAllowedByPolicy();
+  BackgroundModeInfoMap::const_iterator profile_background_data =
+      background_mode_data_.find(most_recent_profile);
+
+  if (profile_background_data == background_mode_data_.end())
+    return NULL;
+
+  // Do not permit a locked profile to be used to open a browser.
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  if (cache.ProfileIsSigninRequiredAtIndex(cache.GetIndexOfProfileWithPath(
+      profile_background_data->first->GetPath())))
+    return NULL;
+
+  return profile_background_data->second.get();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  BackgroundModeManager::BackgroundModeData, StatusIconMenuModel overrides
 void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
-  // When a browser window is necessary, we use the first profile. The windows
-  // opened for these commands are not profile-specific, so any profile would
-  // work and the first is convenient.
-  BackgroundModeData* bmd = background_mode_data_.begin()->second.get();
+  BackgroundModeData* bmd = GetBackgroundModeDataForLastProfile();
   switch (command_id) {
     case IDC_ABOUT:
-      chrome::ShowAboutChrome(bmd->GetBrowserWindow());
+      if (bmd) {
+        chrome::ShowAboutChrome(bmd->GetBrowserWindow());
+      } else {
+        UserManager::Show(base::FilePath(),
+                          profiles::USER_MANAGER_NO_TUTORIAL,
+                          profiles::USER_MANAGER_SELECT_PROFILE_ABOUT_CHROME);
+      }
       break;
     case IDC_TASK_MANAGER:
-      chrome::OpenTaskManager(bmd->GetBrowserWindow());
+      if (bmd) {
+        chrome::OpenTaskManager(bmd->GetBrowserWindow());
+      } else {
+        UserManager::Show(base::FilePath(),
+                          profiles::USER_MANAGER_NO_TUTORIAL,
+                          profiles::USER_MANAGER_SELECT_PROFILE_TASK_MANAGER);
+      }
       break;
     case IDC_EXIT:
       content::RecordAction(UserMetricsAction("Exit"));
@@ -514,7 +546,13 @@ void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
       break;
     }
     default:
-      bmd->ExecuteCommand(command_id, event_flags);
+      if (bmd) {
+        bmd->ExecuteCommand(command_id, event_flags);
+      } else {
+        UserManager::Show(base::FilePath(),
+                          profiles::USER_MANAGER_NO_TUTORIAL,
+                          profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
+      }
       break;
   }
 }

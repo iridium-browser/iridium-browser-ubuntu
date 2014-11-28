@@ -23,9 +23,10 @@ namespace extensions {
 namespace errors = manifest_errors;
 namespace keys = manifest_keys;
 
-class ManifestTest : public testing::Test {
+// Not named "ManifestTest" because a test utility class has that name.
+class ManifestUnitTest : public testing::Test {
  public:
-  ManifestTest() : default_value_("test") {}
+  ManifestUnitTest() : default_value_("test") {}
 
  protected:
   void AssertType(Manifest* manifest, Manifest::Type type) {
@@ -59,7 +60,7 @@ class ManifestTest : public testing::Test {
 };
 
 // Verifies that extensions can access the correct keys.
-TEST_F(ManifestTest, Extension) {
+TEST_F(ManifestUnitTest, Extension) {
   scoped_ptr<base::DictionaryValue> manifest_value(new base::DictionaryValue());
   manifest_value->SetString(keys::kName, "extension");
   manifest_value->SetString(keys::kVersion, "1");
@@ -117,7 +118,7 @@ TEST_F(ManifestTest, Extension) {
 }
 
 // Verifies that key restriction based on type works.
-TEST_F(ManifestTest, ExtensionTypes) {
+TEST_F(ManifestUnitTest, ExtensionTypes) {
   scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
   value->SetString(keys::kName, "extension");
   value->SetString(keys::kVersion, "1");
@@ -159,12 +160,6 @@ TEST_F(ManifestTest, ExtensionTypes) {
   MutateManifest(
       &manifest, keys::kPlatformAppBackground, NULL);
 
-  // Platform app with service worker.
-  MutateManifest(
-      &manifest, keys::kPlatformAppServiceWorker, new base::DictionaryValue());
-  AssertType(manifest.get(), Manifest::TYPE_PLATFORM_APP);
-  MutateManifest(&manifest, keys::kPlatformAppServiceWorker, NULL);
-
   // Hosted app.
   MutateManifest(
       &manifest, keys::kWebURLs, new base::ListValue());
@@ -179,7 +174,7 @@ TEST_F(ManifestTest, ExtensionTypes) {
 };
 
 // Verifies that the getters filter restricted keys.
-TEST_F(ManifestTest, RestrictedKeys) {
+TEST_F(ManifestUnitTest, RestrictedKeys) {
   scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
   value->SetString(keys::kName, "extension");
   value->SetString(keys::kVersion, "1");

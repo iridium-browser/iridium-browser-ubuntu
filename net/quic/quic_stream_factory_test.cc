@@ -84,14 +84,18 @@ class QuicStreamFactoryPeer {
     }
     return false;
   }
+
+  static void DisableConnectionPooling(QuicStreamFactory* factory) {
+    factory->disable_connection_pooling_ = true;
+  }
 };
 
 class QuicStreamFactoryTest : public ::testing::TestWithParam<QuicVersion> {
  protected:
   QuicStreamFactoryTest()
       : random_generator_(0),
-        maker_(GetParam(), 0),
         clock_(new MockClock()),
+        maker_(GetParam(), 0, clock_),
         cert_verifier_(CertVerifier::CreateDefault()),
         channel_id_service_(
             new ChannelIDService(new DefaultChannelIDStore(NULL),
@@ -110,12 +114,14 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<QuicVersion> {
                  SupportedVersions(GetParam()),
                  /*enable_port_selection=*/true,
                  /*enable_time_based_loss_detection=*/true,
-                 /*always_require_handshake_confirmation=*/true,
+                 /*always_require_handshake_confirmation=*/false,
+                 /*disable_connection_pooling=*/false,
                  QuicTagVector()),
         host_port_pair_(kDefaultServerHostName, kDefaultServerPort),
         is_https_(false),
         privacy_mode_(PRIVACY_MODE_DISABLED) {
     factory_.set_require_confirmation(false);
+    clock_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
   }
 
   scoped_ptr<QuicHttpStream> CreateIfSessionExists(
@@ -196,8 +202,8 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<QuicVersion> {
   DeterministicMockClientSocketFactory socket_factory_;
   MockCryptoClientStreamFactory crypto_client_stream_factory_;
   MockRandom random_generator_;
-  QuicTestPacketMaker maker_;
   MockClock* clock_;  // Owned by factory_.
+  QuicTestPacketMaker maker_;
   scoped_ptr<CertVerifier> cert_verifier_;
   scoped_ptr<ChannelIDService> channel_id_service_;
   TransportSecurityState transport_security_state_;
@@ -417,6 +423,61 @@ TEST_P(QuicStreamFactoryTest, Pooling) {
   EXPECT_TRUE(socket_data.at_write_eof());
 }
 
+TEST_P(QuicStreamFactoryTest, NoPoolingIfDisabled) {
+  MockRead reads[] = {
+    MockRead(ASYNC, OK, 0)  // EOF
+  };
+  DeterministicSocketData socket_data1(reads, arraysize(reads), NULL, 0);
+  DeterministicSocketData socket_data2(reads, arraysize(reads), NULL, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data1);
+  socket_factory_.AddSocketDataProvider(&socket_data2);
+  socket_data1.StopAfter(1);
+  socket_data2.StopAfter(1);
+
+  HostPortPair server2("mail.google.com", kDefaultServerPort);
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule(
+      kDefaultServerHostName, "192.168.0.1", "");
+  host_resolver_.rules()->AddIPLiteralRule(
+      "mail.google.com", "192.168.0.1", "");
+
+  // Disable connection pooling.
+  QuicStreamFactoryPeer::DisableConnectionPooling(&factory_);
+
+  QuicStreamRequest request(&factory_);
+  EXPECT_EQ(OK,
+            request.Request(host_port_pair_,
+                            is_https_,
+                            privacy_mode_,
+                            "GET",
+                            net_log_,
+                            callback_.callback()));
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+
+  TestCompletionCallback callback;
+  QuicStreamRequest request2(&factory_);
+  EXPECT_EQ(OK,
+            request2.Request(server2,
+                             is_https_,
+                             privacy_mode_,
+                             "GET",
+                             net_log_,
+                             callback.callback()));
+  scoped_ptr<QuicHttpStream> stream2 = request2.ReleaseStream();
+  EXPECT_TRUE(stream2.get());
+
+  EXPECT_NE(
+      QuicStreamFactoryPeer::GetActiveSession(
+          &factory_, host_port_pair_, is_https_),
+      QuicStreamFactoryPeer::GetActiveSession(&factory_, server2, is_https_));
+
+  EXPECT_TRUE(socket_data1.at_read_eof());
+  EXPECT_TRUE(socket_data1.at_write_eof());
+  EXPECT_TRUE(socket_data2.at_read_eof());
+  EXPECT_TRUE(socket_data2.at_write_eof());
+}
+
 TEST_P(QuicStreamFactoryTest, NoPoolingAfterGoAway) {
   MockRead reads[] = {
     MockRead(ASYNC, OK, 0)  // EOF
@@ -504,7 +565,7 @@ TEST_P(QuicStreamFactoryTest, HttpsPooling) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
   ProofVerifyDetailsChromium verify_details;
   verify_details.cert_verify_result.verified_cert = test_cert;
   verify_details.cert_verify_result.is_issued_by_known_root = true;
@@ -547,6 +608,75 @@ TEST_P(QuicStreamFactoryTest, HttpsPooling) {
   EXPECT_TRUE(socket_data.at_write_eof());
 }
 
+TEST_P(QuicStreamFactoryTest, NoHttpsPoolingIfDisabled) {
+  MockRead reads[] = {
+    MockRead(ASYNC, OK, 0)  // EOF
+  };
+  DeterministicSocketData socket_data1(reads, arraysize(reads), NULL, 0);
+  DeterministicSocketData socket_data2(reads, arraysize(reads), NULL, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data1);
+  socket_factory_.AddSocketDataProvider(&socket_data2);
+  socket_data1.StopAfter(1);
+  socket_data2.StopAfter(1);
+
+  HostPortPair server1("www.example.org", 443);
+  HostPortPair server2("mail.example.org", 443);
+
+  // Load a cert that is valid for:
+  //   www.example.org (server1)
+  //   mail.example.org (server2)
+  //   www.example.com
+  base::FilePath certs_dir = GetTestCertsDirectory();
+  scoped_refptr<X509Certificate> test_cert(
+      ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
+  ProofVerifyDetailsChromium verify_details;
+  verify_details.cert_verify_result.verified_cert = test_cert;
+  verify_details.cert_verify_result.is_issued_by_known_root = true;
+  crypto_client_stream_factory_.set_proof_verify_details(&verify_details);
+
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule(server1.host(), "192.168.0.1", "");
+  host_resolver_.rules()->AddIPLiteralRule(server2.host(), "192.168.0.1", "");
+
+  // Disable connection pooling.
+  QuicStreamFactoryPeer::DisableConnectionPooling(&factory_);
+
+  QuicStreamRequest request(&factory_);
+  is_https_ = true;
+  EXPECT_EQ(OK,
+            request.Request(server1,
+                            is_https_,
+                            privacy_mode_,
+                            "GET",
+                            net_log_,
+                            callback_.callback()));
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+
+  TestCompletionCallback callback;
+  QuicStreamRequest request2(&factory_);
+  EXPECT_EQ(OK,
+            request2.Request(server2,
+                             is_https_,
+                             privacy_mode_,
+                             "GET",
+                             net_log_,
+                             callback_.callback()));
+  scoped_ptr<QuicHttpStream> stream2 = request2.ReleaseStream();
+  EXPECT_TRUE(stream2.get());
+
+  EXPECT_NE(QuicStreamFactoryPeer::GetActiveSession(
+                &factory_, server1, is_https_),
+            QuicStreamFactoryPeer::GetActiveSession(
+                &factory_, server2, is_https_));
+
+  EXPECT_TRUE(socket_data1.at_read_eof());
+  EXPECT_TRUE(socket_data1.at_write_eof());
+  EXPECT_TRUE(socket_data2.at_read_eof());
+  EXPECT_TRUE(socket_data2.at_write_eof());
+}
+
 TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithCertMismatch) {
   MockRead reads[] = {
     MockRead(ASYNC, OK, 0)  // EOF
@@ -569,7 +699,7 @@ TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithCertMismatch) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
   ProofVerifyDetailsChromium verify_details;
   verify_details.cert_verify_result.verified_cert = test_cert;
   crypto_client_stream_factory_.set_proof_verify_details(&verify_details);
@@ -635,7 +765,7 @@ TEST_P(QuicStreamFactoryTest, HttpsPoolingWithMatchingPins) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
   ProofVerifyDetailsChromium verify_details;
   verify_details.cert_verify_result.verified_cert = test_cert;
   verify_details.cert_verify_result.is_issued_by_known_root = true;
@@ -681,6 +811,81 @@ TEST_P(QuicStreamFactoryTest, HttpsPoolingWithMatchingPins) {
   EXPECT_TRUE(socket_data.at_write_eof());
 }
 
+TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithMatchingPinsIfDisabled) {
+  MockRead reads[] = {
+    MockRead(ASYNC, OK, 0)  // EOF
+  };
+  DeterministicSocketData socket_data1(reads, arraysize(reads), NULL, 0);
+  DeterministicSocketData socket_data2(reads, arraysize(reads), NULL, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data1);
+  socket_factory_.AddSocketDataProvider(&socket_data2);
+  socket_data1.StopAfter(1);
+  socket_data2.StopAfter(1);
+
+  HostPortPair server1("www.example.org", 443);
+  HostPortPair server2("mail.example.org", 443);
+  uint8 primary_pin = 1;
+  uint8 backup_pin = 2;
+  test::AddPin(&transport_security_state_, "mail.example.org", primary_pin,
+               backup_pin);
+
+  // Load a cert that is valid for:
+  //   www.example.org (server1)
+  //   mail.example.org (server2)
+  base::FilePath certs_dir = GetTestCertsDirectory();
+  scoped_refptr<X509Certificate> test_cert(
+      ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
+  ProofVerifyDetailsChromium verify_details;
+  verify_details.cert_verify_result.verified_cert = test_cert;
+  verify_details.cert_verify_result.is_issued_by_known_root = true;
+  verify_details.cert_verify_result.public_key_hashes.push_back(
+      test::GetTestHashValue(primary_pin));
+  crypto_client_stream_factory_.set_proof_verify_details(&verify_details);
+
+
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule(server1.host(), "192.168.0.1", "");
+  host_resolver_.rules()->AddIPLiteralRule(server2.host(), "192.168.0.1", "");
+
+  // Disable connection pooling.
+  QuicStreamFactoryPeer::DisableConnectionPooling(&factory_);
+
+  QuicStreamRequest request(&factory_);
+  is_https_ = true;
+  EXPECT_EQ(OK,
+            request.Request(server1,
+                            is_https_,
+                            privacy_mode_,
+                            "GET",
+                            net_log_,
+                            callback_.callback()));
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+
+  TestCompletionCallback callback;
+  QuicStreamRequest request2(&factory_);
+  EXPECT_EQ(OK,
+            request2.Request(server2,
+                             is_https_,
+                             privacy_mode_,
+                             "GET",
+                             net_log_,
+                             callback_.callback()));
+  scoped_ptr<QuicHttpStream> stream2 = request2.ReleaseStream();
+  EXPECT_TRUE(stream2.get());
+
+  EXPECT_NE(QuicStreamFactoryPeer::GetActiveSession(
+                &factory_, server1, is_https_),
+            QuicStreamFactoryPeer::GetActiveSession(
+                &factory_, server2, is_https_));
+
+  EXPECT_TRUE(socket_data1.at_read_eof());
+  EXPECT_TRUE(socket_data1.at_write_eof());
+  EXPECT_TRUE(socket_data2.at_read_eof());
+  EXPECT_TRUE(socket_data2.at_write_eof());
+}
+
 TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithDifferentPins) {
   MockRead reads[] = {
     MockRead(ASYNC, OK, 0)  // EOF
@@ -706,7 +911,7 @@ TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithDifferentPins) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
   ProofVerifyDetailsChromium verify_details;
   verify_details.cert_verify_result.verified_cert = test_cert;
   verify_details.cert_verify_result.is_issued_by_known_root = true;

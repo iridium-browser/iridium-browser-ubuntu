@@ -22,15 +22,13 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/ui_account_tweaks.h"
-#include "chrome/browser/ui/webui/help/help_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/accounts_options_handler.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -243,6 +241,11 @@ void CoreChromeOSOptionsHandler::StopObservingPref(const std::string& path) {
 base::Value* CoreChromeOSOptionsHandler::CreateValueForPref(
     const std::string& pref_name,
     const std::string& controlling_pref_name) {
+  // Athena doesn't have ash::Shell and its session_state_delegate, so the
+  // following code will cause crash.
+  // TODO(mukai|antrim): re-enable this after having session_state_delegate.
+  // http://crbug.com/370175
+#if !defined(USE_ATHENA)
   // The screen lock setting is shared if multiple users are logged in and at
   // least one has chosen to require passwords.
   if (pref_name == prefs::kEnableAutoScreenLock &&
@@ -270,6 +273,7 @@ base::Value* CoreChromeOSOptionsHandler::CreateValueForPref(
       }
     }
   }
+#endif
 
   return CoreOptionsHandler::CreateValueForPref(pref_name,
                                                 controlling_pref_name);
@@ -328,13 +332,6 @@ void CoreChromeOSOptionsHandler::GetLocalizedValues(
             IDS_OPTIONS_CONTROLLED_SETTING_OWNER,
             base::ASCIIToUTF16(user_manager->GetOwnerEmail())));
   }
-
-  localized_strings->SetString(
-      "browserVersion",
-      l10n_util::GetStringFUTF16(IDS_ABOUT_PRODUCT_VERSION,
-                                 ::HelpHandler::BuildBrowserVersionString()));
-  localized_strings->SetBoolean("showVersion",
-                                ::switches::AboutInSettingsEnabled());
 }
 
 void CoreChromeOSOptionsHandler::SelectNetworkCallback(

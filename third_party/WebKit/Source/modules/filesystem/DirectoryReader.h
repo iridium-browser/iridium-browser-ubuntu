@@ -43,6 +43,7 @@ namespace blink {
 class ErrorCallback;
 
 class DirectoryReader : public DirectoryReaderBase, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static DirectoryReader* create(DOMFileSystemBase* fileSystem, const String& fullPath)
     {
@@ -51,7 +52,7 @@ public:
 
     virtual ~DirectoryReader();
 
-    void readEntries(PassOwnPtr<EntriesCallback>, PassOwnPtr<ErrorCallback> = nullptr);
+    void readEntries(EntriesCallback*, ErrorCallback* = nullptr);
 
     DOMFileSystem* filesystem() const { return static_cast<DOMFileSystem*>(m_fileSystem.get()); }
 
@@ -70,10 +71,10 @@ private:
     bool m_isReading;
     EntryHeapVector m_entries;
     RefPtrWillBeMember<FileError> m_error;
-    OwnPtr<EntriesCallback> m_entriesCallback;
-    OwnPtr<ErrorCallback> m_errorCallback;
+    Member<EntriesCallback> m_entriesCallback;
+    Member<ErrorCallback> m_errorCallback;
 };
 
-}
+} // namespace blink
 
 #endif // DirectoryReader_h

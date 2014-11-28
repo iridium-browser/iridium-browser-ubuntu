@@ -27,8 +27,8 @@
 #include "chrome/browser/mac/obsolete_system.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -555,7 +555,11 @@ NSString* const kVersionKey = @"KSVersion";
 
   [self updateStatus:kAutoupdateChecking version:nil];
 
-  [registration_ checkForUpdate];
+  // All checks from inside Chrome are considered user-initiated, because they
+  // only happen following a user action, such as visiting the about page.
+  // Non-user-initiated checks are the periodic checks automatically made by
+  // Keystone, which don't come through this code path (or even this process).
+  [registration_ checkForUpdateWasUserInitiated:YES];
 
   // Upon completion, ksr::KSRegistrationCheckForUpdateNotification will be
   // posted, and -checkForUpdateComplete: will be called.

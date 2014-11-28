@@ -33,9 +33,8 @@
  * @implements {WebInspector.Searchable}
  * @implements {WebInspector.TargetManager.Observer}
  * @implements {WebInspector.ViewportControl.Provider}
- * @param {boolean} hideContextSelector
  */
-WebInspector.ConsoleView = function(hideContextSelector)
+WebInspector.ConsoleView = function()
 {
     WebInspector.VBox.call(this);
     this.registerRequiredCSS("filter.css");
@@ -62,9 +61,6 @@ WebInspector.ConsoleView = function(hideContextSelector)
 
     this._filter = new WebInspector.ConsoleViewFilter(this);
     this._filter.addEventListener(WebInspector.ConsoleViewFilter.Events.FilterChanged, this._updateMessageList.bind(this));
-
-    if (hideContextSelector)
-        this._executionContextSelector.element.classList.add("hidden");
 
     this._filterBar = new WebInspector.FilterBar();
 
@@ -143,28 +139,44 @@ WebInspector.ConsoleView = function(hideContextSelector)
 
     this._registerWithMessageSink();
     WebInspector.targetManager.observeTargets(this);
-    WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.ConsoleCleared, this._consoleCleared, this);
-    WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.MessageAdded, this._onConsoleMessageAdded, this);
-    WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.CommandEvaluated, this._commandEvaluated, this);
     WebInspector.targetManager.addModelListener(WebInspector.RuntimeModel, WebInspector.RuntimeModel.Events.ExecutionContextCreated, this._onExecutionContextCreated, this);
     WebInspector.targetManager.addModelListener(WebInspector.RuntimeModel, WebInspector.RuntimeModel.Events.ExecutionContextDestroyed, this._onExecutionContextDestroyed, this);
-
-    /**
-     * @param {!WebInspector.ConsoleMessage} message
-     * @this {WebInspector.ConsoleView}
-     */
-    function appendMessage(message)
-    {
-         var viewMessage = this._createViewMessage(message);
-         this._consoleMessageAdded(viewMessage);
-    }
-
-    WebInspector.multitargetConsoleModel.messages().forEach(appendMessage, this);
+    this._initConsoleMessages();
 
     WebInspector.context.addFlavorChangeListener(WebInspector.ExecutionContext, this._executionContextChangedExternally, this);
 }
 
 WebInspector.ConsoleView.prototype = {
+    _initConsoleMessages: function()
+    {
+        var mainTarget = WebInspector.targetManager.mainTarget();
+        if (!WebInspector.isWorkerFrontend() && (!mainTarget || !mainTarget.resourceTreeModel.cachedResourcesLoaded())) {
+            WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, this._onResourceTreeModelLoaded, this);
+            return;
+        }
+        this._fetchMultitargetMessages();
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onResourceTreeModelLoaded: function(event)
+    {
+        var resourceTreeModel = event.target;
+        if (resourceTreeModel.target() !== WebInspector.targetManager.mainTarget())
+            return;
+        WebInspector.targetManager.removeModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, this._onResourceTreeModelLoaded, this);
+        this._fetchMultitargetMessages();
+    },
+
+    _fetchMultitargetMessages: function()
+    {
+        WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.ConsoleCleared, this._consoleCleared, this);
+        WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.MessageAdded, this._onConsoleMessageAdded, this);
+        WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.CommandEvaluated, this._commandEvaluated, this);
+        WebInspector.multitargetConsoleModel.messages().forEach(this._addConsoleMessage, this);
+    },
+
     /**
      * @return {number}
      */
@@ -289,12 +301,12 @@ WebInspector.ConsoleView.prototype = {
         if (executionContext.isMainWorldContext) {
             if (executionContext.frameId) {
                 var frame = executionContext.target().resourceTreeModel.frameForId(executionContext.frameId);
-                result =  frame ? frame.displayName() : executionContext.name;
+                result =  frame ? frame.displayName() : (executionContext.origin || executionContext.name);
             } else {
-                result = WebInspector.displayNameForURL(executionContext.name)
+                result = WebInspector.displayNameForURL(executionContext.origin) || executionContext.name;
             }
         } else
-            result = "\u00a0\u00a0\u00a0\u00a0" + executionContext.name;
+            result = "\u00a0\u00a0\u00a0\u00a0" + (executionContext.name || executionContext.origin);
 
         var maxLength = 50;
         return result.trimMiddle(maxLength);
@@ -317,7 +329,7 @@ WebInspector.ConsoleView.prototype = {
         var newOption = document.createElement("option");
         newOption.__executionContext = executionContext;
         newOption.text = this._titleFor(executionContext);
-        this._optionByExecutionContext.put(executionContext, newOption);
+        this._optionByExecutionContext.set(executionContext, newOption);
         var sameGroupExists = false;
         var options = this._executionContextSelector.selectElement().options;
         var insertBeforeOption = null;
@@ -619,7 +631,7 @@ WebInspector.ConsoleView.prototype = {
         var request = consoleMessage ? consoleMessage.request : null;
         if (request && request.type === WebInspector.resourceTypes.XHR) {
             contextMenu.appendSeparator();
-            contextMenu.appendItem(WebInspector.UIString("Replay XHR"), NetworkAgent.replayXHR.bind(null, request.requestId));
+            contextMenu.appendItem(WebInspector.UIString("Replay XHR"), request.replayXHR.bind(request));
         }
 
         contextMenu.show();
@@ -816,13 +828,18 @@ WebInspector.ConsoleView.prototype = {
                 addMessage();
                 return;
             }
-
             var url;
+            var lineNumber;
+            var columnNumber;
             var script = target.debuggerModel.scriptForId(response.location.scriptId);
-            if (script && script.sourceURL)
+            if (script && script.sourceURL) {
                 url = script.sourceURL;
+                // FIXME(WK62725): Debugger line/column are 0-based, while console ones are 1-based.
+                lineNumber = response.location.lineNumber + 1;
+                columnNumber = response.location.columnNumber + 1;
+            }
             // FIXME: this should be using live location.
-            addMessage(url, response.location.lineNumber, response.location.columnNumber);
+            addMessage(url, lineNumber, columnNumber);
         }
     },
 

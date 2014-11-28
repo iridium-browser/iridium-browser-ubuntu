@@ -330,8 +330,7 @@ static void CalcLinearEnergiesC(AecmCore_t* aecm,
         echo_est[i] = WEBRTC_SPL_MUL_16_U16(aecm->channelStored[i],
                                            far_spectrum[i]);
         (*far_energy) += (uint32_t)(far_spectrum[i]);
-        (*echo_energy_adapt) += WEBRTC_SPL_UMUL_16_16(aecm->channelAdapt16[i],
-                                          far_spectrum[i]);
+        *echo_energy_adapt += aecm->channelAdapt16[i] * far_spectrum[i];
         (*echo_energy_stored) += (uint32_t)echo_est[i];
     }
 }
@@ -706,6 +705,15 @@ int16_t WebRtcAecm_AsymFilt(const int16_t filtOld, const int16_t inVal,
     return retVal;
 }
 
+// ExtractFractionPart(a, zeros)
+//
+// returns the fraction part of |a|, with |zeros| number of leading zeros, as an
+// int16_t scaled to Q8. There is no sanity check of |a| in the sense that the
+// number of zeros match.
+static int16_t ExtractFractionPart(uint32_t a, int zeros) {
+  return (int16_t)(((a << zeros) & 0x7FFFFFFF) >> 23);
+}
+
 // WebRtcAecm_CalcEnergies(...)
 //
 // This function calculates the log of energies for nearend, farend and estimated
@@ -751,9 +759,7 @@ void WebRtcAecm_CalcEnergies(AecmCore_t * aecm,
     if (nearEner)
     {
         zeros = WebRtcSpl_NormU32(nearEner);
-        frac = (int16_t)WEBRTC_SPL_RSHIFT_U32(
-                              (WEBRTC_SPL_LSHIFT_U32(nearEner, zeros) & 0x7FFFFFFF),
-                              23);
+        frac = ExtractFractionPart(nearEner, zeros);
         // log2 in Q8
         tmp16 += WEBRTC_SPL_LSHIFT_W16((31 - zeros), 8) + frac;
         tmp16 -= WEBRTC_SPL_LSHIFT_W16(aecm->dfaNoisyQDomain, 8);
@@ -774,8 +780,7 @@ void WebRtcAecm_CalcEnergies(AecmCore_t * aecm,
     if (tmpFar)
     {
         zeros = WebRtcSpl_NormU32(tmpFar);
-        frac = (int16_t)WEBRTC_SPL_RSHIFT_U32((WEBRTC_SPL_LSHIFT_U32(tmpFar, zeros)
-                        & 0x7FFFFFFF), 23);
+        frac = ExtractFractionPart(tmpFar, zeros);
         // log2 in Q8
         tmp16 += WEBRTC_SPL_LSHIFT_W16((31 - zeros), 8) + frac;
         tmp16 -= WEBRTC_SPL_LSHIFT_W16(far_q, 8);
@@ -787,8 +792,7 @@ void WebRtcAecm_CalcEnergies(AecmCore_t * aecm,
     if (tmpAdapt)
     {
         zeros = WebRtcSpl_NormU32(tmpAdapt);
-        frac = (int16_t)WEBRTC_SPL_RSHIFT_U32((WEBRTC_SPL_LSHIFT_U32(tmpAdapt, zeros)
-                        & 0x7FFFFFFF), 23);
+        frac = ExtractFractionPart(tmpAdapt, zeros);
         //log2 in Q8
         tmp16 += WEBRTC_SPL_LSHIFT_W16((31 - zeros), 8) + frac;
         tmp16 -= WEBRTC_SPL_LSHIFT_W16(RESOLUTION_CHANNEL16 + far_q, 8);
@@ -800,8 +804,7 @@ void WebRtcAecm_CalcEnergies(AecmCore_t * aecm,
     if (tmpStored)
     {
         zeros = WebRtcSpl_NormU32(tmpStored);
-        frac = (int16_t)WEBRTC_SPL_RSHIFT_U32((WEBRTC_SPL_LSHIFT_U32(tmpStored, zeros)
-                        & 0x7FFFFFFF), 23);
+        frac = ExtractFractionPart(tmpStored, zeros);
         //log2 in Q8
         tmp16 += WEBRTC_SPL_LSHIFT_W16((31 - zeros), 8) + frac;
         tmp16 -= WEBRTC_SPL_LSHIFT_W16(RESOLUTION_CHANNEL16 + far_q, 8);
@@ -1067,8 +1070,8 @@ void WebRtcAecm_UpdateChannel(AecmCore_t * aecm,
                 {
                     tmp32no2 = WEBRTC_SPL_SHIFT_W32(tmp32no2, shift2ResChan);
                 }
-                aecm->channelAdapt32[i] = WEBRTC_SPL_ADD_SAT_W32(aecm->channelAdapt32[i],
-                        tmp32no2);
+                aecm->channelAdapt32[i] =
+                    WebRtcSpl_AddSatW32(aecm->channelAdapt32[i], tmp32no2);
                 if (aecm->channelAdapt32[i] < 0)
                 {
                     // We can never have negative channel gain

@@ -12,6 +12,7 @@
 #include "GrContext.h"
 #include "GrDrawState.h"
 #include "GrIndexBuffer.h"
+#include "GrPathRendering.h"
 #include "GrTraceMarker.h"
 
 #include "SkClipStack.h"
@@ -35,6 +36,9 @@ protected:
 
 public:
     SK_DECLARE_INST_COUNT(GrDrawTarget)
+
+
+    typedef GrPathRendering::PathTransformType PathTransformType ;
 
     ///////////////////////////////////////////////////////////////////////////
 
@@ -333,37 +337,10 @@ public:
                               PathTransformSize(transformsType) * count elements
      * @param fill            Fill type for drawing all the paths
      */
-    enum PathTransformType {
-        kNone_PathTransformType,        //!< []
-        kTranslateX_PathTransformType,  //!< [kMTransX]
-        kTranslateY_PathTransformType,  //!< [kMTransY]
-        kTranslate_PathTransformType,   //!< [kMTransX, kMTransY]
-        kAffine_PathTransformType,      //!< [kMScaleX, kMSkewX, kMTransX, kMSkewY, kMScaleY, kMTransY]
-
-        kLast_PathTransformType = kAffine_PathTransformType
-    };
     void drawPaths(const GrPathRange* pathRange,
                    const uint32_t indices[], int count,
                    const float transforms[], PathTransformType transformsType,
                    SkPath::FillType fill);
-
-    static inline int PathTransformSize(PathTransformType type) {
-        switch (type) {
-            case kNone_PathTransformType:
-                return 0;
-            case kTranslateX_PathTransformType:
-            case kTranslateY_PathTransformType:
-                return 1;
-            case kTranslate_PathTransformType:
-                return 2;
-            case kAffine_PathTransformType:
-                return 6;
-
-            default:
-                SkFAIL("Unknown path transform type");
-                return 0;
-        }
-    }
 
     /**
      * Helper function for drawing rects. It performs a geometry src push and pop
@@ -616,7 +593,7 @@ public:
         bool set(GrDrawTarget*  target,
                  int            vertexCount,
                  int            indexCount);
-        bool succeeded() const { return NULL != fTarget; }
+        bool succeeded() const { return SkToBool(fTarget); }
         void* vertices() const { SkASSERT(this->succeeded()); return fVertices; }
         void* indices() const { SkASSERT(this->succeeded()); return fIndices; }
         SkPoint* positions() const {
@@ -662,7 +639,7 @@ public:
     public:
         AutoGeometryPush(GrDrawTarget* target)
             : fAttribRestore(target->drawState()) {
-            SkASSERT(NULL != target);
+            SkASSERT(target);
             fTarget = target;
             target->pushGeometrySource();
         }
@@ -684,7 +661,7 @@ public:
                                  ASRInit init,
                                  const SkMatrix* viewMatrix = NULL)
             : fState(target, init, viewMatrix) {
-            SkASSERT(NULL != target);
+            SkASSERT(target);
             fTarget = target;
             target->pushGeometrySource();
             if (kPreserve_ASRInit == init) {
@@ -706,7 +683,7 @@ public:
         DrawToken(GrDrawTarget* drawTarget, uint32_t drawID) :
                   fDrawTarget(drawTarget), fDrawID(drawID) {}
 
-        bool isIssued() { return NULL != fDrawTarget && fDrawTarget->isIssued(fDrawID); }
+        bool isIssued() { return fDrawTarget && fDrawTarget->isIssued(fDrawID); }
 
     private:
         GrDrawTarget*  fDrawTarget;
@@ -717,6 +694,10 @@ public:
     virtual DrawToken getCurrentDrawToken() { return DrawToken(this, 0); }
 
 protected:
+    // Extend access to GrRODrawState::convertToPEndeingExec to subclasses.
+    void convertDrawStateToPendingExec(GrRODrawState* ds) {
+        ds->convertToPendingExec();
+    }
 
     enum GeometrySrcType {
         kNone_GeometrySrcType,     //<! src has not been specified
@@ -845,7 +826,7 @@ protected:
 
         // NULL if no copy of the dst is needed for the draw.
         const GrDeviceCoordTexture* getDstCopy() const {
-            if (NULL != fDstCopy.texture()) {
+            if (fDstCopy.texture()) {
                 return &fDstCopy;
             } else {
                 return NULL;

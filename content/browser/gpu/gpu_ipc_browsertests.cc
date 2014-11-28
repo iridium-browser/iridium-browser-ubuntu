@@ -47,7 +47,7 @@ class ContextTestBase : public content::ContentBrowserTest {
             WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits(),
             NULL));
     CHECK(context_.get());
-    context_->makeContextCurrent();
+    context_->InitializeOnCurrentThread();
     context_support_ = context_->GetContextSupport();
     ContentBrowserTest::SetUpOnMainThread();
   }
@@ -161,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
       kInitCause,
       base::Bind(&BrowserGpuChannelHostFactoryTest::Signal, &event));
   EXPECT_TRUE(event);
-  EXPECT_EQ(gpu_channel, GetGpuChannel());
+  EXPECT_EQ(gpu_channel.get(), GetGpuChannel());
 }
 
 // Fails since UI Compositor establishes a GpuChannel.

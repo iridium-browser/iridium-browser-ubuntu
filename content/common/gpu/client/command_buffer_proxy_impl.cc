@@ -189,14 +189,15 @@ void CommandBufferProxyImpl::Flush(int32 put_offset) {
 
   Send(new GpuCommandBufferMsg_AsyncFlush(route_id_,
                                           put_offset,
-                                          ++flush_count_));
+                                          ++flush_count_,
+                                          latency_info_));
+  latency_info_.clear();
 }
 
 void CommandBufferProxyImpl::SetLatencyInfo(
     const std::vector<ui::LatencyInfo>& latency_info) {
-  if (last_state_.error != gpu::error::kNoError)
-    return;
-  Send(new GpuCommandBufferMsg_SetLatencyInfo(route_id_, latency_info));
+  for (size_t i = 0; i < latency_info.size(); i++)
+    latency_info_.push_back(latency_info[i]);
 }
 
 void CommandBufferProxyImpl::WaitForTokenInRange(int32 start, int32 end) {
@@ -346,7 +347,7 @@ void CommandBufferProxyImpl::DestroyGpuMemoryBuffer(int32 id) {
 
   // Remove the gpu memory buffer from the client side cache.
   DCHECK(gpu_memory_buffers_.find(id) != gpu_memory_buffers_.end());
-  channel_->factory()->DeleteGpuMemoryBuffer(gpu_memory_buffers_.take(id));
+  gpu_memory_buffers_.take(id);
 }
 
 int CommandBufferProxyImpl::GetRouteID() const {

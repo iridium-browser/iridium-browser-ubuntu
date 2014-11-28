@@ -113,7 +113,7 @@ bool RenderSVGShape::fillContains(const FloatPoint& point, bool requiresFill, co
         return false;
 
     bool hasFallback;
-    if (requiresFill && !RenderSVGResource::fillPaintingResource(this, style(), hasFallback))
+    if (requiresFill && !RenderSVGResource::requestPaintingResource(ApplyToFillMode, this, style(), hasFallback))
         return false;
 
     return shapeDependentFillContains(point, fillRule);
@@ -125,7 +125,7 @@ bool RenderSVGShape::strokeContains(const FloatPoint& point, bool requiresStroke
         return false;
 
     bool hasFallback;
-    if (requiresStroke && !RenderSVGResource::strokePaintingResource(this, style(), hasFallback))
+    if (requiresStroke && !RenderSVGResource::requestPaintingResource(ApplyToStrokeMode, this, style(), hasFallback))
         return false;
 
     return shapeDependentStrokeContains(point);
@@ -203,13 +203,16 @@ bool RenderSVGShape::shouldGenerateMarkerPositions() const
 void RenderSVGShape::fillShape(RenderStyle* style, GraphicsContext* context)
 {
     bool hasFallback;
-    if (RenderSVGResource* fillPaintingResource = RenderSVGResource::fillPaintingResource(this, style, hasFallback)) {
+    if (RenderSVGResource* fillPaintingResource = RenderSVGResource::requestPaintingResource(ApplyToFillMode, this, style, hasFallback)) {
         if (fillPaintingResource->applyResource(this, style, context, ApplyToFillMode)) {
-            fillPaintingResource->postApplyResource(this, context, ApplyToFillMode, 0, this);
+            fillShape(context);
+            fillPaintingResource->postApplyResource(this, context);
         } else if (hasFallback) {
             RenderSVGResourceSolidColor* fallbackResource = RenderSVGResource::sharedSolidPaintingResource();
-            if (fallbackResource->applyResource(this, style, context, ApplyToFillMode))
-                fallbackResource->postApplyResource(this, context, ApplyToFillMode, 0, this);
+            if (fallbackResource->applyResource(this, style, context, ApplyToFillMode)) {
+                fillShape(context);
+                fallbackResource->postApplyResource(this, context);
+            }
         }
     }
 }
@@ -217,13 +220,16 @@ void RenderSVGShape::fillShape(RenderStyle* style, GraphicsContext* context)
 void RenderSVGShape::strokeShape(RenderStyle* style, GraphicsContext* context)
 {
     bool hasFallback;
-    if (RenderSVGResource* strokePaintingResource = RenderSVGResource::strokePaintingResource(this, style, hasFallback)) {
+    if (RenderSVGResource* strokePaintingResource = RenderSVGResource::requestPaintingResource(ApplyToStrokeMode, this, style, hasFallback)) {
         if (strokePaintingResource->applyResource(this, style, context, ApplyToStrokeMode)) {
-            strokePaintingResource->postApplyResource(this, context, ApplyToStrokeMode, 0, this);
+            strokeShape(context);
+            strokePaintingResource->postApplyResource(this, context);
         } else if (hasFallback) {
             RenderSVGResourceSolidColor* fallbackResource = RenderSVGResource::sharedSolidPaintingResource();
-            if (fallbackResource->applyResource(this, style, context, ApplyToStrokeMode))
-                fallbackResource->postApplyResource(this, context, ApplyToStrokeMode, 0, this);
+            if (fallbackResource->applyResource(this, style, context, ApplyToStrokeMode)) {
+                strokeShape(context);
+                fallbackResource->postApplyResource(this, context);
+            }
         }
     }
 }
@@ -288,9 +294,9 @@ void RenderSVGShape::paint(PaintInfo& paintInfo, const LayoutPoint&)
 
 // This method is called from inside paintOutline() since we call paintOutline()
 // while transformed to our coord system, return local coords
-void RenderSVGShape::addFocusRingRects(Vector<IntRect>& rects, const LayoutPoint&, const RenderLayerModelObject*) const
+void RenderSVGShape::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&, const RenderLayerModelObject*) const
 {
-    IntRect rect = enclosingIntRect(paintInvalidationRectInLocalCoordinates());
+    LayoutRect rect = LayoutRect(paintInvalidationRectInLocalCoordinates());
     if (!rect.isEmpty())
         rects.append(rect);
 }
@@ -452,7 +458,12 @@ void RenderSVGShape::processMarkerPositions()
 
     ASSERT(m_path);
 
-    SVGMarkerData markerData(m_markerPositions);
+    SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(this);
+    ASSERT(resources);
+
+    RenderSVGResourceMarker* markerStart = resources->markerStart();
+
+    SVGMarkerData markerData(m_markerPositions, markerStart ? markerStart->orientType() == SVGMarkerOrientAutoStartReverse : false);
     m_path->apply(&markerData, SVGMarkerData::updateFromPathElement);
     markerData.pathIsDone();
 }

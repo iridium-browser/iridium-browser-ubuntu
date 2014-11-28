@@ -19,16 +19,6 @@
 #endif
 #endif  // defined(OS_MACOSX)
 
-#if defined(OS_WIN)
-#if defined(GOOGLE_CHROME_BUILD)
-#define PRODUCT_STRING_PATH L"Google\\Chrome"
-#elif defined(CHROMIUM_BUILD)
-#define PRODUCT_STRING_PATH L"Chromium"
-#else
-#error Unknown branding
-#endif
-#endif  // defined(OS_WIN)
-
 namespace chrome {
 
 const char kChromeVersionEnvVar[] = "CHROME_VERSION";
@@ -177,6 +167,8 @@ const base::FilePath::CharType kPreferencesFilename[] = FPL("Preferences");
 const base::FilePath::CharType kProtectedPreferencesFilenameDeprecated[] =
     FPL("Protected Preferences");
 const base::FilePath::CharType kReadmeFilename[] = FPL("README");
+const base::FilePath::CharType kResetPromptMementoFilename[] =
+    FPL("Reset Prompt Memento");
 const base::FilePath::CharType kSafeBrowsingBaseFilename[] =
     FPL("Safe Browsing");
 const base::FilePath::CharType kSecurePreferencesFilename[] =
@@ -266,9 +258,7 @@ const char kTestUserProfileDir[] = "test-user";
 const char kApplicationClientIDStringForAVScanning[] =
     "2676A9A2-D919-4FEE-9187-152100393AB2";
 
-#if defined(OS_ANDROID)
 const size_t kMaxMetaTagAttributeLength = 2000;
-#endif
 
 }  // namespace chrome
 

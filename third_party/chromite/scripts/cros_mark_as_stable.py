@@ -1,21 +1,21 @@
-#!/usr/bin/python
-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """This module uprevs a given package's ebuild to the next revision."""
 
+from __future__ import print_function
+
 import optparse
 import os
 import sys
 
 from chromite.cbuildbot import constants
-from chromite.cbuildbot import portage_utilities
 from chromite.lib import cros_build_lib
 from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import portage_util
 
 
 # Commit message for uprevving Portage packages.
@@ -229,7 +229,7 @@ def main(_argv):
                     help='Prints out debug info.')
   (options, args) = parser.parse_args()
 
-  portage_utilities.EBuild.VERBOSE = options.verbose
+  portage_util.EBuild.VERBOSE = options.verbose
 
   if len(args) != 1:
     _PrintUsageAndDie('Must specify a valid command [commit, push]')
@@ -256,7 +256,7 @@ def main(_argv):
   manifest = git.ManifestCheckout.Cached(options.srcroot)
 
   if command == 'commit':
-    portage_utilities.BuildEBuildDictionary(overlays, options.all, package_list)
+    portage_util.BuildEBuildDictionary(overlays, options.all, package_list)
 
   # Contains the array of packages we actually revved.
   revved_packages = []
@@ -282,7 +282,7 @@ def main(_argv):
         keys.insert(0, k)
         break
 
-  with parallel.BackgroundTaskRunner(portage_utilities.RegenCache) as queue:
+  with parallel.BackgroundTaskRunner(portage_util.RegenCache) as queue:
     for overlay in keys:
       ebuilds = overlays[overlay]
       if not os.path.isdir(overlay):
@@ -330,7 +330,7 @@ def main(_argv):
             raise
 
         if messages:
-          portage_utilities.EBuild.CommitChange('\n\n'.join(messages), overlay)
+          portage_util.EBuild.CommitChange('\n\n'.join(messages), overlay)
 
         if cros_build_lib.IsInsideChroot():
           # Regenerate caches if need be.  We do this all the time to

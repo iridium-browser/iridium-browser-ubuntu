@@ -186,12 +186,13 @@ static TextStream& operator<<(TextStream& ts, const SVGMarkerUnitsType& markerUn
     return ts;
 }
 
-TextStream& operator<<(TextStream& ts, const Color& c)
+static TextStream& operator<<(TextStream& ts, const SVGMarkerOrientType& orientType)
 {
-    return ts << c.nameForRenderTreeAsText();
+    ts << SVGEnumerationToString<SVGMarkerOrientType>(orientType);
+    return ts;
 }
 
-// FIXME: Maybe this should be in KCanvasRenderingStyle.cpp
+// FIXME: Maybe this should be in DashArray.cpp
 static TextStream& operator<<(TextStream& ts, const DashArray& a)
 {
     ts << "{";
@@ -281,7 +282,7 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
         ASSERT(shape.element());
 
         bool hasFallback;
-        if (RenderSVGResource* strokePaintingResource = RenderSVGResource::strokePaintingResource(const_cast<RenderSVGShape*>(&shape), shape.style(), hasFallback)) {
+        if (RenderSVGResource* strokePaintingResource = RenderSVGResource::requestPaintingResource(ApplyToStrokeMode, const_cast<RenderSVGShape*>(&shape), shape.style(), hasFallback)) {
             TextStreamSeparator s(" ");
             ts << " [stroke={" << s;
             writeSVGPaintingResource(ts, strokePaintingResource);
@@ -309,7 +310,7 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
             ts << "}]";
         }
 
-        if (RenderSVGResource* fillPaintingResource = RenderSVGResource::fillPaintingResource(const_cast<RenderSVGShape*>(&shape), shape.style(), hasFallback)) {
+        if (RenderSVGResource* fillPaintingResource = RenderSVGResource::requestPaintingResource(ApplyToFillMode, const_cast<RenderSVGShape*>(&shape), shape.style(), hasFallback)) {
             TextStreamSeparator s(" ");
             ts << " [fill={" << s;
             writeSVGPaintingResource(ts, fillPaintingResource);
@@ -512,7 +513,7 @@ void writeSVGResourceContainer(TextStream& ts, const RenderObject& object, int i
         // Creating a placeholder filter which is passed to the builder.
         FloatRect dummyRect;
         IntRect dummyIntRect;
-        RefPtr<SVGFilter> dummyFilter = SVGFilter::create(AffineTransform(), dummyIntRect, dummyRect, dummyRect, true);
+        RefPtr<SVGFilter> dummyFilter = SVGFilter::create(dummyIntRect, dummyRect, dummyRect, true);
         if (RefPtr<SVGFilterBuilder> builder = filter->buildPrimitives(dummyFilter.get())) {
             if (FilterEffect* lastEffect = builder->lastEffect())
                 lastEffect->externalRepresentation(ts, indent + 1);
@@ -526,7 +527,7 @@ void writeSVGResourceContainer(TextStream& ts, const RenderObject& object, int i
         ts << " [ref at " << marker->referencePoint() << "]";
         ts << " [angle=";
         if (marker->angle() == -1)
-            ts << "auto" << "]\n";
+            ts << marker->orientType() << "]\n";
         else
             ts << marker->angle() << "]\n";
     } else if (resource->resourceType() == PatternResourceType) {

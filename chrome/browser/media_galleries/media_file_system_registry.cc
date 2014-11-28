@@ -38,15 +38,15 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/common/fileapi/file_system_mount_option.h"
-#include "webkit/common/fileapi/file_system_types.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/common/fileapi/file_system_mount_option.h"
+#include "storage/common/fileapi/file_system_types.h"
 
 using content::BrowserThread;
 using content::NavigationController;
 using content::RenderProcessHost;
 using content::WebContents;
-using fileapi::ExternalMountPoints;
+using storage::ExternalMountPoints;
 using storage_monitor::MediaStorageUtil;
 using storage_monitor::StorageInfo;
 using storage_monitor::StorageMonitor;
@@ -703,8 +703,10 @@ class MediaFileSystemRegistry::MediaFileSystemContextImpl
       result = registry->RegisterIPhotoFilesystemOnUIThread(fs_name, path);
     } else {
       result = ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
-          fs_name, fileapi::kFileSystemTypeNativeMedia,
-          fileapi::FileSystemMountOption(), path);
+          fs_name,
+          storage::kFileSystemTypeNativeMedia,
+          storage::FileSystemMountOption(),
+          path);
     }
     return result;
   }
@@ -718,8 +720,10 @@ class MediaFileSystemRegistry::MediaFileSystemContextImpl
     // Sanity checks for |path|.
     CHECK(MediaStorageUtil::CanCreateFileSystem(device_id, path));
     bool result = ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
-        fs_name, fileapi::kFileSystemTypeDeviceMedia,
-        fileapi::FileSystemMountOption(), path);
+        fs_name,
+        storage::kFileSystemTypeDeviceMedia,
+        storage::FileSystemMountOption(),
+        path);
     CHECK(result);
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
         &MTPDeviceMapService::RegisterMTPFileSystem,

@@ -20,9 +20,6 @@
 #ifndef RenderSVGResource_h
 #define RenderSVGResource_h
 
-#include "core/rendering/svg/RenderSVGShape.h"
-#include "core/svg/SVGDocumentExtensions.h"
-
 namespace blink {
 
 enum RenderSVGResourceType {
@@ -46,7 +43,6 @@ enum RenderSVGResourceMode {
 typedef unsigned RenderSVGResourceModeFlags;
 
 class GraphicsContext;
-class Path;
 class RenderObject;
 class RenderStyle;
 class RenderSVGResourceSolidColor;
@@ -60,7 +56,7 @@ public:
     virtual void removeClientFromCache(RenderObject*, bool markForInvalidation = true) = 0;
 
     virtual bool applyResource(RenderObject*, RenderStyle*, GraphicsContext*&, unsigned short resourceMode) = 0;
-    virtual void postApplyResource(RenderObject*, GraphicsContext*&, unsigned short, const Path*, const RenderSVGShape*) { }
+    virtual void postApplyResource(RenderObject*, GraphicsContext*&) { }
 
     virtual RenderSVGResourceType resourceType() const = 0;
 
@@ -75,8 +71,7 @@ public:
 
     // Helper utilities used in the render tree to access resources used for painting shapes/text (gradients & patterns & solid colors only)
     // If hasFallback gets set to true, the sharedSolidPaintingResource is set to a fallback color.
-    static RenderSVGResource* fillPaintingResource(RenderObject*, const RenderStyle*, bool& hasFallback);
-    static RenderSVGResource* strokePaintingResource(RenderObject*, const RenderStyle*, bool& hasFallback);
+    static RenderSVGResource* requestPaintingResource(RenderSVGResourceMode, RenderObject*, const RenderStyle*, bool& hasFallback);
     static RenderSVGResourceSolidColor* sharedSolidPaintingResource();
 
     static void markForLayoutAndParentResourceInvalidation(RenderObject*, bool needsLayout = true);

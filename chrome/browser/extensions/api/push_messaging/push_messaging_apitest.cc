@@ -9,7 +9,6 @@
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_handler.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_mapper.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/invalidation/fake_invalidation_service.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,6 +20,8 @@
 #include "components/invalidation/invalidation_service.h"
 #include "components/invalidation/profile_invalidation_provider.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/result_catcher.h"
 #include "google/cacheinvalidation/types.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -113,7 +114,7 @@ class PushMessagingApiTest : public ExtensionApiTest {
 
 IN_PROC_BROWSER_TEST_F(PushMessagingApiTest, EventDispatch) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
 
   const extensions::Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("push_messaging"));
@@ -130,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingApiTest, EventDispatch) {
 // that we install.
 IN_PROC_BROWSER_TEST_F(PushMessagingApiTest, ReceivesPush) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
 
   const extensions::Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("push_messaging"));
@@ -196,7 +197,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingApiTest, Restart) {
 // Test that GetChannelId fails if no user is signed in.
 IN_PROC_BROWSER_TEST_F(PushMessagingApiTest, GetChannelId) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(profile());
+  catcher.RestrictToBrowserContext(profile());
 
   const extensions::Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("push_messaging"));

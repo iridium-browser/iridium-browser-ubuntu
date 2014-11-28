@@ -1,14 +1,14 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 
 """Functionality for mangling repository checkouts that are shared
 
 In particular, this in combination w/ enter_chroot's mount binding, allows
 us to access the same repo from inside and outside a chroot at the same time
 """
+
+from __future__ import print_function
 
 __all__ = ('RebuildRepoCheckout',)
 
@@ -264,4 +264,4 @@ if __name__ == '__main__':
     chroot_root = sys.argv[3]
   ret = RebuildRepoCheckout(sys.argv[1], sys.argv[2],
                             chroot_reference_root=chroot_root)
-  print '\n'.join(ret)
+  print('\n'.join(ret))

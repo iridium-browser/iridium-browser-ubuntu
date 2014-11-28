@@ -15,15 +15,14 @@
 #include "base/strings/string16.h"
 #include "base/values.h"
 
-namespace gfx {
-class Image;
-}
 
 class Profile;
 
 // ScreenlockBridge brings together the screenLockPrivate API and underlying
 // support. On ChromeOS, it delegates calls to the ScreenLocker. On other
 // platforms, it delegates calls to UserManagerUI (and friends).
+// TODO(tbarzic): Rename ScreenlockBridge to SignInScreenBridge, as this is not
+// used solely for the lock screen anymore.
 class ScreenlockBridge {
  public:
   class Observer {
@@ -32,8 +31,19 @@ class ScreenlockBridge {
     virtual void OnScreenDidLock() = 0;
     // Invoked after the screen lock is dismissed.
     virtual void OnScreenDidUnlock() = 0;
+    // Invoked when the user focused on the lock screen changes.
+    virtual void OnFocusedUserChanged(const std::string& user_id) = 0;
    protected:
     virtual ~Observer() {}
+  };
+
+  // User pod icons supported by lock screen / signin screen UI.
+  enum UserPodCustomIcon {
+    USER_POD_CUSTOM_ICON_NONE,
+    USER_POD_CUSTOM_ICON_HARDLOCKED,
+    USER_POD_CUSTOM_ICON_LOCKED,
+    USER_POD_CUSTOM_ICON_UNLOCKED,
+    USER_POD_CUSTOM_ICON_SPINNER
   };
 
   // Class containing parameters describing the custom icon that should be
@@ -47,57 +57,28 @@ class ScreenlockBridge {
     // screenlock web UI.
     scoped_ptr<base::DictionaryValue> ToDictionaryValue() const;
 
-    // Sets the icon as chrome://theme resource URL.
-    void SetIconAsResourceURL(const std::string& url);
-
-    // Sets the icon as a gfx::Image. The image will be converted to set of data
-    // URLs for each icon representation. Use |SetIconAsResourceURL| instead of
-    // this.
-    // TODO(tbarzic): Remove this one once easy unlock app stops using
-    // screenlockPrivate.showCustomIcon.
-    void SetIconAsImage(const gfx::Image& image);
-
-    // Sets the icon size. Has to be called if |SetIconAsResourceURL| was used
-    // to set the icon. For animated icon, this should be set to a single frame
-    // size, not the animation resource size.
-    void SetSize(size_t icon_width, size_t icon_height);
-
-    // If the icon is supposed to be animated, sets the animation parameters.
-    // If set, it expects that the resource set using |SetIcon*| methods
-    // contains horizontally arranged ordered list of animation frames.
-    // Note that the icon size set in |SetSize| should be a single frame size.
-    // |resource_width|: Total animation resource width.
-    // |frame_length_ms|: Time for which a single animation frame is shown.
-    void SetAnimation(size_t resource_width, size_t frame_length_ms);
-
-    // Sets the icon opacity. The values should be in <0, 100] interval, which
-    // will get scaled into <0, 1] interval. The default value is 100.
-    void SetOpacity(size_t opacity);
+    // Sets the icon that should be shown in the UI.
+    void SetIcon(UserPodCustomIcon icon);
 
     // Sets the icon tooltip. If |autoshow| is set the tooltip is automatically
     // shown with the icon.
     void SetTooltip(const base::string16& tooltip, bool autoshow);
+
+    // Sets the accessiblity label of the icon. If this attribute is not
+    // provided, then the tooltip will be used.
+    void SetAriaLabel(const base::string16& aria_label);
 
     // If hardlock on click is set, clicking the icon in the screenlock will
     // go to state where password is required for unlock.
     void SetHardlockOnClick();
 
    private:
-    std::string icon_resource_url_;
-    scoped_ptr<gfx::Image> icon_image_;
-
-    size_t width_;
-    size_t height_;
-
-    bool animation_set_;
-    size_t animation_resource_width_;
-    size_t animation_frame_length_ms_;
-
-    // The opacity should be in <0, 100] range.
-    size_t opacity_;
+    UserPodCustomIcon icon_;
 
     base::string16 tooltip_;
     bool autoshow_tooltip_;
+
+    base::string16 aria_label_;
 
     bool hardlock_on_click_;
 
@@ -142,6 +123,11 @@ class ScreenlockBridge {
     // Unlock from easy unlock app for a user.
     virtual void Unlock(const std::string& user_email) = 0;
 
+    // Attempts to login the user using an easy unlock key.
+    virtual void AttemptEasySignin(const std::string& user_email,
+                                   const std::string& secret,
+                                   const std::string& key_label) = 0;
+
    protected:
     virtual ~LockHandler() {}
   };
@@ -150,6 +136,7 @@ class ScreenlockBridge {
   static std::string GetAuthenticatedUserEmail(Profile* profile);
 
   void SetLockHandler(LockHandler* lock_handler);
+  void SetFocusedUser(const std::string& user_id);
 
   bool IsLocked() const;
   void Lock(Profile* profile);
@@ -160,6 +147,8 @@ class ScreenlockBridge {
 
   LockHandler* lock_handler() { return lock_handler_; }
 
+  std::string focused_user_id() const { return focused_user_id_; }
+
  private:
   friend struct base::DefaultLazyInstanceTraits<ScreenlockBridge>;
   friend struct base::DefaultDeleter<ScreenlockBridge>;
@@ -168,6 +157,8 @@ class ScreenlockBridge {
   ~ScreenlockBridge();
 
   LockHandler* lock_handler_;  // Not owned
+  // The last focused user's id.
+  std::string focused_user_id_;
   ObserverList<Observer, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenlockBridge);

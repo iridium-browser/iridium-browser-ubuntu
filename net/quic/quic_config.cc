@@ -10,7 +10,6 @@
 #include "net/quic/crypto/crypto_handshake_message.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/quic_flags.h"
-#include "net/quic/quic_sent_packet_manager.h"
 #include "net/quic/quic_utils.h"
 
 using std::min;
@@ -552,6 +551,14 @@ uint32 QuicConfig::ReceivedInitialRoundTripTimeUs() const {
   return initial_round_trip_time_us_.GetReceivedValue();
 }
 
+bool QuicConfig::HasInitialRoundTripTimeUsToSend() const {
+  return initial_round_trip_time_us_.HasSendValue();
+}
+
+uint32 QuicConfig::GetInitialRoundTripTimeUsToSend() const {
+  return initial_round_trip_time_us_.GetSendValue();
+}
+
 void QuicConfig::SetInitialFlowControlWindowToSend(uint32 window_bytes) {
   if (window_bytes < kDefaultFlowControlSendWindow) {
     LOG(DFATAL) << "Initial flow control receive window (" << window_bytes
@@ -648,12 +655,12 @@ void QuicConfig::SetDefaults() {
   QuicTagVector congestion_feedback;
   congestion_feedback.push_back(kQBIC);
   congestion_feedback_.set(congestion_feedback, kQBIC);
-  idle_connection_state_lifetime_seconds_.set(kDefaultTimeoutSecs,
+  idle_connection_state_lifetime_seconds_.set(kMaximumIdleTimeoutSecs,
                                               kDefaultInitialTimeoutSecs);
   // kKATO is optional. Return 0 if not negotiated.
   keepalive_timeout_seconds_.set(0, 0);
-  max_streams_per_connection_.set(kDefaultMaxStreamsPerConnection,
-                                  kDefaultMaxStreamsPerConnection);
+  set_max_streams_per_connection(kDefaultMaxStreamsPerConnection,
+                                 kDefaultMaxStreamsPerConnection);
   max_time_before_crypto_handshake_ = QuicTime::Delta::FromSeconds(
       kDefaultMaxTimeForCryptoHandshakeSecs);
 

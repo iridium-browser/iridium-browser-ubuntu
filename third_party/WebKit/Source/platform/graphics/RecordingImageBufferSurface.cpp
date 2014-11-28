@@ -28,8 +28,16 @@ RecordingImageBufferSurface::RecordingImageBufferSurface(const IntSize& size, Op
 RecordingImageBufferSurface::~RecordingImageBufferSurface()
 { }
 
-void RecordingImageBufferSurface::initializeCurrentFrame()
+bool RecordingImageBufferSurface::initializeCurrentFrame()
 {
+    StateStack stateStack;
+    bool saved = false;
+    if (m_currentFrame) {
+        saved = saveState(m_currentFrame->getRecordingCanvas(), &stateStack);
+        if (!saved)
+            return false;
+    }
+
     static SkRTreeFactory rTreeFactory;
     m_currentFrame = adoptPtr(new SkPictureRecorder);
     m_currentFrame->beginRecording(size().width(), size().height(), &rTreeFactory);
@@ -38,6 +46,11 @@ void RecordingImageBufferSurface::initializeCurrentFrame()
         m_imageBuffer->context()->resetCanvas(m_currentFrame->getRecordingCanvas());
         m_imageBuffer->context()->setRegionTrackingMode(GraphicsContext::RegionTrackingOverwrite);
     }
+
+    if (saved)
+        setCurrentState(m_currentFrame->getRecordingCanvas(), &stateStack);
+
+    return true;
 }
 
 void RecordingImageBufferSurface::setImageBuffer(ImageBuffer* imageBuffer)
@@ -134,28 +147,51 @@ bool RecordingImageBufferSurface::finalizeFrameInternal()
         return false;
     }
 
-    SkCanvas* oldCanvas = m_currentFrame->getRecordingCanvas(); // Could be raster or picture
-
-    // FIXME(crbug.com/392614): handle transferring complex state from the current picture to the new one.
-    if (oldCanvas->getSaveCount() > m_initialSaveCount)
-        return false;
-
-    if (!oldCanvas->isClipRect())
-        return false;
-
-    SkMatrix ctm = oldCanvas->getTotalMatrix();
-    SkRect clip;
-    oldCanvas->getClipBounds(&clip);
-
     m_previousFrame = adoptRef(m_currentFrame->endRecording());
-    initializeCurrentFrame();
+    if (!initializeCurrentFrame())
+        return false;
 
-    SkCanvas* newCanvas = m_currentFrame->getRecordingCanvas();
-    newCanvas->concat(ctm);
-    newCanvas->clipRect(clip);
 
     m_frameWasCleared = false;
     return true;
+}
+
+bool RecordingImageBufferSurface::saveState(SkCanvas* srcCanvas, StateStack* stateStack)
+{
+    StateRec state;
+
+    // we will remove all the saved state stack in endRecording anyway, so it makes no difference
+    while (srcCanvas->getSaveCount() > m_initialSaveCount) {
+        state.m_ctm = srcCanvas->getTotalMatrix();
+        // FIXME: don't mess up the state in case we will have to fallback, crbug.com/408392
+        if (!srcCanvas->getClipDeviceBounds(&state.m_clip))
+            return false;
+        stateStack->push(state);
+        srcCanvas->restore();
+    }
+
+    state.m_ctm = srcCanvas->getTotalMatrix();
+    // FIXME: don't mess up the state in case we will have to fallback, crbug.com/408392
+    if (!srcCanvas->getClipDeviceBounds(&state.m_clip))
+        return false;
+    stateStack->push(state);
+
+    return true;
+}
+
+void RecordingImageBufferSurface::setCurrentState(SkCanvas* dstCanvas, StateStack* stateStack)
+{
+    while (stateStack->size() > 1) {
+        dstCanvas->resetMatrix();
+        dstCanvas->clipRect(SkRect::MakeFromIRect(stateStack->peek().m_clip));
+        dstCanvas->setMatrix(stateStack->peek().m_ctm);
+        dstCanvas->save();
+        stateStack->pop();
+    }
+
+    dstCanvas->resetMatrix();
+    dstCanvas->clipRect(SkRect::MakeFromIRect(stateStack->peek().m_clip));
+    dstCanvas->setMatrix(stateStack->peek().m_ctm);
 }
 
 } // namespace blink

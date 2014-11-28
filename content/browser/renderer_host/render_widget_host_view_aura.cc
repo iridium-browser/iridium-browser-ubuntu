@@ -29,6 +29,7 @@
 #include "content/browser/renderer_host/input/synthetic_gesture_target_aura.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_view_host_delegate_view.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/ui_events_helper.h"
@@ -470,6 +471,20 @@ RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host)
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, RenderWidgetHostView implementation:
 
+bool RenderWidgetHostViewAura::OnMessageReceived(
+    const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderWidgetHostViewAura, message)
+    // TODO(kevers): Move to RenderWidgetHostViewImpl and consolidate IPC
+    // messages for TextInput<State|Type>Changed. Corresponding code in
+    // RenderWidgetHostViewAndroid should also be moved at the same time.
+    IPC_MESSAGE_HANDLER(ViewHostMsg_TextInputStateChanged,
+                        OnTextInputStateChanged)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
 void RenderWidgetHostViewAura::InitAsChild(
     gfx::NativeView parent_view) {
   window_->SetType(ui::wm::WINDOW_TYPE_CONTROL);
@@ -641,6 +656,10 @@ void RenderWidgetHostViewAura::SetBounds(const gfx::Rect& rect) {
   }
 
   InternalSetBounds(gfx::Rect(relative_origin, rect.size()));
+}
+
+gfx::Vector2dF RenderWidgetHostViewAura::GetLastScrollOffset() const {
+  return last_scroll_offset_;
 }
 
 gfx::NativeView RenderWidgetHostViewAura::GetNativeView() const {
@@ -829,19 +848,25 @@ void RenderWidgetHostViewAura::SetIsLoading(bool is_loading) {
   UpdateCursorIfOverSelf();
 }
 
-void RenderWidgetHostViewAura::TextInputStateChanged(
-    const ViewHostMsg_TextInputState_Params& params) {
-  if (text_input_type_ != params.type ||
-      text_input_mode_ != params.mode ||
-      can_compose_inline_ != params.can_compose_inline) {
-    text_input_type_ = params.type;
-    text_input_mode_ = params.mode;
-    can_compose_inline_ = params.can_compose_inline;
+void RenderWidgetHostViewAura::TextInputTypeChanged(
+    ui::TextInputType type,
+    ui::TextInputMode input_mode,
+    bool can_compose_inline) {
+  if (text_input_type_ != type ||
+      text_input_mode_ != input_mode ||
+      can_compose_inline_ != can_compose_inline) {
+    text_input_type_ = type;
+    text_input_mode_ = input_mode;
+    can_compose_inline_ = can_compose_inline;
     if (GetInputMethod())
       GetInputMethod()->OnTextInputTypeChanged(this);
     if (touch_editing_client_)
       touch_editing_client_->OnTextInputTypeChanged(text_input_type_);
   }
+}
+
+void RenderWidgetHostViewAura::OnTextInputStateChanged(
+    const ViewHostMsg_TextInputState_Params& params) {
   if (params.show_ime_if_needed && params.type != ui::TEXT_INPUT_TYPE_NONE) {
     if (GetInputMethod())
       GetInputMethod()->ShowImeIfNeeded();
@@ -905,9 +930,7 @@ void RenderWidgetHostViewAura::SelectionChanged(const base::string16& text,
   }
 
   // Set the CLIPBOARD_TYPE_SELECTION to the ui::Clipboard.
-  ui::ScopedClipboardWriter clipboard_writer(
-      ui::Clipboard::GetForCurrentThread(),
-      ui::CLIPBOARD_TYPE_SELECTION);
+  ui::ScopedClipboardWriter clipboard_writer(ui::CLIPBOARD_TYPE_SELECTION);
   clipboard_writer.WriteText(text.substr(pos, n));
 #endif  // defined(USE_X11) && !defined(OS_CHROMEOS)
 }
@@ -934,20 +957,10 @@ void RenderWidgetHostViewAura::SelectionBoundsChanged(
   }
 }
 
-void RenderWidgetHostViewAura::ScrollOffsetChanged() {
-  aura::Window* root = window_->GetRootWindow();
-  if (!root)
-    return;
-  aura::client::CursorClient* cursor_client =
-      aura::client::GetCursorClient(root);
-  if (cursor_client && !cursor_client->IsCursorVisible())
-    cursor_client->DisableMouseEvents();
-}
-
 void RenderWidgetHostViewAura::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    const base::Callback<void(bool, const SkBitmap&)>& callback,
+    CopyFromCompositingSurfaceCallback& callback,
     const SkColorType color_type) {
   delegated_frame_host_->CopyFromCompositingSurface(
       src_subrect, dst_size, callback, color_type);
@@ -1032,6 +1045,8 @@ void RenderWidgetHostViewAura::OnSwapCompositorFrame(
     uint32 output_surface_id,
     scoped_ptr<cc::CompositorFrame> frame) {
   TRACE_EVENT0("content", "RenderWidgetHostViewAura::OnSwapCompositorFrame");
+
+  last_scroll_offset_ = frame->metadata.root_scroll_offset;
   if (frame->delegated_frame_data) {
     delegated_frame_host_->SwapDelegatedFrame(
         output_surface_id,
@@ -1048,6 +1063,11 @@ void RenderWidgetHostViewAura::OnSwapCompositorFrame(
     host_->GetProcess()->ReceivedBadMessage();
     return;
   }
+}
+
+void RenderWidgetHostViewAura::DidStopFlinging() {
+  if (touch_editing_client_)
+    touch_editing_client_->DidStopFlinging();
 }
 
 #if defined(OS_WIN)
@@ -1232,6 +1252,100 @@ RenderWidgetHostViewAura::AccessibilityGetNativeViewAccessible() {
 
 gfx::GLSurfaceHandle RenderWidgetHostViewAura::GetCompositingSurface() {
   return ImageTransportFactory::GetInstance()->GetSharedSurfaceHandle();
+}
+
+void RenderWidgetHostViewAura::ShowDisambiguationPopup(
+    const gfx::Rect& rect_pixels,
+    const SkBitmap& zoomed_bitmap) {
+  RenderViewHostDelegate* delegate = NULL;
+  if (host_->IsRenderView())
+    delegate = RenderViewHost::From(host_)->GetDelegate();
+  // Suppress the link disambiguation popup if the virtual keyboard is currently
+  // requested, as it doesn't interact well with the keyboard.
+  if (delegate && delegate->IsVirtualKeyboardRequested())
+    return;
+
+  // |target_rect| is provided in pixels, not DIPs. So we convert it to DIPs
+  // by scaling it by the inverse of the device scale factor.
+  gfx::RectF screen_target_rect_f(rect_pixels);
+  screen_target_rect_f.Scale(1.0f / current_device_scale_factor_);
+  disambiguation_target_rect_ = gfx::ToEnclosingRect(screen_target_rect_f);
+
+  float scale = static_cast<float>(zoomed_bitmap.width()) /
+                static_cast<float>(rect_pixels.width());
+  gfx::Size zoomed_size(gfx::ToCeiledSize(
+      gfx::ScaleSize(disambiguation_target_rect_.size(), scale)));
+
+  // Save of a copy of the |last_scroll_offset_| for comparison when the copy
+  // callback fires, to ensure that we haven't scrolled.
+  disambiguation_scroll_offset_ = last_scroll_offset_;
+
+  CopyFromCompositingSurface(
+      disambiguation_target_rect_,
+      zoomed_size,
+      base::Bind(&RenderWidgetHostViewAura::DisambiguationPopupRendered,
+          base::internal::SupportsWeakPtrBase::StaticAsWeakPtr
+              <RenderWidgetHostViewAura>(this)),
+      kN32_SkColorType);
+}
+
+void RenderWidgetHostViewAura::DisambiguationPopupRendered(
+    bool success,
+    const SkBitmap& result) {
+  if (!success || disambiguation_scroll_offset_ != last_scroll_offset_)
+    return;
+
+  // Use RenderViewHostDelegate to get to the WebContentsViewAura, which will
+  // actually show the disambiguation popup.
+  RenderViewHostDelegate* delegate = NULL;
+  if (host_->IsRenderView())
+    delegate = RenderViewHost::From(host_)->GetDelegate();
+  RenderViewHostDelegateView* delegate_view = NULL;
+  if (delegate) {
+    delegate_view = delegate->GetDelegateView();
+    if (delegate->IsVirtualKeyboardRequested())
+      return;
+  }
+  if (delegate_view) {
+    delegate_view->ShowDisambiguationPopup(
+        disambiguation_target_rect_,
+        result,
+        base::Bind(&RenderWidgetHostViewAura::ProcessDisambiguationGesture,
+            base::internal::SupportsWeakPtrBase::StaticAsWeakPtr
+                <RenderWidgetHostViewAura>(this)),
+        base::Bind(&RenderWidgetHostViewAura::ProcessDisambiguationMouse,
+            base::internal::SupportsWeakPtrBase::StaticAsWeakPtr
+                <RenderWidgetHostViewAura>(this)));
+  }
+}
+
+void RenderWidgetHostViewAura::HideDisambiguationPopup() {
+  RenderViewHostDelegate* delegate = NULL;
+  if (host_->IsRenderView())
+    delegate = RenderViewHost::From(host_)->GetDelegate();
+  RenderViewHostDelegateView* delegate_view = NULL;
+  if (delegate)
+    delegate_view = delegate->GetDelegateView();
+  if (delegate_view)
+    delegate_view->HideDisambiguationPopup();
+}
+
+void RenderWidgetHostViewAura::ProcessDisambiguationGesture(
+    ui::GestureEvent* event) {
+  blink::WebGestureEvent web_gesture = content::MakeWebGestureEvent(event);
+  // If we fail to make a WebGestureEvent that is a Tap from the provided event,
+  // don't forward it to Blink.
+  if (web_gesture.type < blink::WebInputEvent::Type::GestureTap ||
+      web_gesture.type > blink::WebInputEvent::Type::GestureTapCancel)
+    return;
+
+  host_->ForwardGestureEvent(web_gesture);
+}
+
+void RenderWidgetHostViewAura::ProcessDisambiguationMouse(
+    ui::MouseEvent* event) {
+  blink::WebMouseEvent web_mouse = content::MakeWebMouseEvent(event);
+  host_->ForwardMouseEvent(web_mouse);
 }
 
 bool RenderWidgetHostViewAura::LockMouse() {
@@ -1850,6 +1964,10 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
                         reinterpret_cast<LPARAM>(toplevel_hwnd));
     }
 #endif
+    // The Disambiguation popup does not parent itself from this window, so we
+    // manually dismiss it.
+    HideDisambiguationPopup();
+
     blink::WebMouseWheelEvent mouse_wheel_event =
         MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent*>(event));
     if (mouse_wheel_event.deltaX != 0 || mouse_wheel_event.deltaY != 0)
@@ -2463,11 +2581,6 @@ ui::Layer* RenderWidgetHostViewAura::GetLayer() {
 
 RenderWidgetHostImpl* RenderWidgetHostViewAura::GetHost() {
   return host_;
-}
-
-void RenderWidgetHostViewAura::SchedulePaintInRect(
-    const gfx::Rect& damage_rect_in_dip) {
-  window_->SchedulePaintInRect(damage_rect_in_dip);
 }
 
 bool RenderWidgetHostViewAura::IsVisible() {

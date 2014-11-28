@@ -34,7 +34,11 @@ struct NaClValidationCache;
  *   struct NaClChromeMainArgs *args = NaClChromeMainArgsCreate();
  *   // Fill out args...
  *   NaClAppSetDesc(nap, NACL_CHROME_DESC_BASE, NaClDescMakeCustomDesc(...));
- *   NaClChromeMainStartApp(nap, args);
+ *   int exit_status;
+ *   int ok = NaClChromeMainStart(nap, args, &exit_status);
+ *   if (!ok)
+ *     NaClExit(1);
+ *   NaClExit(exit_status);
  */
 
 /*
@@ -44,7 +48,7 @@ struct NaClValidationCache;
  *
  * This number is chosen so as not to conflict with
  * NACL_SERVICE_PORT_DESCRIPTOR, NACL_SERVICE_ADDRESS_DESCRIPTOR and
- * export_addr_to inside NaClChromeMainStartApp().
+ * export_addr_to inside NaClChromeMainStart().
  */
 #define NACL_CHROME_DESC_BASE 6
 
@@ -52,18 +56,29 @@ struct NaClValidationCache;
 struct NaClChromeMainArgs {
   /*
    * Handle for bootstrapping a NaCl IMC connection to the trusted
-   * PPAPI plugin.  Required.
+   * PPAPI plugin.  This is optional.
    */
   NaClHandle imc_bootstrap_handle;
 
   /*
+   * DEPRECATED: superseded by irt_desc.
+   * TODO(ncbray): remove
    * File descriptor for the NaCl integrated runtime (IRT) library.
    * Note that this is a file descriptor even on Windows (where file
    * descriptors are emulated by the C runtime library).
    * Optional; may be -1.  Optional when loading nexes that don't follow
    * NaCl's stable ABI, such as the PNaCl translator.
+   * Callee assumes ownership.
    */
   int irt_fd;
+
+  /*
+   * File descriptor for the NaCl integrated runtime (IRT) library.
+   * Optional; may be NULL.  Optional when loading nexes that don't follow
+   * NaCl's stable ABI, such as the PNaCl translator.
+   * Callee assumes ownership.
+   */
+  struct NaClDesc *irt_desc;
 
   /* Whether to enable untrusted hardware exception handling.  Boolean. */
   int enable_exception_handling;
@@ -76,6 +91,9 @@ struct NaClChromeMainArgs {
 
   /* Whether or not the app is a PNaCl app. Boolean. */
   int pnacl_mode;
+
+  /* Whether to skip NaCl's platform qualification check.  Boolean. */
+  int skip_qualification;
 
   /*
    * Maximum size of the initially loaded nexe's code segment, in
@@ -170,8 +188,15 @@ struct NaClChromeMainArgs {
   /*
    * Descriptor for the user nexe module to load and run. This is optional and
    * may be NULL if SRPC is used for module loading.
+   * Callee assumes ownership.
    */
   struct NaClDesc *nexe_desc;
+
+  /*
+   * The command line to be passed to the nexe.
+   */
+  int argc;
+  char **argv;
 };
 
 #if NACL_LINUX || NACL_OSX
@@ -204,9 +229,32 @@ void NaClSetFatalErrorCallback(void (*func)(const char *data, size_t bytes));
 /* Create a new args struct containing default values. */
 struct NaClChromeMainArgs *NaClChromeMainArgsCreate(void);
 
-/* Start NaCl. This does not return. */
+/*
+ * Start NaCl. This does not return.
+ * TODO(teravest): Remove this.
+ */
 void NaClChromeMainStartApp(struct NaClApp *nap,
                             struct NaClChromeMainArgs *args);
+
+/*
+ * Start NaCl.
+ * On success, returns 1 and sets exit_status to the value that the application
+ * passed to _exit().
+ * Returns 0 if the application fails to start.
+ */
+int NaClChromeMainStart(struct NaClApp *nap,
+                        struct NaClChromeMainArgs *args,
+                        int *exit_status);
+
+/*
+ * NaClExit() is for doing a graceful exit, when no internal errors
+ * have been detected, when the caller wants to return a well-defined
+ * exit status.
+ *
+ * This is safer than exit(), which does some teardown that can cause running
+ * threads to crash.
+ */
+void NaClExit(int code);
 
 EXTERN_C_END
 

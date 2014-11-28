@@ -30,7 +30,6 @@ namespace sync_driver {
 class DataTypeController;
 class DataTypeEncryptionHandler;
 class DataTypeManagerObserver;
-class FailedDataTypesHandler;
 
 // List of data types grouped by priority and ordered from high priority to
 // low priority.
@@ -46,13 +45,14 @@ class DataTypeManagerImpl : public DataTypeManager,
       const DataTypeController::TypeMap* controllers,
       const DataTypeEncryptionHandler* encryption_handler,
       BackendDataTypeConfigurer* configurer,
-      DataTypeManagerObserver* observer,
-      FailedDataTypesHandler* failed_data_types_handler);
+      DataTypeManagerObserver* observer);
   virtual ~DataTypeManagerImpl();
 
   // DataTypeManager interface.
   virtual void Configure(syncer::ModelTypeSet desired_types,
                          syncer::ConfigureReason reason) OVERRIDE;
+  virtual void ReenableType(syncer::ModelType type) OVERRIDE;
+  virtual void ResetDataTypeErrors() OVERRIDE;
 
   // Needed only for backend migration.
   virtual void PurgeForMigration(
@@ -162,7 +162,7 @@ class DataTypeManagerImpl : public DataTypeManager,
 
   // For querying failed data types (having unrecoverable error) when
   // configuring backend.
-  FailedDataTypesHandler* failed_data_types_handler_;
+  DataTypeStatusTable data_type_status_table_;
 
   // Types waiting to be downloaded.
   TypeSetPriorityList download_types_queue_;

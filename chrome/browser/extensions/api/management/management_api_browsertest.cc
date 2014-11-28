@@ -11,7 +11,6 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "content/public/browser/notification_service.h"
@@ -22,6 +21,8 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/common/test_util.h"
+#include "extensions/test/extension_test_message_listener.h"
 
 namespace keys = extension_management_api_constants;
 namespace util = extension_function_test_utils;
@@ -99,6 +100,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
+                       GetSelfNoPermissions) {
+  ExtensionTestMessageListener listener1("success", false);
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("management/get_self")));
+  ASSERT_TRUE(listener1.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
                        UninstallWithConfirmDialog) {
   ExtensionService* service = ExtensionSystem::Get(browser()->profile())->
       extension_service();
@@ -110,12 +119,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
 
   const std::string id = extension->id();
 
-  scoped_refptr<Extension> empty_extension(
-      extension_function_test_utils::CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension(test_util::CreateEmptyExtension());
   // Uninstall, then cancel via the confirm dialog.
   scoped_refptr<ManagementUninstallFunction> uninstall_function(
       new ManagementUninstallFunction());
-  uninstall_function->set_extension(empty_extension);
+  uninstall_function->set_extension(empty_extension.get());
   uninstall_function->set_user_gesture(true);
   ManagementUninstallFunction::SetAutoConfirmForTest(false);
 
@@ -132,7 +140,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
 
   // Uninstall, then accept via the confirm dialog.
   uninstall_function = new ManagementUninstallFunction();
-  uninstall_function->set_extension(empty_extension);
+  uninstall_function->set_extension(empty_extension.get());
   ManagementUninstallFunction::SetAutoConfirmForTest(true);
   uninstall_function->set_user_gesture(true);
   util::RunFunctionAndReturnSingleResult(

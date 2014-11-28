@@ -7,6 +7,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -16,8 +17,9 @@
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/cryptohome/system_salt_getter.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
-#include "chromeos/dbus/fake_dbus_thread_manager.h"
+#include "components/ownership/mock_owner_key_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
@@ -73,21 +75,18 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    scoped_ptr<FakeDBusThreadManager> fake_dbus_thread_manager(
-        new FakeDBusThreadManager);
     fake_cryptohome_client_ = new FakeCryptohomeClient;
     fake_cryptohome_client_->SetServiceIsAvailable(true);
     fake_cryptohome_client_->set_system_salt(
         FakeCryptohomeClient::GetStubSystemSalt());
-    fake_dbus_thread_manager->SetCryptohomeClient(
+    chromeos::DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
         scoped_ptr<CryptohomeClient>(fake_cryptohome_client_));
-
-    DBusThreadManager::InitializeForTesting(fake_dbus_thread_manager.release());
 
     SystemSaltGetter::Initialize();
 
     DeviceSettingsService::Initialize();
-    scoped_refptr<MockOwnerKeyUtil> owner_key_util_(new MockOwnerKeyUtil());
+    scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util_(
+        new ownership::MockOwnerKeyUtil());
     owner_key_util_->SetPublicKeyFromPrivateKey(
         *device_policy_.GetSigningKey());
     DeviceSettingsService::Get()->SetSessionManager(
@@ -99,6 +98,7 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
   virtual void TearDown() OVERRIDE {
     CrosSettings::Shutdown();
     TestingBrowserProcess::GetGlobal()->SetBrowserPolicyConnector(NULL);
+    content::BrowserThread::GetBlockingPool()->FlushForTesting();
     DeviceSettingsService::Get()->UnsetSessionManager();
     DeviceSettingsService::Shutdown();
     SystemSaltGetter::Shutdown();

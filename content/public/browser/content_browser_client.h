@@ -18,6 +18,7 @@
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/media_stream_request.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/socket_permission_request.h"
 #include "content/public/common/window_container_type.h"
@@ -25,9 +26,9 @@
 #include "net/cookies/canonical_cookie.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory.h"
+#include "storage/browser/fileapi/file_system_context.h"
 #include "third_party/WebKit/public/platform/WebNotificationPermission.h"
 #include "ui/base/window_open_disposition.h"
-#include "webkit/browser/fileapi/file_system_context.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/posix/global_descriptors.h"
@@ -74,7 +75,7 @@ namespace ui {
 class SelectFilePolicy;
 }
 
-namespace fileapi {
+namespace storage {
 class ExternalMountPoints;
 class FileSystemBackend;
 }
@@ -225,14 +226,6 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Called from a site instance's destructor.
   virtual void SiteInstanceDeleting(SiteInstance* site_instance) {}
-
-  // Called when a worker process is created.
-  virtual void WorkerProcessCreated(SiteInstance* site_instance,
-                                    int worker_process_id) {}
-
-  // Called when a worker process is terminated.
-  virtual void WorkerProcessTerminated(SiteInstance* site_instance,
-                                       int worker_process_id) {}
 
   // Returns true if for the navigation from |current_url| to |new_url|
   // in |site_instance|, a new SiteInstance and BrowsingInstance should be
@@ -499,12 +492,6 @@ class CONTENT_EXPORT ContentBrowserClient {
                                int opener_id,
                                bool* no_javascript_access);
 
-  // Returns a title string to use in the task manager for a process host with
-  // the given URL, or the empty string to fall back to the default logic.
-  // This is called on the IO thread.
-  virtual std::string GetWorkerProcessTitle(const GURL& url,
-                                            ResourceContext* context);
-
   // Notifies the embedder that the ResourceDispatcherHost has been created.
   // This is when it can optionally add a delegate.
   virtual void ResourceDispatcherHostCreated() {}
@@ -529,11 +516,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void OverrideWebkitPrefs(RenderViewHost* render_view_host,
                                    const GURL& url,
                                    WebPreferences* prefs) {}
-
-  // Inspector setting was changed and should be persisted.
-  virtual void UpdateInspectorSetting(RenderViewHost* rvh,
-                                      const std::string& key,
-                                      const std::string& value) {}
 
   // Notifies that BrowserURLHandler has been created, so that the embedder can
   // optionally add their own handlers.
@@ -584,7 +566,7 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Returns auto mount handlers for URL requests for FileSystem APIs.
   virtual void GetURLRequestAutoMountHandlers(
-      std::vector<fileapi::URLRequestAutoMountHandler>* handlers) {}
+      std::vector<storage::URLRequestAutoMountHandler>* handlers) {}
 
   // Returns additional file system backends for FileSystem API.
   // |browser_context| is needed in the additional FileSystemBackends.
@@ -593,7 +575,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void GetAdditionalFileSystemBackends(
       BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      ScopedVector<fileapi::FileSystemBackend>* additional_backends) {}
+      ScopedVector<storage::FileSystemBackend>* additional_backends) {}
 
   // Allows an embedder to return its own LocationProvider implementation.
   // Return NULL to use the default one for the platform to be created.
@@ -656,6 +638,13 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual ExternalVideoSurfaceContainer*
   OverrideCreateExternalVideoSurfaceContainer(WebContents* web_contents);
 #endif
+
+// Checks if |security_origin| has permission to access the microphone or
+// camera. Note that this does not query the user. |type| must be
+// MEDIA_DEVICE_AUDIO_CAPTURE or MEDIA_DEVICE_VIDEO_CAPTURE.
+virtual bool CheckMediaAccessPermission(BrowserContext* browser_context,
+                                        const GURL& security_origin,
+                                        MediaStreamType type);
 };
 
 }  // namespace content

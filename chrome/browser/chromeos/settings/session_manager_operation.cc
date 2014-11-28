@@ -12,13 +12,16 @@
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
-#include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/net/nss_context.h"
+#include "components/ownership/owner_key_util.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/signature_creator.h"
 #include "policy/proto/device_management_backend.pb.h"
+
+using ownership::OwnerKeyUtil;
+using ownership::PublicKey;
 
 namespace em = enterprise_management;
 
@@ -26,10 +29,10 @@ namespace chromeos {
 
 SessionManagerOperation::SessionManagerOperation(const Callback& callback)
     : session_manager_client_(NULL),
-      weak_factory_(this),
       callback_(callback),
       force_key_load_(false),
-      is_loading_(false) {}
+      is_loading_(false),
+      weak_factory_(this) {}
 
 SessionManagerOperation::~SessionManagerOperation() {}
 
@@ -71,7 +74,7 @@ void SessionManagerOperation::ReportResult(
 }
 
 void SessionManagerOperation::EnsurePublicKey(const base::Closure& callback) {
-  if (force_key_load_ || !public_key_ || !public_key_->is_loaded()) {
+  if (force_key_load_ || !public_key_.get() || !public_key_->is_loaded()) {
     scoped_refptr<base::TaskRunner> task_runner =
         content::BrowserThread::GetBlockingPool()
             ->GetTaskRunnerWithShutdownBehavior(
@@ -97,7 +100,7 @@ scoped_refptr<PublicKey> SessionManagerOperation::LoadPublicKey(
   scoped_refptr<PublicKey> public_key(new PublicKey());
 
   // Keep already-existing public key.
-  if (current_key && current_key->is_loaded()) {
+  if (current_key.get() && current_key->is_loaded()) {
     public_key->data() = current_key->data();
   }
   if (!public_key->is_loaded() && util->IsPublicKeyPresent()) {
@@ -113,7 +116,7 @@ void SessionManagerOperation::StorePublicKey(const base::Closure& callback,
   force_key_load_ = false;
   public_key_ = new_key;
 
-  if (!public_key_ || !public_key_->is_loaded()) {
+  if (!public_key_.get() || !public_key_->is_loaded()) {
     ReportResult(DeviceSettingsService::STORE_KEY_UNAVAILABLE);
     return;
   }
@@ -248,22 +251,23 @@ SignAndStoreSettingsOperation::SignAndStoreSettingsOperation(
 SignAndStoreSettingsOperation::~SignAndStoreSettingsOperation() {}
 
 void SignAndStoreSettingsOperation::Run() {
-  if (!delegate_) {
+  if (!owner_settings_service_) {
     ReportResult(DeviceSettingsService::STORE_KEY_UNAVAILABLE);
     return;
   }
-  delegate_->IsOwnerAsync(
+  owner_settings_service_->IsOwnerAsync(
       base::Bind(&SignAndStoreSettingsOperation::StartSigning,
                  weak_factory_.GetWeakPtr()));
 }
 
 void SignAndStoreSettingsOperation::StartSigning(bool is_owner) {
-  if (!delegate_ || !is_owner) {
+  if (!owner_settings_service_ || !is_owner) {
     ReportResult(DeviceSettingsService::STORE_KEY_UNAVAILABLE);
     return;
   }
 
-  bool rv = delegate_->AssembleAndSignPolicyAsync(
+  bool rv = owner_settings_service_->AssembleAndSignPolicyAsync(
+      content::BrowserThread::GetBlockingPool(),
       new_policy_.Pass(),
       base::Bind(&SignAndStoreSettingsOperation::StoreDeviceSettingsBlob,
                  weak_factory_.GetWeakPtr()));

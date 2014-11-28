@@ -101,7 +101,7 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
   // of history entirely. So nuke all shortcuts that map to this URL.
   scoped_refptr<ShortcutsBackend> backend =
       ShortcutsBackendFactory::GetForProfileIfExists(profile_);
-  if (backend) // Can be NULL in Incognito.
+  if (backend.get())  // Can be NULL in Incognito.
     backend->DeleteShortcutsWithURL(url);
 
   matches_.erase(std::remove_if(matches_.begin(), matches_.end(),
@@ -200,8 +200,7 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
   match.description = shortcut.match_core.description;
   match.description_class = AutocompleteMatch::ClassificationsFromString(
       shortcut.match_core.description_class);
-  match.transition =
-      static_cast<content::PageTransition>(shortcut.match_core.transition);
+  match.transition = ui::PageTransitionFromInt(shortcut.match_core.transition);
   match.type = static_cast<AutocompleteMatch::Type>(shortcut.match_core.type);
   match.keyword = shortcut.match_core.keyword;
   match.RecordAdditionalInfo("number of hits", shortcut.number_of_hits);

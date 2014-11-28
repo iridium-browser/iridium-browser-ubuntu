@@ -4,15 +4,73 @@
 
 #include "cc/resources/gpu_raster_worker_pool.h"
 
+#include <algorithm>
+
 #include "base/debug/trace_event.h"
 #include "cc/output/context_provider.h"
+#include "cc/resources/raster_buffer.h"
 #include "cc/resources/resource.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_gpu_raster.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "third_party/skia/include/core/SkMultiPictureDraw.h"
+#include "third_party/skia/include/core/SkPictureRecorder.h"
+#include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/utils/SkNullCanvas.h"
 
 namespace cc {
+namespace {
+
+class RasterBufferImpl : public RasterBuffer {
+ public:
+  RasterBufferImpl(ResourceProvider* resource_provider,
+                   const Resource* resource,
+                   SkMultiPictureDraw* multi_picture_draw)
+      : resource_provider_(resource_provider),
+        resource_(resource),
+        surface_(resource_provider->LockForWriteToSkSurface(resource->id())),
+        multi_picture_draw_(multi_picture_draw) {}
+  virtual ~RasterBufferImpl() {
+    resource_provider_->UnlockForWriteToSkSurface(resource_->id());
+  }
+
+  // Overridden from RasterBuffer:
+  virtual skia::RefPtr<SkCanvas> AcquireSkCanvas() OVERRIDE {
+    if (!surface_)
+      return skia::AdoptRef(SkCreateNullCanvas());
+
+    skia::RefPtr<SkCanvas> canvas = skia::SharePtr(recorder_.beginRecording(
+        resource_->size().width(), resource_->size().height()));
+
+    // Balanced with restore() call in ReleaseSkCanvas. save()/restore() calls
+    // are needed to ensure that canvas returns to its previous state after use.
+    canvas->save();
+    return canvas;
+  }
+  virtual void ReleaseSkCanvas(const skia::RefPtr<SkCanvas>& canvas) OVERRIDE {
+    if (!surface_)
+      return;
+
+    // Balanced with save() call in AcquireSkCanvas.
+    canvas->restore();
+
+    // Add the canvas and recorded picture to |multi_picture_draw_|.
+    skia::RefPtr<SkPicture> picture = skia::AdoptRef(recorder_.endRecording());
+    multi_picture_draw_->add(surface_->getCanvas(), picture.get());
+  }
+
+ private:
+  ResourceProvider* resource_provider_;
+  const Resource* resource_;
+  SkSurface* surface_;
+  SkMultiPictureDraw* multi_picture_draw_;
+  SkPictureRecorder recorder_;
+
+  DISALLOW_COPY_AND_ASSIGN(RasterBufferImpl);
+};
+
+}  // namespace
 
 // static
 scoped_ptr<RasterWorkerPool> GpuRasterWorkerPool::Create(
@@ -32,8 +90,6 @@ GpuRasterWorkerPool::GpuRasterWorkerPool(base::SequencedTaskRunner* task_runner,
       context_provider_(context_provider),
       resource_provider_(resource_provider),
       run_tasks_on_origin_thread_pending_(false),
-      raster_tasks_pending_(false),
-      raster_tasks_required_for_activation_pending_(false),
       raster_finished_weak_ptr_factory_(this),
       weak_ptr_factory_(this) {
   DCHECK(context_provider_);
@@ -62,14 +118,8 @@ void GpuRasterWorkerPool::Shutdown() {
 void GpuRasterWorkerPool::ScheduleTasks(RasterTaskQueue* queue) {
   TRACE_EVENT0("cc", "GpuRasterWorkerPool::ScheduleTasks");
 
-  DCHECK_EQ(queue->required_for_activation_count,
-            static_cast<size_t>(
-                std::count_if(queue->items.begin(),
-                              queue->items.end(),
-                              RasterTaskQueue::Item::IsRequiredForActivation)));
-
-  raster_tasks_pending_ = true;
-  raster_tasks_required_for_activation_pending_ = true;
+  // Mark all task sets as pending.
+  raster_pending_.set();
 
   unsigned priority = kRasterTaskPriorityBase;
 
@@ -78,19 +128,17 @@ void GpuRasterWorkerPool::ScheduleTasks(RasterTaskQueue* queue) {
   // Cancel existing OnRasterFinished callbacks.
   raster_finished_weak_ptr_factory_.InvalidateWeakPtrs();
 
-  scoped_refptr<RasterizerTask>
-      new_raster_required_for_activation_finished_task(
-          CreateRasterRequiredForActivationFinishedTask(
-              queue->required_for_activation_count,
-              task_runner_.get(),
-              base::Bind(
-                  &GpuRasterWorkerPool::OnRasterRequiredForActivationFinished,
-                  raster_finished_weak_ptr_factory_.GetWeakPtr())));
-  scoped_refptr<RasterizerTask> new_raster_finished_task(
-      CreateRasterFinishedTask(
-          task_runner_.get(),
-          base::Bind(&GpuRasterWorkerPool::OnRasterFinished,
-                     raster_finished_weak_ptr_factory_.GetWeakPtr())));
+  scoped_refptr<RasterizerTask> new_raster_finished_tasks[kNumberOfTaskSets];
+
+  size_t task_count[kNumberOfTaskSets] = {0};
+
+  for (TaskSet task_set = 0; task_set < kNumberOfTaskSets; ++task_set) {
+    new_raster_finished_tasks[task_set] = CreateRasterFinishedTask(
+        task_runner_.get(),
+        base::Bind(&GpuRasterWorkerPool::OnRasterFinished,
+                   raster_finished_weak_ptr_factory_.GetWeakPtr(),
+                   task_set));
+  }
 
   for (RasterTaskQueue::Item::Vector::const_iterator it = queue->items.begin();
        it != queue->items.end();
@@ -99,34 +147,34 @@ void GpuRasterWorkerPool::ScheduleTasks(RasterTaskQueue* queue) {
     RasterTask* task = item.task;
     DCHECK(!task->HasCompleted());
 
-    if (item.required_for_activation) {
-      graph_.edges.push_back(TaskGraph::Edge(
-          task, new_raster_required_for_activation_finished_task.get()));
+    for (TaskSet task_set = 0; task_set < kNumberOfTaskSets; ++task_set) {
+      if (!item.task_sets[task_set])
+        continue;
+
+      ++task_count[task_set];
+
+      graph_.edges.push_back(
+          TaskGraph::Edge(task, new_raster_finished_tasks[task_set].get()));
     }
 
     InsertNodesForRasterTask(&graph_, task, task->dependencies(), priority++);
-
-    graph_.edges.push_back(
-        TaskGraph::Edge(task, new_raster_finished_task.get()));
   }
 
-  InsertNodeForTask(&graph_,
-                    new_raster_required_for_activation_finished_task.get(),
-                    kRasterRequiredForActivationFinishedTaskPriority,
-                    queue->required_for_activation_count);
-  InsertNodeForTask(&graph_,
-                    new_raster_finished_task.get(),
-                    kRasterFinishedTaskPriority,
-                    queue->items.size());
+  for (TaskSet task_set = 0; task_set < kNumberOfTaskSets; ++task_set) {
+    InsertNodeForTask(&graph_,
+                      new_raster_finished_tasks[task_set].get(),
+                      kRasterFinishedTaskPriority,
+                      task_count[task_set]);
+  }
 
   ScheduleTasksOnOriginThread(this, &graph_);
   task_graph_runner_->ScheduleTasks(namespace_token_, &graph_);
 
   ScheduleRunTasksOnOriginThread();
 
-  raster_finished_task_ = new_raster_finished_task;
-  raster_required_for_activation_finished_task_ =
-      new_raster_required_for_activation_finished_task;
+  std::copy(new_raster_finished_tasks,
+            new_raster_finished_tasks + kNumberOfTaskSets,
+            raster_finished_tasks_);
 }
 
 void GpuRasterWorkerPool::CheckForCompletedTasks() {
@@ -148,29 +196,28 @@ void GpuRasterWorkerPool::CheckForCompletedTasks() {
   completed_tasks_.clear();
 }
 
-SkCanvas* GpuRasterWorkerPool::AcquireCanvasForRaster(RasterTask* task) {
-  return resource_provider_->MapGpuRasterBuffer(task->resource()->id());
+scoped_ptr<RasterBuffer> GpuRasterWorkerPool::AcquireBufferForRaster(
+    const Resource* resource) {
+  // RasterBuffer implementation depends on a SkSurface having been acquired for
+  // the resource.
+  resource_provider_->AcquireSkSurface(resource->id());
+
+  return make_scoped_ptr<RasterBuffer>(
+      new RasterBufferImpl(resource_provider_, resource, &multi_picture_draw_));
 }
 
-void GpuRasterWorkerPool::ReleaseCanvasForRaster(RasterTask* task) {
-  resource_provider_->UnmapGpuRasterBuffer(task->resource()->id());
+void GpuRasterWorkerPool::ReleaseBufferForRaster(
+    scoped_ptr<RasterBuffer> buffer) {
+  // Nothing to do here. RasterBufferImpl destructor cleans up after itself.
 }
 
-void GpuRasterWorkerPool::OnRasterFinished() {
-  TRACE_EVENT0("cc", "GpuRasterWorkerPool::OnRasterFinished");
+void GpuRasterWorkerPool::OnRasterFinished(TaskSet task_set) {
+  TRACE_EVENT1(
+      "cc", "GpuRasterWorkerPool::OnRasterFinished", "task_set", task_set);
 
-  DCHECK(raster_tasks_pending_);
-  raster_tasks_pending_ = false;
-  client_->DidFinishRunningTasks();
-}
-
-void GpuRasterWorkerPool::OnRasterRequiredForActivationFinished() {
-  TRACE_EVENT0("cc",
-               "GpuRasterWorkerPool::OnRasterRequiredForActivationFinished");
-
-  DCHECK(raster_tasks_required_for_activation_pending_);
-  raster_tasks_required_for_activation_pending_ = false;
-  client_->DidFinishRunningTasksRequiredForActivation();
+  DCHECK(raster_pending_[task_set]);
+  raster_pending_[task_set] = false;
+  client_->DidFinishRunningTasks(task_set);
 }
 
 void GpuRasterWorkerPool::ScheduleRunTasksOnOriginThread() {
@@ -192,6 +239,10 @@ void GpuRasterWorkerPool::RunTasksOnOriginThread() {
 
   ScopedGpuRaster gpu_raster(context_provider_);
   task_graph_runner_->RunUntilIdle();
+
+  // Draw each all of the pictures that were collected.  This will also clear
+  // the pictures and canvases added to |multi_picture_draw_|
+  multi_picture_draw_.draw();
 }
 
 }  // namespace cc

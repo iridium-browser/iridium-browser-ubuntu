@@ -5,49 +5,57 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="ct-commit.html">
+<link rel="import" href="ct-detailed-commit.html">
+<link rel="import" href="../bower_components/paper-button/paper-button.html">
 
-<polymer-element name="ct-commit-list" attributes="first last commits" noscript>
+<polymer-element name="ct-commit-list" attributes="commitList detailed">
   <template>
     <style>
       :host {
         display: block;
       }
+      paper-icon-button {
+        vertical-align: middle;
+      }
+      paper-icon-button::shadow #icon {
+        margin: 0px;
+      }
+      .repository-info {
+        display: block;
+        margin-bottom: 10px;
+      }
+      ct-commit {
+        margin-left: 10px;
+      }
     </style>
-    <template repeat="{{ repository in commits.commits | _repositories }}">
-      <template repeat="{{ commit in repository | _commits }}">
-        <ct-commit data="{{ commit }}"></ct-commit>
-      </template>
+    <template repeat="{{ repository in commitList.repositories }}">
+      <div class="repository-info">
+        <span style="font-weight: bold">{{ repository.name }}</span> {{ repository.range }}
+        <paper-icon-button icon="unfold-more"
+            on-click="{{ _toggle }}" repository="{{ repository.name }}"></paper-icon-button>
+        <template if="{{ repository.expanded }}">
+          <template repeat="{{ commit in repository.commits }}">
+            <template if="{{ !detailed }}">
+              <ct-commit data="{{ commit }}"></ct-commit>
+            </template>
+            <template if="{{ detailed }}">
+              <ct-detailed-commit data="{{ commit }}"></ct-detailed-commit>
+            </template>
+          </template>
+        </template>
+      </div>
     </template>
   </template>
   <script>
-    Polymer({
-      commits: null,
-      first: null,
-      last: null,
-
-      _repositories: function(commits) {
-        if (!commits)
-          return [];
-        return Object.keys(commits).sort();
-      },
-
-      _commits: function(repository) {
-        var commits = [];
-        if (!this.first || !this.last)
-          return commits;
-
-        var first = Number(this.first[repository]);
-        var last = Number(this.last[repository]);
-        if (first == last)
-          return commits;
-
-        if (first > last) {
-          console.warn('Revision range is backwards, which is invalid:', first, last);
-          return commits;
-        }
-
-        return this.commits.range(repository, first + 1, last);
-      },
-    });
+  Polymer({
+    detailed: false,
+    _toggle: function(event, detail, sender, target) {
+      var repo = sender.getAttribute('repository');
+      var r = this.commitList.repositories.find(function(item) {
+        return item.name === repo;
+      });
+      r.expanded = !r.expanded;
+    }
+  });
   </script>
 </polymer-element>

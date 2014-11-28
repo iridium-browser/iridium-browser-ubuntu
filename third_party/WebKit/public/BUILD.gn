@@ -4,8 +4,6 @@
 
 import("//tools/grit/grit_rule.gni")
 
-if (!is_android) {
-
 # GYP version: WebKit/public/blink.gyp:blink
 group("blink") {
   deps = [
@@ -37,6 +35,9 @@ group("test_support") {
 
 # GYP version: WebKit/public/all.gyp:all_blink
 group("all_blink") {
+  # This includes some test targets. Don't link into production!
+  testonly = true
+
   deps = [
     "//third_party/WebKit/Source/core",
     "//third_party/WebKit/Source/modules",
@@ -47,8 +48,6 @@ group("all_blink") {
   ]
 }
 
-}  # !is_android
-
 config("blink_headers_config") {
   include_dirs = [ ".." ]
 }
@@ -56,8 +55,10 @@ config("blink_headers_config") {
 # Depend on this target to use public blink API headers for things like enums
 # and public structures without actually linking against any Blink libraries.
 source_set("blink_headers") {
-  direct_dependent_configs = [
+  public_configs = [
     ":blink_headers_config",
+    # Blink exposes icu headers in the public API.
+    "//third_party/icu:icu_config",
     # Blink exposes NPAPI headers in the public API.
     "//third_party/npapi:npapi_config",
   ]

@@ -47,6 +47,7 @@ typedef unsigned GLenum;
 typedef int GC3Dint;
 
 class HTMLVideoElement FINAL : public HTMLMediaElement, public CanvasImageSource {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLVideoElement> create(Document&);
     virtual void trace(Visitor*) OVERRIDE;
@@ -85,6 +86,8 @@ public:
     virtual FloatSize sourceSize() const OVERRIDE;
     virtual const KURL& sourceURL() const OVERRIDE { return currentSrc(); }
 
+    virtual bool isHTMLVideoElement() const OVERRIDE { return true; }
+
 private:
     HTMLVideoElement(Document&);
 
@@ -109,6 +112,6 @@ private:
     AtomicString m_defaultPosterURL;
 };
 
-} //namespace
+} // namespace blink
 
-#endif
+#endif // HTMLVideoElement_h

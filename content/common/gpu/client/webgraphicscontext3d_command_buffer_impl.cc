@@ -28,7 +28,6 @@
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
-#include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/gles2_trace_implementation.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
@@ -65,28 +64,6 @@ scoped_refptr<WebGraphicsContext3DCommandBufferImpl::ShareGroup>
   return it->second;
 }
 
-// Singleton used to initialize and terminate the gles2 library.
-class GLES2Initializer {
- public:
-  GLES2Initializer() {
-    gles2::Initialize();
-  }
-
-  ~GLES2Initializer() {
-    gles2::Terminate();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(GLES2Initializer);
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
-base::LazyInstance<GLES2Initializer> g_gles2_initializer =
-    LAZY_INSTANCE_INITIALIZER;
-
-////////////////////////////////////////////////////////////////////////////////
-
 } // namespace anonymous
 
 WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits::SharedMemoryLimits()
@@ -119,8 +96,8 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl(
       active_url_(active_url),
       gpu_preference_(attributes.preferDiscreteGPU ? gfx::PreferDiscreteGpu
                                                    : gfx::PreferIntegratedGpu),
-      weak_ptr_factory_(this),
-      mem_limits_(limits) {
+      mem_limits_(limits),
+      weak_ptr_factory_(this) {
   if (share_context) {
     DCHECK(!attributes_.shareResources);
     share_group_ = share_context->share_group_;
@@ -226,9 +203,6 @@ bool WebGraphicsContext3DCommandBufferImpl::InitializeCommandBuffer(
 
 bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::CreateContext");
-  // Ensure the gles2 library is initialized first in a thread safe way.
-  g_gles2_initializer.Get();
-
   scoped_refptr<gpu::gles2::ShareGroup> gles2_share_group;
 
   scoped_ptr<base::AutoLock> share_group_lock;
@@ -269,7 +243,7 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   bool bind_generates_resources = false;
   real_gl_.reset(
       new gpu::gles2::GLES2Implementation(gles2_helper_.get(),
-                                          gles2_share_group,
+                                          gles2_share_group.get(),
                                           transfer_buffer_.get(),
                                           bind_generates_resources,
                                           lose_context_when_out_of_memory_,
@@ -296,12 +270,11 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   return true;
 }
 
-bool WebGraphicsContext3DCommandBufferImpl::makeContextCurrent() {
+bool WebGraphicsContext3DCommandBufferImpl::InitializeOnCurrentThread() {
   if (!MaybeInitializeGL()) {
     DLOG(ERROR) << "Failed to initialize context.";
     return false;
   }
-  gles2::SetGLContext(GetGLInterface());
   if (gpu::error::IsError(command_buffer_->GetLastError())) {
     LOG(ERROR) << "Context dead on arrival. Last error: "
                << command_buffer_->GetLastError();

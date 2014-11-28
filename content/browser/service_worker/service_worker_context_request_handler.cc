@@ -4,6 +4,7 @@
 
 #include "content/browser/service_worker/service_worker_context_request_handler.h"
 
+#include "base/time/time.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/browser/service_worker/service_worker_read_from_cache_job.h"
@@ -18,7 +19,7 @@ namespace content {
 ServiceWorkerContextRequestHandler::ServiceWorkerContextRequestHandler(
     base::WeakPtr<ServiceWorkerContextCore> context,
     base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-    base::WeakPtr<webkit_blob::BlobStorageContext> blob_storage_context,
+    base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
     ResourceType resource_type)
     : ServiceWorkerRequestHandler(context,
                                   provider_host,
@@ -34,7 +35,7 @@ ServiceWorkerContextRequestHandler::~ServiceWorkerContextRequestHandler() {
 net::URLRequestJob* ServiceWorkerContextRequestHandler::MaybeCreateJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate) {
-  if (!provider_host_ || !version_ || !context_)
+  if (!provider_host_ || !version_.get() || !context_)
     return NULL;
 
   // We currently have no use case for hijacking a redirected request.
@@ -72,7 +73,7 @@ net::URLRequestJob* ServiceWorkerContextRequestHandler::MaybeCreateJob(
                                             network_delegate,
                                             resource_type_,
                                             context_,
-                                            version_,
+                                            version_.get(),
                                             extra_load_flags,
                                             response_id);
   }
@@ -89,7 +90,10 @@ net::URLRequestJob* ServiceWorkerContextRequestHandler::MaybeCreateJob(
 
 void ServiceWorkerContextRequestHandler::GetExtraResponseInfo(
     bool* was_fetched_via_service_worker,
-    GURL* original_url_via_service_worker) const {
+    GURL* original_url_via_service_worker,
+    base::TimeTicks* fetch_start_time,
+    base::TimeTicks* fetch_ready_time,
+    base::TimeTicks* fetch_end_time) const {
   *was_fetched_via_service_worker = false;
   *original_url_via_service_worker = GURL();
 }

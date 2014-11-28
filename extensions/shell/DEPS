@@ -12,9 +12,12 @@ include_rules = [
   # the code you need to a shared location.
   "-chrome",
 
-  # Only allow app_shell and extensions resources, not general Chrome ones.
+  # The system.storage API expects the StorageMonitor to be initialized by
+  # the embedder before being used by the extension.
+  "+components/storage_monitor",
+
+  # Only allow extensions resources, not general Chrome ones.
   "-grit",
-  "+grit/app_shell_resources.h",
   "+grit/extensions_resources.h",
 
   # Real DEPS go in subdirectories, for example extensions/shell/browser/DEPS.

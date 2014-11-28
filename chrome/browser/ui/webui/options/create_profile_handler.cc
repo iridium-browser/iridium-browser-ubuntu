@@ -8,6 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_util.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -23,7 +24,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/options/options_handlers_helper.h"
 #include "chrome/common/pref_names.h"
-#include "grit/generated_resources.h"
+#include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace options {
@@ -80,6 +81,8 @@ void CreateProfileHandler::CreateProfile(const base::ListValue* args) {
   bool create_shortcut = false;
   bool supervised_user = false;
   if (args->GetString(0, &name) && args->GetString(1, &icon)) {
+    base::TrimWhitespace(name, base::TRIM_ALL, &name);
+    CHECK(!name.empty());
     if (args->GetBoolean(2, &create_shortcut)) {
       bool success = args->GetBoolean(3, &supervised_user);
       DCHECK(success);

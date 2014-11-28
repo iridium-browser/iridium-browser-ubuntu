@@ -17,6 +17,7 @@
 #include "content/public/utility/utility_thread.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
+#include "extensions/common/extension_utility_messages.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/update_manifest.h"
 #include "media/base/media.h"
@@ -58,9 +59,11 @@ const char kExtensionHandlerUnzipError[] =
 
 }  // namespace
 
-ExtensionsHandler::ExtensionsHandler() {}
+ExtensionsHandler::ExtensionsHandler() {
+}
 
-ExtensionsHandler::~ExtensionsHandler() {}
+ExtensionsHandler::~ExtensionsHandler() {
+}
 
 // static
 void ExtensionsHandler::PreSandboxStartup() {
@@ -86,8 +89,6 @@ bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(ExtensionsHandler, message)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_UnpackExtension, OnUnpackExtension)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_UnzipToDir, OnUnzipToDir)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseUpdateManifest,
-                        OnParseUpdateManifest)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_DecodeImageBase64, OnDecodeImageBase64)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CheckMediaFile, OnCheckMediaFile)
@@ -111,9 +112,12 @@ bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 #if defined(OS_WIN)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_GetAndEncryptWiFiCredentials,
-                        OnGetAndEncryptWiFiCredentials)
+    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_GetWiFiCredentials,
+                        OnGetWiFiCredentials)
 #endif  // defined(OS_WIN)
+
+    IPC_MESSAGE_HANDLER(ExtensionUtilityMsg_ParseUpdateManifest,
+                        OnParseUpdateManifest)
 
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -159,10 +163,10 @@ void ExtensionsHandler::OnUnzipToDir(const base::FilePath& zip_path,
 void ExtensionsHandler::OnParseUpdateManifest(const std::string& xml) {
   UpdateManifest manifest;
   if (!manifest.Parse(xml)) {
-    Send(new ChromeUtilityHostMsg_ParseUpdateManifest_Failed(
+    Send(new ExtensionUtilityHostMsg_ParseUpdateManifest_Failed(
         manifest.errors()));
   } else {
-    Send(new ChromeUtilityHostMsg_ParseUpdateManifest_Succeeded(
+    Send(new ExtensionUtilityHostMsg_ParseUpdateManifest_Succeeded(
         manifest.results()));
   }
   ReleaseProcessIfNeeded();
@@ -182,7 +186,7 @@ void ExtensionsHandler::OnDecodeImageBase64(
     decoded_vector[i] = static_cast<unsigned char>(decoded_string[i]);
   }
 
-  ChromeContentUtilityClient::DecodeImage(decoded_vector);
+  ChromeContentUtilityClient::DecodeImageAndSend(decoded_vector, false);
 }
 
 void ExtensionsHandler::OnParseJSON(const std::string& json) {
@@ -263,9 +267,7 @@ void ExtensionsHandler::OnParsePicasaPMPDatabase(
   picasa::PicasaAlbumTableReader reader(files.Pass());
   bool parse_success = reader.Init();
   Send(new ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished(
-      parse_success,
-      reader.albums(),
-      reader.folders()));
+      parse_success, reader.albums(), reader.folders()));
   ReleaseProcessIfNeeded();
 }
 
@@ -282,9 +284,7 @@ void ExtensionsHandler::OnIndexPicasaAlbumsContents(
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 #if defined(OS_WIN)
-void ExtensionsHandler::OnGetAndEncryptWiFiCredentials(
-    const std::string& network_guid,
-    const std::vector<uint8>& public_key) {
+void ExtensionsHandler::OnGetWiFiCredentials(const std::string& network_guid) {
   scoped_ptr<wifi::WiFiService> wifi_service(wifi::WiFiService::Create());
   wifi_service->Initialize(NULL);
 
@@ -292,15 +292,7 @@ void ExtensionsHandler::OnGetAndEncryptWiFiCredentials(
   std::string error;
   wifi_service->GetKeyFromSystem(network_guid, &key_data, &error);
 
-  std::vector<uint8> ciphertext;
-  bool success = error.empty() && !key_data.empty();
-  if (success) {
-    success = networking_private_crypto::EncryptByteString(
-        public_key, key_data, &ciphertext);
-  }
-
-  Send(new ChromeUtilityHostMsg_GotEncryptedWiFiCredentials(ciphertext,
-                                                            success));
+  Send(new ChromeUtilityHostMsg_GotWiFiCredentials(key_data, error.empty()));
 }
 #endif  // defined(OS_WIN)
 

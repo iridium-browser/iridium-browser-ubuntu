@@ -1,0 +1,558 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/crypto.gni")
+import("//build/config/features.gni")
+
+# From third_party/libjingle/libjingle.gyp's target_defaults.
+config("jingle_unexported_configs") {
+  defines = [
+    "EXPAT_RELATIVE_PATH",
+    "FEATURE_ENABLE_SSL",
+    "GTEST_RELATIVE_PATH",
+    "HAVE_SRTP",
+    "HAVE_WEBRTC_VIDEO",
+    "HAVE_WEBRTC_VOICE",
+    "LOGGING_INSIDE_WEBRTC",
+    "NO_MAIN_THREAD_WRAPPING",
+    "NO_SOUND_SYSTEM",
+    "SRTP_RELATIVE_PATH",
+    "USE_WEBRTC_DEV_BRANCH",
+    "ENABLE_EXTERNAL_AUTH",
+    "WEBRTC_CHROMIUM_BUILD",
+  ]
+
+  include_dirs = [
+    "overrides",
+    "../../third_party/webrtc/overrides",
+    "source",
+    "../../testing/gtest/include",
+    "../../third_party",
+    "../../third_party/libyuv/include",
+    "../../third_party/usrsctp",
+  ]
+
+  # Assumes libpeer is linked statically.
+  defines += [ "LIBPEERCONNECTION_LIB=1" ]
+
+  if (is_win && cpu_arch == "x86") {
+    defines += [ "_USE_32BIT_TIME_T" ]
+  }
+
+  if (use_openssl) {
+    defines += [
+      "SSL_USE_OPENSSL",
+      "HAVE_OPENSSL_SSL_H",
+    ]
+  } else {
+    defines += [
+      "SSL_USE_NSS",
+      "HAVE_NSS_SSL_H",
+      "SSL_USE_NSS_RNG",
+    ]
+  }
+
+}
+
+# From third_party/libjingle/libjingle.gyp's target_defaults.
+config("jingle_direct_dependent_configs") {
+  include_dirs = [
+    "../../third_party/webrtc/overrides",
+    "overrides",
+    "source",
+    "../../testing/gtest/include",
+    "../../third_party",
+  ]
+  defines = [
+    "FEATURE_ENABLE_SSL",
+    "FEATURE_ENABLE_VOICEMAIL",
+    "EXPAT_RELATIVE_PATH",
+    "GTEST_RELATIVE_PATH",
+    "NO_MAIN_THREAD_WRAPPING",
+    "NO_SOUND_SYSTEM",
+  ]
+  # TODO(GYP): Port is_win blocks.
+  if (is_linux) {
+    defines += [ "LINUX", "WEBRTC_LINUX" ]
+  }
+  if (is_mac) {
+    defines += [ "OSX", "WEBRTC_MAC" ]
+  }
+  if (is_ios) {
+    defines += [ "IOS", "WEBRTC_MAC", "WEBRTC_IOS" ]
+  }
+  if (is_win) {
+    defines += [ "WEBRTC_WIN" ]
+  }
+  if (is_android) {
+    defines += [ "ANDROID" ]
+  }
+  if (is_posix) {
+    defines += [ "POSIX", "WEBRTC_POSIX" ]
+  }
+  # TODO(GYP): Support these in GN.
+  # if (is_bsd) {
+  #   defines += [ "BSD" ]
+  # }
+  # if (is_openbsd) {
+  #   defines += [ "OPENBSD" ]
+  # }
+  # if (is_freebsd) {
+  #   defines += [ "FREEBSD" ]
+  # }
+  if (is_chromeos) {
+    defines += [ "CHROMEOS" ]
+  }
+}
+
+# From third_party/libjingle/libjingle.gyp's target_defaults.
+config("jingle_all_dependent_configs") {
+  if (is_debug) {
+    # TODO(sergeyu): Fix libjingle to use NDEBUG instead of
+    # _DEBUG and remove this define. See GYP file as well.
+    defines = [ "_DEBUG" ]
+  }
+}
+
+# From third_party/libjingle/libjingle.gyp's target_defaults.
+group("jingle_deps") {
+  public_deps = [
+    "//third_party/expat",
+  ]
+  deps = [
+    "//base",
+    "//net",
+    "//crypto:platform",
+  ]
+}
+
+# GYP version: third_party/libjingle.gyp:libjingle
+static_library("libjingle") {
+  sources = [
+    # List from third_party/libjingle/libjingle_common.gypi
+    "source/talk/p2p/base/asyncstuntcpsocket.cc",
+    "source/talk/p2p/base/asyncstuntcpsocket.h",
+    "source/talk/p2p/base/basicpacketsocketfactory.cc",
+    "source/talk/p2p/base/basicpacketsocketfactory.h",
+    "source/talk/p2p/base/candidate.h",
+    "source/talk/p2p/base/common.h",
+    "source/talk/p2p/base/constants.cc",
+    "source/talk/p2p/base/constants.h",
+    "source/talk/p2p/base/dtlstransport.h",
+    "source/talk/p2p/base/dtlstransportchannel.cc",
+    "source/talk/p2p/base/dtlstransportchannel.h",
+    "source/talk/p2p/base/p2ptransport.cc",
+    "source/talk/p2p/base/p2ptransport.h",
+    "source/talk/p2p/base/p2ptransportchannel.cc",
+    "source/talk/p2p/base/p2ptransportchannel.h",
+    "source/talk/p2p/base/parsing.cc",
+    "source/talk/p2p/base/parsing.h",
+    "source/talk/p2p/base/port.cc",
+    "source/talk/p2p/base/port.h",
+    "source/talk/p2p/base/portallocator.cc",
+    "source/talk/p2p/base/portallocator.h",
+    "source/talk/p2p/base/portallocatorsessionproxy.cc",
+    "source/talk/p2p/base/portallocatorsessionproxy.h",
+    "source/talk/p2p/base/portproxy.cc",
+    "source/talk/p2p/base/portproxy.h",
+    "source/talk/p2p/base/pseudotcp.cc",
+    "source/talk/p2p/base/pseudotcp.h",
+    "source/talk/p2p/base/rawtransport.cc",
+    "source/talk/p2p/base/rawtransport.h",
+    "source/talk/p2p/base/rawtransportchannel.cc",
+    "source/talk/p2p/base/rawtransportchannel.h",
+    "source/talk/p2p/base/relayport.cc",
+    "source/talk/p2p/base/relayport.h",
+    "source/talk/p2p/base/session.cc",
+    "source/talk/p2p/base/session.h",
+    "source/talk/p2p/base/sessionclient.h",
+    "source/talk/p2p/base/sessiondescription.cc",
+    "source/talk/p2p/base/sessiondescription.h",
+    "source/talk/p2p/base/sessionid.h",
+    "source/talk/p2p/base/sessionmanager.cc",
+    "source/talk/p2p/base/sessionmanager.h",
+    "source/talk/p2p/base/sessionmessages.cc",
+    "source/talk/p2p/base/sessionmessages.h",
+    "source/talk/p2p/base/stun.cc",
+    "source/talk/p2p/base/stun.h",
+    "source/talk/p2p/base/stunport.cc",
+    "source/talk/p2p/base/stunport.h",
+    "source/talk/p2p/base/stunrequest.cc",
+    "source/talk/p2p/base/stunrequest.h",
+    "source/talk/p2p/base/tcpport.cc",
+    "source/talk/p2p/base/tcpport.h",
+    "source/talk/p2p/base/transport.cc",
+    "source/talk/p2p/base/transport.h",
+    "source/talk/p2p/base/transportchannel.cc",
+    "source/talk/p2p/base/transportchannel.h",
+    "source/talk/p2p/base/transportchannelimpl.h",
+    "source/talk/p2p/base/transportchannelproxy.cc",
+    "source/talk/p2p/base/transportchannelproxy.h",
+    "source/talk/p2p/base/transportdescription.cc",
+    "source/talk/p2p/base/transportdescription.h",
+    "source/talk/p2p/base/transportdescriptionfactory.cc",
+    "source/talk/p2p/base/transportdescriptionfactory.h",
+    "source/talk/p2p/base/turnport.cc",
+    "source/talk/p2p/base/turnport.h",
+    "source/talk/p2p/client/basicportallocator.cc",
+    "source/talk/p2p/client/basicportallocator.h",
+    "source/talk/p2p/client/httpportallocator.cc",
+    "source/talk/p2p/client/httpportallocator.h",
+    "source/talk/p2p/client/sessionmanagertask.h",
+    "source/talk/p2p/client/sessionsendtask.h",
+    "source/talk/p2p/client/socketmonitor.cc",
+    "source/talk/p2p/client/socketmonitor.h",
+    "source/talk/xmllite/qname.cc",
+    "source/talk/xmllite/qname.h",
+    "source/talk/xmllite/xmlbuilder.cc",
+    "source/talk/xmllite/xmlbuilder.h",
+    "source/talk/xmllite/xmlconstants.cc",
+    "source/talk/xmllite/xmlconstants.h",
+    "source/talk/xmllite/xmlelement.cc",
+    "source/talk/xmllite/xmlelement.h",
+    "source/talk/xmllite/xmlnsstack.cc",
+    "source/talk/xmllite/xmlnsstack.h",
+    "source/talk/xmllite/xmlparser.cc",
+    "source/talk/xmllite/xmlparser.h",
+    "source/talk/xmllite/xmlprinter.cc",
+    "source/talk/xmllite/xmlprinter.h",
+    "source/talk/xmpp/asyncsocket.h",
+    "source/talk/xmpp/constants.cc",
+    "source/talk/xmpp/constants.h",
+    "source/talk/xmpp/jid.cc",
+    "source/talk/xmpp/jid.h",
+    "source/talk/xmpp/plainsaslhandler.h",
+    "source/talk/xmpp/prexmppauth.h",
+    "source/talk/xmpp/saslcookiemechanism.h",
+    "source/talk/xmpp/saslhandler.h",
+    "source/talk/xmpp/saslmechanism.cc",
+    "source/talk/xmpp/saslmechanism.h",
+    "source/talk/xmpp/saslplainmechanism.h",
+    "source/talk/xmpp/xmppclient.cc",
+    "source/talk/xmpp/xmppclient.h",
+    "source/talk/xmpp/xmppclientsettings.h",
+    "source/talk/xmpp/xmppengine.h",
+    "source/talk/xmpp/xmppengineimpl.cc",
+    "source/talk/xmpp/xmppengineimpl.h",
+    "source/talk/xmpp/xmppengineimpl_iq.cc",
+    "source/talk/xmpp/xmpplogintask.cc",
+    "source/talk/xmpp/xmpplogintask.h",
+    "source/talk/xmpp/xmppstanzaparser.cc",
+    "source/talk/xmpp/xmppstanzaparser.h",
+    "source/talk/xmpp/xmpptask.cc",
+    "source/talk/xmpp/xmpptask.h",
+  ]
+  sources -= [
+    # Compiled as part of libjingle_p2p_constants.
+    "source/talk/p2p/base/constants.cc",
+    "source/talk/p2p/base/constants.h",
+  ]
+  public_deps = [
+    ":jingle_deps"
+  ]
+  deps = [
+    "//third_party/webrtc/base:webrtc_base",
+    ":libjingle_p2p_constants",
+  ]
+
+  # From libjingle_common.gypi's conditions list.
+  if (is_win) {
+    cflags = [ "/wd4005", "/wd4267" ]
+  }
+
+  configs += [
+    ":jingle_unexported_configs"
+  ]
+  public_configs = [
+    ":jingle_direct_dependent_configs",
+  ]
+  all_dependent_configs = [
+    ":jingle_all_dependent_configs",
+  ]
+}
+
+# This has to be is a separate project due to a bug in MSVS 2008 and the
+# current toolset on android.  The problem is that we have two files named
+# "constants.cc" and MSVS/android doesn't handle this properly.
+# GYP currently has guards to catch this, so if you want to remove it,
+# run GYP and if GYP has removed the validation check, then we can assume
+# that the toolchains have been fixed (we currently use VS2010 and later,
+# so VS2008 isn't a concern anymore).
+#
+# GYP version: third_party/libjingle.gyp:libjingle_p2p_constants
+static_library("libjingle_p2p_constants") {
+  sources = [
+    "source/talk/p2p/base/constants.cc",
+    "source/talk/p2p/base/constants.h",
+  ]
+  public_deps = [
+    ":jingle_deps",
+  ]
+  configs += [
+    ":jingle_unexported_configs"
+  ]
+  public_configs = [
+    ":jingle_direct_dependent_configs",
+  ]
+  all_dependent_configs = [
+    ":jingle_all_dependent_configs",
+  ]
+}
+
+# GYP version: third_party/libjingle.gyp:peerconnnection_server
+#TODO(GYP): Switch to executable when WebRTC dependency is resolved.
+source_set("peerconnnection_server") {
+  sources = [
+    "source/talk/examples/peerconnection/server/data_socket.cc",
+    "source/talk/examples/peerconnection/server/data_socket.h",
+    "source/talk/examples/peerconnection/server/main.cc",
+    "source/talk/examples/peerconnection/server/peer_channel.cc",
+    "source/talk/examples/peerconnection/server/peer_channel.h",
+    "source/talk/examples/peerconnection/server/utils.cc",
+    "source/talk/examples/peerconnection/server/utils.h",
+  ]
+  include_dirs = [
+    "source",
+  ]
+  public_deps = [
+    ":jingle_deps",
+  ]
+  deps = [
+    ":libjingle",
+    ":jingle_deps",
+  ]
+  configs += [
+    ":jingle_unexported_configs"
+  ]
+  public_configs = [
+    ":jingle_direct_dependent_configs",
+  ]
+  all_dependent_configs = [
+    ":jingle_all_dependent_configs",
+  ]
+  if (is_win) {
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    cflags = [ "/wd4309" ]
+  }
+}
+
+if (enable_webrtc) {
+
+  source_set("libjingle_webrtc") {
+    sources = [
+      "overrides/init_webrtc.cc",
+      "overrides/init_webrtc.h",
+    ]
+    configs += [ ":jingle_unexported_configs" ]
+    public_configs = [ ":jingle_direct_dependent_configs" ]
+    deps = [ ":libjingle_webrtc_common" ]
+  }
+
+  # Note: this does not support the shared library build of libpeerconnection
+  # as is supported in the GYP build. It's not clear what this is used for.
+  source_set("libjingle_webrtc_common") {
+    sources = [
+      "overrides/talk/media/webrtc/webrtcexport.h",
+
+      "source/talk/app/webrtc/audiotrack.cc",
+      "source/talk/app/webrtc/audiotrack.h",
+      "source/talk/app/webrtc/audiotrackrenderer.cc",
+      "source/talk/app/webrtc/audiotrackrenderer.h",
+      "source/talk/app/webrtc/datachannel.cc",
+      "source/talk/app/webrtc/datachannel.h",
+      "source/talk/app/webrtc/dtmfsender.cc",
+      "source/talk/app/webrtc/dtmfsender.h",
+      "source/talk/app/webrtc/jsep.h",
+      "source/talk/app/webrtc/jsepicecandidate.cc",
+      "source/talk/app/webrtc/jsepicecandidate.h",
+      "source/talk/app/webrtc/jsepsessiondescription.cc",
+      "source/talk/app/webrtc/jsepsessiondescription.h",
+      "source/talk/app/webrtc/localaudiosource.cc",
+      "source/talk/app/webrtc/localaudiosource.h",
+      "source/talk/app/webrtc/mediaconstraintsinterface.cc",
+      "source/talk/app/webrtc/mediaconstraintsinterface.h",
+      "source/talk/app/webrtc/mediastream.cc",
+      "source/talk/app/webrtc/mediastream.h",
+      "source/talk/app/webrtc/mediastreamhandler.cc",
+      "source/talk/app/webrtc/mediastreamhandler.h",
+      "source/talk/app/webrtc/mediastreaminterface.h",
+      "source/talk/app/webrtc/mediastreamprovider.h",
+      "source/talk/app/webrtc/mediastreamproxy.h",
+      "source/talk/app/webrtc/mediastreamsignaling.cc",
+      "source/talk/app/webrtc/mediastreamsignaling.h",
+      "source/talk/app/webrtc/mediastreamtrack.h",
+      "source/talk/app/webrtc/mediastreamtrackproxy.h",
+      "source/talk/app/webrtc/notifier.h",
+      "source/talk/app/webrtc/peerconnection.cc",
+      "source/talk/app/webrtc/peerconnection.h",
+      "source/talk/app/webrtc/peerconnectionfactory.cc",
+      "source/talk/app/webrtc/peerconnectionfactory.h",
+      "source/talk/app/webrtc/peerconnectioninterface.h",
+      "source/talk/app/webrtc/portallocatorfactory.cc",
+      "source/talk/app/webrtc/portallocatorfactory.h",
+      "source/talk/app/webrtc/remoteaudiosource.cc",
+      "source/talk/app/webrtc/remoteaudiosource.h",
+      "source/talk/app/webrtc/remotevideocapturer.cc",
+      "source/talk/app/webrtc/remotevideocapturer.h",
+      "source/talk/app/webrtc/sctputils.cc",
+      "source/talk/app/webrtc/sctputils.h",
+      "source/talk/app/webrtc/statscollector.cc",
+      "source/talk/app/webrtc/statscollector.h",
+      "source/talk/app/webrtc/statstypes.h",
+      "source/talk/app/webrtc/streamcollection.h",
+      "source/talk/app/webrtc/umametrics.h",
+      "source/talk/app/webrtc/videosource.cc",
+      "source/talk/app/webrtc/videosource.h",
+      "source/talk/app/webrtc/videosourceinterface.h",
+      "source/talk/app/webrtc/videosourceproxy.h",
+      "source/talk/app/webrtc/videotrack.cc",
+      "source/talk/app/webrtc/videotrack.h",
+      "source/talk/app/webrtc/videotrackrenderers.cc",
+      "source/talk/app/webrtc/videotrackrenderers.h",
+      "source/talk/app/webrtc/webrtcsdp.cc",
+      "source/talk/app/webrtc/webrtcsdp.h",
+      "source/talk/app/webrtc/webrtcsession.cc",
+      "source/talk/app/webrtc/webrtcsession.h",
+      "source/talk/app/webrtc/webrtcsessiondescriptionfactory.cc",
+      "source/talk/app/webrtc/webrtcsessiondescriptionfactory.h",
+      "source/talk/media/base/audiorenderer.h",
+      "source/talk/media/base/capturemanager.cc",
+      "source/talk/media/base/capturemanager.h",
+      "source/talk/media/base/capturerenderadapter.cc",
+      "source/talk/media/base/capturerenderadapter.h",
+      "source/talk/media/base/codec.cc",
+      "source/talk/media/base/codec.h",
+      "source/talk/media/base/constants.cc",
+      "source/talk/media/base/constants.h",
+      "source/talk/media/base/cryptoparams.h",
+      "source/talk/media/base/filemediaengine.cc",
+      "source/talk/media/base/filemediaengine.h",
+      "source/talk/media/base/hybriddataengine.h",
+      "source/talk/media/base/mediachannel.h",
+      "source/talk/media/base/mediaengine.cc",
+      "source/talk/media/base/mediaengine.h",
+      "source/talk/media/base/rtpdataengine.cc",
+      "source/talk/media/base/rtpdataengine.h",
+      "source/talk/media/base/rtpdump.cc",
+      "source/talk/media/base/rtpdump.h",
+      "source/talk/media/base/rtputils.cc",
+      "source/talk/media/base/rtputils.h",
+      "source/talk/media/base/streamparams.cc",
+      "source/talk/media/base/streamparams.h",
+      "source/talk/media/base/videoadapter.cc",
+      "source/talk/media/base/videoadapter.h",
+      "source/talk/media/base/videocapturer.cc",
+      "source/talk/media/base/videocapturer.h",
+      "source/talk/media/base/videocommon.cc",
+      "source/talk/media/base/videocommon.h",
+      "source/talk/media/base/videoframe.cc",
+      "source/talk/media/base/videoframe.h",
+      "source/talk/media/devices/dummydevicemanager.cc",
+      "source/talk/media/devices/dummydevicemanager.h",
+      "source/talk/media/devices/filevideocapturer.cc",
+      "source/talk/media/devices/filevideocapturer.h",
+      "source/talk/media/webrtc/webrtccommon.h",
+      "source/talk/media/webrtc/webrtcpassthroughrender.cc",
+      "source/talk/media/webrtc/webrtcpassthroughrender.h",
+      "source/talk/media/webrtc/webrtctexturevideoframe.cc",
+      "source/talk/media/webrtc/webrtctexturevideoframe.h",
+      "source/talk/media/webrtc/webrtcvideocapturer.cc",
+      "source/talk/media/webrtc/webrtcvideocapturer.h",
+      "source/talk/media/webrtc/webrtcvideoframe.cc",
+      "source/talk/media/webrtc/webrtcvideoframe.h",
+      "source/talk/media/webrtc/webrtcvideoframefactory.cc",
+      "source/talk/media/webrtc/webrtcvideoframefactory.h",
+      "source/talk/media/webrtc/webrtcvie.h",
+      "source/talk/media/webrtc/webrtcvoe.h",
+      "source/talk/session/media/audiomonitor.cc",
+      "source/talk/session/media/audiomonitor.h",
+      "source/talk/session/media/bundlefilter.cc",
+      "source/talk/session/media/bundlefilter.h",
+      "source/talk/session/media/call.cc",
+      "source/talk/session/media/call.h",
+      "source/talk/session/media/channel.cc",
+      "source/talk/session/media/channel.h",
+      "source/talk/session/media/channelmanager.cc",
+      "source/talk/session/media/channelmanager.h",
+      "source/talk/session/media/currentspeakermonitor.cc",
+      "source/talk/session/media/currentspeakermonitor.h",
+      "source/talk/session/media/externalhmac.cc",
+      "source/talk/session/media/externalhmac.h",
+      "source/talk/session/media/mediamessages.cc",
+      "source/talk/session/media/mediamessages.h",
+      "source/talk/session/media/mediamonitor.cc",
+      "source/talk/session/media/mediamonitor.h",
+      "source/talk/session/media/mediasession.cc",
+      "source/talk/session/media/mediasession.h",
+      "source/talk/session/media/mediasessionclient.cc",
+      "source/talk/session/media/mediasessionclient.h",
+      "source/talk/session/media/mediasink.h",
+      "source/talk/session/media/rtcpmuxfilter.cc",
+      "source/talk/session/media/rtcpmuxfilter.h",
+      "source/talk/session/media/soundclip.cc",
+      "source/talk/session/media/soundclip.h",
+      "source/talk/session/media/srtpfilter.cc",
+      "source/talk/session/media/srtpfilter.h",
+      "source/talk/session/media/typingmonitor.cc",
+      "source/talk/session/media/typingmonitor.h",
+      "source/talk/session/media/voicechannel.h",
+      "source/talk/session/tunnel/pseudotcpchannel.cc",
+      "source/talk/session/tunnel/pseudotcpchannel.h",
+      "source/talk/session/tunnel/tunnelsessionclient.cc",
+      "source/talk/session/tunnel/tunnelsessionclient.h",
+    ]
+
+    configs += [ ":jingle_unexported_configs" ]
+    public_configs = [ ":jingle_direct_dependent_configs" ]
+
+    deps = [
+      "//third_party/libsrtp",
+      "//third_party/webrtc/modules/media_file",
+      "//third_party/webrtc/modules/video_capture",
+      "//third_party/webrtc/modules/video_render",
+    ]
+
+    if (!is_ios) {
+      # TODO(mallinath) - Enable SCTP for iOS.
+      sources += [
+        "source/talk/media/sctp/sctpdataengine.cc",
+        "source/talk/media/sctp/sctpdataengine.h",
+      ]
+      defines = [ "HAVE_SCTP" ]
+      deps += [ "//third_party/usrsctp" ]
+    }
+
+    if (is_clang) {
+      cflags = [ "-Wno-unused-private-field" ]
+    }
+  }
+
+  # Note: this does not support the shared library build of libpeerconnection
+  # as is supported in the GYP build. It's not clear what this is used for.
+  source_set("libpeerconnection") {
+    sources = [
+      "source/talk/media/webrtc/webrtcmediaengine.cc",
+      "source/talk/media/webrtc/webrtcmediaengine.h",
+      "source/talk/media/webrtc/webrtcvideoengine.cc",
+      "source/talk/media/webrtc/webrtcvideoengine.h",
+      "source/talk/media/webrtc/webrtcvideoengine2.cc",
+      "source/talk/media/webrtc/webrtcvideoengine2.h",
+      "source/talk/media/webrtc/webrtcvoiceengine.cc",
+      "source/talk/media/webrtc/webrtcvoiceengine.h",
+    ]
+
+    configs += [ ":jingle_unexported_configs" ]
+    public_configs = [ ":jingle_direct_dependent_configs" ]
+
+    deps = [
+      ":libjingle_webrtc_common",
+      "//third_party/webrtc",
+      "//third_party/webrtc/system_wrappers",
+      "//third_party/webrtc/voice_engine",
+    ]
+  }
+
+}  # enable_webrtc
+
+# TODO(GYP): Port libjingle.gyp's enable_webrtc condition block.

@@ -61,9 +61,8 @@ class RendererTest : public ::testing::Test {
         new MockContextProvider(TestWebGraphicsContext3D::Create());
     output_surface_.reset(new OutputSurface(context_provider_));
     output_surface_->BindToClient(&output_surface_client_);
-    resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1,
-        false);
+    resource_provider_ = ResourceProvider::Create(
+        output_surface_.get(), NULL, NULL, 0, false, 1, false);
     renderer_ = CreateRenderer<T>(&renderer_client_,
                                   &tree_settings_,
                                   output_surface_.get(),
@@ -83,7 +82,8 @@ typedef ::testing::Types<DelegatingRenderer, GLRenderer> RendererTypes;
 TYPED_TEST_CASE(RendererTest, RendererTypes);
 
 TYPED_TEST(RendererTest, ContextPurgedWhenRendererBecomesInvisible) {
-  EXPECT_CALL(*(this->context_provider_), DeleteCachedResources()).Times(1);
+  EXPECT_CALL(*(this->context_provider_.get()), DeleteCachedResources())
+      .Times(1);
 
   EXPECT_TRUE(this->renderer_->visible());
   this->renderer_->SetVisible(false);

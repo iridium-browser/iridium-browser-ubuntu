@@ -8,29 +8,32 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=214024
+CLANG_REVISION=217949
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
-LLVM_BUILD_DIR="${LLVM_DIR}/../llvm-build"
+LLVM_BUILD_DIR="${LLVM_DIR}/../llvm-build/Release+Asserts"
+COMPILER_RT_BUILD_DIR="${LLVM_DIR}/../llvm-build/compiler-rt"
 LLVM_BOOTSTRAP_DIR="${LLVM_DIR}/../llvm-bootstrap"
 LLVM_BOOTSTRAP_INSTALL_DIR="${LLVM_DIR}/../llvm-bootstrap-install"
 CLANG_DIR="${LLVM_DIR}/tools/clang"
-CLANG_TOOLS_EXTRA_DIR="${CLANG_DIR}/tools/extra"
-COMPILER_RT_DIR="${LLVM_DIR}/projects/compiler-rt"
+COMPILER_RT_DIR="${LLVM_DIR}/compiler-rt"
 LIBCXX_DIR="${LLVM_DIR}/projects/libcxx"
 LIBCXXABI_DIR="${LLVM_DIR}/projects/libcxxabi"
-ANDROID_NDK_DIR="${LLVM_DIR}/../android_tools/ndk"
-STAMP_FILE="${LLVM_BUILD_DIR}/cr_build_revision"
+ANDROID_NDK_DIR="${THIS_DIR}/../../../third_party/android_tools/ndk"
+STAMP_FILE="${LLVM_DIR}/../llvm-build/cr_build_revision"
 
 ABS_LIBCXX_DIR="${PWD}/${LIBCXX_DIR}"
 ABS_LIBCXXABI_DIR="${PWD}/${LIBCXXABI_DIR}"
+ABS_LLVM_DIR="${PWD}/${LLVM_DIR}"
+ABS_LLVM_BUILD_DIR="${PWD}/${LLVM_BUILD_DIR}"
+ABS_COMPILER_RT_DIR="${PWD}/${COMPILER_RT_DIR}"
 
 
 # Use both the clang revision and the plugin revisions to test for updates.
 BLINKGCPLUGIN_REVISION=\
-$(grep LIBRARYNAME "$THIS_DIR"/../blink_gc_plugin/Makefile \
-    | cut -d '_' -f 2)
+$(grep 'set(LIBRARYNAME' "$THIS_DIR"/../blink_gc_plugin/CMakeLists.txt \
+    | cut -d ' ' -f 2 | tr -cd '[0-9]')
 CLANG_AND_PLUGINS_REVISION="${CLANG_REVISION}-${BLINKGCPLUGIN_REVISION}"
 
 # ${A:-a} returns $A if it's set, a else.
@@ -55,16 +58,11 @@ force_local_build=
 run_tests=
 bootstrap=
 with_android=yes
-chrome_tools="plugins blink_gc_plugin"
+chrome_tools="plugins;blink_gc_plugin"
 gcc_toolchain=
 
 if [[ "${OS}" = "Darwin" ]]; then
   with_android=
-fi
-if [ "${OS}" = "FreeBSD" ]; then
-  MAKE=gmake
-else
-  MAKE=make
 fi
 
 while [[ $# > 0 ]]; do
@@ -120,8 +118,8 @@ while [[ $# > 0 ]]; do
       echo "--print-revision: Print current clang revision and exit."
       echo "--without-android: Don't build ASan Android runtime library."
       echo "--with-chrome-tools: Select which chrome tools to build." \
-           "Defaults to plugins."
-      echo "    Example: --with-chrome-tools 'plugins empty-string'"
+           "Defaults to plugins;blink_gc_plugin."
+      echo "    Example: --with-chrome-tools plugins;empty-string"
       echo "--gcc-toolchain: Set the prefix for which GCC version should"
       echo "    be used for building. For example, to use gcc in"
       echo "    /opt/foo/bin/gcc, use '--gcc-toolchain '/opt/foo"
@@ -198,9 +196,9 @@ if [[ -z "$force_local_build" ]]; then
     exit 1
   fi
   if [ -f "${CDS_OUTPUT}" ]; then
-    rm -rf "${LLVM_BUILD_DIR}/Release+Asserts"
-    mkdir -p "${LLVM_BUILD_DIR}/Release+Asserts"
-    tar -xzf "${CDS_OUTPUT}" -C "${LLVM_BUILD_DIR}/Release+Asserts"
+    rm -rf "${LLVM_BUILD_DIR}"
+    mkdir -p "${LLVM_BUILD_DIR}"
+    tar -xzf "${CDS_OUTPUT}" -C "${LLVM_BUILD_DIR}"
     echo clang "${CLANG_REVISION}" unpacked
     echo "${CLANG_AND_PLUGINS_REVISION}" > "${STAMP_FILE}"
     rm -rf "${CDS_OUT_DIR}"
@@ -219,6 +217,28 @@ if [[ -n "${with_android}" ]] && ! [[ -d "${ANDROID_NDK_DIR}" ]]; then
   exit 1
 fi
 
+# Check that cmake and ninja are available.
+if ! which cmake > /dev/null; then
+  echo "CMake needed to build clang; please install"
+  exit 1
+fi
+if ! which ninja > /dev/null; then
+  echo "ninja needed to build clang, please install"
+  exit 1
+fi
+
+echo Reverting previously patched files
+for i in \
+      "${CLANG_DIR}/test/Index/crash-recovery-modules.m" \
+      "${CLANG_DIR}/unittests/libclang/LibclangTest.cpp" \
+      "${COMPILER_RT_DIR}/lib/asan/asan_rtl.cc" \
+      "${COMPILER_RT_DIR}/test/asan/TestCases/Linux/new_array_cookie_test.cc" \
+      ; do
+  if [[ -e "${i}" ]]; then
+    svn revert "${i}"
+  fi;
+done
+
 echo Getting LLVM r"${CLANG_REVISION}" in "${LLVM_DIR}"
 if ! svn co --force "${LLVM_REPO_URL}/llvm/trunk@${CLANG_REVISION}" \
                     "${LLVM_DIR}"; then
@@ -229,6 +249,10 @@ fi
 
 echo Getting clang r"${CLANG_REVISION}" in "${CLANG_DIR}"
 svn co --force "${LLVM_REPO_URL}/cfe/trunk@${CLANG_REVISION}" "${CLANG_DIR}"
+
+# We have moved from building compiler-rt in the LLVM tree, to a separate
+# directory. Nuke any previous checkout to avoid building it.
+rm -rf "${LLVM_DIR}/projects/compiler-rt"
 
 echo Getting compiler-rt r"${CLANG_REVISION}" in "${COMPILER_RT_DIR}"
 svn co --force "${LLVM_REPO_URL}/compiler-rt/trunk@${CLANG_REVISION}" \
@@ -250,9 +274,8 @@ if [ "${OS}" = "Darwin" ]; then
                  "${LIBCXXABI_DIR}"
 fi
 
-# Apply patch for test failing with --disable-pthreads (llvm.org/PR11974)
+# Apply patch for tests failing with --disable-pthreads (llvm.org/PR11974)
 pushd "${CLANG_DIR}"
-svn revert test/Index/crash-recovery-modules.m
 cat << 'EOF' |
 --- third_party/llvm/tools/clang/test/Index/crash-recovery-modules.m	(revision 202554)
 +++ third_party/llvm/tools/clang/test/Index/crash-recovery-modules.m	(working copy)
@@ -268,40 +291,62 @@ EOF
 patch -p4
 popd
 
+pushd "${CLANG_DIR}"
+cat << 'EOF' |
+--- unittests/libclang/LibclangTest.cpp (revision 215949)
++++ unittests/libclang/LibclangTest.cpp (working copy)
+@@ -431,7 +431,7 @@
+   EXPECT_EQ(0U, clang_getNumDiagnostics(ClangTU));
+ }
+
+-TEST_F(LibclangReparseTest, ReparseWithModule) {
++TEST_F(LibclangReparseTest, DISABLED_ReparseWithModule) {
+   const char *HeaderTop = "#ifndef H\n#define H\nstruct Foo { int bar;";
+   const char *HeaderBottom = "\n};\n#endif\n";
+   const char *MFile = "#include \"HeaderFile.h\"\nint main() {"
+EOF
+patch -p0
+popd
+
 # Echo all commands.
 set -x
 
-NUM_JOBS=3
-if [[ "${OS}" = "Linux" ]]; then
-  NUM_JOBS="$(grep -c "^processor" /proc/cpuinfo)"
-elif [ "${OS}" = "Darwin" -o "${OS}" = "FreeBSD" ]; then
-  NUM_JOBS="$(sysctl -n hw.ncpu)"
-fi
+# Set default values for CC and CXX if they're not set in the environment.
+CC=${CC:-cc}
+CXX=${CXX:-c++}
 
 if [[ -n "${gcc_toolchain}" ]]; then
   # Use the specified gcc installation for building.
-  export CC="$gcc_toolchain/bin/gcc"
-  export CXX="$gcc_toolchain/bin/g++"
+  CC="$gcc_toolchain/bin/gcc"
+  CXX="$gcc_toolchain/bin/g++"
   # Set LD_LIBRARY_PATH to make auxiliary targets (tablegen, bootstrap compiler,
   # etc.) find the .so.
   export LD_LIBRARY_PATH="$(dirname $(${CXX} -print-file-name=libstdc++.so.6))"
 fi
 
-export CFLAGS=""
-export CXXFLAGS=""
+CFLAGS=""
+CXXFLAGS=""
+LDFLAGS=""
+
 # LLVM uses C++11 starting in llvm 3.5. On Linux, this means libstdc++4.7+ is
 # needed, on OS X it requires libc++. clang only automatically links to libc++
 # when targeting OS X 10.9+, so add stdlib=libc++ explicitly so clang can run on
 # OS X versions as old as 10.7.
 # TODO(thakis): Some bots are still on 10.6, so for now bundle libc++.dylib.
 # Remove this once all bots are on 10.7+, then use --enable-libcpp=yes and
-# change all MACOSX_DEPLOYMENT_TARGET values to 10.7.
+# change deployment_target to 10.7.
+deployment_target=""
+
 if [ "${OS}" = "Darwin" ]; then
   # When building on 10.9, /usr/include usually doesn't exist, and while
   # Xcode's clang automatically sets a sysroot, self-built clangs don't.
-  export CFLAGS="-isysroot $(xcrun --show-sdk-path)"
-  export CPPFLAGS="${CFLAGS}"
-  export CXXFLAGS="-stdlib=libc++ -nostdinc++ -I${ABS_LIBCXX_DIR}/include ${CFLAGS}"
+  CFLAGS="-isysroot $(xcrun --show-sdk-path)"
+  CPPFLAGS="${CFLAGS}"
+  CXXFLAGS="-stdlib=libc++ -nostdinc++ -I${ABS_LIBCXX_DIR}/include ${CFLAGS}"
+
+  if [[ -n "${bootstrap}" ]]; then
+    deployment_target=10.6
+  fi
 fi
 
 # Build bootstrap clang if requested.
@@ -310,28 +355,25 @@ if [[ -n "${bootstrap}" ]]; then
   echo "Building bootstrap compiler"
   mkdir -p "${LLVM_BOOTSTRAP_DIR}"
   pushd "${LLVM_BOOTSTRAP_DIR}"
-  if [[ ! -f ./config.status ]]; then
-    # The bootstrap compiler only needs to be able to build the real compiler,
-    # so it needs no cross-compiler output support. In general, the host
-    # compiler should be as similar to the final compiler as possible, so do
-    # keep --disable-threads & co.
-    ../llvm/configure \
-        --enable-optimized \
-        --enable-targets=host-only \
-        --enable-libedit=no \
-        --disable-threads \
-        --disable-pthreads \
-        --without-llvmgcc \
-        --without-llvmgxx \
-        --prefix="${ABS_INSTALL_DIR}"
-  fi
 
-  ${MAKE} -j"${NUM_JOBS}"
+  cmake -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_TARGETS_TO_BUILD=host \
+      -DLLVM_ENABLE_THREADS=OFF \
+      -DCMAKE_INSTALL_PREFIX="${ABS_INSTALL_DIR}" \
+      -DCMAKE_C_COMPILER="${CC}" \
+      -DCMAKE_CXX_COMPILER="${CXX}" \
+      -DCMAKE_C_FLAGS="${CFLAGS}" \
+      -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+      ../llvm
+
+  ninja
   if [[ -n "${run_tests}" ]]; then
-    ${MAKE} check-all
+    ninja check-all
   fi
 
-  ${MAKE} install
+  ninja install
   if [[ -n "${gcc_toolchain}" ]]; then
     # Copy that gcc's stdlibc++.so.6 to the build dir, so the bootstrap
     # compiler can start.
@@ -340,14 +382,14 @@ if [[ -n "${bootstrap}" ]]; then
   fi
 
   popd
-  export CC="${ABS_INSTALL_DIR}/bin/clang"
-  export CXX="${ABS_INSTALL_DIR}/bin/clang++"
+  CC="${ABS_INSTALL_DIR}/bin/clang"
+  CXX="${ABS_INSTALL_DIR}/bin/clang++"
 
   if [[ -n "${gcc_toolchain}" ]]; then
     # Tell the bootstrap compiler to use a specific gcc prefix to search
     # for standard library headers and shared object file.
-    export CFLAGS="--gcc-toolchain=${gcc_toolchain}"
-    export CXXFLAGS="--gcc-toolchain=${gcc_toolchain}"
+    CFLAGS="--gcc-toolchain=${gcc_toolchain}"
+    CXXFLAGS="--gcc-toolchain=${gcc_toolchain}"
   fi
 
   echo "Building final compiler"
@@ -385,34 +427,71 @@ if [ "${OS}" = "Darwin" ]; then
     -Wl,-force_symbols_weak_list,${ABS_LIBCXX_DIR}/lib/weak.exp
   ln -sf libc++.1.dylib libc++.dylib
   popd
-  export LDFLAGS+="-stdlib=libc++ -L${PWD}/libcxxbuild"
+  LDFLAGS+="-stdlib=libc++ -L${PWD}/libcxxbuild"
 fi
 
-if [[ ! -f ./config.status ]]; then
-  ../llvm/configure \
-      --enable-optimized \
-      --enable-libedit=no \
-      --disable-threads \
-      --disable-pthreads \
-      --without-llvmgcc \
-      --without-llvmgxx
-fi
+rm -fv CMakeCache.txt
+MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DLLVM_ENABLE_THREADS=OFF \
+    -DCMAKE_C_COMPILER="${CC}" \
+    -DCMAKE_CXX_COMPILER="${CXX}" \
+    -DCMAKE_C_FLAGS="${CFLAGS}" \
+    -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
+    "${ABS_LLVM_DIR}"
+env
 
 if [[ -n "${gcc_toolchain}" ]]; then
   # Copy in the right stdlibc++.so.6 so clang can start.
-  mkdir -p Release+Asserts/lib
-  cp -v "$(${CXX} ${CXXFLAGS} -print-file-name=libstdc++.so.6)" \
-    Release+Asserts/lib/
+  mkdir -p lib
+  cp -v "$(${CXX} ${CXXFLAGS} -print-file-name=libstdc++.so.6)" lib/
 fi
-MACOSX_DEPLOYMENT_TARGET=10.5 ${MAKE} -j"${NUM_JOBS}"
+
+ninja
+
 STRIP_FLAGS=
 if [ "${OS}" = "Darwin" ]; then
   # See http://crbug.com/256342
   STRIP_FLAGS=-x
 
-  cp libcxxbuild/libc++.1.dylib Release+Asserts/bin
+  cp libcxxbuild/libc++.1.dylib bin/
 fi
-strip ${STRIP_FLAGS} Release+Asserts/bin/clang
+strip ${STRIP_FLAGS} bin/clang
+popd
+
+# Build compiler-rt out-of-tree.
+mkdir -p "${COMPILER_RT_BUILD_DIR}"
+pushd "${COMPILER_RT_BUILD_DIR}"
+
+rm -fv CMakeCache.txt
+MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DLLVM_ENABLE_THREADS=OFF \
+    -DCMAKE_C_COMPILER="${CC}" \
+    -DCMAKE_CXX_COMPILER="${CXX}" \
+    -DLLVM_CONFIG_PATH="${ABS_LLVM_BUILD_DIR}/bin/llvm-config" \
+    "${ABS_COMPILER_RT_DIR}"
+
+ninja
+
+# Copy selected output to the main tree.
+# Darwin doesn't support cp --parents, so pipe through tar instead.
+CLANG_VERSION=$("${ABS_LLVM_BUILD_DIR}/bin/clang" --version | \
+     sed -ne 's/clang version \([0-9]\.[0-9]\.[0-9]\).*/\1/p')
+ABS_LLVM_CLANG_LIB_DIR="${ABS_LLVM_BUILD_DIR}/lib/clang/${CLANG_VERSION}"
+tar -c *blacklist.txt | tar -C ${ABS_LLVM_CLANG_LIB_DIR} -xv
+tar -c include/sanitizer | tar -C ${ABS_LLVM_CLANG_LIB_DIR} -xv
+if [[ "${OS}" = "Darwin" ]]; then
+  tar -c lib/darwin | tar -C ${ABS_LLVM_CLANG_LIB_DIR} -xv
+else
+  tar -c lib/linux | tar -C ${ABS_LLVM_CLANG_LIB_DIR} -xv
+fi
+
 popd
 
 if [[ -n "${with_android}" ]]; then
@@ -427,42 +506,58 @@ if [[ -n "${with_android}" ]]; then
   # http://crbug.com/357890
   rm -v "${LLVM_BUILD_DIR}"/android-toolchain/include/c++/*/unwind.h
 
-  # Build ASan runtime for Android.
-  # Note: LLVM_ANDROID_TOOLCHAIN_DIR is not relative to PWD, but to where we
-  # build the runtime, i.e. third_party/llvm/projects/compiler-rt.
-  pushd "${LLVM_BUILD_DIR}"
-  ${MAKE} -C tools/clang/runtime/ \
-    LLVM_ANDROID_TOOLCHAIN_DIR="../../../llvm-build/android-toolchain"
+  # Build ASan runtime for Android in a separate build tree.
+  mkdir -p ${LLVM_BUILD_DIR}/android
+  pushd ${LLVM_BUILD_DIR}/android
+  rm -fv CMakeCache.txt
+  MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_ENABLE_THREADS=OFF \
+      -DCMAKE_C_COMPILER=${PWD}/../bin/clang \
+      -DCMAKE_CXX_COMPILER=${PWD}/../bin/clang++ \
+      -DLLVM_CONFIG_PATH=${PWD}/../bin/llvm-config \
+      -DCMAKE_C_FLAGS="--target=arm-linux-androideabi --sysroot=${PWD}/../android-toolchain/sysroot -B${PWD}/../android-toolchain" \
+      -DCMAKE_CXX_FLAGS="--target=arm-linux-androideabi --sysroot=${PWD}/../android-toolchain/sysroot -B${PWD}/../android-toolchain" \
+      -DANDROID=1 \
+      "${ABS_COMPILER_RT_DIR}"
+  ninja clang_rt.asan-arm-android
+
+  # And copy it into the main build tree.
+  cp "$(find -name libclang_rt.asan-arm-android.so)" "${ABS_LLVM_CLANG_LIB_DIR}/lib/linux/"
   popd
 fi
 
 # Build Chrome-specific clang tools. Paths in this list should be relative to
 # tools/clang.
-# For each tool directory, copy it into the clang tree and use clang's build
-# system to compile it.
-for CHROME_TOOL_DIR in ${chrome_tools}; do
-  TOOL_SRC_DIR="${THIS_DIR}/../${CHROME_TOOL_DIR}"
-  TOOL_DST_DIR="${LLVM_DIR}/tools/clang/tools/chrome-${CHROME_TOOL_DIR}"
-  TOOL_BUILD_DIR="${LLVM_BUILD_DIR}/tools/clang/tools/chrome-${CHROME_TOOL_DIR}"
-  rm -rf "${TOOL_DST_DIR}"
-  cp -R "${TOOL_SRC_DIR}" "${TOOL_DST_DIR}"
-  rm -rf "${TOOL_BUILD_DIR}"
-  mkdir -p "${TOOL_BUILD_DIR}"
-  cp "${TOOL_SRC_DIR}/Makefile" "${TOOL_BUILD_DIR}"
-  MACOSX_DEPLOYMENT_TARGET=10.5 ${MAKE} -j"${NUM_JOBS}" -C "${TOOL_BUILD_DIR}"
-done
+TOOL_SRC_DIR="${PWD}/${THIS_DIR}/../"
+TOOL_BUILD_DIR="${ABS_LLVM_BUILD_DIR}/tools/clang/tools/chrome-extras"
+
+rm -rf "${TOOL_BUILD_DIR}"
+mkdir -p "${TOOL_BUILD_DIR}"
+pushd "${TOOL_BUILD_DIR}"
+rm -fv CMakeCache.txt
+MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja  \
+    -DLLVM_BUILD_DIR="${ABS_LLVM_BUILD_DIR}" \
+    -DLLVM_SRC_DIR="${ABS_LLVM_DIR}" \
+    -DCMAKE_C_COMPILER="${CC}" \
+    -DCMAKE_CXX_COMPILER="${CXX}" \
+    -DCMAKE_C_FLAGS="${CFLAGS}" \
+    -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_INSTALL_PREFIX="${ABS_LLVM_BUILD_DIR}" \
+    -DCHROMIUM_TOOLS="${chrome_tools}" \
+    "${TOOL_SRC_DIR}"
+popd
+ninja -C "${TOOL_BUILD_DIR}" install
 
 if [[ -n "$run_tests" ]]; then
-  # Run a few tests.
-  for CHROME_TOOL_DIR in ${chrome_tools}; do
-    TOOL_SRC_DIR="${THIS_DIR}/../${CHROME_TOOL_DIR}"
-    if [[ -f "${TOOL_SRC_DIR}/tests/test.sh" ]]; then
-      "${TOOL_SRC_DIR}/tests/test.sh" "${LLVM_BUILD_DIR}/Release+Asserts"
-    fi
-  done
-  pushd "${LLVM_BUILD_DIR}"
-  ${MAKE} check-all
-  popd
+  # Run Chrome tool tests.
+  ninja -C "${TOOL_BUILD_DIR}" check-all
+  # Run the LLVM and Clang tests.
+  ninja -C "${LLVM_BUILD_DIR}" check-all
 fi
 
 # After everything is done, log success for this revision.

@@ -6,19 +6,19 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/login/auth/mount_manager.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_constants.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -203,7 +203,7 @@ void SupervisedUserCreationControllerNew::StartCreationImpl() {
       base::TimeDelta::FromSeconds(kUserCreationTimeoutSeconds),
       this,
       &SupervisedUserCreationControllerNew::CreationTimedOut);
-  authenticator_ = new ExtendedAuthenticator(this);
+  authenticator_ = ExtendedAuthenticator::Create(this);
   UserContext user_context;
   user_context.SetKey(Key(creation_context_->master_key));
   authenticator_->TransformKeyIfNeeded(
@@ -270,10 +270,18 @@ void SupervisedUserCreationControllerNew::OnMountSuccess(
       creation_context_->salted_password,
       kCryptohomeSupervisedUserKeyLabel,
       kCryptohomeSupervisedUserKeyPrivileges);
-  base::Base64Decode(creation_context_->encryption_key,
-                     &password_key.encryption_key);
-  base::Base64Decode(creation_context_->signature_key,
-                     &password_key.signature_key);
+  std::string encryption_key;
+  base::Base64Decode(creation_context_->encryption_key, &encryption_key);
+  password_key.authorization_data.push_back(
+      cryptohome::KeyDefinition::AuthorizationData(true /* encrypt */,
+                                                   false /* sign */,
+                                                   encryption_key));
+  std::string signature_key;
+  base::Base64Decode(creation_context_->signature_key, &signature_key);
+  password_key.authorization_data.push_back(
+      cryptohome::KeyDefinition::AuthorizationData(false /* encrypt */,
+                                                   true /* sign */,
+                                                   signature_key));
 
   Key key(Key::KEY_TYPE_SALTED_PBKDF2_AES256_1234,
           std::string(),  // The salt is stored elsewhere.
@@ -343,10 +351,11 @@ void SupervisedUserCreationControllerNew::RegistrationCallback(
         FROM_HERE,
         base::Bind(&StoreSupervisedUserFiles,
                    creation_context_->token,
-                   MountManager::GetHomeDir(creation_context_->mount_hash)),
-        base::Bind(&SupervisedUserCreationControllerNew::
-                        OnSupervisedUserFilesStored,
-                   weak_factory_.GetWeakPtr()));
+                   ProfileHelper::GetProfilePathByUserIdHash(
+                       creation_context_->mount_hash)),
+        base::Bind(
+            &SupervisedUserCreationControllerNew::OnSupervisedUserFilesStored,
+            weak_factory_.GetWeakPtr()));
   } else {
     stage_ = STAGE_ERROR;
     LOG(ERROR) << "Supervised user creation failed. Error code "

@@ -140,10 +140,10 @@ TEST(Tokenizer, Locations) {
   std::vector<Token> results = Tokenizer::Tokenize(&input, &err);
 
   ASSERT_EQ(4u, results.size());
-  ASSERT_TRUE(results[0].location() == Location(&input, 1, 1));
-  ASSERT_TRUE(results[1].location() == Location(&input, 1, 3));
-  ASSERT_TRUE(results[2].location() == Location(&input, 1, 5));
-  ASSERT_TRUE(results[3].location() == Location(&input, 2, 3));
+  ASSERT_TRUE(results[0].location() == Location(&input, 1, 1, 1));
+  ASSERT_TRUE(results[1].location() == Location(&input, 1, 3, 3));
+  ASSERT_TRUE(results[2].location() == Location(&input, 1, 5, 5));
+  ASSERT_TRUE(results[3].location() == Location(&input, 2, 3, 8));
 }
 
 TEST(Tokenizer, ByteOffsetOfNthLine) {
@@ -161,4 +161,66 @@ TEST(Tokenizer, ByteOffsetOfNthLine) {
   input2[2] = 0;
   EXPECT_EQ(0u, Tokenizer::ByteOffsetOfNthLine(input2, 1));
   EXPECT_EQ(2u, Tokenizer::ByteOffsetOfNthLine(input2, 2));
+}
+
+TEST(Tokenizer, Comments) {
+  TokenExpectation fn[] = {
+    { Token::LINE_COMMENT, "# Stuff" },
+    { Token::IDENTIFIER, "fun" },
+    { Token::LEFT_PAREN, "(" },
+    { Token::STRING, "\"foo\"" },
+    { Token::RIGHT_PAREN, ")" },
+    { Token::LEFT_BRACE, "{" },
+    { Token::SUFFIX_COMMENT, "# Things" },
+    { Token::LINE_COMMENT, "#Wee" },
+    { Token::IDENTIFIER, "foo" },
+    { Token::EQUAL, "=" },
+    { Token::INTEGER, "12" },
+    { Token::SUFFIX_COMMENT, "#Zip" },
+    { Token::RIGHT_BRACE, "}" },
+  };
+  EXPECT_TRUE(CheckTokenizer(
+      "# Stuff\n"
+      "fun(\"foo\") {  # Things\n"
+      "#Wee\n"
+      "foo = 12 #Zip\n"
+      "}",
+      fn));
+}
+
+TEST(Tokenizer, CommentsContinued) {
+  // In the first test, the comments aren't horizontally aligned, so they're
+  // considered separate. In the second test, they are, so "B" is a
+  // continuation of "A" (another SUFFIX comment).
+  TokenExpectation fn1[] = {
+    { Token::IDENTIFIER, "fun" },
+    { Token::LEFT_PAREN, "(" },
+    { Token::STRING, "\"foo\"" },
+    { Token::RIGHT_PAREN, ")" },
+    { Token::LEFT_BRACE, "{" },
+    { Token::SUFFIX_COMMENT, "# A" },
+    { Token::LINE_COMMENT, "# B" },
+    { Token::RIGHT_BRACE, "}" },
+  };
+  EXPECT_TRUE(CheckTokenizer(
+      "fun(\"foo\") {  # A\n"
+      "  # B\n"
+      "}",
+      fn1));
+
+  TokenExpectation fn2[] = {
+    { Token::IDENTIFIER, "fun" },
+    { Token::LEFT_PAREN, "(" },
+    { Token::STRING, "\"foo\"" },
+    { Token::RIGHT_PAREN, ")" },
+    { Token::LEFT_BRACE, "{" },
+    { Token::SUFFIX_COMMENT, "# A" },
+    { Token::SUFFIX_COMMENT, "# B" },
+    { Token::RIGHT_BRACE, "}" },
+  };
+  EXPECT_TRUE(CheckTokenizer(
+      "fun(\"foo\") {  # A\n"
+      "              # B\n"  // Note that these are aligned, the \"s move A out.
+      "}",
+      fn2));
 }

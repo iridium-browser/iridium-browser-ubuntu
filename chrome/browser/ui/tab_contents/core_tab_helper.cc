@@ -11,19 +11,19 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "net/base/load_states.h"
 #include "net/http/http_request_headers.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -145,7 +145,7 @@ void CoreTabHelper::DidStartLoading(content::RenderViewHost* render_view_host) {
 }
 
 void CoreTabHelper::WasShown() {
-  WebCacheManager::GetInstance()->ObserveActivity(
+  web_cache::WebCacheManager::GetInstance()->ObserveActivity(
       web_contents()->GetRenderProcessHost()->GetID());
 }
 
@@ -242,7 +242,7 @@ void CoreTabHelper::OnRequestThumbnailForContextNodeACK(
 
   content::OpenURLParams open_url_params(
       result, content::Referrer(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false);
+      ui::PAGE_TRANSITION_LINK, false);
   const std::string& content_type = post_content.first;
   std::string* post_data = &post_content.second;
   if (!post_data->empty()) {

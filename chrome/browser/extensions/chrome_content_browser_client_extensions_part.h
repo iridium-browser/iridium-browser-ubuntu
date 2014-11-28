@@ -43,8 +43,6 @@ class ChromeContentBrowserClientExtensionsPart
       content::ResourceContext* resource_context,
       const GURL& current_url,
       const GURL& new_url);
-  static std::string GetWorkerProcessTitle(const GURL& url,
-                                           content::ResourceContext* context);
 
   // Similiar to ChromeContentBrowserClient::ShouldAllowOpenURL(), but the
   // return value indicates whether to use |result| or not.
@@ -64,10 +62,6 @@ class ChromeContentBrowserClientExtensionsPart
       content::SiteInstance* site_instance) OVERRIDE;
   virtual void SiteInstanceDeleting(
       content::SiteInstance* site_instance) OVERRIDE;
-  virtual void WorkerProcessCreated(content::SiteInstance* site_instance,
-                                    int worker_process_id) OVERRIDE;
-  virtual void WorkerProcessTerminated(content::SiteInstance* site_instance,
-                                       int worker_process_id) OVERRIDE;
   virtual void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                                    const GURL& url,
                                    content::WebPreferences* web_prefs) OVERRIDE;
@@ -76,11 +70,11 @@ class ChromeContentBrowserClientExtensionsPart
   virtual void GetAdditionalAllowedSchemesForFileSystem(
       std::vector<std::string>* additional_allowed_schemes) OVERRIDE;
   virtual void GetURLRequestAutoMountHandlers(
-      std::vector<fileapi::URLRequestAutoMountHandler>* handlers) OVERRIDE;
+      std::vector<storage::URLRequestAutoMountHandler>* handlers) OVERRIDE;
   virtual void GetAdditionalFileSystemBackends(
       content::BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      ScopedVector<fileapi::FileSystemBackend>* additional_backends) OVERRIDE;
+      ScopedVector<storage::FileSystemBackend>* additional_backends) OVERRIDE;
   virtual void AppendExtraRendererCommandLineSwitches(
       base::CommandLine* command_line,
       content::RenderProcessHost* process,

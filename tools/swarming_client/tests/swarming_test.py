@@ -17,9 +17,8 @@ import tempfile
 import threading
 import unittest
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT_DIR)
-sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party'))
+# net_utils adjusts sys.path.
+import net_utils
 
 from depot_tools import auto_stub
 
@@ -127,6 +126,7 @@ def gen_data(shard_output, exit_codes):
     u'machine_id': u'host',
     u'machine_tag': u'localhost',
     u'output': unicode(shard_output),
+    u'isolated_out': swarming.extract_output_files_location(shard_output),
   }
 
 
@@ -136,8 +136,7 @@ def gen_yielded_data(index, shard_output, exit_codes):
 
 
 def generate_url_response(shard_output, exit_codes):
-  return net.HttpResponse.get_fake_response(
-      json.dumps(gen_data(shard_output, exit_codes)), 'mocked_url')
+  return json.dumps(gen_data(shard_output, exit_codes))
 
 
 def get_swarm_results(keys, output_collector=None):
@@ -199,14 +198,12 @@ class NonBlockingEvent(threading._Event):  # pylint: disable=W0212
     return super(NonBlockingEvent, self).wait(0)
 
 
-class TestCase(auto_stub.TestCase):
+class TestCase(net_utils.TestCase):
   """Base class that defines the url_open mock."""
   def setUp(self):
     super(TestCase, self).setUp()
     self._lock = threading.Lock()
-    self.requests = []
     self.mock(swarming.auth, 'ensure_logged_in', lambda _: None)
-    self.mock(swarming.net.HttpService, 'request', self._url_open)
     self.mock(swarming.time, 'sleep', lambda _: None)
     self.mock(swarming.subprocess, 'call', lambda *_: self.fail())
     self.mock(swarming.threading, 'Event', NonBlockingEvent)
@@ -217,7 +214,6 @@ class TestCase(auto_stub.TestCase):
     try:
       if not self.has_failed():
         self._check_output('', '')
-        self.assertEqual([], self.requests)
     finally:
       super(TestCase, self).tearDown()
 
@@ -229,38 +225,19 @@ class TestCase(auto_stub.TestCase):
     self.mock(sys, 'stdout', StringIO.StringIO())
     self.mock(sys, 'stderr', StringIO.StringIO())
 
-  def _url_open(self, url, **kwargs):
-    logging.info('url_open(%s)', url)
-    # Ignore 'stream' argument, it's not important for these tests.
-    kwargs.pop('stream')
-    with self._lock:
-      # Since the client is multi-threaded, requests can be processed out of
-      # order.
-      for index, r in enumerate(self.requests):
-        if r[0] == url and r[1] == kwargs:
-          _, _, returned = self.requests.pop(index)
-          break
-      else:
-        self.fail(
-            'Failed to find url %s\n%s\nRemaining:\n%s' % (
-              url,
-              json.dumps(kwargs, indent=2, sort_keys=True),
-              json.dumps(
-                  [(i[0], i[1]) for i in self.requests],
-                  indent=2, sort_keys=True)))
-    return returned
-
 
 class TestGetTestKeys(TestCase):
   def test_no_keys(self):
     self.mock(swarming.time, 'sleep', lambda x: x)
-    self.requests = [
-      (
-        '/get_matching_test_cases?name=my_test',
-        {'retry_404': True},
-        StringIO.StringIO('No matching Test Cases'),
-      ) for _ in range(net.URL_OPEN_MAX_ATTEMPTS)
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_matching_test_cases?name=my_test',
+            {'retry_404': True},
+            'No matching Test Cases',
+            None,
+          ) for _ in range(net.URL_OPEN_MAX_ATTEMPTS)
+        ])
     try:
       swarming.get_task_keys('http://host:9001', 'my_test')
       self.fail()
@@ -273,67 +250,78 @@ class TestGetTestKeys(TestCase):
   def test_no_keys_on_first_attempt(self):
     self.mock(swarming.time, 'sleep', lambda x: x)
     keys = ['key_1', 'key_2']
-    self.requests = [
-      (
-        '/get_matching_test_cases?name=my_test',
-        {'retry_404': True},
-        StringIO.StringIO('No matching Test Cases'),
-      ),
-      (
-        '/get_matching_test_cases?name=my_test',
-        {'retry_404': True},
-        StringIO.StringIO(json.dumps(keys)),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_matching_test_cases?name=my_test',
+            {'retry_404': True},
+            'No matching Test Cases',
+            None,
+          ),
+          (
+            'http://host:9001/get_matching_test_cases?name=my_test',
+            {'retry_404': True},
+            json.dumps(keys),
+            None,
+          ),
+        ])
     actual = swarming.get_task_keys('http://host:9001', 'my_test')
     self.assertEqual(keys, actual)
 
   def test_find_keys(self):
     keys = ['key_1', 'key_2']
-    self.requests = [
-      (
-        '/get_matching_test_cases?name=my_test',
-        {'retry_404': True},
-        StringIO.StringIO(json.dumps(keys)),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_matching_test_cases?name=my_test',
+            {'retry_404': True},
+            json.dumps(keys),
+            None,
+          ),
+        ])
     actual = swarming.get_task_keys('http://host:9001', 'my_test')
     self.assertEqual(keys, actual)
 
 
 class TestGetSwarmResults(TestCase):
   def test_success(self):
-    self.requests = [
-      (
-        '/get_result?r=key1',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(SWARM_OUTPUT_SUCCESS, '0, 0'),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_result?r=key1',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(SWARM_OUTPUT_SUCCESS, '0, 0'),
+            None,
+          ),
+        ])
     expected = [gen_yielded_data(0, SWARM_OUTPUT_SUCCESS, '0, 0')]
     actual = get_swarm_results(['key1'])
     self.assertEqual(expected, actual)
 
   def test_failure(self):
-    self.requests = [
-      (
-        '/get_result?r=key1',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(SWARM_OUTPUT_FAILURE, '0, 1'),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_result?r=key1',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(SWARM_OUTPUT_FAILURE, '0, 1'),
+            None,
+          ),
+        ])
     expected = [gen_yielded_data(0, SWARM_OUTPUT_FAILURE, '0, 1')]
     actual = get_swarm_results(['key1'])
     self.assertEqual(expected, actual)
 
   def test_no_test_output(self):
-    self.requests = [
-      (
-        '/get_result?r=key1',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(SWARM_OUTPUT_WITH_NO_TEST_OUTPUT, '0, 0'),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_result?r=key1',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(SWARM_OUTPUT_WITH_NO_TEST_OUTPUT, '0, 0'),
+            None,
+          ),
+        ])
     expected = [gen_yielded_data(0, SWARM_OUTPUT_WITH_NO_TEST_OUTPUT, '0, 0')]
     actual = get_swarm_results(['key1'])
     self.assertEqual(expected, actual)
@@ -355,35 +343,41 @@ class TestGetSwarmResults(TestCase):
     self.mock(swarming, 'now', get_now)
     # The actual number of requests here depends on 'now' progressing to 10
     # seconds. It's called once per loop. Loop makes 9 iterations.
-    self.requests = 9 * [
-      (
-        '/get_result?r=key1',
-        {'retry_404': False, 'retry_50x': False},
-        None,
-      )
-    ]
+    self.expected_requests(
+        9 * [
+          (
+            'http://host:9001/get_result?r=key1',
+            {'retry_404': False, 'retry_50x': False},
+            None,
+            None,
+          )
+        ])
     actual = get_swarm_results(['key1'])
     self.assertEqual([], actual)
     self.assertTrue(all(not v for v in now.itervalues()), now)
 
   def test_many_shards(self):
-    self.requests = [
-      (
-        '/get_result?r=key1',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(TEST_SHARD_OUTPUT_1, '0, 0'),
-      ),
-      (
-        '/get_result?r=key2',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(TEST_SHARD_OUTPUT_2, '0, 0'),
-      ),
-      (
-        '/get_result?r=key3',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(TEST_SHARD_OUTPUT_3, '0, 0'),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_result?r=key1',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(TEST_SHARD_OUTPUT_1, '0, 0'),
+            None,
+          ),
+          (
+            'http://host:9001/get_result?r=key2',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(TEST_SHARD_OUTPUT_2, '0, 0'),
+            None,
+          ),
+          (
+            'http://host:9001/get_result?r=key3',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(TEST_SHARD_OUTPUT_3, '0, 0'),
+            None,
+          ),
+        ])
     expected = [
       gen_yielded_data(0, TEST_SHARD_OUTPUT_1, '0, 0'),
       gen_yielded_data(1, TEST_SHARD_OUTPUT_2, '0, 0'),
@@ -394,23 +388,27 @@ class TestGetSwarmResults(TestCase):
 
   def test_output_collector_called(self):
     # Three shards, one failed. All results are passed to output collector.
-    self.requests = [
-      (
-        '/get_result?r=key1',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(TEST_SHARD_OUTPUT_1, '0, 0'),
-      ),
-      (
-        '/get_result?r=key2',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(TEST_SHARD_OUTPUT_2, '0, 0'),
-      ),
-      (
-        '/get_result?r=key3',
-        {'retry_404': False, 'retry_50x': False},
-        generate_url_response(SWARM_OUTPUT_FAILURE, '0, 1'),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'http://host:9001/get_result?r=key1',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(TEST_SHARD_OUTPUT_1, '0, 0'),
+            None,
+          ),
+          (
+            'http://host:9001/get_result?r=key2',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(TEST_SHARD_OUTPUT_2, '0, 0'),
+            None,
+          ),
+          (
+            'http://host:9001/get_result?r=key3',
+            {'retry_404': False, 'retry_50x': False},
+            generate_url_response(SWARM_OUTPUT_FAILURE, '0, 1'),
+            None,
+          ),
+        ])
 
     class FakeOutputCollector(object):
       def __init__(self):
@@ -841,7 +839,7 @@ class TriggerTaskShardsTest(TestCase):
         (
           [
             sys.executable,
-            os.path.join(ROOT_DIR, 'isolate.py'),
+            os.path.join(swarming.ROOT_DIR, 'isolate.py'),
             'archive',
             '--isolate-server', 'http://localhost:1',
             '--namespace', 'default',
@@ -853,41 +851,6 @@ class TriggerTaskShardsTest(TestCase):
     ]
     self.assertEqual(expected_calls, calls)
     self._check_output('Archiving: %s\n' % isolated, '')
-
-
-def mock_swarming_api_v1_bots():
-  """Returns fake /swarming/api/v1/bots data."""
-  now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-  dead = '2006-01-02 03:04:05'
-  return {
-    'machine_death_timeout': 10,
-    'machines': [
-      {
-        'dimensions': {},
-        'id': 'no-dimensions',
-        'is_dead': False,
-        'last_seen_ts': now,
-      },
-      {
-        'dimensions': {'os': 'amiga'},
-        'id': 'amig1',
-        'is_dead': False,
-        'last_seen_ts': now,
-      },
-      {
-        'dimensions': {'os': ['amiga', 'atari'], 'foo': 1},
-        'id': 'amig2',
-        'is_dead': False,
-        'last_seen_ts': now,
-      },
-      {
-        'dimensions': {'os': 'amiga'},
-        'id': 'dead',
-        'is_dead': True,
-        'last_seen_ts': dead,
-      },
-    ],
-  }
 
 
 class MainTest(TestCase):
@@ -928,13 +891,15 @@ class MainTest(TestCase):
     data = {
       'request': json.dumps(j, sort_keys=True, separators=(',',':')),
     }
-    self.requests = [
-      (
-        '/test',
-        {'data': data},
-        StringIO.StringIO(json.dumps(gen_trigger_response())),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'https://host1/test',
+            {'data': data},
+            json.dumps(gen_trigger_response()),
+            None,
+          ),
+        ])
     ret = main([
         'trigger',
         '--swarming', 'https://host1',
@@ -977,13 +942,15 @@ class MainTest(TestCase):
     data = {
       'request': json.dumps(j, sort_keys=True, separators=(',',':')),
     }
-    self.requests = [
-      (
-        '/test',
-        {'data': data},
-        StringIO.StringIO(json.dumps(gen_trigger_response())),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'https://host1/test',
+            {'data': data},
+            json.dumps(gen_trigger_response()),
+            None,
+          ),
+        ])
     ret = main([
         'trigger',
         '--swarming', 'https://host1',
@@ -1001,7 +968,7 @@ class MainTest(TestCase):
       (
         [
           sys.executable,
-          os.path.join(ROOT_DIR, 'isolate.py'), 'archive',
+          os.path.join(swarming.ROOT_DIR, 'isolate.py'), 'archive',
           '--isolate-server', 'https://host2',
           '--namespace' ,'default-gzip',
           '--isolated', isolated,
@@ -1011,131 +978,6 @@ class MainTest(TestCase):
     self.assertEqual(expected, calls)
     self._check_output(
         'Archiving: %s\nTriggered task: %s\n' % (isolated, task_name), '')
-
-  def test_query(self):
-    self.requests = [
-      (
-        '/swarming/api/v1/bots',
-        {
-          "content_type": None,
-          "data": None,
-          "headers": None,
-          "max_attempts": 30,
-          "method": "GET",
-          "retry_404": False,
-          "retry_50x": True,
-          "timeout": 360.0
-        },
-        StringIO.StringIO(json.dumps(mock_swarming_api_v1_bots())),
-      ),
-    ]
-    main(['query', '--swarming', 'https://localhost:1'])
-    expected = (
-        "amig1\n  {u'os': u'amiga'}\n"
-        "amig2\n  {u'foo': 1, u'os': [u'amiga', u'atari']}\n"
-        "no-dimensions\n  {}\n")
-    self._check_output(expected, '')
-
-  def test_query_bare(self):
-    self.requests = [
-      (
-        '/swarming/api/v1/bots',
-        {
-          "content_type": None,
-          "data": None,
-          "headers": None,
-          "max_attempts": 30,
-          "method": "GET",
-          "retry_404": False,
-          "retry_50x": True,
-          "timeout": 360.0
-        },
-        StringIO.StringIO(json.dumps(mock_swarming_api_v1_bots())),
-      ),
-    ]
-    main(['query', '--swarming', 'https://localhost:1', '--bare'])
-    self._check_output("amig1\namig2\nno-dimensions\n", '')
-
-  def test_query_filter(self):
-    self.requests = [
-      (
-        '/swarming/api/v1/bots',
-        {
-          "content_type": None,
-          "data": None,
-          "headers": None,
-          "max_attempts": 30,
-          "method": "GET",
-          "retry_404": False,
-          "retry_50x": True,
-          "timeout": 360.0
-        },
-        StringIO.StringIO(json.dumps(mock_swarming_api_v1_bots())),
-      ),
-    ]
-    main(
-        [
-          'query', '--swarming', 'https://localhost:1',
-          '--dimension', 'os', 'amiga',
-        ])
-    expected = (
-        "amig1\n  {u'os': u'amiga'}\n"
-        "amig2\n  {u'foo': 1, u'os': [u'amiga', u'atari']}\n")
-    self._check_output(expected, '')
-
-  def test_query_filter_keep_dead(self):
-    self.requests = [
-      (
-        '/swarming/api/v1/bots',
-        {
-          "content_type": None,
-          "data": None,
-          "headers": None,
-          "max_attempts": 30,
-          "method": "GET",
-          "retry_404": False,
-          "retry_50x": True,
-          "timeout": 360.0
-        },
-        StringIO.StringIO(json.dumps(mock_swarming_api_v1_bots())),
-      ),
-    ]
-    main(
-        [
-          'query', '--swarming', 'https://localhost:1',
-          '--dimension', 'os', 'amiga', '--keep-dead',
-        ])
-    expected = (
-        "amig1\n  {u'os': u'amiga'}\n"
-        "amig2\n  {u'foo': 1, u'os': [u'amiga', u'atari']}\n"
-        "dead\n  {u'os': u'amiga'}\n")
-    self._check_output(expected, '')
-
-  def test_query_filter_dead_only(self):
-    self.requests = [
-      (
-        '/swarming/api/v1/bots',
-        {
-          "content_type": None,
-          "data": None,
-          "headers": None,
-          "max_attempts": 30,
-          "method": "GET",
-          "retry_404": False,
-          "retry_50x": True,
-          "timeout": 360.0
-        },
-        StringIO.StringIO(json.dumps(mock_swarming_api_v1_bots())),
-      ),
-    ]
-    main(
-        [
-          'query', '--swarming', 'https://localhost:1',
-          '--dimension', 'os', 'amiga', '--dead-only',
-        ])
-    expected = (
-        "dead\n  {u'os': u'amiga'}\n")
-    self._check_output(expected, '')
 
   def test_trigger_no_request(self):
     with self.assertRaises(SystemExit):
@@ -1220,13 +1062,15 @@ class MainTest(TestCase):
     data = {
       'request': json.dumps(j, sort_keys=True, separators=(',',':')),
     }
-    self.requests = [
-      (
-        '/test',
-        {'data': data},
-        StringIO.StringIO(json.dumps(gen_trigger_response())),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'https://host1/test',
+            {'data': data},
+            json.dumps(gen_trigger_response()),
+            None,
+          ),
+        ])
     ret = main([
         'trigger',
         '--swarming', 'https://host1',
@@ -1256,13 +1100,15 @@ class MainTest(TestCase):
     data = {
       'request': json.dumps(j, sort_keys=True, separators=(',',':')),
     }
-    self.requests = [
-      (
-        '/test',
-        {'data': data},
-        StringIO.StringIO(json.dumps(gen_trigger_response())),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'https://host1/test',
+            {'data': data},
+            json.dumps(gen_trigger_response()),
+            None,
+          ),
+        ])
     ret = main([
         'trigger',
         '--swarming', 'https://host1',
@@ -1294,13 +1140,15 @@ class MainTest(TestCase):
     data = {
       'request': json.dumps(j, sort_keys=True, separators=(',',':')),
     }
-    self.requests = [
-      (
-        '/test',
-        {'data': data},
-        StringIO.StringIO(json.dumps(gen_trigger_response())),
-      ),
-    ]
+    self.expected_requests(
+        [
+          (
+            'https://host1/test',
+            {'data': data},
+            json.dumps(gen_trigger_response()),
+            None,
+          ),
+        ])
     ret = main([
         'trigger',
         '--swarming', 'https://host1',
@@ -1334,6 +1182,261 @@ class MainTest(TestCase):
     ]
     self.assertEqual(expected, called)
 
+  def test_query_base(self):
+    self.expected_requests(
+        [
+          (
+            'https://localhost:1/swarming/api/v1/client/bots/botid/tasks?'
+                'limit=200',
+            {},
+            {'yo': 'dawg'},
+          ),
+        ])
+    main(
+        [
+          'query', '--swarming', 'https://localhost:1', 'bots/botid/tasks',
+        ])
+    self._check_output('{\n  "yo": "dawg"\n}\n', '')
+
+  def test_query_cursor(self):
+    self.expected_requests(
+        [
+          (
+            'https://localhost:1/swarming/api/v1/client/bots/botid/tasks?'
+                'limit=2',
+            {},
+            {
+              'cursor': '%',
+              'extra': False,
+              'items': ['A'],
+            },
+          ),
+          (
+            'https://localhost:1/swarming/api/v1/client/bots/botid/tasks?'
+                'cursor=%25&limit=1',
+            {},
+            {
+              'cursor': None,
+              'items': ['B'],
+              'ignored': True,
+            },
+          ),
+        ])
+    main(
+        [
+          'query', '--swarming', 'https://localhost:1', 'bots/botid/tasks',
+          '--limit', '2',
+        ])
+    expected = (
+        '{\n'
+        '  "extra": false, \n'
+        '  "items": [\n'
+        '    "A", \n'
+        '    "B"\n'
+        '  ]\n'
+        '}\n')
+    self._check_output(expected, '')
+
+
+class BotTestCase(TestCase):
+  def setUp(self):
+    super(BotTestCase, self).setUp()
+    # Expected requests are always the same, independent of the test case.
+    self.expected_requests(
+        [
+          (
+            'https://localhost:1/swarming/api/v1/client/bots?limit=250',
+            {},
+            self.mock_swarming_api_v1_bots_page_1(),
+          ),
+          (
+            'https://localhost:1/swarming/api/v1/client/bots?limit=250&'
+              'cursor=opaque_cursor',
+            {},
+            self.mock_swarming_api_v1_bots_page_2(),
+          ),
+        ])
+
+  @staticmethod
+  def mock_swarming_api_v1_bots_page_1():
+    """Returns fake /swarming/api/v1/client/bots data."""
+    # Sample data retrieved from actual server.
+    now = unicode(datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    return {
+      u'items': [
+        {
+          u'created_ts': now,
+          u'dimensions': {
+            u'cores': u'4',
+            u'cpu': [u'x86', u'x86-64'],
+            u'gpu': [u'15ad', u'15ad:0405'],
+            u'hostname': u'swarm3.example.com',
+            u'id': u'swarm3',
+            u'os': [u'Mac', u'Mac-10.9'],
+          },
+          u'external_ip': u'1.1.1.3',
+          u'hostname': u'swarm3.example.com',
+          u'id': u'swarm3',
+          u'internal_ip': u'192.168.0.3',
+          u'is_dead': False,
+          u'last_seen_ts': now,
+          u'quarantined': False,
+          u'task': u'148569b73a89501',
+          u'version': u'56918a2ea28a6f51751ad14cc086f118b8727905',
+        },
+        {
+          u'created_ts': now,
+          u'dimensions': {
+            u'cores': u'8',
+            u'cpu': [u'x86', u'x86-64'],
+            u'gpu': [],
+            u'hostname': u'swarm1.example.com',
+            u'id': u'swarm1',
+            u'os': [u'Linux', u'Linux-12.04'],
+          },
+          u'external_ip': u'1.1.1.1',
+          u'hostname': u'swarm1.example.com',
+          u'id': u'swarm1',
+          u'internal_ip': u'192.168.0.1',
+          u'is_dead': True,
+          u'last_seen_ts': 'A long time ago',
+          u'quarantined': False,
+          u'task': None,
+          u'version': u'56918a2ea28a6f51751ad14cc086f118b8727905',
+        },
+        {
+          u'created_ts': now,
+          u'dimensions': {
+            u'cores': u'8',
+            u'cpu': [u'x86', u'x86-64'],
+            u'cygwin': u'0',
+            u'gpu': [
+              u'15ad',
+              u'15ad:0405',
+              u'VMware Virtual SVGA 3D Graphics Adapter',
+            ],
+            u'hostname': u'swarm2.example.com',
+            u'id': u'swarm2',
+            u'integrity': u'high',
+            u'os': [u'Windows', u'Windows-6.1'],
+          },
+          u'external_ip': u'1.1.1.2',
+          u'hostname': u'swarm2.example.com',
+          u'id': u'swarm2',
+          u'internal_ip': u'192.168.0.2',
+          u'is_dead': False,
+          u'last_seen_ts': now,
+          u'quarantined': False,
+          u'task': None,
+          u'version': u'56918a2ea28a6f51751ad14cc086f118b8727905',
+        },
+      ],
+      u'cursor': u'opaque_cursor',
+      u'death_timeout': 1800.0,
+      u'limit': 4,
+      u'now': unicode(now),
+    }
+
+  @staticmethod
+  def mock_swarming_api_v1_bots_page_2():
+    """Returns fake /swarming/api/v1/client/bots data."""
+    # Sample data retrieved from actual server.
+    now = unicode(datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    return {
+      u'items': [
+        {
+          u'created_ts': now,
+          u'dimensions': {
+            u'cores': u'8',
+            u'cpu': [u'x86', u'x86-64'],
+            u'gpu': [],
+            u'hostname': u'swarm4.example.com',
+            u'id': u'swarm4',
+            u'os': [u'Linux', u'Linux-12.04'],
+          },
+          u'external_ip': u'1.1.1.4',
+          u'hostname': u'swarm4.example.com',
+          u'id': u'swarm4',
+          u'internal_ip': u'192.168.0.4',
+          u'is_dead': False,
+          u'last_seen_ts': now,
+          u'quarantined': False,
+          u'task': u'14856971a64c601',
+          u'version': u'56918a2ea28a6f51751ad14cc086f118b8727905',
+        }
+      ],
+      u'cursor': None,
+      u'death_timeout': 1800.0,
+      u'limit': 4,
+      u'now': unicode(now),
+    }
+
+  def test_bots(self):
+    main(['bots', '--swarming', 'https://localhost:1'])
+    expected = (
+        u'swarm2\n'
+        u'  {"cores": "8", "cpu": ["x86", "x86-64"], "cygwin": "0", "gpu": '
+          '["15ad", "15ad:0405", "VMware Virtual SVGA 3D Graphics Adapter"], '
+          '"hostname": "swarm2.example.com", "id": "swarm2", "integrity": '
+          '"high", "os": ["Windows", "Windows-6.1"]}\n'
+        'swarm3\n'
+        '  {"cores": "4", "cpu": ["x86", "x86-64"], "gpu": ["15ad", '
+          '"15ad:0405"], "hostname": "swarm3.example.com", "id": "swarm3", '
+          '"os": ["Mac", "Mac-10.9"]}\n'
+        u'  task: 148569b73a89501\n'
+        u'swarm4\n'
+        u'  {"cores": "8", "cpu": ["x86", "x86-64"], "gpu": [], "hostname": '
+          '"swarm4.example.com", "id": "swarm4", "os": ["Linux", '
+          '"Linux-12.04"]}\n'
+        u'  task: 14856971a64c601\n')
+    self._check_output(expected, '')
+
+  def test_bots_bare(self):
+    main(['bots', '--swarming', 'https://localhost:1', '--bare'])
+    self._check_output("swarm2\nswarm3\nswarm4\n", '')
+
+  def test_bots_filter(self):
+    main(
+        [
+          'bots', '--swarming', 'https://localhost:1',
+          '--dimension', 'os', 'Windows',
+        ])
+    expected = (
+        u'swarm2\n  {"cores": "8", "cpu": ["x86", "x86-64"], "cygwin": "0", '
+          '"gpu": ["15ad", "15ad:0405", "VMware Virtual SVGA 3D Graphics '
+          'Adapter"], "hostname": "swarm2.example.com", "id": "swarm2", '
+          '"integrity": "high", "os": ["Windows", "Windows-6.1"]}\n')
+    self._check_output(expected, '')
+
+  def test_bots_filter_keep_dead(self):
+    main(
+        [
+          'bots', '--swarming', 'https://localhost:1',
+          '--dimension', 'os', 'Linux', '--keep-dead',
+        ])
+    expected = (
+        u'swarm1\n  {"cores": "8", "cpu": ["x86", "x86-64"], "gpu": [], '
+          '"hostname": "swarm1.example.com", "id": "swarm1", "os": ["Linux", '
+          '"Linux-12.04"]}\n'
+        u'swarm4\n'
+        u'  {"cores": "8", "cpu": ["x86", "x86-64"], "gpu": [], "hostname": '
+          '"swarm4.example.com", "id": "swarm4", "os": ["Linux", '
+          '"Linux-12.04"]}\n'
+        u'  task: 14856971a64c601\n')
+    self._check_output(expected, '')
+
+  def test_bots_filter_dead_only(self):
+    main(
+        [
+          'bots', '--swarming', 'https://localhost:1',
+          '--dimension', 'os', 'Linux', '--dead-only',
+        ])
+    expected = (
+        u'swarm1\n  {"cores": "8", "cpu": ["x86", "x86-64"], "gpu": [], '
+          '"hostname": "swarm1.example.com", "id": "swarm1", "os": ["Linux", '
+          '"Linux-12.04"]}\n')
+    self._check_output(expected, '')
+
 
 def gen_run_isolated_out_hack_log(isolate_server, namespace, isolated_hash):
   data = {
@@ -1355,7 +1458,10 @@ class ExtractOutputFilesLocationTest(auto_stub.TestCase):
       'more log',
     ))
     self.assertEqual(
-        ('https://fake', 'default', '12345'),
+        {'hash': '12345',
+         'namespace': 'default',
+         'server': 'https://fake',
+         'view_url': 'https://fake/browse?namespace=default&hash=12345'},
         swarming.extract_output_files_location(task_log))
 
   def test_empty(self):

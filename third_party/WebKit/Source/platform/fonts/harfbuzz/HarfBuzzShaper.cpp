@@ -235,7 +235,7 @@ static inline unsigned countGraphemesInCluster(const UChar* normalizedBuffer, un
     return numGraphemes < 0 ? 0 : numGraphemes;
 }
 
-inline HarfBuzzShaper::HarfBuzzRun::HarfBuzzRun(const SimpleFontData* fontData, unsigned startIndex, unsigned numCharacters, TextDirection direction, hb_script_t script)
+inline HarfBuzzShaper::HarfBuzzRun::HarfBuzzRun(const SimpleFontData* fontData, unsigned startIndex, unsigned numCharacters, hb_direction_t direction, hb_script_t script)
     : m_fontData(fontData)
     , m_startIndex(startIndex)
     , m_numCharacters(numCharacters)
@@ -272,16 +272,6 @@ inline void HarfBuzzShaper::HarfBuzzRun::applyShapeResult(hb_buffer_t* harfBuzzB
     m_advances.resize(m_numGlyphs);
     m_glyphToCharacterIndexes.resize(m_numGlyphs);
     m_offsets.resize(m_numGlyphs);
-}
-
-inline void HarfBuzzShaper::HarfBuzzRun::copyShapeResultAndGlyphPositions(const HarfBuzzRun& run)
-{
-    m_numGlyphs = run.m_numGlyphs;
-    m_glyphs = run.m_glyphs;
-    m_advances = run.m_advances;
-    m_glyphToCharacterIndexes = run.m_glyphToCharacterIndexes;
-    m_offsets = run.m_offsets;
-    m_width = run.m_width;
 }
 
 inline void HarfBuzzShaper::HarfBuzzRun::setGlyphAndPositions(unsigned index, uint16_t glyphId, float advance, float offsetX, float offsetY)
@@ -367,16 +357,19 @@ static void normalizeCharacters(const TextRun& run, unsigned length, UChar* dest
         UChar32 character;
         U16_NEXT(source, position, length, character);
         // Don't normalize tabs as they are not treated as spaces for word-end.
-        if (Character::treatAsSpace(character) && character != '\t')
-            character = ' ';
+        if (run.normalizeSpace() && Character::isNormalizedCanvasSpaceCharacter(character))
+            character = space;
+        else if (Character::treatAsSpace(character) && character != characterTabulation)
+            character = space;
         else if (Character::treatAsZeroWidthSpaceInComplexScript(character))
             character = zeroWidthSpace;
+
         U16_APPEND(destination, *destinationLength, length, character, error);
         ASSERT_UNUSED(error, !error);
     }
 }
 
-HarfBuzzShaper::HarfBuzzShaper(const Font* font, const TextRun& run, ForTextEmphasisOrNot forTextEmphasis)
+HarfBuzzShaper::HarfBuzzShaper(const Font* font, const TextRun& run, ForTextEmphasisOrNot forTextEmphasis, HashSet<const SimpleFontData*>* fallbackFonts)
     : m_font(font)
     , m_normalizedBufferLength(0)
     , m_run(run)
@@ -389,6 +382,7 @@ HarfBuzzShaper::HarfBuzzShaper(const Font* font, const TextRun& run, ForTextEmph
     , m_toIndex(m_run.length())
     , m_forTextEmphasis(forTextEmphasis)
     , m_glyphBoundingBox(std::numeric_limits<float>::max(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::max())
+    , m_fallbackFonts(fallbackFonts)
 {
     m_normalizedBuffer = adoptArrayPtr(new UChar[m_run.length() + 1]);
     normalizeCharacters(m_run, m_run.length(), m_normalizedBuffer.get(), &m_normalizedBufferLength);
@@ -396,10 +390,16 @@ HarfBuzzShaper::HarfBuzzShaper(const Font* font, const TextRun& run, ForTextEmph
     setFontFeatures();
 }
 
-bool HarfBuzzShaper::isWordEnd(unsigned index)
+// In complex text word-spacing affects each line-break, space (U+0020) and non-breaking space (U+00A0).
+static inline bool isCodepointSpace(UChar c)
+{
+    return c == space || c == noBreakSpace || c == newlineCharacter;
+}
+
+static inline bool isWordEnd(const UChar* normalizedBuffer, unsigned index)
 {
     // This could refer a high-surrogate, but should work.
-    return index && isCodepointSpace(m_normalizedBuffer[index]);
+    return index && isCodepointSpace(normalizedBuffer[index]);
 }
 
 int HarfBuzzShaper::determineWordBreakSpacing()
@@ -433,7 +433,7 @@ void HarfBuzzShaper::setPadding(int padding)
     unsigned numWordEnds = 0;
 
     for (unsigned i = 0; i < m_normalizedBufferLength; i++) {
-        if (isWordEnd(i))
+        if (isWordEnd(m_normalizedBuffer.get(), i))
             numWordEnds++;
     }
 
@@ -615,17 +615,18 @@ struct CandidateRun {
 };
 
 static inline bool collectCandidateRuns(const UChar* normalizedBuffer,
-    size_t bufferLength, const Font* font, Vector<CandidateRun>* runs)
+    size_t bufferLength, const Font* font, Vector<CandidateRun>* runs, bool isSpaceNormalize)
 {
     const UChar* normalizedBufferEnd = normalizedBuffer + bufferLength;
     SurrogatePairAwareTextIterator iterator(normalizedBuffer, 0, bufferLength, bufferLength);
     UChar32 character;
     unsigned clusterLength = 0;
     unsigned startIndexOfCurrentRun = 0;
+
     if (!iterator.consume(character, clusterLength))
         return false;
 
-    const SimpleFontData* nextFontData = font->glyphDataForCharacter(character, false).fontData;
+    const SimpleFontData* nextFontData = font->glyphDataForCharacter(character, false, isSpaceNormalize).fontData;
     UErrorCode errorCode = U_ZERO_ERROR;
     UScriptCode nextScript = uscript_getScript(character, &errorCode);
     if (U_FAILURE(errorCode))
@@ -647,7 +648,7 @@ static inline bool collectCandidateRuns(const UChar* normalizedBuffer,
                 continue;
             }
 
-            nextFontData = font->glyphDataForCharacter(character, false).fontData;
+            nextFontData = font->glyphDataForCharacter(character, false, isSpaceNormalize).fontData;
             nextScript = uscript_getScript(character, &errorCode);
             if (U_FAILURE(errorCode))
                 return false;
@@ -756,7 +757,7 @@ bool HarfBuzzShaper::createHarfBuzzRuns()
 {
     Vector<CandidateRun> candidateRuns;
     if (!collectCandidateRuns(m_normalizedBuffer.get(),
-        m_normalizedBufferLength, m_font, &candidateRuns))
+        m_normalizedBufferLength, m_font, &candidateRuns, m_run.normalizeSpace()))
         return false;
 
     if (!resolveCandidateRuns(candidateRuns))
@@ -787,6 +788,11 @@ static inline hb_script_t ICUScriptToHBScript(UScriptCode script)
     return hb_script_from_string(uscript_getShortName(script), -1);
 }
 
+static inline hb_direction_t TextDirectionToHBDirection(TextDirection dir)
+{
+    return dir == RTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR;
+}
+
 
 void HarfBuzzShaper::addHarfBuzzRun(unsigned startCharacter,
     unsigned endCharacter, const SimpleFontData* fontData,
@@ -794,9 +800,12 @@ void HarfBuzzShaper::addHarfBuzzRun(unsigned startCharacter,
 {
     ASSERT(endCharacter > startCharacter);
     ASSERT(script != USCRIPT_INVALID_CODE);
+    if (m_fallbackFonts)
+        m_fallbackFonts->add(fontData);
     return m_harfBuzzRuns.append(HarfBuzzRun::create(fontData,
         startCharacter, endCharacter - startCharacter,
-        m_run.direction(), ICUScriptToHBScript(script)));
+        TextDirectionToHBDirection(m_run.direction()),
+        ICUScriptToHBScript(script)));
 }
 
 static const uint16_t* toUint16(const UChar* src)
@@ -831,17 +840,14 @@ bool HarfBuzzShaper::shapeHarfBuzzRuns()
 
         hb_buffer_set_language(harfBuzzBuffer.get(), hb_language_from_string(locale.data(), locale.length()));
         hb_buffer_set_script(harfBuzzBuffer.get(), currentRun->script());
-        hb_buffer_set_direction(harfBuzzBuffer.get(), currentRun->rtl() ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
-
-        hb_segment_properties_t props;
-        hb_buffer_get_segment_properties(harfBuzzBuffer.get(), &props);
+        hb_buffer_set_direction(harfBuzzBuffer.get(), currentRun->direction());
 
         const UChar* src = m_normalizedBuffer.get() + currentRun->startIndex();
         std::wstring key(src, src + currentRun->numCharacters());
 
         CachedShapingResults* cachedResults = runCache.find(key);
         if (cachedResults) {
-            if (cachedResults->dir == props.direction && cachedResults->font == *m_font && cachedResults->locale == localeString) {
+            if (cachedResults->dir == currentRun->direction() && cachedResults->font == *m_font && cachedResults->locale == localeString) {
                 currentRun->applyShapeResult(cachedResults->buffer);
                 setGlyphPositionsForHarfBuzzRun(currentRun, cachedResults->buffer);
 
@@ -857,7 +863,7 @@ bool HarfBuzzShaper::shapeHarfBuzzRuns()
 
         // Add a space as pre-context to the buffer. This prevents showing dotted-circle
         // for combining marks at the beginning of runs.
-        static const uint16_t preContext = ' ';
+        static const uint16_t preContext = space;
         hb_buffer_add_utf16(harfBuzzBuffer.get(), &preContext, 1, 1, 0);
 
         if (fontDescription.variant() == FontVariantSmallCaps && u_islower(m_normalizedBuffer[currentRun->startIndex()])) {
@@ -877,7 +883,7 @@ bool HarfBuzzShaper::shapeHarfBuzzRuns()
         currentRun->applyShapeResult(harfBuzzBuffer.get());
         setGlyphPositionsForHarfBuzzRun(currentRun, harfBuzzBuffer.get());
 
-        runCache.insert(key, new CachedShapingResults(harfBuzzBuffer.get(), m_font, props.direction, localeString));
+        runCache.insert(key, new CachedShapingResults(harfBuzzBuffer.get(), m_font, currentRun->direction(), localeString));
 
         harfBuzzBuffer.set(hb_buffer_create());
     }
@@ -919,7 +925,7 @@ void HarfBuzzShaper::setGlyphPositionsForHarfBuzzRun(HarfBuzzRun* currentRun, hb
         if (isClusterEnd && !Character::treatAsZeroWidthSpace(m_normalizedBuffer[currentCharacterIndex]))
             spacing += m_letterSpacing;
 
-        if (isClusterEnd && isWordEnd(currentCharacterIndex))
+        if (isClusterEnd && isWordEnd(m_normalizedBuffer.get(), currentCharacterIndex))
             spacing += determineWordBreakSpacing();
 
         if (currentFontData->isZeroWidthSpaceGlyph(glyph)) {

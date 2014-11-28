@@ -4,10 +4,9 @@
 
 package org.chromium.android_webview;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
 
 /**
@@ -21,7 +20,7 @@ import org.chromium.components.web_contents_delegate_android.WebContentsDelegate
 public abstract class AwWebContentsDelegate extends WebContentsDelegateAndroid {
     // Callback filesSelectedInChooser() when done.
     @CalledByNative
-    public abstract void runFileChooser(int processId, int renderId, int mode_flags,
+    public abstract void runFileChooser(int processId, int renderId, int modeFlags,
             String acceptTypes, String title, String defaultFilename,  boolean capture);
 
     @CalledByNative
@@ -41,5 +40,5 @@ public abstract class AwWebContentsDelegate extends WebContentsDelegateAndroid {
 
     // Call in response to a prior runFileChooser call.
     protected static native void nativeFilesSelectedInChooser(int processId, int renderId,
-            int mode_flags, String[] filePath, String[] displayName);
+            int modeFlags, String[] filePath, String[] displayName);
 }

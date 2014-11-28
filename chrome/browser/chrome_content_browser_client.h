@@ -103,10 +103,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::SiteInstance* site_instance) OVERRIDE;
   virtual void SiteInstanceDeleting(content::SiteInstance* site_instance)
       OVERRIDE;
-  virtual void WorkerProcessCreated(content::SiteInstance* site_instance,
-                                    int worker_process_id) OVERRIDE;
-  virtual void WorkerProcessTerminated(content::SiteInstance* site_instance,
-                                       int worker_process_id) OVERRIDE;
   virtual bool ShouldSwapBrowsingInstancesForNavigation(
       content::SiteInstance* site_instance,
       const GURL& current_url,
@@ -237,8 +233,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                                int render_process_id,
                                int opener_id,
                                bool* no_javascript_access) OVERRIDE;
-  virtual std::string GetWorkerProcessTitle(
-      const GURL& url, content::ResourceContext* context) OVERRIDE;
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual content::SpeechRecognitionManagerDelegate*
       GetSpeechRecognitionManagerDelegate() OVERRIDE;
@@ -248,9 +242,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                                    const GURL& url,
                                    content::WebPreferences* prefs) OVERRIDE;
-  virtual void UpdateInspectorSetting(content::RenderViewHost* rvh,
-                                      const std::string& key,
-                                      const std::string& value) OVERRIDE;
   virtual void BrowserURLHandlerCreated(
       content::BrowserURLHandler* handler) OVERRIDE;
   virtual void ClearCache(content::RenderViewHost* rvh) OVERRIDE;
@@ -271,11 +262,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void GetAdditionalAllowedSchemesForFileSystem(
       std::vector<std::string>* additional_schemes) OVERRIDE;
   virtual void GetURLRequestAutoMountHandlers(
-      std::vector<fileapi::URLRequestAutoMountHandler>* handlers) OVERRIDE;
+      std::vector<storage::URLRequestAutoMountHandler>* handlers) OVERRIDE;
   virtual void GetAdditionalFileSystemBackends(
       content::BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      ScopedVector<fileapi::FileSystemBackend>* additional_backends) OVERRIDE;
+      ScopedVector<storage::FileSystemBackend>* additional_backends) OVERRIDE;
   virtual content::DevToolsManagerDelegate*
       GetDevToolsManagerDelegate() OVERRIDE;
   virtual bool IsPluginAllowedToCallRequestOSFileHandle(
@@ -298,6 +289,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void PreSpawnRenderer(sandbox::TargetPolicy* policy,
                                 bool* success) OVERRIDE;
 #endif
+  virtual bool CheckMediaAccessPermission(
+      content::BrowserContext* browser_context,
+      const GURL& security_origin,
+      content::MediaStreamType type) OVERRIDE;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;

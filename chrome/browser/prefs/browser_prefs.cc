@@ -43,6 +43,7 @@
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/extension_welcome_notification.h"
 #include "chrome/browser/notifications/message_center_notification_manager.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
 #include "chrome/browser/plugins/plugin_finder.h"
@@ -57,7 +58,6 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/renderer_host/pepper/device_id_fetcher.h"
-#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -72,7 +72,6 @@
 #include "chrome/browser/ui/startup/autolaunch_prompt.h"
 #include "chrome/browser/ui/startup/default_browser_prompt.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
-#include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -84,6 +83,7 @@
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
+#include "components/gcm_driver/gcm_channel_status_syncer.h"
 #include "components/google/core/browser/google_pref_names.h"
 #include "components/google/core/browser/google_url_tracker.h"
 #include "components/network_time/network_time_tracker.h"
@@ -107,13 +107,13 @@
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
-#include "apps/prefs.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "extensions/browser/extension_prefs.h"
 #endif
 
@@ -136,6 +136,7 @@
 #include "chrome/browser/android/new_tab_page_prefs.h"
 #else
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
+#include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #include "chrome/browser/ui/autofill/generated_credit_card_bubble_controller.h"
 #endif
 
@@ -222,11 +223,12 @@ const char kBackupPref[] = "backup";
 // be cleared from user data.
 const char kSyncPromoErrorMessage[] = "sync_promo.error_message";
 
-// The AutomaticProfileResetter service, which has since been unimplemented,
-// used this preference to save that the profile reset prompt had already been
-// shown. We keep the name here for now so that we can clear out legacy values.
+// The AutomaticProfileResetter service used this preference to save that the
+// profile reset prompt had already been shown, however, the preference has been
+// renamed in Local State. We keep the name here for now so that we can clear
+// out legacy values.
 // TODO(engedy): Remove this and usages in M42 or later. See crbug.com/398813.
-const char kProfileResetPromptMemento[] = "profile.reset_prompt_memento";
+const char kLegacyProfileResetPromptMemento[] = "profile.reset_prompt_memento";
 #endif
 
 }  // namespace
@@ -252,7 +254,6 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   GpuModeManager::RegisterPrefs(registry);
   IntranetRedirectDetector::RegisterPrefs(registry);
   IOThread::RegisterPrefs(registry);
-  KeywordEditorController::RegisterPrefs(registry);
   network_time::NetworkTimeTracker::RegisterPrefs(registry);
   PrefProxyConfigTrackerImpl::RegisterPrefs(registry);
   ProfileInfoCache::RegisterPrefs(registry);
@@ -263,7 +264,6 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   SigninManagerFactory::RegisterPrefs(registry);
   SSLConfigServiceManager::RegisterPrefs(registry);
   UpgradeDetector::RegisterPrefs(registry);
-  WebCacheManager::RegisterPrefs(registry);
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
   autofill::AutofillDialogController::RegisterPrefs(registry);
@@ -272,6 +272,10 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::BrowserPolicyConnector::RegisterPrefs(registry);
   policy::PolicyStatisticsCollector::RegisterPrefs(registry);
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+  EasyUnlockService::RegisterPrefs(registry);
 #endif
 
 #if defined(ENABLE_NOTIFICATIONS) && !defined(OS_ANDROID)
@@ -292,8 +296,11 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 #endif  // defined(ENABLE_TASK_MANAGER)
 
 #if !defined(OS_ANDROID)
+  AutomaticProfileResetterFactory::RegisterPrefs(registry);
   BackgroundModeManager::RegisterPrefs(registry);
   RegisterBrowserPrefs(registry);
+  // The native GCM is used on Android instead.
+  gcm::GCMChannelStatusSyncer::RegisterPrefs(registry);
 #if !defined(OS_CHROMEOS)
   RegisterDefaultBrowserPromptPrefs(registry);
 #endif  // !defined(OS_CHROMEOS)
@@ -353,7 +360,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   // Preferences registered only for migration (clearing or moving to a new key)
   // go here.
 #if !defined(OS_ANDROID)
-  registry->RegisterDictionaryPref(kProfileResetPromptMemento);
+  registry->RegisterDictionaryPref(kLegacyProfileResetPromptMemento);
 #endif  // !defined(OS_ANDROID)
 }
 
@@ -404,7 +411,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
-  apps::RegisterProfilePrefs(registry);
   EasyUnlockService::RegisterProfilePrefs(registry);
   extensions::ActivityLog::RegisterProfilePrefs(registry);
   extensions::launch_util::RegisterProfilePrefs(registry);
@@ -427,6 +433,13 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   DesktopNotificationService::RegisterProfilePrefs(registry);
 #endif
 
+#if defined(ENABLE_NOTIFICATIONS) && defined(ENABLE_EXTENSIONS) && \
+    !defined(OS_ANDROID)
+  // The extension welcome notification requires a build that enables extensions
+  // and notifications, and uses the UI message center.
+  ExtensionWelcomeNotification::RegisterProfilePrefs(registry);
+#endif
+
 #if defined(ENABLE_SERVICE_DISCOVERY)
   LocalDiscoveryUI::RegisterProfilePrefs(registry);
 #endif
@@ -443,8 +456,11 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   DriveAppMapping::RegisterProfilePrefs(registry);
   extensions::CommandService::RegisterProfilePrefs(registry);
   extensions::ExtensionSettingsHandler::RegisterProfilePrefs(registry);
+#if !defined(USE_ATHENA)
   extensions::TabsCaptureVisibleTabFunction::RegisterProfilePrefs(registry);
+#endif
   first_run::RegisterProfilePrefs(registry);
+  gcm::GCMChannelStatusSyncer::RegisterProfilePrefs(registry);
   NewTabUI::RegisterProfilePrefs(registry);
   PepperFlashSettingsManager::RegisterProfilePrefs(registry);
   PinnedTabCodec::RegisterProfilePrefs(registry);
@@ -474,6 +490,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
 
 #if defined(OS_WIN)
+  component_updater::RegisterProfilePrefsForSwReporter(registry);
   NetworkProfileBubble::RegisterProfilePrefs(registry);
 #endif
 
@@ -606,7 +623,7 @@ void MigrateBrowserPrefs(Profile* profile, PrefService* local_state) {
   }
 
 #if !defined(OS_ANDROID)
-  local_state->ClearPref(kProfileResetPromptMemento);
+  local_state->ClearPref(kLegacyProfileResetPromptMemento);
 #endif
 
 #if defined(OS_CHROMEOS)

@@ -1,4 +1,3 @@
-#include "precompiled.h"
 //
 // Copyright (c) 2013-2014 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -46,7 +45,7 @@ static D3D9FastCopyMap BuildFastCopyMap()
 {
     D3D9FastCopyMap map;
 
-    map.insert(std::make_pair(D3DFMT_A8R8G8B8, D3D9FastCopyFormat(GL_RGBA, GL_UNSIGNED_BYTE, CopyBGRAUByteToRGBAUByte)));
+    map.insert(std::make_pair(D3DFMT_A8R8G8B8, D3D9FastCopyFormat(GL_RGBA, GL_UNSIGNED_BYTE, CopyBGRA8ToRGBA8)));
 
     return map;
 }

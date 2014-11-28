@@ -51,7 +51,6 @@ static unsigned long long toIntegerMilliseconds(double seconds)
 PerformanceTiming::PerformanceTiming(LocalFrame* frame)
     : DOMWindowProperty(frame)
 {
-    ScriptWrappable::init(this);
 }
 
 unsigned long long PerformanceTiming::navigationStart() const
@@ -353,6 +352,11 @@ unsigned long long PerformanceTiming::monotonicTimeToIntegerMilliseconds(double 
         return 0;
 
     return toIntegerMilliseconds(timing->monotonicTimeToPseudoWallTime(monotonicSeconds));
+}
+
+void PerformanceTiming::trace(Visitor* visitor)
+{
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

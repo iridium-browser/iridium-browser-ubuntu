@@ -25,11 +25,6 @@ import sys
 
 from common_includes import *
 
-CONFIG = {
-  PERSISTFILE_BASENAME: "/tmp/v8-bump-up-version-tempfile",
-  VERSION_FILE: "src/version.cc",
-}
-
 VERSION_BRANCH = "auto-bump-up-version"
 
 
@@ -72,7 +67,7 @@ class LastChangeBailout(Step):
   MESSAGE = "Stop script if the last change modified the version."
 
   def RunStep(self):
-    if self._config[VERSION_FILE] in self.GitChangedFiles(self["latest"]):
+    if VERSION_FILE in self.GitChangedFiles(self["latest"]):
       print "Stop due to recent version change."
       return True
 
@@ -121,7 +116,7 @@ class LKGRVersionUpToDateBailout(Step):
   def RunStep(self):
     # If a version-change commit becomes the lkgr, don't bump up the version
     # again.
-    if self._config[VERSION_FILE] in self.GitChangedFiles(self["lkgr"]):
+    if VERSION_FILE in self.GitChangedFiles(self["lkgr"]):
       print "Stop because the lkgr is a version change itself."
       return True
 
@@ -193,15 +188,19 @@ class ChangeVersion(Step):
   def RunStep(self):
     self.GitCreateBranch(VERSION_BRANCH, "bleeding_edge")
 
-    self.SetVersion(self.Config(VERSION_FILE), "new_")
+    self.SetVersion(os.path.join(self.default_cwd, VERSION_FILE), "new_")
 
     try:
-      self.GitCommit("[Auto-roll] Bump up version to %s\n\nTBR=%s" %
-                     (self["new_version"], self._options.author))
-      self.GitUpload(author=self._options.author,
-                     force=self._options.force_upload,
-                     bypass_hooks=True)
-      self.GitDCommit()
+      msg = "[Auto-roll] Bump up version to %s" % self["new_version"]
+      self.GitCommit("%s\n\nTBR=%s" % (msg, self._options.author),
+                     author=self._options.author)
+      if self._options.svn:
+        self.SVNCommit("branches/bleeding_edge", msg)
+      else:
+        self.GitUpload(author=self._options.author,
+                       force=self._options.force_upload,
+                       bypass_hooks=True)
+        self.GitDCommit()
       print "Successfully changed the version."
     finally:
       # Clean up.
@@ -223,6 +222,11 @@ class BumpUpVersion(ScriptsBase):
     options.force_upload = True
     return True
 
+  def _Config(self):
+    return {
+      "PERSISTFILE_BASENAME": "/tmp/v8-bump-up-version-tempfile",
+    }
+
   def _Steps(self):
     return [
       Preparation,
@@ -238,4 +242,4 @@ class BumpUpVersion(ScriptsBase):
     ]
 
 if __name__ == "__main__":  # pragma: no cover
-  sys.exit(BumpUpVersion(CONFIG).Run())
+  sys.exit(BumpUpVersion().Run())

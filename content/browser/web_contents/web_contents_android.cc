@@ -178,7 +178,6 @@ void WebContentsAndroid::BeginExitTransition(JNIEnv* env,
 
 void WebContentsAndroid::OnHide(JNIEnv* env, jobject obj) {
   web_contents_->WasHidden();
-  PauseVideo();
 }
 
 void WebContentsAndroid::OnShow(JNIEnv* env, jobject obj) {
@@ -198,13 +197,6 @@ void WebContentsAndroid::ReleaseMediaPlayers(JNIEnv* env, jobject jobj) {
   if (manager)
     manager->ReleaseAllMediaPlayers();
 #endif // defined(ENABLE_BROWSER_CDMS)
-}
-
-void WebContentsAndroid::PauseVideo() {
-  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
-      web_contents_->GetRenderViewHost());
-  if (rvhi)
-    rvhi->media_web_contents_observer()->PauseVideo();
 }
 
 void WebContentsAndroid::AddStyleSheetByURL(
@@ -343,12 +335,11 @@ void WebContentsAndroid::DidStartNavigationTransitionForFrame(int64 frame_id) {
 void WebContentsAndroid::EvaluateJavaScript(JNIEnv* env,
                                             jobject obj,
                                             jstring script,
-                                            jobject callback,
-                                            jboolean start_renderer) {
+                                            jobject callback) {
   RenderViewHost* rvh = web_contents_->GetRenderViewHost();
   DCHECK(rvh);
 
-  if (start_renderer && !rvh->IsRenderViewLive()) {
+  if (!rvh->IsRenderViewLive()) {
     if (!static_cast<WebContentsImpl*>(web_contents_)->
         CreateRenderViewForInitialEmptyDocument()) {
       LOG(ERROR) << "Failed to create RenderView in EvaluateJavaScript";

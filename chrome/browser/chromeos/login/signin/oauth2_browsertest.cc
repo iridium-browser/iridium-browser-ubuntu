@@ -15,7 +15,6 @@
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
@@ -34,6 +33,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/result_catcher.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/cookies/canonical_cookie.h"
@@ -453,7 +454,8 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_MergeSession) {
 // MergeSession test is attempting to merge session for an existing profile
 // that was generated in PRE_PRE_MergeSession test. This attempt should fail
 // since FakeGaia instance isn't configured to return relevant tokens/cookies.
-IN_PROC_BROWSER_TEST_F(OAuth2Test, MergeSession) {
+// This test is flaky, see: crbug.com/408867.
+IN_PROC_BROWSER_TEST_F(OAuth2Test, DISABLED_MergeSession) {
   SimulateNetworkOnline();
 
   content::WindowedNotificationObserver(
@@ -744,7 +746,7 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, XHRThrottle) {
 
   // Run background page tests. The tests will just wait for XHR request
   // to complete.
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
 
   scoped_ptr<ExtensionTestMessageListener> non_google_xhr_listener(
       new ExtensionTestMessageListener("non-google-xhr-received", false));

@@ -19,6 +19,8 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/app_list/start_page_observer.h"
 #include "components/signin/core/browser/signin_manager_base.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/app_list/app_list_view_delegate.h"
 
 class AppListControllerDelegate;
@@ -50,15 +52,27 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
                             public HotwordClient,
                             public ProfileInfoCacheObserver,
                             public SigninManagerBase::Observer,
-                            public SigninManagerFactory::Observer {
+                            public SigninManagerFactory::Observer,
+                            public content::NotificationObserver {
  public:
-  AppListViewDelegate(Profile* profile,
-                      AppListControllerDelegate* controller);
+  // Constructs Chrome's AppListViewDelegate with a NULL Profile.
+  // Does not take ownership of |controller|. TODO(tapted): It should.
+  explicit AppListViewDelegate(AppListControllerDelegate* controller);
   virtual ~AppListViewDelegate();
 
+  // Configure the AppList for the given |profile|.
+  void SetProfile(Profile* profile);
+  Profile* profile() { return profile_; }
+
  private:
-  // Updates the app list's current profile and ProfileMenuItems.
-  void OnProfileChanged();
+  // Updates the speech webview and start page for the current |profile_|.
+  void SetUpSearchUI();
+
+  // Updates the app list's ProfileMenuItems for the current |profile_|.
+  void SetUpProfileSwitcher();
+
+  // Updates the app list's custom launcher pages for the current |profile_|.
+  void SetUpCustomLauncherPages();
 
   // Overridden from app_list::AppListViewDelegate:
   virtual bool ForceNativeDesktop() const OVERRIDE;
@@ -118,9 +132,11 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
 
   // Overridden from SigninManagerBase::Observer:
   virtual void GoogleSigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void GoogleSigninSucceeded(const std::string& username,
+  virtual void GoogleSigninSucceeded(const std::string& account_id,
+                                     const std::string& username,
                                      const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& username) OVERRIDE;
+  virtual void GoogleSignedOut(const std::string& account_id,
+                               const std::string& username) OVERRIDE;
 
   // Overridden from ProfileInfoCacheObserver:
   virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE;
@@ -130,7 +146,11 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
       const base::FilePath& profile_path,
       const base::string16& old_profile_name) OVERRIDE;
 
-  scoped_ptr<app_list::SearchController> search_controller_;
+  // Overridden from content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   // Unowned pointer to the controller.
   AppListControllerDelegate* controller_;
   // Unowned pointer to the associated profile. May change if SetProfileByPath
@@ -140,7 +160,9 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
   // if |profile_| changes.
   app_list::AppListModel* model_;
 
+  // Note: order ensures |search_controller_| is destroyed before |speech_ui_|.
   scoped_ptr<app_list::SpeechUIModel> speech_ui_;
+  scoped_ptr<app_list::SearchController> search_controller_;
 
   base::TimeDelta auto_launch_timeout_;
 
@@ -158,6 +180,9 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
 
   // Window contents of additional custom launcher pages.
   ScopedVector<apps::CustomLauncherPageContents> custom_page_contents_;
+
+  // Registers for NOTIFICATION_APP_TERMINATING to unload custom launcher pages.
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListViewDelegate);
 };

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,7 +5,9 @@
 """Cros unit test library, with utility functions."""
 
 from __future__ import print_function
+
 import collections
+import contextlib
 import cookielib
 import cStringIO
 import datetime
@@ -22,15 +23,22 @@ import re
 import socket
 import stat
 import sys
+import time
 import unittest
 import urllib
 
 from chromite.cbuildbot import constants
+from chromite.lib import cidb
 import cros_build_lib
 import gob_util
 import osutils
 import terminal
 import timeout_util
+
+# Unit tests should never connect to the live prod or debug instances
+# of the cidb. This call ensures that they will not accidentally
+# do so through the normal cidb SetUp / GetConnectionForBuilder factory.
+cidb.CIDBConnectionFactory.SetupMockCidb()
 
 if 'chromite' not in sys.modules:
   # TODO(build): Finish test wrapper (http://crosbug.com/37517).
@@ -52,19 +60,21 @@ class GlobalTestConfig(object):
   """Global configuration for tests."""
 
   # By default, disable all network tests.
-  NETWORK_TESTS_DISABLED = True
+  RUN_NETWORK_TESTS = False
+  NETWORK_TESTS_SKIPPED = 0
 
 
-def NetworkTest(reason='Skipping network test'):
+def NetworkTest(reason='Skipping network test (re-run w/--network)'):
   """Decorator for unit tests. Skip the test if --network is not specified."""
   def Decorator(test_item):
     @functools.wraps(test_item)
     def NetworkWrapper(*args, **kwargs):
-      if GlobalTestConfig.NETWORK_TESTS_DISABLED:
+      if not GlobalTestConfig.RUN_NETWORK_TESTS:
+        GlobalTestConfig.NETWORK_TESTS_SKIPPED += 1
         raise unittest.SkipTest(reason)
       test_item(*args, **kwargs)
 
-    # We can't check GlobalTestConfig.NETWORK_TESTS_DISABLED here because
+    # We can't check GlobalTestConfig.RUN_NETWORK_TESTS here because
     # __main__ hasn't run yet. Wrap each test so that we check the flag before
     # running it.
     if isinstance(test_item, type) and issubclass(test_item, TestCase):
@@ -630,7 +640,7 @@ class TestCase(unittest.TestCase):
   def assertRaises2(self, exception, functor, *args, **kwargs):
     """Like assertRaises, just with checking of the exception.
 
-    args:
+    Args:
       exception: The expected exception type to intecept.
       functor: The function to invoke.
       args: Positional args to pass to the function.
@@ -642,13 +652,15 @@ class TestCase(unittest.TestCase):
         the resultant exception.  Thus if you wanted to catch a ENOENT, you
         would do:
           assertRaises2(EnvironmentError, func, args,
-                        attrs={"errno":errno.ENOENT})
+                        check_attrs={'errno': errno.ENOENT})
+      ex_msg: A substring that should be in the stringified exception.
       msg: The error message to be displayed if the exception isn't raised.
         If not given, a suitable one is defaulted to.
       returns: The exception object.
     """
     exact_kls = kwargs.pop("exact_kls", None)
     check_attrs = kwargs.pop("check_attrs", {})
+    ex_msg = kwargs.pop("ex_msg", None)
     msg = kwargs.pop("msg", None)
     if msg is None:
       msg = ("%s(*%r, **%r) didn't throw an exception"
@@ -657,6 +669,8 @@ class TestCase(unittest.TestCase):
       functor(*args, **kwargs)
       raise AssertionError(msg)
     except exception as e:
+      if ex_msg:
+        self.assertIn(ex_msg, str(e))
       if exact_kls:
         self.assertEqual(e.__class__, exception)
       bad = []
@@ -1194,12 +1208,13 @@ class GerritTestCase(MockTempDirTestCase):
     return self._CloneProject(name, path)
 
   @classmethod
-  def _CreateCommit(cls, clone_path, fn=None, msg=None, text=None, amend=False):
+  def _CreateCommit(cls, clone_path, filename=None, msg=None, text=None,
+                    amend=False):
     """Create a commit in the given git checkout.
 
     Args:
       clone_path: The directory on disk of the git clone.
-      fn: The name of the file to write. Optional.
+      filename: The name of the file to write. Optional.
       msg: The commit message. Optional.
       text: The text to append to the file. Optional.
       amend: Whether to amend an existing patch. If set, we will amend the
@@ -1208,34 +1223,35 @@ class GerritTestCase(MockTempDirTestCase):
     Returns:
       (sha1, changeid) of the new commit.
     """
-    if not fn:
-      fn = 'test-file.txt'
+    if not filename:
+      filename = 'test-file.txt'
     if not msg:
       msg = 'Test Message'
     if not text:
       text = 'Another day, another dollar.'
-    fpath = os.path.join(clone_path, fn)
+    fpath = os.path.join(clone_path, filename)
     osutils.WriteFile(fpath, '%s\n' % text, mode='a')
-    cros_build_lib.RunCommand(['git', 'add', fn], cwd=clone_path, quiet=True)
+    cros_build_lib.RunCommand(['git', 'add', filename], cwd=clone_path,
+                              quiet=True)
     cmd = ['git', 'commit']
     cmd += ['--amend', '-C', 'HEAD'] if amend else ['-m', msg]
     cros_build_lib.RunCommand(cmd, cwd=clone_path, quiet=True)
     return cls._GetCommit(clone_path)
 
-  def createCommit(self, clone_path, fn=None, msg=None, text=None,
+  def createCommit(self, clone_path, filename=None, msg=None, text=None,
                    amend=False):
     """Create a commit in the given git checkout.
 
     Args:
       clone_path: The directory on disk of the git clone.
-      fn: The name of the file to write. Optional.
+      filename: The name of the file to write. Optional.
       msg: The commit message. Optional.
       text: The text to append to the file. Optional.
       amend: Whether to amend an existing patch. If set, we will amend the
         HEAD commit in the checkout and upload that patch.
     """
     clone_path = os.path.join(self.tempdir, clone_path)
-    return self._CreateCommit(clone_path, fn, msg, text, amend)
+    return self._CreateCommit(clone_path, filename, msg, text, amend)
 
   @staticmethod
   def _GetCommit(clone_path, ref='HEAD'):
@@ -1405,6 +1421,23 @@ class MockLoggingTestCase(MockTestCase, LoggingTestCase):
   """Convenience class mixing Logging and Mock."""
 
 
+@contextlib.contextmanager
+def SetTimeZone(tz):
+  """Temporarily set the timezone to the specified value.
+
+  This is needed because cros_test_lib.TestCase doesn't call time.tzset()
+  after resetting the environment.
+  """
+  old_environ = os.environ.copy()
+  try:
+    os.environ['TZ'] = tz
+    time.tzset()
+    yield
+  finally:
+    osutils.SetEnvironment(old_environ)
+    time.tzset()
+
+
 def FindTests(directory, module_namespace=''):
   """Find all *_unittest.py, and return their python namespaces.
 
@@ -1436,7 +1469,7 @@ def main(**kwargs):
   allow_exit = kwargs.pop('exit', True)
   if '--network' in sys.argv:
     sys.argv.remove('--network')
-    GlobalTestConfig.NETWORK_TESTS_DISABLED = False
+    GlobalTestConfig.RUN_NETWORK_TESTS = True
   level = kwargs.pop('level', logging.CRITICAL)
   for flag in ('-d', '--debug'):
     if flag in sys.argv:
@@ -1447,6 +1480,9 @@ def main(**kwargs):
     unittest.main(**kwargs)
     raise SystemExit(0)
   except SystemExit as e:
+    if GlobalTestConfig.NETWORK_TESTS_SKIPPED:
+      print('Note: %i network test(s) skipped; use --network to run them.' %
+            GlobalTestConfig.NETWORK_TESTS_SKIPPED)
     if e.__class__ != SystemExit or allow_exit:
       raise
     # Redo the exit code ourselves- unittest throws True on occasion.

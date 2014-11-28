@@ -34,9 +34,10 @@
 
 #include "core/InputTypeNames.h"
 #include "core/frame/FrameView.h"
+#include "core/html/forms/DateTimeChooserClient.h"
+#include "core/page/PagePopup.h"
 #include "core/rendering/RenderTheme.h"
 #include "platform/DateComponents.h"
-#include "platform/DateTimeChooserClient.h"
 #include "platform/Language.h"
 #include "platform/text/PlatformLocale.h"
 #include "public/platform/Platform.h"
@@ -71,6 +72,11 @@ void DateTimeChooserImpl::endChooser()
     if (!m_popup)
         return;
     m_chromeClient->closePagePopup(m_popup);
+}
+
+AXObject* DateTimeChooserImpl::rootAXObject()
+{
+    return m_popup ? m_popup->rootAXObject() : 0;
 }
 
 IntSize DateTimeChooserImpl::contentSize()
@@ -132,6 +138,9 @@ void DateTimeChooserImpl::writeDocument(SharedBuffer* data)
     addProperty("todayLabel", todayLabelString, data);
     addProperty("clearLabel", locale().queryString(WebLocalizedString::CalendarClear), data);
     addProperty("weekLabel", locale().queryString(WebLocalizedString::WeekNumberLabel), data);
+    addProperty("axShowMonthSelector", locale().queryString(WebLocalizedString::AXCalendarShowMonthSelector), data);
+    addProperty("axShowNextMonth", locale().queryString(WebLocalizedString::AXCalendarShowNextMonth), data);
+    addProperty("axShowPreviousMonth", locale().queryString(WebLocalizedString::AXCalendarShowPreviousMonth), data);
     addProperty("weekStartDay", m_locale->firstDayOfWeek(), data);
     addProperty("shortMonthLabels", m_locale->shortMonthLabels(), data);
     addProperty("dayLabels", m_locale->weekDayShortLabels(), data);
@@ -162,6 +171,11 @@ void DateTimeChooserImpl::writeDocument(SharedBuffer* data)
     data->append(Platform::current()->loadResource("suggestionPicker.js"));
     data->append(Platform::current()->loadResource("calendarPicker.js"));
     addString("</script></body>\n", data);
+}
+
+Element& DateTimeChooserImpl::ownerElement()
+{
+    return m_client->ownerElement();
 }
 
 Locale& DateTimeChooserImpl::locale()

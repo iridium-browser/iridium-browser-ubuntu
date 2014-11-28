@@ -15,7 +15,6 @@
 #include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/about_ui.h"
@@ -42,7 +41,6 @@
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/password_manager_internals/password_manager_internals_ui.h"
-#include "chrome/browser/ui/webui/performance_monitor/performance_monitor_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
@@ -63,6 +61,7 @@
 #include "components/dom_distiller/webui/dom_distiller_ui.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/favicon_base/select_favicon_frames.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
@@ -381,9 +380,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // extensions, etc) aren't supported.
   if (url.host() == chrome::kChromeUIInspectHost)
     return &NewWebUI<InspectUI>;
-  // Performance monitoring page is not on Android for now.
-  if (url.host() == chrome::kChromeUIPerformanceMonitorHost)
-    return &NewWebUI<performance_monitor::PerformanceMonitorUI>;
   // Android does not support plugins for now.
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewWebUI<PluginsUI>;
@@ -533,8 +529,9 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #endif
 #if defined(ENABLE_FULL_PRINTING)
   if (url.host() == chrome::kChromeUIPrintHost &&
-      !profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled))
+      !profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
     return &NewWebUI<PrintPreviewUI>;
+  }
 #endif
 
   if (IsEnableDomDistillerSet() &&

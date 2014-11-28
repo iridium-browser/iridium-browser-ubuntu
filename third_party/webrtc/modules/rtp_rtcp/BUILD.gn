@@ -85,6 +85,7 @@ source_set("rtp_rtcp") {
     "source/rtp_format_h264.h",
     "source/rtp_format_vp8.cc",
     "source/rtp_format_vp8.h",
+    "source/rtp_format_video_generic.cc",
     "source/rtp_format_video_generic.h",
     "source/vp8_partition_aggregator.cc",
     "source/vp8_partition_aggregator.h",
@@ -92,6 +93,12 @@ source_set("rtp_rtcp") {
     "mocks/mock_rtp_rtcp.h",
     "source/mock/mock_rtp_payload_strategy.h",
   ]
+
+  if (is_clang) {
+    # Suppress warnings from Chrome's Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
 
   deps = [
     "../../system_wrappers",

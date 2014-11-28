@@ -108,6 +108,8 @@ static const char kClientAddrHost2[] = "22.22.22.22";
 static const char kStunAddrHost[] = "99.99.99.1";
 static const SocketAddress kTurnUdpIntAddr("99.99.99.4", 3478);
 static const SocketAddress kTurnUdpExtAddr("99.99.99.6", 0);
+static const char kTurnUsername[] = "test";
+static const char kTurnPassword[] = "test";
 
 static const char kSessionVersion[] = "1";
 
@@ -510,7 +512,7 @@ class WebRtcSessionTest : public testing::Test {
   }
 
   void VerifyAnswerFromNonCryptoOffer() {
-    // Create a SDP without Crypto.
+    // Create an SDP without Crypto.
     cricket::MediaSessionOptions options;
     options.has_video = true;
     JsepSessionDescription* offer(
@@ -1083,6 +1085,18 @@ class WebRtcSessionTest : public testing::Test {
     }
   }
 
+  void ConfigureAllocatorWithTurn() {
+    cricket::RelayServerConfig relay_server(cricket::RELAY_TURN);
+    cricket::RelayCredentials credentials(kTurnUsername, kTurnPassword);
+    relay_server.credentials = credentials;
+    relay_server.ports.push_back(cricket::ProtocolAddress(
+        kTurnUdpIntAddr, cricket::PROTO_UDP, false));
+    allocator_->AddRelay(relay_server);
+    allocator_->set_step_delay(cricket::kMinimumStepDelay);
+    allocator_->set_flags(cricket::PORTALLOCATOR_DISABLE_TCP |
+                          cricket::PORTALLOCATOR_ENABLE_BUNDLE);
+  }
+
   cricket::FakeMediaEngine* media_engine_;
   cricket::FakeDataEngine* data_engine_;
   cricket::FakeDeviceManager* device_manager_;
@@ -1162,6 +1176,53 @@ TEST_F(WebRtcSessionTest, TestStunError) {
   EXPECT_EQ(6u, observer_.mline_1_candidates_.size());
 }
 
+// Test session delivers no candidates gathered when constraint set to "none".
+TEST_F(WebRtcSessionTest, TestIceTransportsNone) {
+  AddInterface(rtc::SocketAddress(kClientAddrHost1, kClientAddrPort));
+  SetIceTransportType(PeerConnectionInterface::kNone);
+  Init(NULL);
+  mediastream_signaling_.SendAudioVideoStream1();
+  InitiateCall();
+  EXPECT_TRUE_WAIT(observer_.oncandidatesready_, kIceCandidatesTimeout);
+  EXPECT_EQ(0u, observer_.mline_0_candidates_.size());
+  EXPECT_EQ(0u, observer_.mline_1_candidates_.size());
+}
+
+// Test session delivers only relay candidates gathered when constaint set to
+// "relay".
+TEST_F(WebRtcSessionTest, TestIceTransportsRelay) {
+  AddInterface(rtc::SocketAddress(kClientAddrHost1, kClientAddrPort));
+  ConfigureAllocatorWithTurn();
+  SetIceTransportType(PeerConnectionInterface::kRelay);
+  Init(NULL);
+  mediastream_signaling_.SendAudioVideoStream1();
+  InitiateCall();
+  EXPECT_TRUE_WAIT(observer_.oncandidatesready_, kIceCandidatesTimeout);
+  EXPECT_EQ(2u, observer_.mline_0_candidates_.size());
+  EXPECT_EQ(2u, observer_.mline_1_candidates_.size());
+  for (size_t i = 0; i < observer_.mline_0_candidates_.size(); ++i) {
+    EXPECT_EQ(cricket::RELAY_PORT_TYPE,
+              observer_.mline_0_candidates_[i].type());
+  }
+  for (size_t i = 0; i < observer_.mline_1_candidates_.size(); ++i) {
+    EXPECT_EQ(cricket::RELAY_PORT_TYPE,
+              observer_.mline_1_candidates_[i].type());
+  }
+}
+
+// Test session delivers all candidates gathered when constaint set to "all".
+TEST_F(WebRtcSessionTest, TestIceTransportsAll) {
+  AddInterface(rtc::SocketAddress(kClientAddrHost1, kClientAddrPort));
+  SetIceTransportType(PeerConnectionInterface::kAll);
+  Init(NULL);
+  mediastream_signaling_.SendAudioVideoStream1();
+  InitiateCall();
+  EXPECT_TRUE_WAIT(observer_.oncandidatesready_, kIceCandidatesTimeout);
+  // Host + STUN. By default allocator is disabled to gather relay candidates.
+  EXPECT_EQ(4u, observer_.mline_0_candidates_.size());
+  EXPECT_EQ(4u, observer_.mline_1_candidates_.size());
+}
+
 TEST_F(WebRtcSessionTest, SetSdpFailedOnInvalidSdp) {
   Init(NULL);
   SessionDescriptionInterface* offer = NULL;
@@ -1211,13 +1272,12 @@ TEST_F(WebRtcSessionTest, TestCreateSdesOfferReceiveSdesAnswer) {
             rtc::FromString<uint64>(offer->session_version()));
 
   SetLocalDescriptionWithoutError(offer);
+  EXPECT_EQ(0u, video_channel_->send_streams().size());
+  EXPECT_EQ(0u, voice_channel_->send_streams().size());
 
   mediastream_signaling_.SendAudioVideoStream2();
   answer = CreateRemoteAnswer(session_->local_description());
   SetRemoteDescriptionWithoutError(answer);
-
-  EXPECT_EQ(0u, video_channel_->send_streams().size());
-  EXPECT_EQ(0u, voice_channel_->send_streams().size());
 
   // Make sure the receive streams have not changed.
   ASSERT_EQ(1u, video_channel_->recv_streams().size());
@@ -1992,13 +2052,21 @@ TEST_F(WebRtcSessionTest, CreateOfferWithConstraints) {
 
   const cricket::ContentInfo* content =
       cricket::GetFirstAudioContent(offer->description());
-
   EXPECT_TRUE(content != NULL);
+
   content = cricket::GetFirstVideoContent(offer->description());
   EXPECT_TRUE(content != NULL);
 
-  // TODO(perkj): Should the direction be set to SEND_ONLY if
-  // The constraints is set to not receive audio or video but a track is added?
+  // Sets constraints to false and verifies that audio/video contents are
+  // removed.
+  options.offer_to_receive_audio = 0;
+  options.offer_to_receive_video = 0;
+  offer.reset(CreateOffer(options));
+
+  content = cricket::GetFirstAudioContent(offer->description());
+  EXPECT_TRUE(content == NULL);
+  content = cricket::GetFirstVideoContent(offer->description());
+  EXPECT_TRUE(content == NULL);
 }
 
 // Test that an answer can not be created if the last remote description is not
@@ -2037,8 +2105,7 @@ TEST_F(WebRtcSessionTest, CreateAudioAnswerWithoutConstraintsOrStreams) {
   Init(NULL);
   // Create a remote offer with audio only.
   cricket::MediaSessionOptions options;
-  options.has_audio = true;
-  options.has_video = false;
+
   rtc::scoped_ptr<JsepSessionDescription> offer(
       CreateRemoteOffer(options));
   ASSERT_TRUE(cricket::GetFirstVideoContent(offer->description()) == NULL);
@@ -2174,7 +2241,6 @@ TEST_F(WebRtcSessionTest, TestAVOfferWithAudioOnlyAnswer) {
   SessionDescriptionInterface* offer = CreateOffer();
 
   cricket::MediaSessionOptions options;
-  options.has_video = false;
   SessionDescriptionInterface* answer = CreateRemoteAnswer(offer, options);
 
   // SetLocalDescription and SetRemoteDescriptions takes ownership of offer
@@ -2887,7 +2953,6 @@ TEST_F(WebRtcSessionTest, TestCryptoAfterSetLocalDescriptionWithDisabled) {
 TEST_F(WebRtcSessionTest, TestCreateAnswerWithNewUfragAndPassword) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_audio = true;
   options.has_video = true;
   rtc::scoped_ptr<JsepSessionDescription> offer(
       CreateRemoteOffer(options));
@@ -2919,7 +2984,6 @@ TEST_F(WebRtcSessionTest, TestCreateAnswerWithNewUfragAndPassword) {
 TEST_F(WebRtcSessionTest, TestCreateAnswerWithOldUfragAndPassword) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_audio = true;
   options.has_video = true;
   rtc::scoped_ptr<JsepSessionDescription> offer(
       CreateRemoteOffer(options));
@@ -2985,7 +3049,6 @@ TEST_F(WebRtcSessionTest, TestIceStatesBundle) {
 TEST_F(WebRtcSessionTest, SetSdpFailedOnSessionError) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_audio = true;
   options.has_video = true;
 
   cricket::BaseSession::Error error_code = cricket::BaseSession::ERROR_CONTENT;
@@ -3309,6 +3372,26 @@ TEST_F(WebRtcSessionTest, TestNumUnsignalledRecvStreamsConstraint) {
   SetAndVerifyNumUnsignalledRecvStreams(kMaxUnsignalledRecvStreams + 1,
                                         kMaxUnsignalledRecvStreams);
   SetAndVerifyNumUnsignalledRecvStreams(-1, 0);
+}
+
+TEST_F(WebRtcSessionTest, TestCombinedAudioVideoBweConstraint) {
+  constraints_.reset(new FakeConstraints());
+  constraints_->AddOptional(
+      webrtc::MediaConstraintsInterface::kCombinedAudioVideoBwe,
+      true);
+  Init(NULL);
+  mediastream_signaling_.SendAudioVideoStream1();
+  SessionDescriptionInterface* offer = CreateOffer();
+
+  SetLocalDescriptionWithoutError(offer);
+
+  voice_channel_ = media_engine_->GetVoiceChannel(0);
+
+  ASSERT_TRUE(voice_channel_ != NULL);
+  cricket::AudioOptions audio_options;
+  EXPECT_TRUE(voice_channel_->GetOptions(&audio_options));
+  EXPECT_TRUE(
+      audio_options.combined_audio_video_bwe.GetWithDefaultIfUnset(false));
 }
 
 // Tests that we can renegotiate new media content with ICE candidates in the

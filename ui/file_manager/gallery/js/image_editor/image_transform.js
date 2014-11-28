@@ -283,7 +283,7 @@ function DraggableRect(rect, viewport) {
   /**
    * Viewport.
    *
-   * @param {Viewport}
+   * @type {Viewport}
    * @private
    */
   this.viewport_ = viewport;
@@ -469,8 +469,8 @@ DraggableRect.prototype.getCursorStyle = function(x, y, mouseDown) {
 /**
  * Obtains the drag handler depending on the coordinate.
  *
- * @param {number} startScreenX X coordinate for cursor in the screen.
- * @param {number} startScreenY Y coordinate for cursor in the screen.
+ * @param {number} initialScreenX X coordinate for cursor in the screen.
+ * @param {number} initialScreenY Y coordinate for cursor in the screen.
  * @param {boolean} touch Whether the operation is done by touch or not.
  * @return {function(number,number,boolean)} Drag handler that takes x
  *     coordinate value, y coordinate value, and shift key flag.
@@ -523,8 +523,8 @@ DraggableRect.prototype.getDragHandler = function(
       // Check new crop.
       if (this.dragMode_.newcrop) {
         this.dragMode_.newcrop = false;
-        this.bounds_.left = this.bounds_.right = newX;
-        this.bounds_.top = this.bounds_.bottom = newY;
+        this.bounds_.left = this.bounds_.right = initialX;
+        this.bounds_.top = this.bounds_.bottom = initialY;
         mouseBiasX = 0;
         mouseBiasY = 0;
       }

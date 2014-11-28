@@ -9,18 +9,25 @@
 namespace content {
 
 GpuMemoryBufferImpl::GpuMemoryBufferImpl(const gfx::Size& size,
-                                         unsigned internalformat)
-    : size_(size), internalformat_(internalformat), mapped_(false) {
+                                         unsigned internalformat,
+                                         const DestructionCallback& callback)
+    : size_(size),
+      internalformat_(internalformat),
+      callback_(callback),
+      mapped_(false) {
   DCHECK(IsFormatValid(internalformat));
 }
 
-GpuMemoryBufferImpl::~GpuMemoryBufferImpl() {}
+GpuMemoryBufferImpl::~GpuMemoryBufferImpl() {
+  callback_.Run();
+}
 
 // static
 bool GpuMemoryBufferImpl::IsFormatValid(unsigned internalformat) {
   switch (internalformat) {
     case GL_BGRA8_EXT:
     case GL_RGBA8_OES:
+    case GL_RGB8_OES:
       return true;
     default:
       return false;
@@ -43,6 +50,7 @@ size_t GpuMemoryBufferImpl::BytesPerPixel(unsigned internalformat) {
   switch (internalformat) {
     case GL_BGRA8_EXT:
     case GL_RGBA8_OES:
+    case GL_RGB8_OES:
       return 4;
     default:
       NOTREACHED();

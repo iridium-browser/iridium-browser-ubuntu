@@ -9,19 +9,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/browser_main_parts.h"
-
-namespace content {
-struct MainFunctionParams;
-}
+#include "content/public/common/main_function_params.h"
 
 namespace chromecast {
-
-class CastService;
-
 namespace shell {
-
-class CastBrowserContext;
-class RemoteDebuggingServer;
+class CastBrowserProcess;
 class URLRequestContextFactory;
 
 class CastBrowserMainParts : public content::BrowserMainParts {
@@ -39,14 +31,9 @@ class CastBrowserMainParts : public content::BrowserMainParts {
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
 
-  CastBrowserContext* browser_context() {
-    return browser_context_.get();
-  }
-
  private:
-  scoped_ptr<CastBrowserContext> browser_context_;
-  scoped_ptr<CastService> cast_service_;
-  scoped_ptr<RemoteDebuggingServer> dev_tools_;
+  scoped_ptr<CastBrowserProcess> cast_browser_process_;
+  const content::MainFunctionParams parameters_;  // For running browser tests.
   URLRequestContextFactory* const url_request_context_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CastBrowserMainParts);

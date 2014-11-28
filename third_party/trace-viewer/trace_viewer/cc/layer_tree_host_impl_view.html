@@ -36,12 +36,12 @@ tvcm.exportTo('cc', function() {
 
       this.layerPicker_ = new cc.LayerPicker();
       this.layerPicker_.addEventListener(
-          'selection-changed',
+          'selection-change',
           this.onLayerPickerSelectionChanged_.bind(this));
 
       this.layerView_ = new cc.LayerView();
       this.layerView_.addEventListener(
-          'selection-changed',
+          'selection-change',
           this.onLayerViewSelectionChanged_.bind(this));
       this.dragHandle_ = new tvcm.ui.DragHandle();
       this.dragHandle_.horizontal = false;
@@ -84,9 +84,12 @@ tvcm.exportTo('cc', function() {
     },
 
     set selection(selection) {
+      if (this.selection_ == selection)
+        return;
       this.selection_ = selection;
       this.layerPicker_.selection = selection;
       this.layerView_.selection = selection;
+      tvcm.dispatchSimpleEvent(this, 'cc-selection-change');
     },
 
     onLayerPickerSelectionChanged_: function() {
@@ -95,13 +98,22 @@ tvcm.exportTo('cc', function() {
       this.layerView_.layerTreeImpl = this.layerPicker_.layerTreeImpl;
       this.layerView_.isRenderPassQuads = this.layerPicker_.isRenderPassQuads;
       this.layerView_.regenerateContent();
+      tvcm.dispatchSimpleEvent(this, 'cc-selection-change');
     },
 
     onLayerViewSelectionChanged_: function() {
       this.selection_ = this.layerView_.selection;
       this.layerPicker_.selection = this.selection;
-    }
+      tvcm.dispatchSimpleEvent(this, 'cc-selection-change');
+    },
 
+    get extraHighlightsByLayerId() {
+      return this.layerView_.extraHighlightsByLayerId;
+    },
+
+    set extraHighlightsByLayerId(extraHighlightsByLayerId) {
+      this.layerView_.extraHighlightsByLayerId = extraHighlightsByLayerId;
+    }
   };
 
   tracing.analysis.ObjectSnapshotView.register(

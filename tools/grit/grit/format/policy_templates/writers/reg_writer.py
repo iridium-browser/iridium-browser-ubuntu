@@ -83,9 +83,10 @@ class RegWriter(template_writer.TemplateWriter):
       list.append('"%s"=%s' % (policy['name'], example_value_str))
 
   def WritePolicy(self, policy):
-    self._WritePolicy(policy,
-                      self.config['win_reg_mandatory_key_name'],
-                      self._mandatory)
+    if self.CanBeMandatory(policy):
+      self._WritePolicy(policy,
+                        self.config['win_reg_mandatory_key_name'],
+                        self._mandatory)
 
   def WriteRecommendedPolicy(self, policy):
     self._WritePolicy(policy,

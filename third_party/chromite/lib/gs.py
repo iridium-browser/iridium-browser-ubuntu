@@ -4,6 +4,8 @@
 
 """Library to make common google storage operations more reliable."""
 
+from __future__ import print_function
+
 import contextlib
 import datetime
 import getpass
@@ -13,7 +15,6 @@ import os
 import re
 import tempfile
 import urlparse
-import uuid
 
 from chromite.cbuildbot import constants
 from chromite.lib import cache
@@ -187,7 +188,7 @@ class GSContext(object):
   AUTHORIZATION_ERRORS = ('no configured', 'detail=Authorization')
 
   DEFAULT_BOTO_FILE = os.path.expanduser('~/.boto')
-  DEFAULT_GSUTIL_TRACKER_DIR = os.path.expanduser('~/.gsutil')
+  DEFAULT_GSUTIL_TRACKER_DIR = os.path.expanduser('~/.gsutil/tracker-files')
   # This is set for ease of testing.
   DEFAULT_GSUTIL_BIN = None
   DEFAULT_GSUTIL_BUILDER_BIN = '/b/build/third_party/gsutil/gsutil'
@@ -198,8 +199,9 @@ class GSContext(object):
   # (1*sleep) the first time, then (2*sleep), continuing via attempt * sleep.
   DEFAULT_SLEEP_TIME = 60
 
-  GSUTIL_TAR = 'gsutil_3.42.tar.gz'
+  GSUTIL_TAR = 'gsutil_4.5.tar.gz'
   GSUTIL_URL = PUBLIC_BASE_HTTPS_URL + 'pub/%s' % GSUTIL_TAR
+  GSUTIL_API_SELECTOR = 'JSON'
 
   RESUMABLE_UPLOAD_ERROR = ('Too many resumable upload attempts failed without '
                             'progress')
@@ -318,8 +320,8 @@ class GSContext(object):
       result = self.DoCommand(cmd, combine_stdout_stderr=True,
                               redirect_stdout=True)
 
-      # Expect output like: gsutil version 3.35
-      match = re.search(r'^\s*gsutil\s+version\s+([\d.]+)', result.output,
+      # Expect output like: 'gsutil version 3.35' or 'gsutil version: 4.5'.
+      match = re.search(r'^\s*gsutil\s+version:?\s+([\d.]+)', result.output,
                         re.IGNORECASE)
       if match:
         self._gsutil_version = match.group(1)
@@ -348,7 +350,7 @@ class GSContext(object):
 
   def _ConfigureBotoConfig(self):
     """Make sure we can access protected bits in GS."""
-    print 'Configuring gsutil. **Please use your @google.com account.**'
+    print('Configuring gsutil. **Please use your @google.com account.**')
     try:
       self.DoCommand(['config'], retries=0, debug_level=logging.CRITICAL,
                      print_cmd=False)
@@ -396,7 +398,7 @@ class GSContext(object):
                       **kwargs)
 
   @staticmethod
-  def _GetTrackerFilenames(dest_path):
+  def GetTrackerFilenames(dest_path):
     """Returns a list of gsutil tracker filenames.
 
     Tracker files are used by gsutil to resume downloads/uploads. This
@@ -415,12 +417,13 @@ class GSContext(object):
       bucket_name = dest.netloc
       object_name = dest.path.lstrip('/')
       filenames.append(
-          re.sub(r'[/\\]', '_', 'resumable_upload__%s__%s.url' %
-                 (bucket_name, object_name)))
+          re.sub(r'[/\\]', '_', 'resumable_upload__%s__%s__%s.url' %
+                 (bucket_name, object_name, GSContext.GSUTIL_API_SELECTOR)))
     else:
       prefix = 'download'
       filenames.append(
-          re.sub(r'[/\\]', '_', 'resumable_download__%s.etag' % dest.path))
+          re.sub(r'[/\\]', '_', 'resumable_download__%s__%s.etag' %
+                 (dest.path, GSContext.GSUTIL_API_SELECTOR)))
 
     hashed_filenames = []
     for filename in filenames:
@@ -455,20 +458,16 @@ class GSContext(object):
 
     error = e.result.error
     if error:
-      if 'GSResponseError' in error:
-        if 'code=PreconditionFailed' in error:
-          raise GSContextPreconditionFailed(e)
-        if 'code=NoSuchKey' in error:
-          raise GSNoSuchKey(e)
+      if 'PreconditionException' in error:
+        raise GSContextPreconditionFailed(e)
 
-      # If the file does not exist, one of the following errors occurs.
-      if ('InvalidUriError:' in error or
-          'Attempt to get key for' in error or
-          'CommandException: No URIs matched' in error or
-          'CommandException: One or more URIs matched no objects' in error or
-          'CommandException: No such object' in error or
-          'Some files could not be removed' in error or
-          'does not exist' in error):
+      # If the file does not exist, one of the following errors occurs. The
+      # "stat" command leaves off the "CommandException: " prefix, but it also
+      # outputs to stdout instead of stderr and so will not be caught here
+      # regardless.
+      if ('CommandException: No URLs matched' in error or
+          'NotFoundException:' in error or
+          'One or more URLs matched no objects' in error):
         raise GSNoSuchKey(e)
 
       logging.warning('GS_ERROR: %s', error)
@@ -479,17 +478,22 @@ class GSContext(object):
       # Temporary fix: remove the gsutil tracker files so that our retry
       # can hit a different backend. This should be removed after the
       # bug is fixed by the Google Storage team (see crbug.com/308300).
-      if (self.RESUMABLE_DOWNLOAD_ERROR in error or
-          self.RESUMABLE_UPLOAD_ERROR in error or
-          'ResumableUploadException' in error or
-          'ResumableDownloadException' in error):
-
+      RESUMABLE_ERROR_MESSAGE = (
+          self.RESUMABLE_DOWNLOAD_ERROR,
+          self.RESUMABLE_UPLOAD_ERROR,
+          'ResumableUploadException',
+          'ResumableUploadAbortException',
+          'ResumableDownloadException',
+          'ssl.SSLError: The read operation timed out',
+          'Unable to find the server',
+      )
+      if any(x in error for x in RESUMABLE_ERROR_MESSAGE):
         # Only remove the tracker files if we try to upload/download a file.
         if 'cp' in e.result.cmd[:-2]:
           # Assume a command: gsutil [options] cp [options] src_path dest_path
           # dest_path needs to be a fully qualified local path, which is already
           # required for GSContext.Copy().
-          tracker_filenames = self._GetTrackerFilenames(e.result.cmd[-1])
+          tracker_filenames = self.GetTrackerFilenames(e.result.cmd[-1])
           logging.info('Potential list of tracker files: %s',
                        tracker_filenames)
           for tracker_filename in tracker_filenames:
@@ -503,8 +507,10 @@ class GSContext(object):
               osutils.SafeUnlink(tracker_file_path)
         return True
 
-      # We have seen flaky errors with 5xx return codes.
-      if 'GSResponseError: status=5' in error:
+      # We have seen flaky errors with 5xx return codes
+      # See b/17376491 for the "JSON decoding" error.
+      if ('ServiceException: 5' in error or
+          'Failure: No JSON object could be decoded' in error):
         return True
 
     return False
@@ -624,7 +630,16 @@ class GSContext(object):
         # Don't retry on local copies.
         kwargs.setdefault('retries', 0)
 
-      return self.DoCommand(cmd, **kwargs)
+      try:
+        return self.DoCommand(cmd, **kwargs)
+      except GSNoSuchKey as e:
+        # If the source was a local file, the error is a quirk of gsutil 4.5
+        # and should be ignored. If the source was remote, there might
+        # legitimately be no such file. See crbug.com/393419.
+        if os.path.isfile(src_path):
+          # pylint: disable=E1101
+          return e.args[0].result
+        raise
 
   # TODO(mtennant): Merge with LS() after it supports returning details.
   def LSWithDetails(self, path, **kwargs):
@@ -753,22 +768,32 @@ class GSContext(object):
       # subject to caching behavior of 'gsutil ls', and it only requires
       # read access to the file, unlike 'gsutil acl get'.
       self.DoCommand(['stat', path], redirect_stdout=True, **kwargs)
-    except GSNoSuchKey:
-      # A path that does not exist will result in error output like:
-      # InvalidUriError: Attempt to get key for "gs://foo/bar"
-      # That will result in GSNoSuchKey.
-      return False
+    except cros_build_lib.RunCommandError as e:
+      if e.result.output and 'No URLs matched' in e.result.output:
+        # A path that does not exist will result in output on stdout like:
+        # No URLs matched gs://foo/bar
+        # That behavior is different from any other command and is handled
+        # here specially. See b/16020252.
+        return False
+      else:
+        raise
     return True
 
-  def Remove(self, path, ignore_missing=False):
+  def Remove(self, path, recurse=False, ignore_missing=False):
     """Remove the specified file.
 
     Args:
       path: Full gs:// url of the file to delete.
+      recurse: Remove recursively starting at path. Same as rm -R. Defaults
+        to False.
       ignore_missing: Whether to suppress errors about missing files.
     """
+    cmd = ['rm']
+    if recurse:
+      cmd.append('-R')
+    cmd.append(path)
     try:
-      self.DoCommand(['rm', path])
+      self.DoCommand(cmd)
     except GSNoSuchKey:
       if not ignore_missing:
         raise
@@ -779,24 +804,24 @@ class GSContext(object):
     Returns:
       A tuple of the generation and metageneration.
     """
-    def _Header(name):
+    def _Field(name):
       if res and res.returncode == 0 and res.output is not None:
-        # Search for a header that looks like this:
-        # header: x-goog-generation: 1378856506589000
-        m = re.search(r'header: %s: (\d+)' % name, res.output)
+        # Search for a field that looks like this:
+        # Generation: 1378856506589000
+        m = re.search(r'%s:\s*(\d+)' % name, res.output)
         if m:
           return int(m.group(1))
       return 0
 
     try:
-      res = self.DoCommand(['-d', 'acl', 'get', path],
+      res = self.DoCommand(['stat', path],
                            error_code_ok=True, redirect_stdout=True)
     except GSNoSuchKey:
       # If a DoCommand throws an error, 'res' will be None, so _Header(...)
       # will return 0 in both of the cases below.
       pass
 
-    return (_Header('x-goog-generation'), _Header('x-goog-metageneration'))
+    return (_Field('Generation'), _Field('Metageneration'))
 
   def Counter(self, path):
     """Return a GSCounter object pointing at a |path| in Google Storage.
@@ -837,8 +862,10 @@ def TemporaryURL(prefix):
 
   At the end, the URL will be deleted.
   """
+  md5 = hashlib.md5(os.urandom(20))
+  md5.update(cros_build_lib.UserDateTimeFormat())
   url = '%s/chromite-temp/%s/%s/%s' % (constants.TRASH_BUCKET, prefix,
-                                       getpass.getuser(), uuid.uuid1())
+                                       getpass.getuser(), md5.hexdigest())
   ctx = GSContext()
   ctx.Remove(url, ignore_missing=True)
   try:

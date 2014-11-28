@@ -76,6 +76,14 @@ WebInspector.NetworkProjectDelegate.prototype = {
     },
 
     /**
+     * @return {string}
+     */
+    url: function()
+    {
+        return this._name;
+    },
+
+    /**
      * @param {string} parentPath
      * @param {string} name
      * @param {string} url
@@ -127,15 +135,15 @@ WebInspector.NetworkWorkspaceBinding.prototype = {
      */
     addFileForURL: function(url, contentProvider, isContentScript)
     {
-        var splitURL = WebInspector.ParsedURL.splitURL(url);
+        var splitURL = WebInspector.ParsedURL.splitURLIntoPathComponents(url);
         var projectName = splitURL[0];
         var parentPath = splitURL.slice(1, -1).join("/");
         try {
-            parentPath = decodeURI(parentPath);
+            parentPath = parentPath;
         } catch (e) { }
         var name = splitURL.peekLast() || "";
         try {
-            name = decodeURI(name);
+            name = name;
         } catch (e) { }
         var projectDelegate = this._projectDelegate(projectName, isContentScript || false);
         var path = projectDelegate.addFile(parentPath, name, url, contentProvider);

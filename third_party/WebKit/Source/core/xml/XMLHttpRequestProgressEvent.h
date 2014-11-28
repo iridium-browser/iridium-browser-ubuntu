@@ -32,6 +32,7 @@
 namespace blink {
 
 class XMLHttpRequestProgressEvent FINAL : public ProgressEvent {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<XMLHttpRequestProgressEvent> create()
     {
@@ -51,16 +52,10 @@ public:
     virtual void trace(Visitor* visitor) OVERRIDE { ProgressEvent::trace(visitor); }
 
 private:
-    XMLHttpRequestProgressEvent()
-    {
-        ScriptWrappable::init(this);
-    }
+    XMLHttpRequestProgressEvent() { }
 
     XMLHttpRequestProgressEvent(const AtomicString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total)
-        : ProgressEvent(type, lengthComputable, loaded, total)
-    {
-        ScriptWrappable::init(this);
-    }
+        : ProgressEvent(type, lengthComputable, loaded, total) { }
 };
 
 } // namespace blink

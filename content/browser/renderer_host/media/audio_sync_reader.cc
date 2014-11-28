@@ -115,24 +115,11 @@ bool AudioSyncReader::Init() {
                                                 foreign_socket_.get());
 }
 
-#if defined(OS_WIN)
-bool AudioSyncReader::PrepareForeignSocketHandle(
+bool AudioSyncReader::PrepareForeignSocket(
     base::ProcessHandle process_handle,
-    base::SyncSocket::Handle* foreign_handle) {
-  ::DuplicateHandle(GetCurrentProcess(), foreign_socket_->handle(),
-                    process_handle, foreign_handle,
-                    0, FALSE, DUPLICATE_SAME_ACCESS);
-  return (*foreign_handle != 0);
+    base::SyncSocket::TransitDescriptor* descriptor) {
+  return foreign_socket_->PrepareTransitDescriptor(process_handle, descriptor);
 }
-#else
-bool AudioSyncReader::PrepareForeignSocketHandle(
-    base::ProcessHandle process_handle,
-    base::FileDescriptor* foreign_handle) {
-  foreign_handle->fd = foreign_socket_->handle();
-  foreign_handle->auto_close = false;
-  return (foreign_handle->fd != -1);
-}
-#endif
 
 bool AudioSyncReader::WaitUntilDataIsReady() {
   base::TimeDelta timeout = maximum_wait_time_;
@@ -157,10 +144,11 @@ bool AudioSyncReader::WaitUntilDataIsReady() {
   while (timeout.InMicroseconds() > 0) {
     bytes_received = socket_->ReceiveWithTimeout(
         &renderer_buffer_index, sizeof(renderer_buffer_index), timeout);
-    if (!bytes_received)
+    if (bytes_received != sizeof(renderer_buffer_index)) {
+      bytes_received = 0;
       break;
+    }
 
-    DCHECK_EQ(bytes_received, sizeof(renderer_buffer_index));
     if (renderer_buffer_index == buffer_index_)
       break;
 

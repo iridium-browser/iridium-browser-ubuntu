@@ -76,7 +76,7 @@ WebInspector.FileSystemWorkspaceBinding.prototype = {
     {
         var fileSystem = /** @type {!WebInspector.IsolatedFileSystem} */ (event.data);
         var boundFileSystem = new WebInspector.FileSystemWorkspaceBinding.FileSystem(this, fileSystem, this._workspace);
-        this._boundFileSystems.put(fileSystem.normalizedPath(), boundFileSystem);
+        this._boundFileSystems.set(fileSystem.normalizedPath(), boundFileSystem);
     },
 
     /**
@@ -238,6 +238,15 @@ WebInspector.FileSystemWorkspaceBinding.FileSystem.prototype = {
     {
         var normalizedPath = this._fileSystem.normalizedPath();
         return normalizedPath.substr(normalizedPath.lastIndexOf("/") + 1);
+    },
+
+    /**
+     * @return {string}
+     */
+    url: function()
+    {
+        // Overriddden by subclasses
+        return "";
     },
 
     /**

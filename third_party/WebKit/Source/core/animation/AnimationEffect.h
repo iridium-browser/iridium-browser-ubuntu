@@ -43,16 +43,14 @@ namespace blink {
 class Interpolation;
 
 class AnimationEffect : public RefCountedWillBeGarbageCollectedFinalized<AnimationEffect>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum CompositeOperation {
         CompositeReplace,
         CompositeAdd,
     };
 
-    AnimationEffect()
-    {
-        ScriptWrappable::init(this);
-    }
+    AnimationEffect() { }
     virtual ~AnimationEffect() { }
     virtual PassOwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > sample(int iteration, double fraction, double iterationDuration) const = 0;
 

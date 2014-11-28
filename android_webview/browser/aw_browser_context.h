@@ -30,6 +30,7 @@ class WebContents;
 namespace data_reduction_proxy {
 class DataReductionProxyConfigurator;
 class DataReductionProxySettings;
+class DataReductionProxyStatisticsPrefs;
 }
 
 namespace net {
@@ -87,6 +88,8 @@ class AwBrowserContext : public content::BrowserContext,
   data_reduction_proxy::DataReductionProxySettings*
       GetDataReductionProxySettings();
 
+  AwURLRequestContextGetter* GetAwURLRequestContext();
+
   void CreateUserPrefServiceIfNecessary();
 
   // content::BrowserContext implementation.
@@ -105,7 +108,7 @@ class AwBrowserContext : public content::BrowserContext,
   virtual content::DownloadManagerDelegate*
       GetDownloadManagerDelegate() OVERRIDE;
   virtual content::BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
+  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
   virtual content::PushMessagingService* GetPushMessagingService() OVERRIDE;
   virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
 
@@ -114,6 +117,7 @@ class AwBrowserContext : public content::BrowserContext,
       const scoped_refptr<URLEnumerator>& enumerator) OVERRIDE;
 
  private:
+  void CreateDataReductionProxyStatisticsIfNecessary();
   static bool data_reduction_proxy_enabled_;
 
   // The file path where data for this context is persisted.
@@ -134,6 +138,8 @@ class AwBrowserContext : public content::BrowserContext,
 
   scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
       data_reduction_proxy_configurator_;
+  scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+      data_reduction_proxy_statistics_;
   scoped_ptr<data_reduction_proxy::DataReductionProxySettings>
       data_reduction_proxy_settings_;
 

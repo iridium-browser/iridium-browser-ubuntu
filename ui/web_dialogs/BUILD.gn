@@ -19,7 +19,10 @@ component("web_dialogs") {
     "//base",
     "//base/third_party/dynamic_annotations",
     "//content/public/browser",
+    "//content/public/common",
     "//skia",
+    "//ui/base",
+    "//url",
   ]
 }
 
@@ -31,10 +34,13 @@ static_library("test_support") {
     "test/test_web_dialog_delegate.h",
   ]
 
-  deps = [
+  public_deps = [
     ":web_dialogs",
+  ]
+  deps = [
     "//base",
     "//content/public/browser",
     "//skia",
+    "//url",
   ]
 }

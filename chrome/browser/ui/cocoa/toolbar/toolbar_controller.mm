@@ -45,13 +45,13 @@
 #include "chrome/browser/ui/toolbar/wrench_menu_badge_controller.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -734,6 +734,10 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   return [self.view convertPoint:point toView:nil];
 }
 
+- (NSPoint)managePasswordsBubblePoint {
+  return locationBarView_->GetManagePasswordsBubblePoint();
+}
+
 - (NSPoint)translateBubblePoint {
   return locationBarView_->GetTranslateBubblePoint();
 }
@@ -768,15 +772,6 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   return wrenchButton_;
 }
 
-- (void)activatePageAction:(const std::string&)extension_id {
-  locationBarView_->ActivatePageAction(extension_id);
-}
-
-// Activates the browser action for the extension that has the given id.
-- (void)activateBrowserAction:(const std::string&)extension_id {
-  [browserActionsController_ activateBrowserAction:extension_id];
-}
-
 // (URLDropTargetController protocol)
 - (void)dropURLs:(NSArray*)urls inView:(NSView*)view at:(NSPoint)point {
   // TODO(viettrungluu): This code is more or less copied from the code in
@@ -800,7 +795,7 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
           OmniboxView::StripJavascriptSchemas(base::UTF8ToUTF16(url.spec())));
   }
   OpenURLParams params(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
+      url, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false);
   browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
 }
 
@@ -818,7 +813,7 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   GURL url(match.destination_url);
 
   OpenURLParams params(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
+      url, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false);
   browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
 }
 

@@ -22,6 +22,7 @@ class DictionaryValue;
 
 namespace content {
 class BrowserContext;
+class WebContents;
 }
 
 namespace extensions {
@@ -60,6 +61,14 @@ class ExtensionMessageFilter : public content::BrowserMessageFilter {
                                  const std::string& event_name);
   void OnExtensionAddLazyListener(const std::string& extension_id,
                                   const std::string& event_name);
+  void OnExtensionAttachGuest(int routing_id,
+                              int element_instance_id,
+                              int guest_instance_id,
+                              const base::DictionaryValue& attach_params);
+  void OnExtensionCreateMimeHandlerViewGuest(int render_frame_id,
+                                             const std::string& url,
+                                             const std::string& mime_type,
+                                             int element_instance_id);
   void OnExtensionRemoveLazyListener(const std::string& extension_id,
                                      const std::string& event_name);
   void OnExtensionAddFilteredListener(const std::string& extension_id,
@@ -81,6 +90,13 @@ class ExtensionMessageFilter : public content::BrowserMessageFilter {
   void OnExtensionRequestForIOThread(
       int routing_id,
       const ExtensionHostMsg_Request_Params& params);
+
+  // Runs on UI thread.
+  void MimeHandlerViewGuestCreatedCallback(int element_instance_id,
+                                           int embedder_render_process_id,
+                                           int embedder_render_frame_id,
+                                           const std::string& src,
+                                           content::WebContents* web_contents);
 
   const int render_process_id_;
 

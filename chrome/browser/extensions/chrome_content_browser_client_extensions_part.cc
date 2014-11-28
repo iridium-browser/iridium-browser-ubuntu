@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/browser_permissions_policy_delegate.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
@@ -20,7 +19,6 @@
 #include "chrome/browser/renderer_host/chrome_extension_message_filter.h"
 #include "chrome/browser/sync_file_system/local/sync_file_system_backend.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/extensions/manifest_handlers/app_isolation_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -30,6 +28,8 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "extensions/browser/api/web_request/web_request_api.h"
+#include "extensions/browser/api/web_request/web_request_api_helpers.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_message_filter.h"
 #include "extensions/browser/extension_registry.h"
@@ -197,7 +197,7 @@ bool ChromeContentBrowserClientExtensionsPart::CanCommitURL(
       service->extensions()->GetExtensionOrAppByURL(url);
   if (new_extension &&
       new_extension->is_hosted_app() &&
-      new_extension->id() == extension_misc::kWebStoreAppId &&
+      new_extension->id() == extensions::kWebStoreAppId &&
       !ProcessMap::Get(profile)->Contains(
           new_extension->id(), process_host->GetID())) {
     return false;
@@ -299,14 +299,14 @@ bool ChromeContentBrowserClientExtensionsPart::
       service->extensions()->GetExtensionOrAppByURL(current_url);
   if (current_extension &&
       current_extension->is_hosted_app() &&
-      current_extension->id() != extension_misc::kWebStoreAppId)
+      current_extension->id() != extensions::kWebStoreAppId)
     current_extension = NULL;
 
   const Extension* new_extension =
       service->extensions()->GetExtensionOrAppByURL(new_url);
   if (new_extension &&
       new_extension->is_hosted_app() &&
-      new_extension->id() != extension_misc::kWebStoreAppId)
+      new_extension->id() != extensions::kWebStoreAppId)
     new_extension = NULL;
 
   // First do a process check.  We should force a BrowsingInstance swap if the
@@ -333,17 +333,6 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldSwapProcessesForRedirect(
   return CrossesExtensionProcessBoundary(
       io_data->GetExtensionInfoMap()->extensions(),
       current_url, new_url, false);
-}
-
-// static
-std::string ChromeContentBrowserClientExtensionsPart::GetWorkerProcessTitle(
-    const GURL& url, content::ResourceContext* context) {
-  // Check if it's an extension-created worker, in which case we want to use
-  // the name of the extension.
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  const Extension* extension =
-      io_data->GetExtensionInfoMap()->extensions().GetByID(url.host());
-  return extension ? extension->name() : std::string();
 }
 
 // static
@@ -410,7 +399,7 @@ void ChromeContentBrowserClientExtensionsPart::RenderProcessWillLaunch(
 
   host->AddFilter(new ChromeExtensionMessageFilter(id, profile));
   host->AddFilter(new ExtensionMessageFilter(id, profile));
-  SendExtensionWebRequestStatusToHost(host);
+  extension_web_request_api_helpers::SendExtensionWebRequestStatusToHost(host);
 }
 
 void ChromeContentBrowserClientExtensionsPart::SiteInstanceGotProcess(
@@ -467,33 +456,6 @@ void ChromeContentBrowserClientExtensionsPart::SiteInstanceDeleting(
                                      site_instance->GetId()));
 }
 
-void ChromeContentBrowserClientExtensionsPart::WorkerProcessCreated(
-    SiteInstance* site_instance,
-    int worker_process_id) {
-  ExtensionRegistry* extension_registry =
-      ExtensionRegistry::Get(site_instance->GetBrowserContext());
-  if (!extension_registry)
-    return;
-  const Extension* extension =
-      extension_registry->enabled_extensions().GetExtensionOrAppByURL(
-          site_instance->GetSiteURL());
-  if (!extension)
-    return;
-  ExtensionSystem* extension_system =
-      ExtensionSystem::Get(site_instance->GetBrowserContext());
-  extension_system->info_map()->RegisterExtensionWorkerProcess(
-      extension->id(), worker_process_id, site_instance->GetId());
-}
-
-void ChromeContentBrowserClientExtensionsPart::WorkerProcessTerminated(
-    SiteInstance* site_instance,
-    int worker_process_id) {
-  ExtensionSystem* extension_system =
-      ExtensionSystem::Get(site_instance->GetBrowserContext());
-  extension_system->info_map()->UnregisterExtensionWorkerProcess(
-      worker_process_id);
-}
-
 void ChromeContentBrowserClientExtensionsPart::OverrideWebkitPrefs(
     RenderViewHost* rvh,
     const GURL& url,
@@ -538,7 +500,7 @@ void ChromeContentBrowserClientExtensionsPart::
 }
 
 void ChromeContentBrowserClientExtensionsPart::GetURLRequestAutoMountHandlers(
-    std::vector<fileapi::URLRequestAutoMountHandler>* handlers) {
+    std::vector<storage::URLRequestAutoMountHandler>* handlers) {
   handlers->push_back(
       base::Bind(MediaFileSystemBackend::AttemptAutoMountForURLRequest));
 }
@@ -546,7 +508,7 @@ void ChromeContentBrowserClientExtensionsPart::GetURLRequestAutoMountHandlers(
 void ChromeContentBrowserClientExtensionsPart::GetAdditionalFileSystemBackends(
     content::BrowserContext* browser_context,
     const base::FilePath& storage_partition_path,
-    ScopedVector<fileapi::FileSystemBackend>* additional_backends) {
+    ScopedVector<storage::FileSystemBackend>* additional_backends) {
   base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
   additional_backends->push_back(new MediaFileSystemBackend(
       storage_partition_path,

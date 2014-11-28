@@ -164,10 +164,10 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   virtual void Initialize(DemuxerHost* host,
                           const PipelineStatusCB& status_cb,
                           bool enable_text_tracks) OVERRIDE;
-  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual void Seek(base::TimeDelta time, const PipelineStatusCB& cb) OVERRIDE;
-  virtual DemuxerStream* GetStream(DemuxerStream::Type type) OVERRIDE;
   virtual base::Time GetTimelineOffset() const OVERRIDE;
+  virtual DemuxerStream* GetStream(DemuxerStream::Type type) OVERRIDE;
   virtual base::TimeDelta GetStartTime() const OVERRIDE;
   virtual Liveness GetLiveness() const OVERRIDE;
 

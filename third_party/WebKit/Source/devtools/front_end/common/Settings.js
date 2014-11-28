@@ -82,6 +82,7 @@ WebInspector.Settings = function()
     this.shortcutPanelSwitch = this.createSetting("shortcutPanelSwitch", false);
     this.showWhitespacesInEditor = this.createSetting("showWhitespacesInEditor", false);
     this.skipStackFramesPattern = this.createRegExpSetting("skipStackFramesPattern", "");
+    this.skipContentScripts = this.createSetting("skipContentScripts", false);
     this.pauseOnExceptionEnabled = this.createSetting("pauseOnExceptionEnabled", false);
     this.pauseOnCaughtException = this.createSetting("pauseOnCaughtException", false);
     this.enableAsyncStackTraces = this.createSetting("enableAsyncStackTraces", false);
@@ -190,13 +191,46 @@ WebInspector.Setting.prototype = {
         this._value = value;
         if (this._storage) {
             try {
-                this._storage[this._name] = JSON.stringify(value);
+                var settingString = JSON.stringify(value);
+                try {
+                    this._storage[this._name] = settingString;
+                } catch(e) {
+                    this._printSettingsSavingError(e.message, this._name, settingString);
+                }
             } catch(e) {
-                console.error("Error saving setting with name:" + this._name);
+                WebInspector.console.error("Cannot stringify setting with name: " + this._name + ", error: " + e.message);
             }
         }
         this._eventSupport.dispatchEventToListeners(this._name, value);
-    }
+    },
+
+    /**
+     * @param {string} message
+     * @param {string} name
+     * @param {string} value
+     */
+    _printSettingsSavingError: function(message, name, value)
+    {
+        var errorMessage = "Error saving setting with name: " + this._name + ", value length: " + value.length + ". Error: " + message;
+        console.error(errorMessage);
+        WebInspector.console.error(errorMessage);
+        WebInspector.console.log("Ten largest settings: ");
+
+        var sizes = { __proto__: null };
+        for (var key in this._storage)
+            sizes[key] = this._storage.getItem(key).length;
+        var keys = Object.keys(sizes);
+
+        function comparator(key1, key2)
+        {
+            return sizes[key2] - sizes[key1];
+        }
+
+        keys.sort(comparator);
+
+        for (var i = 0; i < 10 && i < keys.length; ++i)
+            WebInspector.console.log("Setting: '" + keys[i] + "', size: " + sizes[keys[i]]);
+    },
 }
 
 /**
@@ -279,181 +313,12 @@ WebInspector.RegExpSetting.prototype = {
 
 /**
  * @constructor
- * @param {boolean} experimentsEnabled
- */
-WebInspector.ExperimentsSettings = function(experimentsEnabled)
-{
-    this._experimentsEnabled = experimentsEnabled;
-    this._setting = WebInspector.settings.createSetting("experiments", {});
-    this._experiments = [];
-    this._enabledForTest = {};
-
-    // Add currently running experiments here.
-    this.applyCustomStylesheet = this._createExperiment("applyCustomStylesheet", "Allow custom UI themes");
-    this.canvasInspection = this._createExperiment("canvasInspection ", "Canvas inspection");
-    this.devicesPanel = this._createExperiment("devicesPanel", "Devices panel");
-    this.disableAgentsWhenProfile = this._createExperiment("disableAgentsWhenProfile", "Disable other agents and UI when profiler is active", true);
-    this.dockToLeft = this._createExperiment("dockToLeft", "Dock to left", true);
-    this.documentation = this._createExperiment("documentation", "Documentation for JS and CSS", true);
-    this.fileSystemInspection = this._createExperiment("fileSystemInspection", "FileSystem inspection");
-    this.gpuTimeline = this._createExperiment("gpuTimeline", "GPU data on timeline", true);
-    this.layersPanel = this._createExperiment("layersPanel", "Layers panel");
-    this.timelineOnTraceEvents = this._createExperiment("timelineOnTraceEvents", "Timeline on trace events");
-    this.paintProfiler = this._createExperiment("paintProfiler", "Paint profiler");
-    this.timelinePowerProfiler = this._createExperiment("timelinePowerProfiler", "Timeline power profiler");
-    this.timelineJSCPUProfile = this._createExperiment("timelineJSCPUProfile", "Timeline with JS sampling");
-
-    this._cleanUpSetting();
-}
-
-WebInspector.ExperimentsSettings.prototype = {
-    /**
-     * @return {!Array.<!WebInspector.Experiment>}
-     */
-    get experiments()
-    {
-        return this._experiments.slice();
-    },
-
-    /**
-     * @return {boolean}
-     */
-    get experimentsEnabled()
-    {
-        return this._experimentsEnabled;
-    },
-
-    /**
-     * @param {string} experimentName
-     * @param {string} experimentTitle
-     * @param {boolean=} hidden
-     * @return {!WebInspector.Experiment}
-     */
-    _createExperiment: function(experimentName, experimentTitle, hidden)
-    {
-        var experiment = new WebInspector.Experiment(this, experimentName, experimentTitle, !!hidden);
-        this._experiments.push(experiment);
-        return experiment;
-    },
-
-    /**
-     * @param {string} experimentName
-     * @return {boolean}
-     */
-    isEnabled: function(experimentName)
-    {
-        if (this._enabledForTest[experimentName])
-            return true;
-
-        if (!this.experimentsEnabled)
-            return false;
-
-        var experimentsSetting = this._setting.get();
-        return experimentsSetting[experimentName];
-    },
-
-    /**
-     * @param {string} experimentName
-     * @param {boolean} enabled
-     */
-    setEnabled: function(experimentName, enabled)
-    {
-        var experimentsSetting = this._setting.get();
-        experimentsSetting[experimentName] = enabled;
-        this._setting.set(experimentsSetting);
-    },
-
-    /**
-     * @param {string} experimentName
-     */
-    _enableForTest: function(experimentName)
-    {
-        this._enabledForTest[experimentName] = true;
-    },
-
-    _cleanUpSetting: function()
-    {
-        var experimentsSetting = this._setting.get();
-        var cleanedUpExperimentSetting = {};
-        for (var i = 0; i < this._experiments.length; ++i) {
-            var experimentName = this._experiments[i].name;
-            if (experimentsSetting[experimentName])
-                cleanedUpExperimentSetting[experimentName] = true;
-        }
-        this._setting.set(cleanedUpExperimentSetting);
-    }
-}
-
-/**
- * @constructor
- * @param {!WebInspector.ExperimentsSettings} experimentsSettings
- * @param {string} name
- * @param {string} title
- * @param {boolean} hidden
- */
-WebInspector.Experiment = function(experimentsSettings, name, title, hidden)
-{
-    this._name = name;
-    this._title = title;
-    this._hidden = hidden;
-    this._experimentsSettings = experimentsSettings;
-}
-
-WebInspector.Experiment.prototype = {
-    /**
-     * @return {string}
-     */
-    get name()
-    {
-        return this._name;
-    },
-
-    /**
-     * @return {string}
-     */
-    get title()
-    {
-        return this._title;
-    },
-
-    /**
-     * @return {boolean}
-     */
-    get hidden()
-    {
-        return this._hidden;
-    },
-
-    /**
-     * @return {boolean}
-     */
-    isEnabled: function()
-    {
-        return this._experimentsSettings.isEnabled(this._name);
-    },
-
-    /**
-     * @param {boolean} enabled
-     */
-    setEnabled: function(enabled)
-    {
-        this._experimentsSettings.setEnabled(this._name, enabled);
-    },
-
-    enableForTest: function()
-    {
-        this._experimentsSettings._enableForTest(this._name);
-    }
-}
-
-/**
- * @constructor
  */
 WebInspector.VersionController = function()
 {
 }
 
-WebInspector.VersionController.currentVersion = 9;
+WebInspector.VersionController.currentVersion = 10;
 
 WebInspector.VersionController.prototype = {
     updateVersion: function()
@@ -669,6 +534,17 @@ WebInspector.VersionController.prototype = {
         }
     },
 
+    _updateVersionFrom9To10: function()
+    {
+        if (!window.localStorage)
+            return;
+
+        for (var key in window.localStorage) {
+            if (key.startsWith("revision-history"))
+                window.localStorage.removeItem(key);
+        }
+    },
+
     /**
      * @param {!WebInspector.Setting} breakpointsSetting
      * @param {number} maxBreakpointsCount
@@ -686,11 +562,6 @@ WebInspector.VersionController.prototype = {
  * @type {!WebInspector.Settings}
  */
 WebInspector.settings;
-
-/**
- * @type {!WebInspector.ExperimentsSettings}
- */
-WebInspector.experimentsSettings;
 
 // These methods are added for backwards compatibility with Devtools CodeSchool extension.
 // DO NOT REMOVE

@@ -59,7 +59,7 @@ class RendererAccessibilityTest : public RenderViewTest {
     const IPC::Message* message =
         sink_->GetUniqueMessageMatching(AccessibilityHostMsg_Events::ID);
     ASSERT_TRUE(message);
-    Tuple1<std::vector<AccessibilityHostMsg_EventParams> > param;
+    Tuple2<std::vector<AccessibilityHostMsg_EventParams>, int> param;
     AccessibilityHostMsg_Events::Read(message, &param);
     ASSERT_GE(param.a.size(), 1U);
     *params = param.a[0];
@@ -324,7 +324,7 @@ TEST_F(RendererAccessibilityTest,
   accessibility->HandleAXEvent(
       root_obj,
       ui::AX_EVENT_VALUE_CHANGED);
-  view()->main_render_frame()->OnSwapOut(kProxyRoutingId);
+  view()->GetMainRenderFrame()->OnSwapOut(kProxyRoutingId);
   accessibility->SendPendingAccessibilityEvents();
   EXPECT_FALSE(sink_->GetUniqueMessageMatching(
       AccessibilityHostMsg_Events::ID));
@@ -337,7 +337,7 @@ TEST_F(RendererAccessibilityTest,
   FrameMsg_Navigate_Params nav_params;
   nav_params.url = GURL("data:text/html,<p>Hello, again.</p>");
   nav_params.navigation_type = FrameMsg_Navigate_Type::NORMAL;
-  nav_params.transition = PAGE_TRANSITION_TYPED;
+  nav_params.transition = ui::PAGE_TRANSITION_TYPED;
   nav_params.current_history_list_length = 1;
   nav_params.current_history_list_offset = 0;
   nav_params.pending_history_list_offset = 1;
@@ -549,7 +549,7 @@ TEST_F(RendererAccessibilityTest, EventOnObjectNotInTree) {
   const IPC::Message* message =
       sink_->GetUniqueMessageMatching(AccessibilityHostMsg_Events::ID);
   ASSERT_TRUE(message);
-  Tuple1<std::vector<AccessibilityHostMsg_EventParams> > param;
+  Tuple2<std::vector<AccessibilityHostMsg_EventParams>, int> param;
   AccessibilityHostMsg_Events::Read(message, &param);
   ASSERT_EQ(0U, param.a.size());
 }

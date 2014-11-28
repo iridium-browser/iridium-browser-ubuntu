@@ -9,19 +9,24 @@
 #include "ui/aura/window.h"
 
 namespace athena {
+class SplitViewController;
 class WindowListProvider;
 
 class WindowOverviewModeDelegate {
  public:
   virtual ~WindowOverviewModeDelegate() {}
 
+  // Called to activate |window|, set its bounds and set its visibility when
+  // |window| is selected in overview mode. |window| is NULL if there are no
+  // windows in overview mode.
   virtual void OnSelectWindow(aura::Window* window) = 0;
 
   // Gets into split-view mode with |left| on the left-side of the screen, and
   // |right| on the right-side. If |left| or |right| is NULL, then the delegate
   // selects the best option in its place.
-  virtual void OnSplitViewMode(aura::Window* left,
-                               aura::Window* right) = 0;
+  virtual void OnSelectSplitViewWindow(aura::Window* left,
+                                       aura::Window* right,
+                                       aura::Window* to_activate) = 0;
 };
 
 class WindowOverviewMode {
@@ -30,7 +35,8 @@ class WindowOverviewMode {
 
   static scoped_ptr<WindowOverviewMode> Create(
       aura::Window* container,
-      const WindowListProvider* window_list_provider,
+      WindowListProvider* window_list_provider,
+      SplitViewController* split_view_controller,
       WindowOverviewModeDelegate* delegate);
 };
 

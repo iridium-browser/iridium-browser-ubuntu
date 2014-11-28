@@ -15,15 +15,28 @@ namespace content {
 // Implementation of GPU memory buffer based on IO surfaces.
 class GpuMemoryBufferImplIOSurface : public GpuMemoryBufferImpl {
  public:
-  GpuMemoryBufferImplIOSurface(const gfx::Size& size, unsigned internalformat);
-  virtual ~GpuMemoryBufferImplIOSurface();
+  static void Create(const gfx::Size& size,
+                     unsigned internalformat,
+                     unsigned usage,
+                     int client_id,
+                     const CreationCallback& callback);
+
+  static void AllocateForChildProcess(const gfx::Size& size,
+                                      unsigned internalformat,
+                                      unsigned usage,
+                                      int child_client_id,
+                                      const AllocationCallback& callback);
+
+  static scoped_ptr<GpuMemoryBufferImpl> CreateFromHandle(
+      const gfx::GpuMemoryBufferHandle& handle,
+      const gfx::Size& size,
+      unsigned internalformat,
+      const DestructionCallback& callback);
 
   static bool IsFormatSupported(unsigned internalformat);
   static bool IsUsageSupported(unsigned usage);
   static bool IsConfigurationSupported(unsigned internalformat, unsigned usage);
   static uint32 PixelFormat(unsigned internalformat);
-
-  bool InitializeFromHandle(const gfx::GpuMemoryBufferHandle& handle);
 
   // Overridden from gfx::GpuMemoryBuffer:
   virtual void* Map() OVERRIDE;
@@ -32,6 +45,12 @@ class GpuMemoryBufferImplIOSurface : public GpuMemoryBufferImpl {
   virtual gfx::GpuMemoryBufferHandle GetHandle() const OVERRIDE;
 
  private:
+  GpuMemoryBufferImplIOSurface(const gfx::Size& size,
+                               unsigned internalformat,
+                               const DestructionCallback& callback,
+                               IOSurfaceRef io_surface);
+  virtual ~GpuMemoryBufferImplIOSurface();
+
   base::ScopedCFTypeRef<IOSurfaceRef> io_surface_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferImplIOSurface);

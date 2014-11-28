@@ -31,8 +31,8 @@ cr.define('options', function() {
    *       }
    * @private
    */
-  SupervisedUserListData.prototype.receiveExistingSupervisedUsers_ = function(
-    supervisedUsers) {
+  SupervisedUserListData.prototype.receiveExistingSupervisedUsers_ =
+      function(supervisedUsers) {
     if (!this.promise_) {
       this.onDataChanged_(supervisedUsers);
       return;
@@ -46,7 +46,9 @@ cr.define('options', function() {
    * @private
    */
   SupervisedUserListData.prototype.onSigninError_ = function() {
-    assert(this.promise_);
+    if (!this.promise_) {
+      return;
+    }
     this.reject_();
     this.resetPromise_();
   };
@@ -132,19 +134,14 @@ cr.define('options', function() {
   };
 
   // Forward public APIs to private implementations.
-  [
+  cr.makePublic(SupervisedUserListData, [
     'addObserver',
     'onSigninError',
     'receiveExistingSupervisedUsers',
     'removeObserver',
     'requestExistingSupervisedUsers',
     'resetPromise',
-  ].forEach(function(name) {
-    SupervisedUserListData[name] = function() {
-      var instance = SupervisedUserListData.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
-    };
-  });
+  ]);
 
   // Export
   return {

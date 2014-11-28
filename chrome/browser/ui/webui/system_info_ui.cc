@@ -22,14 +22,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "net/base/directory_lister.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -158,8 +158,8 @@ void SystemInfoUIHTMLSource::RequestComplete() {
   static const base::StringPiece systeminfo_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_SYS_HTML));
-  std::string full_html = webui::GetTemplatesHtml(
-      systeminfo_html, &strings, "t" /* template root node id */);
+  webui::UseVersion2 version2;
+  std::string full_html = webui::GetI18nTemplateHtml(systeminfo_html, &strings);
   callback_.Run(base::RefCountedString::TakeString(&full_html));
 }
 

@@ -51,6 +51,7 @@ void mapAttributeToCSSProperty(HashMap<StringImpl*, CSSPropertyID>* propertyName
 typedef WillBeHeapHashSet<RawPtrWillBeMember<SVGElement> > SVGElementSet;
 
 class SVGElement : public Element {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~SVGElement();
     virtual void attach(const AttachContext&) OVERRIDE;
@@ -147,9 +148,6 @@ public:
     virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) OVERRIDE FINAL;
 
     void invalidateRelativeLengthClients(SubtreeLayoutScope* = 0);
-
-    bool isContextElement() const { return m_isContextElement; }
-    void setContextElement() { m_isContextElement = true; }
 
     void addToPropertyMap(PassRefPtr<SVGAnimatedPropertyBase>);
 
@@ -251,7 +249,6 @@ private:
 #if ENABLE(ASSERT)
     bool m_inRelativeLengthClientsInvalidation;
 #endif
-    unsigned m_isContextElement : 1;
 
     OwnPtrWillBeMember<SVGElementRareData> m_SVGRareData;
     RefPtr<SVGAnimatedString> m_className;
@@ -291,8 +288,8 @@ inline bool Node::hasTagName(const SVGQualifiedName& name) const
     template <> inline bool isElementOfType<const thisType>(const SVGElement& element) { return is##thisType(element); } \
     DEFINE_ELEMENT_TYPE_CASTS_WITH_FUNCTION(thisType)
 
-}
+} // namespace blink
 
 #include "core/SVGElementTypeHelpers.h"
 
-#endif
+#endif // SVGElement_h

@@ -64,7 +64,6 @@ public class CoreImpl implements Core, AsyncWaiter {
     }
 
     private CoreImpl() {
-        nativeConstructor();
     }
 
     /**
@@ -169,6 +168,14 @@ public class CoreImpl implements Core, AsyncWaiter {
         }
         assert result.getMojoHandle2() == 0;
         return new SharedBufferHandleImpl(this, result.getMojoHandle1());
+    }
+
+    /**
+     * @see org.chromium.mojo.system.Core#acquireNativeHandle(int)
+     */
+    @Override
+    public UntypedHandle acquireNativeHandle(int handle) {
+        return new UntypedHandleImpl(this, handle);
     }
 
     /**
@@ -611,8 +618,6 @@ public class CoreImpl implements Core, AsyncWaiter {
         result.setMojoHandle2(mojoHandle2);
         return result;
     }
-
-    private native void nativeConstructor();
 
     private native long nativeGetTimeTicksNow();
 

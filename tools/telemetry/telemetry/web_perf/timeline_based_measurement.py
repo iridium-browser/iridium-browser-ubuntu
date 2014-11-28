@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from telemetry.core import util
 from telemetry.core.platform import tracing_category_filter
+from telemetry.core.platform import tracing_options
 from telemetry.page import page_test
 from telemetry.timeline import model as model_module
 from telemetry.value import string as string_value_module
@@ -21,11 +22,13 @@ from telemetry.web_perf.metrics import smoothness
 # overhead increases. The user of the measurement must therefore chose between
 # a few levels of instrumentation.
 NO_OVERHEAD_LEVEL = 'no-overhead'
+V8_OVERHEAD_LEVEL = 'v8-overhead'
 MINIMAL_OVERHEAD_LEVEL = 'minimal-overhead'
 DEBUG_OVERHEAD_LEVEL = 'debug-overhead'
 
 ALL_OVERHEAD_LEVELS = [
   NO_OVERHEAD_LEVEL,
+  V8_OVERHEAD_LEVEL,
   MINIMAL_OVERHEAD_LEVEL,
   DEBUG_OVERHEAD_LEVEL
 ]
@@ -150,12 +153,18 @@ class TimelineBasedMeasurement(page_test.PageTest):
               'is not set, the trace will not be saved.'))
 
   def WillNavigateToPage(self, page, tab):
-    if not tab.browser.supports_tracing:
+    if not tab.browser.platform.tracing_controller.IsChromeTracingSupported(
+        tab.browser):
       raise Exception('Not supported')
 
     assert self.options.overhead_level in ALL_OVERHEAD_LEVELS
     if self.options.overhead_level == NO_OVERHEAD_LEVEL:
       category_filter = tracing_category_filter.CreateNoOverheadFilter()
+    # TODO(ernstm): Remove this overhead level when benchmark relevant v8 events
+    # become available in the 'benchmark' category.
+    elif self.options.overhead_level == V8_OVERHEAD_LEVEL:
+      category_filter = tracing_category_filter.CreateNoOverheadFilter()
+      category_filter.AddIncludedCategory('v8')
     elif self.options.overhead_level == MINIMAL_OVERHEAD_LEVEL:
       category_filter = tracing_category_filter.CreateMinimalOverheadFilter()
     else:
@@ -163,12 +172,13 @@ class TimelineBasedMeasurement(page_test.PageTest):
 
     for delay in page.GetSyntheticDelayCategories():
       category_filter.AddSyntheticDelay(delay)
-
-    tab.browser.StartTracing(category_filter)
+    options = tracing_options.TracingOptions()
+    options.enable_chrome_trace = True
+    tab.browser.platform.tracing_controller.Start(options, category_filter)
 
   def ValidateAndMeasurePage(self, page, tab, results):
     """ Collect all possible metrics and added them to results. """
-    trace_result = tab.browser.StopTracing()
+    trace_result = tab.browser.platform.tracing_controller.Stop()
     trace_dir = self.options.trace_dir
     if trace_dir:
       trace_file_path = util.GetSequentialFileName(
@@ -188,5 +198,5 @@ class TimelineBasedMeasurement(page_test.PageTest):
     meta_metrics.AddResults(results)
 
   def CleanUpAfterPage(self, page, tab):
-    if tab.browser.is_tracing_running:
-      tab.browser.StopTracing()
+    if tab.browser.platform.tracing_controller.is_tracing_running:
+      tab.browser.platform.tracing_controller.Stop()

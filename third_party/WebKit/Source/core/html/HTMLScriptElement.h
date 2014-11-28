@@ -32,6 +32,7 @@ namespace blink {
 class ScriptLoader;
 
 class HTMLScriptElement FINAL : public HTMLElement, public ScriptLoaderClient {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLScriptElement> create(Document&, bool wasInsertedByParser, bool alreadyStarted = false);
 
@@ -52,6 +53,7 @@ private:
     virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
     virtual void didNotifySubtreeInsertionsToDocument() OVERRIDE;
     virtual void childrenChanged(const ChildrenChange&) OVERRIDE;
+    virtual void didMoveToNewDocument(Document& oldDocument) OVERRIDE;
 
     virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
     virtual bool hasLegalLinkAttribute(const QualifiedName&) const OVERRIDE;
@@ -74,6 +76,6 @@ private:
     OwnPtr<ScriptLoader> m_loader;
 };
 
-} //namespace
+} // namespace blink
 
-#endif
+#endif // HTMLScriptElement_h

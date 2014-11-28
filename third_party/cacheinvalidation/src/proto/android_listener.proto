@@ -25,10 +25,9 @@ package com.google.protos.ipc.invalidation;
 
 option optimize_for = LITE_RUNTIME;
 
-option java_outer_classname = "AndroidListenerProtocol";
 
-
-
+option java_outer_classname = "NanoAndroidListenerProtocol";
+option java_package = "com.google.protos.ipc.invalidation";
 
 
 import "client.proto";

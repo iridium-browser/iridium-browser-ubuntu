@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -19,29 +19,29 @@
 #include "base/time/time.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/mock_storage_client.h"
+#include "storage/browser/quota/quota_database.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
-#include "webkit/browser/quota/quota_database.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/browser/quota/quota_manager_proxy.h"
 
 using base::MessageLoopProxy;
-using quota::kQuotaErrorAbort;
-using quota::kQuotaErrorInvalidModification;
-using quota::kQuotaErrorNotSupported;
-using quota::kQuotaStatusOk;
-using quota::kQuotaStatusUnknown;
-using quota::kStorageTypePersistent;
-using quota::kStorageTypeSyncable;
-using quota::kStorageTypeTemporary;
-using quota::kStorageTypeUnknown;
-using quota::QuotaClient;
-using quota::QuotaManager;
-using quota::QuotaStatusCode;
-using quota::StorageType;
-using quota::UsageAndQuota;
-using quota::UsageInfo;
-using quota::UsageInfoEntries;
+using storage::kQuotaErrorAbort;
+using storage::kQuotaErrorInvalidModification;
+using storage::kQuotaErrorNotSupported;
+using storage::kQuotaStatusOk;
+using storage::kQuotaStatusUnknown;
+using storage::kStorageTypePersistent;
+using storage::kStorageTypeSyncable;
+using storage::kStorageTypeTemporary;
+using storage::kStorageTypeUnknown;
+using storage::QuotaClient;
+using storage::QuotaManager;
+using storage::QuotaStatusCode;
+using storage::StorageType;
+using storage::UsageAndQuota;
+using storage::UsageInfo;
+using storage::UsageInfoEntries;
 
 namespace content {
 

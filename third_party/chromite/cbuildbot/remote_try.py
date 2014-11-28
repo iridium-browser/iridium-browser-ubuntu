@@ -1,10 +1,10 @@
-#!/usr/bin/python
-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Code related to Remote tryjobs."""
+
+from __future__ import print_function
 
 import constants
 import getpass
@@ -168,7 +168,7 @@ class RemoteTryJob(object):
 
       checkout = patch.GetCheckout(self.manifest)
       checkout.AssertPushable()
-      print 'Uploading patch %s' % patch
+      print('Uploading patch %s' % patch)
       patch.Upload(checkout['push_url'], ref_final, dryrun=dryrun)
 
       # TODO(rcui): Pass in the remote instead of tag. http://crosbug.com/33937.
@@ -252,5 +252,7 @@ class RemoteTryJob(object):
     """Get link to the waterfall for the user."""
     # Note that this will only show the jobs submitted by the user in the last
     # 24 hours.
-    return ('%s/waterfall?committer=%s' % (constants.TRYBOT_DASHBOARD,
-                                           self.user_email))
+    return '%s/waterfall?committer=%s&builder=%s' % (
+        constants.TRYBOT_DASHBOARD,
+        self.user_email,
+        '&builder='.join(self.bots))

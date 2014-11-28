@@ -81,7 +81,7 @@ public:
     virtual void removePendingCallbacks() { }
 
     // Overridden by subclasses to handle sync vs async error-handling.
-    virtual void reportError(PassOwnPtr<ErrorCallback>, PassRefPtrWillBeRawPtr<FileError>) = 0;
+    virtual void reportError(ErrorCallback*, PassRefPtrWillBeRawPtr<FileError>) = 0;
 
     const String& name() const { return m_name; }
     FileSystemType type() const { return m_type; }
@@ -106,15 +106,15 @@ public:
     static PassRefPtrWillBeRawPtr<File> createFile(const FileMetadata&, const KURL& fileSystemURL, FileSystemType, const String name);
 
     // Actual FileSystem API implementations. All the validity checks on virtual paths are done at this level.
-    void getMetadata(const EntryBase*, PassOwnPtr<MetadataCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    void move(const EntryBase* source, EntryBase* parent, const String& name, PassOwnPtr<EntryCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    void copy(const EntryBase* source, EntryBase* parent, const String& name, PassOwnPtr<EntryCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    void remove(const EntryBase*, PassOwnPtr<VoidCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    void removeRecursively(const EntryBase*, PassOwnPtr<VoidCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    void getParent(const EntryBase*, PassOwnPtr<EntryCallback>, PassOwnPtr<ErrorCallback>);
-    void getFile(const EntryBase*, const String& path, const FileSystemFlags&, PassOwnPtr<EntryCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    void getDirectory(const EntryBase*, const String& path, const FileSystemFlags&, PassOwnPtr<EntryCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
-    int readDirectory(DirectoryReaderBase*, const String& path, PassOwnPtr<EntriesCallback>, PassOwnPtr<ErrorCallback>, SynchronousType = Asynchronous);
+    void getMetadata(const EntryBase*, MetadataCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    void move(const EntryBase* source, EntryBase* parent, const String& name, EntryCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    void copy(const EntryBase* source, EntryBase* parent, const String& name, EntryCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    void remove(const EntryBase*, VoidCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    void removeRecursively(const EntryBase*, VoidCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    void getParent(const EntryBase*, EntryCallback*, ErrorCallback*);
+    void getFile(const EntryBase*, const String& path, const FileSystemFlags&, EntryCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    void getDirectory(const EntryBase*, const String& path, const FileSystemFlags&, EntryCallback*, ErrorCallback*, SynchronousType = Asynchronous);
+    int readDirectory(DirectoryReaderBase*, const String& path, EntriesCallback*, ErrorCallback*, SynchronousType = Asynchronous);
     bool waitForAdditionalResult(int callbacksId);
 
     virtual void trace(Visitor*) { }

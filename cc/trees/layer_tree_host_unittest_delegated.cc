@@ -80,7 +80,7 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
     scoped_ptr<DelegatedFrameData> frame(new DelegatedFrameData);
 
     scoped_ptr<RenderPass> root_pass(RenderPass::Create());
-    root_pass->SetNew(RenderPass::Id(1, 1),
+    root_pass->SetNew(RenderPassId(1, 1),
                       root_output_rect,
                       root_damage_rect,
                       gfx::Transform());
@@ -94,7 +94,7 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
     scoped_ptr<DelegatedFrameData> frame(new DelegatedFrameData);
 
     scoped_ptr<RenderPass> root_pass(RenderPass::Create());
-    root_pass->SetNew(RenderPass::Id(1, 1),
+    root_pass->SetNew(RenderPassId(1, 1),
                       root_output_rect,
                       root_damage_rect,
                       gfx::Transform());
@@ -166,7 +166,7 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
   }
 
   void AddRenderPass(DelegatedFrameData* frame,
-                     RenderPass::Id id,
+                     RenderPassId id,
                      const gfx::Rect& output_rect,
                      const gfx::Rect& damage_rect,
                      const FilterOperations& filters,
@@ -338,7 +338,7 @@ class LayerTreeHostDelegatedTestCreateChildId
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
     TestContextProvider* context_provider = static_cast<TestContextProvider*>(
-        host_impl->output_surface()->context_provider().get());
+        host_impl->output_surface()->context_provider());
 
     ++num_activates_;
     switch (num_activates_) {
@@ -419,7 +419,7 @@ class LayerTreeHostDelegatedTestInvalidFrameAfterContextLost
       return;
 
     TestContextProvider* context_provider = static_cast<TestContextProvider*>(
-        host_impl->output_surface()->context_provider().get());
+        host_impl->output_surface()->context_provider());
 
     ++num_activates_;
     switch (num_activates_) {
@@ -563,7 +563,7 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
       case 17:
         // Make another layer that uses the same frame provider. The new layer
         // should be damaged.
-        delegated_copy_ = CreateDelegatedLayer(frame_provider_);
+        delegated_copy_ = CreateDelegatedLayer(frame_provider_.get());
         delegated_copy_->SetPosition(gfx::Point(5, 0));
 
         // Also set a new frame.
@@ -768,10 +768,10 @@ class LayerTreeHostDelegatedTestRemapResourcesInQuads
 
     // The resources in the quads should be remapped to the parent's namespace.
     const TextureDrawQuad* quad1 = TextureDrawQuad::MaterialCast(
-        delegated_impl->RenderPassesInDrawOrder()[0]->quad_list[0]);
+        delegated_impl->RenderPassesInDrawOrder()[0]->quad_list.ElementAt(0));
     EXPECT_EQ(parent_resource_id1, quad1->resource_id);
     const TextureDrawQuad* quad2 = TextureDrawQuad::MaterialCast(
-        delegated_impl->RenderPassesInDrawOrder()[0]->quad_list[1]);
+        delegated_impl->RenderPassesInDrawOrder()[0]->quad_list.ElementAt(1));
     EXPECT_EQ(parent_resource_id2, quad2->resource_id);
 
     EndTest();
@@ -1020,8 +1020,8 @@ class LayerTreeHostDelegatedTestFrameBeforeAck
 
     const RenderPass* pass = delegated_impl->RenderPassesInDrawOrder()[0];
     EXPECT_EQ(1u, pass->quad_list.size());
-    const TextureDrawQuad* quad = TextureDrawQuad::MaterialCast(
-        pass->quad_list[0]);
+    const TextureDrawQuad* quad =
+        TextureDrawQuad::MaterialCast(pass->quad_list.front());
     EXPECT_EQ(map.find(999)->second, quad->resource_id);
 
     EndTest();
@@ -1135,14 +1135,14 @@ class LayerTreeHostDelegatedTestFrameBeforeTakeResources
 
     const RenderPass* pass = delegated_impl->RenderPassesInDrawOrder()[0];
     EXPECT_EQ(3u, pass->quad_list.size());
-    const TextureDrawQuad* quad1 = TextureDrawQuad::MaterialCast(
-        pass->quad_list[0]);
+    const TextureDrawQuad* quad1 =
+        TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(0));
     EXPECT_EQ(map.find(999)->second, quad1->resource_id);
-    const TextureDrawQuad* quad2 = TextureDrawQuad::MaterialCast(
-        pass->quad_list[1]);
+    const TextureDrawQuad* quad2 =
+        TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(1));
     EXPECT_EQ(map.find(555)->second, quad2->resource_id);
-    const TextureDrawQuad* quad3 = TextureDrawQuad::MaterialCast(
-        pass->quad_list[2]);
+    const TextureDrawQuad* quad3 =
+        TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(2));
     EXPECT_EQ(map.find(444)->second, quad3->resource_id);
   }
 
@@ -1258,11 +1258,11 @@ class LayerTreeHostDelegatedTestBadFrame
 
         const RenderPass* pass = delegated_impl->RenderPassesInDrawOrder()[0];
         EXPECT_EQ(2u, pass->quad_list.size());
-        const TextureDrawQuad* quad1 = TextureDrawQuad::MaterialCast(
-            pass->quad_list[0]);
+        const TextureDrawQuad* quad1 =
+            TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(0));
         EXPECT_EQ(map.find(999)->second, quad1->resource_id);
-        const TextureDrawQuad* quad2 = TextureDrawQuad::MaterialCast(
-            pass->quad_list[1]);
+        const TextureDrawQuad* quad2 =
+            TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(1));
         EXPECT_EQ(map.find(555)->second, quad2->resource_id);
         break;
       }
@@ -1280,11 +1280,11 @@ class LayerTreeHostDelegatedTestBadFrame
         // 555 in it.
         const RenderPass* pass = delegated_impl->RenderPassesInDrawOrder()[0];
         EXPECT_EQ(2u, pass->quad_list.size());
-        const TextureDrawQuad* quad1 = TextureDrawQuad::MaterialCast(
-            pass->quad_list[0]);
+        const TextureDrawQuad* quad1 =
+            TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(0));
         EXPECT_EQ(map.find(999)->second, quad1->resource_id);
-        const TextureDrawQuad* quad2 = TextureDrawQuad::MaterialCast(
-            pass->quad_list[1]);
+        const TextureDrawQuad* quad2 =
+            TextureDrawQuad::MaterialCast(pass->quad_list.ElementAt(1));
         EXPECT_EQ(map.find(555)->second, quad2->resource_id);
         break;
       }
@@ -1298,8 +1298,8 @@ class LayerTreeHostDelegatedTestBadFrame
 
         const RenderPass* pass = delegated_impl->RenderPassesInDrawOrder()[0];
         EXPECT_EQ(1u, pass->quad_list.size());
-        const TextureDrawQuad* quad1 = TextureDrawQuad::MaterialCast(
-            pass->quad_list[0]);
+        const TextureDrawQuad* quad1 =
+            TextureDrawQuad::MaterialCast(pass->quad_list.front());
         EXPECT_EQ(map.find(999)->second, quad1->resource_id);
         break;
       }

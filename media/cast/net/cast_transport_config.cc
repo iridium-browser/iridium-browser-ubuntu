@@ -8,7 +8,7 @@ namespace media {
 namespace cast {
 
 CastTransportRtpConfig::CastTransportRtpConfig()
-    : ssrc(0), feedback_ssrc(0), rtp_payload_type(0), stored_frames(0) {}
+    : ssrc(0), feedback_ssrc(0), rtp_payload_type(0) {}
 
 CastTransportRtpConfig::~CastTransportRtpConfig() {}
 
@@ -16,7 +16,8 @@ EncodedFrame::EncodedFrame()
     : dependency(UNKNOWN_DEPENDENCY),
       frame_id(0),
       referenced_frame_id(0),
-      rtp_timestamp(0) {}
+      rtp_timestamp(0),
+      new_playout_delay_ms(0) {}
 
 EncodedFrame::~EncodedFrame() {}
 

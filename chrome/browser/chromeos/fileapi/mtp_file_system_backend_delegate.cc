@@ -4,9 +4,9 @@
 
 #include "chrome/browser/chromeos/fileapi/mtp_file_system_backend_delegate.h"
 #include "chrome/browser/media_galleries/fileapi/device_media_async_file_util.h"
-#include "webkit/browser/blob/file_stream_reader.h"
-#include "webkit/browser/fileapi/file_stream_writer.h"
-#include "webkit/browser/fileapi/file_system_url.h"
+#include "storage/browser/blob/file_stream_reader.h"
+#include "storage/browser/fileapi/file_stream_writer.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 namespace chromeos {
 
@@ -20,34 +20,49 @@ MTPFileSystemBackendDelegate::MTPFileSystemBackendDelegate(
 MTPFileSystemBackendDelegate::~MTPFileSystemBackendDelegate() {
 }
 
-fileapi::AsyncFileUtil* MTPFileSystemBackendDelegate::GetAsyncFileUtil(
-    fileapi::FileSystemType type) {
-  DCHECK_EQ(fileapi::kFileSystemTypeDeviceMediaAsFileStorage, type);
+storage::AsyncFileUtil* MTPFileSystemBackendDelegate::GetAsyncFileUtil(
+    storage::FileSystemType type) {
+  DCHECK_EQ(storage::kFileSystemTypeDeviceMediaAsFileStorage, type);
 
   return device_media_async_file_util_.get();
 }
 
-scoped_ptr<webkit_blob::FileStreamReader>
+scoped_ptr<storage::FileStreamReader>
 MTPFileSystemBackendDelegate::CreateFileStreamReader(
-    const fileapi::FileSystemURL& url,
+    const storage::FileSystemURL& url,
     int64 offset,
+    int64 max_bytes_to_read,
     const base::Time& expected_modification_time,
-    fileapi::FileSystemContext* context) {
-  DCHECK_EQ(fileapi::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
+    storage::FileSystemContext* context) {
+  DCHECK_EQ(storage::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
 
   return device_media_async_file_util_->GetFileStreamReader(
       url, offset, expected_modification_time, context);
 }
 
-scoped_ptr<fileapi::FileStreamWriter>
+scoped_ptr<storage::FileStreamWriter>
 MTPFileSystemBackendDelegate::CreateFileStreamWriter(
-    const fileapi::FileSystemURL& url,
+    const storage::FileSystemURL& url,
     int64 offset,
-    fileapi::FileSystemContext* context) {
-  DCHECK_EQ(fileapi::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
+    storage::FileSystemContext* context) {
+  DCHECK_EQ(storage::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
 
   // TODO(kinaba): support writing.
-  return scoped_ptr<fileapi::FileStreamWriter>();
+  return scoped_ptr<storage::FileStreamWriter>();
+}
+
+storage::WatcherManager* MTPFileSystemBackendDelegate::GetWatcherManager(
+    const storage::FileSystemURL& url) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+void MTPFileSystemBackendDelegate::GetRedirectURLForContents(
+    const storage::FileSystemURL& url,
+    const storage::URLCallback& callback) {
+  DCHECK_EQ(storage::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
+
+  callback.Run(GURL());
 }
 
 }  // namespace chromeos

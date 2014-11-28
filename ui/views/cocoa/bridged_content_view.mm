@@ -7,10 +7,10 @@
 #include "base/logging.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#include "grit/ui_strings.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/gfx/canvas_paint_mac.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
@@ -149,7 +149,11 @@
 }
 
 - (void)scrollWheel:(NSEvent*)theEvent {
-  [self handleMouseEvent:theEvent];
+  if (!hostedView_)
+    return;
+
+  ui::MouseWheelEvent event(theEvent);
+  hostedView_->GetWidget()->OnMouseEvent(&event);
 }
 
 - (void)deleteBackward:(id)sender {

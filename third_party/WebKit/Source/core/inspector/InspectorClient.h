@@ -30,8 +30,7 @@
 #include "core/inspector/InspectorStateClient.h"
 #include "core/page/ContextMenuProvider.h"
 #include "wtf/Forward.h"
-#include "wtf/HashMap.h"
-#include "wtf/HashSet.h"
+#include "wtf/PassRefPtr.h"
 
 namespace blink {
 
@@ -70,12 +69,15 @@ public:
     virtual void setShowScrollBottleneckRects(bool) { }
 
     virtual void resetScrollAndPageScaleFactor() { }
+    virtual float minimumPageScaleFactor() { return 1; }
+    virtual float maximumPageScaleFactor() { return 1; }
+    virtual void setPageScaleFactor(float) { }
     virtual void showContextMenu(float x, float y, PassRefPtr<ContextMenuProvider>) { }
-    virtual void getAllocatedObjects(HashSet<const void*>&) { }
-    virtual void dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>&) { }
 
     virtual void dispatchKeyEvent(const PlatformKeyboardEvent&) { }
     virtual void dispatchMouseEvent(const PlatformMouseEvent&) { }
+
+    virtual void resumeStartup() { }
 
 protected:
     virtual ~InspectorClient() { }

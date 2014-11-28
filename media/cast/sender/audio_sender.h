@@ -51,76 +51,21 @@ class AudioSender : public FrameSender,
                    const base::TimeTicks& recorded_time);
 
  protected:
-  // Protected for testability.
-  void OnReceivedCastFeedback(const RtcpCastMessage& cast_feedback);
+  virtual int GetNumberOfFramesInEncoder() const OVERRIDE;
+  virtual base::TimeDelta GetInFlightMediaDuration() const OVERRIDE;
+  virtual void OnAck(uint32 frame_id) OVERRIDE;
 
  private:
-  // Schedule and execute periodic checks for re-sending packets.  If no
-  // acknowledgements have been received for "too long," AudioSender will
-  // speculatively re-send certain packets of an unacked frame to kick-start
-  // re-transmission.  This is a last resort tactic to prevent the session from
-  // getting stuck after a long outage.
-  void ScheduleNextResendCheck();
-  void ResendCheck();
-  void ResendForKickstart();
-
-  // Returns true if there are too many frames in flight, as defined by the
-  // configured target playout delay plus simple logic.  When this is true,
-  // InsertAudio() will silenty drop frames instead of sending them to the audio
-  // encoder.
-  bool AreTooManyFramesInFlight() const;
-
   // Called by the |audio_encoder_| with the next EncodedFrame to send.
-  void SendEncodedAudioFrame(scoped_ptr<EncodedFrame> audio_frame);
-
-  // The total amount of time between a frame's capture/recording on the sender
-  // and its playback on the receiver (i.e., shown to a user).  This is fixed as
-  // a value large enough to give the system sufficient time to encode,
-  // transmit/retransmit, receive, decode, and render; given its run-time
-  // environment (sender/receiver hardware performance, network conditions,
-  // etc.).
-  const base::TimeDelta target_playout_delay_;
-
-  // Maximum number of outstanding frames before the encoding and sending of
-  // new frames shall halt.
-  const int max_unacked_frames_;
+  void OnEncodedAudioFrame(int encoder_bitrate,
+                           scoped_ptr<EncodedFrame> encoded_frame,
+                           int samples_skipped);
 
   // Encodes AudioBuses into EncodedFrames.
   scoped_ptr<AudioEncoder> audio_encoder_;
-  const int configured_encoder_bitrate_;
 
-  // Counts how many RTCP reports are being "aggressively" sent (i.e., one per
-  // frame) at the start of the session.  Once a threshold is reached, RTCP
-  // reports are instead sent at the configured interval + random drift.
-  int num_aggressive_rtcp_reports_sent_;
-
-  // This is "null" until the first frame is sent.  Thereafter, this tracks the
-  // last time any frame was sent or re-sent.
-  base::TimeTicks last_send_time_;
-
-  // The ID of the last frame sent.  Logic throughout AudioSender assumes this
-  // can safely wrap-around.  This member is invalid until
-  // |!last_send_time_.is_null()|.
-  uint32 last_sent_frame_id_;
-
-  // The ID of the latest (not necessarily the last) frame that has been
-  // acknowledged.  Logic throughout AudioSender assumes this can safely
-  // wrap-around.  This member is invalid until |!last_send_time_.is_null()|.
-  uint32 latest_acked_frame_id_;
-
-  // Counts the number of duplicate ACK that are being received.  When this
-  // number reaches a threshold, the sender will take this as a sign that the
-  // receiver hasn't yet received the first packet of the next frame.  In this
-  // case, AudioSender will trigger a re-send of the next frame.
-  int duplicate_ack_counter_;
-
-  // If this sender is ready for use, this is STATUS_AUDIO_INITIALIZED.
-  CastInitializationStatus cast_initialization_status_;
-
-  // This is a "good enough" mapping for finding the RTP timestamp associated
-  // with a video frame. The key is the lowest 8 bits of frame id (which is
-  // what is sent via RTCP). This map is used for logging purposes.
-  RtpTimestamp frame_id_to_rtp_timestamp_[256];
+  // The number of audio samples enqueued in |audio_encoder_|.
+  int samples_in_encoder_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<AudioSender> weak_factory_;

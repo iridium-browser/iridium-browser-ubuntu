@@ -36,7 +36,6 @@
 
 namespace blink {
 
-class Page;
 class Settings;
 
 class SettingsDelegate {
@@ -59,6 +58,7 @@ public:
         ScriptEnableChange,
         FontFamilyChange,
         AcceleratedCompositingChange,
+        MediaQueryChange,
     };
 
     virtual void settingsChanged(ChangeType) = 0;

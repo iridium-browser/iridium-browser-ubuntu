@@ -6,6 +6,9 @@
 #define CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_CONTROLLER_PRIVATE_H_
 
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
+
+@class BrowserWindowLayout;
 
 // Private methods for the |BrowserWindowController|. This category should
 // contain the private methods used by different parts of the BWC; private
@@ -33,10 +36,6 @@
 // content area, download shelf (if any).
 - (void)layoutSubviews;
 
-// Find the total height of the floating bar (in presentation mode). Safe to
-// call even when not in presentation mode.
-- (CGFloat)floatingBarHeight;
-
 // Shows the informational "how to exit fullscreen" bubble.
 - (void)showFullscreenExitBubbleIfNecessary;
 - (void)destroyFullscreenExitBubbleIfNecessary;
@@ -48,44 +47,10 @@
                           width:(CGFloat)width
                      fullscreen:(BOOL)fullscreen;
 
-// Lays out the toolbar (or just location bar for popups) at the given maximum
-// y-coordinate, with the given width; returns the new maximum y (below the
-// toolbar).
-- (CGFloat)layoutToolbarAtMinX:(CGFloat)minX
-                          maxY:(CGFloat)maxY
-                         width:(CGFloat)width;
-
 // Returns YES if the bookmark bar should be placed below the infobar, NO
 // otherwise.
 - (BOOL)placeBookmarkBarBelowInfoBar;
 
-// Lays out the bookmark bar at the given maximum y-coordinate, with the given
-// width; returns the new maximum y (below the bookmark bar). Note that one must
-// call it with the appropriate |maxY| which depends on whether or not the
-// bookmark bar is shown as the NTP bubble or not (use
-// |-placeBookmarkBarBelowInfoBar|).
-- (CGFloat)layoutBookmarkBarAtMinX:(CGFloat)minX
-                              maxY:(CGFloat)maxY
-                             width:(CGFloat)width;
-
-// Lay out the view which draws the background for the floating bar when in
-// presentation mode, with the given frame and presentation-mode-status. Should
-// be called even when not in presentation mode to hide the backing view.
-- (void)layoutFloatingBarBackingView:(NSRect)frame
-                    presentationMode:(BOOL)presentationMode;
-
-// Lays out the infobar at the given maximum y-coordinate, with the given width;
-// returns the new maximum y (below the infobar).
-- (CGFloat)layoutInfoBarAtMinX:(CGFloat)minX
-                          maxY:(CGFloat)maxY
-                         width:(CGFloat)width;
-
-// Lays out the download shelf, if there is one, at the given minimum
-// y-coordinate, with the given width; returns the new minimum y (above the
-// download shelf). This is safe to call even if there is no download shelf.
-- (CGFloat)layoutDownloadShelfAtMinX:(CGFloat)minX
-                                minY:(CGFloat)minY
-                               width:(CGFloat)width;
 
 // Lays out the tab content area in the given frame. If the height changes,
 // sends a message to the renderer to resize.
@@ -109,14 +74,6 @@
 // hidden while a permissions bubble is visible.)
 - (void)permissionBubbleWindowWillClose:(NSNotification*)notification;
 
-// Sets presentation mode, creating the PresentationModeController if needed and
-// forcing a relayout.  If |forceDropdown| is YES, this method will always
-// initially show the floating bar when entering presentation mode, even if the
-// floating bar does not have focus.  This method is safe to call on all OS
-// versions.
-- (void)setPresentationModeInternal:(BOOL)presentationMode
-                      forceDropdown:(BOOL)forceDropdown;
-
 // Enter or exit fullscreen without using Cocoa's System Fullscreen API.  These
 // methods are internal implementations of |-setFullscreen:|.
 - (void)enterImmersiveFullscreen;
@@ -127,10 +84,6 @@
 // System Fullscreen API.
 - (void)registerForContentViewResizeNotifications;
 - (void)deregisterForContentViewResizeNotifications;
-
-// Adjust the UI when entering or leaving presentation mode.  This method is
-// safe to call on all OS versions.
-- (void)adjustUIForPresentationMode:(BOOL)fullscreen;
 
 // Allows/prevents bar visibility locks and releases from updating the visual
 // state. Enabling makes changes instantaneously; disabling cancels any
@@ -145,13 +98,67 @@
 // The opacity for the toolbar divider; 0 means that it shouldn't be shown.
 - (CGFloat)toolbarDividerOpacity;
 
-// Ensures the z-order of subviews is correct.
-- (void)updateSubviewZOrder:(BOOL)inPresentationMode;
-
-- (void)updateAllowOverlappingViews:(BOOL)inPresentationMode;
+// When a view does not have a layer, but it has multiple subviews with layers,
+// the ordering of the layers is not well defined. Removing a subview and
+// re-adding it to the same position has the side effect of updating the layer
+// ordering to better reflect the subview ordering.
+// This is a hack needed because NSThemeFrame is not layer backed, but it has
+// multiple direct subviews which are. http://crbug.com/413009
+- (void)updateLayerOrdering:(NSView*)view;
 
 // Update visibility of the infobar tip, depending on the state of the window.
 - (void)updateInfoBarTipVisibility;
+
+// The min Y of the bubble point in the coordinate space of the toolbar.
+- (NSInteger)pageInfoBubblePointY;
+
+// Configures the presentationModeController_ right after it is constructed.
+- (void)configurePresentationModeController;
+
+// Allows the omnibox to slide. Also prepares UI for several fullscreen modes.
+// This method gets called when entering AppKit fullscren, or when entering
+// Immersive fullscreen. Expects fullscreenStyle_ to be set.
+- (void)adjustUIForSlidingFullscreenStyle:(fullscreen_mac::SlidingStyle)style;
+
+// This method gets called when exiting AppKit fullscreen, or when exiting
+// Immersive fullscreen. It performs some common UI changes, and stops the
+// omnibox from sliding.
+- (void)adjustUIForExitingFullscreenAndStopOmniboxSliding;
+
+// Exposed for testing.
+// Creates a PresentationModeController with the given style.
+- (PresentationModeController*)newPresentationModeControllerWithStyle:
+    (fullscreen_mac::SlidingStyle)style;
+
+// Toggles the AppKit Fullscreen API. By default, doing so enters Canonical
+// Fullscreen.
+- (void)enterAppKitFullscreen;
+- (void)exitAppKitFullscreen;
+
+// Updates |layout| with the full set of parameters required to statelessly
+// determine the layout of the views managed by this controller.
+- (void)updateLayoutParameters:(BrowserWindowLayout*)layout;
+
+// Applies a layout to the views managed by this controller.
+- (void)applyLayout:(BrowserWindowLayout*)layout;
+
+// Ensures that the window's content view's subviews have the correct
+// z-ordering. Will add or remove subviews as necessary.
+- (void)updateSubviewZOrder;
+
+// Performs updateSubviewZOrder when this controller is not in fullscreen.
+- (void)updateSubviewZOrderNormal;
+
+// Performs updateSubviewZOrder when this controller is in fullscreen.
+- (void)updateSubviewZOrderFullscreen;
+
+// Sets the content view's subviews. Attempts to not touch the tabContentArea
+// to prevent redraws.
+- (void)setContentViewSubviews:(NSArray*)subviews;
+
+// A hack required to get NSThemeFrame sub layers to order correctly. See
+// implementation for more details.
+- (void)updateSubviewZOrderHack;
 
 @end  // @interface BrowserWindowController(Private)
 

@@ -48,6 +48,15 @@ class Html5FsForTesting : public Html5Fs {
     Error error = Init(args);
     EXPECT_EQ(expected_error, error);
   }
+
+  bool Exists(const char* filename) {
+    ScopedNode node;
+    if (Open(Path(filename), O_RDONLY, &node))
+      return false;
+
+    struct stat buf;
+    return node->GetStat(&buf) == 0;
+  }
 };
 
 class Html5FsTest : public ::testing::Test {
@@ -143,7 +152,7 @@ TEST_F(Html5FsTest, PassFilesystemResource) {
     ScopedRef<Html5FsForTesting> fs(
         new Html5FsForTesting(map, &ppapi_));
 
-    ASSERT_EQ(0, fs->Access(Path("/foo"), R_OK | W_OK | X_OK));
+    ASSERT_TRUE(fs->Exists("/foo"));
 
     ppapi_html5_.GetCoreInterface()->ReleaseResource(filesystem);
   }
@@ -156,18 +165,8 @@ TEST_F(Html5FsTest, MountSubtree) {
   map["SOURCE"] = "/foo";
   ScopedRef<Html5FsForTesting> fs(new Html5FsForTesting(map, &ppapi_));
 
-  ASSERT_EQ(0, fs->Access(Path("/bar"), R_OK | W_OK | X_OK));
-  ASSERT_EQ(ENOENT, fs->Access(Path("/foo/bar"), F_OK));
-}
-
-TEST_F(Html5FsTest, Access) {
-  EXPECT_TRUE(ppapi_html5_.filesystem_template()->AddEmptyFile("/foo", NULL));
-
-  StringMap_t map;
-  ScopedRef<Html5FsForTesting> fs(new Html5FsForTesting(map, &ppapi_));
-
-  ASSERT_EQ(0, fs->Access(Path("/foo"), R_OK | W_OK | X_OK));
-  ASSERT_EQ(ENOENT, fs->Access(Path("/bar"), F_OK));
+  ASSERT_TRUE(fs->Exists("/bar"));
+  ASSERT_FALSE(fs->Exists("/foo/bar"));
 }
 
 TEST_F(Html5FsTest, Mkdir) {
@@ -178,7 +177,7 @@ TEST_F(Html5FsTest, Mkdir) {
   EXPECT_EQ(EEXIST, fs->Mkdir(Path("/"), 0644));
 
   Path path("/foo");
-  ASSERT_EQ(ENOENT, fs->Access(path, F_OK));
+  ASSERT_FALSE(fs->Exists("/foo"));
   ASSERT_EQ(0, fs->Mkdir(path, 0644));
 
   struct stat stat;
@@ -189,15 +188,16 @@ TEST_F(Html5FsTest, Mkdir) {
 }
 
 TEST_F(Html5FsTest, Remove) {
-  EXPECT_TRUE(ppapi_html5_.filesystem_template()->AddEmptyFile("/foo", NULL));
+  const char* kPath = "/foo";
+  EXPECT_TRUE(ppapi_html5_.filesystem_template()->AddEmptyFile(kPath, NULL));
 
   StringMap_t map;
   ScopedRef<Html5FsForTesting> fs(new Html5FsForTesting(map, &ppapi_));
 
-  Path path("/foo");
-  ASSERT_EQ(0, fs->Access(path, F_OK));
+  Path path(kPath);
+  ASSERT_TRUE(fs->Exists(kPath));
   ASSERT_EQ(0, fs->Remove(path));
-  EXPECT_EQ(ENOENT, fs->Access(path, F_OK));
+  EXPECT_FALSE(fs->Exists(kPath));
 }
 
 TEST_F(Html5FsTest, Unlink) {
@@ -207,10 +207,12 @@ TEST_F(Html5FsTest, Unlink) {
   StringMap_t map;
   ScopedRef<Html5FsForTesting> fs(new Html5FsForTesting(map, &ppapi_));
 
+  ASSERT_TRUE(fs->Exists("/dir"));
+  ASSERT_TRUE(fs->Exists("/file"));
+  ASSERT_EQ(0, fs->Unlink(Path("/file")));
   ASSERT_EQ(EISDIR, fs->Unlink(Path("/dir")));
-  EXPECT_EQ(0, fs->Unlink(Path("/file")));
-  EXPECT_EQ(ENOENT, fs->Access(Path("/file"), F_OK));
-  EXPECT_EQ(0, fs->Access(Path("/dir"), F_OK));
+  EXPECT_FALSE(fs->Exists("/file"));
+  EXPECT_TRUE(fs->Exists("/dir"));
 }
 
 TEST_F(Html5FsTest, Rmdir) {
@@ -222,8 +224,8 @@ TEST_F(Html5FsTest, Rmdir) {
 
   ASSERT_EQ(ENOTDIR, fs->Rmdir(Path("/file")));
   EXPECT_EQ(0, fs->Rmdir(Path("/dir")));
-  EXPECT_EQ(ENOENT, fs->Access(Path("/dir"), F_OK));
-  EXPECT_EQ(0, fs->Access(Path("/file"), F_OK));
+  EXPECT_FALSE(fs->Exists("/dir"));
+  EXPECT_TRUE(fs->Exists("/file"));
 }
 
 TEST_F(Html5FsTest, Rename) {
@@ -232,21 +234,19 @@ TEST_F(Html5FsTest, Rename) {
   StringMap_t map;
   ScopedRef<Html5FsForTesting> fs(new Html5FsForTesting(map, &ppapi_));
 
-  Path path("/foo");
-  Path newpath("/bar");
-  ASSERT_EQ(0, fs->Access(path, F_OK));
-  ASSERT_EQ(0, fs->Rename(path, newpath));
-  EXPECT_EQ(ENOENT, fs->Access(path, F_OK));
-  EXPECT_EQ(0, fs->Access(newpath, F_OK));
+  ASSERT_TRUE(fs->Exists("/foo"));
+  ASSERT_EQ(0, fs->Rename(Path("/foo"), Path("/bar")));
+  EXPECT_FALSE(fs->Exists("/foo"));
+  EXPECT_TRUE(fs->Exists("/bar"));
 }
 
 TEST_F(Html5FsTest, OpenForCreate) {
   StringMap_t map;
   ScopedRef<Html5FsForTesting> fs(new Html5FsForTesting(map, &ppapi_));
 
-  Path path("/foo");
-  EXPECT_EQ(ENOENT, fs->Access(path, F_OK));
+  EXPECT_FALSE(fs->Exists("/foo"));
 
+  Path path("/foo");
   ScopedNode node;
   ASSERT_EQ(0, fs->Open(path, O_CREAT | O_RDWR, &node));
 
@@ -389,8 +389,7 @@ TEST_F(Html5FsTest, GetStat) {
   struct stat statbuf;
   EXPECT_EQ(0, node->GetStat(&statbuf));
   EXPECT_EQ(S_IFREG, statbuf.st_mode & S_IFMT);
-  EXPECT_EQ(S_IRUSR | S_IRGRP | S_IROTH |
-            S_IWUSR | S_IWGRP | S_IWOTH, statbuf.st_mode & ~S_IFMT);
+  EXPECT_EQ(S_IRALL | S_IWALL | S_IXALL, statbuf.st_mode & ~S_IFMT);
   EXPECT_EQ(strlen(contents), statbuf.st_size);
   EXPECT_EQ(access_time, statbuf.st_atime);
   EXPECT_EQ(creation_time, statbuf.st_ctime);
@@ -408,8 +407,7 @@ TEST_F(Html5FsTest, GetStat) {
   EXPECT_EQ(0, fs->Open(Path("/dir"), O_RDONLY, &node));
   EXPECT_EQ(0, node->GetStat(&statbuf));
   EXPECT_EQ(S_IFDIR, statbuf.st_mode & S_IFMT);
-  EXPECT_EQ(S_IRUSR | S_IRGRP | S_IROTH |
-            S_IWUSR | S_IWGRP | S_IWOTH, statbuf.st_mode & ~S_IFMT);
+  EXPECT_EQ(S_IRALL | S_IWALL | S_IXALL, statbuf.st_mode & ~S_IFMT);
   EXPECT_EQ(0, statbuf.st_size);
   EXPECT_EQ(access_time, statbuf.st_atime);
   EXPECT_EQ(creation_time, statbuf.st_ctime);
@@ -472,6 +470,10 @@ TEST_F(Html5FsTest, GetDents) {
   ScopedNode node;
   ASSERT_EQ(0, fs->Open(Path("/file"), O_RDWR, &node));
 
+  struct stat stat;
+  ASSERT_EQ(0, node->GetStat(&stat));
+  ino_t file1_ino = stat.st_ino;
+
   // Should fail for regular files.
   const size_t kMaxDirents = 5;
   dirent dirents[kMaxDirents];
@@ -508,6 +510,11 @@ TEST_F(Html5FsTest, GetDents) {
 
   // Add another file...
   ASSERT_EQ(0, fs->Open(Path("/file2"), O_CREAT, &node));
+  ASSERT_EQ(0, node->GetStat(&stat));
+  ino_t file2_ino = stat.st_ino;
+
+  // These files SHOULD not hash to the same value but COULD.
+  EXPECT_NE(file1_ino, file2_ino);
 
   // Read the root directory again.
   memset(&dirents[0], 0, sizeof(dirents));
@@ -523,6 +530,13 @@ TEST_F(Html5FsTest, GetDents) {
       EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
       EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
       dirnames.insert(dirents[i].d_name);
+
+      if (!strcmp(dirents[i].d_name, "file")) {
+        EXPECT_EQ(dirents[i].d_ino, file1_ino);
+      }
+      if (!strcmp(dirents[i].d_name, "file2")) {
+        EXPECT_EQ(dirents[i].d_ino, file2_ino);
+      }
     }
 
     EXPECT_EQ(1, dirnames.count("file"));

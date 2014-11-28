@@ -34,6 +34,7 @@ IPC_STRUCT_TRAITS_BEGIN(media::cast::EncodedFrame)
   IPC_STRUCT_TRAITS_MEMBER(referenced_frame_id)
   IPC_STRUCT_TRAITS_MEMBER(rtp_timestamp)
   IPC_STRUCT_TRAITS_MEMBER(reference_time)
+  IPC_STRUCT_TRAITS_MEMBER(new_playout_delay_ms)
   IPC_STRUCT_TRAITS_MEMBER(data)
 IPC_STRUCT_TRAITS_END()
 
@@ -46,7 +47,6 @@ IPC_STRUCT_TRAITS_BEGIN(media::cast::CastTransportRtpConfig)
   IPC_STRUCT_TRAITS_MEMBER(ssrc)
   IPC_STRUCT_TRAITS_MEMBER(feedback_ssrc)
   IPC_STRUCT_TRAITS_MEMBER(rtp_payload_type)
-  IPC_STRUCT_TRAITS_MEMBER(stored_frames)
   IPC_STRUCT_TRAITS_MEMBER(aes_key)
   IPC_STRUCT_TRAITS_MEMBER(aes_iv_mask)
 IPC_STRUCT_TRAITS_END()
@@ -81,19 +81,12 @@ IPC_STRUCT_TRAITS_BEGIN(media::cast::RtcpCastMessage)
   IPC_STRUCT_TRAITS_MEMBER(missing_frames_and_packets)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(media::cast::RtcpRttReport)
-  IPC_STRUCT_TRAITS_MEMBER(rtt)
-  IPC_STRUCT_TRAITS_MEMBER(avg_rtt)
-  IPC_STRUCT_TRAITS_MEMBER(min_rtt)
-  IPC_STRUCT_TRAITS_MEMBER(max_rtt)
-IPC_STRUCT_TRAITS_END()
-
 // Cast messages sent from the browser to the renderer.
 
 IPC_MESSAGE_CONTROL3(CastMsg_Rtt,
                      int32 /* channel_id */,
                      uint32 /* ssrc */,
-                     media::cast::RtcpRttReport /* rtt_report */)
+                     base::TimeDelta /* rtt */)
 
 IPC_MESSAGE_CONTROL3(CastMsg_RtcpCastMessage,
                      int32 /* channel_id */,
@@ -122,15 +115,11 @@ IPC_MESSAGE_CONTROL2(
   int32 /*channel_id*/,
   media::cast::CastTransportRtpConfig /*config*/)
 
-IPC_MESSAGE_CONTROL2(
-    CastHostMsg_InsertCodedAudioFrame,
+IPC_MESSAGE_CONTROL3(
+    CastHostMsg_InsertFrame,
     int32 /* channel_id */,
-    media::cast::EncodedFrame /* audio_frame */)
-
-IPC_MESSAGE_CONTROL2(
-    CastHostMsg_InsertCodedVideoFrame,
-    int32 /* channel_id */,
-    media::cast::EncodedFrame /* video_frame */)
+    uint32 /* ssrc */,
+    media::cast::EncodedFrame /* audio/video frame */)
 
 IPC_MESSAGE_CONTROL4(
     CastHostMsg_SendSenderReport,
@@ -139,18 +128,23 @@ IPC_MESSAGE_CONTROL4(
     base::TimeTicks /* current_time */,
     uint32 /* current_time_as_rtp_timestamp */)
 
-IPC_MESSAGE_CONTROL5(
-    CastHostMsg_ResendPackets,
+IPC_MESSAGE_CONTROL3(
+    CastHostMsg_CancelSendingFrames,
     int32 /* channel_id */,
-    bool /* is_audio */,
-    media::cast::MissingFramesAndPacketsMap /* missing_packets */,
-    bool /* cancel_rtx_if_not_in_list */,
-    base::TimeDelta /* dedupe_window */)
+    uint32 /* ssrc */,
+    std::vector<uint32> /* frame_ids */)
 
-IPC_MESSAGE_CONTROL2(
+IPC_MESSAGE_CONTROL3(
+    CastHostMsg_ResendFrameForKickstart,
+    int32 /* channel_id */,
+    uint32 /* ssrc */,
+    uint32 /* frame_id */)
+
+IPC_MESSAGE_CONTROL3(
     CastHostMsg_New,
     int32 /* channel_id */,
-    net::IPEndPoint /*remote_end_point*/)
+    net::IPEndPoint /* remote_end_point */,
+    base::DictionaryValue /* options */)
 
 IPC_MESSAGE_CONTROL1(
     CastHostMsg_Delete,

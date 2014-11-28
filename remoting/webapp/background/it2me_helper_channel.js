@@ -10,13 +10,20 @@
  * assistance).
  *
  * It runs in the background page and contains two chrome.runtime.Port objects,
- * respresenting connections to the webapp and hangout, respectively.
+ * representing connections to the webapp and hangout, respectively.
  *
- * Connection is always initiated from Hangouts.
+ * Connection is always initiated from Hangouts by calling
+ *   var port = chrome.runtime.connect({name:'it2me.helper.hangout'}, extId).
+ *   port.postMessage('hello')
+ * If the webapp is not installed, |port.onDisconnect| will fire.
+ * If the webapp is installed, Hangouts will receive a hello response with the
+ * list of supported features.
  *
  *   Hangout                     It2MeHelperChannel        Chrome Remote Desktop
  *      |-----runtime.connect() ------>|                                |
- *      |------connect message-------->|                                |
+ *      |--------hello message-------->|                                |
+ *      |                              |<-----helloResponse message-----|
+ *      |-------connect message------->|                                |
  *      |                              |-------appLauncher.launch()---->|
  *      |                              |<------runtime.connect()------- |
  *      |                              |<-----sessionStateChanged------ |
@@ -109,8 +116,16 @@ remoting.It2MeHelperChannel =
 
 /** @enum {string} */
 remoting.It2MeHelperChannel.HangoutMessageTypes = {
+  HELLO: 'hello',
+  HELLO_RESPONSE: 'helloResponse',
   CONNECT: 'connect',
-  DISCONNECT: 'disconnect'
+  DISCONNECT: 'disconnect',
+  ERROR: 'error'
+};
+
+/** @enum {string} */
+remoting.It2MeHelperChannel.Features = {
+  REMOTE_ASSISTANCE: 'remoteAssistance'
 };
 
 /** @enum {string} */
@@ -143,14 +158,17 @@ remoting.It2MeHelperChannel.prototype.onHangoutMessage_ = function(message) {
       case MessageTypes.DISCONNECT:
         this.closeWebapp_(message);
         return true;
+      case MessageTypes.HELLO:
+        this.hangoutPort_.postMessage({
+          method: MessageTypes.HELLO_RESPONSE,
+          supportedFeatures: base.values(remoting.It2MeHelperChannel.Features)
+        });
+        return true;
     }
+    throw new Error('Unknown message method=' + message.method);
   } catch(e) {
     var error = /** @type {Error} */ e;
-    console.error(error);
-    this.hangoutPort_.postMessage({
-      method: message.method + 'Response',
-      error: error.message
-    });
+    this.sendErrorResponse_(this.hangoutPort_, error, message);
   }
   return false;
 };
@@ -259,11 +277,7 @@ remoting.It2MeHelperChannel.prototype.onWebappMessage_ = function(message) {
     throw new Error('Unknown message method=' + message.method);
   } catch(e) {
     var error = /** @type {Error} */ e;
-    console.error(error);
-    this.webappPort_.postMessage({
-      method: message.method + 'Response',
-      error: error.message
-    });
+    this.sendErrorResponse_(this.webappPort_, error, message);
   }
   return false;
 };
@@ -287,4 +301,26 @@ remoting.It2MeHelperChannel.prototype.unhookPorts_ = function() {
     this.onDisconnectCallback_(this);
     this.onDisconnectCallback_  = null;
   }
+};
+
+/**
+ * @param {chrome.runtime.Port} port
+ * @param {string|Error} error
+ * @param {?{method:string, data:Object.<string,*>}=} opt_incomingMessage
+ * @private
+ */
+remoting.It2MeHelperChannel.prototype.sendErrorResponse_ =
+    function(port, error, opt_incomingMessage) {
+  if (error instanceof Error) {
+    error = error.message;
+  }
+
+  console.error('Error responding to message method:' +
+                (opt_incomingMessage ? opt_incomingMessage.method : 'null') +
+                ' error:' + error);
+  port.postMessage({
+    method: remoting.It2MeHelperChannel.HangoutMessageTypes.ERROR,
+    message: error,
+    request: opt_incomingMessage
+  });
 };

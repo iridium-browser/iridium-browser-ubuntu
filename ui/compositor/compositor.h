@@ -186,11 +186,20 @@ class COMPOSITOR_EXPORT Compositor
   // the |root_layer|.
   void SetBackgroundColor(SkColor color);
 
+  // Set the visibility of the underlying compositor.
+  void SetVisible(bool visible);
+
   // Returns the widget for this compositor.
   gfx::AcceleratedWidget widget() const { return widget_; }
 
   // Returns the vsync manager for this compositor.
   scoped_refptr<CompositorVSyncManager> vsync_manager() const;
+
+  // Returns the main thread task runner this compositor uses. Users of the
+  // compositor generally shouldn't use this.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner() const {
+    return task_runner_;
+  }
 
   // Compositor does not own observers. It is the responsibility of the
   // observer to remove itself when it is done observing.
@@ -221,12 +230,13 @@ class COMPOSITOR_EXPORT Compositor
   // LayerTreeHostClient implementation.
   virtual void WillBeginMainFrame(int frame_id) OVERRIDE {}
   virtual void DidBeginMainFrame() OVERRIDE {}
-  virtual void Animate(base::TimeTicks frame_begin_time) OVERRIDE;
+  virtual void BeginMainFrame(const cc::BeginFrameArgs& args) OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual void ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                   float page_scale) OVERRIDE {}
-  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(bool fallback)
-      OVERRIDE;
+  virtual void ApplyViewportDeltas(
+      const gfx::Vector2d& scroll_delta,
+      float page_scale,
+      float top_controls_delta) OVERRIDE {}
+  virtual void RequestNewOutputSurface(bool fallback) OVERRIDE;
   virtual void DidInitializeOutputSurface() OVERRIDE {}
   virtual void WillCommit() OVERRIDE {}
   virtual void DidCommit() OVERRIDE;

@@ -13,8 +13,8 @@ namespace chrome {
 
 bool IsNativeViewInAsh(gfx::NativeView native_view) {
 #if defined(OS_CHROMEOS)
-  // Optimization. There is only ash on ChromeOS.
-  return true;
+  // Optimization. There is only ash or only athena on ChromeOS.
+  return ash::Shell::HasInstance();
 #endif
 
   if (!ash::Shell::HasInstance())
@@ -34,16 +34,6 @@ bool IsNativeViewInAsh(gfx::NativeView native_view) {
 
 bool IsNativeWindowInAsh(gfx::NativeWindow native_window) {
   return IsNativeViewInAsh(native_window);
-}
-
-void ToggleAshDesktop() {
-  if (chrome::HOST_DESKTOP_TYPE_ASH == chrome::HOST_DESKTOP_TYPE_NATIVE)
-    return;
-
-  if (!ash::Shell::HasInstance())
-    OpenAsh(gfx::kNullAcceleratedWidget);
-  else
-    CloseAsh();
 }
 
 }  // namespace chrome

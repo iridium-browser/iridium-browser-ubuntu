@@ -7,7 +7,6 @@ package org.chromium.sync.notifier;
 import android.accounts.Account;
 import android.content.Intent;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
 import com.google.protos.ipc.invalidation.Types;
 
@@ -87,14 +86,16 @@ public class InvalidationIntentProtocol {
      */
     public static Intent createRegisterIntent(Account account, int[] objectSources,
             String[] objectNames) {
-        Preconditions.checkArgument(objectSources.length == objectNames.length,
-            "objectSources and objectNames must have the same length");
+        if (objectSources.length != objectNames.length) {
+            throw new IllegalArgumentException(
+                    "objectSources and objectNames must have the same length");
+        }
 
         // Add all non-Sync objects to new lists.
         ArrayList<Integer> sources = new ArrayList<Integer>();
         ArrayList<String> names = new ArrayList<String>();
         for (int i = 0; i < objectSources.length; i++) {
-            if (objectSources[i] != Types.ObjectSource.Type.CHROME_SYNC.getNumber()) {
+            if (objectSources[i] != Types.ObjectSource.CHROME_SYNC) {
                 sources.add(objectSources[i]);
                 names.add(objectNames[i]);
             }

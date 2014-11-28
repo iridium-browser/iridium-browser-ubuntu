@@ -16,7 +16,7 @@
 
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.common.base.Preconditions;
+import com.google.ipc.invalidation.util.Preconditions;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;

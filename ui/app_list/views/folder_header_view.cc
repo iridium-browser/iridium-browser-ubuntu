@@ -7,13 +7,14 @@
 #include <algorithm>
 
 #include "base/strings/utf_string_conversions.h"
-#include "grit/ui_resources.h"
-#include "grit/ui_strings.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_folder_item.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/views/app_list_folder_view.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/resources/grit/ui_resources.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -26,8 +27,8 @@ namespace {
 const int kPreferredWidth = 360;
 const int kPreferredHeight = 48;
 const int kIconDimension = 24;
-const int kPadding = 14;
-const int kBottomSeparatorWidth = 380;
+const int kBackButtonPadding = 14;
+const int kBottomSeparatorPadding = 9;  // Non-experimental app list only.
 const int kBottomSeparatorHeight = 1;
 const int kMaxFolderNameWidth = 300;
 
@@ -158,7 +159,13 @@ void FolderHeaderView::Layout() {
     return;
 
   gfx::Rect back_bounds(rect);
-  back_bounds.set_width(kIconDimension + 2 * kPadding);
+  back_bounds.set_width(kIconDimension + 2 * kBackButtonPadding);
+  if (app_list::switches::IsExperimentalAppListEnabled()) {
+    // Align the left edge of the button image with the left margin of the
+    // launcher window. Note that this means the physical button dimensions
+    // extends slightly into the margin.
+    back_bounds.set_x(kExperimentalWindowPadding - kBackButtonPadding);
+  }
   back_button_->SetBoundsRect(back_bounds);
 
   gfx::Rect text_bounds(rect);
@@ -167,7 +174,8 @@ void FolderHeaderView::Layout() {
                             : folder_name_placeholder_text_;
   int text_width =
       gfx::Canvas::GetStringWidth(text, folder_name_view_->GetFontList()) +
-      folder_name_view_->GetCaretBounds().width();
+      folder_name_view_->GetCaretBounds().width() +
+      folder_name_view_->GetInsets().width();
   text_width = std::min(text_width, kMaxFolderNameWidth);
   text_bounds.set_x(back_bounds.x() + (rect.width() - text_width) / 2);
   text_bounds.set_width(text_width);
@@ -191,9 +199,11 @@ void FolderHeaderView::OnPaint(gfx::Canvas* canvas) {
     return;
 
   // Draw bottom separator line.
-  rect.set_x((rect.width() - kBottomSeparatorWidth) / 2 + rect.x());
-  rect.set_y(rect.y() + rect.height() - kBottomSeparatorHeight);
-  rect.set_width(kBottomSeparatorWidth);
+  int horizontal_padding = app_list::switches::IsExperimentalAppListEnabled()
+                               ? kExperimentalWindowPadding
+                               : kBottomSeparatorPadding;
+  rect.Inset(horizontal_padding, 0);
+  rect.set_y(rect.bottom() - kBottomSeparatorHeight);
   rect.set_height(kBottomSeparatorHeight);
   canvas->FillRect(rect, kTopSeparatorColor);
 }
@@ -222,20 +232,8 @@ void FolderHeaderView::ButtonPressed(views::Button* sender,
   delegate_->NavigateBack(folder_item_, event);
 }
 
-void FolderHeaderView::ItemIconChanged() {
-}
-
 void FolderHeaderView::ItemNameChanged() {
   Update();
-}
-
-void FolderHeaderView::ItemHighlightedChanged() {
-}
-
-void FolderHeaderView::ItemIsInstallingChanged() {
-}
-
-void FolderHeaderView::ItemPercentDownloadedChanged() {
 }
 
 }  // namespace app_list

@@ -1105,7 +1105,7 @@ def ValidateRegularInstruction(instruction, bitness):
          'inc', 'dec', 'neg', 'not',
          'shl', 'shr', 'sar', 'rol', 'ror', 'rcl', 'rcr',
          'shld', 'shrd',
-         'pop', 'clflush', 'cmpxchg8b',
+         'pop', 'cmpxchg8b',
          'lea',
          'nop',
          'prefetch', 'prefetchnta', 'prefetcht0', 'prefetcht1', 'prefetcht2',
@@ -1216,7 +1216,7 @@ def ValidateRegularInstruction(instruction, bitness):
       write_ops = [ops[2]]
 
     elif _InstructionNameIn(name, [
-        'pop', 'clflush', 'cmpxchg8b', 'cmpxchg16b']):
+        'pop', 'cmpxchg8b', 'cmpxchg16b']):
       assert len(ops) == 1
       write_ops = ops
 

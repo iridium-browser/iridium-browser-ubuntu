@@ -11,6 +11,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/variations/variations_associated_data.h"
 
@@ -41,6 +43,9 @@ const char kLocalPredictorSpecTrialName[] = "PrerenderLocalPredictorSpec";
 const char kLocalPredictorKeyName[] = "LocalPredictor";
 const char kLocalPredictorUnencryptedSyncOnlyKeyName[] =
     "LocalPredictorUnencryptedSyncOnly";
+const char kLocalPredictorNetworkPredictionEnabledOnly[] =
+    "LocalPredictorNetworkPredictionEnabledOnly";
+const char kLocalPredictorOnCellularOnly[] = "LocalPredictorOnCellularOnly";
 const char kSideEffectFreeWhitelistKeyName[] = "SideEffectFreeWhitelist";
 const char kPrerenderLaunchKeyName[] = "PrerenderLaunch";
 const char kPrerenderAlwaysControlKeyName[] = "PrerenderAlwaysControl";
@@ -90,22 +95,27 @@ void SetupPrerenderFieldTrial() {
   FieldTrial::Probability experiment_multi_prerender_probability;
   FieldTrial::Probability experiment_15min_ttl_probability;
   FieldTrial::Probability experiment_no_use_probability;
+  FieldTrial::Probability experiment_match_complete_probability;
 
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
   if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
       channel == chrome::VersionInfo::CHANNEL_BETA) {
     // Use very conservatives and stable settings in beta and stable.
-    const FieldTrial::Probability release_prerender_enabled_probability = 980;
+    const FieldTrial::Probability release_prerender_enabled_probability = 970;
     const FieldTrial::Probability release_control_probability = 10;
     const FieldTrial::Probability
         release_experiment_multi_prerender_probability = 0;
     const FieldTrial::Probability release_experiment_15min_ttl_probability = 10;
     const FieldTrial::Probability release_experiment_no_use_probability = 0;
+    const FieldTrial::Probability
+        release_experiment_match_complete_probability = 10;
     COMPILE_ASSERT(
-        release_prerender_enabled_probability + release_control_probability +
+        release_prerender_enabled_probability +
+        release_control_probability +
         release_experiment_multi_prerender_probability +
         release_experiment_15min_ttl_probability +
-        release_experiment_no_use_probability == divisor,
+        release_experiment_no_use_probability +
+        release_experiment_match_complete_probability == divisor,
         release_experiment_probabilities_must_equal_divisor);
 
     control_probability = release_control_probability;
@@ -113,19 +123,25 @@ void SetupPrerenderFieldTrial() {
         release_experiment_multi_prerender_probability;
     experiment_15min_ttl_probability = release_experiment_15min_ttl_probability;
     experiment_no_use_probability = release_experiment_no_use_probability;
+    experiment_match_complete_probability =
+        release_experiment_match_complete_probability;
   } else {
     // In testing channels, use more experiments and a larger control group to
     // improve quality of data.
-    const FieldTrial::Probability dev_prerender_enabled_probability = 250;
-    const FieldTrial::Probability dev_control_probability = 250;
+    const FieldTrial::Probability dev_prerender_enabled_probability = 200;
+    const FieldTrial::Probability dev_control_probability = 200;
     const FieldTrial::Probability
-        dev_experiment_multi_prerender_probability = 250;
-    const FieldTrial::Probability dev_experiment_15min_ttl_probability = 125;
-    const FieldTrial::Probability dev_experiment_no_use_probability = 125;
-    COMPILE_ASSERT(dev_prerender_enabled_probability + dev_control_probability +
+        dev_experiment_multi_prerender_probability = 200;
+    const FieldTrial::Probability dev_experiment_15min_ttl_probability = 100;
+    const FieldTrial::Probability dev_experiment_no_use_probability = 100;
+    const FieldTrial::Probability
+        dev_experiment_match_complete_probability = 200;
+    COMPILE_ASSERT(dev_prerender_enabled_probability +
+                   dev_control_probability +
                    dev_experiment_multi_prerender_probability +
                    dev_experiment_15min_ttl_probability +
-                   dev_experiment_no_use_probability == divisor,
+                   dev_experiment_no_use_probability +
+                   dev_experiment_match_complete_probability == divisor,
                    dev_experiment_probabilities_must_equal_divisor);
 
     control_probability = dev_control_probability;
@@ -133,6 +149,8 @@ void SetupPrerenderFieldTrial() {
         dev_experiment_multi_prerender_probability;
     experiment_15min_ttl_probability = dev_experiment_15min_ttl_probability;
     experiment_no_use_probability = dev_experiment_no_use_probability;
+    experiment_match_complete_probability =
+        dev_experiment_match_complete_probability;
   }
 
   int prerender_enabled_group = -1;
@@ -153,6 +171,9 @@ void SetupPrerenderFieldTrial() {
   const int experiment_no_use_group =
       trial->AppendGroup("PrerenderNoUse",
                          experiment_no_use_probability);
+  const int experiment_match_complete_group =
+      trial->AppendGroup("MatchComplete",
+                         experiment_match_complete_probability);
 
   const int trial_group = trial->group();
   if (trial_group == prerender_enabled_group) {
@@ -170,6 +191,9 @@ void SetupPrerenderFieldTrial() {
   } else if (trial_group == experiment_no_use_group) {
     PrerenderManager::SetMode(
         PrerenderManager::PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP);
+  } else if (trial_group == experiment_match_complete_group) {
+    PrerenderManager::SetMode(
+        PrerenderManager::PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP);
   } else {
     NOTREACHED();
   }
@@ -312,11 +336,36 @@ bool IsLocalPredictorEnabled() {
       GetLocalPredictorSpecValue(kLocalPredictorKeyName) == kEnabledGroup;
 }
 
-bool DisableLocalPredictorBasedOnSyncAndConfiguration(Profile* profile) {
+bool ShouldDisableLocalPredictorBasedOnSyncAndConfiguration(Profile* profile) {
   return
       GetLocalPredictorSpecValue(kLocalPredictorUnencryptedSyncOnlyKeyName) ==
           kEnabledGroup &&
       !IsUnencryptedSyncEnabled(profile);
+}
+
+bool ShouldDisableLocalPredictorDueToPreferencesAndNetwork(Profile* profile) {
+  bool on_cellular =
+      net::NetworkChangeNotifier::IsConnectionCellular(
+          net::NetworkChangeNotifier::GetConnectionType());
+  // If the user is not on a cellular connection, but we require a cellular
+  // connection, we must temporarily disable our local predictions.
+  if (!on_cellular &&
+      GetLocalPredictorSpecValue(kLocalPredictorOnCellularOnly) ==
+      kEnabledGroup) {
+    return true;
+  }
+
+  // If we don't care whether or not network prediction will actually be
+  // exercised, we do not need to temporarily disable our predictions.
+  if (GetLocalPredictorSpecValue(kLocalPredictorNetworkPredictionEnabledOnly) !=
+      kEnabledGroup) {
+    return false;
+  }
+
+  // We should temporarily disable iff the predictive network action would
+  // not be exercised.
+
+  return !chrome_browser_net::CanPrefetchAndPrerenderUI(profile->GetPrefs());
 }
 
 bool IsLoggedInPredictorEnabled() {

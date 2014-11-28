@@ -37,8 +37,7 @@ namespace drive_backend {
 
 namespace {
 
-fileapi::FileSystemURL URL(const GURL& origin,
-                           const std::string& path) {
+storage::FileSystemURL URL(const GURL& origin, const std::string& path) {
   return CreateSyncableFileSystemURL(
       origin, base::FilePath::FromUTF8Unsafe(path));
 }
@@ -123,10 +122,8 @@ class RemoteToLocalSyncerTest : public testing::Test {
 
   void RegisterApp(const std::string& app_id,
                    const std::string& app_root_folder_id) {
-    SyncStatusCode status = SYNC_STATUS_FAILED;
-    context_->GetMetadataDatabase()->RegisterApp(app_id, app_root_folder_id,
-                                                 CreateResultReceiver(&status));
-    base::RunLoop().RunUntilIdle();
+    SyncStatusCode status = context_->GetMetadataDatabase()->RegisterApp(
+        app_id, app_root_folder_id);
     EXPECT_EQ(SYNC_STATUS_OK, status);
   }
 
@@ -167,13 +164,13 @@ class RemoteToLocalSyncerTest : public testing::Test {
               fake_drive_helper_->DeleteResource(file_id));
   }
 
-  void CreateLocalFolder(const fileapi::FileSystemURL& url) {
+  void CreateLocalFolder(const storage::FileSystemURL& url) {
     remote_change_processor_->UpdateLocalFileMetadata(
         url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
                         SYNC_FILE_TYPE_DIRECTORY));
   }
 
-  void CreateLocalFile(const fileapi::FileSystemURL& url) {
+  void CreateLocalFile(const storage::FileSystemURL& url) {
     remote_change_processor_->UpdateLocalFileMetadata(
         url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
                         SYNC_FILE_TYPE_FILE));
@@ -213,7 +210,7 @@ class RemoteToLocalSyncerTest : public testing::Test {
       status = RunSyncer();
     } while (status == SYNC_STATUS_OK ||
              status == SYNC_STATUS_RETRY ||
-             metadata_database->PromoteLowerPriorityTrackersToNormal());
+             metadata_database->PromoteDemotedTrackers());
     return status;
   }
 
@@ -228,7 +225,7 @@ class RemoteToLocalSyncerTest : public testing::Test {
     return status;
   }
 
-  void AppendExpectedChange(const fileapi::FileSystemURL& url,
+  void AppendExpectedChange(const storage::FileSystemURL& url,
                             FileChange::ChangeType change_type,
                             SyncFileType file_type) {
     expected_changes_[url].push_back(FileChange(change_type, file_type));
@@ -384,8 +381,8 @@ TEST_F(RemoteToLocalSyncerTest, Conflict_CreateFileOnFolder) {
   VerifyConsistency();
 
   // Tracker for the remote file should has low priority.
-  EXPECT_FALSE(GetMetadataDatabase()->GetNormalPriorityDirtyTracker(NULL));
-  EXPECT_TRUE(GetMetadataDatabase()->HasLowPriorityDirtyTracker());
+  EXPECT_FALSE(GetMetadataDatabase()->GetDirtyTracker(NULL));
+  EXPECT_TRUE(GetMetadataDatabase()->HasDemotedDirtyTracker());
 }
 
 TEST_F(RemoteToLocalSyncerTest, Conflict_CreateFolderOnFile) {
@@ -449,8 +446,8 @@ TEST_F(RemoteToLocalSyncerTest, Conflict_CreateFileOnFile) {
   VerifyConsistency();
 
   // Tracker for the remote file should be lowered.
-  EXPECT_FALSE(GetMetadataDatabase()->GetNormalPriorityDirtyTracker(NULL));
-  EXPECT_TRUE(GetMetadataDatabase()->HasLowPriorityDirtyTracker());
+  EXPECT_FALSE(GetMetadataDatabase()->GetDirtyTracker(NULL));
+  EXPECT_TRUE(GetMetadataDatabase()->HasDemotedDirtyTracker());
 }
 
 TEST_F(RemoteToLocalSyncerTest, Conflict_CreateNestedFolderOnFile) {

@@ -28,54 +28,57 @@
 #include "config.h"
 #include "modules/webdatabase/SQLStatement.h"
 
-#include "platform/Logging.h"
-#include "modules/webdatabase/sqlite/SQLiteDatabase.h"
-#include "modules/webdatabase/sqlite/SQLiteStatement.h"
-#include "modules/webdatabase/AbstractDatabaseServer.h"
-#include "modules/webdatabase/AbstractSQLStatementBackend.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseManager.h"
+#include "modules/webdatabase/SQLError.h"
+#include "modules/webdatabase/SQLStatementBackend.h"
 #include "modules/webdatabase/SQLStatementCallback.h"
 #include "modules/webdatabase/SQLStatementErrorCallback.h"
 #include "modules/webdatabase/SQLTransaction.h"
+#include "modules/webdatabase/sqlite/SQLiteDatabase.h"
+#include "modules/webdatabase/sqlite/SQLiteStatement.h"
+#include "platform/Logging.h"
 #include "wtf/text/CString.h"
 
 namespace blink {
 
 PassOwnPtrWillBeRawPtr<SQLStatement> SQLStatement::create(Database* database,
-    PassOwnPtr<SQLStatementCallback> callback, PassOwnPtr<SQLStatementErrorCallback> errorCallback)
+    SQLStatementCallback* callback, SQLStatementErrorCallback* errorCallback)
 {
     return adoptPtrWillBeNoop(new SQLStatement(database, callback, errorCallback));
 }
 
-SQLStatement::SQLStatement(Database* database, PassOwnPtr<SQLStatementCallback> callback,
-    PassOwnPtr<SQLStatementErrorCallback> errorCallback)
-    : m_statementCallbackWrapper(callback, database->executionContext())
-    , m_statementErrorCallbackWrapper(errorCallback, database->executionContext())
+SQLStatement::SQLStatement(Database* database, SQLStatementCallback* callback,
+    SQLStatementErrorCallback* errorCallback)
+    : m_statementCallback(callback)
+    , m_statementErrorCallback(errorCallback)
+{
+}
+
+SQLStatement::~SQLStatement()
 {
 }
 
 void SQLStatement::trace(Visitor* visitor)
 {
     visitor->trace(m_backend);
-    visitor->trace(m_statementCallbackWrapper);
-    visitor->trace(m_statementErrorCallbackWrapper);
-    AbstractSQLStatement::trace(visitor);
+    visitor->trace(m_statementCallback);
+    visitor->trace(m_statementErrorCallback);
 }
 
-void SQLStatement::setBackend(AbstractSQLStatementBackend* backend)
+void SQLStatement::setBackend(SQLStatementBackend* backend)
 {
     m_backend = backend;
 }
 
 bool SQLStatement::hasCallback()
 {
-    return m_statementCallbackWrapper.hasCallback();
+    return m_statementCallback;
 }
 
 bool SQLStatement::hasErrorCallback()
 {
-    return m_statementErrorCallbackWrapper.hasCallback();
+    return m_statementErrorCallback;
 }
 
 bool SQLStatement::performCallback(SQLTransaction* transaction)
@@ -85,8 +88,8 @@ bool SQLStatement::performCallback(SQLTransaction* transaction)
 
     bool callbackError = false;
 
-    OwnPtr<SQLStatementCallback> callback = m_statementCallbackWrapper.unwrap();
-    OwnPtr<SQLStatementErrorCallback> errorCallback = m_statementErrorCallbackWrapper.unwrap();
+    SQLStatementCallback* callback = m_statementCallback.release();
+    SQLStatementErrorCallback* errorCallback = m_statementErrorCallback.release();
     SQLErrorData* error = m_backend->sqlError();
 
     // Call the appropriate statement callback and track if it resulted in an error,

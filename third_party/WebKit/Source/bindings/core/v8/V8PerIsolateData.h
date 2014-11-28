@@ -32,6 +32,7 @@
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "gin/public/gin_embedders.h"
 #include "gin/public/isolate_holder.h"
+#include "modules/indexeddb/IDBPendingTransactionMonitor.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/OwnPtr.h"
@@ -51,17 +52,20 @@ typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
 
 class V8PerIsolateData {
 public:
-    static void ensureInitialized(v8::Isolate*);
+    static v8::Isolate* initialize();
     static V8PerIsolateData* from(v8::Isolate* isolate)
     {
         ASSERT(isolate);
         ASSERT(isolate->GetData(gin::kEmbedderBlink));
         return static_cast<V8PerIsolateData*>(isolate->GetData(gin::kEmbedderBlink));
     }
-    static void dispose(v8::Isolate*);
+
+    static void willBeDestroyed(v8::Isolate*);
+    static void destroy(v8::Isolate*);
     static v8::Isolate* mainThreadIsolate();
 
-    v8::Isolate* isolate() { return m_isolate; }
+    bool destructionPending() const { return m_destructionPending; }
+    v8::Isolate* isolate() { return m_isolateHolder->isolate(); }
 
     v8::Handle<v8::FunctionTemplate> toStringTemplate();
 
@@ -99,8 +103,10 @@ public:
     const char* previousSamplingState() const { return m_previousSamplingState; }
     void setPreviousSamplingState(const char* name) { m_previousSamplingState = name; }
 
+    IDBPendingTransactionMonitor* ensureIDBPendingTransactionMonitor();
+
 private:
-    explicit V8PerIsolateData(v8::Isolate*);
+    V8PerIsolateData();
     ~V8PerIsolateData();
 
     typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate> > DOMTemplateMap;
@@ -108,7 +114,7 @@ private:
     bool hasInstance(const WrapperTypeInfo*, v8::Handle<v8::Value>, DOMTemplateMap&);
     v8::Handle<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Handle<v8::Value>, DOMTemplateMap&);
 
-    v8::Isolate* m_isolate;
+    bool m_destructionPending;
     OwnPtr<gin::IsolateHolder> m_isolateHolder;
     DOMTemplateMap m_domTemplateMapForMainWorld;
     DOMTemplateMap m_domTemplateMapForNonMainWorld;
@@ -131,6 +137,8 @@ private:
 #endif
     OwnPtr<GCEventData> m_gcEventData;
     bool m_performingMicrotaskCheckpoint;
+
+    OwnPtr<IDBPendingTransactionMonitor> m_idbPendingTransactionMonitor;
 };
 
 } // namespace blink

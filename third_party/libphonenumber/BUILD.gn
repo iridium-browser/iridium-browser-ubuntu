@@ -44,15 +44,21 @@ static_library("libphonenumber_without_metadata") {
     "src/phonenumbers/utf/unilib.cc",
   ]
 
-  direct_dependent_configs = [ ":libphonenumber_config" ]
+  # TODO(scottmg): Temporary until https://codereview.appspot.com/134650043/
+  # lands and rolls. http://crbug.com/335824
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
 
+  public_configs = [ ":libphonenumber_config" ]
+
+  public_deps = [
+    ":proto",
+  ]
   deps = [
     ":proto",
     "//third_party/icu",
     "//third_party/protobuf:protobuf_lite",
   ]
-
-  forward_dependent_configs_from = [ ":proto" ]
 }
 
 # Library used by clients that includes production metadata.
@@ -65,10 +71,9 @@ static_library("libphonenumber") {
     #"src/phonenumbers/metadata.cc",
   ]
 
-  deps = [
+  public_deps = [
     ":libphonenumber_without_metadata",
   ]
-  forward_dependent_configs_from = deps
 }
 
 # GYP version: third_party/libphonenumber/libphonenumber.gyp:libphonenumber_unittests

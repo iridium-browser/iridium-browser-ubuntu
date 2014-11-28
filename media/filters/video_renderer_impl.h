@@ -16,6 +16,7 @@
 #include "base/threading/platform_thread.h"
 #include "media/base/decryptor.h"
 #include "media/base/demuxer_stream.h"
+#include "media/base/media_log.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/video_decoder.h"
 #include "media/base/video_frame.h"
@@ -53,7 +54,8 @@ class MEDIA_EXPORT VideoRendererImpl
       ScopedVector<VideoDecoder> decoders,
       const SetDecryptorReadyCB& set_decryptor_ready_cb,
       const PaintCB& paint_cb,
-      bool drop_frames);
+      bool drop_frames,
+      const scoped_refptr<MediaLog>& media_log);
   virtual ~VideoRendererImpl();
 
   // VideoRenderer implementation.
@@ -61,14 +63,12 @@ class MEDIA_EXPORT VideoRendererImpl
                           bool low_delay,
                           const PipelineStatusCB& init_cb,
                           const StatisticsCB& statistics_cb,
-                          const TimeCB& max_time_cb,
                           const BufferingStateCB& buffering_state_cb,
                           const base::Closure& ended_cb,
                           const PipelineStatusCB& error_cb,
-                          const TimeDeltaCB& get_time_cb,
-                          const TimeDeltaCB& get_duration_cb) OVERRIDE;
+                          const TimeDeltaCB& get_time_cb) OVERRIDE;
   virtual void Flush(const base::Closure& callback) OVERRIDE;
-  virtual void StartPlaying() OVERRIDE;
+  virtual void StartPlayingFrom(base::TimeDelta timestamp) OVERRIDE;
 
   // PlatformThread::Delegate implementation.
   virtual void ThreadMain() OVERRIDE;
@@ -140,7 +140,7 @@ class MEDIA_EXPORT VideoRendererImpl
 
   // Important detail: being in kPlaying doesn't imply that video is being
   // rendered. Rather, it means that the renderer is ready to go. The actual
-  // rendering of video is controlled by time advancing via |time_cb_|.
+  // rendering of video is controlled by time advancing via |get_time_cb_|.
   //
   //   kUninitialized
   //         | Initialize()
@@ -151,7 +151,7 @@ class MEDIA_EXPORT VideoRendererImpl
   //         |
   //         V            Decoders reset
   //      kFlushed <------------------ kFlushing
-  //         | StartPlaying()             ^
+  //         | StartPlayingFrom()         ^
   //         |                            |
   //         |                            | Flush()
   //         `---------> kPlaying --------'
@@ -181,12 +181,10 @@ class MEDIA_EXPORT VideoRendererImpl
   // Event callbacks.
   PipelineStatusCB init_cb_;
   StatisticsCB statistics_cb_;
-  TimeCB max_time_cb_;
   BufferingStateCB buffering_state_cb_;
   base::Closure ended_cb_;
   PipelineStatusCB error_cb_;
   TimeDeltaCB get_time_cb_;
-  TimeDeltaCB get_duration_cb_;
 
   base::TimeDelta start_timestamp_;
 

@@ -545,8 +545,11 @@ KeyboardCode KeyboardCodeFromXKeyEvent(const XEvent* xev) {
   }
 
   keycode = KeyboardCodeFromXKeysym(keysym);
-  if (keycode == VKEY_UNKNOWN)
+  if (keycode == VKEY_UNKNOWN && !IsModifierKey(keysym)) {
+    // Modifier keys should not fall back to the hardware-keycode-based US
+    // layout.  See crbug.com/402320
     keycode = DefaultKeyboardCodeFromHardwareKeycode(xkey->keycode);
+  }
 
   return keycode;
 }
@@ -819,6 +822,8 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_WLAN;
     case XF86XK_PowerOff:
       return VKEY_POWER;
+    case XF86XK_Sleep:
+      return VKEY_SLEEP;
     case XF86XK_MonBrightnessDown:
       return VKEY_BRIGHTNESS_DOWN;
     case XF86XK_MonBrightnessUp:
@@ -838,7 +843,7 @@ const char* CodeFromXEvent(const XEvent* xev) {
   int keycode = (xev->type == GenericEvent)
                     ? static_cast<XIDeviceEvent*>(xev->xcookie.data)->detail
                     : xev->xkey.keycode;
-  return KeycodeConverter::GetInstance()->NativeKeycodeToCode(keycode);
+  return ui::KeycodeConverter::NativeKeycodeToCode(keycode);
 }
 
 uint16 GetCharacterFromXEvent(const XEvent* xev) {

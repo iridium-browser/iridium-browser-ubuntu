@@ -44,7 +44,7 @@ namespace blink {
 
 PassRefPtrWillBeRawPtr<MediaController> MediaController::create(ExecutionContext* context)
 {
-    return adoptRefWillBeRefCountedGarbageCollected(new MediaController(context));
+    return adoptRefWillBeNoop(new MediaController(context));
 }
 
 MediaController::MediaController(ExecutionContext* context)
@@ -62,7 +62,6 @@ MediaController::MediaController(ExecutionContext* context)
     , m_timeupdateTimer(this, &MediaController::timeupdateTimerFired)
     , m_previousTimeupdateTime(0)
 {
-    ScriptWrappable::init(this);
 }
 
 MediaController::~MediaController()
@@ -158,7 +157,7 @@ double MediaController::currentTime() const
     return m_position;
 }
 
-void MediaController::setCurrentTime(double time, ExceptionState& exceptionState)
+void MediaController::setCurrentTime(double time)
 {
     // When the user agent is to seek the media controller to a particular new playback position,
     // it must follow these steps:
@@ -175,7 +174,7 @@ void MediaController::setCurrentTime(double time, ExceptionState& exceptionState
 
     // Seek each slaved media element to the new playback position relative to the media element timeline.
     for (MediaElementSequence::const_iterator it = m_mediaElements.begin(); it != m_mediaElements.end(); ++it)
-        (*it)->seek(time, exceptionState);
+        (*it)->seek(time);
 
     scheduleTimeupdateEvent();
 }
@@ -484,7 +483,7 @@ void MediaController::bringElementUpToSpeed(HTMLMediaElement* element)
     // When the user agent is to bring a media element up to speed with its new media controller,
     // it must seek that media element to the MediaController's media controller position relative
     // to the media element's timeline.
-    element->seek(currentTime(), IGNORE_EXCEPTION);
+    element->seek(currentTime());
 
     // Update volume to take controller volume and mute into account.
     element->updateVolume();
@@ -503,10 +502,6 @@ bool MediaController::isRestrained() const
     bool allPaused = true;
     for (MediaElementSequence::const_iterator it = m_mediaElements.begin(); it != m_mediaElements.end(); ++it) {
         HTMLMediaElement* element = *it;
-
-        // and none of its slaved media elements are blocked media elements,
-        if (element->isBlocked())
-            return false;
 
         if (element->isAutoplaying() && element->paused())
             anyAutoplayingAndPaused = true;

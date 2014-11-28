@@ -235,7 +235,6 @@ OAuth2TokenService::Fetcher::Fetcher(
       client_id_(client_id),
       client_secret_(client_secret) {
   DCHECK(oauth2_token_service_);
-  DCHECK(getter_.get());
   waiting_requests_.push_back(waiting_request);
 }
 
@@ -345,6 +344,8 @@ size_t OAuth2TokenService::Fetcher::GetWaitingRequestCount() const {
 }
 
 void OAuth2TokenService::Fetcher::Cancel() {
+  if (fetcher_)
+    fetcher_->CancelRequest();
   fetcher_.reset();
   retry_timer_.Stop();
   error_ = GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);

@@ -10,8 +10,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
+#include "storage/browser/quota/special_storage_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/quota/special_storage_policy.h"
 
 namespace {
 
@@ -53,7 +53,7 @@ base::FilePath TestBrowserContext::TakePath() {
 }
 
 void TestBrowserContext::SetSpecialStoragePolicy(
-    quota::SpecialStoragePolicy* policy) {
+    storage::SpecialStoragePolicy* policy) {
   special_storage_policy_ = policy;
 }
 
@@ -109,7 +109,7 @@ BrowserPluginGuestManager* TestBrowserContext::GetGuestManager() {
   return NULL;
 }
 
-quota::SpecialStoragePolicy* TestBrowserContext::GetSpecialStoragePolicy() {
+storage::SpecialStoragePolicy* TestBrowserContext::GetSpecialStoragePolicy() {
   return special_storage_policy_.get();
 }
 

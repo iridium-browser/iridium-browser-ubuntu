@@ -33,6 +33,7 @@ class CastTransportHostFilterTest : public testing::Test {
     EXPECT_TRUE(filter_->OnMessageReceived(message));
   }
 
+  base::DictionaryValue options_;
   content::TestBrowserThreadBundle browser_thread_bundle_;
   scoped_refptr<content::BrowserMessageFilter> filter_;
   net::IPAddressNumber receiver_address_;
@@ -41,7 +42,7 @@ class CastTransportHostFilterTest : public testing::Test {
 
 TEST_F(CastTransportHostFilterTest, NewDelete) {
   const int kChannelId = 17;
-  CastHostMsg_New new_msg(kChannelId, receive_endpoint_);
+  CastHostMsg_New new_msg(kChannelId, receive_endpoint_, options_);
   CastHostMsg_Delete delete_msg(kChannelId);
 
   // New, then delete, as expected.
@@ -64,7 +65,7 @@ TEST_F(CastTransportHostFilterTest, NewDelete) {
 
 TEST_F(CastTransportHostFilterTest, NewMany) {
   for (int i = 0; i < 100; i++) {
-    CastHostMsg_New new_msg(i, receive_endpoint_);
+    CastHostMsg_New new_msg(i, receive_endpoint_, options_);
     FakeSend(new_msg);
   }
 
@@ -79,18 +80,16 @@ TEST_F(CastTransportHostFilterTest, NewMany) {
 TEST_F(CastTransportHostFilterTest, SimpleMessages) {
   // Create a cast transport sender.
   const int32 kChannelId = 42;
-  CastHostMsg_New new_msg(kChannelId, receive_endpoint_);
+  CastHostMsg_New new_msg(kChannelId, receive_endpoint_, options_);
   FakeSend(new_msg);
 
   media::cast::CastTransportRtpConfig audio_config;
-  audio_config.stored_frames = 10;
   audio_config.ssrc = 1;
   audio_config.feedback_ssrc = 2;
   CastHostMsg_InitializeAudio init_audio_msg(kChannelId, audio_config);
   FakeSend(init_audio_msg);
 
   media::cast::CastTransportRtpConfig video_config;
-  video_config.stored_frames = 10;
   video_config.ssrc = 11;
   video_config.feedback_ssrc = 12;
   CastHostMsg_InitializeVideo init_video_msg(kChannelId, video_config);
@@ -105,9 +104,8 @@ TEST_F(CastTransportHostFilterTest, SimpleMessages) {
   const int kBytesPerSample = 2;
   const int kChannels = 2;
   audio_frame.data = std::string(kSamples * kBytesPerSample * kChannels, 'q');
-  CastHostMsg_InsertCodedAudioFrame insert_coded_audio_frame(
-      kChannelId, audio_frame);
-  FakeSend(insert_coded_audio_frame);
+  CastHostMsg_InsertFrame insert_audio_frame(1, kChannelId, audio_frame);
+  FakeSend(insert_audio_frame);
 
   media::cast::EncodedFrame video_frame;
   video_frame.dependency = media::cast::EncodedFrame::KEY;
@@ -117,20 +115,20 @@ TEST_F(CastTransportHostFilterTest, SimpleMessages) {
   // are generated.
   const int kVideoDataSize = 4711;
   video_frame.data = std::string(kVideoDataSize, 'p');
-  CastHostMsg_InsertCodedVideoFrame insert_coded_video_frame(
-      kChannelId, video_frame);
-  FakeSend(insert_coded_video_frame);
+  CastHostMsg_InsertFrame insert_video_frame(11, kChannelId, video_frame);
+  FakeSend(insert_video_frame);
 
   CastHostMsg_SendSenderReport rtcp_msg(
       kChannelId, 1, base::TimeTicks(), 2);
   FakeSend(rtcp_msg);
 
-  media::cast::MissingFramesAndPacketsMap missing_packets;
-  missing_packets[1].insert(4);
-  missing_packets[1].insert(7);
-  CastHostMsg_ResendPackets resend_msg(
-      kChannelId, false, missing_packets, true, base::TimeDelta());
-  FakeSend(resend_msg);
+  std::vector<uint32> frame_ids;
+  frame_ids.push_back(1);
+  CastHostMsg_CancelSendingFrames cancel_msg(kChannelId, 1, frame_ids);
+  FakeSend(cancel_msg);
+
+  CastHostMsg_ResendFrameForKickstart kickstart_msg(kChannelId, 1, 1);
+  FakeSend(kickstart_msg);
 
   CastHostMsg_Delete delete_msg(kChannelId);
   FakeSend(delete_msg);

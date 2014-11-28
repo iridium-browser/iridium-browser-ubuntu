@@ -31,6 +31,7 @@
 #include "config.h"
 #include "web/tests/FrameTestHelpers.h"
 
+#include "core/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebData.h"
 #include "public/platform/WebString.h"
@@ -41,7 +42,6 @@
 #include "public/web/WebSettings.h"
 #include "public/web/WebViewClient.h"
 #include "web/WebLocalFrameImpl.h"
-#include "web/tests/URLTestHelpers.h"
 #include "wtf/StdLibExtras.h"
 
 namespace blink {
@@ -71,7 +71,7 @@ TestWebFrameClient* testClientForFrame(WebFrame* frame)
 
 class QuitTask : public WebThread::Task {
 public:
-    void PostThis(blink::Timer<QuitTask>*)
+    void PostThis(Timer<QuitTask>*)
     {
         // We don't just quit here because the SharedTimer may be part-way
         // through the current queue of tasks when runPendingTasks was called,
@@ -247,7 +247,7 @@ void pumpPendingRequestsDoNotUse(WebFrame* frame)
 void runPendingTasks()
 {
     // Pending tasks include Timers that have been scheduled.
-    blink::Timer<QuitTask> quitOnTimeout(new QuitTask, &QuitTask::PostThis);
+    Timer<QuitTask> quitOnTimeout(new QuitTask, &QuitTask::PostThis);
     quitOnTimeout.startOneShot(0, FROM_HERE);
     Platform::current()->currentThread()->enterRunLoop();
 }

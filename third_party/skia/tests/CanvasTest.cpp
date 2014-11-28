@@ -463,7 +463,8 @@ static void DrawPictureTestStep(SkCanvas* canvas,
                                 skiatest::Reporter*,
                                 CanvasTestStep*) {
     SkPictureRecorder recorder;
-    SkCanvas* testCanvas = recorder.beginRecording(kWidth, kHeight, NULL, 0);
+    SkCanvas* testCanvas = recorder.beginRecording(SkIntToScalar(kWidth), SkIntToScalar(kHeight), 
+                                                   NULL, 0);
     testCanvas->scale(SkIntToScalar(2), SkIntToScalar(1));
     testCanvas->clipRect(kTestRect);
     testCanvas->drawRect(kTestRect, kTestPaint);
@@ -687,13 +688,17 @@ public:
         // are flattened during the second execution
         testStep->setAssertMessageFormat(kPictureDrawAssertMessageFormat);
         SkPictureRecorder referenceRecorder;
-        SkCanvas* referenceCanvas = referenceRecorder.beginRecording(kWidth, kHeight,
-                                                                     NULL, recordFlags);
+        SkCanvas* referenceCanvas =
+            referenceRecorder.DEPRECATED_beginRecording(SkIntToScalar(kWidth), 
+                                                        SkIntToScalar(kHeight), 
+                                                        NULL, recordFlags);
         testStep->draw(referenceCanvas, reporter);
 
         SkPictureRecorder testRecorder;
-        SkCanvas* testCanvas = testRecorder.beginRecording(kWidth, kHeight,
-                                                           NULL, recordFlags);
+        SkCanvas* testCanvas =
+            testRecorder.DEPRECATED_beginRecording(SkIntToScalar(kWidth), 
+                                                   SkIntToScalar(kHeight), 
+                                                   NULL, recordFlags);
         testStep->draw(testCanvas, reporter);
         testStep->setAssertMessageFormat(kPictureSecondDrawAssertMessageFormat);
         testStep->draw(testCanvas, reporter);
@@ -878,17 +883,15 @@ static void test_newraster(skiatest::Reporter* reporter) {
     SkDELETE(canvas);
 
     // now try a deliberately bad info
-    info.fWidth = -1;
+    info = info.makeWH(-1, info.height());
     REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRaster(info));
 
     // too big
-    info.fWidth = 1 << 30;
-    info.fHeight = 1 << 30;
+    info = info.makeWH(1 << 30, 1 << 30);
     REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRaster(info));
 
     // not a valid pixel type
-    info.fWidth = info.fHeight = 10;
-    info.fColorType = kUnknown_SkColorType;
+    info = SkImageInfo::Make(10, 10, kUnknown_SkColorType, info.alphaType());
     REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRaster(info));
 
     // We should succeed with a zero-sized valid info

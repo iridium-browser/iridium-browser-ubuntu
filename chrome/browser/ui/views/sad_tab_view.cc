@@ -13,10 +13,11 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/feedback/feedback_util.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -177,7 +178,7 @@ void SadTabView::LinkClicked(views::Link* source, int event_flags) {
         chrome::kCrashReasonURL : chrome::kKillReasonURL);
     OpenURLParams params(
         help_url, content::Referrer(), CURRENT_TAB,
-        content::PAGE_TRANSITION_LINK, false);
+        ui::PAGE_TRANSITION_LINK, false);
     web_contents_->OpenURL(params);
   } else if (source == feedback_link_) {
     chrome::ShowFeedbackPage(

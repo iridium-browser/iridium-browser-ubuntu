@@ -50,7 +50,7 @@ static SourceEventSender& sourceErrorEventSender()
 class HTMLSourceElement::Listener FINAL : public MediaQueryListListener {
 public:
     explicit Listener(HTMLSourceElement* element) : m_element(element) { }
-    virtual void call() OVERRIDE
+    virtual void notifyMediaQueryChanged() OVERRIDE
     {
         if (m_element)
             m_element->notifyMediaQueryChanged();
@@ -71,7 +71,6 @@ inline HTMLSourceElement::HTMLSourceElement(Document& document)
     , m_listener(adoptRefWillBeNoop(new Listener(this)))
 {
     WTF_LOG(Media, "HTMLSourceElement::HTMLSourceElement - %p", this);
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(HTMLSourceElement)

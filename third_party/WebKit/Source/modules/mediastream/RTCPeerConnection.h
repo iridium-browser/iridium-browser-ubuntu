@@ -61,19 +61,20 @@ class RTCPeerConnection FINAL
     , public EventTargetWithInlineData
     , public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<RTCPeerConnection>);
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(RTCPeerConnection);
 public:
     static RTCPeerConnection* create(ExecutionContext*, const Dictionary&, const Dictionary&, ExceptionState&);
     virtual ~RTCPeerConnection();
 
-    void createOffer(PassOwnPtr<RTCSessionDescriptionCallback>, PassOwnPtr<RTCErrorCallback>, const Dictionary&, ExceptionState&);
+    void createOffer(RTCSessionDescriptionCallback*, RTCErrorCallback*, const Dictionary&, ExceptionState&);
 
-    void createAnswer(PassOwnPtr<RTCSessionDescriptionCallback>, PassOwnPtr<RTCErrorCallback>, const Dictionary&, ExceptionState&);
+    void createAnswer(RTCSessionDescriptionCallback*, RTCErrorCallback*, const Dictionary&, ExceptionState&);
 
-    void setLocalDescription(RTCSessionDescription*, PassOwnPtr<VoidCallback>, PassOwnPtr<RTCErrorCallback>, ExceptionState&);
+    void setLocalDescription(RTCSessionDescription*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
     RTCSessionDescription* localDescription(ExceptionState&);
 
-    void setRemoteDescription(RTCSessionDescription*, PassOwnPtr<VoidCallback>, PassOwnPtr<RTCErrorCallback>, ExceptionState&);
+    void setRemoteDescription(RTCSessionDescription*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
     RTCSessionDescription* remoteDescription(ExceptionState&);
 
     String signalingState() const;
@@ -83,7 +84,7 @@ public:
     // DEPRECATED
     void addIceCandidate(RTCIceCandidate*, ExceptionState&);
 
-    void addIceCandidate(RTCIceCandidate*, PassOwnPtr<VoidCallback>, PassOwnPtr<RTCErrorCallback>, ExceptionState&);
+    void addIceCandidate(RTCIceCandidate*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
 
     String iceGatheringState() const;
 
@@ -99,7 +100,7 @@ public:
 
     void removeStream(MediaStream*, ExceptionState&);
 
-    void getStats(PassOwnPtr<RTCStatsCallback> successCallback, MediaStreamTrack* selector);
+    void getStats(RTCStatsCallback* successCallback, MediaStreamTrack* selector);
 
     RTCDataChannel* createDataChannel(String label, const Dictionary& dataChannelDict, ExceptionState&);
 
@@ -129,6 +130,7 @@ public:
     virtual void didRemoveRemoteStream(const WebMediaStream&) OVERRIDE;
     virtual void didAddRemoteDataChannel(WebRTCDataChannelHandler*) OVERRIDE;
     virtual void releasePeerConnectionHandler() OVERRIDE;
+    virtual void closePeerConnection() OVERRIDE;
 
     // EventTarget
     virtual const AtomicString& interfaceName() const OVERRIDE;
@@ -147,10 +149,11 @@ public:
     virtual void trace(Visitor*) OVERRIDE;
 
 private:
-    RTCPeerConnection(ExecutionContext*, PassRefPtr<RTCConfiguration>, WebMediaConstraints, ExceptionState&);
+    RTCPeerConnection(ExecutionContext*, RTCConfiguration*, WebMediaConstraints, ExceptionState&);
 
-    static PassRefPtr<RTCConfiguration> parseConfiguration(const Dictionary&, ExceptionState&);
-    static PassRefPtr<RTCOfferOptions> parseOfferOptions(const Dictionary&, ExceptionState&);
+
+    static RTCConfiguration* parseConfiguration(const Dictionary&, ExceptionState&);
+    static RTCOfferOptions* parseOfferOptions(const Dictionary&, ExceptionState&);
 
     void scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event>);
     void dispatchScheduledEvent();
@@ -159,6 +162,8 @@ private:
     void changeSignalingState(WebRTCPeerConnectionHandlerClient::SignalingState);
     void changeIceGatheringState(WebRTCPeerConnectionHandlerClient::ICEGatheringState);
     void changeIceConnectionState(WebRTCPeerConnectionHandlerClient::ICEConnectionState);
+
+    void closeInternal();
 
     SignalingState m_signalingState;
     ICEGatheringState m_iceGatheringState;

@@ -8,15 +8,16 @@
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #import "chrome/browser/ui/chrome_style.h"
-#import "chrome/browser/ui/cocoa/hyperlink_text_view.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/browser/ui/sync/one_click_signin_histogram.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#import "ui/base/cocoa/controls/hyperlink_text_view.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 namespace {
@@ -114,7 +115,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   else {
     content::OpenURLParams params(GURL(chrome::kChromeUISettingsURL),
                                   content::Referrer(), CURRENT_TAB,
-                                  content::PAGE_TRANSITION_LINK, false);
+                                  ui::PAGE_TRANSITION_LINK, false);
     webContents_->OpenURL(params);
   }
   [self close];
@@ -291,7 +292,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
                                    NEW_WINDOW : NEW_FOREGROUND_TAB;
   content::OpenURLParams params(GURL(chrome::kChromeSyncLearnMoreURL),
                                 content::Referrer(), location,
-                                content::PAGE_TRANSITION_LINK, false);
+                                ui::PAGE_TRANSITION_LINK, false);
   webContents_->OpenURL(params);
   return YES;
 }

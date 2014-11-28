@@ -12,19 +12,13 @@
 #include "native_client/src/include/nacl_base.h"
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
-#include "native_client/src/include/nacl_string.h"
 #include "native_client/src/include/portability.h"
 #include "native_client/src/include/portability_io.h"
-#include "native_client/src/include/portability_string.h"
-#include "native_client/src/public/nacl_file_info.h"
 #include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
-#include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
-#include "native_client/src/trusted/service_runtime/nacl_error_code.h"
 
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_nacl_private.h"
-#include "ppapi/cpp/dev/url_util_dev.h"
 #include "ppapi/cpp/module.h"
 
 #include "ppapi/native_client/src/trusted/plugin/nacl_subprocess.h"
@@ -72,7 +66,6 @@ bool Plugin::LoadHelperNaClModuleInternal(NaClSubprocess* subprocess,
                          pp_instance(),
                          false,  // No main_service_runtime.
                          false,  // No non-SFI mode (i.e. in SFI-mode).
-                         pp::BlockUntilComplete(),
                          pp::BlockUntilComplete());
   subprocess->set_service_runtime(service_runtime);
 
@@ -128,8 +121,7 @@ void Plugin::LoadNaClModule(PP_NaClFileInfo file_info,
                             bool enable_dyncode_syscalls,
                             bool enable_exception_handling,
                             bool enable_crash_throttling,
-                            const pp::CompletionCallback& init_done_cb,
-                            const pp::CompletionCallback& crash_cb) {
+                            const pp::CompletionCallback& init_done_cb) {
   CHECK(pp::Module::Get()->core()->IsMainThread());
   // Before forking a new sel_ldr process, ensure that we do not leak
   // the ServiceRuntime object for an existing subprocess, and that any
@@ -149,7 +141,7 @@ void Plugin::LoadNaClModule(PP_NaClFileInfo file_info,
                            enable_crash_throttling);
   ErrorInfo error_info;
   ServiceRuntime* service_runtime = new ServiceRuntime(
-      this, pp_instance(), true, uses_nonsfi_mode, init_done_cb, crash_cb);
+      this, pp_instance(), true, uses_nonsfi_mode, init_done_cb);
   main_subprocess_.set_service_runtime(service_runtime);
   if (NULL == service_runtime) {
     error_info.SetReport(
@@ -194,7 +186,7 @@ bool Plugin::LoadNaClModuleContinuationIntern() {
   return PP_ToBool(nacl_interface_->StartPpapiProxy(pp_instance()));
 }
 
-NaClSubprocess* Plugin::LoadHelperNaClModule(const nacl::string& helper_url,
+NaClSubprocess* Plugin::LoadHelperNaClModule(const std::string& helper_url,
                                              PP_NaClFileInfo file_info,
                                              ErrorInfo* error_info) {
   nacl::scoped_ptr<NaClSubprocess> nacl_subprocess(
@@ -275,12 +267,8 @@ Plugin::Plugin(PP_Instance pp_instance)
   // Notify PPB_NaCl_Private that the instance is created before altering any
   // state that it tracks.
   nacl_interface_->InstanceCreated(pp_instance);
-  // We call set_exit_status() here to ensure that the 'exitStatus' property is
-  // set. This can only be called when nacl_interface_ is not NULL.
-  set_exit_status(-1);
   nexe_file_info_ = kInvalidNaClFileInfo;
 }
-
 
 Plugin::~Plugin() {
   int64_t shutdown_start = NaClGetTimeOfDayMicroseconds();
@@ -339,8 +327,7 @@ void Plugin::NexeFileDidOpen(int32_t pp_error) {
       true, /* enable_dyncode_syscalls */
       true, /* enable_exception_handling */
       false, /* enable_crash_throttling */
-      callback_factory_.NewCallback(&Plugin::NexeFileDidOpenContinuation),
-      callback_factory_.NewCallback(&Plugin::NexeDidCrash));
+      callback_factory_.NewCallback(&Plugin::NexeFileDidOpenContinuation));
 }
 
 void Plugin::NexeFileDidOpenContinuation(int32_t pp_error) {
@@ -356,15 +343,6 @@ void Plugin::NexeFileDidOpenContinuation(int32_t pp_error) {
     NaClLog(4, "NexeFileDidOpenContinuation: failed.");
   }
   NaClLog(4, "Leaving NexeFileDidOpenContinuation\n");
-}
-
-void Plugin::NexeDidCrash(int32_t pp_error) {
-  PLUGIN_PRINTF(("Plugin::NexeDidCrash (pp_error=%" NACL_PRId32 ")\n",
-                 pp_error));
-
-  std::string crash_log =
-      main_subprocess_.service_runtime()->GetCrashLogOutput();
-  nacl_interface_->NexeDidCrash(pp_instance(), crash_log.c_str());
 }
 
 void Plugin::BitcodeDidTranslate(int32_t pp_error) {
@@ -388,8 +366,7 @@ void Plugin::BitcodeDidTranslate(int32_t pp_error) {
       false, /* enable_dyncode_syscalls */
       false, /* enable_exception_handling */
       true, /* enable_crash_throttling */
-      callback_factory_.NewCallback(&Plugin::BitcodeDidTranslateContinuation),
-      callback_factory_.NewCallback(&Plugin::NexeDidCrash));
+      callback_factory_.NewCallback(&Plugin::BitcodeDidTranslateContinuation));
 }
 
 void Plugin::BitcodeDidTranslateContinuation(int32_t pp_error) {
@@ -448,31 +425,5 @@ void Plugin::ReportLoadError(const ErrorInfo& error_info) {
                                    error_info.error_code(),
                                    error_info.message().c_str());
 }
-
-bool Plugin::DocumentCanRequest(const std::string& url) {
-  CHECK(pp::Module::Get()->core()->IsMainThread());
-  CHECK(pp::URLUtil_Dev::Get() != NULL);
-  return pp::URLUtil_Dev::Get()->DocumentCanRequest(this, pp::Var(url));
-}
-
-void Plugin::set_exit_status(int exit_status) {
-  pp::Core* core = pp::Module::Get()->core();
-  if (core->IsMainThread()) {
-    SetExitStatusOnMainThread(PP_OK, exit_status);
-  } else {
-    pp::CompletionCallback callback =
-        callback_factory_.NewCallback(&Plugin::SetExitStatusOnMainThread,
-                                      exit_status);
-    core->CallOnMainThread(0, callback, 0);
-  }
-}
-
-void Plugin::SetExitStatusOnMainThread(int32_t pp_error,
-                                       int exit_status) {
-  DCHECK(pp::Module::Get()->core()->IsMainThread());
-  DCHECK(nacl_interface_);
-  nacl_interface_->SetExitStatus(pp_instance(), exit_status);
-}
-
 
 }  // namespace plugin

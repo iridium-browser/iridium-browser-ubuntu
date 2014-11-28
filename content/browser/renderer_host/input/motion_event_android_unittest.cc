@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <android/input.h>
+
 #include "base/android/jni_android.h"
+#include "base/float_util.h"
 #include "content/browser/renderer_host/input/motion_event_android.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/events/event_constants.h"
 
 using ui::MotionEvent;
 
@@ -12,9 +16,9 @@ namespace content {
 namespace {
 const float kPixToDip = 0.5f;
 
-// Corresponds to ACTION_DOWN, see
-// developer.android.com/reference/android/view/MotionEvent.html#ACTION_DOWN.
-int kAndroidActionDown = 0;
+int kAndroidActionDown = AMOTION_EVENT_ACTION_DOWN;
+
+int kAndroidAltKeyDown = AMETA_ALT_ON;
 
 // Corresponds to TOOL_TYPE_FINGER, see
 // developer.android.com/reference/android/view/MotionEvent.html
@@ -31,13 +35,17 @@ TEST(MotionEventAndroidTest, Constructor) {
   int event_time_ms = 5;
   base::TimeTicks event_time =
       base::TimeTicks() + base::TimeDelta::FromMilliseconds(event_time_ms);
-  float x0 = 13.7;
-  float y0 = -7.13;
-  float x1 = -13.7;
-  float y1 = 7.13;
+  float x0 = 13.7f;
+  float y0 = -7.13f;
+  float x1 = -13.7f;
+  float y1 = 7.13f;
   float raw_offset = 10.1f;
   float touch_major0 = 5.3f;
   float touch_major1 = 3.5f;
+  float touch_minor0 = 1.2f;
+  float touch_minor1 = 2.1f;
+  float orientation0 = 0.1f;
+  float orientation1 = std::numeric_limits<float>::quiet_NaN();
   int p0 = 1;
   int p1 = 2;
   int pointer_count = 2;
@@ -64,11 +72,16 @@ TEST(MotionEventAndroidTest, Constructor) {
                            p1,
                            touch_major0,
                            touch_major1,
+                           touch_minor0,
+                           touch_minor1,
+                           orientation0,
+                           orientation1,
                            x0 + raw_offset,
                            y0 - raw_offset,
                            kAndroidToolTypeFinger,
                            kAndroidToolTypeFinger,
-                           kAndroidButtonPrimary);
+                           kAndroidButtonPrimary,
+                           kAndroidAltKeyDown);
 
   EXPECT_EQ(MotionEvent::ACTION_DOWN, event.GetAction());
   EXPECT_EQ(event_time, event.GetEventTime());
@@ -82,11 +95,16 @@ TEST(MotionEventAndroidTest, Constructor) {
   EXPECT_FLOAT_EQ((y1 - raw_offset) * kPixToDip, event.GetRawY(1));
   EXPECT_EQ(touch_major0 * kPixToDip, event.GetTouchMajor(0));
   EXPECT_EQ(touch_major1 * kPixToDip, event.GetTouchMajor(1));
+  EXPECT_EQ(touch_minor0 * kPixToDip, event.GetTouchMinor(0));
+  EXPECT_EQ(touch_minor1 * kPixToDip, event.GetTouchMinor(1));
+  EXPECT_EQ(orientation0, event.GetOrientation(0));
+  EXPECT_EQ(0.f, event.GetOrientation(1));
   EXPECT_EQ(p0, event.GetPointerId(0));
   EXPECT_EQ(p1, event.GetPointerId(1));
   EXPECT_EQ(MotionEvent::TOOL_TYPE_FINGER, event.GetToolType(0));
   EXPECT_EQ(MotionEvent::TOOL_TYPE_FINGER, event.GetToolType(1));
   EXPECT_EQ(MotionEvent::BUTTON_PRIMARY, event.GetButtonState());
+  EXPECT_EQ(ui::EF_ALT_DOWN, event.GetFlags());
   EXPECT_EQ(static_cast<size_t>(pointer_count), event.GetPointerCount());
   EXPECT_EQ(static_cast<size_t>(history_size), event.GetHistorySize());
   EXPECT_EQ(action_index, event.GetActionIndex());
@@ -96,9 +114,11 @@ TEST(MotionEventAndroidTest, Clone) {
   int event_time_ms = 5;
   base::TimeTicks event_time =
       base::TimeTicks() + base::TimeDelta::FromMilliseconds(event_time_ms);
-  float x = 13.7;
-  float y = -7.13;
+  float x = 13.7f;
+  float y = -7.13f;
   float touch_major = 5.3f;
+  float touch_minor = 3.5f;
+  float orientation = 0.2f;
   int pointer_count = 1;
   int pointer_id = 1;
   base::android::ScopedJavaLocalRef<jobject> event_obj =
@@ -122,8 +142,13 @@ TEST(MotionEventAndroidTest, Clone) {
                            0,
                            touch_major,
                            0.f,
+                           touch_minor,
+                           0.f,
+                           orientation,
+                           0.f,
                            x,
                            y,
+                           0,
                            0,
                            0,
                            0);
@@ -137,8 +162,8 @@ TEST(MotionEventAndroidTest, Cancel) {
   base::TimeTicks event_time =
       base::TimeTicks() + base::TimeDelta::FromMilliseconds(event_time_ms);
   int pointer_count = 1;
-  float x = 13.7;
-  float y = -7.13;
+  float x = 13.7f;
+  float y = -7.13f;
   base::android::ScopedJavaLocalRef<jobject> event_obj =
       MotionEventAndroid::Obtain(
           event_time, event_time, MotionEvent::ACTION_DOWN, x, y);
@@ -160,8 +185,13 @@ TEST(MotionEventAndroidTest, Cancel) {
                            0,
                            0.f,
                            0.f,
+                           0.f,
+                           0.f,
+                           0.f,
+                           0.f,
                            x,
                            y,
+                           0,
                            0,
                            0,
                            0);

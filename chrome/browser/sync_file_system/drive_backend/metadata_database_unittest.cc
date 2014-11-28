@@ -16,6 +16,7 @@
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.pb.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database_index.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database_index_interface.h"
+#include "chrome/browser/sync_file_system/drive_backend/metadata_database_index_on_disk.h"
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -168,7 +169,7 @@ base::FilePath CreateNormalizedPath(const base::FilePath::StringType& path) {
 
 }  // namespace
 
-class MetadataDatabaseTest : public testing::Test {
+class MetadataDatabaseTest : public testing::TestWithParam<bool> {
  public:
   MetadataDatabaseTest()
       : current_change_id_(kInitialChangeID),
@@ -201,12 +202,9 @@ class MetadataDatabaseTest : public testing::Test {
 
   SyncStatusCode InitializeMetadataDatabase() {
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    MetadataDatabase::Create(base::ThreadTaskRunnerHandle::Get(),
-                             database_dir_.path(),
-                             in_memory_env_.get(),
-                             CreateResultReceiver(&status,
-                                                  &metadata_database_));
-    message_loop_.RunUntilIdle();
+    metadata_database_ = MetadataDatabase::CreateInternal(
+        database_dir_.path(), in_memory_env_.get(),
+        GetParam(), &status);
     return status;
   }
 
@@ -462,59 +460,75 @@ class MetadataDatabaseTest : public testing::Test {
     return db->Commit();
   }
 
+  void VerifyReloadConsistencyForOnMemory(MetadataDatabaseIndex* index1,
+                                          MetadataDatabaseIndex* index2) {
+    ExpectEquivalentServiceMetadata(index1, index2);
+    {
+      SCOPED_TRACE("Expect equivalent metadata_by_id_ contents.");
+      ExpectEquivalent(index1->metadata_by_id_, index2->metadata_by_id_);
+    }
+    {
+      SCOPED_TRACE("Expect equivalent tracker_by_id_ contents.");
+      ExpectEquivalent(index1->tracker_by_id_, index2->tracker_by_id_);
+    }
+    {
+      SCOPED_TRACE("Expect equivalent trackers_by_file_id_ contents.");
+      ExpectEquivalent(index1->trackers_by_file_id_,
+                       index2->trackers_by_file_id_);
+    }
+    {
+      SCOPED_TRACE("Expect equivalent app_root_by_app_id_ contents.");
+      ExpectEquivalent(index1->app_root_by_app_id_,
+                       index2->app_root_by_app_id_);
+    }
+    {
+      SCOPED_TRACE("Expect equivalent trackers_by_parent_and_title_ contents.");
+      ExpectEquivalent(index1->trackers_by_parent_and_title_,
+                       index2->trackers_by_parent_and_title_);
+    }
+    {
+      SCOPED_TRACE("Expect equivalent dirty_trackers_ contents.");
+      ExpectEquivalent(index1->dirty_trackers_, index2->dirty_trackers_);
+    }
+  }
+
+  void VerifyReloadConsistencyForOnDisk(
+      MetadataDatabaseIndexOnDisk* index1,
+      MetadataDatabaseIndexOnDisk* index2) {
+    ExpectEquivalentServiceMetadata(index1, index2);
+    scoped_ptr<LevelDBWrapper::Iterator> itr1 =
+        index1->GetDBForTesting()->NewIterator();
+    scoped_ptr<LevelDBWrapper::Iterator> itr2 =
+        index2->GetDBForTesting()->NewIterator();
+    for (itr1->SeekToFirst(), itr2->SeekToFirst();
+         itr1->Valid() && itr2->Valid();
+         itr1->Next(), itr2->Next()) {
+      EXPECT_EQ(itr1->key().ToString(), itr2->key().ToString());
+      EXPECT_EQ(itr1->value().ToString(), itr2->value().ToString());
+    }
+    EXPECT_TRUE(!itr1->Valid());
+    EXPECT_TRUE(!itr2->Valid());
+  }
+
   void VerifyReloadConsistency() {
     scoped_ptr<MetadataDatabase> metadata_database_2;
     ASSERT_EQ(SYNC_STATUS_OK,
               MetadataDatabase::CreateForTesting(
                   metadata_database_->db_.Pass(),
+                  metadata_database_->enable_on_disk_index_,
                   &metadata_database_2));
     metadata_database_->db_ = metadata_database_2->db_.Pass();
 
-    const MetadataDatabaseIndex* on_memory =
-        static_cast<MetadataDatabaseIndex*>(metadata_database_->index_.get());
-    const MetadataDatabaseIndex* reloaded =
-        static_cast<MetadataDatabaseIndex*>(metadata_database_2->index_.get());
-
-    {
-      SCOPED_TRACE("Expect equivalent service_metadata");
-      ExpectEquivalentServiceMetadata(metadata_database_->index_.get(),
-                                      metadata_database_2->index_.get());
-    }
-
-    {
-      SCOPED_TRACE("Expect equivalent metadata_by_id_ contents.");
-      ExpectEquivalent(on_memory->metadata_by_id_,
-                       reloaded->metadata_by_id_);
-    }
-
-    {
-      SCOPED_TRACE("Expect equivalent tracker_by_id_ contents.");
-      ExpectEquivalent(on_memory->tracker_by_id_,
-                       reloaded->tracker_by_id_);
-    }
-
-    {
-      SCOPED_TRACE("Expect equivalent trackers_by_file_id_ contents.");
-      ExpectEquivalent(on_memory->trackers_by_file_id_,
-                       reloaded->trackers_by_file_id_);
-    }
-
-    {
-      SCOPED_TRACE("Expect equivalent app_root_by_app_id_ contents.");
-      ExpectEquivalent(on_memory->app_root_by_app_id_,
-                       reloaded->app_root_by_app_id_);
-    }
-
-    {
-      SCOPED_TRACE("Expect equivalent trackers_by_parent_and_title_ contents.");
-      ExpectEquivalent(on_memory->trackers_by_parent_and_title_,
-                       reloaded->trackers_by_parent_and_title_);
-    }
-
-    {
-      SCOPED_TRACE("Expect equivalent dirty_trackers_ contents.");
-      ExpectEquivalent(on_memory->dirty_trackers_,
-                       reloaded->dirty_trackers_);
+    MetadataDatabaseIndexInterface* index1 = metadata_database_->index_.get();
+    MetadataDatabaseIndexInterface* index2 = metadata_database_2->index_.get();
+    if (GetParam()) {
+      VerifyReloadConsistencyForOnDisk(
+          static_cast<MetadataDatabaseIndexOnDisk*>(index1),
+          static_cast<MetadataDatabaseIndexOnDisk*>(index2));
+    } else {
+      VerifyReloadConsistencyForOnMemory(
+          static_cast<MetadataDatabaseIndex*>(index1),
+          static_cast<MetadataDatabaseIndex*>(index2));
     }
   }
 
@@ -539,79 +553,44 @@ class MetadataDatabaseTest : public testing::Test {
 
   SyncStatusCode RegisterApp(const std::string& app_id,
                              const std::string& folder_id) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->RegisterApp(
-        app_id, folder_id,
-        CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->RegisterApp(app_id, folder_id);
   }
 
   SyncStatusCode DisableApp(const std::string& app_id) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->DisableApp(
-        app_id, CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->DisableApp(app_id);
   }
 
   SyncStatusCode EnableApp(const std::string& app_id) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->EnableApp(
-        app_id, CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->EnableApp(app_id);
   }
 
   SyncStatusCode UnregisterApp(const std::string& app_id) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->UnregisterApp(
-        app_id, CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->UnregisterApp(app_id);
   }
 
   SyncStatusCode UpdateByChangeList(
       ScopedVector<google_apis::ChangeResource> changes) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->UpdateByChangeList(
-        current_change_id_,
-        changes.Pass(), CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->UpdateByChangeList(
+        current_change_id_, changes.Pass());
   }
 
   SyncStatusCode PopulateFolder(const std::string& folder_id,
                                 const FileIDList& listed_children) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->PopulateFolderByChildList(
-        folder_id, listed_children,
-        CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->PopulateFolderByChildList(
+        folder_id, listed_children);
   }
 
   SyncStatusCode UpdateTracker(const FileTracker& tracker) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->UpdateTracker(
-        tracker.tracker_id(), tracker.synced_details(),
-        CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->UpdateTracker(
+        tracker.tracker_id(), tracker.synced_details());
   }
 
   SyncStatusCode PopulateInitialData(
       int64 largest_change_id,
       const google_apis::FileResource& sync_root_folder,
       const ScopedVector<google_apis::FileResource>& app_root_folders) {
-    SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    metadata_database_->PopulateInitialData(
-        largest_change_id,
-        sync_root_folder,
-        app_root_folders,
-        CreateResultReceiver(&status));
-    message_loop_.RunUntilIdle();
-    return status;
+    return metadata_database_->PopulateInitialData(
+        largest_change_id, sync_root_folder, app_root_folders);
   }
 
   void ResetTrackerID(FileTracker* tracker) {
@@ -637,13 +616,26 @@ class MetadataDatabaseTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(MetadataDatabaseTest);
 };
 
-TEST_F(MetadataDatabaseTest, InitializationTest_Empty) {
+INSTANTIATE_TEST_CASE_P(MetadataDatabaseTestWithIndexesOnDisk,
+                        MetadataDatabaseTest,
+                        ::testing::Values(true, false));
+
+TEST_P(MetadataDatabaseTest, InitializationTest_Empty) {
   EXPECT_EQ(SYNC_STATUS_OK, InitializeMetadataDatabase());
   DropDatabase();
   EXPECT_EQ(SYNC_STATUS_OK, InitializeMetadataDatabase());
+
+  DropDatabase();
+
+  scoped_ptr<LevelDBWrapper> db = InitializeLevelDB();
+  db->Put(kServiceMetadataKey, "Unparsable string");
+  EXPECT_TRUE(db->Commit().ok());
+  db.reset();
+
+  EXPECT_EQ(SYNC_STATUS_OK, InitializeMetadataDatabase());
 }
 
-TEST_F(MetadataDatabaseTest, InitializationTest_SimpleTree) {
+TEST_P(MetadataDatabaseTest, InitializationTest_SimpleTree) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedFolder(sync_root, "app_id"));
   app_root.tracker.set_app_id(app_root.metadata.details().title());
@@ -667,7 +659,7 @@ TEST_F(MetadataDatabaseTest, InitializationTest_SimpleTree) {
   VerifyTrackedFiles(tracked_files, arraysize(tracked_files));
 }
 
-TEST_F(MetadataDatabaseTest, AppManagementTest) {
+TEST_P(MetadataDatabaseTest, AppManagementTest) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedFolder(sync_root, "app_id"));
   app_root.tracker.set_app_id(app_root.metadata.details().title());
@@ -722,7 +714,7 @@ TEST_F(MetadataDatabaseTest, AppManagementTest) {
   VerifyReloadConsistency();
 }
 
-TEST_F(MetadataDatabaseTest, BuildPathTest) {
+TEST_P(MetadataDatabaseTest, BuildPathTest) {
   FileMetadata sync_root(CreateSyncRootMetadata());
   FileTracker sync_root_tracker(CreateSyncRootTracker(sync_root));
 
@@ -771,7 +763,7 @@ TEST_F(MetadataDatabaseTest, BuildPathTest) {
             path);
 }
 
-TEST_F(MetadataDatabaseTest, FindNearestActiveAncestorTest) {
+TEST_P(MetadataDatabaseTest, FindNearestActiveAncestorTest) {
   const std::string kAppID = "app_id";
 
   FileMetadata sync_root(CreateSyncRootMetadata());
@@ -876,7 +868,7 @@ TEST_F(MetadataDatabaseTest, FindNearestActiveAncestorTest) {
   }
 }
 
-TEST_F(MetadataDatabaseTest, UpdateByChangeListTest) {
+TEST_P(MetadataDatabaseTest, UpdateByChangeListTest) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedFolder(sync_root, "app_id"));
   TrackedFile disabled_app_root(CreateTrackedFolder(sync_root, "disabled_app"));
@@ -938,7 +930,7 @@ TEST_F(MetadataDatabaseTest, UpdateByChangeListTest) {
   VerifyReloadConsistency();
 }
 
-TEST_F(MetadataDatabaseTest, PopulateFolderTest_RegularFolder) {
+TEST_P(MetadataDatabaseTest, PopulateFolderTest_RegularFolder) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedAppRoot(sync_root, "app_id"));
   app_root.tracker.set_app_id(app_root.metadata.details().title());
@@ -980,7 +972,7 @@ TEST_F(MetadataDatabaseTest, PopulateFolderTest_RegularFolder) {
   VerifyReloadConsistency();
 }
 
-TEST_F(MetadataDatabaseTest, PopulateFolderTest_InactiveFolder) {
+TEST_P(MetadataDatabaseTest, PopulateFolderTest_InactiveFolder) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedAppRoot(sync_root, "app_id"));
 
@@ -1010,7 +1002,7 @@ TEST_F(MetadataDatabaseTest, PopulateFolderTest_InactiveFolder) {
   VerifyReloadConsistency();
 }
 
-TEST_F(MetadataDatabaseTest, PopulateFolderTest_DisabledAppRoot) {
+TEST_P(MetadataDatabaseTest, PopulateFolderTest_DisabledAppRoot) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile disabled_app_root(
       CreateTrackedAppRoot(sync_root, "disabled_app"));
@@ -1047,7 +1039,7 @@ TEST_F(MetadataDatabaseTest, PopulateFolderTest_DisabledAppRoot) {
 }
 
 // TODO(tzik): Fix expectation and re-enable this test.
-TEST_F(MetadataDatabaseTest, DISABLED_UpdateTrackerTest) {
+TEST_P(MetadataDatabaseTest, DISABLED_UpdateTrackerTest) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedAppRoot(sync_root, "app_root"));
   TrackedFile file(CreateTrackedFile(app_root, "file"));
@@ -1098,7 +1090,7 @@ TEST_F(MetadataDatabaseTest, DISABLED_UpdateTrackerTest) {
   VerifyReloadConsistency();
 }
 
-TEST_F(MetadataDatabaseTest, PopulateInitialDataTest) {
+TEST_P(MetadataDatabaseTest, PopulateInitialDataTest) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedFolder(sync_root, "app_root"));
   app_root.tracker.set_active(false);
@@ -1129,7 +1121,7 @@ TEST_F(MetadataDatabaseTest, PopulateInitialDataTest) {
   VerifyReloadConsistency();
 }
 
-TEST_F(MetadataDatabaseTest, DumpFiles) {
+TEST_P(MetadataDatabaseTest, DumpFiles) {
   TrackedFile sync_root(CreateTrackedSyncRoot());
   TrackedFile app_root(CreateTrackedAppRoot(sync_root, "app_id"));
   app_root.tracker.set_app_id(app_root.metadata.details().title());

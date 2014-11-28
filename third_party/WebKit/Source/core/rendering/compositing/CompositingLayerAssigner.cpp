@@ -27,6 +27,7 @@
 #include "config.h"
 #include "core/rendering/compositing/CompositingLayerAssigner.h"
 
+#include "core/inspector/InspectorTraceEvents.h"
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "platform/TraceEvent.h"
 
@@ -144,8 +145,11 @@ CompositingReasons CompositingLayerAssigner::getReasonsPreventingSquashing(const
     if (squashingWouldExceedSparsityTolerance(layer, squashingState))
         return CompositingReasonSquashingSparsityExceeded;
 
+    if (layer->renderer()->hasBlendMode())
+        return CompositingReasonSquashingBlendingIsDisallowed;
+
     // FIXME: this is not efficient, since it walks up the tree. We should store these values on the CompositingInputsCache.
-    if (layer->clippingContainer() != squashingLayer.clippingContainer() && !squashingLayer.compositedLayerMapping()->containingSquashedLayer(layer->clippingContainer()))
+    if (layer->clippingContainer() != squashingLayer.clippingContainer() && !squashingLayer.compositedLayerMapping()->containingSquashedLayer(layer->clippingContainer(), squashingState.nextSquashedLayerIndex))
         return CompositingReasonSquashingClippingContainerMismatch;
 
     // Composited descendants need to be clipped by a child containment graphics layer, which would not be available if the layer is
@@ -195,6 +199,7 @@ void CompositingLayerAssigner::updateSquashingAssignment(RenderLayer* layer, Squ
         layer->clipper().clearClipRectsIncludingDescendants();
 
         // Issue a paint invalidation, since |layer| may have been added to an already-existing squashing layer.
+        TRACE_LAYER_INVALIDATION(layer, InspectorLayerInvalidationTrackingEvent::AddedToSquashingLayer);
         layersNeedingPaintInvalidation.append(layer);
         m_layersChanged = true;
     } else if (compositedLayerUpdate == RemoveFromSquashingLayer) {
@@ -206,6 +211,7 @@ void CompositingLayerAssigner::updateSquashingAssignment(RenderLayer* layer, Squ
         }
 
         // If we need to issue paint invalidations, do so now that we've removed it from a squashed layer.
+        TRACE_LAYER_INVALIDATION(layer, InspectorLayerInvalidationTrackingEvent::RemovedFromSquashingLayer);
         layersNeedingPaintInvalidation.append(layer);
         m_layersChanged = true;
 
@@ -217,6 +223,7 @@ void CompositingLayerAssigner::assignLayersToBackingsForReflectionLayer(RenderLa
 {
     CompositingStateTransitionType compositedLayerUpdate = computeCompositedLayerUpdate(reflectionLayer);
     if (compositedLayerUpdate != NoCompositingStateChange) {
+        TRACE_LAYER_INVALIDATION(reflectionLayer, InspectorLayerInvalidationTrackingEvent::ReflectionLayerChanged);
         layersNeedingPaintInvalidation.append(reflectionLayer);
         m_layersChanged = true;
         m_compositor->allocateOrClearCompositedLayerMapping(reflectionLayer, compositedLayerUpdate);
@@ -239,6 +246,7 @@ void CompositingLayerAssigner::assignLayersToBackingsInternal(RenderLayer* layer
     CompositingStateTransitionType compositedLayerUpdate = computeCompositedLayerUpdate(layer);
 
     if (m_compositor->allocateOrClearCompositedLayerMapping(layer, compositedLayerUpdate)) {
+        TRACE_LAYER_INVALIDATION(layer, InspectorLayerInvalidationTrackingEvent::NewCompositedLayer);
         layersNeedingPaintInvalidation.append(layer);
         m_layersChanged = true;
     }

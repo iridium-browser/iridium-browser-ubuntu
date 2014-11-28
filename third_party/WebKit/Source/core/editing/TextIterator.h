@@ -51,6 +51,7 @@ enum TextIteratorBehavior {
 typedef unsigned TextIteratorBehaviorFlags;
 
 String plainText(const Range*, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
+String plainText(const Position& start, const Position& end, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
 PassRefPtrWillBeRawPtr<Range> findPlainText(const Range*, const String&, FindOptions);
 void findPlainText(const Position& inputStart, const Position& inputEnd, const String&, FindOptions, Position& resultStart, Position& resultEnd);
 
@@ -107,8 +108,16 @@ public:
         }
     }
 
-    PassRefPtrWillBeRawPtr<Range> range() const;
+    PassRefPtrWillBeRawPtr<Range> createRange() const;
     Node* node() const;
+
+    Document* ownerDocument() const;
+    Node* startContainer() const;
+    Node* endContainer() const;
+    int startOffset() const;
+    int endOffset() const;
+    Position startPosition() const;
+    Position endPosition() const;
 
     // Computes the length of the given range using a text iterator. The default
     // iteration behavior is to always emit object replacement characters for
@@ -116,7 +125,9 @@ public:
     // also emits spaces for other non-text nodes using the
     // |TextIteratorEmitsCharactersBetweenAllVisiblePosition| mode.
     static int rangeLength(const Range*, bool forSelectionPreservation = false);
+    static int rangeLength(const Position& start, const Position& end, bool forSelectionPreservation = false);
     static PassRefPtrWillBeRawPtr<Range> subrange(Range* entireRange, int characterOffset, int characterCount);
+    static void subrange(Position& start, Position& end, int characterOffset, int characterCount);
 
 private:
     enum IterationProgress {
@@ -129,7 +140,8 @@ private:
 
     void initialize(const Position& start, const Position& end);
 
-    int startOffset() const { return m_positionStartOffset; }
+    void flushPositionOffsets() const;
+    int positionStartOffset() const { return m_positionStartOffset; }
     const String& string() const { return m_text; }
     void exitNode();
     bool shouldRepresentNodeOffsetZero();
@@ -225,6 +237,7 @@ class SimplifiedBackwardsTextIterator {
     STACK_ALLOCATED();
 public:
     explicit SimplifiedBackwardsTextIterator(const Range*, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
+    SimplifiedBackwardsTextIterator(const Position& start, const Position& end, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
 
     bool atEnd() const { return !m_positionNode || m_shouldStop; }
     void advance();
@@ -244,9 +257,13 @@ public:
             m_textContainer.prependTo(output, m_textOffset, m_textLength);
     }
 
-    PassRefPtrWillBeRawPtr<Range> range() const;
+    Node* startContainer() const;
+    int endOffset() const;
+    Position startPosition() const;
+    Position endPosition() const;
 
 private:
+    void init(Node* startNode, Node* endNode, int startOffset, int endOffset);
     void exitNode();
     bool handleTextNode();
     RenderText* handleFirstLetter(int& startOffset, int& offsetInNode);
@@ -322,7 +339,15 @@ public:
     void appendTextTo(BufferType& output) { m_textIterator.appendTextTo(output, m_runOffset); }
 
     int characterOffset() const { return m_offset; }
-    PassRefPtrWillBeRawPtr<Range> range() const;
+    PassRefPtrWillBeRawPtr<Range> createRange() const;
+
+    Document* ownerDocument() const;
+    Node* startContainer() const;
+    Node* endContainer() const;
+    int startOffset() const;
+    int endOffset() const;
+    Position startPosition() const;
+    Position endPosition() const;
 
 private:
     void initialize();
@@ -338,12 +363,13 @@ class BackwardsCharacterIterator {
     STACK_ALLOCATED();
 public:
     explicit BackwardsCharacterIterator(const Range*, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
+    BackwardsCharacterIterator(const Position&, const Position&, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
 
     void advance(int);
 
     bool atEnd() const { return m_textIterator.atEnd(); }
 
-    PassRefPtrWillBeRawPtr<Range> range() const;
+    Position endPosition() const;
 
 private:
     int m_offset;
@@ -358,7 +384,7 @@ private:
 class WordAwareIterator {
     STACK_ALLOCATED();
 public:
-    explicit WordAwareIterator(const Range*);
+    explicit WordAwareIterator(const Position& start, const Position& end);
     ~WordAwareIterator();
 
     bool atEnd() const { return !m_didLookAhead && m_textIterator.atEnd(); }
@@ -372,7 +398,6 @@ private:
     Vector<UChar> m_buffer;
     // Did we have to look ahead in the textIterator to confirm the current chunk?
     bool m_didLookAhead;
-    RefPtrWillBeMember<Range> m_range;
     TextIterator m_textIterator;
 };
 

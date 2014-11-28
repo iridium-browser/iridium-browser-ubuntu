@@ -13,7 +13,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/drive_file_stream_reader.h"
 #include "net/base/completion_callback.h"
-#include "webkit/browser/blob/file_stream_reader.h"
+#include "storage/browser/blob/file_stream_reader.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -25,12 +25,12 @@ class ResourceEntry;
 
 namespace internal {
 
-// The implementation of webkit_blob::FileStreamReader for drive file system.
-// webkit_blob::FileStreamReader does not provide a way for explicit
+// The implementation of storage::FileStreamReader for drive file system.
+// storage::FileStreamReader does not provide a way for explicit
 // initialization, hence the initialization of this class will be done lazily.
 // Note that when crbug.com/225339 is resolved, this class will be also
 // initialized explicitly.
-class WebkitFileStreamReaderImpl : public webkit_blob::FileStreamReader {
+class WebkitFileStreamReaderImpl : public storage::FileStreamReader {
  public:
   WebkitFileStreamReaderImpl(
       const DriveFileStreamReader::FileSystemGetter& file_system_getter,
@@ -40,7 +40,7 @@ class WebkitFileStreamReaderImpl : public webkit_blob::FileStreamReader {
       const base::Time& expected_modification_time);
   virtual ~WebkitFileStreamReaderImpl();
 
-  // webkit_blob::FileStreamReader override.
+  // storage::FileStreamReader override.
   virtual int Read(net::IOBuffer* buffer,
                    int buffer_length,
                    const net::CompletionCallback& callback) OVERRIDE;

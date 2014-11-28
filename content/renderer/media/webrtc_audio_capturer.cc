@@ -30,6 +30,20 @@ const int kPowerMonitorTimeConstantMs = 10;
 // The time between two audio power level samples.
 const int kPowerMonitorLogIntervalSeconds = 10;
 
+// Method to check if any of the data in |audio_source| has energy.
+bool HasDataEnergy(const media::AudioBus& audio_source) {
+  for (int ch = 0; ch < audio_source.channels(); ++ch) {
+    const float* channel_ptr = audio_source.channel(ch);
+    for (int frame = 0; frame < audio_source.frames(); ++frame) {
+      if (channel_ptr[frame] != 0)
+        return true;
+    }
+  }
+
+  // All the data is zero.
+  return false;
+}
+
 }  // namespace
 
 // Reference counted container of WebRtcLocalAudioTrack delegate.
@@ -44,14 +58,16 @@ class WebRtcAudioCapturer::TrackOwner
                base::TimeDelta delay,
                double volume,
                bool key_pressed,
-               bool need_audio_processing) {
+               bool need_audio_processing,
+               bool force_report_nonzero_energy) {
     base::AutoLock lock(lock_);
     if (delegate_) {
       delegate_->Capture(audio_data,
                          delay,
                          volume,
                          key_pressed,
-                         need_audio_processing);
+                         need_audio_processing,
+                         force_report_nonzero_energy);
     }
   }
 
@@ -156,6 +172,24 @@ bool WebRtcAudioCapturer::Initialize() {
 
   media::ChannelLayout channel_layout = static_cast<media::ChannelLayout>(
       device_info_.device.input.channel_layout);
+
+  // If KEYBOARD_MIC effect is set, change the layout to the corresponding
+  // layout that includes the keyboard mic.
+  if ((device_info_.device.input.effects &
+          media::AudioParameters::KEYBOARD_MIC) &&
+      MediaStreamAudioProcessor::IsAudioTrackProcessingEnabled() &&
+      audio_constraints.GetProperty(
+          MediaAudioConstraints::kGoogExperimentalNoiseSuppression)) {
+    if (channel_layout == media::CHANNEL_LAYOUT_STEREO) {
+      channel_layout = media::CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC;
+      DVLOG(1) << "Changed stereo layout to stereo + keyboard mic layout due "
+               << "to KEYBOARD_MIC effect.";
+    } else {
+      DVLOG(1) << "KEYBOARD_MIC effect ignored, not compatible with layout "
+               << channel_layout;
+    }
+  }
+
   DVLOG(1) << "Audio input hardware channel layout: " << channel_layout;
   UMA_HISTOGRAM_ENUMERATION("WebRTC.AudioInputChannelLayout",
                             channel_layout, media::CHANNEL_LAYOUT_MAX + 1);
@@ -237,7 +271,7 @@ void WebRtcAudioCapturer::AddTrack(WebRtcLocalAudioTrack* track) {
     // Add with a tag, so we remember to call OnSetFormat() on the new
     // track.
     scoped_refptr<TrackOwner> track_owner(new TrackOwner(track));
-    tracks_.AddAndTag(track_owner);
+    tracks_.AddAndTag(track_owner.get());
   }
 }
 
@@ -300,7 +334,7 @@ void WebRtcAudioCapturer::SetCapturerSource(
   // bits_per_sample is always 16 for now.
   int buffer_size = GetBufferSize(sample_rate);
   media::AudioParameters params(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                                channel_layout, 0, sample_rate,
+                                channel_layout, sample_rate,
                                 16, buffer_size,
                                 device_info_.device.input.effects);
 
@@ -360,7 +394,7 @@ void WebRtcAudioCapturer::Start() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "WebRtcAudioCapturer::Start()";
   base::AutoLock auto_lock(lock_);
-  if (running_ || !source_)
+  if (running_ || !source_.get())
     return;
 
   // Start the data source, i.e., start capturing data from the current source.
@@ -496,6 +530,12 @@ void WebRtcAudioCapturer::Capture(const media::AudioBus* audio_source,
     audio_power_monitor_.Reset();
   }
 
+  // Figure out if the pre-processed data has any energy or not, the
+  // information will be passed to the track to force the calculator
+  // to report energy in case the post-processed data is zeroed by the audio
+  // processing.
+  const bool force_report_nonzero_energy = HasDataEnergy(*audio_source);
+
   // Push the data to the processor for processing.
   audio_processor_->PushCaptureData(audio_source);
 
@@ -509,7 +549,7 @@ void WebRtcAudioCapturer::Capture(const media::AudioBus* audio_source,
     for (TrackList::ItemList::const_iterator it = tracks.begin();
          it != tracks.end(); ++it) {
       (*it)->Capture(output, audio_delay, current_volume, key_pressed,
-                     need_audio_processing);
+                     need_audio_processing, force_report_nonzero_energy);
     }
 
     if (new_volume) {
@@ -527,8 +567,8 @@ void WebRtcAudioCapturer::OnCaptureError() {
 
 media::AudioParameters WebRtcAudioCapturer::source_audio_parameters() const {
   base::AutoLock auto_lock(lock_);
-  return audio_processor_ ?
-      audio_processor_->InputFormat() : media::AudioParameters();
+  return audio_processor_.get() ? audio_processor_->InputFormat()
+                                : media::AudioParameters();
 }
 
 bool WebRtcAudioCapturer::GetPairedOutputParameters(

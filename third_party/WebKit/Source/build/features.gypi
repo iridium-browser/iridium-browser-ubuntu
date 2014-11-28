@@ -32,7 +32,6 @@
   # The following defines turn WebKit features on and off.
   'variables': {
     'feature_defines': [
-      'ENABLE_CUSTOM_SCHEME_HANDLER=0',
       'ENABLE_SVG_FONTS=1',
       # WTF_USE_DYNAMIC_ANNOTATIONS=1 may be defined in build/common.gypi
       # We can't define it here because it should be present only
@@ -45,7 +44,7 @@
       'enable_oilpan%': 0,
       'gc_profile_heap%': 0,
       'gc_profile_marking%': 0,
-      'blink_asserts_always_on%': 0,
+      'blink_logging_always_on%': 0,
     },
     'conditions': [
       ['use_concatenated_impulse_responses==1', {
@@ -100,9 +99,9 @@
           'ENABLE_GC_PROFILE_MARKING=1',
         ],
       }],
-      ['blink_asserts_always_on==1', {
+      ['blink_logging_always_on==1', {
         'feature_defines': [
-          'ENABLE_ASSERT=1',
+          'LOG_DISABLED=0',
         ],
       }],
     ],

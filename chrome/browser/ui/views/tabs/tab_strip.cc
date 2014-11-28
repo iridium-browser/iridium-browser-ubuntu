@@ -27,8 +27,8 @@
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_observer.h"
 #include "chrome/browser/ui/views/touch_uma/touch_uma.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/default_theme_provider.h"
@@ -1002,6 +1002,12 @@ void TabStrip::CloseTab(Tab* tab, CloseTabSource source) {
   int model_index = GetModelIndexOfTab(tab);
   if (IsValidModelIndex(model_index))
     controller_->CloseTab(model_index, source);
+}
+
+void TabStrip::ToggleTabAudioMute(Tab* tab) {
+  int model_index = GetModelIndexOfTab(tab);
+  if (IsValidModelIndex(model_index))
+    controller_->ToggleTabAudioMute(model_index);
 }
 
 void TabStrip::ShowContextMenuForTab(Tab* tab,

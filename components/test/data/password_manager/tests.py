@@ -101,6 +101,15 @@ class Tumblr(WebsiteTest):
     self.Submit("#signup_password")
 
 
+class Twitter(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https:///twitter.com")
+    self.FillUsernameInto("#signin-email")
+    self.FillPasswordInto("#signin-password")
+    self.Submit("#signin-password")
+
+
 class Wikipedia(WebsiteTest):
 
   def Login(self):
@@ -108,6 +117,15 @@ class Wikipedia(WebsiteTest):
     self.FillUsernameInto("#wpName1")
     self.FillPasswordInto("#wpPassword1")
     self.Submit("#wpPassword1")
+
+
+class Yahoo(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://login.yahoo.com")
+    self.FillUsernameInto("#username")
+    self.FillPasswordInto("#passwd")
+    self.Submit("#passwd")
 
 
 class Yandex(WebsiteTest):
@@ -132,7 +150,7 @@ class Amazon(WebsiteTest):
         "%2Fauth%2F2.0")
     self.FillUsernameInto("[name='email']")
     self.FillPasswordInto("[name='password']")
-    self.Submit("[name='password']")
+    self.Click("#signInSubmit-input")
 
 
 # Password not saved.
@@ -152,9 +170,7 @@ class Ask(WebsiteTest):
 class Baidu(WebsiteTest):
 
   def Login(self):
-    self.GoTo("http://www.baidu.com/")
-    self.Click("[name='tj_login']")
-    self.WaitUntilDisplayed("[name='userName']")
+    self.GoTo("https://passport.baidu.com")
     self.FillUsernameInto("[name='userName']")
     self.FillPasswordInto("[name='password']")
     self.Submit("[name='password']")
@@ -199,7 +215,6 @@ class Espn(WebsiteTest):
     frame = self.driver.find_element_by_css_selector("#cboxLoadedContent "
                                                      "iframe")
     self.driver.switch_to_frame(frame)
-    self.WaitUntilDisplayed("#username")
     self.FillUsernameInto("#username")
     self.FillPasswordInto("#password")
     while self.IsDisplayed("#password"):
@@ -211,7 +226,7 @@ class Espn(WebsiteTest):
 class Live(WebsiteTest):
 
   def Login(self):
-    self.GoTo("https://www.live.com")
+    self.GoTo("https://login.live.com")
     self.FillUsernameInto("[name='login']")
     self.FillPasswordInto("[name='passwd']")
     self.Submit("[name='passwd']")
@@ -223,7 +238,6 @@ class One63(WebsiteTest):
   def Login(self):
     self.GoTo("http://www.163.com")
     self.HoverOver("#js_N_navHighlight")
-    self.WaitUntilDisplayed("#js_loginframe_username")
     self.FillUsernameInto("#js_loginframe_username")
     self.FillPasswordInto(".ntes-loginframe-label-ipt[type='password']")
     self.Click(".ntes-loginframe-btn")
@@ -235,25 +249,12 @@ class Vube(WebsiteTest):
   def Login(self):
     self.GoTo("https://vube.com")
     self.Click("[vube-login='']")
-    self.WaitUntilDisplayed("[ng-model='login.user']")
     self.FillUsernameInto("[ng-model='login.user']")
     self.FillPasswordInto("[ng-model='login.pass']")
     while (self.IsDisplayed("[ng-model='login.pass']")
            and not self.IsDisplayed(".prompt.alert")):
       self.ClickIfClickable("[ng-click='login()']")
       self.Wait(1)
-
-
-# Tests that can cause a crash.
-
-
-class Yahoo(WebsiteTest):
-
-  def Login(self):
-    self.GoTo("https://login.yahoo.com")
-    self.FillUsernameInto("#username")
-    self.FillPasswordInto("#passwd")
-    self.Submit("#passwd")
 
 
 def Tests(environment):
@@ -278,10 +279,13 @@ def Tests(environment):
 
   environment.AddWebsiteTest(Tumblr("tumblr", username_not_auto=True))
 
+  environment.AddWebsiteTest(Twitter("twitter"))
+
   environment.AddWebsiteTest(Wikipedia("wikipedia", username_not_auto=True))
 
-  environment.AddWebsiteTest(Yandex("yandex"))
+  environment.AddWebsiteTest(Yahoo("yahoo", username_not_auto=True))
 
+  environment.AddWebsiteTest(Yandex("yandex"))
 
   # Disabled tests.
 
@@ -313,11 +317,6 @@ def Tests(environment):
 
   # http://crbug.com/368690
   environment.AddWebsiteTest(Vube("vube"), disabled=True)
-
-  # Tests that can cause a crash (the cause of the crash is not related to the
-  # password manager).
-  environment.AddWebsiteTest(Yahoo("yahoo", username_not_auto=True),
-                             disabled=True)
 
 def saveResults(environment_tests_results, environment_save_path):
   """Save the test results in an xml file.

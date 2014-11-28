@@ -37,27 +37,28 @@ import android.webkit.GeolocationPermissions;
 import android.webkit.ValueCallback;
 import android.widget.OverScroller;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.content.browser.ContentSettings;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewStatics;
-import org.chromium.content.browser.LoadUrlParams;
-import org.chromium.content.browser.NavigationHistory;
-import org.chromium.content.browser.PageTransitionTypes;
 import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.content.common.CleanupReference;
-import org.chromium.content_public.Referrer;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.content_public.browser.JavaScriptCallback;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationController;
+import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.common.Referrer;
 import org.chromium.ui.base.ActivityWindowAndroid;
+import org.chromium.ui.base.PageTransitionTypes;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 
@@ -183,6 +184,8 @@ public class AwContents {
     private final Context mContext;
     private ContentViewCore mContentViewCore;
     private WindowAndroid mWindowAndroid;
+    private WebContents mWebContents;
+    private NavigationController mNavigationController;
     private final AwContentsClient mContentsClient;
     private final AwContentViewClient mContentViewClient;
     private WebContentsObserverAndroid mWebContentsObserver;
@@ -247,6 +250,10 @@ public class AwContents {
     // we are a child of a ListView. This may cause many toggles of View focus, which we suppress
     // when in this state.
     private boolean mTemporarilyDetached;
+
+    // True when this AwContents has been destroyed.
+    // Do not use directly, call isDestroyed() instead.
+    private boolean mIsDestroyed = false;
 
     private static final class DestroyRunnable implements Runnable {
         private final long mNativeAwContents;
@@ -450,8 +457,7 @@ public class AwContents {
 
         @Override
         public void scrollNativeTo(int x, int y) {
-            if (mNativeAwContents == 0) return;
-            nativeScrollTo(mNativeAwContents, x, y);
+            if (!isDestroyed()) nativeScrollTo(mNativeAwContents, x, y);
         }
 
         @Override
@@ -508,7 +514,7 @@ public class AwContents {
     private class AwComponentCallbacks implements ComponentCallbacks2 {
         @Override
         public void onTrimMemory(final int level) {
-            if (mNativeAwContents == 0) return;
+            if (isDestroyed()) return;
             boolean visibleRectEmpty = getGlobalVisibleRect().isEmpty();
             final boolean visible = mIsViewVisible && mIsWindowVisible && !visibleRectEmpty;
             nativeTrimMemory(mNativeAwContents, level, visible);
@@ -588,6 +594,7 @@ public class AwContents {
                     @Override
                     public void onGestureZoomSupportChanged(
                             boolean supportsDoubleTapZoom, boolean supportsMultiTouchZoom) {
+                        if (isDestroyed()) return;
                         mContentViewCore.updateDoubleTapSupport(supportsDoubleTapZoom);
                         mContentViewCore.updateMultiTouchZoomSupport(supportsMultiTouchZoom);
                     }
@@ -633,10 +640,12 @@ public class AwContents {
 
     /**
      * Transitions this {@link AwContents} to fullscreen mode and returns the
-     * {@link View} where the contents will be drawn while in fullscreen.
+     * {@link View} where the contents will be drawn while in fullscreen, or null
+     * if this AwContents has already been destroyed.
      */
     View enterFullScreen() {
         assert !isFullScreen();
+        if (isDestroyed()) return null;
 
         // Detach to tear down the GL functor if this is still associated with the old
         // container view. It will be recreated during the next call to onDraw attached to
@@ -663,7 +672,7 @@ public class AwContents {
      * in the WebView.
      */
     void exitFullScreen() {
-        if (!isFullScreen())
+        if (!isFullScreen() || isDestroyed())
             // exitFullScreen() can be called without a prior call to enterFullScreen() if a
             // "misbehave" app overrides onShowCustomView but does not add the custom view to
             // the window. Exiting avoids a crash.
@@ -744,8 +753,10 @@ public class AwContents {
      */
     private void setNewAwContents(long newAwContentsPtr) {
         if (mNativeAwContents != 0) {
-            destroy();
+            destroyNatives();
             mContentViewCore = null;
+            mWebContents = null;
+            mNavigationController = null;
         }
 
         assert mNativeAwContents == 0 && mCleanupReference == null && mContentViewCore == null;
@@ -769,11 +780,11 @@ public class AwContents {
                 new AwGestureStateListener(), mContentViewClient, mZoomControls, mWindowAndroid);
         nativeSetJavaPeers(mNativeAwContents, this, mWebContentsDelegate, mContentsClientBridge,
                 mIoThreadClient, mInterceptNavigationDelegate);
+        mWebContents = mContentViewCore.getWebContents();
+        mNavigationController = mWebContents.getNavigationController();
         installWebContentsObserver();
         mSettings.setWebContents(nativeWebContents);
         nativeSetDipScale(mNativeAwContents, (float) mDIPScale);
-
-        // The only call to onShow. onHide should never be called.
         mContentViewCore.onShow();
     }
 
@@ -781,8 +792,7 @@ public class AwContents {
         if (mWebContentsObserver != null) {
             mWebContentsObserver.detachFromWebContents();
         }
-        mWebContentsObserver = new AwWebContentsObserver(mContentViewCore.getWebContents(),
-                mContentsClient);
+        mWebContentsObserver = new AwWebContentsObserver(mWebContents, mContentsClient);
     }
 
     /**
@@ -848,8 +858,7 @@ public class AwContents {
         // Restore injected JavaScript interfaces.
         for (Map.Entry<String, Pair<Object, Class>> entry : javascriptInterfaces.entrySet()) {
             @SuppressWarnings("unchecked")
-            Class<? extends Annotation> requiredAnnotation = (Class<? extends Annotation>)
-                    entry.getValue().second;
+            Class<? extends Annotation> requiredAnnotation = entry.getValue().second;
             mContentViewCore.addPossiblyUnsafeJavascriptInterface(
                     entry.getValue().first,
                     entry.getKey(),
@@ -858,9 +867,17 @@ public class AwContents {
     }
 
     /**
-     * Deletes the native counterpart of this object.
+     * Destroys this object and deletes its native counterpart.
      */
     public void destroy() {
+        mIsDestroyed = true;
+        destroyNatives();
+    }
+
+    /**
+     * Deletes the native counterpart of this object.
+     */
+    private void destroyNatives() {
         if (mCleanupReference != null) {
             assert mNativeAwContents != 0;
             // If we are attached, we have to call native detach to clean up
@@ -869,24 +886,52 @@ public class AwContents {
                 nativeOnDetachedFromWindow(mNativeAwContents);
             }
 
-            // We explicitly do not null out the mContentViewCore reference here
-            // because ContentViewCore already has code to deal with the case
-            // methods are called on it after it's been destroyed, and other
-            // code relies on AwContents.mContentViewCore to be non-null.
+            mWebContentsObserver.detachFromWebContents();
+            mWebContentsObserver = null;
             mContentViewCore.destroy();
+            mContentViewCore = null;
             mNativeAwContents = 0;
+            mWebContents = null;
+            mNavigationController = null;
 
             mCleanupReference.cleanupNow();
             mCleanupReference = null;
         }
 
-        assert !mContentViewCore.isAlive();
+        assert mContentViewCore == null;
+        assert mWebContents == null;
+        assert mNavigationController == null;
         assert mNativeAwContents == 0;
+    }
+
+    private boolean isDestroyed() {
+        if (mIsDestroyed) {
+            assert mContentViewCore == null;
+            assert mWebContents == null;
+            assert mNavigationController == null;
+            assert mNativeAwContents == 0;
+        } else {
+            assert mContentViewCore != null;
+            assert mWebContents != null;
+            assert mNavigationController != null;
+            assert mNativeAwContents != 0;
+        }
+        return mIsDestroyed;
     }
 
     @VisibleForTesting
     public ContentViewCore getContentViewCore() {
         return mContentViewCore;
+    }
+
+    @VisibleForTesting
+    public WebContents getWebContents() {
+        return mWebContents;
+    }
+
+    @VisibleForTesting
+    public NavigationController getNavigationController() {
+        return mNavigationController;
     }
 
     // Can be called from any thread.
@@ -895,10 +940,7 @@ public class AwContents {
     }
 
     public AwPdfExporter getPdfExporter() {
-        // mNativeAwContents can be null, due to destroy().
-        if (mNativeAwContents == 0) {
-            return null;
-        }
+        if (isDestroyed()) return null;
         if (mAwPdfExporter == null) {
             mAwPdfExporter = new AwPdfExporter(mContainerView);
             nativeCreatePdfExporter(mNativeAwContents, mAwPdfExporter);
@@ -929,7 +971,7 @@ public class AwContents {
      * to ensure backwards compatible behavior.
      */
     public void disableJavascriptInterfacesInspection() {
-        mContentViewCore.setAllowJavascriptInterfacesInspection(false);
+        if (!isDestroyed()) mContentViewCore.setAllowJavascriptInterfacesInspection(false);
     }
 
     /**
@@ -944,7 +986,7 @@ public class AwContents {
     public long getAwDrawGLViewContext() {
         // Only called during early construction, so client should not have had a chance to
         // call destroy yet.
-        assert mNativeAwContents != 0;
+        assert !isDestroyed();
 
         // Using the native pointer as the returned viewContext. This is matched by the
         // reinterpret_cast back to BrowserViewRenderer pointer in the native DrawGLFunction.
@@ -983,15 +1025,14 @@ public class AwContents {
     }
 
     public Picture capturePicture() {
-        if (mNativeAwContents == 0) return null;
+        if (isDestroyed()) return null;
         return new AwPicture(nativeCapturePicture(mNativeAwContents,
                 mScrollOffsetManager.computeHorizontalScrollRange(),
                 mScrollOffsetManager.computeVerticalScrollRange()));
     }
 
     public void clearView() {
-        if (mNativeAwContents == 0) return;
-        nativeClearView(mNativeAwContents);
+        if (!isDestroyed()) nativeClearView(mNativeAwContents);
     }
 
     /**
@@ -1000,7 +1041,7 @@ public class AwContents {
      * @param invalidationOnly Flag to call back only on invalidation without providing a picture.
      */
     public void enableOnNewPicture(boolean enabled, boolean invalidationOnly) {
-        if (mNativeAwContents == 0) return;
+        if (isDestroyed()) return;
         if (invalidationOnly) {
             mPictureListenerContentProvider = null;
         } else if (enabled && mPictureListenerContentProvider == null) {
@@ -1015,18 +1056,15 @@ public class AwContents {
     }
 
     public void findAllAsync(String searchString) {
-        if (mNativeAwContents == 0) return;
-        nativeFindAllAsync(mNativeAwContents, searchString);
+        if (!isDestroyed()) nativeFindAllAsync(mNativeAwContents, searchString);
     }
 
     public void findNext(boolean forward) {
-        if (mNativeAwContents == 0) return;
-        nativeFindNext(mNativeAwContents, forward);
+        if (!isDestroyed()) nativeFindNext(mNativeAwContents, forward);
     }
 
     public void clearMatches() {
-        if (mNativeAwContents == 0) return;
-        nativeClearMatches(mNativeAwContents);
+        if (!isDestroyed()) nativeClearMatches(mNativeAwContents);
     }
 
     /**
@@ -1048,8 +1086,7 @@ public class AwContents {
                 ThreadUtils.runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (mNativeAwContents == 0) return;
-                        nativeAddVisitedLinks(mNativeAwContents, value);
+                        if (!isDestroyed()) nativeAddVisitedLinks(mNativeAwContents, value);
                     }
                 });
             }
@@ -1065,6 +1102,8 @@ public class AwContents {
      * @param params Parameters for this load.
      */
     public void loadUrl(LoadUrlParams params) {
+        if (isDestroyed()) return;
+
         if (params.getLoadUrlType() == LoadUrlParams.LOAD_TYPE_DATA &&
                 !params.isBaseUrlDataScheme()) {
             // This allows data URLs with a non-data base URL access to file:///android_asset/ and
@@ -1075,7 +1114,7 @@ public class AwContents {
 
         // If we are reloading the same url, then set transition type as reload.
         if (params.getUrl() != null &&
-                params.getUrl().equals(mContentViewCore.getUrl()) &&
+                params.getUrl().equals(mWebContents.getUrl()) &&
                 params.getTransitionType() == PageTransitionTypes.PAGE_TRANSITION_LINK) {
             params.setTransitionType(PageTransitionTypes.PAGE_TRANSITION_RELOAD);
         }
@@ -1091,11 +1130,11 @@ public class AwContents {
         // was adding them in a very narrow set of conditions. See http://crbug.com/306873
         // However, if the embedder is attempting to inject a Referer header for their
         // loadUrl call, then we set that separately and remove it from the extra headers map/
-        final String REFERER = "referer";
+        final String referer = "referer";
         Map<String, String> extraHeaders = params.getExtraHeaders();
         if (extraHeaders != null) {
             for (String header : extraHeaders.keySet()) {
-                if (REFERER.equals(header.toLowerCase(Locale.US))) {
+                if (referer.equals(header.toLowerCase(Locale.US))) {
                     params.setReferrer(new Referrer(extraHeaders.remove(header), 1));
                     params.setExtraHeaders(extraHeaders);
                     break;
@@ -1103,13 +1142,11 @@ public class AwContents {
             }
         }
 
-        if (mNativeAwContents != 0) {
-            nativeSetExtraHeadersForUrl(
-                    mNativeAwContents, params.getUrl(), params.getExtraHttpRequestHeadersString());
-        }
+        nativeSetExtraHeadersForUrl(
+                mNativeAwContents, params.getUrl(), params.getExtraHttpRequestHeadersString());
         params.setExtraHeaders(new HashMap<String, String>());
 
-        mContentViewCore.loadUrl(params);
+        mNavigationController.loadUrl(params);
 
         // The behavior of WebViewClassic uses the populateVisitedLinks callback in WebKit.
         // Chromium does not use this use code path and the best emulation of this behavior to call
@@ -1133,7 +1170,8 @@ public class AwContents {
      * @return The URL of the current page or null if it's empty.
      */
     public String getUrl() {
-        String url =  mContentViewCore.getUrl();
+        if (isDestroyed()) return null;
+        String url =  mWebContents.getUrl();
         if (url == null || url.trim().isEmpty()) return null;
         return url;
     }
@@ -1144,7 +1182,7 @@ public class AwContents {
 
     public void setBackgroundColor(int color) {
         mBaseBackgroundColor = color;
-        if (mNativeAwContents != 0) nativeSetBackgroundColor(mNativeAwContents, color);
+        if (!isDestroyed()) nativeSetBackgroundColor(mNativeAwContents, color);
     }
 
     /**
@@ -1158,7 +1196,7 @@ public class AwContents {
         // Do not ask the ContentViewCore for the background color, as it will always
         // report white prior to initial navigation or post destruction,  whereas we want
         // to use the client supplied base value in those cases.
-        if (mNativeAwContents == 0 || !mContentsClient.isCachedRendererBackgroundColorValid()) {
+        if (isDestroyed() || !mContentsClient.isCachedRendererBackgroundColorValid()) {
             return mBaseBackgroundColor;
         }
         return mContentsClient.getCachedRendererBackgroundColor();
@@ -1176,7 +1214,7 @@ public class AwContents {
      * @see ContentViewCore#getContentSettings()
      */
     public ContentSettings getContentSettings() {
-        return mContentViewCore.getContentSettings();
+        return isDestroyed() ? null : mContentViewCore.getContentSettings();
     }
 
     /**
@@ -1324,88 +1362,90 @@ public class AwContents {
      * @see android.webkit.WebView#stopLoading()
      */
     public void stopLoading() {
-        mContentViewCore.stopLoading();
+        if (!isDestroyed()) mWebContents.stop();
     }
 
     /**
      * @see android.webkit.WebView#reload()
      */
     public void reload() {
-        mContentViewCore.reload(true);
+        if (!isDestroyed()) mNavigationController.reload(true);
     }
 
     /**
      * @see android.webkit.WebView#canGoBack()
      */
     public boolean canGoBack() {
-        return mContentViewCore.canGoBack();
+        return isDestroyed() ? false : mNavigationController.canGoBack();
     }
 
     /**
      * @see android.webkit.WebView#goBack()
      */
     public void goBack() {
-        mContentViewCore.goBack();
+        if (!isDestroyed()) mNavigationController.goBack();
     }
 
     /**
      * @see android.webkit.WebView#canGoForward()
      */
     public boolean canGoForward() {
-        return mContentViewCore.canGoForward();
+        return isDestroyed() ? false : mNavigationController.canGoForward();
     }
 
     /**
      * @see android.webkit.WebView#goForward()
      */
     public void goForward() {
-        mContentViewCore.goForward();
+        if (!isDestroyed()) mNavigationController.goForward();
     }
 
     /**
      * @see android.webkit.WebView#canGoBackOrForward(int)
      */
     public boolean canGoBackOrForward(int steps) {
-        return mContentViewCore.canGoToOffset(steps);
+        return isDestroyed() ? false : mNavigationController.canGoToOffset(steps);
     }
 
     /**
      * @see android.webkit.WebView#goBackOrForward(int)
      */
     public void goBackOrForward(int steps) {
-        mContentViewCore.goToOffset(steps);
+        if (!isDestroyed()) mNavigationController.goToOffset(steps);
     }
 
     /**
      * @see android.webkit.WebView#pauseTimers()
      */
     public void pauseTimers() {
-        ContentViewStatics.setWebKitSharedTimersSuspended(true);
+        if (!isDestroyed()) ContentViewStatics.setWebKitSharedTimersSuspended(true);
     }
 
     /**
      * @see android.webkit.WebView#resumeTimers()
      */
     public void resumeTimers() {
-        ContentViewStatics.setWebKitSharedTimersSuspended(false);
+        if (!isDestroyed()) ContentViewStatics.setWebKitSharedTimersSuspended(false);
     }
 
     /**
      * @see android.webkit.WebView#onPause()
      */
     public void onPause() {
-        if (mIsPaused || mNativeAwContents == 0) return;
+        if (mIsPaused || isDestroyed()) return;
         mIsPaused = true;
         nativeSetIsPaused(mNativeAwContents, mIsPaused);
+        mContentViewCore.onHide();
     }
 
     /**
      * @see android.webkit.WebView#onResume()
      */
     public void onResume() {
-        if (!mIsPaused || mNativeAwContents == 0) return;
+        if (!mIsPaused || isDestroyed()) return;
         mIsPaused = false;
         nativeSetIsPaused(mNativeAwContents, mIsPaused);
+        mContentViewCore.onShow();
     }
 
     /**
@@ -1443,13 +1483,11 @@ public class AwContents {
      * @param includeDiskFiles if false, only the RAM cache is cleared
      */
     public void clearCache(boolean includeDiskFiles) {
-        if (mNativeAwContents == 0) return;
-        nativeClearCache(mNativeAwContents, includeDiskFiles);
+        if (!isDestroyed()) nativeClearCache(mNativeAwContents, includeDiskFiles);
     }
 
     public void documentHasImages(Message message) {
-        if (mNativeAwContents == 0) return;
-        nativeDocumentHasImages(mNativeAwContents, message);
+        if (!isDestroyed()) nativeDocumentHasImages(mNativeAwContents, message);
     }
 
     public void saveWebArchive(
@@ -1474,7 +1512,8 @@ public class AwContents {
     }
 
     public String getOriginalUrl() {
-        NavigationHistory history = mContentViewCore.getNavigationHistory();
+        if (isDestroyed()) return null;
+        NavigationHistory history = mNavigationController.getNavigationHistory();
         int currentIndex = history.getCurrentEntryIndex();
         if (currentIndex >= 0 && currentIndex < history.getEntryCount()) {
             return history.getEntryAtIndex(currentIndex).getOriginalUrl();
@@ -1486,21 +1525,21 @@ public class AwContents {
      * @see ContentViewCore#getNavigationHistory()
      */
     public NavigationHistory getNavigationHistory() {
-        return mContentViewCore.getNavigationHistory();
+        return isDestroyed() ? null : mNavigationController.getNavigationHistory();
     }
 
     /**
      * @see android.webkit.WebView#getTitle()
      */
     public String getTitle() {
-        return mContentViewCore.getTitle();
+        return isDestroyed() ? null : mWebContents.getTitle();
     }
 
     /**
      * @see android.webkit.WebView#clearHistory()
      */
     public void clearHistory() {
-        mContentViewCore.clearHistory();
+        if (!isDestroyed()) mNavigationController.clearHistory();
     }
 
     public String[] getHttpAuthUsernamePassword(String host, String realm) {
@@ -1518,15 +1557,15 @@ public class AwContents {
      * @see android.webkit.WebView#getCertificate()
      */
     public SslCertificate getCertificate() {
-        if (mNativeAwContents == 0) return null;
-        return SslUtil.getCertificateFromDerBytes(nativeGetCertificate(mNativeAwContents));
+        return isDestroyed() ? null
+                : SslUtil.getCertificateFromDerBytes(nativeGetCertificate(mNativeAwContents));
     }
 
     /**
      * @see android.webkit.WebView#clearSslPreferences()
      */
     public void clearSslPreferences() {
-        mContentViewCore.clearSslPreferences();
+        if (!isDestroyed()) mNavigationController.clearSslPreferences();
     }
 
     // TODO(sgurun) remove after this rolls in. To keep internal tree happy.
@@ -1539,7 +1578,7 @@ public class AwContents {
      * garbage allocation on repeated calls.
      */
     public HitTestData getLastHitTestResult() {
-        if (mNativeAwContents == 0) return null;
+        if (isDestroyed()) return null;
         nativeUpdateLastHitTestData(mNativeAwContents);
         return mPossiblyStaleHitTestData;
     }
@@ -1548,7 +1587,7 @@ public class AwContents {
      * @see android.webkit.WebView#requestFocusNodeHref()
      */
     public void requestFocusNodeHref(Message msg) {
-        if (msg == null || mNativeAwContents == 0) return;
+        if (msg == null || isDestroyed()) return;
 
         nativeUpdateLastHitTestData(mNativeAwContents);
         Bundle data = msg.getData();
@@ -1567,7 +1606,7 @@ public class AwContents {
      * @see android.webkit.WebView#requestImageRef()
      */
     public void requestImageRef(Message msg) {
-        if (msg == null || mNativeAwContents == 0) return;
+        if (msg == null || isDestroyed()) return;
 
         nativeUpdateLastHitTestData(mNativeAwContents);
         Bundle data = msg.getData();
@@ -1588,7 +1627,7 @@ public class AwContents {
      * the screen density factor. See CTS WebViewTest.testSetInitialScale.
      */
     public float getScale() {
-        return (float)(mPageScaleFactor * mDIPScale);
+        return (float) (mPageScaleFactor * mDIPScale);
     }
 
     /**
@@ -1662,6 +1701,7 @@ public class AwContents {
     // This method uses the term 'zoom' for legacy reasons, but relates
     // to what chrome calls the 'page scale factor'.
     public boolean zoomBy(float delta) {
+        if (isDestroyed()) return false;
         if (delta < 0.01f || delta > 100.0f) {
             throw new IllegalStateException("zoom delta value outside [0.01, 100] range.");
         }
@@ -1672,14 +1712,14 @@ public class AwContents {
      * @see android.webkit.WebView#invokeZoomPicker()
      */
     public void invokeZoomPicker() {
-        mContentViewCore.invokeZoomPicker();
+        if (!isDestroyed()) mContentViewCore.invokeZoomPicker();
     }
 
     /**
      * @see android.webkit.WebView#preauthorizePermission(Uri, long)
      */
     public void preauthorizePermission(Uri origin, long resources) {
-        if (mNativeAwContents == 0) return;
+        if (isDestroyed()) return;
         nativePreauthorizePermission(mNativeAwContents, origin.toString(), resources);
     }
 
@@ -1687,6 +1727,7 @@ public class AwContents {
      * @see ContentViewCore.evaluateJavaScript(String, JavaScriptCallback)
      */
     public void evaluateJavaScript(String script, final ValueCallback<String> callback) {
+        if (isDestroyed()) return;
         JavaScriptCallback jsCallback = null;
         if (callback != null) {
             jsCallback = new JavaScriptCallback() {
@@ -1697,14 +1738,12 @@ public class AwContents {
             };
         }
 
-        mContentViewCore.evaluateJavaScript(script, jsCallback);
+        mWebContents.evaluateJavaScript(script, jsCallback);
     }
 
-    /**
-     * @see ContentViewCore.evaluateJavaScriptEvenIfNotYetNavigated(String)
-     */
+    // TODO(boliu): Remove this once Android side no longer calls this.
     public void evaluateJavaScriptEvenIfNotYetNavigated(String script) {
-        mContentViewCore.evaluateJavaScriptEvenIfNotYetNavigated(script);
+        if (!isDestroyed()) mWebContents.evaluateJavaScript(script, null);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -1729,7 +1768,7 @@ public class AwContents {
      * @see android.view.View#onGenericMotionEvent()
      */
     public boolean onGenericMotionEvent(MotionEvent event) {
-        return mContentViewCore.onGenericMotionEvent(event);
+        return isDestroyed() ? false : mContentViewCore.onGenericMotionEvent(event);
     }
 
     /**
@@ -1808,14 +1847,12 @@ public class AwContents {
 
     private void setViewVisibilityInternal(boolean visible) {
         mIsViewVisible = visible;
-        if (mNativeAwContents == 0) return;
-        nativeSetViewVisibility(mNativeAwContents, mIsViewVisible);
+        if (!isDestroyed()) nativeSetViewVisibility(mNativeAwContents, mIsViewVisible);
     }
 
     private void setWindowVisibilityInternal(boolean visible) {
         mIsWindowVisible = visible;
-        if (mNativeAwContents == 0) return;
-        nativeSetWindowVisibility(mNativeAwContents, mIsWindowVisible);
+        if (!isDestroyed()) nativeSetWindowVisibility(mNativeAwContents, mIsWindowVisible);
     }
 
     /**
@@ -1828,7 +1865,7 @@ public class AwContents {
      * @return False if saving state failed.
      */
     public boolean saveState(Bundle outState) {
-        if (mNativeAwContents == 0 || outState == null) return false;
+        if (isDestroyed() || outState == null) return false;
 
         byte[] state = nativeGetOpaqueState(mNativeAwContents);
         if (state == null) return false;
@@ -1843,7 +1880,7 @@ public class AwContents {
      * @return False if restoring state failed.
      */
     public boolean restoreState(Bundle inState) {
-        if (mNativeAwContents == 0 || inState == null) return false;
+        if (isDestroyed() || inState == null) return false;
 
         byte[] state = inState.getByteArray(SAVE_RESTORE_STATE_KEY);
         if (state == null) return false;
@@ -1854,7 +1891,7 @@ public class AwContents {
         // but is optimized out in the restoreState case because the title is
         // already restored. See WebContentsImpl::UpdateTitleForEntry. So we
         // call the callback explicitly here.
-        if (result) mContentsClient.onReceivedTitle(mContentViewCore.getTitle());
+        if (result) mContentsClient.onReceivedTitle(mWebContents.getTitle());
 
         return result;
     }
@@ -1864,6 +1901,7 @@ public class AwContents {
      */
     public void addPossiblyUnsafeJavascriptInterface(Object object, String name,
             Class<? extends Annotation> requiredAnnotation) {
+        if (isDestroyed()) return;
         mContentViewCore.addPossiblyUnsafeJavascriptInterface(object, name, requiredAnnotation);
     }
 
@@ -1871,7 +1909,7 @@ public class AwContents {
      * @see android.webkit.WebView#removeJavascriptInterface(String)
      */
     public void removeJavascriptInterface(String interfaceName) {
-        mContentViewCore.removeJavascriptInterface(interfaceName);
+        if (!isDestroyed()) mContentViewCore.removeJavascriptInterface(interfaceName);
     }
 
     /**
@@ -1881,32 +1919,33 @@ public class AwContents {
      * @return The AccessibilityNodeProvider, if available, or null otherwise.
      */
     public AccessibilityNodeProvider getAccessibilityNodeProvider() {
-        return mContentViewCore.getAccessibilityNodeProvider();
+        return isDestroyed() ? null : mContentViewCore.getAccessibilityNodeProvider();
     }
 
     /**
      * @see android.webkit.WebView#onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo)
      */
     public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
-        mContentViewCore.onInitializeAccessibilityNodeInfo(info);
+        if (!isDestroyed()) mContentViewCore.onInitializeAccessibilityNodeInfo(info);
     }
 
     /**
      * @see android.webkit.WebView#onInitializeAccessibilityEvent(AccessibilityEvent)
      */
     public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
-        mContentViewCore.onInitializeAccessibilityEvent(event);
+        if (!isDestroyed()) mContentViewCore.onInitializeAccessibilityEvent(event);
     }
 
     public boolean supportsAccessibilityAction(int action) {
-        return mContentViewCore.supportsAccessibilityAction(action);
+        return isDestroyed() ? false : mContentViewCore.supportsAccessibilityAction(action);
     }
 
     /**
      * @see android.webkit.WebView#performAccessibilityAction(int, Bundle)
      */
     public boolean performAccessibilityAction(int action, Bundle arguments) {
-        return mContentViewCore.performAccessibilityAction(action, arguments);
+        return isDestroyed() ? false
+                : mContentViewCore.performAccessibilityAction(action, arguments);
     }
 
     /**
@@ -1919,8 +1958,7 @@ public class AwContents {
     }
 
     public void setNetworkAvailable(boolean networkUp) {
-        if (mNativeAwContents == 0) return;
-        nativeSetJsOnlineProperty(mNativeAwContents, networkUp);
+        if (!isDestroyed()) nativeSetJsOnlineProperty(mNativeAwContents, networkUp);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -1971,7 +2009,7 @@ public class AwContents {
                             mBrowserContext.getGeolocationPermissions().deny(origin);
                         }
                     }
-                    if (mNativeAwContents == 0) return;
+                    if (isDestroyed()) return;
                     nativeInvokeGeolocationCallback(mNativeAwContents, allow, origin);
                 }
             });
@@ -1980,7 +2018,7 @@ public class AwContents {
 
     @CalledByNative
     private void onGeolocationPermissionsShowPrompt(String origin) {
-        if (mNativeAwContents == 0) return;
+        if (isDestroyed()) return;
         AwGeolocationPermissions permissions = mBrowserContext.getGeolocationPermissions();
         // Reject if geoloaction is disabled, or the origin has a retained deny
         if (!mSettings.getGeolocationEnabled()) {
@@ -2137,13 +2175,13 @@ public class AwContents {
             float oldPageScaleFactor = mPageScaleFactor;
             mPageScaleFactor = pageScaleFactor;
             mContentsClient.getCallbackHelper().postOnScaleChangedScaled(
-                    (float)(oldPageScaleFactor * mDIPScale),
-                    (float)(mPageScaleFactor * mDIPScale));
+                    (float) (oldPageScaleFactor * mDIPScale),
+                    (float) (mPageScaleFactor * mDIPScale));
         }
     }
 
     private void saveWebArchiveInternal(String path, final ValueCallback<String> callback) {
-        if (path == null || mNativeAwContents == 0) {
+        if (path == null || isDestroyed()) {
             ThreadUtils.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -2190,11 +2228,11 @@ public class AwContents {
     }
 
     public void extractSmartClipData(int x, int y, int width, int height) {
-        mContentViewCore.extractSmartClipData(x, y, width, height);
+        if (!isDestroyed()) mContentViewCore.extractSmartClipData(x, y, width, height);
     }
 
     public void setSmartClipDataListener(ContentViewCore.SmartClipDataListener listener) {
-        mContentViewCore.setSmartClipDataListener(listener);
+        if (!isDestroyed()) mContentViewCore.setSmartClipDataListener(listener);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -2210,7 +2248,7 @@ public class AwContents {
 
         @Override
         public void onDraw(Canvas canvas) {
-            if (mNativeAwContents == 0) {
+            if (isDestroyed()) {
                 canvas.drawColor(getEffectiveBackgroundColor());
                 return;
             }
@@ -2247,7 +2285,7 @@ public class AwContents {
 
         @Override
         public void requestFocus() {
-            if (mNativeAwContents == 0) return;
+            if (isDestroyed()) return;
             if (!mContainerView.isInTouchMode() && mSettings.shouldFocusFirstNode()) {
                 nativeFocusFirstNode(mNativeAwContents);
             }
@@ -2268,16 +2306,17 @@ public class AwContents {
 
         @Override
         public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
-            return mContentViewCore.onCreateInputConnection(outAttrs);
+            return isDestroyed() ? null : mContentViewCore.onCreateInputConnection(outAttrs);
         }
 
         @Override
         public boolean onKeyUp(int keyCode, KeyEvent event) {
-            return mContentViewCore.onKeyUp(keyCode, event);
+            return isDestroyed() ? false : mContentViewCore.onKeyUp(keyCode, event);
         }
 
         @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
+            if (isDestroyed()) return false;
             if (isDpadEvent(event)) {
                 mSettings.setSpatialNavigationEnabled(true);
             }
@@ -2300,8 +2339,7 @@ public class AwContents {
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            if (mNativeAwContents == 0) return false;
-
+            if (isDestroyed()) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 mSettings.setSpatialNavigationEnabled(false);
             }
@@ -2335,22 +2373,22 @@ public class AwContents {
 
         @Override
         public boolean onHoverEvent(MotionEvent event) {
-            return mContentViewCore.onHoverEvent(event);
+            return isDestroyed() ? false : mContentViewCore.onHoverEvent(event);
         }
 
         @Override
         public boolean onGenericMotionEvent(MotionEvent event) {
-            return mContentViewCore.onGenericMotionEvent(event);
+            return isDestroyed() ? false : mContentViewCore.onGenericMotionEvent(event);
         }
 
         @Override
         public void onConfigurationChanged(Configuration newConfig) {
-            mContentViewCore.onConfigurationChanged(newConfig);
+            if (!isDestroyed()) mContentViewCore.onConfigurationChanged(newConfig);
         }
 
         @Override
         public void onAttachedToWindow() {
-            if (mNativeAwContents == 0) return;
+            if (isDestroyed()) return;
             if (mIsAttachedToWindow) {
                 Log.w(TAG, "onAttachedToWindow called when already attached. Ignoring");
                 return;
@@ -2369,15 +2407,14 @@ public class AwContents {
 
         @Override
         public void onDetachedFromWindow() {
+            if (isDestroyed()) return;
             if (!mIsAttachedToWindow) {
                 Log.w(TAG, "onDetachedFromWindow called when already detached. Ignoring");
                 return;
             }
             mIsAttachedToWindow = false;
             hideAutofillPopup();
-            if (mNativeAwContents != 0) {
-                nativeOnDetachedFromWindow(mNativeAwContents);
-            }
+            nativeOnDetachedFromWindow(mNativeAwContents);
 
             mContentViewCore.onDetachedFromWindow();
             updateHardwareAcceleratedFeaturesToggle();
@@ -2393,19 +2430,21 @@ public class AwContents {
 
         @Override
         public void onWindowFocusChanged(boolean hasWindowFocus) {
+            if (isDestroyed()) return;
             mWindowFocused = hasWindowFocus;
             mContentViewCore.onWindowFocusChanged(hasWindowFocus);
         }
 
         @Override
         public void onFocusChanged(boolean focused, int direction, Rect previouslyFocusedRect) {
+            if (isDestroyed()) return;
             mContainerViewFocused = focused;
             mContentViewCore.onFocusChanged(focused);
         }
 
         @Override
         public void onSizeChanged(int w, int h, int ow, int oh) {
-            if (mNativeAwContents == 0) return;
+            if (isDestroyed()) return;
             mScrollOffsetManager.setContainerViewSize(w, h);
             // The AwLayoutSizer needs to go first so that if we're in
             // fixedLayoutSize mode the update

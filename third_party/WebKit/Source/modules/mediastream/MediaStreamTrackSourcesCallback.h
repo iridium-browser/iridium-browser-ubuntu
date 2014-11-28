@@ -31,9 +31,10 @@ namespace blink {
 
 class MediaStreamTrackSourcesResponse;
 
-class MediaStreamTrackSourcesCallback {
+class MediaStreamTrackSourcesCallback : public GarbageCollectedFinalized<MediaStreamTrackSourcesCallback> {
 public:
     virtual ~MediaStreamTrackSourcesCallback() { }
+    virtual void trace(Visitor*) { }
     virtual void handleEvent(const SourceInfoVector&) = 0;
 };
 

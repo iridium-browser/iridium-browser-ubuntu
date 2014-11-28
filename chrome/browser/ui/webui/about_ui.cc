@@ -13,7 +13,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/i18n/number_formatting.h"
 #include "base/json/json_writer.h"
 #include "base/memory/singleton.h"
@@ -38,6 +38,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -47,9 +50,6 @@
 #include "content/public/common/process_type.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "net/base/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
@@ -705,7 +705,7 @@ std::string AboutStats(const std::string& query) {
           base::JSONWriter::OPTIONS_PRETTY_PRINT,
           &data);
     if (query == kStringsJsPath)
-      data = "var templateData = " + data + ";";
+      data = "loadTimeData.data = " + data + ";";
   } else if (query == "raw") {
     // Dump the raw counters which have changed in text format.
     data = "<pre>";

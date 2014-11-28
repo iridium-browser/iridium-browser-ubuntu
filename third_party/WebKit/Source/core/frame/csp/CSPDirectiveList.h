@@ -49,7 +49,7 @@ public:
     bool allowConnectToSource(const KURL&, ContentSecurityPolicy::ReportingStatus) const;
     bool allowFormAction(const KURL&, ContentSecurityPolicy::ReportingStatus) const;
     bool allowBaseURI(const KURL&, ContentSecurityPolicy::ReportingStatus) const;
-    bool allowAncestors(LocalFrame*, ContentSecurityPolicy::ReportingStatus) const;
+    bool allowAncestors(LocalFrame*, const KURL&, ContentSecurityPolicy::ReportingStatus) const;
     bool allowChildContextFromSource(const KURL&, ContentSecurityPolicy::ReportingStatus) const;
     bool allowScriptNonce(const String&) const;
     bool allowStyleNonce(const String&) const;
@@ -61,7 +61,7 @@ public:
     ReferrerPolicy referrerPolicy() const { return m_referrerPolicy; }
     bool didSetReferrerPolicy() const { return m_didSetReferrerPolicy; }
     bool isReportOnly() const { return m_reportOnly; }
-    const Vector<KURL>& reportURIs() const { return m_reportURIs; }
+    const Vector<String>& reportEndpoints() const { return m_reportEndpoints; }
 
 private:
     CSPDirectiveList(ContentSecurityPolicy*, ContentSecurityPolicyHeaderType, ContentSecurityPolicyHeaderSource);
@@ -80,6 +80,7 @@ private:
     SourceListDirective* operativeDirective(SourceListDirective*) const;
     SourceListDirective* operativeDirective(SourceListDirective*, SourceListDirective* override) const;
     void reportViolation(const String& directiveText, const String& effectiveDirective, const String& consoleMessage, const KURL& blockedURL) const;
+    void reportViolationWithFrame(const String& directiveText, const String& effectiveDirective, const String& consoleMessage, const KURL& blockedURL, LocalFrame*) const;
     void reportViolationWithLocation(const String& directiveText, const String& effectiveDirective, const String& consoleMessage, const KURL& blockedURL, const String& contextURL, const WTF::OrdinalNumber& contextLine) const;
     void reportViolationWithState(const String& directiveText, const String& effectiveDirective, const String& message, const KURL& blockedURL, ScriptState*) const;
 
@@ -98,7 +99,7 @@ private:
 
     bool checkSourceAndReportViolation(SourceListDirective*, const KURL&, const String& effectiveDirective) const;
     bool checkMediaTypeAndReportViolation(MediaListDirective*, const String& type, const String& typeAttribute, const String& consoleMessage) const;
-    bool checkAncestorsAndReportViolation(SourceListDirective*, LocalFrame*) const;
+    bool checkAncestorsAndReportViolation(SourceListDirective*, LocalFrame*, const KURL&) const;
 
     bool denyIfEnforcingPolicy() const { return m_reportOnly; }
 
@@ -130,7 +131,7 @@ private:
     OwnPtr<SourceListDirective> m_scriptSrc;
     OwnPtr<SourceListDirective> m_styleSrc;
 
-    Vector<KURL> m_reportURIs;
+    Vector<String> m_reportEndpoints;
 
     String m_evalDisabledErrorMessage;
 };

@@ -10,6 +10,7 @@
 #include "base/event_types.h"
 #include "base/gtest_prod_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/gesture_event_details.h"
@@ -28,6 +29,8 @@ class EventTarget;
 
 class EVENTS_EXPORT Event {
  public:
+  static scoped_ptr<Event> Clone(const Event& event);
+
   virtual ~Event();
 
   class DispatcherApi {
@@ -84,6 +87,7 @@ class EVENTS_EXPORT Event {
   bool IsCapsLockDown() const { return (flags_ & EF_CAPS_LOCK_DOWN) != 0; }
   bool IsAltDown() const { return (flags_ & EF_ALT_DOWN) != 0; }
   bool IsAltGrDown() const { return (flags_ & EF_ALTGR_DOWN) != 0; }
+  bool IsCommandDown() const { return (flags_ & EF_COMMAND_DOWN) != 0; }
   bool IsRepeat() const { return (flags_ & EF_IS_REPEAT) != 0; }
 
   bool IsKeyEvent() const {
@@ -183,6 +187,11 @@ class EVENTS_EXPORT Event {
 
   bool IsMouseWheelEvent() const {
     return type_ == ET_MOUSEWHEEL;
+  }
+
+  bool IsLocatedEvent() const {
+    return IsMouseEvent() || IsScrollEvent() || IsTouchEvent() ||
+           IsGestureEvent();
   }
 
   // Convenience methods to cast |this| to a GestureEvent. IsGestureEvent()
@@ -545,6 +554,17 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   float force_;
 };
 
+// An interface that individual platforms can use to store additional data on
+// KeyEvent.
+//
+// Currently only used in mojo.
+class EVENTS_EXPORT ExtendedKeyEventData {
+ public:
+  virtual ~ExtendedKeyEventData() {}
+
+  virtual ExtendedKeyEventData* Clone() const = 0;
+};
+
 // A KeyEvent is really two distinct classes, melded together due to the
 // DOM legacy of Windows key events: a keystroke event (is_char_ == false),
 // or a character event (is_char_ == true).
@@ -569,7 +589,7 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
 // -- character_ is a UTF-16 character value.
 // -- key_code_ is conflated with character_ by some code, because both
 //    arrive in the wParam field of a Windows event.
-// -- code_ is "".
+// -- code_ is the empty string.
 //
 class EVENTS_EXPORT KeyEvent : public Event {
  public:
@@ -591,6 +611,23 @@ class EVENTS_EXPORT KeyEvent : public Event {
            const std::string& code,
            int flags);
 
+  KeyEvent(const KeyEvent& rhs);
+
+  KeyEvent& operator=(const KeyEvent& rhs);
+
+  virtual ~KeyEvent();
+
+  // TODO(erg): While we transition to mojo, we have to hack around a mismatch
+  // in our event types. Our ui::Events don't really have all the data we need
+  // to process key events, and we instead do per-platform conversions with
+  // native HWNDs or XEvents. And we can't reliably send those native data
+  // types across mojo types in a cross-platform way. So instead, we set the
+  // resulting data when read across IPC boundaries.
+  void SetExtendedKeyEventData(scoped_ptr<ExtendedKeyEventData> data);
+  const ExtendedKeyEventData* extended_key_event_data() const {
+    return extended_key_event_data_.get();
+  }
+
   // This bypasses the normal mapping from keystroke events to characters,
   // which allows an I18N virtual keyboard to fabricate a keyboard event that
   // does not have a corresponding KeyboardCode (example: U+00E1 Latin small
@@ -601,8 +638,24 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // BMP characters.
   base::char16 GetCharacter() const;
 
+  // If this is a keystroke event with key_code_ VKEY_RETURN, returns '\r';
+  // otherwise returns the same as GetCharacter().
+  base::char16 GetUnmodifiedText() const;
+
+  // If the Control key is down in the event, returns a layout-independent
+  // character (corresponding to US layout); otherwise returns the same
+  // as GetUnmodifiedText().
+  base::char16 GetText() const;
+
   // Gets the platform key code. For XKB, this is the xksym value.
+  void set_platform_keycode(uint32 keycode) { platform_keycode_ = keycode; }
   uint32 platform_keycode() const { return platform_keycode_; }
+
+  // Gets the associated (Windows-based) KeyboardCode for this key event.
+  // Historically, this has also been used to obtain the character associated
+  // with a character event, because both use the Window message 'wParam' field.
+  // This should be avoided; if necessary for backwards compatibility, use
+  // GetConflatedWindowsKeyCode().
   KeyboardCode key_code() const { return key_code_; }
 
   // True if this is a character event, false if this is a keystroke event.
@@ -611,6 +664,17 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // This is only intended to be used externally by classes that are modifying
   // events in an EventRewriter.
   void set_key_code(KeyboardCode key_code) { key_code_ = key_code; }
+
+  // Returns the same value as key_code(), except that located codes are
+  // returned in place of non-located ones (e.g. VKEY_LSHIFT or VKEY_RSHIFT
+  // instead of VKEY_SHIFT). This is a hybrid of semantic and physical
+  // for legacy DOM reasons.
+  KeyboardCode GetLocatedWindowsKeyboardCode() const;
+
+  // For a keystroke event, returns the same value as key_code().
+  // For a character event, returns the same value as GetCharacter().
+  // This exists for backwards compatibility with Windows key events.
+  uint16 GetConflatedWindowsKeyCode() const;
 
   // Returns true for [Alt]+<num-pad digit> Unicode alt key codes used by Win.
   // TODO(msw): Additional work may be needed for analogues on other platforms.
@@ -635,6 +699,9 @@ class EVENTS_EXPORT KeyEvent : public Event {
   void set_is_char(bool is_char) { is_char_ = is_char; }
 
  private:
+  // True if the key press originated from a 'right' key (VKEY_RSHIFT, etc.).
+  bool IsRightSideKey() const;
+
   KeyboardCode key_code_;
 
   // String of 'code' defined in DOM KeyboardEvent (e.g. 'KeyA', 'Space')
@@ -657,7 +724,13 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // This value represents the text that the key event will insert to input
   // field. For key with modifier key, it may have specifial text.
   // e.g. CTRL+A has '\x01'.
-  base::char16 character_;
+  mutable base::char16 character_;
+
+  // Parts of our event handling require raw native events (see both the
+  // windows and linux implementations of web_input_event in content/). Because
+  // mojo instead serializes and deserializes events in potentially different
+  // processes, we need to have a mechanism to keep track of this data.
+  scoped_ptr<ExtendedKeyEventData> extended_key_event_data_;
 
   static bool IsRepeated(const KeyEvent& event);
 

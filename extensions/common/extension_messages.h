@@ -20,6 +20,7 @@
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/socket_permission_data.h"
 #include "extensions/common/permissions/usb_device_permission_data.h"
+#include "extensions/common/stack_frame.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
 #include "extensions/common/user_script.h"
@@ -180,6 +181,13 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::SocketPermissionData)
   IPC_STRUCT_TRAITS_MEMBER(entry())
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(extensions::StackFrame)
+  IPC_STRUCT_TRAITS_MEMBER(line_number)
+  IPC_STRUCT_TRAITS_MEMBER(column_number)
+  IPC_STRUCT_TRAITS_MEMBER(source)
+  IPC_STRUCT_TRAITS_MEMBER(function)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(extensions::UsbDevicePermissionData)
   IPC_STRUCT_TRAITS_MEMBER(vendor_id())
   IPC_STRUCT_TRAITS_MEMBER(product_id())
@@ -209,7 +217,7 @@ typedef std::map<std::string, std::set<std::string> > ExecutingScriptsMap;
 struct ExtensionMsg_PermissionSetStruct {
   ExtensionMsg_PermissionSetStruct();
   explicit ExtensionMsg_PermissionSetStruct(
-      const extensions::PermissionSet* permissions);
+      const extensions::PermissionSet& permissions);
   ~ExtensionMsg_PermissionSetStruct();
 
   scoped_refptr<const extensions::PermissionSet> ToPermissionSet() const;
@@ -349,6 +357,10 @@ IPC_MESSAGE_ROUTED5(ExtensionMsg_MessageInvoke,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_SetFunctionNames,
                      std::vector<std::string>)
 
+// Set the top-level frame to the provided name.
+IPC_MESSAGE_ROUTED1(ExtensionMsg_SetFrameName,
+                    std::string /* frame_name */)
+
 // Tell the renderer process the platforms system font.
 IPC_MESSAGE_CONTROL2(ExtensionMsg_SetSystemFont,
                      std::string /* font_family */,
@@ -393,6 +405,13 @@ IPC_MESSAGE_CONTROL3(ExtensionMsg_UpdateUserScripts,
                      base::SharedMemoryHandle,
                      extensions::ExtensionId /* owner */,
                      std::set<std::string> /* changed extensions */)
+
+// Trigger to execute declarative content script under browser control.
+IPC_MESSAGE_ROUTED4(ExtensionMsg_ExecuteDeclarativeScript,
+                    int /* tab identifier */,
+                    extensions::ExtensionId /* extension identifier */,
+                    int /* script identifier */,
+                    GURL /* page URL where script should be injected */)
 
 // Tell the render view which browser window it's being attached to.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_UpdateBrowserWindowId,
@@ -492,6 +511,16 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_WatchPages,
 // an acknowledgement even if the RenderView has closed or navigated away.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_TransferBlobs,
                      std::vector<std::string> /* blob_uuids */)
+
+// The ACK for ExtensionHostMsg_CreateMimeHandlerViewGuest.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_CreateMimeHandlerViewGuestACK,
+                     int /* element_instance_id */)
+
+// Once a RenderView proxy has been created for the guest in the embedder render
+// process, this IPC informs the embedder of the proxy's routing ID.
+IPC_MESSAGE_ROUTED2(ExtensionMsg_GuestAttached,
+                    int /* element_instance_id */,
+                    int /* source_routing_id */)
 
 // Messages sent from the renderer to the browser.
 
@@ -693,3 +722,31 @@ IPC_MESSAGE_ROUTED1(ExtensionHostMsg_OnWatchedPageChange,
 // Sent by the renderer when it has received a Blob handle from the browser.
 IPC_MESSAGE_CONTROL1(ExtensionHostMsg_TransferBlobsAck,
                      std::vector<std::string> /* blob_uuids */)
+
+// Informs of updated frame names.
+IPC_MESSAGE_ROUTED2(ExtensionHostMsg_FrameNameChanged,
+                    bool /* is_top_level */,
+                    std::string /* name */)
+
+// Tells listeners that a detailed message was reported to the console by
+// WebKit.
+IPC_MESSAGE_ROUTED4(ExtensionHostMsg_DetailedConsoleMessageAdded,
+                    base::string16 /* message */,
+                    base::string16 /* source */,
+                    extensions::StackTrace /* stack trace */,
+                    int32 /* severity level */)
+
+// Sent by the renderer to set initialization parameters of a Browser Plugin
+// that is identified by |element_instance_id|.
+IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AttachGuest,
+                     int /* routing_id */,
+                     int /* element_instance_id */,
+                     int /* guest_instance_id */,
+                     base::DictionaryValue /* attach_params */)
+
+// Tells the browser to create a mime handler guest view for a plugin.
+IPC_MESSAGE_CONTROL4(ExtensionHostMsg_CreateMimeHandlerViewGuest,
+                     int /* render_frame_id */,
+                     std::string /* embedder_url */,
+                     std::string /* mime_type */,
+                     int /* element_instance_id */)

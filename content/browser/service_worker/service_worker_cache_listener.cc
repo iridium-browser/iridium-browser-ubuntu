@@ -5,6 +5,7 @@
 #include "content/browser/service_worker/service_worker_cache_listener.h"
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/service_worker/service_worker_cache_storage_manager.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
@@ -23,26 +24,24 @@ WebServiceWorkerCacheError ToWebServiceWorkerCacheError(
   switch (err) {
     case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NO_ERROR:
       NOTREACHED();
-      return WebServiceWorkerCacheError::
-          WebServiceWorkerCacheErrorNotImplemented;
+      return blink::WebServiceWorkerCacheErrorNotImplemented;
     case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NOT_IMPLEMENTED:
-      return WebServiceWorkerCacheError::
-          WebServiceWorkerCacheErrorNotImplemented;
+      return blink::WebServiceWorkerCacheErrorNotImplemented;
     case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NOT_FOUND:
-      return WebServiceWorkerCacheError::WebServiceWorkerCacheErrorNotFound;
+      return blink::WebServiceWorkerCacheErrorNotFound;
     case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_EXISTS:
-      return WebServiceWorkerCacheError::WebServiceWorkerCacheErrorExists;
+      return blink::WebServiceWorkerCacheErrorExists;
     case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_STORAGE:
       // TODO(jkarlin): Changethis to CACHE_STORAGE_ERROR_STORAGE once that's
       // added.
-      return WebServiceWorkerCacheError::WebServiceWorkerCacheErrorNotFound;
-    case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_EMPTY_KEY:
-      // TODO(jkarlin): Update this to CACHE_STORAGE_ERROR_EMPTY_KEY once that's
+      return blink::WebServiceWorkerCacheErrorNotFound;
+    case ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_CLOSING:
+      // TODO(jkarlin): Update this to CACHE_STORAGE_ERROR_CLOSING once that's
       // added.
-      return WebServiceWorkerCacheError::WebServiceWorkerCacheErrorNotFound;
+      return blink::WebServiceWorkerCacheErrorNotFound;
   }
   NOTREACHED();
-  return WebServiceWorkerCacheError::WebServiceWorkerCacheErrorNotImplemented;
+  return blink::WebServiceWorkerCacheErrorNotImplemented;
 }
 
 }  // namespace
@@ -50,7 +49,10 @@ WebServiceWorkerCacheError ToWebServiceWorkerCacheError(
 ServiceWorkerCacheListener::ServiceWorkerCacheListener(
     ServiceWorkerVersion* version,
     base::WeakPtr<ServiceWorkerContextCore> context)
-    : version_(version), context_(context), weak_factory_(this) {
+    : version_(version),
+      context_(context),
+      next_cache_id_(0),
+      weak_factory_(this) {
 }
 
 ServiceWorkerCacheListener::~ServiceWorkerCacheListener() {
@@ -63,13 +65,23 @@ bool ServiceWorkerCacheListener::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheStorageGet,
                         OnCacheStorageGet)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheStorageHas,
-                        OnCacheStorageGet)
+                        OnCacheStorageHas)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheStorageCreate,
                         OnCacheStorageCreate)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheStorageDelete,
                         OnCacheStorageDelete)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheStorageKeys,
                         OnCacheStorageKeys)
+    IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheMatch,
+                        OnCacheMatch)
+    IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheMatchAll,
+                        OnCacheMatchAll)
+    IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheKeys,
+                        OnCacheKeys)
+    IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheBatch,
+                        OnCacheBatch)
+    IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_CacheClosed,
+                        OnCacheClosed)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -79,6 +91,8 @@ bool ServiceWorkerCacheListener::OnMessageReceived(
 void ServiceWorkerCacheListener::OnCacheStorageGet(
     int request_id,
     const base::string16& cache_name) {
+  TRACE_EVENT0("ServiceWorker",
+               "ServiceWorkerCacheListener::OnCacheStorageGet");
   context_->cache_manager()->GetCache(
       version_->scope().GetOrigin(),
       base::UTF16ToUTF8(cache_name),
@@ -90,6 +104,8 @@ void ServiceWorkerCacheListener::OnCacheStorageGet(
 void ServiceWorkerCacheListener::OnCacheStorageHas(
     int request_id,
     const base::string16& cache_name) {
+  TRACE_EVENT0("ServiceWorker",
+               "ServiceWorkerCacheListener::OnCacheStorageHas");
   context_->cache_manager()->HasCache(
       version_->scope().GetOrigin(),
       base::UTF16ToUTF8(cache_name),
@@ -101,6 +117,8 @@ void ServiceWorkerCacheListener::OnCacheStorageHas(
 void ServiceWorkerCacheListener::OnCacheStorageCreate(
     int request_id,
     const base::string16& cache_name) {
+  TRACE_EVENT0("ServiceWorker",
+               "ServiceWorkerCacheListener::OnCacheStorageCreate");
   context_->cache_manager()->CreateCache(
       version_->scope().GetOrigin(),
       base::UTF16ToUTF8(cache_name),
@@ -112,6 +130,8 @@ void ServiceWorkerCacheListener::OnCacheStorageCreate(
 void ServiceWorkerCacheListener::OnCacheStorageDelete(
     int request_id,
     const base::string16& cache_name) {
+  TRACE_EVENT0("ServiceWorker",
+               "ServiceWorkerCacheListener::OnCacheStorageDelete");
   context_->cache_manager()->DeleteCache(
       version_->scope().GetOrigin(),
       base::UTF16ToUTF8(cache_name),
@@ -121,11 +141,56 @@ void ServiceWorkerCacheListener::OnCacheStorageDelete(
 }
 
 void ServiceWorkerCacheListener::OnCacheStorageKeys(int request_id) {
+  TRACE_EVENT0("ServiceWorker",
+               "ServiceWorkerCacheListener::OnCacheStorageKeys");
   context_->cache_manager()->EnumerateCaches(
       version_->scope().GetOrigin(),
       base::Bind(&ServiceWorkerCacheListener::OnCacheStorageKeysCallback,
                  weak_factory_.GetWeakPtr(),
                  request_id));
+}
+
+void ServiceWorkerCacheListener::OnCacheMatch(
+    int request_id,
+    int cache_id,
+    const ServiceWorkerFetchRequest& request,
+    const ServiceWorkerCacheQueryParams& match_params) {
+  // TODO(gavinp,jkarlin): Implement this method.
+  Send(ServiceWorkerMsg_CacheMatchError(
+      request_id, blink::WebServiceWorkerCacheErrorNotImplemented));
+}
+
+void ServiceWorkerCacheListener::OnCacheMatchAll(
+    int request_id,
+    int cache_id,
+    const ServiceWorkerFetchRequest& request,
+    const ServiceWorkerCacheQueryParams& match_params) {
+  // TODO(gavinp,jkarlin): Implement this method.
+  Send(ServiceWorkerMsg_CacheMatchAllError(
+      request_id, blink::WebServiceWorkerCacheErrorNotImplemented));
+}
+
+void ServiceWorkerCacheListener::OnCacheKeys(
+    int request_id,
+    int cache_id,
+    const ServiceWorkerFetchRequest& request,
+    const ServiceWorkerCacheQueryParams& match_params) {
+  // TODO(gavinp,jkarlin): Implement this method.
+  Send(ServiceWorkerMsg_CacheKeysError(
+      request_id, blink::WebServiceWorkerCacheErrorNotImplemented));
+}
+
+void ServiceWorkerCacheListener::OnCacheBatch(
+    int request_id,
+    int cache_id,
+    const std::vector<ServiceWorkerBatchOperation>& operations) {
+  // TODO(gavinp,jkarlin): Implement this method.
+  Send(ServiceWorkerMsg_CacheBatchError(
+      request_id, blink::WebServiceWorkerCacheErrorNotImplemented));
+}
+
+void ServiceWorkerCacheListener::OnCacheClosed(int cache_id) {
+  // TODO(gavinp,jkarlin): Implement this method.
 }
 
 void ServiceWorkerCacheListener::Send(const IPC::Message& message) {
@@ -134,13 +199,15 @@ void ServiceWorkerCacheListener::Send(const IPC::Message& message) {
 
 void ServiceWorkerCacheListener::OnCacheStorageGetCallback(
     int request_id,
-    int cache_id,
+    const scoped_refptr<ServiceWorkerCache>& cache,
     ServiceWorkerCacheStorage::CacheStorageError error) {
   if (error != ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NO_ERROR) {
     Send(ServiceWorkerMsg_CacheStorageGetError(
         request_id, ToWebServiceWorkerCacheError(error)));
     return;
   }
+
+  CacheID cache_id = StoreCacheReference(cache);
   Send(ServiceWorkerMsg_CacheStorageGetSuccess(request_id, cache_id));
 }
 
@@ -156,7 +223,7 @@ void ServiceWorkerCacheListener::OnCacheStorageHasCallback(
   if (!has_cache) {
     Send(ServiceWorkerMsg_CacheStorageHasError(
         request_id,
-        WebServiceWorkerCacheError::WebServiceWorkerCacheErrorNotFound));
+        blink::WebServiceWorkerCacheErrorNotFound));
     return;
   }
   Send(ServiceWorkerMsg_CacheStorageHasSuccess(request_id));
@@ -164,13 +231,14 @@ void ServiceWorkerCacheListener::OnCacheStorageHasCallback(
 
 void ServiceWorkerCacheListener::OnCacheStorageCreateCallback(
     int request_id,
-    int cache_id,
+    const scoped_refptr<ServiceWorkerCache>& cache,
     ServiceWorkerCacheStorage::CacheStorageError error) {
   if (error != ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NO_ERROR) {
     Send(ServiceWorkerMsg_CacheStorageCreateError(
         request_id, ToWebServiceWorkerCacheError(error)));
     return;
   }
+  CacheID cache_id = StoreCacheReference(cache);
   Send(ServiceWorkerMsg_CacheStorageCreateSuccess(request_id, cache_id));
 }
 
@@ -202,6 +270,18 @@ void ServiceWorkerCacheListener::OnCacheStorageKeysCallback(
     string16s.push_back(base::UTF8ToUTF16(strings[i]));
   }
   Send(ServiceWorkerMsg_CacheStorageKeysSuccess(request_id, string16s));
+}
+
+ServiceWorkerCacheListener::CacheID
+ServiceWorkerCacheListener::StoreCacheReference(
+    const scoped_refptr<ServiceWorkerCache>& cache) {
+  int cache_id = next_cache_id_++;
+  id_to_cache_map_[cache_id] = cache;
+  return cache_id;
+}
+
+void ServiceWorkerCacheListener::DropCacheReference(CacheID cache_id) {
+  id_to_cache_map_.erase(cache_id);
 }
 
 }  // namespace content

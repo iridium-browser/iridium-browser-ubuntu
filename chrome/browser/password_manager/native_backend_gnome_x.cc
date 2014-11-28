@@ -30,7 +30,6 @@ using autofill::PasswordForm;
 using base::UTF8ToUTF16;
 using base::UTF16ToUTF8;
 using content::BrowserThread;
-using password_manager::PSLMatchingHelper;
 
 #define GNOME_KEYRING_DEFINE_POINTER(name) \
   typeof(&::gnome_keyring_##name) GnomeKeyringLoader::gnome_keyring_##name;
@@ -140,6 +139,10 @@ scoped_ptr<PasswordForm> FormFromAttributes(GnomeKeyringAttributeList* attrs) {
   int64 date_synced = 0;
   base::StringToInt64(string_attr_map["date_synced"], &date_synced);
   form->date_synced = base::Time::FromInternalValue(date_synced);
+  form->display_name = UTF8ToUTF16(string_attr_map["display_name"]);
+  form->avatar_url = GURL(string_attr_map["avatar_url"]);
+  form->federation_url = GURL(string_attr_map["federation_url"]);
+  form->is_zero_click = uint_attr_map["is_zero_click"];
 
   return form.Pass();
 }
@@ -147,17 +150,16 @@ scoped_ptr<PasswordForm> FormFromAttributes(GnomeKeyringAttributeList* attrs) {
 // Parse all the results from the given GList into a PasswordFormList, and free
 // the GList. PasswordForms are allocated on the heap, and should be deleted by
 // the consumer. If not NULL, |lookup_form| is used to filter out results --
-// only credentials with signon realms passing the PSL matching (done by
-// |helper|) against |lookup_form->signon_realm| will be kept. PSL matched
-// results get their signon_realm, origin, and action rewritten to those of
-// |lookup_form_|, with the original signon_realm saved into the result's
-// original_signon_realm data member.
+// only credentials with signon realms passing the PSL matching against
+// |lookup_form->signon_realm| will be kept. PSL matched results get their
+// signon_realm, origin, and action rewritten to those of |lookup_form_|, with
+// the original signon_realm saved into the result's original_signon_realm data
+// member.
 void ConvertFormList(GList* found,
                      const PasswordForm* lookup_form,
-                     const PSLMatchingHelper& helper,
                      NativeBackendGnome::PasswordFormList* forms) {
-  PSLMatchingHelper::PSLDomainMatchMetric psl_domain_match_metric =
-      PSLMatchingHelper::PSL_DOMAIN_MATCH_NONE;
+  password_manager::PSLDomainMatchMetric psl_domain_match_metric =
+      password_manager::PSL_DOMAIN_MATCH_NONE;
   for (GList* element = g_list_first(found); element != NULL;
        element = g_list_next(element)) {
     GnomeKeyringFound* data = static_cast<GnomeKeyringFound*>(element->data);
@@ -169,11 +171,11 @@ void ConvertFormList(GList* found,
         // This is not an exact match, we try PSL matching.
         if (lookup_form->scheme != PasswordForm::SCHEME_HTML ||
             form->scheme != PasswordForm::SCHEME_HTML ||
-            !(PSLMatchingHelper::IsPublicSuffixDomainMatch(
+            !(password_manager::IsPublicSuffixDomainMatch(
                 lookup_form->signon_realm, form->signon_realm))) {
           continue;
         }
-        psl_domain_match_metric = PSLMatchingHelper::PSL_DOMAIN_MATCH_FOUND;
+        psl_domain_match_metric = password_manager::PSL_DOMAIN_MATCH_FOUND;
         form->original_signon_realm = form->signon_realm;
         form->signon_realm = lookup_form->signon_realm;
         form->origin = lookup_form->origin;
@@ -190,12 +192,15 @@ void ConvertFormList(GList* found,
     }
   }
   if (lookup_form) {
+    const GURL signon_realm(lookup_form->signon_realm);
+    std::string registered_domain =
+        password_manager::GetRegistryControlledDomain(signon_realm);
     UMA_HISTOGRAM_ENUMERATION(
         "PasswordManager.PslDomainMatchTriggering",
-        helper.IsMatchingEnabled()
+        password_manager::ShouldPSLDomainMatchingApply(registered_domain)
             ? psl_domain_match_metric
-            : PSLMatchingHelper::PSL_DOMAIN_MATCH_DISABLED,
-        PSLMatchingHelper::PSL_DOMAIN_MATCH_COUNT);
+            : password_manager::PSL_DOMAIN_MATCH_NOT_USED,
+        password_manager::PSL_DOMAIN_MATCH_COUNT);
   }
 }
 
@@ -222,6 +227,10 @@ const GnomeKeyringPasswordSchema kGnomeSchema = {
     { "type", GNOME_KEYRING_ATTRIBUTE_TYPE_UINT32 },
     { "times_used", GNOME_KEYRING_ATTRIBUTE_TYPE_UINT32 },
     { "date_synced", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
+    { "display_name", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
+    { "avatar_url", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
+    { "federation_url", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
+    { "is_zero_click", GNOME_KEYRING_ATTRIBUTE_TYPE_UINT32 },
     // This field is always "chrome" so that we can search for it.
     { "application", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
     { NULL }
@@ -306,7 +315,6 @@ class GKRMethod : public GnomeKeyringLoader {
   // found logins to those which indeed PSL-match the look-up. And finally,
   // |lookup_form_| set to NULL means that PSL matching is not required.
   scoped_ptr<PasswordForm> lookup_form_;
-  const PSLMatchingHelper helper_;
 };
 
 void GKRMethod::AddLogin(const PasswordForm& form, const char* app_string) {
@@ -340,6 +348,10 @@ void GKRMethod::AddLogin(const PasswordForm& form, const char* app_string) {
       "times_used", form.times_used,
       "scheme", form.scheme,
       "date_synced", base::Int64ToString(date_synced).c_str(),
+      "display_name", UTF16ToUTF8(form.display_name).c_str(),
+      "avatar_url", form.avatar_url.spec().c_str(),
+      "federation_url", form.federation_url.spec().c_str(),
+      "is_zero_click", form.is_zero_click,
       "application", app_string,
       NULL);
 }
@@ -392,7 +404,6 @@ void GKRMethod::RemoveLogin(const PasswordForm& form, const char* app_string) {
       this,  // data
       NULL,  // destroy_data
       "origin_url", form.origin.spec().c_str(),
-      "action_url", form.action.spec().c_str(),
       "username_element", UTF16ToUTF8(form.username_element).c_str(),
       "username_value", UTF16ToUTF8(form.username_value).c_str(),
       "password_element", UTF16ToUTF8(form.password_element).c_str(),
@@ -407,9 +418,9 @@ void GKRMethod::GetLogins(const PasswordForm& form, const char* app_string) {
   lookup_form_.reset(new PasswordForm(form));
   // Search GNOME Keyring for matching passwords.
   ScopedAttributeList attrs(gnome_keyring_attribute_list_new());
-  if (!helper_.ShouldPSLDomainMatchingApply(
-           PSLMatchingHelper::GetRegistryControlledDomain(
-               GURL(form.signon_realm)))) {
+  if (!password_manager::ShouldPSLDomainMatchingApply(
+          password_manager::GetRegistryControlledDomain(
+              GURL(form.signon_realm)))) {
     AppendString(&attrs, "signon_realm", form.signon_realm);
   }
   AppendString(&attrs, "application", app_string);
@@ -504,8 +515,7 @@ void GKRMethod::OnOperationGetList(GnomeKeyringResult result, GList* list,
   method->result_ = result;
   method->forms_.clear();
   // |list| will be freed after this callback returns, so convert it now.
-  ConvertFormList(
-      list, method->lookup_form_.get(), method->helper_, &method->forms_);
+  ConvertFormList(list, method->lookup_form_.get(), &method->forms_);
   method->lookup_form_.reset(NULL);
   method->event_.Signal();
 }

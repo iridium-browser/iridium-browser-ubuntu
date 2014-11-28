@@ -5,8 +5,8 @@
 #include "athena/screen/public/screen_manager.h"
 #include "athena/system/orientation_controller.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path_watcher.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/task_runner.h"
 
@@ -14,97 +14,34 @@ namespace athena {
 
 namespace {
 
-// Path of the socket which the sensor daemon creates.
-const char kSocketPath[] = "/dev/sensors/orientation";
-
 // Threshold after which to rotate in a given direction.
 const int kGravityThreshold = 6.0f;
 
-// Minimum delay before triggering another orientation change.
-const int kOrientationChangeDelayNS = 500000000;
-
-enum SensorType {
-  SENSOR_ACCELEROMETER,
-  SENSOR_LIGHT,
-  SENSOR_PROXIMITY
-};
-
-// A sensor event from the device.
-struct DeviceSensorEvent {
-  // The type of event from the SensorType enum above.
-  int32_t type;
-
-  // The time in nanoseconds at which the event happened.
-  int64_t timestamp;
-
-  union {
-    // Accelerometer X,Y,Z values in SI units (m/s^2) including gravity.
-    // The orientation is described at
-    // http://www.html5rocks.com/en/tutorials/device/orientation/.
-    float data[3];
-
-    // Ambient (room) temperature in degrees Celcius.
-    float temperature;
-
-    // Proximity sensor distance in centimeters.
-    float distance;
-
-    // Ambient light level in SI lux units.
-    float light;
-  };
-};
-
 }  // namespace
 
-OrientationController::OrientationController(
-    scoped_refptr<base::TaskRunner> io_task_runner)
-    : DeviceSocketListener(kSocketPath, sizeof(DeviceSensorEvent)),
-      last_orientation_change_time_(0),
-      weak_factory_(this) {
-  CHECK(base::MessageLoopForUI::current());
-  ui_task_runner_ = base::MessageLoopForUI::current()->task_runner();
-  io_task_runner->PostTask(FROM_HERE, base::Bind(
-      &OrientationController::WatchForSocketPathOnIO,
-      make_scoped_refptr<OrientationController>(this)));
+OrientationController::OrientationController() {
+}
+
+void OrientationController::InitWith(
+    scoped_refptr<base::TaskRunner> blocking_task_runner) {
+  accelerometer_reader_.reset(
+      new chromeos::AccelerometerReader(blocking_task_runner, this));
 }
 
 OrientationController::~OrientationController() {
 }
 
-void OrientationController::WatchForSocketPathOnIO() {
-  CHECK(base::MessageLoopForIO::current());
-  if (base::PathExists(base::FilePath(kSocketPath))) {
-    ui_task_runner_->PostTask(FROM_HERE,
-        base::Bind(&OrientationController::StartListening,
-                   make_scoped_refptr<OrientationController>(this)));
-  } else {
-    watcher_.reset(new base::FilePathWatcher);
-    watcher_->Watch(
-        base::FilePath(kSocketPath), false,
-        base::Bind(&OrientationController::OnFilePathChangedOnIO,
-                   make_scoped_refptr<OrientationController>(this)));
-  }
+void OrientationController::Shutdown() {
+  accelerometer_reader_.reset();
 }
 
-void OrientationController::OnFilePathChangedOnIO(const base::FilePath& path,
-                                                  bool error) {
-  watcher_.reset();
-  if (error)
+void OrientationController::HandleAccelerometerUpdate(
+    const ui::AccelerometerUpdate& update) {
+  if (!update.has(ui::ACCELEROMETER_SOURCE_SCREEN))
     return;
 
-  ui_task_runner_->PostTask(FROM_HERE,
-      base::Bind(&OrientationController::StartListening,
-                 make_scoped_refptr<OrientationController>(this)));
-}
-
-void OrientationController::OnDataAvailableOnIO(const void* data) {
-  const DeviceSensorEvent* event =
-      static_cast<const DeviceSensorEvent*>(data);
-  if (event->type != SENSOR_ACCELEROMETER)
-    return;
-
-  float gravity_x = event->data[0];
-  float gravity_y = event->data[1];
+  float gravity_x = update.get(ui::ACCELEROMETER_SOURCE_SCREEN).x();
+  float gravity_y = update.get(ui::ACCELEROMETER_SOURCE_SCREEN).y();
   gfx::Display::Rotation rotation;
   if (gravity_x < -kGravityThreshold) {
     rotation = gfx::Display::ROTATE_270;
@@ -119,25 +56,11 @@ void OrientationController::OnDataAvailableOnIO(const void* data) {
     return;
   }
 
-  if (rotation == current_rotation_ ||
-      event->timestamp - last_orientation_change_time_ <
-          kOrientationChangeDelayNS) {
+  if (rotation == current_rotation_)
     return;
-  }
 
-  last_orientation_change_time_ = event->timestamp;
   current_rotation_ = rotation;
-  ui_task_runner_->PostTask(FROM_HERE,
-      base::Bind(&OrientationController::RotateOnUI,
-                 make_scoped_refptr<OrientationController>(this), rotation));
-}
-
-void OrientationController::RotateOnUI(gfx::Display::Rotation rotation) {
-  ScreenManager* screen_manager = ScreenManager::Get();
-  // Since this is called from the IO thread, the screen manager may no longer
-  // exist.
-  if (screen_manager)
-    screen_manager->SetRotation(rotation);
+  ScreenManager::Get()->SetRotation(rotation);
 }
 
 }  // namespace athena

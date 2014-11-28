@@ -114,8 +114,7 @@ VideoSendStream::VideoSendStream(
     CpuOveruseObserver* overuse_observer,
     webrtc::VideoEngine* video_engine,
     const VideoSendStream::Config& config,
-    const std::vector<VideoStream> video_streams,
-    const void* encoder_settings,
+    const VideoEncoderConfig& encoder_config,
     const std::map<uint32_t, RtpState>& suspended_ssrcs,
     int base_channel,
     int start_bitrate_bps)
@@ -211,7 +210,7 @@ VideoSendStream::VideoSendStream(
   }
 
   codec_ = ViECodec::GetInterface(video_engine);
-  if (!ReconfigureVideoEncoder(video_streams, encoder_settings))
+  if (!ReconfigureVideoEncoder(encoder_config))
     abort();
 
   if (overuse_observer)
@@ -297,8 +296,8 @@ void VideoSendStream::Stop() {
 }
 
 bool VideoSendStream::ReconfigureVideoEncoder(
-    const std::vector<VideoStream>& streams,
-    const void* encoder_settings) {
+    const VideoEncoderConfig& config) {
+  const std::vector<VideoStream>& streams = config.streams;
   assert(!streams.empty());
   assert(config_.rtp.ssrcs.size() >= streams.size());
 
@@ -311,29 +310,31 @@ bool VideoSendStream::ReconfigureVideoEncoder(
   } else {
     video_codec.codecType = kVideoCodecGeneric;
   }
-
-  if (video_codec.codecType == kVideoCodecVP8) {
-    video_codec.codecSpecific.VP8.resilience = kResilientStream;
-    video_codec.codecSpecific.VP8.numberOfTemporalLayers = 1;
-    video_codec.codecSpecific.VP8.denoisingOn = true;
-    video_codec.codecSpecific.VP8.errorConcealmentOn = false;
-    video_codec.codecSpecific.VP8.automaticResizeOn = false;
-    video_codec.codecSpecific.VP8.frameDroppingOn = true;
-    video_codec.codecSpecific.VP8.keyFrameInterval = 3000;
-  } else if (video_codec.codecType == kVideoCodecH264) {
-    video_codec.codecSpecific.H264.profile = kProfileBase;
-    video_codec.codecSpecific.H264.frameDroppingOn = true;
-    video_codec.codecSpecific.H264.keyFrameInterval = 3000;
+  switch (config.content_type) {
+    case VideoEncoderConfig::kRealtimeVideo:
+      video_codec.mode = kRealtimeVideo;
+      break;
+    case VideoEncoderConfig::kScreenshare:
+      video_codec.mode = kScreensharing;
+      break;
   }
 
   if (video_codec.codecType == kVideoCodecVP8) {
-    if (encoder_settings != NULL) {
-      video_codec.codecSpecific.VP8 =
-          *reinterpret_cast<const VideoCodecVP8*>(encoder_settings);
+    video_codec.codecSpecific.VP8 = VideoEncoder::GetDefaultVp8Settings();
+  } else if (video_codec.codecType == kVideoCodecH264) {
+    video_codec.codecSpecific.H264 = VideoEncoder::GetDefaultH264Settings();
+  }
+
+  if (video_codec.codecType == kVideoCodecVP8) {
+    if (config.encoder_specific_settings != NULL) {
+      video_codec.codecSpecific.VP8 = *reinterpret_cast<const VideoCodecVP8*>(
+                                          config.encoder_specific_settings);
     }
+    video_codec.codecSpecific.VP8.numberOfTemporalLayers =
+        static_cast<unsigned char>(streams.back().temporal_layers.size());
   } else {
     // TODO(pbos): Support encoder_settings codec-agnostically.
-    assert(encoder_settings == NULL);
+    assert(config.encoder_specific_settings == NULL);
   }
 
   strncpy(video_codec.plName,
@@ -363,8 +364,8 @@ bool VideoSendStream::ReconfigureVideoEncoder(
     sim_stream->targetBitrate = streams[i].target_bitrate_bps / 1000;
     sim_stream->maxBitrate = streams[i].max_bitrate_bps / 1000;
     sim_stream->qpMax = streams[i].max_qp;
-    // TODO(pbos): Implement mapping for temporal layers.
-    assert(streams[i].temporal_layers.empty());
+    sim_stream->numberOfTemporalLayers =
+        static_cast<unsigned char>(streams[i].temporal_layers.size());
 
     video_codec.width = std::max(video_codec.width,
                                  static_cast<unsigned short>(streams[i].width));
@@ -458,6 +459,17 @@ std::map<uint32_t, RtpState> VideoSendStream::GetRtpStates() const {
   }
 
   return rtp_states;
+}
+
+void VideoSendStream::SignalNetworkState(Call::NetworkState state) {
+  // When network goes up, enable RTCP status before setting transmission state.
+  // When it goes down, disable RTCP afterwards. This ensures that any packets
+  // sent due to the network state changed will not be dropped.
+  if (state == Call::kNetworkUp)
+    rtp_rtcp_->SetRTCPStatus(channel_, kRtcpCompound_RFC4585);
+  network_->SetNetworkTransmissionState(channel_, state == Call::kNetworkUp);
+  if (state == Call::kNetworkDown)
+    rtp_rtcp_->SetRTCPStatus(channel_, kRtcpNone);
 }
 
 }  // namespace internal

@@ -20,6 +20,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -643,16 +644,16 @@ TEST_F(URLBlacklistManagerTest, DontBlockResources) {
   EXPECT_TRUE(blacklist_manager_->IsURLBlocked(GURL("http://google.com")));
 
   net::TestURLRequestContext context;
-  net::URLRequest request(
-      GURL("http://google.com"), net::DEFAULT_PRIORITY, NULL, &context);
+  scoped_ptr<net::URLRequest> request(context.CreateRequest(
+      GURL("http://google.com"), net::DEFAULT_PRIORITY, NULL, NULL));
 
   int reason = net::ERR_UNEXPECTED;
   // Background requests aren't filtered.
-  EXPECT_FALSE(blacklist_manager_->IsRequestBlocked(request, &reason));
+  EXPECT_FALSE(blacklist_manager_->IsRequestBlocked(*request.get(), &reason));
 
   // Main frames are filtered.
-  request.SetLoadFlags(net::LOAD_MAIN_FRAME);
-  EXPECT_TRUE(blacklist_manager_->IsRequestBlocked(request, &reason));
+  request->SetLoadFlags(net::LOAD_MAIN_FRAME);
+  EXPECT_TRUE(blacklist_manager_->IsRequestBlocked(*request.get(), &reason));
   EXPECT_EQ(net::ERR_BLOCKED_BY_ADMINISTRATOR, reason);
 
   // On most platforms, sync gets a free pass due to signin flows.
@@ -665,10 +666,39 @@ TEST_F(URLBlacklistManagerTest, DontBlockResources) {
 
   GURL sync_url(GaiaUrls::GetInstance()->service_login_url().Resolve(
       "?service=chromiumsync"));
-  net::URLRequest sync_request(sync_url, net::DEFAULT_PRIORITY, NULL, &context);
-  sync_request.SetLoadFlags(net::LOAD_MAIN_FRAME);
+  scoped_ptr<net::URLRequest> sync_request(context.CreateRequest(
+      sync_url, net::DEFAULT_PRIORITY, NULL, NULL));
+  sync_request->SetLoadFlags(net::LOAD_MAIN_FRAME);
   EXPECT_EQ(block_signin_urls,
-            blacklist_manager_->IsRequestBlocked(sync_request, &reason));
+            blacklist_manager_->IsRequestBlocked(*sync_request.get(), &reason));
+}
+
+TEST_F(URLBlacklistManagerTest, DefaultBlacklistExceptions) {
+  URLBlacklist blacklist(GetSegmentURLCallback());
+  scoped_ptr<base::ListValue> blocked(new base::ListValue);
+
+  // Blacklist everything:
+  blocked->Append(new base::StringValue("*"));
+  blacklist.Block(blocked.get());
+
+  // Internal NTP and extension URLs are not blocked by the "*":
+  EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.google.com")));
+  EXPECT_FALSE((blacklist.IsURLBlocked(GURL("chrome-extension://xyz"))));
+  EXPECT_FALSE((blacklist.IsURLBlocked(GURL("chrome-search://local-ntp"))));
+  EXPECT_FALSE((blacklist.IsURLBlocked(GURL("chrome-native://ntp"))));
+
+  // Unless they are explicitly blacklisted:
+  blocked->Append(new base::StringValue("chrome-extension://*"));
+  scoped_ptr<base::ListValue> allowed(new base::ListValue);
+  allowed->Append(new base::StringValue("chrome-extension://abc"));
+  blacklist.Block(blocked.get());
+  blacklist.Allow(allowed.get());
+
+  EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.google.com")));
+  EXPECT_TRUE((blacklist.IsURLBlocked(GURL("chrome-extension://xyz"))));
+  EXPECT_FALSE((blacklist.IsURLBlocked(GURL("chrome-extension://abc"))));
+  EXPECT_FALSE((blacklist.IsURLBlocked(GURL("chrome-search://local-ntp"))));
+  EXPECT_FALSE((blacklist.IsURLBlocked(GURL("chrome-native://ntp"))));
 }
 
 }  // namespace policy

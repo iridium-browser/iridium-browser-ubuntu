@@ -39,6 +39,9 @@ class Builder(object):
           raise RuntimeError(
               'Path to visual studio could not be determined.')
       else:
+        # Need to re-escape goma dir, see crbug.com/394990.
+        if opts.goma_dir:
+          opts.goma_dir = opts.goma_dir.encode('string_escape')
         SetBuildSystemDefault(opts.build_preference, opts.use_goma,
                               opts.goma_dir)
     else:
@@ -142,6 +145,9 @@ class AndroidBuilder(Builder):
   def __init__(self, opts):
     super(AndroidBuilder, self).__init__(opts)
 
+  # TODO(qyearsley): Make this a class method and verify that it works with
+  # a unit test.
+  # pylint: disable=R0201
   def _GetTargets(self):
     """Returns a list of build targets."""
     return ['chrome_shell_apk', 'cc_perftests_apk', 'android_tools']
@@ -179,6 +185,9 @@ class AndroidChromeBuilder(AndroidBuilder):
   def __init__(self, opts):
     super(AndroidChromeBuilder, self).__init__(opts)
 
+  # TODO(qyearsley): Make this a class method and verify that it works with
+  # a unit test.
+  # pylint: disable=R0201
   def _GetTargets(self):
     """Returns a list of build targets."""
     return AndroidBuilder._GetTargets(self) + ['chrome_apk']

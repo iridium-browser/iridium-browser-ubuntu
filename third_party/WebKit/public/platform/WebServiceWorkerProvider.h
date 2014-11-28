@@ -54,15 +54,15 @@ public:
     // The WebServiceWorkerRegistration and WebServiceWorkerError ownership are
     // passed to the WebServiceWorkerRegistrationCallbacks implementation.
     typedef WebCallbacks<WebServiceWorkerRegistration, WebServiceWorkerError> WebServiceWorkerRegistrationCallbacks;
+    typedef WebCallbacks<bool, WebServiceWorkerError> WebServiceWorkerUnregistrationCallbacks;
+    typedef WebCallbacks<WebServiceWorkerRegistration, WebServiceWorkerError> WebServiceWorkerGetRegistrationCallbacks;
 
     virtual void registerServiceWorker(const WebURL& pattern, const WebURL& scriptUrl, WebServiceWorkerRegistrationCallbacks*) { }
 
-    // Unregisters the ServiceWorker for a given scope. The provider
-    // must always pass null to onSuccess.
-    // FIXME: "unregister" does not provide a WebServiceWorkerRegistration,
-    // revisit this to clean up the the callback type to not take a
-    // WebServiceWorkerRegistration*.
-    virtual void unregisterServiceWorker(const WebURL& pattern, WebServiceWorkerRegistrationCallbacks*) { }
+    // Unregisters the ServiceWorker for a given scope.
+    virtual void unregisterServiceWorker(const WebURL& pattern, WebServiceWorkerUnregistrationCallbacks*) { }
+
+    virtual void getRegistration(const WebURL& documentURL, WebServiceWorkerGetRegistrationCallbacks*) { }
 
     virtual ~WebServiceWorkerProvider() { }
 };

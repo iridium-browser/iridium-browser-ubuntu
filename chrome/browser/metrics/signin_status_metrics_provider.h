@@ -16,9 +16,14 @@
 #include "components/signin/core/browser/signin_manager_base.h"
 
 class Browser;
+class ChromeUserMetricsExtension;
 
 namespace base {
 class FilePath;
+}
+
+namespace metrics {
+class ChromeUserMetricsExtension;
 }
 
 // Collect login status of all opened profiles during one UMA session and record
@@ -31,10 +36,9 @@ class SigninStatusMetricsProvider : public metrics::MetricsProvider,
  public:
   virtual ~SigninStatusMetricsProvider();
 
-  // Record the collected sign-in status into a histogram and re-check current
-  // sign-in status to get prepared for the next UMA session. Called by
-  // MetricsServiceClient when it is collecting final metrics.
-  void RecordSigninStatusHistogram();
+  // metrics::MetricsProvider:
+  virtual void ProvideGeneralMetrics(
+      metrics::ChromeUserMetricsExtension* uma_proto) OVERRIDE;
 
   // Factory method, creates a new instance of this class.
   static SigninStatusMetricsProvider* CreateInstance();
@@ -61,6 +65,7 @@ class SigninStatusMetricsProvider : public metrics::MetricsProvider,
     ALL_PROFILES_NOT_SIGNED_IN,
     MIXED_SIGNIN_STATUS,
     UNKNOWN_SIGNIN_STATUS,
+    ERROR_GETTING_SIGNIN_STATUS,
     SIGNIN_STATUS_MAX,
   };
 
@@ -73,9 +78,11 @@ class SigninStatusMetricsProvider : public metrics::MetricsProvider,
   virtual void SigninManagerShutdown(SigninManagerBase* manager) OVERRIDE;
 
   // SigninManagerBase::Observer:
-  virtual void GoogleSigninSucceeded(const std::string& username,
+  virtual void GoogleSigninSucceeded(const std::string& account_id,
+                                     const std::string& username,
                                      const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& username) OVERRIDE;
+  virtual void GoogleSignedOut(const std::string& account_id,
+                               const std::string& username) OVERRIDE;
 
   // Obtain sign-in status and add observers.
   void Initialize();
@@ -92,6 +99,10 @@ class SigninStatusMetricsProvider : public metrics::MetricsProvider,
 
   // Compute current sign-in status of all opened profiles.
   void ComputeCurrentSigninStatus();
+
+  // Sets the value of |signin_status_|. It ensures that |signin_status_| will
+  // not be changed if its value is already ERROR_GETTING_SIGNIN_STATUS.
+  void SetSigninStatus(ProfilesSigninStatus new_status);
 
   // Get the current recorded sign-in status. For testing purpose only.
   ProfilesSigninStatus GetSigninStatusForTesting();

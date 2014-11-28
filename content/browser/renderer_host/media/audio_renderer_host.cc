@@ -10,6 +10,7 @@
 #include "base/metrics/histogram.h"
 #include "base/process/process.h"
 #include "content/browser/browser_main_loop.h"
+#include "content/browser/media/audio_stream_monitor.h"
 #include "content/browser/media/capture/audio_mirroring_manager.h"
 #include "content/browser/media/media_internals.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
@@ -238,24 +239,17 @@ void AudioRendererHost::DoCompleteCreation(int stream_id) {
 
   AudioSyncReader* reader = static_cast<AudioSyncReader*>(entry->reader());
 
-#if defined(OS_WIN)
-  base::SyncSocket::Handle foreign_socket_handle;
-#else
-  base::FileDescriptor foreign_socket_handle;
-#endif
+  base::SyncSocket::TransitDescriptor socket_descriptor;
 
   // If we failed to prepare the sync socket for the renderer then we fail
   // the construction of audio stream.
-  if (!reader->PrepareForeignSocketHandle(PeerHandle(),
-                                          &foreign_socket_handle)) {
+  if (!reader->PrepareForeignSocket(PeerHandle(), &socket_descriptor)) {
     ReportErrorAndClose(entry->stream_id());
     return;
   }
 
   Send(new AudioMsg_NotifyStreamCreated(
-      entry->stream_id(),
-      foreign_memory_handle,
-      foreign_socket_handle,
+      entry->stream_id(), foreign_memory_handle, socket_descriptor,
       entry->shared_memory()->requested_size()));
 }
 
@@ -272,28 +266,25 @@ void AudioRendererHost::DoNotifyStreamStateChanged(int stream_id,
       is_playing ? media::AudioOutputIPCDelegate::kPlaying
                  : media::AudioOutputIPCDelegate::kPaused));
 
-  MediaObserver* const media_observer =
-      GetContentClient()->browser()->GetMediaObserver();
-  if (media_observer) {
-    if (is_playing) {
-      media_observer->OnAudioStreamPlaying(
-          render_process_id_,
-          entry->render_frame_id(),
-          entry->stream_id(),
-          base::Bind(&media::AudioOutputController::ReadCurrentPowerAndClip,
-                     entry->controller()));
-      if (!entry->playing()) {
-        entry->set_playing(true);
-        base::AtomicRefCountInc(&num_playing_streams_);
-      }
-    } else {
-      media_observer->OnAudioStreamStopped(render_process_id_,
-                                           entry->render_frame_id(),
-                                           entry->stream_id());
-      if (entry->playing()) {
-        entry->set_playing(false);
-        base::AtomicRefCountDec(&num_playing_streams_);
-      }
+  if (is_playing) {
+    AudioStreamMonitor::StartMonitoringStream(
+        render_process_id_,
+        entry->render_frame_id(),
+        entry->stream_id(),
+        base::Bind(&media::AudioOutputController::ReadCurrentPowerAndClip,
+                   entry->controller()));
+    // TODO(dalecurtis): See about using AudioStreamMonitor instead.
+    if (!entry->playing()) {
+      entry->set_playing(true);
+      base::AtomicRefCountInc(&num_playing_streams_);
+    }
+  } else {
+    AudioStreamMonitor::StopMonitoringStream(
+        render_process_id_, entry->render_frame_id(), entry->stream_id());
+    // TODO(dalecurtis): See about using AudioStreamMonitor instead.
+    if (entry->playing()) {
+      entry->set_playing(false);
+      base::AtomicRefCountDec(&num_playing_streams_);
     }
   }
 }
@@ -357,8 +348,6 @@ void AudioRendererHost::OnCreateStream(
     output_device_id = info->device.matched_output_device_id;
 
   // Create the shared memory and share with the renderer process.
-  // For synchronized I/O (if input_channels > 0) then we allocate
-  // extra memory after the output data for the input data.
   uint32 shared_memory_size = AudioBus::CalculateMemorySize(params);
   scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory());
   if (!shared_memory->CreateAndMapAnonymous(shared_memory_size)) {
@@ -389,7 +378,7 @@ void AudioRendererHost::OnCreateStream(
       reader.PassAs<media::AudioOutputController::SyncReader>()));
   if (mirroring_manager_) {
     mirroring_manager_->AddDiverter(
-        render_process_id_, entry->render_view_id(), entry->controller());
+        render_process_id_, entry->render_frame_id(), entry->controller());
   }
   audio_entries_.insert(std::make_pair(stream_id, entry.release()));
   audio_log_->OnCreated(stream_id, params, output_device_id);
@@ -454,10 +443,8 @@ void AudioRendererHost::OnCloseStream(int stream_id) {
   audio_entries_.erase(i);
 
   media::AudioOutputController* const controller = entry->controller();
-  if (mirroring_manager_) {
-    mirroring_manager_->RemoveDiverter(
-        render_process_id_, entry->render_view_id(), controller);
-  }
+  if (mirroring_manager_)
+    mirroring_manager_->RemoveDiverter(controller);
   controller->Close(
       base::Bind(&AudioRendererHost::DeleteEntry, this, base::Passed(&entry)));
   audio_log_->OnClosed(stream_id);
@@ -465,17 +452,10 @@ void AudioRendererHost::OnCloseStream(int stream_id) {
 
 void AudioRendererHost::DeleteEntry(scoped_ptr<AudioEntry> entry) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  // At this point, make the final "say" in audio playback state.
-  MediaObserver* const media_observer =
-      GetContentClient()->browser()->GetMediaObserver();
-  if (media_observer) {
-    media_observer->OnAudioStreamStopped(render_process_id_,
-                                         entry->render_frame_id(),
-                                         entry->stream_id());
-    if (entry->playing())
-      base::AtomicRefCountDec(&num_playing_streams_);
-  }
+  AudioStreamMonitor::StopMonitoringStream(
+      render_process_id_, entry->render_frame_id(), entry->stream_id());
+  if (entry->playing())
+    base::AtomicRefCountDec(&num_playing_streams_);
 }
 
 void AudioRendererHost::ReportErrorAndClose(int stream_id) {

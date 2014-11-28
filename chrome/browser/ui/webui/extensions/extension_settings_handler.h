@@ -10,14 +10,14 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
-#include "chrome/browser/extensions/extension_warning_service.h"
 #include "chrome/browser/extensions/requirements_checker.h"
+#include "chrome/common/extensions/webstore_install_result.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -26,6 +26,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/warning_service.h"
 #include "url/gurl.h"
 
 class ExtensionService;
@@ -71,10 +72,11 @@ class ExtensionSettingsHandler
       public content::WebContentsObserver,
       public ErrorConsole::Observer,
       public ExtensionInstallPrompt::Delegate,
+      public ExtensionManagement::Observer,
       public ExtensionPrefsObserver,
       public ExtensionRegistryObserver,
       public ExtensionUninstallDialog::Delegate,
-      public ExtensionWarningService::Observer,
+      public WarningService::Observer,
       public base::SupportsWeakPtr<ExtensionSettingsHandler> {
  public:
   ExtensionSettingsHandler();
@@ -88,7 +90,7 @@ class ExtensionSettingsHandler
   base::DictionaryValue* CreateExtensionDetailValue(
       const Extension* extension,
       const std::vector<ExtensionPage>& pages,
-      const ExtensionWarningService* warning_service);
+      const WarningService* warning_service);
 
   void GetLocalizedValues(content::WebUIDataSource* source);
 
@@ -134,12 +136,15 @@ class ExtensionSettingsHandler
   virtual void OnExtensionDisableReasonsChanged(const std::string& extension_id,
                                                 int disable_reasons) OVERRIDE;
 
+  // ExtensionManagement::Observer implementation.
+  virtual void OnExtensionManagementSettingsChanged() OVERRIDE;
+
   // ExtensionUninstallDialog::Delegate implementation, used for receiving
   // notification about uninstall confirmation dialog selections.
   virtual void ExtensionUninstallAccepted() OVERRIDE;
   virtual void ExtensionUninstallCanceled() OVERRIDE;
 
-  // ExtensionWarningService::Observer implementation.
+  // WarningService::Observer implementation.
   virtual void ExtensionWarningsChanged() OVERRIDE;
 
   // ExtensionInstallPrompt::Delegate implementation.
@@ -163,6 +168,9 @@ class ExtensionSettingsHandler
 
   // Callback for "reload" message.
   void HandleReloadMessage(const base::ListValue* args);
+
+  // Callback for "repair" message.
+  void HandleRepairMessage(const base::ListValue* args);
 
   // Callback for "enable" message.
   void HandleEnableMessage(const base::ListValue* args);
@@ -228,6 +236,11 @@ class ExtensionSettingsHandler
   // needed.
   ExtensionUninstallDialog* GetExtensionUninstallDialog();
 
+  // Called when the reinstallation is complete.
+  void OnReinstallComplete(bool success,
+                           const std::string& error,
+                           webstore_install::Result result);
+
   // Callback for RequirementsChecker.
   void OnRequirementsChecked(std::string extension_id,
                              std::vector<std::string> requirement_errors);
@@ -276,8 +289,6 @@ class ExtensionSettingsHandler
 
   content::NotificationRegistrar registrar_;
 
-  PrefChangeRegistrar pref_registrar_;
-
   // This will not be empty when a requirements check is in progress. Doing
   // another Check() before the previous one is complete will cause the first
   // one to abort.
@@ -286,7 +297,7 @@ class ExtensionSettingsHandler
   // The UI for showing what permissions the extension has.
   scoped_ptr<ExtensionInstallPrompt> prompt_;
 
-  ScopedObserver<ExtensionWarningService, ExtensionWarningService::Observer>
+  ScopedObserver<WarningService, WarningService::Observer>
       warning_service_observer_;
 
   // An observer to listen for when Extension errors are reported.
@@ -299,6 +310,9 @@ class ExtensionSettingsHandler
 
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observer_;
+
+  ScopedObserver<ExtensionManagement, ExtensionManagement::Observer>
+      extension_management_observer_;
 
   // Whether we found any DISABLE_NOT_VERIFIED extensions and want to kick off
   // a verification check to try and rescue them.

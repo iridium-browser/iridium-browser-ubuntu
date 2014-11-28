@@ -3,18 +3,29 @@
   "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDbHXRPiq2De9EJ+4pvNN6uE/D2avxrqyLSpA/Hq3II+btkPl1gboY3oUPTfevpVOFa90Y1c1b3/W682dXqybT0klIvFLKhdQx0LiVqSUQyIaDrwOCSo/ZcukbEwDRojegWymCjHvX6WZk4kKZzTJYzY1vrp0TWKLhttEMN9KFmowIDAQAB",
 
   "name": "Hotword triggering",
-  "version": "0.0.1.0",
+  "version": "0.0.1.1",
   "manifest_version": 2,
 
   "background": {
-    "scripts": ["manager.js"],
+    "scripts": [
+      "chrome://resources/js/cr.js",
+      "chrome://resources/js/util.js",
+      "chrome://resources/js/cr/event_target.js",
+      "constants.js",
+      "nacl_manager.js",
+      "state_manager.js",
+      "manager.js"
+    ],
     "persistent": false
   },
 
   "permissions": [
     "*://*.google.com/*",
     "chrome://newtab/",
+    "chrome://resources/",
+    "audioCapture",
     "hotwordPrivate",
+    "management",
     "tabs"
   ],
 
@@ -27,12 +38,10 @@
 
   "import": [
     {
-      // TODO(amistry): For now, use a locally modified version of the external
-      // hotword extension. Replace with the ID of the new shared module
-      // containing the hotword detector.
-      "id": "bepbmhgboaologfdajaanbcjmnhjmhfn"
+      "id": "lccekmodgklaepjeofjdjpbminllajkg"
     }
   ],
 
+  "content_security_policy": "object-src 'none'; script-src chrome://resources 'self'",
   "minimum_chrome_version": "38"
 }

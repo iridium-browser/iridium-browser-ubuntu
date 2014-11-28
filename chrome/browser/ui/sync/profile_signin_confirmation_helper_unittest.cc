@@ -44,6 +44,7 @@
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permission_set.h"
@@ -210,7 +211,7 @@ TEST_F(ProfileSigninConfirmationHelperTest, PromptForNewProfile_Extensions) {
 
   // (The web store doesn't count.)
   scoped_refptr<extensions::Extension> webstore =
-      CreateExtension("web store", extension_misc::kWebStoreAppId);
+      CreateExtension("web store", extensions::kWebStoreAppId);
   extensions::ExtensionPrefs::Get(profile_.get())->AddGrantedPermissions(
       webstore->id(), make_scoped_refptr(new extensions::PermissionSet).get());
   extensions->AddExtension(webstore.get());
@@ -242,7 +243,7 @@ TEST_F(ProfileSigninConfirmationHelperTest,
     base::snprintf(buf, arraysize(buf), "http://foo.com/%d", i);
     history->AddPage(
         GURL(std::string(buf)), base::Time::Now(), NULL, 1,
-        GURL(), history::RedirectList(), content::PAGE_TRANSITION_LINK,
+        GURL(), history::RedirectList(), ui::PAGE_TRANSITION_LINK,
         history::SOURCE_BROWSED, false);
   }
   EXPECT_TRUE(
@@ -263,7 +264,7 @@ TEST_F(ProfileSigninConfirmationHelperTest,
   // Profile is new but has a typed URL.
   history->AddPage(
       GURL("http://example.com"), base::Time::Now(), NULL, 1,
-      GURL(), history::RedirectList(), content::PAGE_TRANSITION_TYPED,
+      GURL(), history::RedirectList(), ui::PAGE_TRANSITION_TYPED,
       history::SOURCE_BROWSED, false);
   EXPECT_TRUE(
       GetCallbackResult(

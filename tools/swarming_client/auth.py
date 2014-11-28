@@ -5,8 +5,9 @@
 
 """Client tool to perform various authentication related tasks."""
 
-__version__ = '0.3.1'
+__version__ = '0.3.2'
 
+import logging
 import optparse
 import sys
 
@@ -46,7 +47,7 @@ class AuthService(object):
       bot:<id> - if using HMAC based authentication.
       anonymous:anonymous - if not authenticated.
     """
-    identity = self._service.json_request('GET', '/auth/api/v1/accounts/self')
+    identity = self._service.json_request('/auth/api/v1/accounts/self')
     if not identity:
       raise AuthServiceError('Failed to fetch identity')
     return identity['identity']
@@ -100,7 +101,7 @@ def ensure_logged_in(server_url):
         '  python auth.py login --service=%s' % (server_url, server_url))
     sys.exit(1)
   email = identity.split(':')[1]
-  print >> sys.stderr, 'Logged in to %s: %s' % (server_url, email)
+  logging.info('Logged in to %s: %s', server_url, email)
 
 
 @subcommand.usage('[options]')

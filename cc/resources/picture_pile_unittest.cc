@@ -39,13 +39,16 @@ class TestPicturePile : public PicturePile {
 class PicturePileTestBase {
  public:
   PicturePileTestBase()
-      : pile_(new TestPicturePile()),
-        background_color_(SK_ColorBLUE),
+      : background_color_(SK_ColorBLUE),
         min_scale_(0.125),
         frame_number_(0),
-        contents_opaque_(false) {
+        contents_opaque_(false) {}
+
+  void InitializeData() {
+    pile_ = make_scoped_refptr(new TestPicturePile());
     pile_->SetTileGridSize(gfx::Size(1000, 1000));
     pile_->SetMinContentsScale(min_scale_);
+    client_ = FakeContentLayerClient();
     SetTilingSize(pile_->tiling().max_texture_size());
   }
 
@@ -91,7 +94,86 @@ class PicturePileTestBase {
   bool contents_opaque_;
 };
 
-class PicturePileTest : public PicturePileTestBase, public testing::Test {};
+class PicturePileTest : public PicturePileTestBase, public testing::Test {
+ public:
+  virtual void SetUp() OVERRIDE { InitializeData(); }
+};
+
+TEST_F(PicturePileTest, InvalidationOnTileBorderOutsideInterestRect) {
+  // Don't expand the interest rect past what we invalidate.
+  pile_->SetPixelRecordDistanceForTesting(0);
+
+  gfx::Size tile_size(100, 100);
+  pile_->tiling().SetMaxTextureSize(tile_size);
+
+  gfx::Size pile_size(400, 400);
+  SetTilingSize(pile_size);
+
+  // We have multiple tiles.
+  EXPECT_GT(pile_->tiling().num_tiles_x(), 2);
+  EXPECT_GT(pile_->tiling().num_tiles_y(), 2);
+
+  // Record everything.
+  Region invalidation(tiling_rect());
+  UpdateAndExpandInvalidation(&invalidation, tiling_size(), tiling_rect());
+
+  // +----------+-----------------+-----------+
+  // |          |     VVVV     1,0|           |
+  // |          |     VVVV        |           |
+  // |          |     VVVV        |           |
+  // |       ...|.................|...        |
+  // |       ...|.................|...        |
+  // +----------+-----------------+-----------+
+  // |       ...|                 |...        |
+  // |       ...|                 |...        |
+  // |       ...|                 |...        |
+  // |       ...|                 |...        |
+  // |       ...|              1,1|...        |
+  // +----------+-----------------+-----------+
+  // |       ...|.................|...        |
+  // |       ...|.................|...        |
+  // +----------+-----------------+-----------+
+  //
+  // .. = border pixels for tile 1,1
+  // VV = interest rect (what we will record)
+  //
+  // The first invalidation is inside VV, so it does not touch border pixels of
+  // tile 1,1.
+  //
+  // The second invalidation goes below VV into the .. border pixels of 1,1.
+
+  // This is the VV interest rect which will be entirely inside 1,0 and not
+  // touch the border of 1,1.
+  gfx::Rect interest_rect(
+      pile_->tiling().TilePositionX(1) + pile_->tiling().border_texels(),
+      0,
+      10,
+      pile_->tiling().TileSizeY(0) - pile_->tiling().border_texels());
+
+  // Invalidate tile 1,0 only. This is a rect that avoids the borders of any
+  // other tiles.
+  gfx::Rect invalidate_tile = interest_rect;
+  // This should cause the tile 1,0 to be invalidated and re-recorded. The
+  // invalidation did not need to be expanded.
+  invalidation = invalidate_tile;
+  UpdateAndExpandInvalidation(&invalidation, tiling_size(), interest_rect);
+  EXPECT_EQ(invalidate_tile, invalidation);
+
+  // Invalidate tile 1,0 and 1,1 by invalidating something that only touches the
+  // border of 1,1 (and is inside the tile bounds of 1,0). This is a 10px wide
+  // strip from the top of the tiling onto the border pixels of tile 1,1 that
+  // avoids border pixels of any other tiles.
+  gfx::Rect invalidate_border = interest_rect;
+  invalidate_border.Inset(0, 0, 0, -1);
+  // This should cause the tile 1,0 and 1,1 to be invalidated. The 1,1 tile will
+  // not be re-recorded since it does not touch the interest rect, so the
+  // invalidation should be expanded to cover all of 1,1.
+  invalidation = invalidate_border;
+  UpdateAndExpandInvalidation(&invalidation, tiling_size(), interest_rect);
+  Region expected_invalidation = invalidate_border;
+  expected_invalidation.Union(pile_->tiling().TileBounds(1, 1));
+  EXPECT_EQ(expected_invalidation.ToString(), invalidation.ToString());
+}
 
 TEST_F(PicturePileTest, SmallInvalidateInflated) {
   // Invalidate something inside a tile.
@@ -130,7 +212,7 @@ TEST_F(PicturePileTest, LargeInvalidateInflated) {
 
   int expected_inflation = pile_->buffer_pixels();
 
-  Picture* base_picture = picture_info.GetPicture();
+  const Picture* base_picture = picture_info.GetPicture();
   gfx::Rect base_picture_rect(pile_->tiling_size());
   base_picture_rect.Inset(-expected_inflation, -expected_inflation);
   EXPECT_EQ(base_picture_rect.ToString(),
@@ -184,6 +266,28 @@ TEST_F(PicturePileTest, InvalidateOnTileBoundaryInflated) {
             picture_info.GetInvalidationFrequencyForTesting());
       }
     }
+  }
+}
+
+TEST_F(PicturePileTest, InvalidateOnFullLayer) {
+  UpdateWholePile();
+
+  // Everything was invalidated once so far.
+  for (auto& it : pile_->picture_map()) {
+    EXPECT_FLOAT_EQ(
+        1.0f / TestPicturePile::PictureInfo::INVALIDATION_FRAMES_TRACKED,
+        it.second.GetInvalidationFrequencyForTesting());
+  }
+
+  // Invalidate everything,
+  Region invalidation = tiling_rect();
+  UpdateAndExpandInvalidation(&invalidation, tiling_size(), tiling_rect());
+
+  // Everything was invalidated again.
+  for (auto& it : pile_->picture_map()) {
+    EXPECT_FLOAT_EQ(
+        2.0f / TestPicturePile::PictureInfo::INVALIDATION_FRAMES_TRACKED,
+        it.second.GetInvalidationFrequencyForTesting());
   }
 }
 
@@ -358,6 +462,66 @@ TEST_F(PicturePileTest, NoInvalidationValidViewport) {
   EXPECT_EQ(Region().ToString(), invalidation.ToString());
 }
 
+TEST_F(PicturePileTest, BigFullLayerInvalidation) {
+  gfx::Size huge_layer_size(100000000, 100000000);
+  gfx::Rect viewport(300000, 400000, 5000, 6000);
+
+  // Resize the pile.
+  Region invalidation;
+  UpdateAndExpandInvalidation(&invalidation, huge_layer_size, viewport);
+
+  // Invalidating a huge layer should be fast.
+  base::TimeTicks start = base::TimeTicks::Now();
+  invalidation = gfx::Rect(huge_layer_size);
+  UpdateAndExpandInvalidation(&invalidation, huge_layer_size, viewport);
+  base::TimeTicks end = base::TimeTicks::Now();
+  base::TimeDelta length = end - start;
+  // This is verrrry generous to avoid flake.
+  EXPECT_LT(length.InSeconds(), 5);
+}
+
+TEST_F(PicturePileTest, BigFullLayerInvalidationWithResizeGrow) {
+  gfx::Size huge_layer_size(100000000, 100000000);
+  gfx::Rect viewport(300000, 400000, 5000, 6000);
+
+  // Resize the pile.
+  Region invalidation;
+  UpdateAndExpandInvalidation(&invalidation, huge_layer_size, viewport);
+
+  // Resize the pile even larger, while invalidating everything in the old size.
+  // Invalidating the whole thing should be fast.
+  base::TimeTicks start = base::TimeTicks::Now();
+  gfx::Size bigger_layer_size(huge_layer_size.width() * 2,
+                              huge_layer_size.height() * 2);
+  invalidation = gfx::Rect(huge_layer_size);
+  UpdateAndExpandInvalidation(&invalidation, bigger_layer_size, viewport);
+  base::TimeTicks end = base::TimeTicks::Now();
+  base::TimeDelta length = end - start;
+  // This is verrrry generous to avoid flake.
+  EXPECT_LT(length.InSeconds(), 5);
+}
+
+TEST_F(PicturePileTest, BigFullLayerInvalidationWithResizeShrink) {
+  gfx::Size huge_layer_size(100000000, 100000000);
+  gfx::Rect viewport(300000, 400000, 5000, 6000);
+
+  // Resize the pile.
+  Region invalidation;
+  UpdateAndExpandInvalidation(&invalidation, huge_layer_size, viewport);
+
+  // Resize the pile smaller, while invalidating everything in the new size.
+  // Invalidating the whole thing should be fast.
+  base::TimeTicks start = base::TimeTicks::Now();
+  gfx::Size smaller_layer_size(huge_layer_size.width() - 1000,
+                               huge_layer_size.height() - 1000);
+  invalidation = gfx::Rect(smaller_layer_size);
+  UpdateAndExpandInvalidation(&invalidation, smaller_layer_size, viewport);
+  base::TimeTicks end = base::TimeTicks::Now();
+  base::TimeDelta length = end - start;
+  // This is verrrry generous to avoid flake.
+  EXPECT_LT(length.InSeconds(), 5);
+}
+
 TEST_F(PicturePileTest, InvalidationOutsideRecordingRect) {
   gfx::Size huge_layer_size(10000000, 20000000);
   gfx::Rect viewport(300000, 400000, 5000, 6000);
@@ -396,6 +560,8 @@ enum Corner {
 class PicturePileResizeCornerTest : public PicturePileTestBase,
                                     public testing::TestWithParam<Corner> {
  protected:
+  virtual void SetUp() OVERRIDE { InitializeData(); }
+
   static gfx::Rect CornerSinglePixelRect(Corner corner, const gfx::Size& s) {
     switch (corner) {
       case TOP_LEFT:
@@ -1220,6 +1386,52 @@ TEST_F(PicturePileTest, SmallResizePileInsideInterestRect) {
   // No invalidation when shrinking.
   EXPECT_EQ(Region().ToString(), invalidation.ToString());
   invalidation.Clear();
+}
+
+TEST_F(PicturePileTest, SolidRectangleIsSolid) {
+  // If the client has no contents, the solid state will be true.
+  Region invalidation1(tiling_rect());
+  UpdateAndExpandInvalidation(&invalidation1, tiling_size(), tiling_rect());
+  EXPECT_TRUE(pile_->is_solid_color());
+  EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT), pile_->solid_color());
+
+  // If there is a single rect that covers the view, the solid
+  // state will be true.
+  SkPaint paint;
+  paint.setColor(SK_ColorCYAN);
+  client_.add_draw_rect(tiling_rect(), paint);
+  Region invalidation2(tiling_rect());
+  UpdateAndExpandInvalidation(&invalidation2, tiling_size(), tiling_rect());
+  EXPECT_TRUE(pile_->is_solid_color());
+  EXPECT_EQ(SK_ColorCYAN, pile_->solid_color());
+
+  // If a second smaller rect is draw that doesn't cover the viewport
+  // completely, the solid state will be false.
+  gfx::Rect smallRect = tiling_rect();
+  smallRect.Inset(10, 10, 10, 10);
+  client_.add_draw_rect(smallRect, paint);
+  Region invalidation3(tiling_rect());
+  UpdateAndExpandInvalidation(&invalidation3, tiling_size(), tiling_rect());
+  EXPECT_FALSE(pile_->is_solid_color());
+
+  // If a third rect is drawn over everything, we should be solid again.
+  paint.setColor(SK_ColorRED);
+  client_.add_draw_rect(tiling_rect(), paint);
+  Region invalidation4(tiling_rect());
+  UpdateAndExpandInvalidation(&invalidation4, tiling_size(), tiling_rect());
+  EXPECT_TRUE(pile_->is_solid_color());
+  EXPECT_EQ(SK_ColorRED, pile_->solid_color());
+
+  // If we draw too many, we don't bother doing the analysis and we should no
+  // longer be in a solid state.  There are 8 rects, two clips and a translate.
+  client_.add_draw_rect(tiling_rect(), paint);
+  client_.add_draw_rect(tiling_rect(), paint);
+  client_.add_draw_rect(tiling_rect(), paint);
+  client_.add_draw_rect(tiling_rect(), paint);
+  client_.add_draw_rect(tiling_rect(), paint);
+  Region invalidation5(tiling_rect());
+  UpdateAndExpandInvalidation(&invalidation5, tiling_size(), tiling_rect());
+  EXPECT_FALSE(pile_->is_solid_color());
 }
 
 }  // namespace

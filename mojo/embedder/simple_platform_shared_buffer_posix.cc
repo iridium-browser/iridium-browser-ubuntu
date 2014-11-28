@@ -13,8 +13,8 @@
 
 #include <limits>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -25,8 +25,8 @@
 
 // We assume that |size_t| and |off_t| (type for |ftruncate()|) fits in a
 // |uint64_t|.
-COMPILE_ASSERT(sizeof(size_t) <= sizeof(uint64_t), size_t_too_big);
-COMPILE_ASSERT(sizeof(off_t) <= sizeof(uint64_t), off_t_too_big);
+static_assert(sizeof(size_t) <= sizeof(uint64_t), "size_t too big");
+static_assert(sizeof(off_t) <= sizeof(uint64_t), "off_t too big");
 
 namespace mojo {
 namespace embedder {
@@ -127,7 +127,7 @@ scoped_ptr<PlatformSharedBufferMapping> SimplePlatformSharedBuffer::MapImpl(
   DCHECK_LE(static_cast<uint64_t>(real_offset),
             static_cast<uint64_t>(std::numeric_limits<off_t>::max()));
 
-  void* real_base = mmap(NULL,
+  void* real_base = mmap(nullptr,
                          real_length,
                          PROT_READ | PROT_WRITE,
                          MAP_SHARED,

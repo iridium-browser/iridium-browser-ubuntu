@@ -44,11 +44,12 @@ class FetchManager;
 class Request;
 class ScriptPromise;
 class ScriptState;
-class ServiceWorkerThread;
 class ServiceWorkerClients;
+class ServiceWorkerThread;
 class WorkerThreadStartupData;
 
 class ServiceWorkerGlobalScope FINAL : public WorkerGlobalScope {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> create(ServiceWorkerThread*, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData>);
 
@@ -57,15 +58,17 @@ public:
     virtual void stopFetch() OVERRIDE;
 
     // ServiceWorkerGlobalScope.idl
-    PassRefPtrWillBeRawPtr<ServiceWorkerClients> clients();
+    ServiceWorkerClients* clients();
     String scope(ExecutionContext*);
 
-    PassRefPtrWillBeRawPtr<CacheStorage> caches(ExecutionContext*);
+    CacheStorage* caches(ExecutionContext*);
 
     ScriptPromise fetch(ScriptState*, Request*);
     ScriptPromise fetch(ScriptState*, Request*, const Dictionary&);
     ScriptPromise fetch(ScriptState*, const String&);
     ScriptPromise fetch(ScriptState*, const String&, const Dictionary&);
+
+    void close(ExceptionState&);
 
     // EventTarget
     virtual const AtomicString& interfaceName() const OVERRIDE;
@@ -81,11 +84,11 @@ public:
 private:
     ServiceWorkerGlobalScope(const KURL&, const String& userAgent, ServiceWorkerThread*, double timeOrigin, PassOwnPtrWillBeRawPtr<WorkerClients>);
     virtual void importScripts(const Vector<String>& urls, ExceptionState&) OVERRIDE;
-    virtual void logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE;
+    virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE;
 
-    RefPtrWillBeMember<ServiceWorkerClients> m_clients;
+    PersistentWillBeMember<ServiceWorkerClients> m_clients;
     OwnPtr<FetchManager> m_fetchManager;
-    RefPtrWillBeMember<CacheStorage> m_caches;
+    PersistentWillBeMember<CacheStorage> m_caches;
 };
 
 } // namespace blink

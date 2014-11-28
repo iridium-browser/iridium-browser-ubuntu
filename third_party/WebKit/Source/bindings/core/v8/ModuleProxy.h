@@ -9,8 +9,6 @@
 
 namespace blink {
 
-class Event;
-class EventTarget;
 class ExecutionContext;
 
 // A proxy class to invoke functions implemented in bindings/modules
@@ -19,21 +17,13 @@ class ModuleProxy {
 public:
     static ModuleProxy& moduleProxy();
 
-    v8::Handle<v8::Object> wrapForEvent(Event*, v8::Handle<v8::Object>, v8::Isolate*);
-    void registerWrapForEvent(v8::Handle<v8::Object> (*wrapForEvent)(Event*, v8::Handle<v8::Object>, v8::Isolate*));
-
-    v8::Handle<v8::Value> toV8ForEventTarget(EventTarget*, v8::Handle<v8::Object>, v8::Isolate*);
-    void registerToV8ForEventTarget(v8::Handle<v8::Value> (*toV8ForEventTarget)(EventTarget*, v8::Handle<v8::Object>, v8::Isolate*));
-
-    void didLeaveScriptContextForRecursionScope(ExecutionContext&);
-    void registerDidLeaveScriptContextForRecursionScope(void (*didLeaveScriptContext)(ExecutionContext&));
+    void didLeaveScriptContextForRecursionScope(v8::Isolate*);
+    void registerDidLeaveScriptContextForRecursionScope(void (*didLeaveScriptContext)(v8::Isolate*));
 
 private:
-    ModuleProxy() : m_wrapForEvent(0) { }
+    ModuleProxy() : m_didLeaveScriptContextForRecursionScope(0) { }
 
-    v8::Handle<v8::Object> (*m_wrapForEvent)(Event*, v8::Handle<v8::Object>, v8::Isolate*);
-    v8::Handle<v8::Value> (*m_toV8ForEventTarget)(EventTarget*, v8::Handle<v8::Object>, v8::Isolate*);
-    void (*m_didLeaveScriptContextForRecursionScope)(ExecutionContext&);
+    void (*m_didLeaveScriptContextForRecursionScope)(v8::Isolate*);
 };
 
 } // namespace blink

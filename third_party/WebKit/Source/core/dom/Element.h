@@ -28,6 +28,7 @@
 #include "core/CSSPropertyNames.h"
 #include "core/HTMLNames.h"
 #include "core/css/CSSPrimitiveValue.h"
+#include "core/css/CSSSelector.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ContainerNode.h"
 #include "core/dom/ElementData.h"
@@ -61,17 +62,6 @@ class PseudoElement;
 class ShadowRoot;
 class StylePropertySet;
 
-enum AffectedSelectorType {
-    AffectedSelectorChecked = 1,
-    AffectedSelectorEnabled = 1 << 1,
-    AffectedSelectorDisabled = 1 << 2,
-    AffectedSelectorIndeterminate = 1 << 3,
-    AffectedSelectorLink = 1 << 4,
-    AffectedSelectorTarget = 1 << 5,
-    AffectedSelectorVisited = 1 << 6
-};
-typedef int AffectedSelectorMask;
-
 enum SpellcheckAttributeState {
     SpellcheckAttributeTrue,
     SpellcheckAttributeFalse,
@@ -90,6 +80,7 @@ enum ElementFlags {
 };
 
 class Element : public ContainerNode {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<Element> create(const QualifiedName&, Document*);
     virtual ~Element();
@@ -120,7 +111,6 @@ public:
     // Typed getters and setters for language bindings.
     int getIntegralAttribute(const QualifiedName& attributeName) const;
     void setIntegralAttribute(const QualifiedName& attributeName, int value);
-    unsigned getUnsignedIntegralAttribute(const QualifiedName& attributeName) const;
     void setUnsignedIntegralAttribute(const QualifiedName& attributeName, unsigned value);
     double getFloatingPointAttribute(const QualifiedName& attributeName, double fallbackValue = std::numeric_limits<double>::quiet_NaN()) const;
     void setFloatingPointAttribute(const QualifiedName& attributeName, double value);
@@ -188,11 +178,11 @@ public:
     int clientTop();
     int clientWidth();
     int clientHeight();
-    virtual int scrollLeft();
-    virtual int scrollTop();
-    virtual void setScrollLeft(int);
+    virtual double scrollLeft();
+    virtual double scrollTop();
+    virtual void setScrollLeft(double);
     virtual void setScrollLeft(const Dictionary& scrollOptionsHorizontal, ExceptionState&);
-    virtual void setScrollTop(int);
+    virtual void setScrollTop(double);
     virtual void setScrollTop(const Dictionary& scrollOptionsVertical, ExceptionState&);
     virtual int scrollWidth();
     virtual int scrollHeight();
@@ -313,7 +303,7 @@ public:
     virtual RenderObject* createRenderer(RenderStyle*);
     virtual bool rendererIsNeeded(const RenderStyle&);
     void recalcStyle(StyleRecalcChange, Text* nextTextSibling = 0);
-    void didAffectSelector(AffectedSelectorMask);
+    void pseudoStateChanged(CSSSelector::PseudoType);
     void setAnimationStyleChange(bool);
     void setNeedsAnimationStyleRecalc();
 
@@ -377,7 +367,7 @@ public:
     virtual bool isMouseFocusable() const;
     virtual void dispatchFocusEvent(Element* oldFocusedElement, FocusType);
     virtual void dispatchBlurEvent(Element* newFocusedElement);
-    void dispatchFocusInEvent(const AtomicString& eventType, Element* oldFocusedElement);
+    virtual void dispatchFocusInEvent(const AtomicString& eventType, Element* oldFocusedElement, FocusType);
     void dispatchFocusOutEvent(const AtomicString& eventType, Element* newFocusedElement);
 
     String innerText();
@@ -498,6 +488,8 @@ public:
 
     virtual void trace(Visitor*) OVERRIDE;
 
+    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) OVERRIDE;
+
 protected:
     Element(const QualifiedName& tagName, Document*, ConstructionType);
 
@@ -558,7 +550,6 @@ private:
     void setInlineStyleFromString(const AtomicString&);
 
     StyleRecalcChange recalcOwnStyle(StyleRecalcChange);
-    void recalcChildStyle(StyleRecalcChange);
 
     inline void checkForEmptyStyleChange();
 
@@ -636,6 +627,8 @@ private:
     void detachAttrNodeAtIndex(Attr*, size_t index);
 
     bool isJavaScriptURLAttribute(const Attribute&) const;
+
+    v8::Handle<v8::Object> wrapCustomElement(v8::Handle<v8::Object> creationContext, v8::Isolate*);
 
     RefPtrWillBeMember<ElementData> m_elementData;
 };
@@ -837,6 +830,14 @@ inline bool isShadowHost(const Element* element)
     return element && element->shadow();
 }
 
+inline bool isAtShadowBoundary(const Element* element)
+{
+    if (!element)
+        return false;
+    ContainerNode* parentNode = element->parentNode();
+    return parentNode && parentNode->isShadowRoot();
+}
+
 // These macros do the same as their NODE equivalents but additionally provide a template specialization
 // for isElementOfType<>() so that the Traversal<> API works for these Element types.
 #define DEFINE_ELEMENT_TYPE_CASTS(thisType, predicate) \
@@ -857,4 +858,4 @@ inline bool isShadowHost(const Element* element)
 
 } // namespace
 
-#endif
+#endif // Element_h

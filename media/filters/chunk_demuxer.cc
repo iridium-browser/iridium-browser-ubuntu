@@ -90,6 +90,8 @@ class SourceState {
   typedef base::Callback<ChunkDemuxerStream*(
       DemuxerStream::Type)> CreateDemuxerStreamCB;
 
+  typedef ChunkDemuxer::InitSegmentReceivedCB InitSegmentReceivedCB;
+
   typedef base::Callback<void(
       ChunkDemuxerStream*, const TextTrackConfig&)> NewTextTrackCB;
 
@@ -111,11 +113,14 @@ class SourceState {
   // error occurred. |*timestamp_offset| is used and possibly updated by the
   // append. |append_window_start| and |append_window_end| correspond to the MSE
   // spec's similarly named source buffer attributes that are used in coded
-  // frame processing.
-  bool Append(const uint8* data, size_t length,
+  // frame processing. |init_segment_received_cb| is run for each new fully
+  // parsed initialization segment.
+  bool Append(const uint8* data,
+              size_t length,
               TimeDelta append_window_start,
               TimeDelta append_window_end,
-              TimeDelta* timestamp_offset);
+              TimeDelta* timestamp_offset,
+              const InitSegmentReceivedCB& init_segment_received_cb);
 
   // Aborts the current append sequence and resets the parser.
   void Abort(TimeDelta append_window_start,
@@ -156,9 +161,10 @@ class SourceState {
   void MarkEndOfStream();
   void UnmarkEndOfStream();
   void Shutdown();
-  // Sets the memory limit on each stream. |memory_limit| is the
-  // maximum number of bytes each stream is allowed to hold in its buffer.
-  void SetMemoryLimitsForTesting(int memory_limit);
+  // Sets the memory limit on each stream of a specific type.
+  // |memory_limit| is the maximum number of bytes each stream of type |type|
+  // is allowed to hold in its buffer.
+  void SetMemoryLimits(DemuxerStream::Type type, int memory_limit);
   bool IsSeekWaitingForData() const;
 
  private:
@@ -231,6 +237,13 @@ class SourceState {
   LogCB log_cb_;
   StreamParser::InitCB init_cb_;
 
+  // During Append(), OnNewConfigs() will trigger the initialization segment
+  // received algorithm. This callback is only non-NULL during the lifetime of
+  // an Append() call. Note, the MSE spec explicitly disallows this algorithm
+  // during an Abort(), since Abort() is allowed only to emit coded frames, and
+  // only if the parser is PARSING_MEDIA_SEGMENT (not an INIT segment).
+  InitSegmentReceivedCB init_segment_received_cb_;
+
   // Indicates that timestampOffset should be updated automatically during
   // OnNewBuffers() based on the earliest end timestamp of the buffers provided.
   // TODO(wolenetz): Refactor this function while integrating April 29, 2014
@@ -299,20 +312,27 @@ void SourceState::SetGroupStartTimestampIfInSequenceMode(
   frame_processor_->SetGroupStartTimestampIfInSequenceMode(timestamp_offset);
 }
 
-bool SourceState::Append(const uint8* data, size_t length,
-                         TimeDelta append_window_start,
-                         TimeDelta append_window_end,
-                         TimeDelta* timestamp_offset) {
+bool SourceState::Append(
+    const uint8* data,
+    size_t length,
+    TimeDelta append_window_start,
+    TimeDelta append_window_end,
+    TimeDelta* timestamp_offset,
+    const InitSegmentReceivedCB& init_segment_received_cb) {
   DCHECK(timestamp_offset);
   DCHECK(!timestamp_offset_during_append_);
+  DCHECK(!init_segment_received_cb.is_null());
+  DCHECK(init_segment_received_cb_.is_null());
   append_window_start_during_append_ = append_window_start;
   append_window_end_during_append_ = append_window_end;
   timestamp_offset_during_append_ = timestamp_offset;
+  init_segment_received_cb_= init_segment_received_cb;
 
   // TODO(wolenetz/acolwell): Curry and pass a NewBuffersCB here bound with
   // append window and timestamp offset pointer. See http://crbug.com/351454.
   bool err = stream_parser_->Parse(data, length);
   timestamp_offset_during_append_ = NULL;
+  init_segment_received_cb_.Reset();
   return err;
 }
 
@@ -485,16 +505,26 @@ void SourceState::Shutdown() {
   }
 }
 
-void SourceState::SetMemoryLimitsForTesting(int memory_limit) {
-  if (audio_)
-    audio_->set_memory_limit_for_testing(memory_limit);
-
-  if (video_)
-    video_->set_memory_limit_for_testing(memory_limit);
-
-  for (TextStreamMap::iterator itr = text_stream_map_.begin();
-       itr != text_stream_map_.end(); ++itr) {
-    itr->second->set_memory_limit_for_testing(memory_limit);
+void SourceState::SetMemoryLimits(DemuxerStream::Type type, int memory_limit) {
+  switch (type) {
+    case DemuxerStream::AUDIO:
+      if (audio_)
+        audio_->set_memory_limit(memory_limit);
+      break;
+    case DemuxerStream::VIDEO:
+      if (video_)
+        video_->set_memory_limit(memory_limit);
+      break;
+    case DemuxerStream::TEXT:
+      for (TextStreamMap::iterator itr = text_stream_map_.begin();
+           itr != text_stream_map_.end(); ++itr) {
+        itr->second->set_memory_limit(memory_limit);
+      }
+      break;
+    case DemuxerStream::UNKNOWN:
+    case DemuxerStream::NUM_TYPES:
+      NOTREACHED();
+      break;
   }
 }
 
@@ -523,6 +553,7 @@ bool SourceState::OnNewConfigs(
   DVLOG(1) << "OnNewConfigs(" << allow_audio << ", " << allow_video
            << ", " << audio_config.IsValidConfig()
            << ", " << video_config.IsValidConfig() << ")";
+  DCHECK(!init_segment_received_cb_.is_null());
 
   if (!audio_config.IsValidConfig() && !video_config.IsValidConfig()) {
     DVLOG(1) << "OnNewConfigs() : Audio & video config are not valid!";
@@ -665,6 +696,9 @@ bool SourceState::OnNewConfigs(
   frame_processor_->SetAllTrackBuffersNeedRandomAccessPoint();
 
   DVLOG(1) << "OnNewConfigs() : " << (success ? "success" : "failed");
+  if (success)
+    init_segment_received_cb_.Run();
+
   return success;
 }
 
@@ -933,8 +967,6 @@ void ChunkDemuxerStream::Read(const ReadCB& read_cb) {
 
 DemuxerStream::Type ChunkDemuxerStream::type() { return type_; }
 
-void ChunkDemuxerStream::EnableBitstreamConverter() {}
-
 AudioDecoderConfig ChunkDemuxerStream::audio_decoder_config() {
   CHECK_EQ(type_, AUDIO);
   base::AutoLock auto_lock(lock_);
@@ -1057,10 +1089,9 @@ void ChunkDemuxer::Initialize(
   base::ResetAndReturn(&open_cb_).Run();
 }
 
-void ChunkDemuxer::Stop(const base::Closure& callback) {
+void ChunkDemuxer::Stop() {
   DVLOG(1) << "Stop()";
   Shutdown();
-  callback.Run();
 }
 
 void ChunkDemuxer::Seek(TimeDelta time, const PipelineStatusCB& cb) {
@@ -1094,6 +1125,10 @@ void ChunkDemuxer::Seek(TimeDelta time, const PipelineStatusCB& cb) {
 }
 
 // Demuxer implementation.
+base::Time ChunkDemuxer::GetTimelineOffset() const {
+  return timeline_offset_;
+}
+
 DemuxerStream* ChunkDemuxer::GetStream(DemuxerStream::Type type) {
   DCHECK_NE(type, DemuxerStream::TEXT);
   base::AutoLock auto_lock(lock_);
@@ -1104,10 +1139,6 @@ DemuxerStream* ChunkDemuxer::GetStream(DemuxerStream::Type type) {
     return audio_.get();
 
   return NULL;
-}
-
-base::Time ChunkDemuxer::GetTimelineOffset() const {
-  return timeline_offset_;
 }
 
 TimeDelta ChunkDemuxer::GetStartTime() const {
@@ -1234,15 +1265,19 @@ Ranges<TimeDelta> ChunkDemuxer::GetBufferedRanges(const std::string& id) const {
   return itr->second->GetBufferedRanges(duration_, state_ == ENDED);
 }
 
-void ChunkDemuxer::AppendData(const std::string& id,
-                              const uint8* data, size_t length,
-                              TimeDelta append_window_start,
-                              TimeDelta append_window_end,
-                              TimeDelta* timestamp_offset) {
+void ChunkDemuxer::AppendData(
+    const std::string& id,
+    const uint8* data,
+    size_t length,
+    TimeDelta append_window_start,
+    TimeDelta append_window_end,
+    TimeDelta* timestamp_offset,
+    const InitSegmentReceivedCB& init_segment_received_cb) {
   DVLOG(1) << "AppendData(" << id << ", " << length << ")";
 
   DCHECK(!id.empty());
   DCHECK(timestamp_offset);
+  DCHECK(!init_segment_received_cb.is_null());
 
   Ranges<TimeDelta> ranges;
 
@@ -1265,7 +1300,8 @@ void ChunkDemuxer::AppendData(const std::string& id,
         if (!source_state_map_[id]->Append(data, length,
                                            append_window_start,
                                            append_window_end,
-                                           timestamp_offset)) {
+                                           timestamp_offset,
+                                           init_segment_received_cb)) {
           ReportError_Locked(DEMUXER_ERROR_COULD_NOT_OPEN);
           return;
         }
@@ -1276,7 +1312,8 @@ void ChunkDemuxer::AppendData(const std::string& id,
         if (!source_state_map_[id]->Append(data, length,
                                            append_window_start,
                                            append_window_end,
-                                           timestamp_offset)) {
+                                           timestamp_offset,
+                                           init_segment_received_cb)) {
           ReportError_Locked(PIPELINE_ERROR_DECODE);
           return;
         }
@@ -1507,10 +1544,10 @@ void ChunkDemuxer::Shutdown() {
     base::ResetAndReturn(&seek_cb_).Run(PIPELINE_ERROR_ABORT);
 }
 
-void ChunkDemuxer::SetMemoryLimitsForTesting(int memory_limit) {
+void ChunkDemuxer::SetMemoryLimits(DemuxerStream::Type type, int memory_limit) {
   for (SourceStateMap::iterator itr = source_state_map_.begin();
        itr != source_state_map_.end(); ++itr) {
-    itr->second->SetMemoryLimitsForTesting(memory_limit);
+    itr->second->SetMemoryLimits(type, memory_limit);
   }
 }
 

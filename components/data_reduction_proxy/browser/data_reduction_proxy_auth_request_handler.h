@@ -16,6 +16,7 @@ class SingleThreadTaskRunner;
 }
 
 namespace net {
+class HostPortPair;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
 class ProxyServer;
@@ -49,19 +50,31 @@ class DataReductionProxyAuthRequestHandler {
 
   // Adds a 'Chrome-Proxy' header to |request_headers| with the data reduction
   // proxy authentication credentials. Only adds this header if the provided
-  // |proxy_server| is a data reduction proxy. Must be called on the IO thread.
+  // |proxy_server| is a data reduction proxy and not the data reduction proxy's
+  // CONNECT server. Must be called on the IO thread.
   void MaybeAddRequestHeader(net::URLRequest* request,
                              const net::ProxyServer& proxy_server,
                              net::HttpRequestHeaders* request_headers);
 
-  // Sets a new authentication key. This must be called for platforms that do
-  // not have a default key defined. See the constructor implementation for
-  // those platforms. Must be called on the UI thread.
-  void SetKeyOnUI(const std::string& key);
+  // Adds a 'Chrome-Proxy' header to |request_headers| with the data reduction
+  // proxy authentication credentials. Only adds this header if the provided
+  // |proxy_server| is the data reduction proxy's CONNECT server. Must be called
+  // on the IO thread.
+  void MaybeAddProxyTunnelRequestHandler(
+      const net::HostPortPair& proxy_server,
+      net::HttpRequestHeaders* request_headers);
+
+  // Stores the supplied key and sets up credentials suitable for authenticating
+  // with the data reduction proxy.
+  // This can be called more than once. For example on a platform that does not
+  // have a default key defined, this function will be called some time after
+  // this class has been constructed. Android WebView is a platform that does
+  // this. The caller needs to make sure |this| pointer is valid when
+  // InitAuthentication is called.
+  void InitAuthentication(const std::string& key);
 
  protected:
   void Init();
-  void InitAuthenticationOnUI(const std::string& key);
 
   void AddAuthorizationHeader(net::HttpRequestHeaders* headers);
 
@@ -86,7 +99,9 @@ class DataReductionProxyAuthRequestHandler {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyAuthRequestHandlerTest,
-                           Authorization);
+                           AuthorizationOnIO);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyAuthRequestHandlerTest,
+                           AuthorizationIgnoresEmptyKey);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyAuthRequestHandlerTest,
                            AuthorizationBogusVersion);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyAuthRequestHandlerTest,
@@ -101,15 +116,19 @@ class DataReductionProxyAuthRequestHandler {
                                 std::string* build,
                                 std::string* patch) const;
 
-  // Stores the supplied key and sets up credentials suitable for authenticating
-  // with the data reduction proxy.
-  void InitAuthentication(const std::string& key);
-
   // Generates a session ID and credentials suitable for authenticating with
   // the data reduction proxy.
   void ComputeCredentials(const base::Time& now,
                           std::string* session,
                           std::string* credentials);
+
+  // Adds authentication headers only if |expects_ssl| is true and
+  // |proxy_server| is a data reduction proxy used for ssl tunneling via
+  // HTTP CONNECT, or |expect_ssl| is false and |proxy_server| is a data
+  // reduction proxy for HTTP traffic.
+  void MaybeAddRequestHeaderImpl(const net::HostPortPair& proxy_server,
+                                 bool expect_ssl,
+                                 net::HttpRequestHeaders* request_headers);
 
   // Authentication state.
   std::string key_;

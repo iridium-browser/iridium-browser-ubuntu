@@ -7,6 +7,7 @@
 #include "content/common/browser_plugin/browser_plugin_constants.h"
 #include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/cursors/webcursor.h"
+#include "content/public/renderer/browser_plugin_delegate.h"
 #include "content/renderer/browser_plugin/browser_plugin.h"
 #include "content/renderer/render_thread_impl.h"
 #include "ui/gfx/point.h"
@@ -23,8 +24,8 @@ BrowserPluginManagerImpl::~BrowserPluginManagerImpl() {
 BrowserPlugin* BrowserPluginManagerImpl::CreateBrowserPlugin(
     RenderViewImpl* render_view,
     blink::WebFrame* frame,
-    bool auto_navigate) {
-  return new BrowserPlugin(render_view, frame, auto_navigate);
+    scoped_ptr<BrowserPluginDelegate> delegate) {
+  return new BrowserPlugin(render_view, frame, delegate.Pass());
 }
 
 bool BrowserPluginManagerImpl::Send(IPC::Message* msg) {
@@ -34,13 +35,13 @@ bool BrowserPluginManagerImpl::Send(IPC::Message* msg) {
 bool BrowserPluginManagerImpl::OnMessageReceived(
     const IPC::Message& message) {
   if (BrowserPlugin::ShouldForwardToBrowserPlugin(message)) {
-    int guest_instance_id = browser_plugin::kInstanceIDNone;
-    // All allowed messages must have |guest_instance_id| as their first
-    // parameter.
+    int browser_plugin_instance_id = browser_plugin::kInstanceIDNone;
+    // All allowed messages must have |browser_plugin_instance_id| as their
+    // first parameter.
     PickleIterator iter(message);
-    bool success = iter.ReadInt(&guest_instance_id);
+    bool success = iter.ReadInt(&browser_plugin_instance_id);
     DCHECK(success);
-    BrowserPlugin* plugin = GetBrowserPlugin(guest_instance_id);
+    BrowserPlugin* plugin = GetBrowserPlugin(browser_plugin_instance_id);
     if (plugin && plugin->OnMessageReceived(message))
       return true;
   }

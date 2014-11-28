@@ -4,7 +4,6 @@
 
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -15,6 +14,7 @@
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/render_text.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_test_api.h"
 #include "ui/views/test/views_test_base.h"
@@ -252,11 +252,9 @@ TEST_F(TouchSelectionControllerImplTest, SelectionInTextfieldTest) {
   CreateTextfield();
   textfield_->SetText(ASCIIToUTF16("some text"));
   // Tap the textfield to invoke touch selection.
-  ui::GestureEvent tap(0,
-                       0,
-                       0,
-                       base::TimeDelta(),
-                       ui::GestureEventDetails(ui::ET_GESTURE_TAP, 1.0f, 0.0f));
+  ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
+  details.set_tap_count(1);
+  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Test selecting a range.
@@ -287,11 +285,9 @@ TEST_F(TouchSelectionControllerImplTest, SelectionInBidiTextfieldTest) {
   CreateTextfield();
   textfield_->SetText(WideToUTF16(L"abc\x05d0\x05d1\x05d2"));
   // Tap the textfield to invoke touch selection.
-  ui::GestureEvent tap(0,
-                       0,
-                       0,
-                       base::TimeDelta(),
-                       ui::GestureEventDetails(ui::ET_GESTURE_TAP, 1.0f, 0.0f));
+  ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
+  details.set_tap_count(1);
+  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Test cursor at run boundary and with empty selection.
@@ -338,11 +334,9 @@ TEST_F(TouchSelectionControllerImplTest, SelectRectCallbackTest) {
   CreateTextfield();
   textfield_->SetText(ASCIIToUTF16("textfield with selected text"));
   // Tap the textfield to invoke touch selection.
-  ui::GestureEvent tap(0,
-                       0,
-                       0,
-                       base::TimeDelta(),
-                       ui::GestureEventDetails(ui::ET_GESTURE_TAP, 1.0f, 0.0f));
+  ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
+  details.set_tap_count(1);
+  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
   textfield_->OnGestureEvent(&tap);
   textfield_->SelectRange(gfx::Range(3, 7));
 
@@ -379,11 +373,9 @@ TEST_F(TouchSelectionControllerImplTest, SelectRectInBidiCallbackTest) {
   CreateTextfield();
   textfield_->SetText(WideToUTF16(L"abc\x05e1\x05e2\x05e3" L"def"));
   // Tap the textfield to invoke touch selection.
-  ui::GestureEvent tap(0,
-                       0,
-                       0,
-                       base::TimeDelta(),
-                       ui::GestureEventDetails(ui::ET_GESTURE_TAP, 1.0f, 0.0f));
+  ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
+  details.set_tap_count(1);
+  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Select [c] from left to right.
@@ -511,11 +503,9 @@ TEST_F(TouchSelectionControllerImplTest,
   textfield_->SetText(ASCIIToUTF16(textfield_text));
 
   // Tap the textfield to invoke selection.
-  ui::GestureEvent tap(0,
-                       0,
-                       0,
-                       base::TimeDelta(),
-                       ui::GestureEventDetails(ui::ET_GESTURE_TAP, 1.0f, 0.0f));
+  ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
+  details.set_tap_count(1);
+  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Select some text such that one handle is hidden.

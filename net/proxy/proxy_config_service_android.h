@@ -41,15 +41,21 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
     // Called from Java (on JNI thread) to signal that the proxy settings have
     // changed. The string and int arguments (the host/port pair for the proxy)
     // are either a host/port pair or ("", 0) to indicate "no proxy".
-    virtual void ProxySettingsChangedTo(JNIEnv*, jobject, jstring, jint) = 0;
+    // The third argument indicates the PAC url.
+    virtual void ProxySettingsChangedTo(JNIEnv*,
+                                        jobject,
+                                        jstring,
+                                        jint,
+                                        jstring) = 0;
 
     // Called from Java (on JNI thread) to signal that the proxy settings have
     // changed. New proxy settings are fetched from the system property store.
     virtual void ProxySettingsChanged(JNIEnv*, jobject) = 0;
   };
 
-  ProxyConfigServiceAndroid(base::SequencedTaskRunner* network_task_runner,
-                            base::SequencedTaskRunner* jni_task_runner);
+  ProxyConfigServiceAndroid(
+      const scoped_refptr<base::SequencedTaskRunner>& network_task_runner,
+      const scoped_refptr<base::SequencedTaskRunner>& jni_task_runner);
 
   virtual ~ProxyConfigServiceAndroid();
 
@@ -67,9 +73,10 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
   class Delegate;
 
   // For tests.
-  ProxyConfigServiceAndroid(base::SequencedTaskRunner* network_task_runner,
-                            base::SequencedTaskRunner* jni_task_runner,
-                            GetPropertyCallback get_property_callback);
+  ProxyConfigServiceAndroid(
+      const scoped_refptr<base::SequencedTaskRunner>& network_task_runner,
+      const scoped_refptr<base::SequencedTaskRunner>& jni_task_runner,
+      GetPropertyCallback get_property_callback);
 
   // For tests.
   void ProxySettingsChanged();

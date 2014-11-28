@@ -59,6 +59,8 @@
 
 #include <openssl/base.h>
 
+#include <stdio.h>
+
 #include <openssl/x509.h>
 
 #if defined(__cplusplus)
@@ -67,11 +69,12 @@ extern "C" {
 
 
 /* PKCS8_encrypt_pbe serializes and encrypts a PKCS8_PRIV_KEY_INFO with PBES1 as
- * defined in PKCS #5. Only pbeWithSHAAnd128BitRC4 and
- * pbeWithSHAAnd3-KeyTripleDES-CBC, defined in PKCS #12, are supported. The
- * |pass_raw_len| bytes pointed to by |pass_raw| are used as the password. Note
- * that any conversions from the password as supplied in a text string (such as
- * those specified in B.1 of PKCS #12) must be performed by the caller.
+ * defined in PKCS #5. Only pbeWithSHAAnd128BitRC4,
+ * pbeWithSHAAnd3-KeyTripleDES-CBC and pbeWithSHA1And40BitRC2, defined in PKCS
+ * #12, are supported. The |pass_raw_len| bytes pointed to by |pass_raw| are
+ * used as the password. Note that any conversions from the password as
+ * supplied in a text string (such as those specified in B.1 of PKCS #12) must
+ * be performed by the caller.
  *
  * If |salt| is NULL, a random salt of |salt_len| bytes is generated. If
  * |salt_len| is zero, a default salt length is used instead.
@@ -89,11 +92,12 @@ OPENSSL_EXPORT X509_SIG *PKCS8_encrypt_pbe(int pbe_nid,
                                            PKCS8_PRIV_KEY_INFO *p8inf);
 
 /* PKCS8_decrypt_pbe decrypts and decodes a PKCS8_PRIV_KEY_INFO with PBES1 as
- * defined in PKCS #5. Only pbeWithSHAAnd128BitRC4 and
- * pbeWithSHAAnd3-KeyTripleDES-CBC, defined in PKCS #12, are supported. The
- * |pass_raw_len| bytes pointed to by |pass_raw| are used as the password. Note
- * that any conversions from the password as supplied in a text string (such as
- * those specified in B.1 of PKCS #12) must be performed by the caller.
+ * defined in PKCS #5. Only pbeWithSHAAnd128BitRC4,
+ * pbeWithSHAAnd3-KeyTripleDES-CBC and pbeWithSHA1And40BitRC2, defined in PKCS
+ * #12, are supported. The |pass_raw_len| bytes pointed to by |pass_raw| are
+ * used as the password. Note that any conversions from the password as
+ * supplied in a text string (such as those specified in B.1 of PKCS #12) must
+ * be performed by the caller.
  *
  * The resulting structure must be freed by the caller. */
 OPENSSL_EXPORT PKCS8_PRIV_KEY_INFO *PKCS8_decrypt_pbe(X509_SIG *pkcs8,
@@ -119,6 +123,50 @@ OPENSSL_EXPORT PKCS8_PRIV_KEY_INFO *PKCS8_decrypt(X509_SIG *pkcs8,
                                                   const char *pass,
                                                   int pass_len);
 
+/* PKCS12_get_key_and_certs parses a PKCS#12 structure from |in|, authenticates
+ * and decrypts it using |password|, sets |*out_key| to the included private
+ * key and appends the included certificates to |out_certs|. It returns one on
+ * success and zero on error. The caller takes ownership of the outputs. */
+OPENSSL_EXPORT int PKCS12_get_key_and_certs(EVP_PKEY **out_key,
+                                            STACK_OF(X509) *out_certs,
+                                            CBS *in, const char *password);
+
+
+/* Deprecated functions. */
+
+/* PKCS12_PBE_add does nothing. It exists for compatibility with OpenSSL. */
+OPENSSL_EXPORT void PKCS12_PBE_add();
+
+/* d2i_PKCS12 is a dummy function that copies |*ber_bytes| into a
+ * |PKCS12| structure. The |out_p12| argument must be NULL. On exit,
+ * |*ber_bytes| will be advanced by |ber_len|. It returns a fresh |PKCS12|
+ * structure or NULL on error.
+ *
+ * Note: unlike other d2i functions, |d2i_PKCS12| will always consume |ber_len|
+ * bytes.*/
+OPENSSL_EXPORT PKCS12 *d2i_PKCS12(PKCS12 **out_p12, const uint8_t **ber_bytes,
+                                  size_t ber_len);
+
+/* d2i_PKCS12_bio acts like |d2i_PKCS12| but reads from a |BIO|. */
+OPENSSL_EXPORT PKCS12* d2i_PKCS12_bio(BIO *bio, PKCS12 **out_p12);
+
+/* d2i_PKCS12_fp acts like |d2i_PKCS12| but reads from a |FILE|. */
+OPENSSL_EXPORT PKCS12* d2i_PKCS12_fp(FILE *fp, PKCS12 **out_p12);
+
+/* PKCS12_parse calls |PKCS12_get_key_and_certs| on the ASN.1 data stored in
+ * |p12|. The |out_pkey| and |out_cert| arguments must not be NULL and, on
+ * successful exit, the private key and first certificate will be stored in
+ * them. The |out_ca_certs| argument may be NULL but, if not, then any extra
+ * certificates will be appended to |*out_ca_certs|. If |*out_ca_certs| is NULL
+ * then it will be set to a freshly allocated stack containing the extra certs.
+ *
+ * It returns one on success and zero on error. */
+OPENSSL_EXPORT int PKCS12_parse(const PKCS12 *p12, const char *password,
+                                EVP_PKEY **out_pkey, X509 **out_cert,
+                                STACK_OF(X509) **out_ca_certs);
+
+/* PKCS12_free frees |p12| and its contents. */
+OPENSSL_EXPORT void PKCS12_free(PKCS12 *p12);
 
 #if defined(__cplusplus)
 }  /* extern C */
@@ -141,6 +189,10 @@ OPENSSL_EXPORT PKCS8_PRIV_KEY_INFO *PKCS8_decrypt(X509_SIG *pkcs8,
 #define PKCS8_F_pkcs12_key_gen_raw 114
 #define PKCS8_F_PKCS8_decrypt 115
 #define PKCS8_F_PKCS8_encrypt_pbe 116
+#define PKCS8_F_PKCS12_parse 117
+#define PKCS8_F_PKCS12_handle_content_info 118
+#define PKCS8_F_PKCS12_handle_content_infos 119
+#define PKCS8_F_PKCS12_get_key_and_certs 120
 #define PKCS8_R_ERROR_SETTING_CIPHER_PARAMS 100
 #define PKCS8_R_PRIVATE_KEY_ENCODE_ERROR 101
 #define PKCS8_R_UNKNOWN_ALGORITHM 102
@@ -158,5 +210,14 @@ OPENSSL_EXPORT PKCS8_PRIV_KEY_INFO *PKCS8_decrypt(X509_SIG *pkcs8,
 #define PKCS8_R_METHOD_NOT_SUPPORTED 114
 #define PKCS8_R_CIPHER_HAS_NO_OBJECT_IDENTIFIER 115
 #define PKCS8_R_KEY_GEN_ERROR 116
+#define PKCS8_R_BAD_PKCS12_DATA 117
+#define PKCS8_R_PKCS12_PUBLIC_KEY_INTEGRITY_NOT_SUPPORTED 118
+#define PKCS8_R_BAD_PKCS12_VERSION 119
+#define PKCS8_R_PKCS12_TOO_DEEPLY_NESTED 120
+#define PKCS8_R_MULTIPLE_PRIVATE_KEYS_IN_PKCS12 121
+#define PKCS8_R_UNKNOWN_HASH 122
+#define PKCS8_R_BAD_MAC 123
+#define PKCS8_R_MISSING_MAC 124
+#define PKCS8_R_INCORRECT_PASSWORD 125
 
 #endif  /* OPENSSL_HEADER_PKCS8_H */

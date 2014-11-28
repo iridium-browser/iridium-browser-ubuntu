@@ -112,6 +112,16 @@ class ChromeProxyBypass(ChromeProxyValidation):
     self._metrics.AddResultsForBypass(tab, results)
 
 
+class ChromeProxyBlockOnce(ChromeProxyValidation):
+  """Correctness measurement for block-once responses."""
+
+  def __init__(self):
+    super(ChromeProxyBlockOnce, self).__init__(restart_after_each_page=True)
+
+  def AddResults(self, tab, results):
+    self._metrics.AddResultsForBlockOnce(tab, results)
+
+
 class ChromeProxySafebrowsing(ChromeProxyValidation):
   """Correctness measurement for safebrowsing."""
 
@@ -183,7 +193,6 @@ class ChromeProxyHTTPFallbackProbeURL(ChromeProxyValidation):
     self._metrics.AddResultsForHTTPFallback(tab, results)
 
 
-# Depends on the fix of http://crbug.com/330342.
 class ChromeProxyHTTPFallbackViaHeader(ChromeProxyValidation):
   """Correctness measurement for proxy fallback.
 
@@ -210,7 +219,7 @@ class ChromeProxyHTTPFallbackViaHeader(ChromeProxyValidation):
         _TEST_SERVER + ":80",
         self._metrics.effective_proxies['fallback'],
         self._metrics.effective_proxies['direct']]
-    bad_proxies = [_TEST_SERVER + ":80"]
+    bad_proxies = [_TEST_SERVER + ":80", metrics.PROXY_SETTING_HTTP]
     self._metrics.AddResultsForHTTPFallback(tab, results, proxies, bad_proxies)
 
 

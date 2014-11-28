@@ -33,6 +33,7 @@
 namespace blink {
 
 class MediaError FINAL : public RefCountedWillBeGarbageCollectedFinalized<MediaError>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum Code {
         MEDIA_ERR_ABORTED = 1,
@@ -52,14 +53,11 @@ public:
     void trace(Visitor*) { }
 
 private:
-    MediaError(Code code) : m_code(code)
-    {
-        ScriptWrappable::init(this);
-    }
+    MediaError(Code code) : m_code(code) { }
 
     Code m_code;
 };
 
 } // namespace blink
 
-#endif
+#endif // MediaError_h

@@ -433,6 +433,187 @@ TEST_F(FeatureInfoTest, InitializeEXT_read_format_bgra) {
       GL_BGRA8_EXT));
 }
 
+TEST_F(FeatureInfoTest, InitializeEXT_texture_storage) {
+  SetupInitExpectations("GL_EXT_texture_storage");
+  EXPECT_TRUE(info_->feature_flags().ext_texture_storage);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_TRUE(info_->validators()->texture_parameter.IsValid(
+      GL_TEXTURE_IMMUTABLE_FORMAT_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_BGRA8_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGBA32F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGB32F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_ALPHA32F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE32F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE_ALPHA32F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGBA16F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGB16F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_ALPHA16F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE16F_EXT));
+  EXPECT_FALSE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE_ALPHA16F_EXT));
+}
+
+TEST_F(FeatureInfoTest, InitializeARB_texture_storage) {
+  SetupInitExpectations("GL_ARB_texture_storage");
+  EXPECT_TRUE(info_->feature_flags().ext_texture_storage);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_TRUE(info_->validators()->texture_parameter.IsValid(
+      GL_TEXTURE_IMMUTABLE_FORMAT_EXT));
+}
+
+TEST_F(FeatureInfoTest, InitializeEXT_texture_storage_BGRA) {
+  SetupInitExpectations("GL_EXT_texture_storage GL_EXT_bgra");
+  EXPECT_TRUE(info_->feature_flags().ext_texture_storage);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_BGRA8_EXT));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+TEST_F(FeatureInfoTest, InitializeARB_texture_storage_BGRA) {
+  SetupInitExpectations("GL_ARB_texture_storage GL_EXT_bgra");
+  EXPECT_TRUE(info_->feature_flags().ext_texture_storage);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_BGRA8_EXT));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+TEST_F(FeatureInfoTest, InitializeEXT_texture_storage_BGRA8888) {
+  SetupInitExpectations(
+      "GL_EXT_texture_storage GL_EXT_texture_format_BGRA8888");
+  EXPECT_TRUE(info_->feature_flags().ext_texture_storage);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_BGRA8_EXT));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+TEST_F(FeatureInfoTest, InitializeEXT_texture_storage_float) {
+  SetupInitExpectations("GL_EXT_texture_storage GL_OES_texture_float");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_OES_texture_float"));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGBA32F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGB32F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_ALPHA32F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE32F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE_ALPHA32F_EXT));
+}
+
+TEST_F(FeatureInfoTest, InitializeEXT_texture_storage_half_float) {
+  SetupInitExpectations("GL_EXT_texture_storage GL_OES_texture_half_float");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_OES_texture_half_float"));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGBA16F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_RGB16F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_ALPHA16F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE16F_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format_storage.IsValid(
+      GL_LUMINANCE_ALPHA16F_EXT));
+}
+
+// Check how to handle ES, texture_storage and BGRA combination; 8 tests.
+
+// 1- ES2 + GL_EXT_texture_storage -> GL_EXT_texture_storage (and no
+// GL_EXT_texture_format_BGRA8888 - we don't claim to handle GL_BGRA8 in
+// glTexStorage2DEXT)
+TEST_F(FeatureInfoTest, InitializeGLES2_texture_storage) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_EXT_texture_storage", "", "OpenGL ES 2.0");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_EXT_texture_format_BGRA8888")));
+}
+
+// 2- ES2 + GL_EXT_texture_storage + (GL_EXT_texture_format_BGRA8888 or
+// GL_APPLE_texture_format_bgra8888)
+TEST_F(FeatureInfoTest, InitializeGLES2_texture_storage_BGRA) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_EXT_texture_storage GL_EXT_texture_format_BGRA8888",
+      "",
+      "OpenGL ES 2.0");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+// 3- ES2 + GL_EXT_texture_format_BGRA8888 or GL_APPLE_texture_format_bgra8888
+TEST_F(FeatureInfoTest, InitializeGLES2_texture_format_BGRA) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_EXT_texture_format_BGRA8888", "", "OpenGL ES 2.0");
+  EXPECT_THAT(info_->extensions(), Not(HasSubstr("GL_EXT_texture_storage")));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+// 4- ES2 (neither GL_EXT_texture_storage nor GL_EXT_texture_format_BGRA8888) ->
+// nothing
+TEST_F(FeatureInfoTest, InitializeGLES2_neither_texture_storage_nor_BGRA) {
+  SetupInitExpectationsWithGLVersion("", "", "OpenGL ES 2.0");
+  EXPECT_THAT(info_->extensions(), Not(HasSubstr("GL_EXT_texture_storage")));
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_EXT_texture_format_BGRA8888")));
+}
+
+// 5- ES3 + GL_EXT_texture_format_BGRA8888 -> GL_EXT_texture_format_BGRA8888
+// (we can't expose GL_EXT_texture_storage because we fail the GL_BGRA8
+// requirement)
+TEST_F(FeatureInfoTest, InitializeGLES3_texture_storage_EXT_BGRA) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_EXT_texture_format_BGRA8888", "", "OpenGL ES 3.0");
+  EXPECT_THAT(info_->extensions(), Not(HasSubstr("GL_EXT_texture_storage")));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+// 6- ES3 + GL_APPLE_texture_format_bgra8888 -> GL_EXT_texture_storage +
+// GL_EXT_texture_format_BGRA8888 (driver promises to handle GL_BGRA8 by
+// exposing GL_APPLE_texture_format_bgra8888)
+TEST_F(FeatureInfoTest, InitializeGLES3_texture_storage_APPLE_BGRA) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_APPLE_texture_format_BGRA8888", "", "OpenGL ES 3.0");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+// 7- ES3 + GL_EXT_texture_storage + GL_EXT_texture_format_BGRA8888 ->
+// GL_EXT_texture_storage + GL_EXT_texture_format_BGRA8888  (driver promises to
+// handle GL_BGRA8 by exposing GL_EXT_texture_storage)
+TEST_F(FeatureInfoTest, InitializeGLES3_EXT_texture_storage_EXT_BGRA) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_EXT_texture_storage GL_EXT_texture_format_BGRA8888",
+      "",
+      "OpenGL ES 3.0");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_format_BGRA8888"));
+}
+
+// 8- ES3 + none of the above -> GL_EXT_texture_storage (and no
+// GL_EXT_texture_format_BGRA8888 - we don't claim to handle GL_BGRA8)
+TEST_F(FeatureInfoTest, InitializeGLES3_texture_storage) {
+  SetupInitExpectationsWithGLVersion("", "", "OpenGL ES 3.0");
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_texture_storage"));
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_EXT_texture_format_BGRA8888")));
+}
+
 TEST_F(FeatureInfoTest, InitializeARB_texture_float) {
   SetupInitExpectations("GL_ARB_texture_float");
   EXPECT_TRUE(info_->feature_flags().chromium_color_buffer_float_rgba);
@@ -989,18 +1170,23 @@ TEST_F(FeatureInfoTest, InitializeSamplersWithARBSamplerObjects) {
 
 TEST_F(FeatureInfoTest, InitializeWithES3) {
   SetupInitExpectationsWithGLVersion("", "", "OpenGL ES 3.0");
-  EXPECT_TRUE(info_->feature_flags().enable_samplers);
-  EXPECT_TRUE(info_->feature_flags().map_buffer_range);
-  EXPECT_TRUE(info_->feature_flags().ext_discard_framebuffer);
-  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_discard_framebuffer"));
   EXPECT_TRUE(info_->feature_flags().chromium_framebuffer_multisample);
   EXPECT_TRUE(info_->feature_flags().use_core_framebuffer_multisample);
   EXPECT_THAT(info_->extensions(),
               HasSubstr("GL_CHROMIUM_framebuffer_multisample"));
   EXPECT_TRUE(info_->feature_flags().use_async_readpixels);
+  EXPECT_TRUE(info_->feature_flags().oes_standard_derivatives);
   EXPECT_TRUE(info_->feature_flags().oes_depth24);
   EXPECT_THAT(info_->extensions(), HasSubstr("GL_GOOGLE_depth_texture"));
   EXPECT_THAT(info_->extensions(), HasSubstr("GL_CHROMIUM_depth_texture"));
+  EXPECT_TRUE(
+      info_->validators()->texture_internal_format.IsValid(GL_DEPTH_COMPONENT));
+  EXPECT_TRUE(
+      info_->validators()->texture_internal_format.IsValid(GL_DEPTH_STENCIL));
+  EXPECT_TRUE(info_->validators()->texture_format.IsValid(GL_DEPTH_COMPONENT));
+  EXPECT_TRUE(info_->validators()->texture_format.IsValid(GL_DEPTH_STENCIL));
+  EXPECT_TRUE(info_->validators()->pixel_type.IsValid(GL_UNSIGNED_SHORT));
+  EXPECT_TRUE(info_->validators()->pixel_type.IsValid(GL_UNSIGNED_INT));
   EXPECT_TRUE(info_->validators()->pixel_type.IsValid(GL_UNSIGNED_INT_24_8));
   EXPECT_TRUE(info_->GetTextureFormatValidator(GL_DEPTH_COMPONENT)
                   .IsValid(GL_UNSIGNED_SHORT));
@@ -1017,6 +1203,12 @@ TEST_F(FeatureInfoTest, InitializeWithES3) {
   EXPECT_TRUE(
       info_->validators()->texture_internal_format.IsValid(GL_DEPTH_STENCIL));
   EXPECT_TRUE(info_->validators()->texture_format.IsValid(GL_DEPTH_STENCIL));
+  EXPECT_TRUE(info_->feature_flags().npot_ok);
+  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object);
+  EXPECT_TRUE(info_->feature_flags().enable_samplers);
+  EXPECT_TRUE(info_->feature_flags().map_buffer_range);
+  EXPECT_TRUE(info_->feature_flags().ext_discard_framebuffer);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_discard_framebuffer"));
   EXPECT_TRUE(info_->feature_flags().chromium_sync_query);
   EXPECT_TRUE(gfx::GLFence::IsSupported());
 }
@@ -1070,6 +1262,34 @@ TEST_F(FeatureInfoTest, ARBSyncDisabled) {
   SetupInitExpectationsWithCommandLine("GL_ARB_sync", command_line);
   EXPECT_FALSE(info_->feature_flags().chromium_sync_query);
   EXPECT_FALSE(gfx::GLFence::IsSupported());
+}
+
+TEST_F(FeatureInfoTest, InitializeCHROMIUM_path_rendering) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_NV_path_rendering GL_EXT_direct_state_access", "", "4.3");
+  EXPECT_TRUE(info_->feature_flags().chromium_path_rendering);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_CHROMIUM_path_rendering"));
+}
+
+TEST_F(FeatureInfoTest, InitializeCHROMIUM_path_rendering2) {
+  SetupInitExpectationsWithGLVersion(
+      "GL_NV_path_rendering", "", "OpenGL ES 3.1");
+  EXPECT_TRUE(info_->feature_flags().chromium_path_rendering);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_CHROMIUM_path_rendering"));
+}
+
+TEST_F(FeatureInfoTest, InitializeNoCHROMIUM_path_rendering) {
+  SetupInitExpectationsWithGLVersion("", "", "4.3");
+  EXPECT_FALSE(info_->feature_flags().chromium_path_rendering);
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_CHROMIUM_path_rendering")));
+}
+
+TEST_F(FeatureInfoTest, InitializeNoCHROMIUM_path_rendering2) {
+  SetupInitExpectationsWithGLVersion("GL_NV_path_rendering", "", "4.3");
+  EXPECT_FALSE(info_->feature_flags().chromium_path_rendering);
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_CHROMIUM_path_rendering")));
 }
 
 }  // namespace gles2

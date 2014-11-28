@@ -3,19 +3,19 @@
 // found in the LICENSE file.
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/extensions/manifest_handlers/automation.h"
-#include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
+#include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "extensions/strings/grit/extensions_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
 
-class AutomationManifestTest : public ExtensionManifestTest {
+class AutomationManifestTest : public ChromeManifestTest {
  public:
   AutomationManifestTest() : channel_(chrome::VersionInfo::CHANNEL_UNKNOWN) {}
 
@@ -157,7 +157,7 @@ TEST_F(AutomationManifestTest, EmptyMatches) {
 TEST_F(AutomationManifestTest, NoValidMatches) {
   std::string error;
   scoped_refptr<Extension> extension =
-      LoadExtension(Manifest("automation_no_valid_matches.json"), &error);
+      LoadExtension(ManifestData("automation_no_valid_matches.json"), &error);
   ASSERT_TRUE(extension.get());
   EXPECT_EQ("", error);
   EXPECT_EQ(2u, extension->install_warnings().size());

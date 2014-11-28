@@ -10,9 +10,11 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/metrics/metrics_service_accessor.h"
 
-class ChromeBrowserMetricsServiceObserver;
+class ChromeExtensionDownloaderFactory;
+class PrefService;
 class Profile;
 
 namespace {
@@ -20,9 +22,13 @@ class CrashesDOMHandler;
 class FlashDOMHandler;
 }
 
+namespace component_updater {
+class ComponentUpdateService;
+void RegisterSwReporterComponent(ComponentUpdateService* cus,
+                                 PrefService* prefs);
+}
+
 namespace extensions {
-class ExtensionDownloader;
-class ManifestFetchData;
 class MetricsPrivateGetIsCrashReportingEnabledFunction;
 }
 
@@ -34,22 +40,30 @@ namespace system_logs {
 class ChromeInternalLogSource;
 }
 
+namespace options {
+class BrowserOptionsHandler;
+}
+
 // This class limits and documents access to metrics service helper methods.
 // Since these methods are private, each user has to be explicitly declared
 // as a 'friend' below.
 class ChromeMetricsServiceAccessor : public MetricsServiceAccessor {
  private:
+  friend void component_updater::RegisterSwReporterComponent(
+      component_updater::ComponentUpdateService* cus,
+      PrefService* prefs);
   friend bool prerender::IsOmniboxEnabled(Profile* profile);
-  friend class ::ChromeBrowserMetricsServiceObserver;
+  friend class ChromeExtensionDownloaderFactory;
   friend class ChromeRenderMessageFilter;
   friend class ::CrashesDOMHandler;
   friend class DataReductionProxyChromeSettings;
-  friend class extensions::ExtensionDownloader;
-  friend class extensions::ManifestFetchData;
   friend class extensions::MetricsPrivateGetIsCrashReportingEnabledFunction;
   friend class ::FlashDOMHandler;
   friend class system_logs::ChromeInternalLogSource;
   friend class UmaSessionStats;
+  friend class options::BrowserOptionsHandler;
+  friend void InitiateMetricsReportingChange(
+      bool, const OnMetricsReportingCallbackType&);
 
   FRIEND_TEST_ALL_PREFIXES(ChromeMetricsServiceAccessorTest,
                            MetricsReportingEnabled);

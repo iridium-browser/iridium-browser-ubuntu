@@ -12,7 +12,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "content/public/browser/devtools_manager.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/navigation_controller.h"
@@ -281,8 +281,8 @@ bool WebKitTestController::PrepareForLayoutTest(
     SendTestConfiguration();
 
     NavigationController::LoadURLParams params(test_url);
-    params.transition_type = PageTransitionFromInt(
-        PAGE_TRANSITION_TYPED | PAGE_TRANSITION_FROM_ADDRESS_BAR);
+    params.transition_type = ui::PageTransitionFromInt(
+        ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
     params.should_clear_history_list = true;
     main_window_->web_contents()->GetController().LoadURLWithParams(params);
     main_window_->web_contents()->Focus();
@@ -653,7 +653,7 @@ void WebKitTestController::OnCaptureSessionHistory() {
 }
 
 void WebKitTestController::OnCloseRemainingWindows() {
-  DevToolsManager::GetInstance()->CloseAllClientHosts();
+  DevToolsAgentHost::DetachAllClients();
   std::vector<Shell*> open_windows(Shell::windows());
   for (size_t i = 0; i < open_windows.size(); ++i) {
     if (open_windows[i] != main_window_)

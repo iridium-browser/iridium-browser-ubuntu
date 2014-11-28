@@ -44,7 +44,6 @@
 #include <gtest/gtest.h>
 
 using namespace blink;
-using namespace blink;
 
 static const size_t LargeEnoughSize = 1000 * 1000;
 
@@ -89,14 +88,14 @@ void readYUV(size_t maxDecodedBytes, unsigned* outputYWidth, unsigned* outputYHe
     decoder->setData(data.get(), true);
 
     OwnPtr<ImagePlanes> imagePlanes = adoptPtr(new ImagePlanes());
-    decoder->setImagePlanes(imagePlanes);
+    decoder->setImagePlanes(imagePlanes.release());
     bool sizeIsAvailable = decoder->isSizeAvailable();
     ASSERT_TRUE(sizeIsAvailable);
 
     IntSize size = decoder->decodedSize();
-    IntSize ySize = decoder->decodedYUVSize(0);
-    IntSize uSize = decoder->decodedYUVSize(1);
-    IntSize vSize = decoder->decodedYUVSize(2);
+    IntSize ySize = decoder->decodedYUVSize(0, ImageDecoder::ActualSize);
+    IntSize uSize = decoder->decodedYUVSize(1, ImageDecoder::ActualSize);
+    IntSize vSize = decoder->decodedYUVSize(2, ImageDecoder::ActualSize);
 
     ASSERT_TRUE(size.width() == ySize.width());
     ASSERT_TRUE(size.height() == ySize.height());

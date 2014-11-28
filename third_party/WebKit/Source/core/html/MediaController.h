@@ -39,7 +39,8 @@ class ExceptionState;
 class ExecutionContext;
 class GenericEventQueue;
 
-class MediaController FINAL : public RefCountedWillBeRefCountedGarbageCollected<MediaController>, public EventTargetWithInlineData {
+class MediaController FINAL : public RefCountedWillBeGarbageCollectedFinalized<MediaController>, public EventTargetWithInlineData {
+    DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(MediaController);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaController);
 public:
@@ -55,7 +56,7 @@ public:
 
     double duration() const;
     double currentTime() const;
-    void setCurrentTime(double, ExceptionState&);
+    void setCurrentTime(double);
 
     bool paused() const { return m_paused; }
     void play();
@@ -132,4 +133,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // MediaController_h

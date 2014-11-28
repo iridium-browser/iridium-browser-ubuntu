@@ -4,6 +4,8 @@
 
 """This module contains constants used by cbuildbot and related code."""
 
+from __future__ import print_function
+
 import os
 
 def _FindSourceRoot():
@@ -23,6 +25,7 @@ CHROOT_SOURCE_ROOT = '/mnt/host/source'
 
 CROSUTILS_DIR = os.path.join(SOURCE_ROOT, 'src/scripts')
 CHROMITE_DIR = os.path.join(SOURCE_ROOT, 'chromite')
+DEPOT_TOOLS_DIR = os.path.join(SOURCE_ROOT, 'chromium/tools/depot_tools')
 CHROMITE_BIN_SUBDIR = 'chromite/bin'
 CHROMITE_BIN_DIR = os.path.join(SOURCE_ROOT, CHROMITE_BIN_SUBDIR)
 PATH_TO_CBUILDBOT = os.path.join(CHROMITE_BIN_SUBDIR, 'cbuildbot')
@@ -74,6 +77,7 @@ CHROMIUM_EMAIL = '@chromium.org'
 
 CORP_DOMAIN = 'corp.google.com'
 GOLO_DOMAIN = 'golo.chromium.org'
+CHROME_DOMAIN = 'chrome.' + CORP_DOMAIN
 
 GOB_HOST = '%s.googlesource.com'
 
@@ -98,6 +102,9 @@ CHROMITE_PROJECT = 'chromiumos/chromite'
 CHROMITE_URL = '%s/%s' % (EXTERNAL_GOB_URL, CHROMITE_PROJECT)
 CHROMIUM_SRC_PROJECT = 'chromium/src'
 CHROMIUM_GOB_URL = '%s/%s.git' % (EXTERNAL_GOB_URL, CHROMIUM_SRC_PROJECT)
+CHROME_INTERNAL_PROJECT = 'chrome/src-internal'
+CHROME_INTERNAL_GOB_URL = '%s/%s.git' % (
+    INTERNAL_GOB_URL, CHROME_INTERNAL_PROJECT)
 
 MANIFEST_PROJECT = 'chromiumos/manifest'
 MANIFEST_INT_PROJECT = 'chromeos/manifest-internal'
@@ -181,6 +188,8 @@ CREATED_BRANCHES = [
 CHROME_PN = 'chromeos-chrome'
 CHROME_CP = 'chromeos-base/%s' % CHROME_PN
 
+# Other packages to uprev while uprevving Chrome.
+OTHER_CHROME_PACKAGES = ['chromeos-base/chromium-source']
 
 # Chrome use flags
 USE_CHROME_INTERNAL = 'chrome_internal'
@@ -314,19 +323,20 @@ HWTEST_DEFAULT_PRIORITY = 'DEFAULT'
 HWTEST_CQ_PRIORITY = 'CQ'
 HWTEST_BUILD_PRIORITY = 'Build'
 HWTEST_PFQ_PRIORITY = 'PFQ'
+HWTEST_POST_BUILD_PRIORITY = 'PostBuild'
 
 # Ordered by priority (first item being lowest).
 HWTEST_VALID_PRIORITIES = ['Weekly',
                            'Daily',
-                           'PostBuild',
+                           HWTEST_POST_BUILD_PRIORITY,
                            HWTEST_DEFAULT_PRIORITY,
                            HWTEST_BUILD_PRIORITY,
                            HWTEST_PFQ_PRIORITY,
                            HWTEST_CQ_PRIORITY]
 
 # Creates a mapping of priorities to make easy comparsions.
-HWTEST_PRIORITIES_MAP = dict(zip(HWTEST_VALID_PRIORITIES,
-                                 range(len(HWTEST_VALID_PRIORITIES))))
+HWTEST_PRIORITIES_MAP = dict(
+    (p, i) for i, p in enumerate(HWTEST_VALID_PRIORITIES))
 
 # Defines VM Test types.
 FULL_AU_TEST_TYPE = 'full_suite'
@@ -367,7 +377,10 @@ PATCH_TAGS = (INTERNAL_PATCH_TAG, EXTERNAL_PATCH_TAG)
 TREE_OPEN = 'open'
 TREE_THROTTLED = 'throttled'
 TREE_CLOSED = 'closed'
-VALID_TREE_STATUSES = (TREE_OPEN, TREE_THROTTLED, TREE_CLOSED)
+TREE_MAINTENANCE = 'maintenance'
+# The statuses are listed in the order of increasing severity.
+VALID_TREE_STATUSES = (TREE_OPEN, TREE_THROTTLED, TREE_CLOSED, TREE_MAINTENANCE)
+
 
 _GERRIT_QUERY_TEMPLATE = ('status:open AND '
                           'label:Code-Review=+2 AND '
@@ -409,11 +422,28 @@ CL_ACTION_PICKED_UP = 'picked_up'         # CL picked up in CommitQueueSync
 CL_ACTION_SUBMITTED = 'submitted'         # CL submitted successfully
 CL_ACTION_KICKED_OUT = 'kicked_out'       # CL CQ-Ready value set to zero
 CL_ACTION_SUBMIT_FAILED = 'submit_failed' # CL submitted but submit failed
+CL_ACTION_VERIFIED = 'verified'           # CL was verified by the builder
+
+# Actions the Pre-CQ Launcher can take on a CL
+# See cbuildbot/stages/sync_stages.py:PreCQLauncherStage for more info
+CL_ACTION_PRE_CQ_INFLIGHT = 'pre_cq_inflight'
+CL_ACTION_PRE_CQ_PASSED = 'pre_cq_passed'
+CL_ACTION_PRE_CQ_FAILED = 'pre_cq_failed'
+CL_ACTION_PRE_CQ_LAUNCHING = 'pre_cq_launching'
+CL_ACTION_PRE_CQ_WAITING = 'pre_cq_waiting'
+CL_ACTION_PRE_CQ_READY_TO_SUBMIT = 'pre_cq_ready_to_submit'
 
 CL_ACTIONS = [CL_ACTION_PICKED_UP,
               CL_ACTION_SUBMITTED,
               CL_ACTION_KICKED_OUT,
-              CL_ACTION_SUBMIT_FAILED]
+              CL_ACTION_SUBMIT_FAILED,
+              CL_ACTION_VERIFIED,
+              CL_ACTION_PRE_CQ_INFLIGHT,
+              CL_ACTION_PRE_CQ_PASSED,
+              CL_ACTION_PRE_CQ_FAILED,
+              CL_ACTION_PRE_CQ_LAUNCHING,
+              CL_ACTION_PRE_CQ_WAITING,
+              CL_ACTION_PRE_CQ_READY_TO_SUBMIT]
 
 # CQ types.
 CQ = 'cq'
@@ -500,9 +530,32 @@ BUILD_DASHBOARD = 'http://build.chromium.org/p/chromiumos'
 BUILD_INT_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos'
 TRYBOT_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromiumos.tryserver'
 
+# Valid sherrif types.
+TREE_SHERIFF = 'tree'
+BUILD_DEPUTY = 'build'
+LAB_SHERIFF = 'lab'
+CHROME_GARDENER = 'chrome'
+
+# URLs to retrieve sheriff names from the waterfall.
+TREE_SHERIFF_URL = '%s/sheriff.js' % (BUILD_DASHBOARD)
+TREE_SHERIFF2_URL = '%s/sheriff2.js' % (BUILD_DASHBOARD)
+BUILD_DEPUTY_URL = '%s/chromeos_build_deputy.js' % (BUILD_DASHBOARD)
+LAB_SHERIFF_URL = '%s/sheriff_cros_lab.js' % (BUILD_DASHBOARD)
+CHROME_GARDENER_URL = '%s/sheriff_cr_cros_gardeners.js' % (BUILD_DASHBOARD)
+
+SHERIFF_TYPE_TO_URL = {
+    TREE_SHERIFF: (TREE_SHERIFF_URL, TREE_SHERIFF2_URL),
+    BUILD_DEPUTY: (BUILD_DEPUTY_URL,),
+    LAB_SHERIFF: (LAB_SHERIFF_URL,),
+    CHROME_GARDENER: (CHROME_GARDENER_URL)
+}
+
+
 # Useful config targets.
 CQ_MASTER = 'master-paladin'
-PRE_CQ_GROUP = 'trybot-pre-cq-group'
+
+# Useful google storage locations.
+PRE_CQ_GROUP_GS_LOCATION = 'trybot-pre-cq-group'
 
 # Email validation regex. Not quite fully compliant with RFC 2822, but good
 # approximation.

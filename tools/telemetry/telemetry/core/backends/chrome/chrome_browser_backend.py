@@ -83,7 +83,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
   def GetBrowserStartupArgs(self):
     args = []
     args.extend(self.browser_options.extra_browser_args)
-    args.append('--disable-background-networking')
     args.append('--enable-net-benchmarking')
     args.append('--metrics-recording-only')
     args.append('--no-default-browser-check')
@@ -100,6 +99,9 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     # some other flag indicates a proxy is needed.
     if not '--enable-spdy-proxy-auth' in args:
       args.append('--no-proxy-server')
+
+    if self.browser_options.disable_background_networking:
+      args.append('--disable-background-networking')
 
     if self.browser_options.netsim:
       args.append('--ignore-certificate-errors')
@@ -133,7 +135,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
 
   def HasBrowserFinishedLaunching(self):
     try:
-      self.Request('')
+      self.Request('', timeout=.1)
     except (exceptions.BrowserGoneException,
             exceptions.BrowserConnectionGoneException):
       return False
@@ -158,9 +160,11 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
            document.readyState == 'interactive')
       """
       for e in self._extensions_to_load:
-        if not e.extension_id in self.extension_backend:
+        try:
+          extension_objects = self.extension_backend[e.extension_id]
+        except KeyError:
           return False
-        for extension_object in self.extension_backend[e.extension_id]:
+        for extension_object in extension_objects:
           try:
             res = extension_object.EvaluateJavaScript(
                 extension_ready_js % e.extension_id)
@@ -194,7 +198,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
   def ListInspectableContexts(self):
     return json.loads(self.Request(''))
 
-  def Request(self, path, timeout=5, throw_network_exception=False):
+  def Request(self, path, timeout=30, throw_network_exception=False):
     url = 'http://127.0.0.1:%i/json' % self._port
     if path:
       url += '/' + path

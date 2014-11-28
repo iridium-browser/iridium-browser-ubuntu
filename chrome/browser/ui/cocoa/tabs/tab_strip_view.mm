@@ -11,13 +11,13 @@
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
-#import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#include "grit/generated_resources.h"
+#include "chrome/grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #import "ui/base/cocoa/nsgraphics_context_additions.h"
+#import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
@@ -227,25 +227,46 @@
   return NO;
 }
 
+// Returns AX children (tabs and new tab button), sorted from left to right.
+- (NSArray*)accessibilityChildren {
+  NSArray* children =
+      [super accessibilityAttributeValue:NSAccessibilityChildrenAttribute];
+  return [children sortedArrayUsingComparator:
+      ^NSComparisonResult(id first, id second) {
+          NSPoint firstPosition =
+              [[first accessibilityAttributeValue:
+                          NSAccessibilityPositionAttribute] pointValue];
+          NSPoint secondPosition =
+              [[second accessibilityAttributeValue:
+                           NSAccessibilityPositionAttribute] pointValue];
+          if (firstPosition.x < secondPosition.x)
+            return NSOrderedAscending;
+          else if (firstPosition.x > secondPosition.x)
+            return NSOrderedDescending;
+          else
+            return NSOrderedSame;
+      }];
+}
+
 - (id)accessibilityAttributeValue:(NSString*)attribute {
-  if ([attribute isEqual:NSAccessibilityRoleAttribute])
+  if ([attribute isEqual:NSAccessibilityRoleAttribute]) {
     return NSAccessibilityTabGroupRole;
-  if ([attribute isEqual:NSAccessibilityTabsAttribute]) {
-    NSMutableArray* tabs = [[[NSMutableArray alloc] init] autorelease];
-    NSArray* children =
-        [self accessibilityAttributeValue:NSAccessibilityChildrenAttribute];
-    for (id child in children) {
-      if ([[child accessibilityAttributeValue:NSAccessibilityRoleAttribute]
-          isEqual:NSAccessibilityRadioButtonRole]) {
-        [tabs addObject:child];
-      }
-    }
-    return tabs;
-  }
-  if ([attribute isEqual:NSAccessibilityContentsAttribute])
-    return [self accessibilityAttributeValue:NSAccessibilityChildrenAttribute];
-  if ([attribute isEqual:NSAccessibilityValueAttribute])
+  } else if ([attribute isEqual:NSAccessibilityChildrenAttribute]) {
+    return [self accessibilityChildren];
+  } else if ([attribute isEqual:NSAccessibilityTabsAttribute]) {
+    NSArray* children = [self accessibilityChildren];
+    NSIndexSet* indexes = [children indexesOfObjectsPassingTest:
+        ^BOOL(id child, NSUInteger idx, BOOL* stop) {
+            NSString* role = [child
+                accessibilityAttributeValue:NSAccessibilityRoleAttribute];
+            return [role isEqualToString:NSAccessibilityRadioButtonRole];
+        }];
+    return [children objectsAtIndexes:indexes];
+  } else if ([attribute isEqual:NSAccessibilityContentsAttribute]) {
+    return [self accessibilityChildren];
+  } else if ([attribute isEqual:NSAccessibilityValueAttribute]) {
     return [controller_ activeTabView];
+  }
 
   return [super accessibilityAttributeValue:attribute];
 }

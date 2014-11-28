@@ -40,6 +40,7 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
   functions->fCompileShader = glCompileShader;
   functions->fCompressedTexImage2D = glCompressedTexImage2D;
   functions->fCopyTexSubImage2D = glCopyTexSubImage2D;
+  functions->fCopyTextureCHROMIUM = glCopyTextureCHROMIUM;
   functions->fCreateProgram = glCreateProgram;
   functions->fCreateShader = glCreateShader;
   functions->fCullFace = glCullFace;
@@ -140,6 +141,8 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
   functions->fBindUniformLocation = glBindUniformLocationCHROMIUM;
   functions->fBlitFramebuffer = glBlitFramebufferCHROMIUM;
   functions->fGenerateMipmap = glGenerateMipmap;
+  functions->fMatrixLoadf = glMatrixLoadfCHROMIUM;
+  functions->fMatrixLoadIdentity = glMatrixLoadIdentityCHROMIUM;
 
   return interface;
 }

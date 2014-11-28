@@ -17,6 +17,7 @@
 #include "base/rand_util.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/test_io_thread.h"
 #include "base/threading/platform_thread.h"  // For |Sleep()|.
 #include "base/threading/simple_thread.h"
 #include "base/time/time.h"
@@ -41,7 +42,7 @@ scoped_ptr<MessageInTransit> MakeTestMessage(uint32_t num_bytes) {
       new MessageInTransit(MessageInTransit::kTypeMessagePipeEndpoint,
                            MessageInTransit::kSubtypeMessagePipeEndpointData,
                            num_bytes,
-                           bytes.empty() ? NULL : &bytes[0]));
+                           bytes.empty() ? nullptr : &bytes[0]));
 }
 
 bool CheckMessageData(const void* bytes, uint32_t num_bytes) {
@@ -71,7 +72,7 @@ bool WriteTestMessageToHandle(const embedder::PlatformHandle& handle,
 
 class RawChannelTest : public testing::Test {
  public:
-  RawChannelTest() : io_thread_(test::TestIOThread::kManualStart) {}
+  RawChannelTest() : io_thread_(base::TestIOThread::kManualStart) {}
   virtual ~RawChannelTest() {}
 
   virtual void SetUp() OVERRIDE {
@@ -88,12 +89,12 @@ class RawChannelTest : public testing::Test {
   }
 
  protected:
-  test::TestIOThread* io_thread() { return &io_thread_; }
+  base::TestIOThread* io_thread() { return &io_thread_; }
 
   embedder::ScopedPlatformHandle handles[2];
 
  private:
-  test::TestIOThread io_thread_;
+  base::TestIOThread io_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(RawChannelTest);
 };
@@ -143,7 +144,7 @@ class TestMessageReaderAndChecker {
       // If we have the header....
       size_t message_size;
       if (MessageInTransit::GetNextMessageSize(
-              bytes_.empty() ? NULL : &bytes_[0],
+              bytes_.empty() ? nullptr : &bytes_[0],
               bytes_.size(),
               &message_size)) {
         // If we've read the whole message....

@@ -72,8 +72,23 @@ static_library("search_engines") {
   }
 }
 
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "default_search_pref_test_util.cc",
+    "default_search_pref_test_util.h",
+    "testing_search_terms_data.cc",
+    "testing_search_terms_data.h",
+  ]
+
+  deps = [
+    ":search_engines",
+    "//testing/gtest",
+  ]
+}
+
 json_to_struct("prepopulated_engines") {
-  visibility = ":*"
+  visibility = [ ":*" ]
 
   source = "prepopulated_engines.json"
   schema_file = "prepopulated_engines_schema.json"

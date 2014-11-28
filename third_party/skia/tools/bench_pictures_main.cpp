@@ -54,6 +54,11 @@ DEFINE_bool(trackDeferredCaching, false, "Only meaningful with --deferImageDecod
             "SK_LAZY_CACHE_STATS set to true. Report percentage of cache hits when using "
             "deferred image decoding.");
 
+#if GR_GPU_STATS
+DEFINE_bool(gpuStats, false, "Only meaningful with gpu configurations. "
+            "Report some GPU call statistics.");
+#endif
+
 DEFINE_bool(preprocess, false, "If true, perform device specific preprocessing before timing.");
 
 // Buildbot-specific parameters
@@ -201,13 +206,17 @@ static bool run_single_benchmark(const SkString& inputPath,
         // Because the GPU preprocessing step relies on the in-memory picture
         // statistics we need to rerecord the picture here
         SkPictureRecorder recorder;
-        picture->draw(recorder.beginRecording(picture->width(), picture->height(), NULL, 0));
+        picture->playback(recorder.beginRecording(picture->cullRect().width(), 
+                                                  picture->cullRect().height(), 
+                                                  NULL, 0));
         picture.reset(recorder.endRecording());
     }
 
     SkString filename = SkOSPath::Basename(inputPath.c_str());
 
-    gWriter.bench(filename.c_str(), picture->width(), picture->height());
+    gWriter.bench(filename.c_str(), 
+                  SkScalarCeilToInt(picture->cullRect().width()), 
+                  SkScalarCeilToInt(picture->cullRect().height()));
 
     benchmark.run(picture);
 
@@ -472,6 +481,15 @@ int tool_main(int argc, char** argv) {
                  (double) gTotalCacheHits / (gTotalCacheHits + gTotalCacheMisses));
     }
 #endif
+
+#if GR_GPU_STATS
+    if (FLAGS_gpuStats && benchmark.renderer()->isUsingGpuDevice()) {
+        GrContext* ctx = benchmark.renderer()->getGrContext();
+        SkDebugf("RenderTarget Binds: %d\n", ctx->gpuStats()->renderTargetBinds());
+        SkDebugf("Shader Compilations: %d\n", ctx->gpuStats()->shaderCompilations());
+    }
+#endif
+
     gWriter.end();
     return 0;
 }

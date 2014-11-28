@@ -9,6 +9,8 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
+build_ime = !is_ios
+
 component("base") {
   output_name = "ui_base"
   sources = [
@@ -63,6 +65,8 @@ component("base") {
     "cocoa/controls/hover_image_menu_button_cell.mm",
     "cocoa/controls/hyperlink_button_cell.h",
     "cocoa/controls/hyperlink_button_cell.mm",
+    "cocoa/controls/hyperlink_text_view.h",
+    "cocoa/controls/hyperlink_text_view.mm",
     "cocoa/find_pasteboard.h",
     "cocoa/find_pasteboard.mm",
     "cocoa/flipped_view.h",
@@ -83,6 +87,8 @@ component("base") {
     "cocoa/nib_loading.mm",
     "cocoa/nsgraphics_context_additions.h",
     "cocoa/nsgraphics_context_additions.mm",
+    "cocoa/nsview_additions.h",
+    "cocoa/nsview_additions.mm",
     "cocoa/remote_layer_api.h",
     "cocoa/remote_layer_api.mm",
     "cocoa/tracking_area.h",
@@ -185,6 +191,9 @@ component("base") {
     "models/tree_node_model.h",
     "nine_image_painter_factory.cc",
     "nine_image_painter_factory.h",
+    "page_transition_types.cc",
+    "page_transition_types.h",
+    "page_transition_types_list.h",
     "resource/data_pack.cc",
     "resource/data_pack.h",
     "resource/resource_bundle.cc",
@@ -217,7 +226,6 @@ component("base") {
     "ui_base_switches_util.h",
     "ui_base_types.cc",
     "ui_base_types.h",
-    "ui_base_export.h",
     "view_prop.cc",
     "view_prop.h",
     "webui/jstemplate_builder.cc",
@@ -257,13 +265,6 @@ component("base") {
     "window_open_disposition.cc",
     "window_open_disposition.h",
     "work_area_watcher_observer.h",
-    "x/x11_foreign_window_manager.cc",
-    "x/x11_foreign_window_manager.h",
-    "x/x11_menu_list.cc",
-    "x/x11_menu_list.h",
-    "x/x11_util.cc",
-    "x/x11_util.h",
-    "x/x11_util_internal.h",
   ]
 
   if (is_win) {
@@ -281,28 +282,135 @@ component("base") {
 
   defines = [ "UI_BASE_IMPLEMENTATION" ]
 
-  deps = [
+  public_deps = [
     "//base",
+    "//skia",
+    "//ui/events/platform",
+    "//ui/events:events_base",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+  ]
+  deps = [
     "//base/third_party/dynamic_annotations",
     "//base:base_static",
     "//base:i18n",
     "//net",
-    "//skia",
     "//third_party/icu",
-    "//ui/events/platform",
-    "//ui/events:events_base",
     "//ui/resources",
     "//ui/strings",
     "//url",
   ]
+
+  if (build_ime) {
+    if (!is_android) {
+      deps += [
+        "//ui/events",
+      ]
+    }
+
+    sources += [
+      "ime/candidate_window.cc",
+      "ime/candidate_window.h",
+      "ime/chromeos/character_composer.cc",
+      "ime/chromeos/character_composer.h",
+      "ime/chromeos/ime_bridge.cc",
+      "ime/chromeos/ime_bridge.h",
+      "ime/chromeos/ime_keymap.cc",
+      "ime/chromeos/ime_keymap.h",
+      "ime/chromeos/mock_ime_candidate_window_handler.cc",
+      "ime/chromeos/mock_ime_candidate_window_handler.h",
+      "ime/chromeos/mock_ime_engine_handler.cc",
+      "ime/chromeos/mock_ime_engine_handler.h",
+      "ime/chromeos/mock_ime_input_context_handler.cc",
+      "ime/chromeos/mock_ime_input_context_handler.h",
+      "ime/composition_text.cc",
+      "ime/composition_text.h",
+      "ime/composition_text_util_pango.cc",
+      "ime/composition_text_util_pango.h",
+      "ime/composition_underline.h",
+      "ime/dummy_input_method_delegate.cc",
+      "ime/dummy_input_method_delegate.h",
+      "ime/infolist_entry.cc",
+      "ime/infolist_entry.h",
+      "ime/input_method.h",
+      "ime/input_method_auralinux.cc",
+      "ime/input_method_auralinux.h",
+      "ime/input_method_base.cc",
+      "ime/input_method_base.h",
+      "ime/input_method_chromeos.cc",
+      "ime/input_method_chromeos.h",
+      "ime/input_method_delegate.h",
+      "ime/input_method_factory.cc",
+      "ime/input_method_factory.h",
+      "ime/input_method_initializer.cc",
+      "ime/input_method_initializer.h",
+      "ime/input_method_mac.h",
+      "ime/input_method_mac.mm",
+      "ime/input_method_minimal.cc",
+      "ime/input_method_minimal.h",
+      "ime/input_method_observer.h",
+      "ime/input_method_win.cc",
+      "ime/input_method_win.h",
+      "ime/linux/fake_input_method_context.cc",
+      "ime/linux/fake_input_method_context.h",
+      "ime/linux/fake_input_method_context_factory.cc",
+      "ime/linux/fake_input_method_context_factory.h",
+      "ime/linux/linux_input_method_context.h",
+      "ime/linux/linux_input_method_context_factory.cc",
+      "ime/linux/linux_input_method_context_factory.h",
+      "ime/mock_input_method.cc",
+      "ime/mock_input_method.h",
+      "ime/remote_input_method_delegate_win.h",
+      "ime/remote_input_method_win.cc",
+      "ime/remote_input_method_win.h",
+      "ime/text_input_client.cc",
+      "ime/text_input_client.h",
+      "ime/text_input_focus_manager.cc",
+      "ime/text_input_focus_manager.h",
+      "ime/text_input_type.h",
+      "ime/win/imm32_manager.cc",
+      "ime/win/imm32_manager.h",
+      "ime/win/tsf_input_scope.cc",
+      "ime/win/tsf_input_scope.h",
+    ]
+
+    if (!use_aura || (!is_linux && !use_ozone)) {
+      sources -= [
+        "ime/input_method_auralinux.cc",
+        "ime/input_method_auralinux.h",
+      ]
+    }
+
+    if (!toolkit_views && !use_aura) {
+      sources -= [
+        "ime/input_method_factory.cc",
+        "ime/input_method_factory.h",
+        "ime/input_method_minimal.cc",
+        "ime/input_method_minimal.h",
+      ]
+    }
+
+    if (is_chromeos) {
+      deps += [
+        "//chromeos",
+      ]
+    }
+
+    if (use_pango) {
+      configs += [ "//build/config/linux:pangocairo" ]
+    } else {
+      sources -= [
+        "ime/composition_text_util_pango.cc",
+        "ime/composition_text_util_pango.h",
+      ]
+    }
+  }
 
   if (is_ios) {
     sources += [
       "l10n/l10n_util_mac.h",
       "l10n/l10n_util_mac.mm",
     ]
-  } else {
-    deps += [ "//ui/base/ime" ]
   }
 
   if (toolkit_views) {
@@ -333,8 +441,8 @@ component("base") {
       "dragdrop/drag_utils_aura.cc",
     ]
   }
-  if (!use_x11) {
-    sources -= [
+  if (use_x11) {
+    sources += [
       "x/x11_foreign_window_manager.cc",
       "x/x11_foreign_window_manager.h",
       "x/x11_menu_list.cc",
@@ -343,6 +451,7 @@ component("base") {
       "x/x11_util.h",
       "x/x11_util_internal.h",
     ]
+    deps += [ "//ui/gfx/x" ]
   }
 
   if (!use_aura || !is_linux) {
@@ -419,8 +528,7 @@ component("base") {
 
   if (is_mac) {
     deps += [
-      #TODO(tfarina): port this third_party component to GN.
-      #"//third_party/mozilla",
+      "//third_party/mozilla",
     ]
 
     sources -= [
@@ -543,6 +651,7 @@ component("base") {
 }
 
 source_set("test_support") {
+  testonly = true
   sources = [
     "test/ui_controls.h",
     "test/ui_controls_aura.cc",
@@ -552,6 +661,9 @@ source_set("test_support") {
     "test/ui_controls_win.cc",
   ]
 
+  public_deps = [
+    ":base",
+  ]
   deps = [
     "//base",
     "//skia",
@@ -561,7 +673,7 @@ source_set("test_support") {
     "//ui/gfx/geometry",
   ]
 
-  if (!is_ios) {
+  if (build_ime) {
     sources += [
       "ime/dummy_input_method.cc",
       "ime/dummy_input_method.h",
@@ -586,3 +698,207 @@ if (is_android) {
     jni_package = "base"
   }
 }
+
+# TODO(GYP): Make this work on Android and reenable it.
+if (!is_android) {
+# GYP version: ui/base/ui_base_tests.gyp:ui_unittests
+test("unittests") {
+  # TODO(tfarina): Rename this target to ui_base_unittests.
+  # In order to do this we will need to keep this target, add a dummy
+  # ui_base_unittests target that just points to ui_unittests, change
+  # buildbot code to reference the new 'ui_base_unittests' target.
+  # After buildbot is updated, we can make the changes in Chromium and
+  # remove 'ui_unittests' target. crbug.com/331829
+  output_name = "ui_unittests"
+  sources = [
+    "l10n/l10n_util_mac_unittest.mm",
+    "l10n/l10n_util_unittest.cc",
+    "l10n/l10n_util_win_unittest.cc",
+    "l10n/time_format_unittest.cc",
+    "layout_unittest.cc",
+    "models/tree_node_iterator_unittest.cc",
+    "resource/data_pack_literal.cc",
+    "resource/data_pack_unittest.cc",
+    "resource/resource_bundle_unittest.cc",
+    "test/run_all_unittests.cc",
+  ]
+
+  if (is_ios) {
+    # Compile this Mac file on iOS as well.
+    set_sources_assignment_filter([])
+    sources += [ "l10n/l10n_util_mac_unittest.mm" ]
+    set_sources_assignment_filter(sources_assignment_filter)
+  } else {  # !is_ios
+    sources += [
+      "accelerators/accelerator_manager_unittest.cc",
+      "accelerators/menu_label_accelerator_util_linux_unittest.cc",
+      "clipboard/custom_data_helper_unittest.cc",
+      "cocoa/base_view_unittest.mm",
+      "cocoa/cocoa_base_utils_unittest.mm",
+      "cocoa/controls/blue_label_button_unittest.mm",
+      "cocoa/controls/hover_image_menu_button_unittest.mm",
+      "cocoa/controls/hyperlink_button_cell_unittest.mm",
+      "cocoa/controls/hyperlink_text_view_unittest.mm",
+      "cocoa/focus_tracker_unittest.mm",
+      "cocoa/fullscreen_window_manager_unittest.mm",
+      "cocoa/hover_image_button_unittest.mm",
+      "cocoa/menu_controller_unittest.mm",
+      "cocoa/nsgraphics_context_additions_unittest.mm",
+      "cocoa/nsview_additions_unittest.mm",
+      "cocoa/tracking_area_unittest.mm",
+      "dragdrop/os_exchange_data_provider_aurax11_unittest.cc",
+      "models/list_model_unittest.cc",
+      "models/list_selection_model_unittest.cc",
+      "models/tree_node_model_unittest.cc",
+      "test/data/resource.h",
+      "text/bytes_formatting_unittest.cc",
+      "view_prop_unittest.cc",
+      "webui/web_ui_util_unittest.cc",
+      "x/selection_requestor_unittest.cc",
+    ]
+
+    if (!use_x11) {
+      if (is_chromeos) {
+        # These were already removed in the chromeos case.
+        sources -= [
+          "ime/chromeos/character_composer_unittest.cc",
+          "ime/input_method_chromeos_unittest.cc",
+        ]
+      }
+    }
+  }
+
+  if (build_ime) {
+    sources += [
+      "ime/candidate_window_unittest.cc",
+      "ime/chromeos/character_composer_unittest.cc",
+      "ime/input_method_base_unittest.cc",
+      "ime/input_method_chromeos_unittest.cc",
+      "ime/remote_input_method_win_unittest.cc",
+      "ime/win/imm32_manager_unittest.cc",
+      "ime/win/tsf_input_scope_unittest.cc",
+    ]
+    if (use_x11) {
+      sources += [ "ime/composition_text_util_pango_unittest.cc" ]
+    }
+  }
+
+  deps = [
+    "//base",
+    "//base/allocator",
+    "//base/test:test_support",
+    "//net",
+    "//skia",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//third_party/icu",
+    "//ui/base",
+    "//ui/base:test_support",
+    "//ui/events:events_base",
+    "//ui/events:test_support",
+    "//ui/gfx:test_support",
+    "//ui/resources",
+    "//ui/resources:ui_test_pak",
+    "//ui/strings",
+    "//url",
+  ]
+
+  if (is_ios) {
+    # TODO(GYP) lots of iOS-only steps for ui_unittests
+  }
+
+  if (is_win) {
+    sources += [
+      "dragdrop/os_exchange_data_win_unittest.cc",
+      "win/hwnd_subclass_unittest.cc",
+      "win/open_file_name_win_unittest.cc",
+    ]
+
+    ldflags = [
+      "/DELAYLOAD:d2d1.dll",
+      "/DELAYLOAD:d3d10_1.dll",
+    ]
+    libs = [
+      "d2d1.lib",
+      "d3d10_1.lib",
+      "imm32.lib",
+      "oleacc.lib",
+    ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    cflags = [ "/wd4267" ]
+  }
+
+  if (is_android) {
+    deps += [
+      #"testing/android/native_test.gyp:native_test_native_code"  TODO(GYP)
+    ]
+  }
+
+  if (use_pango) {
+    configs += [
+      "//build/config/linux:pangocairo"
+    ]
+  }
+
+  if (use_x11) {
+    sources += [
+      "cursor/cursor_loader_x11_unittest.cc"
+    ]
+
+    configs += [
+      "//build/config/linux:x11"
+    ]
+
+    deps += [
+      "//ui/events/platform/x11",
+      "//ui/gfx/x",
+    ]
+
+    datadeps = [
+      "//tools/xdisplaycheck"
+    ]
+  }
+
+  if (!is_win || !use_aura) {
+    sources -= [
+      "view_prop_unittest.cc"
+    ]
+  }
+
+  if (is_mac) {
+    deps += [
+      "//third_party/mozilla",
+      #'ui_unittests_bundle',  TODO(GYP)
+    ]
+  }
+
+  if (use_aura || toolkit_views) {
+    sources += [
+      "dragdrop/os_exchange_data_unittest.cc"
+    ]
+
+    deps += [
+      "//ui/events",
+      "//ui/events/platform",
+    ]
+  }
+
+  if (is_chromeos) {
+    sources += [
+      "../chromeos/touch_exploration_controller_unittest.cc",
+    ]
+    sources -= [
+      "dragdrop/os_exchange_data_provider_aurax11_unittest.cc",
+      "x/selection_requestor_unittest.cc",
+    ]
+    deps += [
+      "//ui/aura:test_support",
+      "//ui/events:gesture_detection",
+      #'../chromeos/chromeos.gyp:chromeos',  TODO(GYP)
+      #'chromeos/ui_chromeos.gyp:ui_chromeos',
+    ]
+  }
+}
+}
+# TODO(GYP) Mac (ui_unittest_bundle) and Android (ui_unittests_apk).

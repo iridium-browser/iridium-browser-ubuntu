@@ -27,6 +27,7 @@
 #define IDBDatabase_h
 
 #include "bindings/core/v8/Dictionary.h"
+#include "bindings/core/v8/ScriptState.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DOMStringList.h"
 #include "modules/EventModules.h"
@@ -54,6 +55,7 @@ class IDBDatabase FINAL
     , public EventTargetWithInlineData
     , public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<IDBDatabase>);
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(IDBDatabase);
 public:
     static IDBDatabase* create(ExecutionContext*, PassOwnPtr<WebIDBDatabase>, IDBDatabaseCallbacks*);
@@ -73,9 +75,9 @@ public:
 
     IDBObjectStore* createObjectStore(const String& name, const Dictionary&, ExceptionState&);
     IDBObjectStore* createObjectStore(const String& name, const IDBKeyPath&, bool autoIncrement, ExceptionState&);
-    IDBTransaction* transaction(ExecutionContext* context, PassRefPtrWillBeRawPtr<DOMStringList> scope, const String& mode, ExceptionState& exceptionState) { return transaction(context, *scope, mode, exceptionState); }
-    IDBTransaction* transaction(ExecutionContext*, const Vector<String>&, const String& mode, ExceptionState&);
-    IDBTransaction* transaction(ExecutionContext*, const String&, const String& mode, ExceptionState&);
+    IDBTransaction* transaction(ScriptState* scriptState, PassRefPtrWillBeRawPtr<DOMStringList> scope, const String& mode, ExceptionState& exceptionState) { return transaction(scriptState, *scope, mode, exceptionState); }
+    IDBTransaction* transaction(ScriptState*, const Vector<String>&, const String& mode, ExceptionState&);
+    IDBTransaction* transaction(ScriptState*, const String&, const String& mode, ExceptionState&);
     void deleteObjectStore(const String& name, ExceptionState&);
     void close();
 

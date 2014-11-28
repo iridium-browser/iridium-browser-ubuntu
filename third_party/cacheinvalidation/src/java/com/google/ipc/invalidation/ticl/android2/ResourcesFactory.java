@@ -16,14 +16,12 @@
 
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources;
-import com.google.ipc.invalidation.external.client.SystemResources.NetworkChannel;
 import com.google.ipc.invalidation.external.client.SystemResources.Scheduler;
-import com.google.ipc.invalidation.external.client.SystemResources.Storage;
 import com.google.ipc.invalidation.external.client.android.service.AndroidLogger;
 import com.google.ipc.invalidation.ticl.BasicSystemResources;
 import com.google.ipc.invalidation.ticl.android2.channel.AndroidNetworkChannel;
+import com.google.ipc.invalidation.util.Preconditions;
 
 import android.content.Context;
 
@@ -100,8 +98,9 @@ public class ResourcesFactory {
      * it has a network event to communicate to the Ticl.
      */
     public void setNetworkListener(NetworkChannel.NetworkListener networkListener) {
-      Preconditions.checkState(this.networkListener == null, "Listener already set: %s",
-          networkListener);
+      if (this.networkListener != null) {
+        throw new IllegalStateException("Listener already set: " + networkListener);
+      }
       this.networkListener = Preconditions.checkNotNull(networkListener);
     }
 

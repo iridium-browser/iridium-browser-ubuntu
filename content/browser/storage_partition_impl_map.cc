@@ -6,9 +6,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -35,13 +35,13 @@
 #include "crypto/sha2.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/browser/blob/blob_storage_context.h"
-#include "webkit/browser/blob/blob_url_request_job_factory.h"
-#include "webkit/browser/fileapi/file_system_url_request_job_factory.h"
-#include "webkit/common/blob/blob_data.h"
+#include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/blob/blob_url_request_job_factory.h"
+#include "storage/browser/fileapi/file_system_url_request_job_factory.h"
+#include "storage/common/blob/blob_data.h"
 
-using fileapi::FileSystemContext;
-using webkit_blob::BlobStorageContext;
+using storage::FileSystemContext;
+using storage::BlobStorageContext;
 
 namespace content {
 
@@ -52,11 +52,10 @@ class BlobProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
  public:
   BlobProtocolHandler(ChromeBlobStorageContext* blob_storage_context,
                       StreamContext* stream_context,
-                      fileapi::FileSystemContext* file_system_context)
+                      storage::FileSystemContext* file_system_context)
       : blob_storage_context_(blob_storage_context),
         stream_context_(stream_context),
-        file_system_context_(file_system_context) {
-  }
+        file_system_context_(file_system_context) {}
 
   virtual ~BlobProtocolHandler() {
   }
@@ -73,12 +72,11 @@ class BlobProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
       // Construction is deferred because 'this' is constructed on
       // the main thread but we want blob_protocol_handler_ constructed
       // on the IO thread.
-      blob_protocol_handler_.reset(
-          new webkit_blob::BlobProtocolHandler(
-              blob_storage_context_->context(),
-              file_system_context_,
-              BrowserThread::GetMessageLoopProxyForThread(
-                  BrowserThread::FILE).get()));
+      blob_protocol_handler_.reset(new storage::BlobProtocolHandler(
+          blob_storage_context_->context(),
+          file_system_context_.get(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)
+              .get()));
     }
     return blob_protocol_handler_->MaybeCreateJob(request, network_delegate);
   }
@@ -86,8 +84,8 @@ class BlobProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
  private:
   const scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
   const scoped_refptr<StreamContext> stream_context_;
-  const scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  mutable scoped_ptr<webkit_blob::BlobProtocolHandler> blob_protocol_handler_;
+  const scoped_refptr<storage::FileSystemContext> file_system_context_;
+  mutable scoped_ptr<storage::BlobProtocolHandler> blob_protocol_handler_;
   DISALLOW_COPY_AND_ASSIGN(BlobProtocolHandler);
 };
 

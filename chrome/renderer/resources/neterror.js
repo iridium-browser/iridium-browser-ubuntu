@@ -50,6 +50,11 @@ function updateIconClass(classList, newClass) {
     classList.remove(oldClass);
 
   classList['last_icon_class'] = newClass;
+
+  if (newClass == 'icon-offline') {
+    document.body.classList.add('offline');
+    new Runner('.interstitial-wrapper');
+  }
 }
 
 // Does a search using |baseSearchUrl| and the text in the search box.
@@ -126,5 +131,20 @@ function setButtonLayout() {
       staleLoadButton.style.display == 'none') {
     detailsButton.classList.add('singular');
   }
+
+  if (templateData) {
+    // Hide the details button if there are no details to show.
+    if (templateData.summary && !templateData.summary.msg) {
+      detailsButton.style.display = 'none';
+      document.getElementById('help-box-outer').style.display = 'block';
+    }
+
+    // Show control buttons.
+    if (templateData.reloadButton && templateData.reloadButton.msg ||
+        templateData.staleLoadButton && templateData.staleLoadButton.msg) {
+      controlButtonDiv.hidden = false;
+    }
+  }
 }
+
 document.addEventListener('DOMContentLoaded', setButtonLayout);

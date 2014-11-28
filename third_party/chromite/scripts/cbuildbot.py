@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,6 +7,8 @@
 Used by Chromium OS buildbot configuration for all Chromium OS builds including
 full and pre-flight-queue builds.
 """
+
+from __future__ import print_function
 
 import collections
 import distutils.version
@@ -48,13 +48,14 @@ from chromite.cbuildbot.stages import sync_stages
 from chromite.cbuildbot.stages import test_stages
 
 
+from chromite.lib import cidb
 from chromite.lib import cgroups
 from chromite.lib import cleanup
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
-from chromite.lib import gclient
 from chromite.lib import gerrit
 from chromite.lib import git
+from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
 from chromite.lib import parallel
@@ -85,18 +86,18 @@ def _PrintValidConfigs(display_all=False):
             config_name)
 
   COLUMN_WIDTH = 45
-  print
-  print 'config'.ljust(COLUMN_WIDTH), 'description'
-  print '------'.ljust(COLUMN_WIDTH), '-----------'
+  print()
+  print('config'.ljust(COLUMN_WIDTH), 'description')
+  print('------'.ljust(COLUMN_WIDTH), '-----------')
   config_names = cbuildbot_config.config.keys()
   config_names.sort(key=_GetSortKey)
   for name in config_names:
     if display_all or cbuildbot_config.config[name]['trybot_list']:
       desc = cbuildbot_config.config[name].get('description')
       desc = desc if desc else ''
-      print name.ljust(COLUMN_WIDTH), desc
+      print(name.ljust(COLUMN_WIDTH), desc)
 
-  print
+  print()
 
 
 def _GetConfig(config_name):
@@ -168,6 +169,8 @@ class Builder(object):
     """Runs through the initialization steps of an actual build."""
     if self._run.options.resume:
       results_lib.LoadCheckpoint(self._run.buildroot)
+
+    self._RunStage(report_stages.BuildStartStage)
 
     self._RunStage(build_stages.CleanUpStage)
 
@@ -357,8 +360,6 @@ class Builder(object):
     Returns:
       Whether the build succeeded.
     """
-    report_stages.WriteBasicMetadata(self._run)
-
     self._InitializeTrybotPatchPool()
 
     if self._run.options.bootstrap:
@@ -388,7 +389,7 @@ class Builder(object):
         print_report = False
         success = self._ReExecuteInBuildroot(sync_instance)
       else:
-        self._RunStage(report_stages.ReportBuildStartStage)
+        self._RunStage(report_stages.BuildReexecutionFinishedStage)
         self.RunStages()
 
     except Exception as ex:
@@ -397,7 +398,7 @@ class Builder(object):
         # If the build is marked as successful, but threw exceptions, that's a
         # problem. Print the traceback for debugging.
         if isinstance(ex, failures_lib.CompoundFailure):
-          print str(ex)
+          print(str(ex))
 
         traceback.print_exc(file=sys.stdout)
         raise
@@ -417,9 +418,9 @@ class Builder(object):
         if exception_thrown and success:
           success = False
           cros_build_lib.PrintBuildbotStepWarnings()
-          print """\
+          print("""\
 Exception thrown, but all stages marked successful. This is an internal error,
-because the stage that threw the exception should be marked as failing."""
+because the stage that threw the exception should be marked as failing.""")
 
     return success
 
@@ -520,7 +521,8 @@ class SimpleBuilder(Builder):
 
     if config.build_packages_in_background:
       self._RunStage(build_stages.BuildPackagesStage, board,
-                     builder_run=builder_run, afdo_use=config.afdo_use)
+                     update_metadata=True, builder_run=builder_run,
+                     afdo_use=config.afdo_use)
 
     if builder_run.config.compilecheck or builder_run.options.compilecheck:
       self._RunStage(test_stages.UnitTestStage, board,
@@ -557,8 +559,7 @@ class SimpleBuilder(Builder):
 
     stage_list += [
         [release_stages.SignerTestStage, board, archive_stage],
-        [generic_stages.RetryStage, 1,
-         release_stages.PaygenStage, board, archive_stage],
+        [release_stages.PaygenStage, board, archive_stage],
         [test_stages.ImageTestStage, board],
         [test_stages.UnitTestStage, board],
         [artifact_stages.UploadPrebuiltsStage, board],
@@ -658,7 +659,8 @@ class SimpleBuilder(Builder):
           elif builder_run.config.afdo_use:
             kwargs['afdo_use'] = True
 
-          self._RunStage(build_stages.BuildPackagesStage, board, **kwargs)
+          self._RunStage(build_stages.BuildPackagesStage, board,
+                         update_metadata=True, **kwargs)
 
           if (builder_run.config.afdo_generate_min and
               afdo.CanGenerateAFDOData(board)):
@@ -916,9 +918,8 @@ def _RunBuildStagesWrapper(options, build_config):
   if options.chrome_rev:
     chrome_rev = options.chrome_rev
   if chrome_rev == constants.CHROME_REV_TOT:
-    # Build the TOT Chrome revision.
-    svn_url = gclient.GetBaseURLs()[0]
-    options.chrome_version = gclient.GetTipOfTrunkSvnRevision(svn_url)
+    options.chrome_version = gob_util.GetTipOfTrunkRevision(
+        constants.CHROMIUM_GOB_URL)
     options.chrome_rev = constants.CHROME_REV_SPEC
 
   # If it's likely we'll need to build Chrome, fetch the source.
@@ -1240,7 +1241,7 @@ def _CreateParser():
                           action='callback', dest='chrome_version',
                           callback=_CheckChromeVersionOption,
                           help=('Used with SPEC logic to force a particular '
-                                'SVN revision of chrome rather than the '
+                                'git revision of chrome rather than the '
                                 'latest.'))
   group.add_remote_option('--clobber', action='store_true', dest='clobber',
                           default=False,
@@ -1646,7 +1647,7 @@ def _ParseCommandLine(parser, argv):
 
   # A couple options, like --list, trigger a quick exit.
   if options.output_api_version:
-    print constants.REEXEC_API_VERSION
+    print(constants.REEXEC_API_VERSION)
     sys.exit(0)
 
   if options.list:
@@ -1661,6 +1662,51 @@ def _ParseCommandLine(parser, argv):
 
   _FinishParsing(options, args)
   return options, args
+
+
+def _SetupCidb(options, build_config):
+  """Set up CIDB the appropriate Setup call.
+
+  Args:
+    options: Command line options structure.
+    build_config: Config object for this build.
+  """
+  # TODO(akeshet): This is a temporary workaround to make sure that the cidb
+  # is not used on waterfalls that the db schema does not support (in particular
+  # the chromeos.chrome waterfall).
+  # See crbug.com/406940
+  waterfall = os.environ.get('BUILDBOT_MASTERNAME', '')
+  if not waterfall in ('chromeos', 'chromiumos', 'chromiumos.tryserver'):
+    cidb.CIDBConnectionFactory.SetupNoCidb()
+    return
+
+  # TODO(akeshet): Clean up this code once we have better defined flags to
+  # specify on-or-off waterfall and on-or-off production runs of cbuildbot.
+  # See crbug.com/331417
+
+  # --buildbot runs should use the production database, unless the --debug flag
+  # is also present in which case they should use the debug database.
+  if options.buildbot:
+    if options.debug:
+      cidb.CIDBConnectionFactory.SetupDebugCidb()
+      return
+    else:
+      cidb.CIDBConnectionFactory.SetupProdCidb()
+      return
+
+  # --remote-trybot runs should use the debug database. With the exception of
+  # pre-cq builds, which should use the production database.
+  if options.remote_trybot:
+    if build_config['pre_cq']:
+      cidb.CIDBConnectionFactory.SetupProdCidb()
+      return
+    else:
+      cidb.CIDBConnectionFactory.SetupDebugCidb()
+      return
+
+  # If neither --buildbot nor --remote-trybot flag was used, don't use the
+  # database.
+  cidb.CIDBConnectionFactory.SetupNoCidb()
 
 
 # TODO(build): This function is too damn long.
@@ -1693,19 +1739,19 @@ def main(argv):
             'team for help if this is unexpected.' % build_config['boards'])
 
     # Verify gerrit patches are valid.
-    print 'Verifying patches...'
+    print('Verifying patches...')
     patch_pool = AcquirePoolFromOptions(options)
 
     # --debug need to be explicitly passed through for remote invocations.
     if options.buildbot and '--debug' not in options.pass_through_args:
       _ConfirmRemoteBuildbotRun()
 
-    print 'Submitting tryjob...'
+    print('Submitting tryjob...')
     tryjob = remote_try.RemoteTryJob(options, args, patch_pool.local_patches)
     tryjob.Submit(testjob=options.test_tryjob, dryrun=False)
-    print 'Tryjob submitted!'
-    print ('Go to %s to view the status of your job.'
-           % tryjob.GetTrybotWaterfallLink())
+    print('Tryjob submitted!')
+    print(('Go to %s to view the status of your job.'
+           % tryjob.GetTrybotWaterfallLink()))
     sys.exit(0)
 
   elif (not options.buildbot and not options.remote_trybot
@@ -1832,5 +1878,7 @@ def main(argv):
                 completion_stages.MasterSlaveSyncCompletionStage,
                 '_FetchSlaveStatuses',
                 return_value=mock_statuses)
+
+    _SetupCidb(options, build_config)
 
     _RunBuildStagesWrapper(options, build_config)

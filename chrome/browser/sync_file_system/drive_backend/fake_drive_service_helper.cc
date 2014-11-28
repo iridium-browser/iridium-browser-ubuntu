@@ -5,7 +5,7 @@
 #include "chrome/browser/sync_file_system/drive_backend/fake_drive_service_helper.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -14,8 +14,8 @@
 #include "chrome/browser/sync_file_system/sync_status_code.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/gdata_wapi_parser.h"
+#include "storage/browser/fileapi/file_system_url.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/file_system_url.h"
 
 #define FPL(path) FILE_PATH_LITERAL(path)
 

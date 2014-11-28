@@ -21,42 +21,53 @@ static_library("extensions") {
 
   defines = []
 
-  # TODO(GYP) remove this when webrtc is ported.
-  configs += [ "//content:webrtc_stub_config" ]
-
   # Since browser and browser_extensions actually depend on each other,
   # we must omit the dependency from browser_extensions to browser.
   # However, this means browser_extensions and browser should more or less
   # have the same dependencies. Once browser_extensions is untangled from
   # browser, then we can clean up these dependencies.
+  public_deps = [
+    "//chrome/common/extensions/api",
+    "//content/public/browser",
+  ]
   deps = [
     "//chrome:extra_resources",
     "//chrome:resources",
     "//chrome:strings",
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:theme_resources",
+    "//chrome/browser/devtools",
     "//chrome/browser/history:in_memory_url_index_cache_proto",
-    "//chrome/browser/sync_file_system:sync_file_system_proto",
     "//chrome/common",
-    "//chrome/common/extensions/api",
+    "//chrome/common/extensions/api:api_registration",
     "//chrome/common/net",
     "//chrome/common/safe_browsing:proto",
+    "//chrome/installer/util",
+    "//components/copresence",
+    "//components/omaha_query_params",
     "//components/onc",
+    "//components/proximity_auth",
     "//components/strings",
     "//components/url_matcher",
-    "//content/public/browser",
+    "//content/app/resources",
     "//content/public/common",
     "//crypto",
+    "//device/bluetooth",
+    "//device/hid",
+    "//extensions/browser",
     "//extensions/common/api",
+    "//extensions/common/api:api_registration",
     "//extensions/strings",
     "//net",
     "//skia",
+    "//storage/common",
     "//sync",
     "//third_party/WebKit/public:resources",
     "//third_party/cacheinvalidation",
     "//third_party/icu",
     "//third_party/leveldatabase",
     "//third_party/re2",
+    "//third_party/webrtc/modules/desktop_capture",
     "//ui/accessibility:ax_gen",
     "//ui/base",
     "//ui/gfx",
@@ -64,21 +75,7 @@ static_library("extensions") {
     "//ui/resources",
     "//ui/strings",
     "//url",
-    "//webkit/browser:storage",
-    "//webkit/common:storage",
-    "//webkit/glue/resources",
-    #"debugger",  TODO(GYP)
-    #"installer_util",  TODO(GYP)
-    #"../components/components.gyp:omaha_query_params",  TODO(GYP)
-    #'../device/bluetooth/bluetooth.gyp:device_bluetooth',  TODO(GYP)
-    #"../device/hid/hid.gyp:device_hid",  TODO(GYP)
-    #"../extensions/extensions.gyp:extensions_browser",  TODO(GYP)
-    #"../third_party/webrtc/modules/modules.gyp:desktop_capture",  TODO(GYP)
-  ]
-
-  forward_dependent_configs_from = [
-    "//chrome/common/extensions/api",
-    "//content/public/browser",
+    "//storage/browser",
   ]
 
   if (is_chromeos) {
@@ -107,6 +104,11 @@ static_library("extensions") {
       "api/tabs/ash_panel_contents.h",
     ]
   }
+  if (!use_athena) {
+    sources += rebase_path(
+        gypi_values.chrome_browser_extensions_non_athena_sources,
+        ".", "//chrome")
+  }
 
   if (is_linux) {
     configs += [ "//build/config/linux:fontconfig" ]
@@ -116,6 +118,7 @@ static_library("extensions") {
         "//build/config/linux:x11",
       ]
       deps += [
+        "//ui/events:events_base",
         "//ui/events/platform",
         "//ui/events/platform/x11",
       ]
@@ -191,7 +194,10 @@ static_library("extensions") {
       "//third_party/isimpledom",
     ]
   } else if (!is_chromeos) {
-    sources += [ "api/system_display/display_info_provider_aura.cc" ]
+    sources += [
+      "display_info_provider_aura.cc",
+      "display_info_provider_aura.h",
+    ]
   }
 
   if (enable_app_list) {

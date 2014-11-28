@@ -41,6 +41,7 @@
 #include "core/loader/HistoryItem.h"
 #include "core/loader/MixedContentChecker.h"
 #include "platform/Timer.h"
+#include "platform/heap/Handle.h"
 #include "platform/network/ResourceRequest.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
@@ -48,32 +49,24 @@
 
 namespace blink {
 
-class Resource;
-class Chrome;
-class DOMWrapperWorld;
 class DocumentLoader;
-class Event;
 class FetchContext;
 class FormState;
-class FormSubmission;
+class Frame;
 class FrameLoaderClient;
-class IconController;
 class NavigationAction;
-class Page;
 class ProgressTracker;
 class ResourceError;
-class ResourceResponse;
-class SecurityOrigin;
 class SerializedScriptValue;
 class SubstituteData;
 
 struct FrameLoadRequest;
-struct WindowFeatures;
 
 bool isBackForwardLoadType(FrameLoadType);
 
-class FrameLoader {
+class FrameLoader FINAL {
     WTF_MAKE_NONCOPYABLE(FrameLoader);
+    DISALLOW_ALLOCATION();
 public:
     static ResourceRequest requestFromHistoryItem(HistoryItem*, ResourceRequestCachePolicy);
 
@@ -100,8 +93,11 @@ public:
     void stopAllLoaders();
     void stopLoading();
     bool closeURL();
+
     // FIXME: clear() is trying to do too many things. We should break it down into smaller functions.
     void clear();
+
+    void replaceDocumentWhileExecutingJavaScriptURL(const String& source, Document* ownerDocument);
 
     // Sets a timer to notify the client that the initial empty document has
     // been accessed, and thus it is no longer safe to show a provisional URL
@@ -112,8 +108,6 @@ public:
     // cancels the timer and immediately notifies the client in cases that
     // waiting to notify would allow a URL spoof.
     void notifyIfInitialDocumentAccessed();
-
-    bool isLoading() const;
 
     DocumentLoader* documentLoader() const { return m_documentLoader.get(); }
     DocumentLoader* policyDocumentLoader() const { return m_policyDocumentLoader.get(); }
@@ -155,7 +149,7 @@ public:
     void forceSandboxFlags(SandboxFlags flags) { m_forcedSandboxFlags |= flags; }
     SandboxFlags effectiveSandboxFlags() const;
 
-    LocalFrame* opener();
+    Frame* opener();
     void setOpener(LocalFrame*);
 
     void detachFromParent();
@@ -178,8 +172,6 @@ public:
 
     bool shouldClose();
 
-    void started();
-
     bool allowPlugins(ReasonForCallingAllowPlugins);
 
     void updateForSameDocumentNavigation(const KURL&, SameDocumentNavigationSource, PassRefPtr<SerializedScriptValue>, FrameLoadType);
@@ -189,6 +181,8 @@ public:
     void clearScrollPositionAndViewState();
 
     void restoreScrollPositionAndViewState();
+
+    void trace(Visitor*);
 
 private:
     bool allChildrenAreComplete() const; // immediate children, not all descendants
@@ -224,7 +218,7 @@ private:
 
     void scheduleCheckCompleted();
 
-    LocalFrame* m_frame;
+    RawPtrWillBeMember<LocalFrame> m_frame;
 
     // FIXME: These should be OwnPtr<T> to reduce build times and simplify
     // header dependencies unless performance testing proves otherwise.
@@ -232,7 +226,7 @@ private:
     mutable FrameLoaderStateMachine m_stateMachine;
     mutable MixedContentChecker m_mixedContentChecker;
 
-    OwnPtr<ProgressTracker> m_progressTracker;
+    OwnPtrWillBeMember<ProgressTracker> m_progressTracker;
 
     FrameState m_state;
     FrameLoadType m_loadType;
@@ -244,7 +238,7 @@ private:
     RefPtr<DocumentLoader> m_documentLoader;
     RefPtr<DocumentLoader> m_provisionalDocumentLoader;
     RefPtr<DocumentLoader> m_policyDocumentLoader;
-    OwnPtr<FetchContext> m_fetchContext;
+    OwnPtrWillBeMember<FetchContext> m_fetchContext;
 
     RefPtr<HistoryItem> m_currentItem;
     RefPtr<HistoryItem> m_provisionalItem;
@@ -268,17 +262,12 @@ private:
 
     bool m_inStopAllLoaders;
 
-    // FIXME: This is only used in checkCompleted(). Figure out a way to disentangle it.
-    bool m_isComplete;
-
     Timer<FrameLoader> m_checkTimer;
 
     bool m_didAccessInitialDocument;
     Timer<FrameLoader> m_didAccessInitialDocumentTimer;
 
     SandboxFlags m_forcedSandboxFlags;
-
-    bool m_willDetachClient;
 };
 
 } // namespace blink

@@ -29,7 +29,7 @@
       "name": "vs_addin",
       "recommended": "no",
       "repath": "vs_addin",
-      "revision": 1573,
+      "revision": 1578,
       "stability": "dev",
       "version": 0
     },
@@ -201,6 +201,16 @@
       "revision": 0,
       "stability": "post_stable",
       "version": 37
+    },
+    {
+      "archives": [],
+      "description": "Chrome 38 bundle, revision xxxxx",
+      "name": "pepper_38",
+      "recommended": "no",
+      "repath": "pepper_38",
+      "revision": 0,
+      "stability": "post_stable",
+      "version": 38
     },
     {
       "archives": [],

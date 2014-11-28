@@ -27,7 +27,7 @@ namespace content {
 void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         int page_id,
                         const GURL& url,
-                        PageTransition transition) {
+                        ui::PageTransition transition) {
   params->page_id = page_id;
   params->url = url;
   params->referrer = Referrer();
@@ -55,6 +55,10 @@ TestRenderWidgetHostView::~TestRenderWidgetHostView() {
 
 RenderWidgetHost* TestRenderWidgetHostView::GetRenderWidgetHost() const {
   return NULL;
+}
+
+gfx::Vector2dF TestRenderWidgetHostView::GetLastScrollOffset() const {
+  return gfx::Vector2dF();
 }
 
 gfx::NativeView TestRenderWidgetHostView::GetNativeView() const {
@@ -107,7 +111,7 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
 void TestRenderWidgetHostView::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    const base::Callback<void(bool, const SkBitmap&)>& callback,
+    CopyFromCompositingSurfaceCallback& callback,
     const SkColorType color_type) {
   callback.Run(false, SkBitmap());
 }
@@ -268,7 +272,7 @@ void TestRenderViewHost::SendFailedNavigate(int page_id, const GURL& url) {
 void TestRenderViewHost::SendNavigateWithTransition(
     int page_id,
     const GURL& url,
-    PageTransition transition) {
+    ui::PageTransition transition) {
   main_render_frame_host_->SendNavigateWithTransition(page_id, url, transition);
 }
 
@@ -295,7 +299,7 @@ void TestRenderViewHost::SendNavigateWithParams(
 void TestRenderViewHost::SendNavigateWithTransitionAndResponseCode(
     int page_id,
     const GURL& url,
-    PageTransition transition,
+    ui::PageTransition transition,
     int response_code) {
   main_render_frame_host_->SendNavigateWithTransitionAndResponseCode(
       page_id, url, transition, response_code);
@@ -304,7 +308,7 @@ void TestRenderViewHost::SendNavigateWithTransitionAndResponseCode(
 void TestRenderViewHost::SendNavigateWithParameters(
     int page_id,
     const GURL& url,
-    PageTransition transition,
+    ui::PageTransition transition,
     const GURL& original_request_url,
     int response_code,
     const base::FilePath* file_path_for_history_item) {
@@ -346,9 +350,9 @@ void TestRenderViewHost::TestOnStartDragging(
 }
 
 void TestRenderViewHost::TestOnUpdateStateWithFile(
-    int process_id,
+    int page_id,
     const base::FilePath& file_path) {
-  OnUpdateState(process_id,
+  OnUpdateState(page_id,
                 PageState::CreateForTesting(GURL("http://www.google.com"),
                                             false,
                                             "data",

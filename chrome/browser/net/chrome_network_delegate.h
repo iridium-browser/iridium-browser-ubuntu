@@ -38,12 +38,13 @@ class Predictor;
 namespace data_reduction_proxy {
 class DataReductionProxyAuthRequestHandler;
 class DataReductionProxyParams;
+class DataReductionProxyStatisticsPrefs;
 class DataReductionProxyUsageStats;
 }
 
 namespace domain_reliability {
 class DomainReliabilityMonitor;
-}  // namespace domain_reliability
+}
 
 namespace extensions {
 class EventRouterForwarder;
@@ -166,6 +167,14 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
     data_reduction_proxy_auth_request_handler_ = handler;
   }
 
+  // |data_reduction_proxy_statistics_prefs_| must outlive this
+  // ChromeNetworkDelegate.
+  void set_data_reduction_proxy_statistics_prefs(
+      data_reduction_proxy::DataReductionProxyStatisticsPrefs*
+          statistics_prefs) {
+    data_reduction_proxy_statistics_prefs_ = statistics_prefs;
+  }
+
   void set_on_resolve_proxy_handler(OnResolveProxyHandler handler) {
     on_resolve_proxy_handler_ = handler;
   }
@@ -261,6 +270,10 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   virtual int OnBeforeSocketStreamConnect(
       net::SocketStream* stream,
       const net::CompletionCallback& callback) OVERRIDE;
+  virtual bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
+      const net::URLRequest& request,
+      const GURL& target_url,
+      const GURL& referrer_url) const OVERRIDE;
 
   void AccumulateContentLength(
       int64 received_payload_byte_count,
@@ -318,7 +331,9 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   data_reduction_proxy::DataReductionProxyUsageStats*
       data_reduction_proxy_usage_stats_;
   data_reduction_proxy::DataReductionProxyAuthRequestHandler*
-  data_reduction_proxy_auth_request_handler_;
+      data_reduction_proxy_auth_request_handler_;
+  data_reduction_proxy::DataReductionProxyStatisticsPrefs*
+      data_reduction_proxy_statistics_prefs_;
 
   OnResolveProxyHandler on_resolve_proxy_handler_;
   ProxyConfigGetter proxy_config_getter_;

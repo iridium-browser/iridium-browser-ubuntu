@@ -8,9 +8,11 @@
 #include "modules/EventModules.h"
 #include "modules/serviceworkers/Request.h"
 #include "modules/serviceworkers/RespondWithObserver.h"
+#include "platform/heap/Handle.h"
 
 namespace blink {
 
+class ExceptionState;
 class ExecutionContext;
 class Request;
 class RespondWithObserver;
@@ -19,15 +21,15 @@ class RespondWithObserver;
 // context. RespondWithObserver can be used to notify the client about the
 // service worker's response.
 class FetchEvent FINAL : public Event {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<FetchEvent> create();
-    static PassRefPtrWillBeRawPtr<FetchEvent> create(PassRefPtr<RespondWithObserver>, PassRefPtrWillBeRawPtr<Request>);
-    virtual ~FetchEvent() { }
+    static PassRefPtrWillBeRawPtr<FetchEvent> create(RespondWithObserver*, Request*);
 
-    PassRefPtrWillBeRawPtr<Request> request() const;
+    Request* request() const;
     bool isReload() const;
 
-    void respondWith(ScriptState*, const ScriptValue&);
+    void respondWith(ScriptState*, const ScriptValue&, ExceptionState&);
 
     virtual const AtomicString& interfaceName() const OVERRIDE;
 
@@ -37,11 +39,11 @@ public:
 
 protected:
     FetchEvent();
-    FetchEvent(PassRefPtr<RespondWithObserver>, PassRefPtrWillBeRawPtr<Request>);
+    FetchEvent(RespondWithObserver*, Request*);
 
 private:
-    RefPtr<RespondWithObserver> m_observer;
-    RefPtrWillBeMember<Request> m_request;
+    PersistentWillBeMember<RespondWithObserver> m_observer;
+    PersistentWillBeMember<Request> m_request;
     bool m_isReload;
 };
 

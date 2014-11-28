@@ -36,8 +36,8 @@ GpuScheduler::GpuScheduler(CommandBufferServiceBase* command_buffer,
       decoder_(decoder),
       unscheduled_count_(0),
       rescheduled_count_(0),
-      reschedule_task_factory_(this),
-      was_preempted_(false) {}
+      was_preempted_(false),
+      reschedule_task_factory_(this) {}
 
 GpuScheduler::~GpuScheduler() {
 }
@@ -78,7 +78,7 @@ void GpuScheduler::PutChanged() {
     DCHECK(IsScheduled());
     DCHECK(unschedule_fences_.empty());
 
-    error = parser_->ProcessCommand();
+    error = parser_->ProcessCommands(CommandParser::kParseCommandsSlice);
 
     if (error == error::kDeferCommandUntilLater) {
       DCHECK_GT(unscheduled_count_, 0);
@@ -91,8 +91,6 @@ void GpuScheduler::PutChanged() {
     command_buffer_->SetGetOffset(static_cast<int32>(parser_->get()));
 
     if (error::IsError(error)) {
-      LOG(ERROR) << "[" << decoder_ << "] "
-                 << "GPU PARSE ERROR: " << error;
       command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
       command_buffer_->SetParseError(error);
       break;
@@ -192,7 +190,7 @@ void GpuScheduler::set_token(int32 token) {
 bool GpuScheduler::SetGetBuffer(int32 transfer_buffer_id) {
   scoped_refptr<Buffer> ring_buffer =
       command_buffer_->GetTransferBuffer(transfer_buffer_id);
-  if (!ring_buffer) {
+  if (!ring_buffer.get()) {
     return false;
   }
 

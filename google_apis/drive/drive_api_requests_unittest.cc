@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/message_loop/message_loop.h"
@@ -569,7 +569,7 @@ TEST_F(DriveApiRequestsTest, AboutGetRequest_ValidJson) {
 TEST_F(DriveApiRequestsTest, AboutGetRequest_InvalidJson) {
   // Set an expected data file containing invalid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "gdata/testfile.txt");
+      "drive/testfile.txt");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;

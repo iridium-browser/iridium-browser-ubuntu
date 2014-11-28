@@ -28,6 +28,8 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -43,9 +45,6 @@
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -296,7 +295,7 @@ ExtensionDisabledGlobalError::GetBubbleViewMessages() {
   std::vector<base::string16> messages;
   std::vector<base::string16> permission_warnings =
       extensions::PermissionMessageProvider::Get()->GetWarningMessages(
-          extension_->permissions_data()->active_permissions(),
+          extension_->permissions_data()->active_permissions().get(),
           extension_->GetType());
   if (is_remote_install_) {
     messages.push_back(l10n_util::GetStringFUTF16(

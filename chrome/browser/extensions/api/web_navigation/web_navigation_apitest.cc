@@ -42,6 +42,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/switches.h"
+#include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
@@ -191,7 +192,7 @@ class DelayLoadStartAndExecuteJavascript
   virtual void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& url,
-      content::PageTransition transition_type) OVERRIDE {
+      ui::PageTransition transition_type) OVERRIDE {
     if (script_was_executed_ && EndsWith(url.spec(), until_url_suffix_, true)) {
       content::WebContentsObserver::Observe(NULL);
       test_navigation_listener_->ResumeAll();
@@ -230,16 +231,12 @@ class TestResourceDispatcherHostDelegate
       content::ResourceContext* resource_context,
       content::AppCacheService* appcache_service,
       ResourceType resource_type,
-      int child_id,
-      int route_id,
       ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE {
     ChromeResourceDispatcherHostDelegate::RequestBeginning(
         request,
         resource_context,
         appcache_service,
         resource_type,
-        child_id,
-        route_id,
         throttles);
     content::ResourceThrottle* throttle =
         test_navigation_listener_->CreateResourceThrottle(request->url(),
@@ -487,7 +484,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlank) {
   GURL url = embedded_test_server()->GetURL(
       "/extensions/api_test/webnavigation/targetBlank/a.html");
 
-  chrome::NavigateParams params(browser(), url, content::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
   ui_test_utils::NavigateToURL(&params);
 
   // There's a link with target=_blank on a.html. Click on it to open it in a

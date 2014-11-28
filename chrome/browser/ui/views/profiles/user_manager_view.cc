@@ -9,10 +9,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/views/auto_keep_alive.h"
 #include "chrome/grit/chromium_strings.h"
 #include "content/public/browser/web_contents.h"
@@ -32,46 +34,24 @@
 
 namespace {
 
-// Default window size.
-const int kWindowWidth = 900;
-const int kWindowHeight = 700;
+// An open User Manager window. There can only be one open at a time. This
+// is reset to NULL when the window is closed.
+UserManagerView* instance_ = NULL;
 
-}
+} // namespace
 
-namespace chrome {
+// UserManager -----------------------------------------------------------------
 
-// Declared in browser_dialogs.h so others don't have to depend on this header.
-void ShowUserManager(const base::FilePath& profile_path_to_focus) {
-  UserManagerView::Show(
-      profile_path_to_focus, profiles::USER_MANAGER_NO_TUTORIAL);
-}
-
-void ShowUserManagerWithTutorial(profiles::UserManagerTutorialMode tutorial) {
-  UserManagerView::Show(base::FilePath(), tutorial);
-}
-
-void HideUserManager() {
-  UserManagerView::Hide();
-}
-
-}  // namespace chrome
-
-// static
-UserManagerView* UserManagerView::instance_ = NULL;
-
-UserManagerView::UserManagerView()
-    : web_view_(NULL),
-      keep_alive_(new AutoKeepAlive(NULL)) {
-}
-
-UserManagerView::~UserManagerView() {
-}
-
-// static
-void UserManagerView::Show(const base::FilePath& profile_path_to_focus,
-                           profiles::UserManagerTutorialMode tutorial_mode) {
+void UserManager::Show(
+    const base::FilePath& profile_path_to_focus,
+    profiles::UserManagerTutorialMode tutorial_mode,
+    profiles::UserManagerProfileSelected profile_open_action) {
   ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::OPEN_USER_MANAGER);
   if (instance_) {
+    // If we are showing the User Manager after locking a profile, change the
+    // active profile to Guest.
+    profiles::SetActiveProfileToGuestIfLocked();
+
     // If there's a user manager window open already, just activate it.
     instance_->GetWidget()->Activate();
     return;
@@ -82,20 +62,29 @@ void UserManagerView::Show(const base::FilePath& profile_path_to_focus,
   profiles::CreateGuestProfileForUserManager(
       profile_path_to_focus,
       tutorial_mode,
+      profile_open_action,
       base::Bind(&UserManagerView::OnGuestProfileCreated,
                  base::Passed(make_scoped_ptr(new UserManagerView)),
                  profile_path_to_focus));
 }
 
-// static
-void UserManagerView::Hide() {
+void UserManager::Hide() {
   if (instance_)
     instance_->GetWidget()->Close();
 }
 
-// static
-bool UserManagerView::IsShowing() {
+bool UserManager::IsShowing() {
   return instance_ ? instance_->GetWidget()->IsActive() : false;
+}
+
+// UserManagerView -------------------------------------------------------------
+
+UserManagerView::UserManagerView()
+    : web_view_(NULL),
+      keep_alive_(new AutoKeepAlive(NULL)) {
+}
+
+UserManagerView::~UserManagerView() {
 }
 
 // static
@@ -104,6 +93,11 @@ void UserManagerView::OnGuestProfileCreated(
     const base::FilePath& profile_path_to_focus,
     Profile* guest_profile,
     const std::string& url) {
+  // If we are showing the User Manager after locking a profile, change the
+  // active profile to Guest.
+  profiles::SetActiveProfileToGuestIfLocked();
+
+  DCHECK(!instance_);
   instance_ = instance.release();  // |instance_| takes over ownership.
   instance_->Init(profile_path_to_focus, guest_profile, GURL(url));
 }
@@ -141,7 +135,8 @@ void UserManagerView::Init(
                 browser->window()->GetNativeWindow())->GetNativeView();
         bounds = gfx::Screen::GetScreenFor(native_view)->
             GetDisplayNearestWindow(native_view).work_area();
-        bounds.ClampToCenteredSize(gfx::Size(kWindowWidth, kWindowHeight));
+        bounds.ClampToCenteredSize(gfx::Size(UserManager::kWindowWidth,
+                                             UserManager::kWindowHeight));
       }
     }
   }
@@ -175,7 +170,7 @@ bool UserManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 }
 
 gfx::Size UserManagerView::GetPreferredSize() const {
-  return gfx::Size(kWindowWidth, kWindowHeight);
+  return gfx::Size(UserManager::kWindowWidth, UserManager::kWindowHeight);
 }
 
 bool UserManagerView::CanResize() const {
@@ -183,6 +178,10 @@ bool UserManagerView::CanResize() const {
 }
 
 bool UserManagerView::CanMaximize() const {
+  return true;
+}
+
+bool UserManagerView::CanMinimize() const {
   return true;
 }
 

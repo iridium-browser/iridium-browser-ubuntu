@@ -14,11 +14,12 @@
 
 #include <stdio.h>
 
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/mem.h>
 
 
-static int test_overflow() {
+static int test_overflow(void) {
   unsigned i;
 
   for (i = 0; i < ERR_NUM_ERRORS*2; i++) {
@@ -40,7 +41,7 @@ static int test_overflow() {
   return 1;
 }
 
-static int test_put_error() {
+static int test_put_error(void) {
   uint32_t packed_error;
   int line, flags;
   const char *file;
@@ -72,7 +73,7 @@ static int test_put_error() {
   return 1;
 }
 
-static int test_clear_error() {
+static int test_clear_error(void) {
   if (ERR_get_error() != 0) {
     fprintf(stderr, "ERR_get_error returned value before an error was added.\n");
     return 0;
@@ -89,7 +90,7 @@ static int test_clear_error() {
   return 1;
 }
 
-static int test_print() {
+static int test_print(void) {
   size_t i;
   char buf[256];
   uint32_t packed_error;
@@ -105,11 +106,20 @@ static int test_print() {
   return 1;
 }
 
-int main() {
+static int test_release(void) {
+  ERR_put_error(1, 2, 3, "test", 4);
+  ERR_remove_thread_state(NULL);
+  return 1;
+}
+
+int main(void) {
+  CRYPTO_library_init();
+
   if (!test_overflow() ||
       !test_put_error() ||
       !test_clear_error() ||
-      !test_print()) {
+      !test_print() ||
+      !test_release()) {
     return 1;
   }
 

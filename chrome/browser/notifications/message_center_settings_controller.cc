@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
@@ -29,6 +28,7 @@
 #include "chrome/common/extensions/api/notifications.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/favicon_base/favicon_types.h"
+#include "components/history/core/browser/history_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/event_router.h"
@@ -37,11 +37,11 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/message_center/message_center_style.h"
+#include "ui/strings/grit/ui_strings.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/system/system_notifier.h"

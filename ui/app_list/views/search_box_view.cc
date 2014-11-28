@@ -6,8 +6,8 @@
 
 #include <algorithm>
 
-#include "grit/ui_resources.h"
 #include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/app_list_view_delegate.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/speech_ui_model.h"
@@ -15,29 +15,63 @@
 #include "ui/app_list/views/search_box_view_delegate.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event.h"
+#include "ui/gfx/canvas.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/layout/box_layout.h"
 
 namespace app_list {
 
 namespace {
 
 const int kPadding = 14;
-const int kIconDimension = 32;
 const int kPreferredWidth = 360;
 const int kPreferredHeight = 48;
-#if !defined(OS_CHROMEOS)
-const int kMenuButtonDimension = 29;
-#endif
 
 const SkColor kHintTextColor = SkColorSetRGB(0xA0, 0xA0, 0xA0);
 
 // Menu offset relative to the bottom-right corner of the menu button.
 const int kMenuYOffsetFromButton = -4;
 const int kMenuXOffsetFromButton = -7;
+
+const int kBackgroundBorderWidth = 1;
+const int kBackgroundBorderBottomWidth = 1;
+const int kBackgroundBorderCornerRadius = 2;
+const SkColor kBackgroundBorderColor = SkColorSetRGB(0xEE, 0xEE, 0xEE);
+const SkColor kBackgroundBorderBottomColor = SkColorSetRGB(0xCC, 0xCC, 0xCC);
+
+// A background that paints a solid white rounded rect with a thin grey border.
+class SearchBoxBackground : public views::Background {
+ public:
+  SearchBoxBackground() {}
+  virtual ~SearchBoxBackground() {}
+
+ private:
+  // views::Background overrides:
+  virtual void Paint(gfx::Canvas* canvas, views::View* view) const OVERRIDE {
+    gfx::Rect bounds = view->GetContentsBounds();
+
+    SkPaint paint;
+    paint.setFlags(SkPaint::kAntiAlias_Flag);
+    paint.setColor(kBackgroundBorderColor);
+    canvas->DrawRoundRect(bounds, kBackgroundBorderCornerRadius, paint);
+    bounds.Inset(kBackgroundBorderWidth,
+                 kBackgroundBorderWidth,
+                 kBackgroundBorderWidth,
+                 0);
+    paint.setColor(kBackgroundBorderBottomColor);
+    canvas->DrawRoundRect(bounds, kBackgroundBorderCornerRadius, paint);
+    bounds.Inset(0, 0, 0, kBackgroundBorderBottomWidth);
+    paint.setColor(SK_ColorWHITE);
+    canvas->DrawRoundRect(bounds, kBackgroundBorderCornerRadius, paint);
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(SearchBoxBackground);
+};
 
 }  // namespace
 
@@ -46,13 +80,35 @@ SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate,
     : delegate_(delegate),
       view_delegate_(view_delegate),
       model_(NULL),
-      icon_view_(new views::ImageView),
+      icon_view_(NULL),
       speech_button_(NULL),
       search_box_(new views::Textfield),
       contents_view_(NULL) {
-  AddChildView(icon_view_);
+  if (switches::IsExperimentalAppListEnabled()) {
+    set_background(new SearchBoxBackground());
+  } else {
+    icon_view_ = new views::ImageView;
+    AddChildView(icon_view_);
+  }
+
+  views::BoxLayout* layout =
+      new views::BoxLayout(views::BoxLayout::kHorizontal,
+                           kPadding,
+                           0,
+                           kPadding - views::Textfield::kTextPadding);
+  SetLayoutManager(layout);
+  layout->set_cross_axis_alignment(
+      views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
+  layout->set_minimum_cross_axis_size(kPreferredHeight);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
+  search_box_->SetBorder(views::Border::NullBorder());
+  search_box_->SetFontList(rb.GetFontList(ui::ResourceBundle::MediumFont));
+  search_box_->set_placeholder_text_color(kHintTextColor);
+  search_box_->set_controller(this);
+  AddChildView(search_box_);
+  layout->SetFlexForView(search_box_, 1);
 
 #if !defined(OS_CHROMEOS)
   menu_button_ = new views::MenuButton(NULL, base::string16(), this, false);
@@ -65,12 +121,6 @@ SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate,
                          *rb.GetImageSkiaNamed(IDR_APP_LIST_TOOLS_PRESSED));
   AddChildView(menu_button_);
 #endif
-
-  search_box_->SetBorder(views::Border::NullBorder());
-  search_box_->SetFontList(rb.GetFontList(ui::ResourceBundle::MediumFont));
-  search_box_->set_placeholder_text_color(kHintTextColor);
-  search_box_->set_controller(this);
-  AddChildView(search_box_);
 
   view_delegate_->GetSpeechUI()->AddObserver(this);
   ModelChanged();
@@ -112,50 +162,6 @@ void SearchBoxView::InvalidateMenu() {
 
 gfx::Size SearchBoxView::GetPreferredSize() const {
   return gfx::Size(kPreferredWidth, kPreferredHeight);
-}
-
-void SearchBoxView::Layout() {
-  gfx::Rect rect(GetContentsBounds());
-  if (rect.IsEmpty())
-    return;
-
-  gfx::Rect icon_frame(rect);
-  icon_frame.set_width(kIconDimension + 2 * kPadding);
-  icon_view_->SetBoundsRect(icon_frame);
-
-  // Places |speech_button_| if exists. |speech_button_frame| holds its bounds
-  // to calculate the search box bounds.
-  gfx::Rect speech_button_frame;
-  if (speech_button_) {
-    speech_button_frame = icon_frame;
-    speech_button_frame.set_x(rect.right() - icon_frame.width());
-    gfx::Size button_size = speech_button_->GetPreferredSize();
-    gfx::Point button_origin = speech_button_frame.CenterPoint();
-    button_origin.Offset(-button_size.width() / 2, -button_size.height() / 2);
-    speech_button_->SetBoundsRect(gfx::Rect(button_origin, button_size));
-  }
-
-  gfx::Rect menu_button_frame(rect);
-#if !defined(OS_CHROMEOS)
-  menu_button_frame.set_width(kMenuButtonDimension);
-  menu_button_frame.set_x(rect.right() - menu_button_frame.width() - kPadding);
-  menu_button_frame.ClampToCenteredSize(gfx::Size(menu_button_frame.width(),
-                                                  kMenuButtonDimension));
-  menu_button_->SetBoundsRect(menu_button_frame);
-#else
-  menu_button_frame.set_width(0);
-#endif
-
-  gfx::Rect edit_frame(rect);
-  edit_frame.set_x(icon_frame.right());
-  int edit_frame_width =
-      rect.width() - icon_frame.width() - kPadding - menu_button_frame.width();
-  if (!speech_button_frame.IsEmpty())
-    edit_frame_width -= speech_button_frame.width() + kPadding;
-  edit_frame.set_width(edit_frame_width);
-  edit_frame.ClampToCenteredSize(
-      gfx::Size(edit_frame.width(), search_box_->GetPreferredSize().height()));
-  search_box_->SetBoundsRect(edit_frame);
 }
 
 bool SearchBoxView::OnMouseWheel(const ui::MouseWheelEvent& event) {
@@ -211,7 +217,8 @@ void SearchBoxView::OnMenuButtonClicked(View* source, const gfx::Point& point) {
 }
 
 void SearchBoxView::IconChanged() {
-  icon_view_->SetImage(model_->search_box()->icon());
+  if (icon_view_)
+    icon_view_->SetImage(model_->search_box()->icon());
 }
 
 void SearchBoxView::SpeechRecognitionButtonPropChanged() {

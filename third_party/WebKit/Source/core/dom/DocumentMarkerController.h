@@ -38,8 +38,20 @@ namespace blink {
 class LayoutPoint;
 class LayoutRect;
 class Node;
+class Position;
 class Range;
 class RenderedDocumentMarker;
+class Text;
+class TextIterator;
+
+class MarkerRemoverPredicate FINAL {
+public:
+    explicit MarkerRemoverPredicate(const Vector<String>& words);
+    bool operator()(const DocumentMarker&, const Text&) const;
+
+private:
+    Vector<String> m_words;
+};
 
 class DocumentMarkerController FINAL : public NoBaseWillBeGarbageCollected<DocumentMarkerController> {
     WTF_MAKE_NONCOPYABLE(DocumentMarkerController); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
@@ -49,9 +61,8 @@ public:
     DocumentMarkerController();
 
     void clear();
-    void addMarker(Range*, DocumentMarker::MarkerType);
-    void addMarker(Range*, DocumentMarker::MarkerType, const String& description);
-    void addMarker(Range*, DocumentMarker::MarkerType, const String& description, uint32_t hash);
+    void addMarker(Range*, DocumentMarker::MarkerType, const String& description = emptyString(), uint32_t hash = 0);
+    void addMarker(const Position& start, const Position& end, DocumentMarker::MarkerType, const String& description = emptyString(), uint32_t hash = 0);
     void addTextMatchMarker(const Range*, bool activeMatch);
 
     void copyMarkers(Node* srcNode, unsigned startOffset, int length, Node* dstNode, int delta);
@@ -63,10 +74,12 @@ public:
     // the portion that is outside of the range.
     enum RemovePartiallyOverlappingMarkerOrNot { DoNotRemovePartiallyOverlappingMarker, RemovePartiallyOverlappingMarker };
     void removeMarkers(Range*, DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers(), RemovePartiallyOverlappingMarkerOrNot = DoNotRemovePartiallyOverlappingMarker);
+    void removeMarkers(const Position& start, const Position& end, DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers(), RemovePartiallyOverlappingMarkerOrNot = DoNotRemovePartiallyOverlappingMarker);
     void removeMarkers(Node*, unsigned startOffset, int length, DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers(),  RemovePartiallyOverlappingMarkerOrNot = DoNotRemovePartiallyOverlappingMarker);
 
     void removeMarkers(DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers());
     void removeMarkers(Node*, DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers());
+    void removeMarkers(const MarkerRemoverPredicate& shouldRemoveMarker);
     void repaintMarkers(DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers());
     void invalidateRenderedRectsForMarkersInRect(const LayoutRect&);
     void shiftMarkers(Node*, unsigned startOffset, int delta);
@@ -94,6 +107,7 @@ private:
     void mergeOverlapping(MarkerList*, DocumentMarker&);
     bool possiblyHasMarkers(DocumentMarker::MarkerTypes);
     void removeMarkersFromList(MarkerMap::iterator, DocumentMarker::MarkerTypes);
+    void removeMarkers(TextIterator&, DocumentMarker::MarkerTypes, RemovePartiallyOverlappingMarkerOrNot);
 
     MarkerMap m_markers;
     // Provide a quick way to determine whether a particular marker type is absent without going through the map.

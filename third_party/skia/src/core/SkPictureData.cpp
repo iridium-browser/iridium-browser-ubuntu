@@ -10,6 +10,7 @@
 #include "SkPictureData.h"
 #include "SkPictureRecord.h"
 #include "SkReadBuffer.h"
+#include "SkTextBlob.h"
 #include "SkTypeface.h"
 #include "SkTSort.h"
 #include "SkWriteBuffer.h"
@@ -29,7 +30,7 @@ SkPictureData::SkPictureData(const SkPictInfo& info)
 
 void SkPictureData::initForPlayback() const {
     // ensure that the paths bounds are pre-computed
-    if (NULL != fPathHeap.get()) {
+    if (fPathHeap.get()) {
         for (int i = 0; i < fPathHeap->count(); i++) {
             (*fPathHeap.get())[i].updateBoundsCache();
         }
@@ -52,7 +53,7 @@ SkPictureData::SkPictureData(const SkPictureRecord& record,
     SkSafeRef(fStateTree);
     fContentInfo.set(record.fContentInfo);
 
-    if (NULL != fBoundingHierarchy) {
+    if (fBoundingHierarchy) {
         fBoundingHierarchy->flushDeferredInserts();
     }
 
@@ -74,6 +75,16 @@ SkPictureData::SkPictureData(const SkPictureRecord& record,
         for (int i = 0; i < fPictureCount; i++) {
             fPictureRefs[i] = pictures[i];
             fPictureRefs[i]->ref();
+        }
+    }
+
+    // templatize to consolidate with similar picture logic?
+    const SkTDArray<const SkTextBlob*>& blobs = record.getTextBlobRefs();
+    fTextBlobCount = blobs.count();
+    if (fTextBlobCount > 0) {
+        fTextBlobRefs = SkNEW_ARRAY(const SkTextBlob*, fTextBlobCount);
+        for (int i = 0; i < fTextBlobCount; ++i) {
+            fTextBlobRefs[i] = SkRef(blobs[i]);
         }
     }
 }
@@ -139,6 +150,8 @@ void SkPictureData::init() {
     fPaints = NULL;
     fPictureRefs = NULL;
     fPictureCount = 0;
+    fTextBlobRefs = NULL;
+    fTextBlobCount = 0;
     fOpData = NULL;
     fFactoryPlayback = NULL;
     fBoundingHierarchy = NULL;
@@ -157,6 +170,11 @@ SkPictureData::~SkPictureData() {
         fPictureRefs[i]->unref();
     }
     SkDELETE_ARRAY(fPictureRefs);
+
+    for (int i = 0; i < fTextBlobCount; i++) {
+        fTextBlobRefs[i]->unref();
+    }
+    SkDELETE_ARRAY(fTextBlobRefs);
 
     SkDELETE(fFactoryPlayback);
 }
@@ -268,6 +286,13 @@ void SkPictureData::flattenToBuffer(SkWriteBuffer& buffer) const {
         write_tag_size(buffer, SK_PICT_PATH_BUFFER_TAG, n);
         fPathHeap->flatten(buffer);
     }
+
+    if (fTextBlobCount > 0) {
+        write_tag_size(buffer, SK_PICT_TEXTBLOB_BUFFER_TAG, fTextBlobCount);
+        for (i = 0; i  < fTextBlobCount; ++i) {
+            fTextBlobRefs[i]->flatten(buffer);
+        }
+    }
 }
 
 void SkPictureData::serialize(SkWStream* stream,
@@ -365,14 +390,13 @@ bool SkPictureData::parseStreamTag(SkStream* stream,
     SkDEBUGCODE(bool haveBuffer = false;)
 
     switch (tag) {
-        case SK_PICT_READER_TAG: {
-            SkAutoMalloc storage(size);
-            if (stream->read(storage.get(), size) != size) {
+        case SK_PICT_READER_TAG:
+            SkASSERT(NULL == fOpData);
+            fOpData = SkData::NewFromStream(stream, size);
+            if (!fOpData) {
                 return false;
             }
-            SkASSERT(NULL == fOpData);
-            fOpData = SkData::NewFromMalloc(storage.detach(), size);
-        } break;
+            break;
         case SK_PICT_FACTORY_TAG: {
             SkASSERT(!haveBuffer);
         // Remove this code when v21 and below are no longer supported. At the
@@ -485,14 +509,41 @@ bool SkPictureData::parseBufferTag(SkReadBuffer& buffer,
                 fPathHeap.reset(SkNEW_ARGS(SkPathHeap, (buffer)));
             }
             break;
+        case SK_PICT_TEXTBLOB_BUFFER_TAG: {
+            if (!buffer.validate((0 == fTextBlobCount) && (NULL == fTextBlobRefs))) {
+                return false;
+            }
+            fTextBlobCount = size;
+            fTextBlobRefs = SkNEW_ARRAY(const SkTextBlob*, fTextBlobCount);
+            bool success = true;
+            int i = 0;
+            for ( ; i < fTextBlobCount; i++) {
+                fTextBlobRefs[i] = SkTextBlob::CreateFromBuffer(buffer);
+                if (NULL == fTextBlobRefs[i]) {
+                    success = false;
+                    break;
+                }
+            }
+            if (!success) {
+                // Delete all of the blobs that were already created (up to but excluding i):
+                for (int j = 0; j < i; j++) {
+                    fTextBlobRefs[j]->unref();
+                }
+                // Delete the array
+                SkDELETE_ARRAY(fTextBlobRefs);
+                fTextBlobRefs = NULL;
+                fTextBlobCount = 0;
+                return false;
+            }
+        } break;
         case SK_PICT_READER_TAG: {
-            SkAutoMalloc storage(size);
-            if (!buffer.readByteArray(storage.get(), size) ||
+            SkAutoDataUnref data(SkData::NewUninitialized(size));
+            if (!buffer.readByteArray(data->writable_data(), size) ||
                 !buffer.validate(NULL == fOpData)) {
                 return false;
             }
             SkASSERT(NULL == fOpData);
-            fOpData = SkData::NewFromMalloc(storage.detach(), size);
+            fOpData = data.detach();
         } break;
         case SK_PICT_PICTURE_TAG: {
             if (!buffer.validate((0 == fPictureCount) && (NULL == fPictureRefs))) {
@@ -583,20 +634,13 @@ bool SkPictureData::parseBuffer(SkReadBuffer& buffer) {
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-const SkPicture::OperationList* SkPictureData::getActiveOps(const SkIRect& query) const {
+const SkPicture::OperationList* SkPictureData::getActiveOps(const SkRect& query) const {
     if (NULL == fStateTree || NULL == fBoundingHierarchy) {
         return NULL;
     }
 
     SkPicture::OperationList* activeOps = SkNEW(SkPicture::OperationList);
-
     fBoundingHierarchy->search(query, &(activeOps->fOps));
-    if (0 != activeOps->fOps.count()) {
-        SkTQSort<SkPictureStateTree::Draw>(
-            reinterpret_cast<SkPictureStateTree::Draw**>(activeOps->fOps.begin()),
-            reinterpret_cast<SkPictureStateTree::Draw**>(activeOps->fOps.end()-1));
-    }
-
     return activeOps;
 }
 

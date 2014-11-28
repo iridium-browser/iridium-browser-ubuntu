@@ -46,6 +46,7 @@ class ExceptionState;
 class SampledEffect;
 
 class Animation FINAL : public AnimationNode {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum Priority { DefaultPriority, TransitionPriority };
 
@@ -73,9 +74,10 @@ public:
     void notifyElementDestroyed();
 #endif
 
-    bool isCandidateForAnimationOnCompositor() const;
+    bool isCandidateForAnimationOnCompositor(double playerPlaybackRate) const;
     // Must only be called once.
-    bool maybeStartAnimationOnCompositor(double startTime);
+    bool maybeStartAnimationOnCompositor(double startTime, double timeOffset);
+    bool maybeStartAnimationOnCompositor(double startTime, double timeOffset, double playerPlaybackRate);
     bool hasActiveAnimationsOnCompositor() const;
     bool hasActiveAnimationsOnCompositor(CSSPropertyID) const;
     void cancelAnimationOnCompositor();
@@ -110,4 +112,4 @@ DEFINE_TYPE_CASTS(Animation, AnimationNode, animationNode, animationNode->isAnim
 
 } // namespace blink
 
-#endif
+#endif // Animation_h

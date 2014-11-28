@@ -33,27 +33,25 @@
 #include "wtf/text/WTFString.h"
 
 namespace blink {
-class WebContentDecryptionModule;
-}
-
-namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
 class HTMLMediaElement;
+class MediaKeySession;
 class ScriptState;
+class WebContentDecryptionModule;
 
 // References are held by JS and HTMLMediaElement.
 // The WebContentDecryptionModule has the same lifetime as this object.
 class MediaKeys : public GarbageCollectedFinalized<MediaKeys>, public ContextLifecycleObserver, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static ScriptPromise create(ScriptState*, const String& keySystem);
     virtual ~MediaKeys();
 
     const String& keySystem() const { return m_keySystem; }
 
-    ScriptPromise createSession(ScriptState*, const String& initDataType, ArrayBuffer* initData, const String& sessionType);
-    ScriptPromise createSession(ScriptState*, const String& initDataType, ArrayBufferView* initData, const String& sessionType);
+    MediaKeySession* createSession(ScriptState*, const String& sessionType);
 
     static bool isTypeSupported(const String& keySystem, const String& contentType);
 
@@ -68,12 +66,10 @@ private:
     friend class MediaKeysInitializer;
     MediaKeys(ExecutionContext*, const String& keySystem, PassOwnPtr<blink::WebContentDecryptionModule>);
 
-    ScriptPromise createSessionInternal(ScriptState*, const String& initDataType, PassRefPtr<ArrayBuffer> initData, const String& sessionType);
-
     const String m_keySystem;
     OwnPtr<blink::WebContentDecryptionModule> m_cdm;
 };
 
-}
+} // namespace blink
 
 #endif // MediaKeys_h

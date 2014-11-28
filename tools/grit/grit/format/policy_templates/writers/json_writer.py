@@ -49,6 +49,13 @@ class JsonWriter(template_writer.TemplateWriter):
     if not self._first_written:
       self._out[-2] += ','
 
+    if not self.CanBeMandatory(policy) and self.CanBeRecommended(policy):
+      line = '  // Note: this policy is supported only in recommended mode.'
+      self._out.append(line)
+      line = '  // The JSON file should be placed in %srecommended.' % \
+             self.config['linux_policy_path']
+      self._out.append(line)
+
     line = '  // %s' % policy['caption']
     self._out.append(line)
     self._out.append(HEADER_DELIMETER)

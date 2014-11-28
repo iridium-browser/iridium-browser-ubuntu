@@ -3,13 +3,19 @@
 # found in the LICENSE file.
 
 import base64
-import https
-import utils
+import json
+import os
+import re
+import time
+import urllib2
+
+from common import utils
 
 
-DEPS_FILE_URL_SVN = 'https://src.chromium.org/chrome/trunk/src/DEPS?p=%s'
-DEPS_FILE_URL_GIT = (
-    'https://chromium.googlesource.com/chromium/src/+/%s/DEPS?format=text')
+_THIS_DIR = os.path.abspath(os.path.dirname(__file__))
+CONFIG = json.loads(open(os.path.join(_THIS_DIR,
+                                      'deps_config.json'), 'r').read())
+OLD_GIT_URL_PATTERN = re.compile(r'https?://git.chromium.org/(.*)')
 
 
 class _VarImpl(object):
@@ -43,19 +49,8 @@ def _ParseDEPS(content):
   return (local_scope['deps'], local_scope['deps_os'])
 
 
-def _GetComponentName(path):
+def _GetComponentName(path, host_dirs):
   """Return the component name of a path."""
-  host_dirs = [
-      'src/chrome/browser/resources/',
-      'src/chrome/test/data/layout_tests/',
-      'src/media/',
-      'src/sdch/',
-      'src/testing/',
-      'src/third_party/WebKit/',
-      'src/third_party/',
-      'src/tools/',
-      'src/',
-  ]
   components_renamed = {
       'webkit': 'blink',
   }
@@ -73,12 +68,25 @@ def _GetComponentName(path):
   return '_'.join(path.split('/'))
 
 
-def _GetContentOfDEPS(chromium_revision):
-  if utils.IsGitHash(chromium_revision):
-    url = DEPS_FILE_URL_GIT
+def _GetContentOfDEPS(revision):
+  chromium_git_file_url_template = CONFIG['chromium_git_file_url']
+
+  # Try .DEPS.git first, because before migration from SVN to GIT, the .DEPS.git
+  # has the dependency in GIT repo while DEPS has dependency in SVN repo.
+  url = chromium_git_file_url_template % (revision, '.DEPS.git')
+  http_status_code, content = utils.GetHttpClient().Get(
+      url, retries=5, retry_if_not=404)
+
+  # If .DEPS.git is not found, use DEPS, assuming it is a commit after migration
+  # from SVN to GIT.
+  if http_status_code == 404:
+    url = chromium_git_file_url_template % (revision, 'DEPS')
+    http_status_code, content = utils.GetHttpClient().Get(url, retries=5)
+
+  if http_status_code == 200:
+    return base64.b64decode(content)
   else:
-    url = DEPS_FILE_URL_SVN
-  return https.SendRequest(url % chromium_revision)
+    return ''
 
 
 def GetChromiumComponents(chromium_revision,
@@ -87,7 +95,7 @@ def GetChromiumComponents(chromium_revision,
   """Return a list of components used by Chrome of the given revision.
 
   Args:
-    chromium_revision: The revision of the Chrome build.
+    chromium_revision: Revision of the Chrome build: svn revision, or git hash.
     os_platform: The target platform of the Chrome build, eg. win, mac, etc.
     deps_file_downloader: A function that takes the chromium_revision as input,
                           and returns the content of the DEPS file. The returned
@@ -97,18 +105,41 @@ def GetChromiumComponents(chromium_revision,
   Returns:
     A map from component path to parsed component name, repository URL,
     repository type and revision.
+    Return None if an error occurs.
   """
   if os_platform.lower() == 'linux':
     os_platform = 'unix'
 
-  is_git_hash = utils.IsGitHash(chromium_revision)
+  chromium_git_base_url = CONFIG['chromium_git_base_url']
+
+  if not utils.IsGitHash(chromium_revision):
+    # Convert svn revision or commit position to Git hash.
+    cr_rev_url_template = CONFIG['cr_rev_url']
+    url = cr_rev_url_template % chromium_revision
+    status_code, content = utils.GetHttpClient().Get(
+        url, timeout=120, retries=5, retry_if_not=404)
+    if status_code != 200 or not content:
+      if status_code == 404:
+        print 'Chromium commit position %s is not found.' % chromium_revision
+      return None
+
+    cr_rev_data = json.loads(content)
+    if 'git_sha' not in cr_rev_data:
+      return None
+
+    if 'repo' not in cr_rev_data or cr_rev_data['repo'] != 'chromium/src':
+      print ('%s seems like a commit position of "%s", but not "chromium/src".'
+             % (chromium_revision, cr_rev_data['repo']))
+      return None
+
+    chromium_revision = cr_rev_data.get('git_sha')
+    if not chromium_revision:
+      return None
 
   # Download the content of DEPS file in chromium.
   deps_content = deps_file_downloader(chromium_revision)
-
-  # Googlesource git returns text file encoded in base64, so decode it.
-  if is_git_hash:
-    deps_content = base64.b64decode(deps_content)
+  if not deps_content:
+    return None
 
   all_deps = {}
 
@@ -120,13 +151,18 @@ def GetChromiumComponents(chromium_revision,
 
   # Figure out components based on the dependencies.
   components = {}
-  for component_path in all_deps:
-    name = _GetComponentName(component_path)
-    repository, revision = all_deps[component_path].split('@')
+  host_dirs = CONFIG['host_directories']
+  for component_path, component_repo_url in all_deps.iteritems():
+    if component_repo_url is None:
+      # For some platform like iso, some component is ignored.
+      continue
+
+    name = _GetComponentName(component_path, host_dirs)
+    repository, revision = component_repo_url.split('@')
+    match = OLD_GIT_URL_PATTERN.match(repository)
+    if match:
+      repository = 'https://chromium.googlesource.com/%s' % match.group(1)
     is_git_hash = utils.IsGitHash(revision)
-    if repository.startswith('/'):
-      # TODO(stgao): Use git repo after chromium moves to git.
-      repository = 'https://src.chromium.org/chrome%s' % repository
     if is_git_hash:
       repository_type = 'git'
     else:
@@ -141,19 +177,12 @@ def GetChromiumComponents(chromium_revision,
         'revision': revision
     }
 
-  # Add chromium as a component, depending on the repository type.
-  if is_git_hash:
-    repository = 'https://chromium.googlesource.com/chromium/src/'
-    repository_type = 'git'
-  else:
-    repository = 'https://src.chromium.org/chrome/trunk'
-    repository_type = 'svn'
-
+  # Add chromium as a component.
   components['src/'] = {
       'path': 'src/',
       'name': 'chromium',
-      'repository': repository,
-      'repository_type': repository_type,
+      'repository': chromium_git_base_url,
+      'repository_type': 'git',
       'revision': chromium_revision
   }
 
@@ -177,20 +206,27 @@ def GetChromiumComponentRange(old_revision,
 
   Returns:
     A map from component path to its parsed regression and other information.
+    Return None if an error occurs.
   """
-  # Assume first revision is the old revision.
   old_components = GetChromiumComponents(old_revision, os_platform,
                                          deps_file_downloader)
+  if not old_components:
+    return None
+
   new_components = GetChromiumComponents(new_revision, os_platform,
                                          deps_file_downloader)
+  if not new_components:
+    return None
 
   components = {}
   for path in new_components:
     new_component = new_components[path]
     old_revision = None
+
     if path in old_components:
       old_component = old_components[path]
       old_revision = old_component['revision']
+
     components[path] = {
         'path': path,
         'rolled': new_component['revision'] != old_revision,
@@ -202,9 +238,3 @@ def GetChromiumComponentRange(old_revision,
     }
 
   return components
-
-
-if __name__ == '__main__':
-  import json
-  print json.dumps(GetChromiumComponents(
-      'b4b1aea80b25a3b2f7952c9d95585e880421ef2b'), sort_keys=True, indent=2)

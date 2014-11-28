@@ -25,12 +25,12 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _xmppengine_h_
-#define _xmppengine_h_
+#ifndef TALK_XMPP_XMPPENGINE_H_
+#define TALK_XMPP_XMPPENGINE_H_
 
 // also part of the API
-#include "talk/xmllite/qname.h"
-#include "talk/xmllite/xmlelement.h"
+#include "webrtc/libjingle/xmllite/qname.h"
+#include "webrtc/libjingle/xmllite/xmlelement.h"
 #include "talk/xmpp/jid.h"
 
 
@@ -346,4 +346,4 @@ public:
   } while (false)                     \
 
 
-#endif
+#endif  // TALK_XMPP_XMPPENGINE_H_

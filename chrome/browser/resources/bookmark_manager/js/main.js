@@ -284,13 +284,6 @@ function setSearch(searchText) {
   navigateTo(id);
 }
 
-// Handle the logo button UI.
-// When the user clicks the button we should navigate "home" and focus the list.
-function handleClickOnLogoButton(e) {
-  setSearch('');
-  $('list').focus();
-}
-
 /**
  * This returns the user visible path to the folder where the bookmark is
  * located.
@@ -1328,18 +1321,15 @@ function continueInitializeBookmarkManager(localizedStrings) {
   // when // the user goes back and forward in the history.
   window.addEventListener('hashchange', processHash);
 
-  document.querySelector('.header form').onsubmit = function(e) {
+  document.querySelector('header form').onsubmit = function(e) {
     setSearch($('term').value);
     e.preventDefault();
   };
 
   $('term').addEventListener('search', handleSearch);
 
-  document.querySelector('.summary > button').addEventListener(
+  document.querySelector('.summary button').addEventListener(
       'click', handleOrganizeButtonClick);
-
-  document.querySelector('button.logo').addEventListener(
-      'click', handleClickOnLogoButton);
 
   document.addEventListener('canExecute', handleCanExecuteForDocument);
   document.addEventListener('command', handleCommand);

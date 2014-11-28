@@ -51,7 +51,6 @@ Performance::Performance(LocalFrame* frame)
     , m_referenceTime(frame && frame->host() ? frame->document()->loader()->timing()->referenceMonotonicTime() : 0.0)
     , m_userTiming(nullptr)
 {
-    ScriptWrappable::init(this);
 }
 
 Performance::~Performance()
@@ -214,9 +213,7 @@ void Performance::addResourceTiming(const ResourceTimingInfo& info, Document* in
     const Vector<ResourceResponse>& redirectChain = info.redirectChain();
     bool allowRedirectDetails = allowsTimingRedirect(redirectChain, finalResponse, initiatorDocument);
 
-    // ServiceWorker doesn't support TimingInfo.
-    // FIXME: Implement ServiceWorkerURLRequestJob::GetLoadTimingInfo().
-    if (!allowRedirectDetails && !finalResponse.wasFetchedViaServiceWorker()) {
+    if (!allowRedirectDetails) {
         ResourceLoadTiming* finalTiming = finalResponse.resourceLoadTiming();
         ASSERT(finalTiming);
         if (finalTiming)
@@ -284,6 +281,7 @@ void Performance::trace(Visitor* visitor)
     visitor->trace(m_resourceTimingBuffer);
     visitor->trace(m_userTiming);
     EventTargetWithInlineData::trace(visitor);
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

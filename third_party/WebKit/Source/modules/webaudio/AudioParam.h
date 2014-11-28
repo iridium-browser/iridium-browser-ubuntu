@@ -36,30 +36,24 @@
 #include <sys/types.h>
 #include "wtf/Float32Array.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class AudioNodeOutput;
 
-#if ENABLE(OILPAN)
-#define AUDIO_PARAM_BASE_CLASSES public AudioSummingJunction, public ScriptWrappable
-#else
-#define AUDIO_PARAM_BASE_CLASSES public RefCounted<AudioParam>, public ScriptWrappable, public AudioSummingJunction
-#endif
-class AudioParam FINAL : AUDIO_PARAM_BASE_CLASSES {
+class AudioParam FINAL : public AudioSummingJunction, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static const double DefaultSmoothingConstant;
     static const double SnapThreshold;
 
-    static PassRefPtrWillBeRawPtr<AudioParam> create(AudioContext* context, double defaultValue)
+    static AudioParam* create(AudioContext* context, double defaultValue)
     {
-        return adoptRefWillBeNoop(new AudioParam(context, defaultValue));
+        return new AudioParam(context, defaultValue);
     }
 
     // AudioSummingJunction
-    virtual bool canUpdateState() OVERRIDE { return true; }
     virtual void didUpdate() OVERRIDE { }
 
     // Intrinsic value.
@@ -85,12 +79,30 @@ public:
     void resetSmoothedValue() { m_smoothedValue = m_value; }
 
     // Parameter automation.
-    void setValueAtTime(float value, double time) { m_timeline.setValueAtTime(value, time); }
-    void linearRampToValueAtTime(float value, double time) { m_timeline.linearRampToValueAtTime(value, time); }
-    void exponentialRampToValueAtTime(float value, double time, ExceptionState& es) { m_timeline.exponentialRampToValueAtTime(value, time, es); }
-    void setTargetAtTime(float target, double time, double timeConstant) { m_timeline.setTargetAtTime(target, time, timeConstant); }
-    void setValueCurveAtTime(Float32Array* curve, double time, double duration) { m_timeline.setValueCurveAtTime(curve, time, duration); }
-    void cancelScheduledValues(double startTime) { m_timeline.cancelScheduledValues(startTime); }
+    void setValueAtTime(float value, double time, ExceptionState& exceptionState)
+    {
+        m_timeline.setValueAtTime(value, time, exceptionState);
+    }
+    void linearRampToValueAtTime(float value, double time, ExceptionState& exceptionState)
+    {
+        m_timeline.linearRampToValueAtTime(value, time, exceptionState);
+    }
+    void exponentialRampToValueAtTime(float value, double time, ExceptionState& es)
+    {
+        m_timeline.exponentialRampToValueAtTime(value, time, es);
+    }
+    void setTargetAtTime(float target, double time, double timeConstant, ExceptionState& exceptionState)
+    {
+        m_timeline.setTargetAtTime(target, time, timeConstant, exceptionState);
+    }
+    void setValueCurveAtTime(Float32Array* curve, double time, double duration, ExceptionState& exceptionState)
+    {
+        m_timeline.setValueCurveAtTime(curve, time, duration, exceptionState);
+    }
+    void cancelScheduledValues(double startTime, ExceptionState& exceptionState)
+    {
+        m_timeline.cancelScheduledValues(startTime, exceptionState);
+    }
 
     bool hasSampleAccurateValues() { return m_timeline.hasValues() || numberOfRenderingConnections(); }
 
@@ -107,10 +119,7 @@ private:
         : AudioSummingJunction(context)
         , m_value(defaultValue)
         , m_defaultValue(defaultValue)
-        , m_smoothedValue(defaultValue)
-    {
-        ScriptWrappable::init(this);
-    }
+        , m_smoothedValue(defaultValue) { }
 
     // sampleAccurate corresponds to a-rate (audio rate) vs. k-rate in the Web Audio specification.
     void calculateFinalValues(float* values, unsigned numberOfValues, bool sampleAccurate);

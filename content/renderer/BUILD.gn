@@ -5,17 +5,18 @@
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//content/renderer/renderer.gni")
+import("//media/media_options.gni")
 
 source_set("renderer") {
-  # Only targets in the content tree can depend directly on this target.
-  visibility = [ "//content/*" ]
+  # Only the public target should depend on this. All other targets (even
+  # internal content ones) should depend on the public one.
+  visibility = [ "//content/public/renderer:renderer_sources" ]
 
   sources = rebase_path(content_renderer_gypi_values.private_renderer_sources,
                         ".", "//content")
 
   configs += [
     "//content:content_implementation",
-    "//content:libjingle_stub_config",
   ]
 
   deps = [
@@ -24,31 +25,39 @@ source_set("renderer") {
     "//crypto:platform",
 
     "//base/allocator",
+    "//cc",
+    "//cc/blink",
     "//content:resources",
     "//content/common:mojo_bindings",
+    "//content/public/child:child_sources",
+    "//content/public/common:common_sources",
     "//gin",
+    "//gpu",
+    "//gpu/command_buffer/client:gles2_interface",
     "//jingle:jingle_glue",
     "//media",
+    "//media/blink",
     "//mojo/bindings/js",
     "//mojo/environment:chromium",
     "//mojo/public/js/bindings",
     "//mojo/public/interfaces/application",
     "//net",
     "//skia",
+    "//storage/common",
     "//third_party/icu",
+    "//third_party/libjingle",
     "//third_party/npapi",
     "//third_party/WebKit/public:blink",
     "//third_party/widevine/cdm:version_h",
     "//ui/accessibility",
+    "//ui/base",
+    "//ui/events:events_base",
     "//ui/events:dom4_keycode_converter",
+    "//ui/gl",
     "//ui/native_theme",
     "//ui/surface",
     "//v8",
-    "//webkit/child",
-    "//webkit/common",
-    "//webkit/common:storage",
     "//webkit/common/gpu",
-    #'../third_party/libjingle/libjingle.gyp:libjingle',  TODO(GYP)
   ]
 
   if (!enable_notifications) {
@@ -73,7 +82,7 @@ source_set("renderer") {
     sources -= [
       "accessibility/renderer_accessibility_focus_only.cc",
       "media/audio_decoder.cc",
-      "media/webmediaplayer_impl.cc",
+      "media/crypto/encrypted_media_player_support_impl.cc",
     ]
     sources += [
       "external_popup_menu.cc",
@@ -115,7 +124,6 @@ source_set("renderer") {
       "media/media_stream_constraints_util.h",
       "media/media_stream_dispatcher.h",
       "media/media_stream_dispatcher_eventhandler.h",
-      "media/media_stream_impl.h",
       "media/media_stream_track.cc",
       "media/media_stream_track.h",
     ]
@@ -128,10 +136,10 @@ source_set("renderer") {
     deps += [
       "//crypto",
       "//third_party/libyuv",
-      #"../third_party/libjingle/libjingle.gyp:libjingle_webrtc",  TODO(GYP)
-      #"../third_party/libjingle/libjingle.gyp:libpeerconnection",  TODO(GYP)
-      #"../third_party/webrtc/modules/modules.gyp:audio_device",  TODO(GYP)
-      #"../third_party/webrtc/modules/modules.gyp:audio_processing",  TODO(GYP)
+      "//third_party/webrtc/modules/audio_device",
+      "//third_party/webrtc/modules/audio_processing",
+      "//third_party/libjingle:libjingle_webrtc",
+      "//third_party/libjingle:libpeerconnection",
     ]
   } else {
     sources += [
@@ -166,7 +174,26 @@ source_set("renderer") {
         ".", "//content")
   }
 
+  if (!enable_pepper_cdms) {
+    sources -= [
+      "media/crypto/pepper_cdm_wrapper.h",
+      "media/crypto/pepper_cdm_wrapper_impl.cc",
+      "media/crypto/pepper_cdm_wrapper_impl.h",
+      "media/crypto/ppapi_decryptor.cc",
+      "media/crypto/ppapi_decryptor.h",
+    ]
+  }
+
   if (printing_mode == 1) {
     deps += [ "//printing" ]
+  }
+
+  if (enable_browser_cdms) {
+    sources += [
+      "media/crypto/proxy_media_keys.cc",
+      "media/crypto/proxy_media_keys.h",
+      "media/crypto/renderer_cdm_manager.cc",
+      "media/crypto/renderer_cdm_manager.h",
+    ]
   }
 }

@@ -32,8 +32,8 @@ class CONTENT_EXPORT MediaStreamAudioSource
     local_audio_source_ = source;
   }
 
-  void SetAudioCapturer(WebRtcAudioCapturer* capturer) {
-    DCHECK(!audio_capturer_);
+  void SetAudioCapturer(const scoped_refptr<WebRtcAudioCapturer>& capturer) {
+    DCHECK(!audio_capturer_.get());
     audio_capturer_ = capturer;
   }
 

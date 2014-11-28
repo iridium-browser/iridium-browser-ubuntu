@@ -8,10 +8,11 @@
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
-#include "mojo/public/cpp/application/application_connection.h"
+#include "mojo/public/cpp/application/application_impl.h"
 #include "mojo/public/cpp/application/connect.h"
 #include "mojo/public/cpp/application/service_provider_impl.h"
 #include "mojo/public/interfaces/application/service_provider.mojom.h"
+#include "mojo/public/interfaces/application/shell.mojom.h"
 #include "mojo/services/public/cpp/view_manager/lib/view_private.h"
 #include "mojo/services/public/cpp/view_manager/util.h"
 #include "mojo/services/public/cpp/view_manager/view_manager_delegate.h"
@@ -94,37 +95,14 @@ class RootObserver : public ViewObserver {
   DISALLOW_COPY_AND_ASSIGN(RootObserver);
 };
 
-bool CreateMapAndDupSharedBuffer(size_t size,
-                                  void** memory,
-                                  ScopedSharedBufferHandle* handle,
-                                  ScopedSharedBufferHandle* duped) {
-  MojoResult result = CreateSharedBuffer(NULL, size, handle);
-  if (result != MOJO_RESULT_OK)
-    return false;
-  DCHECK(handle->is_valid());
-
-  result = DuplicateBuffer(handle->get(), NULL, duped);
-  if (result != MOJO_RESULT_OK)
-    return false;
-  DCHECK(duped->is_valid());
-
-  result = MapBuffer(
-      handle->get(), 0, size, memory, MOJO_MAP_BUFFER_FLAG_NONE);
-  if (result != MOJO_RESULT_OK)
-    return false;
-  DCHECK(*memory);
-
-  return true;
-}
-
-ViewManagerClientImpl::ViewManagerClientImpl(
-    ViewManagerDelegate* delegate,
-    ApplicationConnection* app_connection)
+ViewManagerClientImpl::ViewManagerClientImpl(ViewManagerDelegate* delegate,
+                                             Shell* shell)
     : connected_(false),
       connection_id_(0),
       next_id_(1),
       delegate_(delegate),
-      window_manager_delegate_(NULL) {
+      window_manager_delegate_(NULL),
+      shell_(shell) {
   // TODO(beng): Come up with a better way of establishing a configuration for
   //             what the active window manager is.
   std::string window_manager_url = "mojo:mojo_window_manager";
@@ -133,7 +111,9 @@ ViewManagerClientImpl::ViewManagerClientImpl(
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             "window-manager");
   }
-  app_connection->ConnectToService(window_manager_url, &window_manager_);
+  InterfacePtr<ServiceProvider> sp;
+  shell->ConnectToApplication(window_manager_url, Get(&sp));
+  ConnectToService(sp.get(), &window_manager_);
   window_manager_.set_client(this);
 }
 
@@ -154,6 +134,7 @@ ViewManagerClientImpl::~ViewManagerClientImpl() {
   // NOTE: we manually delete as we're a friend.
   for (size_t i = 0; i < non_owned.size(); ++i)
     delete non_owned[i];
+
   delegate_->OnViewManagerDisconnected(this);
 }
 
@@ -198,26 +179,12 @@ void ViewManagerClientImpl::SetBounds(Id view_id, const gfx::Rect& bounds) {
                           ActionCompletedCallback());
 }
 
-void ViewManagerClientImpl::SetViewContents(Id view_id,
-                                            const SkBitmap& contents) {
+void ViewManagerClientImpl::SetSurfaceId(Id view_id, SurfaceIdPtr surface_id) {
   DCHECK(connected_);
-  std::vector<unsigned char> data;
-  gfx::PNGCodec::EncodeBGRASkBitmap(contents, false, &data);
-
-  void* memory = NULL;
-  ScopedSharedBufferHandle duped, shared_state_handle;
-  bool result = CreateMapAndDupSharedBuffer(data.size(),
-                                            &memory,
-                                            &shared_state_handle,
-                                            &duped);
-  if (!result)
+  if (surface_id.is_null())
     return;
-
-  memcpy(memory, &data[0], data.size());
-
-  service_->SetViewContents(view_id, duped.Pass(),
-                            static_cast<uint32_t>(data.size()),
-                            ActionCompletedCallback());
+  service_->SetViewSurfaceId(
+      view_id, surface_id.Pass(), ActionCompletedCallback());
 }
 
 void ViewManagerClientImpl::SetFocus(Id view_id) {
@@ -301,7 +268,7 @@ void ViewManagerClientImpl::OnEmbed(
   if (!connected_) {
     connected_ = true;
     connection_id_ = connection_id;
-    creator_url_ = TypeConverter<String, std::string>::ConvertFrom(creator_url);
+    creator_url_ = String::From(creator_url);
   } else {
     DCHECK_EQ(connection_id_, connection_id);
     DCHECK_EQ(creator_url_, creator_url);
@@ -364,6 +331,16 @@ void ViewManagerClientImpl::OnViewDeleted(Id view_id) {
     ViewPrivate(view).LocalDestroy();
 }
 
+void ViewManagerClientImpl::OnViewVisibilityChanged(Id view_id, bool visible) {
+  // TODO(sky): implement me.
+  NOTIMPLEMENTED();
+}
+
+void ViewManagerClientImpl::OnViewDrawnStateChanged(Id view_id, bool drawn) {
+  // TODO(sky): implement me.
+  NOTIMPLEMENTED();
+}
+
 void ViewManagerClientImpl::OnViewInputEvent(
     Id view_id,
     EventPtr event,
@@ -380,7 +357,8 @@ void ViewManagerClientImpl::OnViewInputEvent(
 void ViewManagerClientImpl::Embed(
     const String& url,
     InterfaceRequest<ServiceProvider> service_provider) {
-  window_manager_delegate_->Embed(url, service_provider.Pass());
+  if (window_manager_delegate_)
+    window_manager_delegate_->Embed(url, service_provider.Pass());
 }
 
 void ViewManagerClientImpl::DispatchOnViewInputEvent(EventPtr event) {

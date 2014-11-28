@@ -5,8 +5,6 @@
 #include "ui/views/touchui/touch_selection_controller_impl.h"
 
 #include "base/time/time.h"
-#include "grit/ui_resources.h"
-#include "grit/ui_strings.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -17,6 +15,8 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
+#include "ui/resources/grit/ui_resources.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/masked_window_targeter.h"
 #include "ui/wm/core/window_animations.h"
@@ -327,8 +327,9 @@ TouchSelectionControllerImpl::TouchSelectionControllerImpl(
                      client_view->GetNativeView())),
       context_menu_(NULL),
       dragging_handle_(NULL) {
-  client_widget_ = Widget::GetTopLevelWidgetForNativeView(
-      client_view_->GetNativeView());
+  aura::Window* client_window = client_view_->GetNativeView();
+  client_window->AddObserver(this);
+  client_widget_ = Widget::GetTopLevelWidgetForNativeView(client_window);
   if (client_widget_)
     client_widget_->AddObserver(this);
   aura::Env::GetInstance()->AddPreTargetHandler(this);
@@ -339,6 +340,7 @@ TouchSelectionControllerImpl::~TouchSelectionControllerImpl() {
   aura::Env::GetInstance()->RemovePreTargetHandler(this);
   if (client_widget_)
     client_widget_->RemoveObserver(this);
+  client_view_->GetNativeView()->RemoveObserver(this);
 }
 
 void TouchSelectionControllerImpl::SelectionChanged() {
@@ -437,9 +439,6 @@ void TouchSelectionControllerImpl::SetDraggingHandle(
 
 void TouchSelectionControllerImpl::SelectionHandleDragged(
     const gfx::Point& drag_pos) {
-  // We do not want to show the context menu while dragging.
-  HideContextMenu();
-
   DCHECK(dragging_handle_);
   gfx::Point drag_pos_in_client = drag_pos;
   ConvertPointToClientView(dragging_handle_, &drag_pos_in_client);
@@ -512,6 +511,12 @@ void TouchSelectionControllerImpl::OnMenuClosed(TouchEditingMenuView* menu) {
     context_menu_ = NULL;
 }
 
+void TouchSelectionControllerImpl::OnAncestorWindowTransformed(
+    aura::Window* window,
+    aura::Window* ancestor) {
+  client_view_->DestroyTouchSelection();
+}
+
 void TouchSelectionControllerImpl::OnWidgetClosing(Widget* widget) {
   DCHECK_EQ(client_widget_, widget);
   client_widget_ = NULL;
@@ -521,7 +526,6 @@ void TouchSelectionControllerImpl::OnWidgetBoundsChanged(
     Widget* widget,
     const gfx::Rect& new_bounds) {
   DCHECK_EQ(client_widget_, widget);
-  HideContextMenu();
   SelectionChanged();
 }
 

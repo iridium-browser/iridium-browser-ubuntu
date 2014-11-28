@@ -167,7 +167,7 @@ SuggestAppsDialog.prototype.retrieveAuthorizeToken_ = function(callback) {
   }
 
   // Fetch or update the access token.
-  chrome.fileBrowserPrivate.requestWebStoreAccessToken(
+  chrome.fileManagerPrivate.requestWebStoreAccessToken(
       function(accessToken) {
         // In case of error, this.accessToken_ will be set to null.
         this.accessToken_ = accessToken;
@@ -386,21 +386,21 @@ SuggestAppsDialog.prototype.onInstallCompleted_ = function(result, error) {
   this.installingItemId_ = null;
 
   switch (result) {
-  case AppInstaller.Result.SUCCESS:
-    SuggestAppsDialog.Metrics.recordInstall(
-        SuggestAppsDialog.Metrics.INSTALL.SUCCESS);
-    this.hide();
-    break;
-  case AppInstaller.Result.CANCELLED:
-    SuggestAppsDialog.Metrics.recordInstall(
-        SuggestAppsDialog.Metrics.INSTALL.CANCELLED);
-    // User cancelled the installation. Do nothing.
-    break;
-  case AppInstaller.Result.ERROR:
-    SuggestAppsDialog.Metrics.recordInstall(
-        SuggestAppsDialog.Metrics.INSTALL.FAILED);
-    fileManager.error.show(str('SUGGEST_DIALOG_INSTALLATION_FAILED'));
-    break;
+    case AppInstaller.Result.SUCCESS:
+      SuggestAppsDialog.Metrics.recordInstall(
+          SuggestAppsDialog.Metrics.INSTALL.SUCCESS);
+      this.hide();
+      break;
+    case AppInstaller.Result.CANCELLED:
+      SuggestAppsDialog.Metrics.recordInstall(
+          SuggestAppsDialog.Metrics.INSTALL.CANCELLED);
+      // User cancelled the installation. Do nothing.
+      break;
+    case AppInstaller.Result.ERROR:
+      SuggestAppsDialog.Metrics.recordInstall(
+          SuggestAppsDialog.Metrics.INSTALL.FAILED);
+      fileManager.error.show(str('SUGGEST_DIALOG_INSTALLATION_FAILED'));
+      break;
   }
 };
 

@@ -119,7 +119,9 @@ class IncludeNode(base.Node):
   def GeneratesResourceMapEntry(self, output_all_resource_defines,
                                 is_active_descendant):
     # includes always generate resource entries.
-    return True
+    if output_all_resource_defines:
+      return True
+    return is_active_descendant
 
   @staticmethod
   def Construct(parent, name, type, file, translateable=True,

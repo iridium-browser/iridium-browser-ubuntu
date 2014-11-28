@@ -14,8 +14,8 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -48,6 +48,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
@@ -500,9 +501,9 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     net::SetExplicitlyAllowedPorts(allowed_ports);
   }
 
-  if (command_line.HasSwitch(switches::kInstallFromWebstore)) {
+  if (command_line.HasSwitch(switches::kInstallEphemeralAppFromWebstore)) {
     extensions::StartupHelper helper;
-    helper.InstallFromWebstore(command_line, last_used_profile);
+    helper.InstallEphemeralApp(command_line, last_used_profile);
     // Nothing more needs to be done, so return false to stop launching and
     // quit.
     return false;
@@ -526,13 +527,13 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     return false;
   }
 
-  if (command_line.HasSwitch(switches::kLimitedInstallFromWebstore)) {
-    extensions::StartupHelper helper;
-    helper.LimitedInstallFromWebstore(command_line, last_used_profile,
-                                      base::Bind(&base::DoNothing));
-  }
-
 #if defined(OS_CHROMEOS)
+
+#if defined(USE_ATHENA)
+  // Athena will never launch browser.
+  silent_launch = true;
+#endif
+
   // The browser will be launched after the user logs in.
   if (command_line.HasSwitch(chromeos::switches::kLoginManager))
     silent_launch = true;
@@ -555,7 +556,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     chrome::AttemptUserExit();
     return false;
   }
-#endif
+#endif  // OS_CHROMEOS
 
 #if defined(TOOLKIT_VIEWS) && defined(USE_X11)
   ui::TouchFactory::SetTouchDeviceListFromCommandLine();
@@ -628,7 +629,9 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
       bool signin_required = profile_index != std::string::npos &&
           profile_info.ProfileIsSigninRequiredAtIndex(profile_index);
       if (signin_required || last_used_profile->IsGuestSession()) {
-        chrome::ShowUserManager(base::FilePath());
+        UserManager::Show(base::FilePath(),
+                          profiles::USER_MANAGER_NO_TUTORIAL,
+                          profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
         return true;
       }
     }
@@ -728,16 +731,16 @@ bool HasPendingUncleanExit(Profile* profile) {
 
 base::FilePath GetStartupProfilePath(const base::FilePath& user_data_dir,
                                      const CommandLine& command_line) {
+  if (command_line.HasSwitch(switches::kProfileDirectory)) {
+    return user_data_dir.Append(
+        command_line.GetSwitchValuePath(switches::kProfileDirectory));
+  }
+
   // If we are showing the app list then chrome isn't shown so load the app
   // list's profile rather than chrome's.
   if (command_line.HasSwitch(switches::kShowAppList)) {
     return AppListService::Get(chrome::HOST_DESKTOP_TYPE_NATIVE)->
         GetProfilePath(user_data_dir);
-  }
-
-  if (command_line.HasSwitch(switches::kProfileDirectory)) {
-    return user_data_dir.Append(
-        command_line.GetSwitchValuePath(switches::kProfileDirectory));
   }
 
   return g_browser_process->profile_manager()->GetLastUsedProfileDir(

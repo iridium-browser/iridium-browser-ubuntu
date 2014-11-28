@@ -118,28 +118,21 @@ int32_t NaClSysExit(struct NaClAppThread  *natp,
 }
 
 int32_t NaClSysThreadExit(struct NaClAppThread  *natp,
-                          int32_t               *stack_flag) {
+                          uint32_t              stack_flag_addr) {
   uint32_t  zero = 0;
 
   NaClLog(4, "NaClSysThreadExit(0x%08"NACL_PRIxPTR", "
-          "0x%08"NACL_PRIxPTR"\n",
-          (uintptr_t) natp,
-          (uintptr_t) stack_flag);
+          "0x%08"NACL_PRIx32"\n",
+          (uintptr_t) natp, stack_flag_addr);
   /*
    * NB: NaClThreads are never joinable, but the abstraction for NaClApps
    * are.
    */
 
-  if (NULL != stack_flag) {
-    NaClLog(4,
-            "NaClSysThreadExit: stack_flag is %"NACL_PRIxPTR"\n",
-            (uintptr_t) stack_flag);
-    if (!NaClCopyOutToUser(natp->nap, (uintptr_t) stack_flag,
+  if (0 != stack_flag_addr) {
+    if (!NaClCopyOutToUser(natp->nap, (uintptr_t) stack_flag_addr,
                            &zero, sizeof zero)) {
-      NaClLog(4,
-              ("NaClSysThreadExit: ignoring invalid"
-               " stack_flag 0x%"NACL_PRIxPTR"\n"),
-              (uintptr_t) stack_flag);
+      NaClLog(4, "NaClSysThreadExit: ignoring invalid stack_flag_addr\n");
     }
   }
 
@@ -149,18 +142,18 @@ int32_t NaClSysThreadExit(struct NaClAppThread  *natp,
 }
 
 int32_t NaClSysNameService(struct NaClAppThread *natp,
-                           int32_t              *desc_addr) {
+                           uint32_t             desc_addr) {
   struct NaClApp *nap = natp->nap;
   int32_t   retval = -NACL_ABI_EINVAL;
   int32_t   desc;
 
   NaClLog(3,
           ("NaClSysNameService(0x%08"NACL_PRIxPTR","
-           " 0x%08"NACL_PRIxPTR")\n"),
+           " 0x%08"NACL_PRIx32")\n"),
           (uintptr_t) natp,
-          (uintptr_t) desc_addr);
+          desc_addr);
 
-  if (!NaClCopyInFromUser(nap, &desc, (uintptr_t) desc_addr, sizeof desc)) {
+  if (!NaClCopyInFromUser(nap, &desc, desc_addr, sizeof desc)) {
     NaClLog(LOG_ERROR,
             "Invalid address argument to NaClSysNameService\n");
     retval = -NACL_ABI_EFAULT;
@@ -170,8 +163,7 @@ int32_t NaClSysNameService(struct NaClAppThread *natp,
   if (-1 == desc) {
     /* read */
     desc = NaClAppSetDescAvail(nap, NaClDescRef(nap->name_service_conn_cap));
-    if (NaClCopyOutToUser(nap, (uintptr_t) desc_addr,
-                          &desc, sizeof desc)) {
+    if (NaClCopyOutToUser(nap, desc_addr, &desc, sizeof desc)) {
       retval = 0;
     } else {
       retval = -NACL_ABI_EFAULT;
@@ -230,7 +222,7 @@ cleanup:
 }
 
 int32_t NaClSysThreadCreate(struct NaClAppThread *natp,
-                            void                 *prog_ctr,
+                            uint32_t             prog_ctr,
                             uint32_t             stack_ptr,
                             uint32_t             thread_ptr,
                             uint32_t             second_thread_ptr) {
@@ -241,11 +233,11 @@ int32_t NaClSysThreadCreate(struct NaClAppThread *natp,
 
   NaClLog(3,
           ("Entered NaClSysThreadCreate(0x%08"NACL_PRIxPTR
-           " pc=0x%08"NACL_PRIxPTR", sp=0x%08"NACL_PRIx32", thread_ptr=0x%08"
+           " pc=0x%08"NACL_PRIx32", sp=0x%08"NACL_PRIx32", thread_ptr=0x%08"
            NACL_PRIx32")\n"),
-          (uintptr_t) natp, (uintptr_t) prog_ctr, stack_ptr, thread_ptr);
+          (uintptr_t) natp, prog_ctr, stack_ptr, thread_ptr);
 
-  if (!NaClIsValidJumpTarget(nap, (uintptr_t) prog_ctr)) {
+  if (!NaClIsValidJumpTarget(nap, prog_ctr)) {
     NaClLog(LOG_ERROR, "NaClSysThreadCreate: Bad function pointer\n");
     retval = -NACL_ABI_EFAULT;
     goto cleanup;
@@ -272,7 +264,7 @@ int32_t NaClSysThreadCreate(struct NaClAppThread *natp,
   NaClVmHoleWaitToStartThread(nap);
 
   retval = NaClCreateAdditionalThread(nap,
-                                      (uintptr_t) prog_ctr,
+                                      prog_ctr,
                                       sys_stack,
                                       thread_ptr,
                                       second_thread_ptr);
@@ -516,10 +508,10 @@ cleanup:
   return retval;
 }
 
-int32_t NaClSysCondTimedWaitAbs(struct NaClAppThread     *natp,
-                                int32_t                  cond_handle,
-                                int32_t                  mutex_handle,
-                                struct nacl_abi_timespec *ts) {
+int32_t NaClSysCondTimedWaitAbs(struct NaClAppThread *natp,
+                                int32_t              cond_handle,
+                                int32_t              mutex_handle,
+                                uint32_t             ts_addr) {
   struct NaClApp           *nap = natp->nap;
   int32_t                  retval = -NACL_ABI_EINVAL;
   struct NaClDesc          *cv_desc;
@@ -528,11 +520,10 @@ int32_t NaClSysCondTimedWaitAbs(struct NaClAppThread     *natp,
 
   NaClLog(3,
           ("Entered NaClSysCondTimedWaitAbs(0x%08"NACL_PRIxPTR
-           ", %d, %d, 0x%08"NACL_PRIxPTR")\n"),
-          (uintptr_t) natp, cond_handle, mutex_handle, (uintptr_t) ts);
+           ", %d, %d, 0x%08"NACL_PRIx32")\n"),
+          (uintptr_t) natp, cond_handle, mutex_handle, ts_addr);
 
-  if (!NaClCopyInFromUser(nap, &trusted_ts,
-                          (uintptr_t) ts, sizeof trusted_ts)) {
+  if (!NaClCopyInFromUser(nap, &trusted_ts, ts_addr, sizeof trusted_ts)) {
     retval = -NACL_ABI_EFAULT;
     goto cleanup;
   }
@@ -665,9 +656,9 @@ cleanup:
   return retval;
 }
 
-int32_t NaClSysNanosleep(struct NaClAppThread     *natp,
-                         struct nacl_abi_timespec *req,
-                         struct nacl_abi_timespec *rem) {
+int32_t NaClSysNanosleep(struct NaClAppThread *natp,
+                         uint32_t             req_addr,
+                         uint32_t             rem_addr) {
   struct NaClApp            *nap = natp->nap;
   struct nacl_abi_timespec  t_sleep;
   struct nacl_abi_timespec  t_rem;
@@ -676,23 +667,22 @@ int32_t NaClSysNanosleep(struct NaClAppThread     *natp,
 
   NaClLog(3,
           ("Entered NaClSysNanosleep(0x%08"NACL_PRIxPTR
-           ", 0x%08"NACL_PRIxPTR", 0x%08"NACL_PRIxPTR"x)\n"),
-          (uintptr_t) natp, (uintptr_t) req, (uintptr_t) rem);
+           ", 0x%08"NACL_PRIx32", 0x%08"NACL_PRIx32"x)\n"),
+          (uintptr_t) natp, req_addr, rem_addr);
 
   /* do the check before we sleep */
-  if (NULL != rem && kNaClBadAddress ==
-      NaClUserToSysAddrRange(nap, (uintptr_t) rem, sizeof *rem)) {
+  if (0 != rem_addr && kNaClBadAddress ==
+      NaClUserToSysAddrRange(nap, rem_addr, sizeof *remptr)) {
     retval = -NACL_ABI_EFAULT;
     goto cleanup;
   }
 
-  if (!NaClCopyInFromUser(nap, &t_sleep,
-                          (uintptr_t) req, sizeof t_sleep)) {
+  if (!NaClCopyInFromUser(nap, &t_sleep, req_addr, sizeof t_sleep)) {
     retval = -NACL_ABI_EFAULT;
     goto cleanup;
   }
 
-  remptr = (NULL == rem) ? NULL : &t_rem;
+  remptr = (0 == rem_addr) ? NULL : &t_rem;
   /* NULL != remptr \equiv NULL != rem */
 
   /*
@@ -706,8 +696,8 @@ int32_t NaClSysNanosleep(struct NaClAppThread     *natp,
   retval = NaClNanosleep(&t_sleep, remptr);
   NaClLog(4, "NaClNanosleep returned %d\n", retval);
 
-  if (-EINTR == retval && NULL != rem &&
-      !NaClCopyOutToUser(nap, (uintptr_t) rem, remptr, sizeof *remptr)) {
+  if (-EINTR == retval && 0 != rem_addr &&
+      !NaClCopyOutToUser(nap, rem_addr, remptr, sizeof *remptr)) {
     NaClLog(LOG_FATAL, "NaClSysNanosleep: check rem failed at copyout\n");
   }
 
@@ -725,15 +715,15 @@ int32_t NaClSysSchedYield(struct NaClAppThread *natp) {
 
 int32_t NaClSysSysconf(struct NaClAppThread *natp,
                        int32_t              name,
-                       int32_t              *result) {
+                       uint32_t             result_addr) {
   struct NaClApp  *nap = natp->nap;
   int32_t         retval = -NACL_ABI_EINVAL;
   int32_t         result_value;
 
   NaClLog(3,
           ("Entered NaClSysSysconf(%08"NACL_PRIxPTR
-           "x, %d, 0x%08"NACL_PRIxPTR")\n"),
-          (uintptr_t) natp, name, (uintptr_t) result);
+           "x, %d, 0x%08"NACL_PRIx32")\n"),
+          (uintptr_t) natp, name, result_addr);
 
   switch (name) {
     case NACL_ABI__SC_NPROCESSORS_ONLN: {
@@ -777,7 +767,7 @@ int32_t NaClSysSysconf(struct NaClAppThread *natp,
       goto cleanup;
     }
   }
-  if (!NaClCopyOutToUser(nap, (uintptr_t) result, &result_value,
+  if (!NaClCopyOutToUser(nap, result_addr, &result_value,
                          sizeof result_value)) {
     retval = -NACL_ABI_EFAULT;
     goto cleanup;
@@ -964,26 +954,20 @@ int32_t NaClSysTestCrash(struct NaClAppThread *natp, int crash_type) {
   return -NACL_ABI_EINVAL;
 }
 
-int32_t NaClSysGetTimeOfDay(struct NaClAppThread      *natp,
-                            struct nacl_abi_timeval   *tv,
-                            struct nacl_abi_timezone  *tz) {
+/*
+ * This syscall does not take a "tz" (timezone) argument.  tz is not
+ * supported in linux, nor is it supported by glibc, since tzset(3) and the
+ * zoneinfo file should be used instead.
+ */
+int32_t NaClSysGetTimeOfDay(struct NaClAppThread *natp,
+                            uint32_t             tv_addr) {
   int                     retval;
   struct nacl_abi_timeval now;
 
-  UNREFERENCED_PARAMETER(tz);
-
   NaClLog(3,
           ("Entered NaClSysGetTimeOfDay(%08"NACL_PRIxPTR
-           ", 0x%08"NACL_PRIxPTR", 0x%08"NACL_PRIxPTR")\n"),
-          (uintptr_t) natp, (uintptr_t) tv, (uintptr_t) tz);
-
-  /*
-   * tz is not supported in linux, nor is it supported by glibc, since
-   * tzset(3) and the zoneinfo file should be used instead.
-   *
-   * TODO(bsy) Do we make the zoneinfo directory available to
-   * applications?
-   */
+           ", 0x%08"NACL_PRIx32")\n"),
+          (uintptr_t) natp, tv_addr);
 
   /* memset() call is required to clear padding in struct nacl_abi_timeval. */
   memset(&now, 0, sizeof(now));
@@ -1002,7 +986,7 @@ int32_t NaClSysGetTimeOfDay(struct NaClAppThread      *natp,
 #endif
   CHECK(now.nacl_abi_tv_usec >= 0);
   CHECK(now.nacl_abi_tv_usec < NACL_MICROS_PER_UNIT);
-  if (!NaClCopyOutToUser(natp->nap, (uintptr_t) tv, &now, sizeof now)) {
+  if (!NaClCopyOutToUser(natp->nap, tv_addr, &now, sizeof now)) {
     return -NACL_ABI_EFAULT;
   }
   return 0;

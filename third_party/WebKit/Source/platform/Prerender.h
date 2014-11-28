@@ -43,10 +43,6 @@
 #include "wtf/text/WTFString.h"
 
 namespace blink {
-class WebPrerender;
-}
-
-namespace blink {
 
 class PrerenderClient;
 

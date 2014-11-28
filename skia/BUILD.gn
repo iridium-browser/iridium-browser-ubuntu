@@ -178,6 +178,10 @@ config("skia_library_config") {
     "SK_USE_DISCARDABLE_SCALEDIMAGECACHE",
   ]
 
+  if (component_mode == "shared_library") {
+    defines += [ "SKIA_IMPLEMENTATION=1" ]
+  }
+
   if (cpu_arch == "arm") {
     if (arm_use_neon) {
       defines += [ "SK_ARM_HAS_NEON" ]
@@ -234,15 +238,15 @@ config("skia_library_config") {
     defines += [ "SK_FONTHOST_USES_FONTMGR" ]
 
     cflags = [
-      # TODO(brettw) comment what these are.
-      "/wd4244",
-      "/wd4267",
-      "/wd4341",
-      "/wd4345",
-      "/wd4390",
-      "/wd4554",
-      "/wd4748",
-      "/wd4800",
+      "/wd4244", # conversion from 'type1( __int64)' to 'type2 (unsigned int)'
+      "/wd4267", # conversion from 'size_t' (64 bit) to 'type'(32 bit).
+      "/wd4341", # signed value is out of range for enum constant.
+      "/wd4345", # Object is default-initialized if initialization is omitted.
+      "/wd4390", # ';'empty statement found in looping;is it what was intended?
+      "/wd4554", # 'operator' : check operator precedence for possible error
+      "/wd4748", # compiler will disable optimizations if a function has inline
+                 # assembly code contains flow control(jmp or jcc) statements.
+      "/wd4800", # forcing value to bool 'true/false'(assigning int to bool).
     ]
   }
 }
@@ -250,6 +254,7 @@ config("skia_library_config") {
 component("skia") {
   sources = [
     # Chrome sources.
+    "config/SkUserConfig.h",
     "ext/analysis_canvas.cc",
     "ext/analysis_canvas.h",
     "ext/benchmarking_canvas.cc",
@@ -324,10 +329,9 @@ component("skia") {
 
   # Remove unused util files include in utils.gypi
   sources -= [
+  "//third_party/skia/src/utils/SkCondVar.cpp",
   "//third_party/skia/src/utils/SkCondVar.h",
   "//third_party/skia/src/utils/SkRunnable.h",
-  "//third_party/skia/src/utils/SkThreadPool.h",
-  "//third_party/skia/src/utils/SkCondVar.cpp",
 
   "//third_party/skia/include/utils/SkBoundaryPatch.h",
   "//third_party/skia/include/utils/SkFrontBufferedStream.h",
@@ -476,7 +480,7 @@ component("skia") {
       "ext/bitmap_platform_device_win.h",
     ]
   } else if (is_mac) {
-    sources += [ 
+    sources += [
       "ext/bitmap_platform_device_mac.cc",
       "ext/bitmap_platform_device_mac.h",
     ]
@@ -504,7 +508,7 @@ component("skia") {
     ":skia_library_config",
     "//build/config/compiler:no_chromium_code"
   ]
-  direct_dependent_configs = [ ":skia_config" ]
+  public_configs = [ ":skia_config" ]
 
   deps = [
     ":skia_opts",
@@ -512,10 +516,6 @@ component("skia") {
     "//base/third_party/dynamic_annotations",
     "//third_party/zlib",
   ]
-
-  if (component_mode == "shared_library") {
-    defines = [ "SKIA_IMPLEMENTATION=1" ]
-  }
 
   if (is_win) {
     configs -= [
@@ -551,6 +551,11 @@ component("skia") {
 
   if (skia_support_pdf) {
     deps += [ "//third_party/sfntly" ]
+  }
+
+  if (is_android && !is_debug) {
+    configs -= [ "//build/config/compiler:optimize" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
   }
 }
 
@@ -689,9 +694,15 @@ source_set("skia_opts") {
     assert(false, "Need to port cpu specific stuff from skia_library_opts.gyp")
   }
 
+  if (is_android && !is_debug) {
+    configs -= [ "//build/config/compiler:optimize" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [
     ":skia_config",
+    ":skia_library_config",
     "//build/config/compiler:no_chromium_code"
   ]
 
@@ -699,5 +710,5 @@ source_set("skia_opts") {
     "//base",
   ]
 
-  visibility = ":skia"
+  visibility = [ ":skia" ]
 }

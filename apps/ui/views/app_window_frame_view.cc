@@ -4,11 +4,10 @@
 
 #include "apps/ui/views/app_window_frame_view.h"
 
-#include "apps/ui/native_app_window.h"
 #include "base/strings/utf_string_conversions.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/common/draggable_region.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_strings.h"  // Accessibility names
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/base/hit_test.h"
@@ -18,6 +17,7 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
+#include "ui/strings/grit/ui_strings.h"  // Accessibility names
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/views_delegate.h"
@@ -38,7 +38,7 @@ const char AppWindowFrameView::kViewClassName[] =
     "browser/ui/views/extensions/AppWindowFrameView";
 
 AppWindowFrameView::AppWindowFrameView(views::Widget* widget,
-                                       NativeAppWindow* window,
+                                       extensions::NativeAppWindow* window,
                                        bool draw_frame,
                                        const SkColor& active_frame_color,
                                        const SkColor& inactive_frame_color)
@@ -229,6 +229,13 @@ void AppWindowFrameView::GetWindowMask(const gfx::Size& size,
   // We got nothing to say about no window mask.
 }
 
+void AppWindowFrameView::SizeConstraintsChanged() {
+  if (draw_frame_) {
+    maximize_button_->SetEnabled(widget_->widget_delegate() &&
+                                 widget_->widget_delegate()->CanMaximize());
+  }
+}
+
 gfx::Size AppWindowFrameView::GetPreferredSize() const {
   gfx::Size pref = widget_->client_view()->GetPreferredSize();
   gfx::Rect bounds(0, 0, pref.width(), pref.height());
@@ -250,10 +257,8 @@ void AppWindowFrameView::Layout() {
                            close_size.width(),
                            close_size.height());
 
-  bool can_ever_resize = widget_->widget_delegate()
-                             ? widget_->widget_delegate()->CanResize()
-                             : false;
-  maximize_button_->SetEnabled(can_ever_resize);
+  maximize_button_->SetEnabled(widget_->widget_delegate() &&
+                               widget_->widget_delegate()->CanMaximize());
   gfx::Size maximize_size = maximize_button_->GetPreferredSize();
   maximize_button_->SetBounds(
       close_button_->x() - kButtonSpacing - maximize_size.width(),

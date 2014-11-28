@@ -24,9 +24,6 @@ config("media_config") {
   if (use_cras) {
     defines += [ "USE_CRAS" ]
   }
-  if (enable_mpeg2ts_stream_parser) {
-    defines += [ "ENABLE_MPEG2TS_STREAM_PARSER" ]
-  }
 }
 
 config("media_dependent_config") {
@@ -107,10 +104,14 @@ component("media") {
     "filters/h264_bit_reader.h",
     "filters/h264_parser.cc",
     "filters/h264_parser.h",
+    "filters/renderer_impl.cc",
+    "filters/renderer_impl.h",
     "filters/skcanvas_video_renderer.cc",
     "filters/skcanvas_video_renderer.h",
     "filters/source_buffer_platform.cc",
     "filters/source_buffer_platform.h",
+    "filters/source_buffer_range.cc",
+    "filters/source_buffer_range.h",
     "filters/source_buffer_stream.cc",
     "filters/source_buffer_stream.h",
     "filters/stream_parser_factory.cc",
@@ -161,13 +162,11 @@ component("media") {
     "video/capture/linux/video_capture_device_linux.h",
     "video/capture/linux/video_capture_device_chromeos.cc",
     "video/capture/linux/video_capture_device_chromeos.h",
-    "video/capture/mac/avfoundation_glue.h",
-    "video/capture/mac/avfoundation_glue.mm",
-    "video/capture/mac/coremedia_glue.h",
-    "video/capture/mac/coremedia_glue.mm",
     "video/capture/mac/platform_video_capturing_mac.h",
     "video/capture/mac/video_capture_device_avfoundation_mac.h",
     "video/capture/mac/video_capture_device_avfoundation_mac.mm",
+    "video/capture/mac/video_capture_device_decklink_mac.h",
+    "video/capture/mac/video_capture_device_decklink_mac.mm",
     "video/capture/mac/video_capture_device_factory_mac.h",
     "video/capture/mac/video_capture_device_factory_mac.mm",
     "video/capture/mac/video_capture_device_mac.h",
@@ -303,7 +302,7 @@ component("media") {
       "//media/base/android:video_capture_jni_headers",
     ]
     if (!is_android_webview_build) {
-      deps += [ ":media_java" ]
+      deps += [ "//media/base/android:media_java" ]
     }
   }
 
@@ -334,11 +333,21 @@ component("media") {
   }
 
   if (is_mac) {
+    deps += [
+      "//media/base/mac",
+      "//third_party/decklink",
+    ]
     libs += [
       "CoreMIDI.framework",
       "CoreVideo.framework",
       "OpenGL.framework",
       "QTKit.framework",
+    ]
+  }
+
+  if (is_ios) {
+    deps += [
+      "//media/base/mac",
     ]
   }
 
@@ -359,14 +368,19 @@ component("media") {
     sources += [
       "formats/mp2t/es_adapter_video.cc",
       "formats/mp2t/es_adapter_video.h",
+      "formats/mp2t/es_parser.cc",
       "formats/mp2t/es_parser.h",
       "formats/mp2t/es_parser_adts.cc",
       "formats/mp2t/es_parser_adts.h",
       "formats/mp2t/es_parser_h264.cc",
       "formats/mp2t/es_parser_h264.h",
+      "formats/mp2t/es_parser_mpeg1audio.cc",
+      "formats/mp2t/es_parser_mpeg1audio.h",
       "formats/mp2t/mp2t_common.h",
       "formats/mp2t/mp2t_stream_parser.cc",
       "formats/mp2t/mp2t_stream_parser.h",
+      "formats/mp2t/timestamp_unroller.cc",
+      "formats/mp2t/timestamp_unroller.h",
       "formats/mp2t/ts_packet.cc",
       "formats/mp2t/ts_packet.h",
       "formats/mp2t/ts_section.h",
@@ -400,12 +414,17 @@ component("media") {
       "formats/mpeg/adts_constants.h",
       "formats/mpeg/adts_stream_parser.cc",
       "formats/mpeg/adts_stream_parser.h",
-      "formats/mpeg/mp3_stream_parser.cc",
-      "formats/mpeg/mp3_stream_parser.h",
       "formats/mpeg/mpeg_audio_stream_parser_base.cc",
       "formats/mpeg/mpeg_audio_stream_parser_base.h",
+      "formats/mpeg/mpeg1_audio_stream_parser.cc",
+      "formats/mpeg/mpeg1_audio_stream_parser.h",
     ]
   }
+
+  public_deps = [
+    "//media/base",
+    "//media/audio",
+  ]
 
   deps += [
     ":shared_memory_support",
@@ -415,8 +434,6 @@ component("media") {
     "//crypto",
     "//crypto:platform",  # TODO(ajwong): This used to be provided by crypto.gyp via export_dependent_settings
     "//gpu/command_buffer/common",
-    "//media/audio",
-    "//media/base",
     "//skia",
     "//third_party/libyuv",
     "//third_party/opus",
@@ -425,6 +442,24 @@ component("media") {
     "//ui/gfx/geometry",
     "//url",
   ]
+}
+
+# Minimal media component for media/cast on iOS.
+if (is_ios) {
+  component("media_for_cast_ios") {
+    configs += [ ":media_config" ]
+    all_dependent_configs = [ ":media_dependent_config" ]
+    include_dirs = [ "." ]
+    libs = [ "CoreVideo.framework" ]
+
+    deps = [
+      ":shared_memory_support",
+      "//base",
+      "//media/base:base_for_cast_ios",
+      "//media/base/mac",
+      "//ui/gfx/geometry",
+    ]
+  }
 }
 
 test("media_unittests") {
@@ -449,6 +484,7 @@ test("media_unittests") {
     "filters/frame_processor_unittest.cc",
     "filters/h264_bit_reader_unittest.cc",
     "filters/h264_parser_unittest.cc",
+    "filters/renderer_impl_unittest.cc",
     "filters/skcanvas_video_renderer_unittest.cc",
     "filters/source_buffer_stream_unittest.cc",
     "filters/video_decoder_selector_unittest.cc",
@@ -477,7 +513,32 @@ test("media_unittests") {
     "formats/webm/webm_webvtt_parser_unittest.cc",
   ]
 
-  if (!is_android) {
+  deps = [
+    ":media",
+    ":test_support",
+    "//base/allocator",
+    "//base/test:test_support",
+    "//media/audio:unittests",
+    "//media/audio:test_support",
+    "//media/base:unittests",
+    "//media/base:test_support",
+    "//skia",  # Direct dependency required to inherit config.
+    "//testing/gmock",
+    "//testing/gtest",
+    "//third_party/widevine/cdm:version_h",
+    "//ui/gfx:test_support",
+    "//url",
+  ]
+
+  if (is_android) {
+    deps += [
+      "//media/base/android",
+      # TODO(GYP)
+      #"//testing/android:native_test_native_code"
+    ]
+  }
+
+  if (media_use_ffmpeg) {
     sources += [
       "ffmpeg/ffmpeg_common_unittest.cc",
       "filters/audio_decoder_unittest.cc",
@@ -490,12 +551,6 @@ test("media_unittests") {
       "filters/pipeline_integration_test.cc",
       "filters/pipeline_integration_test_base.cc",
     ]
-  } else {
-# TODO(ajwong): Blocked on android.
-#    deps += [
-#      ":player_android",
-#      "//testing/android:native_test_native_code"
-#    ]
   }
 
   if (cpu_arch != "arm" && is_chromeos && use_x11) {
@@ -511,9 +566,11 @@ test("media_unittests") {
       "formats/mp2t/es_adapter_video_unittest.cc",
       "formats/mp2t/es_parser_adts_unittest.cc",
       "formats/mp2t/es_parser_h264_unittest.cc",
+      "formats/mp2t/es_parser_mpeg1audio_unittest.cc",
       "formats/mp2t/es_parser_test_base.cc",
       "formats/mp2t/es_parser_test_base.h",
       "formats/mp2t/mp2t_stream_parser_unittest.cc",
+      "formats/mp2t/timestamp_unroller_unittest.cc",
       "formats/mp4/aac_unittest.cc",
       "formats/mp4/avc_unittest.cc",
       "formats/mp4/box_reader_unittest.cc",
@@ -522,7 +579,7 @@ test("media_unittests") {
       "formats/mp4/sample_to_group_iterator_unittest.cc",
       "formats/mp4/track_run_iterator_unittest.cc",
       "formats/mpeg/adts_stream_parser_unittest.cc",
-      "formats/mpeg/mp3_stream_parser_unittest.cc",
+      "formats/mpeg/mpeg1_audio_stream_parser_unittest.cc",
     ]
   }
 
@@ -546,32 +603,6 @@ test("media_unittests") {
 
   configs += [ ":media_config" ]
 
-# TODO(ajwong): This was in the original gyp, but it seems silly.
-#        ['os_posix==1 and OS!="mac"', {
-#          'conditions': [
-#            ['use_allocator!="none"', {
-#              'dependencies': [
-#                '../base/allocator/allocator.gyp:allocator',
-#              ],
-#            }],
-#          ],
-#        }],
-  deps = [
-    ":media",
-    ":test_support",
-    "//base/test:test_support",
-    "//media/audio:unittests",
-    "//media/audio:test_support",
-    "//media/base:unittests",
-    "//media/base:test_support",
-    "//skia",  # Direct dependency required to inherit config.
-    "//testing/gmock",
-    "//testing/gtest",
-    # TODO(dalecurtis): Port the rest of Widevine stuff.
-    "//third_party/widevine/cdm:version_h",
-    "//ui/gfx:test_support",
-    "//url",
-  ]
   if (media_use_ffmpeg) {
     deps += [
       "//third_party/ffmpeg",  # Direct dependency required to inherit config.
@@ -613,6 +644,7 @@ test("media_perftests") {
 }
 
 source_set("test_support") {
+  testonly = true
   sources = [
     "filters/clockless_video_frame_scheduler.cc",
     "filters/clockless_video_frame_scheduler.h",
@@ -648,6 +680,7 @@ component("shared_memory_support") {
     "base/vector_math.h",
   ]
   configs += [ ":media_config" ]
+  defines = [ "MEDIA_IMPLEMENTATION" ]
   deps = [ "//base" ]
 }
 
@@ -725,25 +758,5 @@ if (use_x11) {
       "//ui/gfx",
       "//ui/gfx/geometry",
     ]
-  }
-}
-
-if (is_android) {
-  import("//build/config/android/rules.gni")
-  android_library("media_java") {
-    srcjar_deps = [
-      ":media_android_imageformat_list",
-    ]
-    java_files = []
-  }
-
-  java_cpp_template("media_android_imageformat_list") {
-    sources = [
-      "base/android/java/src/org/chromium/media/ImageFormat.template",
-    ]
-    inputs = [
-      "video/capture/android/imageformat_list.h"
-    ]
-    package_name = "org/chromium/media"
   }
 }
