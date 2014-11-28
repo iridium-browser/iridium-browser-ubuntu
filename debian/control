@@ -3,7 +3,7 @@ Section: web
 Priority: optional
 Maintainer: Joachim Bauch <bauch@struktur.de>
 XS-Testsuite: autopkgtest
-Homepage: http://iridium-browser.org
+Homepage: https://www.iridiumbrowser.de
 Vcs-Git: git://git.netitwork.net/iridium-browser
 Vcs-Browser: https://git.netitwork.net/pub/cgit.cgi/iridium-browser/
 Build-Depends:
