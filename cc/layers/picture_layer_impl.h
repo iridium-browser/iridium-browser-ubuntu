@@ -51,6 +51,8 @@ class CC_EXPORT PictureLayerImpl
    private:
     enum IteratorType { LOW_RES, HIGH_RES, NUM_ITERATORS };
 
+    void AdvanceToNextStage();
+
     PictureLayerImpl* layer_;
 
     struct IterationStage {
@@ -107,8 +109,8 @@ class CC_EXPORT PictureLayerImpl
   virtual void AppendQuads(RenderPass* render_pass,
                            const OcclusionTracker<LayerImpl>& occlusion_tracker,
                            AppendQuadsData* append_quads_data) OVERRIDE;
-  virtual void UpdateTiles(
-      const OcclusionTracker<LayerImpl>* occlusion_tracker) OVERRIDE;
+  virtual void UpdateTiles(const Occlusion& occlusion_in_content_space,
+                           bool resourceless_software_draw) OVERRIDE;
   virtual void NotifyTileStateChanged(const Tile* tile) OVERRIDE;
   virtual void DidBecomeActive() OVERRIDE;
   virtual void DidBeginTracing() OVERRIDE;
@@ -158,8 +160,7 @@ class CC_EXPORT PictureLayerImpl
   void RemoveAllTilings();
   void SyncFromActiveLayer(const PictureLayerImpl* other);
   void AddTilingsForRasterScale();
-  void UpdateTilePriorities(
-      const OcclusionTracker<LayerImpl>* occlusion_tracker);
+  void UpdateTilePriorities(const Occlusion& occlusion_in_content_space);
   virtual bool ShouldAdjustRasterScale() const;
   virtual void RecalculateRasterScales();
   void CleanUpTilingsOnActiveLayer(
@@ -171,11 +172,11 @@ class CC_EXPORT PictureLayerImpl
   bool MarkVisibleTilesAsRequired(
       PictureLayerTiling* tiling,
       const PictureLayerTiling* optional_twin_tiling,
-      float contents_scale,
       const gfx::Rect& rect,
       const Region& missing_region) const;
   gfx::Rect GetViewportForTilePriorityInContentSpace() const;
   PictureLayerImpl* GetRecycledTwinLayer();
+  void UpdatePile(scoped_refptr<PicturePileImpl> pile);
 
   void DoPostCommitInitializationIfNeeded() {
     if (needs_post_commit_initialization_)
@@ -186,6 +187,8 @@ class CC_EXPORT PictureLayerImpl
   bool CanHaveTilings() const;
   bool CanHaveTilingWithScale(float contents_scale) const;
   void SanityCheckTilingState() const;
+
+  bool ShouldAdjustRasterScaleDuringScaleAnimations() const;
 
   virtual void GetDebugBorderProperties(
       SkColor* color, float* width) const OVERRIDE;

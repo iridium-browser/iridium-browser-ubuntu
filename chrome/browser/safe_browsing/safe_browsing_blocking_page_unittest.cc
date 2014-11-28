@@ -124,7 +124,7 @@ class SafeBrowsingBlockingPageTest : public ChromeRenderViewHostTestHarness {
   void Navigate(const char* url, int page_id) {
     WebContentsTester::For(web_contents())->TestDidNavigate(
         web_contents()->GetMainFrame(), page_id, GURL(url),
-        content::PAGE_TRANSITION_TYPED);
+        ui::PAGE_TRANSITION_TYPED);
   }
 
   void GoBack(bool is_cross_site) {
@@ -141,7 +141,7 @@ class SafeBrowsingBlockingPageTest : public ChromeRenderViewHostTestHarness {
         rfh,
         entry->GetPageID(),
         GURL(entry->GetURL()),
-        content::PAGE_TRANSITION_TYPED);
+        ui::PAGE_TRANSITION_TYPED);
   }
 
   void ShowInterstitial(bool is_subresource, const char* url) {
@@ -220,7 +220,7 @@ TEST_F(SafeBrowsingBlockingPageTest, MalwarePageDontProceed) {
 
   // Start a load.
   controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                       content::PAGE_TRANSITION_TYPED, std::string());
+                       ui::PAGE_TRANSITION_TYPED, std::string());
 
 
   // Simulate the load causing a safe browsing interstitial to be shown.
@@ -256,7 +256,7 @@ TEST_F(SafeBrowsingBlockingPageTest, MalwarePageProceed) {
 
   // Start a load.
   controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                       content::PAGE_TRANSITION_TYPED, std::string());
+                       ui::PAGE_TRANSITION_TYPED, std::string());
 
   // Simulate the load causing a safe browsing interstitial to be shown.
   ShowInterstitial(false, kBadURL);
@@ -520,7 +520,7 @@ TEST_F(SafeBrowsingBlockingPageTest, NavigatingBackAndForth) {
 
   // Now navigate to a bad page triggerring an interstitial.
   controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                       content::PAGE_TRANSITION_TYPED, std::string());
+                       ui::PAGE_TRANSITION_TYPED, std::string());
   ShowInterstitial(false, kBadURL);
   SafeBrowsingBlockingPage* sb_interstitial =
       GetSafeBrowsingBlockingPage();
@@ -567,7 +567,7 @@ TEST_F(SafeBrowsingBlockingPageTest, ProceedThenDontProceed) {
 
   // Start a load.
   controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                       content::PAGE_TRANSITION_TYPED, std::string());
+                       ui::PAGE_TRANSITION_TYPED, std::string());
 
   // Simulate the load causing a safe browsing interstitial to be shown.
   ShowInterstitial(false, kBadURL);
@@ -604,7 +604,7 @@ TEST_F(SafeBrowsingBlockingPageTest, MalwareReportsDisabled) {
 
   // Start a load.
   controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                       content::PAGE_TRANSITION_TYPED, std::string());
+                       ui::PAGE_TRANSITION_TYPED, std::string());
 
   // Simulate the load causing a safe browsing interstitial to be shown.
   ShowInterstitial(false, kBadURL);
@@ -639,7 +639,7 @@ TEST_F(SafeBrowsingBlockingPageTest, MalwareReportsToggling) {
 
   // Start a load.
   controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                       content::PAGE_TRANSITION_TYPED, std::string());
+                       ui::PAGE_TRANSITION_TYPED, std::string());
 
   // Simulate the load causing a safe browsing interstitial to be shown.
   ShowInterstitial(false, kBadURL);
@@ -663,73 +663,4 @@ TEST_F(SafeBrowsingBlockingPageTest, MalwareReportsToggling) {
 
   EXPECT_FALSE(profile->GetPrefs()->GetBoolean(
       prefs::kSafeBrowsingExtendedReportingEnabled));
-}
-
-// Test that the transition from old to new preference works.
-TEST_F(SafeBrowsingBlockingPageTest, MalwareReportsTransitionEnabled) {
-  // The old pref is enabled.
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
-  profile->GetPrefs()->SetBoolean(prefs::kSafeBrowsingReportingEnabled, true);
-
-  // Start a load.
-  controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                             content::PAGE_TRANSITION_TYPED, std::string());
-
-  // Simulate the load causing a safe browsing interstitial to be shown.
-  ShowInterstitial(false, kBadURL);
-  SafeBrowsingBlockingPage* sb_interstitial =
-      GetSafeBrowsingBlockingPage();
-  ASSERT_TRUE(sb_interstitial);
-
-  base::RunLoop().RunUntilIdle();
-
-  // At this point, nothing should have changed yet.
-  EXPECT_FALSE(profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingExtendedReportingEnabled));
-
-  ProceedThroughInterstitial(sb_interstitial);
-
-  // Since the user has proceeded without changing the checkbox, the new pref
-  // has been updated.
-  EXPECT_TRUE(profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingExtendedReportingEnabled));
-}
-
-// Test that the transition from old to new preference still respects the
-// user's checkbox preferences.
-TEST_F(SafeBrowsingBlockingPageTest, MalwareReportsTransitionDisabled) {
-  // The old pref is enabled.
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
-  profile->GetPrefs()->SetBoolean(prefs::kSafeBrowsingReportingEnabled, true);
-
-  // Start a load.
-  controller().LoadURL(GURL(kBadURL), content::Referrer(),
-                             content::PAGE_TRANSITION_TYPED, std::string());
-
-  // Simulate the load causing a safe browsing interstitial to be shown.
-  ShowInterstitial(false, kBadURL);
-  SafeBrowsingBlockingPage* sb_interstitial =
-      GetSafeBrowsingBlockingPage();
-  ASSERT_TRUE(sb_interstitial);
-
-  base::RunLoop().RunUntilIdle();
-
-  // At this point, nothing should have changed yet.
-  EXPECT_FALSE(profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingExtendedReportingEnabled));
-
-  // Simulate the user uncheck the report agreement checkbox.
-  sb_interstitial->SetReportingPreference(false);
-
-  ProceedThroughInterstitial(sb_interstitial);
-
-  // The new pref is turned off.
-  EXPECT_FALSE(profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingExtendedReportingEnabled));
-  EXPECT_FALSE(profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingReportingEnabled));
-  EXPECT_FALSE(profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingDownloadFeedbackEnabled));
 }

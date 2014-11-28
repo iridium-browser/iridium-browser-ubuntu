@@ -8,7 +8,7 @@
 // Exactly one instance of SdchManager is built, and all references are made
 // into that collection.
 //
-// The SdchManager maintains a collection of memory resident dictionaries.  It
+// The SdchManager maintains a collection of memory resident dictionaries. It
 // can find a dictionary (based on a server specification of a hash), store a
 // dictionary, and make judgements about what URLs can use, set, etc. a
 // dictionary.
@@ -38,16 +38,27 @@ namespace net {
 // Create a public interface to help us load SDCH dictionaries.
 // The SdchManager class allows registration to support this interface.
 // A browser may register a fetcher that is used by the dictionary managers to
-// get data from a specified URL.  This allows us to use very high level browser
-// functionality in this base (when the functionaity can be provided).
+// get data from a specified URL. This allows us to use very high level browser
+// functionality in this base (when the functionality can be provided).
 class NET_EXPORT SdchFetcher {
  public:
+  class NET_EXPORT Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Called whenever the SdchFetcher has successfully retrieved a
+    // dictionary.  |dictionary_text| contains the body of the dictionary
+    // retrieved from |dictionary_url|.
+    virtual void AddSdchDictionary(const std::string& dictionary_text,
+                                   const GURL& dictionary_url) = 0;
+  };
+
   SdchFetcher() {}
   virtual ~SdchFetcher() {}
 
   // The Schedule() method is called when there is a need to get a dictionary
-  // from a server.  The callee is responsible for getting that dictionary_text,
-  // and then calling back to AddSdchDictionary() to the SdchManager instance.
+  // from a server. The callee is responsible for getting that dictionary_text,
+  // and then calling back to AddSdchDictionary() in the Delegate instance.
   virtual void Schedule(const GURL& dictionary_url) = 0;
 
   // The Cancel() method is called to cancel all pending dictionary fetches.
@@ -60,7 +71,9 @@ class NET_EXPORT SdchFetcher {
 
 //------------------------------------------------------------------------------
 
-class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
+class NET_EXPORT SdchManager
+    : public SdchFetcher::Delegate,
+      public NON_EXPORTED_BASE(base::NonThreadSafe) {
  public:
   // A list of errors that appeared and were either resolved, or used to turn
   // off sdch encoding.
@@ -111,6 +124,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
     DICTIONARY_COUNT_EXCEEDED = 35,
     DICTIONARY_ALREADY_SCHEDULED_TO_DOWNLOAD = 36,
     DICTIONARY_ALREADY_TRIED_TO_DOWNLOAD = 37,
+    DICTIONARY_FETCH_READ_FAILED = 38,
 
     // Failsafe hack.
     ATTEMPT_TO_DECODE_NON_HTTP_DATA = 40,
@@ -127,7 +141,8 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
     META_REFRESH_RECOVERY = 70,            // Dictionary not found.
     // defunct =  71, // Almost the same as META_REFRESH_UNSUPPORTED.
     // defunct = 72,  // Almost the same as CACHED_META_REFRESH_UNSUPPORTED.
-    // defunct = 73,  // PASSING_THROUGH_NON_SDCH plus DISCARD_TENTATIVE_SDCH.
+    // defunct = 73,  // PASSING_THROUGH_NON_SDCH plus
+                      // RESPONSE_TENTATIVE_SDCH in ../filter/sdch_filter.cc.
     META_REFRESH_UNSUPPORTED = 74,         // Unrecoverable error.
     CACHED_META_REFRESH_UNSUPPORTED = 75,  // As above, but pulled from cache.
     PASSING_THROUGH_NON_SDCH = 76,  // Tagged sdch but missing dictionary-hash.
@@ -140,7 +155,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
 
     // Common decoded recovery methods.
     META_REFRESH_CACHED_RECOVERY = 80,  // Probably startup tab loading.
-    DISCARD_TENTATIVE_SDCH = 81,        // Server decided not to use sdch.
+    // defunct = 81, // Now tracked by ResponseCorruptionDetectionCause histo.
 
     // Non SDCH problems, only accounted for to make stat counting complete
     // (i.e., be able to be sure all dictionary advertisements are accounted
@@ -178,7 +193,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
     FRIEND_TEST_ALL_PREFIXES(SdchManagerTest, PathMatch);
 
     // Construct a vc-diff usable dictionary from the dictionary_text starting
-    // at the given offset.  The supplied client_hash should be used to
+    // at the given offset. The supplied client_hash should be used to
     // advertise the dictionary's availability relative to the suppplied URL.
     Dictionary(const std::string& dictionary_text,
                size_t offset,
@@ -188,7 +203,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
                const std::string& path,
                const base::Time& expiration,
                const std::set<int>& ports);
-    ~Dictionary();
+    virtual ~Dictionary();
 
     const GURL& url() const { return url_; }
     const std::string& client_hash() const { return client_hash_; }
@@ -227,7 +242,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
 
     // Metadate "headers" in before dictionary text contained the following:
     // Each dictionary payload consists of several headers, followed by the text
-    // of the dictionary.  The following are the known headers.
+    // of the dictionary. The following are the known headers.
     const std::string domain_;
     const std::string path_;
     const base::Time expiration_;  // Implied by max-age.
@@ -237,7 +252,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
   };
 
   SdchManager();
-  ~SdchManager();
+  virtual ~SdchManager();
 
   // Clear data (for browser data removal).
   void ClearData();
@@ -246,7 +261,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
   static void SdchErrorRecovery(ProblemCodes problem);
 
   // Register a fetcher that this class can use to obtain dictionaries.
-  void set_sdch_fetcher(SdchFetcher* fetcher);
+  void set_sdch_fetcher(scoped_ptr<SdchFetcher> fetcher);
 
   // Enables or disables SDCH compression.
   static void EnableSdchSupport(bool enabled);
@@ -260,7 +275,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
 
   // Briefly prevent further advertising of SDCH on this domain (if SDCH is
   // enabled). After enough calls to IsInSupportedDomain() the blacklisting
-  // will be removed.  Additional blacklists take exponentially more calls
+  // will be removed. Additional blacklists take exponentially more calls
   // to IsInSupportedDomain() before the blacklisting is undone.
   // Used when filter errors are found from a given domain, but it is plausible
   // that the cause is temporary (such as application startup, where cached
@@ -286,7 +301,7 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
 
   // Check to see if SDCH is enabled (globally), and the given URL is in a
   // supported domain (i.e., not blacklisted, and either the specific supported
-  // domain, or all domains were assumed supported).  If it is blacklist, reduce
+  // domain, or all domains were assumed supported). If it is blacklist, reduce
   // by 1 the number of times it will be reported as blacklisted.
   bool IsInSupportedDomain(const GURL& url);
 
@@ -301,15 +316,9 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
   bool CanFetchDictionary(const GURL& referring_url,
                           const GURL& dictionary_url) const;
 
-  // Add an SDCH dictionary to our list of availible dictionaries. This addition
-  // will fail (return false) if addition is illegal (data in the dictionary is
-  // not acceptable from the dictionary_url; dictionary already added, etc.).
-  bool AddSdchDictionary(const std::string& dictionary_text,
-                         const GURL& dictionary_url);
-
   // Find the vcdiff dictionary (the body of the sdch dictionary that appears
   // after the meta-data headers like Domain:...) with the given |server_hash|
-  // to use to decompreses data that arrived as SDCH encoded content.  Check to
+  // to use to decompreses data that arrived as SDCH encoded content. Check to
   // be sure the returned |dictionary| can be used for decoding content supplied
   // in response to a request for |referring_url|.
   // Return null in |dictionary| if there is no matching legal dictionary.
@@ -318,23 +327,36 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
                            scoped_refptr<Dictionary>* dictionary);
 
   // Get list of available (pre-cached) dictionaries that we have already loaded
-  // into memory.  The list is a comma separated list of (client) hashes per
+  // into memory. The list is a comma separated list of (client) hashes per
   // the SDCH spec.
   void GetAvailDictionaryList(const GURL& target_url, std::string* list);
 
   // Construct the pair of hashes for client and server to identify an SDCH
-  // dictionary.  This is only made public to facilitate unit testing, but is
+  // dictionary. This is only made public to facilitate unit testing, but is
   // otherwise private
   static void GenerateHash(const std::string& dictionary_text,
                            std::string* client_hash, std::string* server_hash);
 
   // For Latency testing only, we need to know if we've succeeded in doing a
-  // round trip before starting our comparative tests.  If ever we encounter
+  // round trip before starting our comparative tests. If ever we encounter
   // problems with SDCH, we opt-out of the test unless/until we perform a
   // complete SDCH decoding.
   bool AllowLatencyExperiment(const GURL& url) const;
 
   void SetAllowLatencyExperiment(const GURL& url, bool enable);
+
+  int GetFetchesCountForTesting() const {
+    return fetches_count_for_testing_;
+  }
+
+  // Implementation of SdchFetcher::Delegate.
+
+  // Add an SDCH dictionary to our list of availible
+  // dictionaries. This addition will fail if addition is illegal
+  // (data in the dictionary is not acceptable from the
+  // dictionary_url; dictionary already added, etc.).
+  virtual void AddSdchDictionary(const std::string& dictionary_text,
+                                 const GURL& dictionary_url) OVERRIDE;
 
  private:
   struct BlacklistInfo {
@@ -375,6 +397,8 @@ class NET_EXPORT SdchManager : public NON_EXPORTED_BASE(base::NonThreadSafe) {
   // List of hostnames for which a latency experiment is allowed (because a
   // round trip test has recently passed).
   ExperimentSet allow_latency_experiment_;
+
+  int fetches_count_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(SdchManager);
 };

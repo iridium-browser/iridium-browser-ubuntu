@@ -4,13 +4,13 @@
 
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 
-#include "grit/generated_resources.h"
+#include "chrome/grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMKeyValueAnimation.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/resources/grit/ui_resources.h"
 
 namespace  {
 const CGFloat kFramesPerSecond = 16; // Determined experimentally to look good.
@@ -184,7 +184,7 @@ NSString* const kFadeOutValueKeyPath = @"fadeOutValue";
   // Set accessibility description.
   NSCell* cell = [self cell];
   [cell accessibilitySetOverrideValue:gDescription
-                         forAttribute:NSAccessibilityDescriptionAttribute];
+                         forAttribute:NSAccessibilityTitleAttribute];
 
   // Add a tooltip. Using 'owner:self' means that
   // -view:stringForToolTip:point:userData: will be called to provide the

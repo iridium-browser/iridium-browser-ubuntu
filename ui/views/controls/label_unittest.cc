@@ -378,9 +378,9 @@ TEST_F(LabelTest, DrawSingleLineString) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be centered horizontally and vertically.
   EXPECT_EQ(extra.width() / 2, text_bounds.x());
-  EXPECT_EQ(extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(0, text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_CENTER,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -394,9 +394,9 @@ TEST_F(LabelTest, DrawSingleLineString) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be left aligned horizontally and centered vertically.
   EXPECT_EQ(0, text_bounds.x());
-  EXPECT_EQ(extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(0, text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_LEFT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -410,9 +410,9 @@ TEST_F(LabelTest, DrawSingleLineString) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be right aligned horizontally and centered vertically.
   EXPECT_EQ(extra.width(), text_bounds.x());
-  EXPECT_EQ(extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(0, text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_RIGHT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -439,9 +439,9 @@ TEST_F(LabelTest, DrawSingleLineString) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be centered horizontally and vertically within the border.
   EXPECT_EQ(border.left() + extra.width() / 2, text_bounds.x());
-  EXPECT_EQ(border.top() + extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(border.top(), text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.GetContentsBounds().height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_CENTER,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -455,9 +455,9 @@ TEST_F(LabelTest, DrawSingleLineString) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be left aligned horizontally and centered vertically.
   EXPECT_EQ(border.left(), text_bounds.x());
-  EXPECT_EQ(border.top() + extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(border.top(), text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.GetContentsBounds().height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_LEFT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -471,9 +471,9 @@ TEST_F(LabelTest, DrawSingleLineString) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be right aligned horizontally and centered vertically.
   EXPECT_EQ(border.left() + extra.width(), text_bounds.x());
-  EXPECT_EQ(border.top() + extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(border.top(), text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.GetContentsBounds().height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_RIGHT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -632,9 +632,9 @@ TEST_F(LabelTest, DrawSingleLineStringInRTL) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be centered horizontally and vertically.
   EXPECT_EQ(extra.width() / 2, text_bounds.x());
-  EXPECT_EQ(extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(0, text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_CENTER,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -648,9 +648,9 @@ TEST_F(LabelTest, DrawSingleLineStringInRTL) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be right aligned horizontally and centered vertically.
   EXPECT_EQ(extra.width(), text_bounds.x());
-  EXPECT_EQ(extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(0, text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_RIGHT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -664,9 +664,9 @@ TEST_F(LabelTest, DrawSingleLineStringInRTL) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be left aligned horizontally and centered vertically.
   EXPECT_EQ(0, text_bounds.x());
-  EXPECT_EQ(extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(0, text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_LEFT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -694,9 +694,9 @@ TEST_F(LabelTest, DrawSingleLineStringInRTL) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be centered horizontally and vertically within the border.
   EXPECT_EQ(border.left() + extra.width() / 2, text_bounds.x());
-  EXPECT_EQ(border.top() + extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(border.top(), text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.GetContentsBounds().height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_CENTER,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -710,9 +710,9 @@ TEST_F(LabelTest, DrawSingleLineStringInRTL) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be right aligned horizontally and centered vertically.
   EXPECT_EQ(border.left() + extra.width(), text_bounds.x());
-  EXPECT_EQ(border.top() + extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(border.top(), text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.GetContentsBounds().height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_RIGHT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |
@@ -726,9 +726,9 @@ TEST_F(LabelTest, DrawSingleLineStringInRTL) {
   EXPECT_EQ(label.text(), paint_text);
   // The text should be left aligned horizontally and centered vertically.
   EXPECT_EQ(border.left(), text_bounds.x());
-  EXPECT_EQ(border.top() + extra.height() / 2 , text_bounds.y());
+  EXPECT_EQ(border.top(), text_bounds.y());
   EXPECT_EQ(required_size.width(), text_bounds.width());
-  EXPECT_EQ(required_size.height(), text_bounds.height());
+  EXPECT_EQ(label.GetContentsBounds().height(), text_bounds.height());
   EXPECT_EQ(gfx::Canvas::TEXT_ALIGN_LEFT,
             flags & (gfx::Canvas::TEXT_ALIGN_LEFT |
                      gfx::Canvas::TEXT_ALIGN_CENTER |

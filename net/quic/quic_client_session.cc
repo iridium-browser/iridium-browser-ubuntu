@@ -18,7 +18,6 @@
 #include "net/quic/crypto/quic_server_info.h"
 #include "net/quic/quic_connection_helper.h"
 #include "net/quic/quic_crypto_client_stream_factory.h"
-#include "net/quic/quic_default_packet_writer.h"
 #include "net/quic/quic_server_id.h"
 #include "net/quic/quic_stream_factory.h"
 #include "net/spdy/spdy_session.h"
@@ -137,22 +136,16 @@ void QuicClientSession::StreamRequest::OnRequestCompleteFailure(int rv) {
 QuicClientSession::QuicClientSession(
     QuicConnection* connection,
     scoped_ptr<DatagramClientSocket> socket,
-    scoped_ptr<QuicDefaultPacketWriter> writer,
     QuicStreamFactory* stream_factory,
-    QuicCryptoClientStreamFactory* crypto_client_stream_factory,
     TransportSecurityState* transport_security_state,
     scoped_ptr<QuicServerInfo> server_info,
-    const QuicServerId& server_id,
     const QuicConfig& config,
-    QuicCryptoClientConfig* crypto_config,
     base::TaskRunner* task_runner,
     NetLog* net_log)
     : QuicClientSessionBase(connection, config),
-      server_host_port_(server_id.host_port_pair()),
       require_confirmation_(false),
       stream_factory_(stream_factory),
       socket_(socket.Pass()),
-      writer_(writer.Pass()),
       read_buffer_(new IOBufferWithSize(kMaxPacketSize)),
       transport_security_state_(transport_security_state),
       server_info_(server_info.Pass()),
@@ -164,6 +157,14 @@ QuicClientSession::QuicClientSession(
       num_packets_read_(0),
       going_away_(false),
       weak_factory_(this) {
+  connection->set_debug_visitor(logger_);
+}
+
+void QuicClientSession::InitializeSession(
+    const QuicServerId& server_id,
+    QuicCryptoClientConfig* crypto_config,
+    QuicCryptoClientStreamFactory* crypto_client_stream_factory) {
+  server_host_port_ = server_id.host_port_pair();
   crypto_stream_.reset(
       crypto_client_stream_factory ?
           crypto_client_stream_factory->CreateQuicCryptoClientStream(
@@ -171,8 +172,7 @@ QuicClientSession::QuicClientSession(
           new QuicCryptoClientStream(server_id, this,
                                      new ProofVerifyContextChromium(net_log_),
                                      crypto_config));
-
-  connection->set_debug_visitor(logger_);
+  QuicClientSessionBase::InitializeSession();
   // TODO(rch): pass in full host port proxy pair
   net_log_.BeginEvent(
       NetLog::TYPE_QUIC_SESSION,
@@ -235,7 +235,7 @@ QuicClientSession::~QuicClientSession() {
 
   bool port_selected = stream_factory_->enable_port_selection();
   SSLInfo ssl_info;
-  if (!GetSSLInfo(&ssl_info) || !ssl_info.cert) {
+  if (!GetSSLInfo(&ssl_info) || !ssl_info.cert.get()) {
     if (port_selected) {
       UMA_HISTOGRAM_CUSTOM_COUNTS("Net.QuicSession.ConnectSelectPortForHTTP",
                                   round_trip_handshakes, 0, 3, 4);
@@ -498,7 +498,7 @@ int QuicClientSession::GetNumSentClientHellos() const {
 bool QuicClientSession::CanPool(const std::string& hostname) const {
   DCHECK(connection()->connected());
   SSLInfo ssl_info;
-  if (!GetSSLInfo(&ssl_info) || !ssl_info.cert) {
+  if (!GetSSLInfo(&ssl_info) || !ssl_info.cert.get()) {
     // We can always pool with insecure QUIC sessions.
     return true;
   }
@@ -596,7 +596,19 @@ void QuicClientSession::OnConnectionClosed(QuicErrorCode error,
     UMA_HISTOGRAM_COUNTS(
         "Net.QuicSession.ConnectionClose.NumOpenStreams.TimedOut",
         GetNumOpenStreams());
-    if (!IsCryptoHandshakeConfirmed()) {
+    if (IsCryptoHandshakeConfirmed()) {
+      if (GetNumOpenStreams() > 0) {
+        UMA_HISTOGRAM_BOOLEAN(
+            "Net.QuicSession.TimedOutWithOpenStreams.HasUnackedPackets",
+            connection()->sent_packet_manager().HasUnackedPackets());
+        UMA_HISTOGRAM_COUNTS(
+            "Net.QuicSession.TimedOutWithOpenStreams.ConsecutiveRTOCount",
+            connection()->sent_packet_manager().consecutive_rto_count());
+        UMA_HISTOGRAM_COUNTS(
+            "Net.QuicSession.TimedOutWithOpenStreams.ConsecutiveTLPCount",
+            connection()->sent_packet_manager().consecutive_tlp_count());
+      }
+    } else {
       UMA_HISTOGRAM_COUNTS(
           "Net.QuicSession.ConnectionClose.NumOpenStreams.HandshakeTimedOut",
           GetNumOpenStreams());
@@ -762,7 +774,7 @@ base::Value* QuicClientSession::GetInfoAsValue(
   dict->SetInteger("packets_received", stats.packets_received);
   dict->SetInteger("packets_lost", stats.packets_lost);
   SSLInfo ssl_info;
-  dict->SetBoolean("secure", GetSSLInfo(&ssl_info) && ssl_info.cert);
+  dict->SetBoolean("secure", GetSSLInfo(&ssl_info) && ssl_info.cert.get());
 
   base::ListValue* alias_list = new base::ListValue();
   for (std::set<HostPortPair>::const_iterator it = aliases.begin();

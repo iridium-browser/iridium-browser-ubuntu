@@ -14,8 +14,8 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -36,7 +36,7 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/login/auth/parallel_authenticator.h"
+#include "chrome/browser/chromeos/login/auth/chrome_cryptohome_authenticator.h"
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
@@ -78,6 +78,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/auth/user_context.h"
+#include "chromeos/login/user_names.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user.h"
@@ -89,6 +90,11 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
+
+#if defined(USE_ATHENA)
+#include "athena/extensions/public/extensions_delegate.h"
+#include "athena/main/public/athena_launcher.h"
+#endif
 
 using content::BrowserThread;
 
@@ -146,6 +152,11 @@ bool CanPerformEarlyRestart() {
   if (!base::SysInfo::IsRunningOnChromeOS())
     return false;
 
+  if (!ChromeUserManager::Get()->GetCurrentUserFlow()->
+          SupportsEarlyRestartToApplyFlags()) {
+    return false;
+  }
+
   const ExistingUserController* controller =
       ExistingUserController::current_controller();
   if (!controller)
@@ -157,6 +168,10 @@ bool CanPerformEarlyRestart() {
     return false;
 
   if (controller->auth_mode() != LoginPerformer::AUTH_MODE_INTERNAL)
+    return false;
+
+  // No early restart if Easy unlock key needs to be updated.
+  if (UserSessionManager::GetInstance()->NeedsToUpdateEasyUnlockKeys())
     return false;
 
   return true;
@@ -284,6 +299,11 @@ void LoginUtilsImpl::DoBrowserLaunchInternal(Profile* profile,
 
   VLOG(1) << "Launching browser...";
   TRACE_EVENT0("login", "LaunchBrowser");
+
+#if defined(USE_ATHENA)
+  athena::ExtensionsDelegate::CreateExtensionsDelegateForChrome(profile);
+  athena::StartAthenaSessionWithContext(profile);
+#else
   StartupBrowserCreator browser_creator;
   int return_code;
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
@@ -298,6 +318,7 @@ void LoginUtilsImpl::DoBrowserLaunchInternal(Profile* profile,
 
   // Triggers app launcher start page service to load start page web contents.
   app_list::StartPageService::Get(profile);
+#endif
 
   // Mark login host for deletion after browser starts.  This
   // guarantees that the message loop will be referenced by the
@@ -388,7 +409,7 @@ bool LoginUtilsImpl::RestartToApplyPerSessionFlagsIfNeed(Profile* profile,
   CommandLine::StringVector flags;
   // argv[0] is the program name |CommandLine::NO_PROGRAM|.
   flags.assign(user_flags.argv().begin() + 1, user_flags.argv().end());
-  VLOG(1) << "Restarting to apply per-session flags...";
+  LOG(WARNING) << "Restarting to apply per-session flags...";
   DBusThreadManager::Get()->GetSessionManagerClient()->SetFlagsForUser(
       user_manager::UserManager::Get()->GetActiveUser()->email(), flags);
   AttemptRestart(profile);
@@ -408,6 +429,22 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
                                  browser_command_line,
                                  &command_line);
 
+  // This makes sure that Chrome restarts with no per-session flags. The guest
+  // profile will always have empty set of per-session flags. If this is not
+  // done and device owner has some per-session flags, when Chrome is relaunched
+  // the guest profile session flags will not match the current command line and
+  // another restart will be attempted in order to reset the user flags for the
+  // guest user.
+  const CommandLine user_flags(CommandLine::NO_PROGRAM);
+  if (!about_flags::AreSwitchesIdenticalToCurrentCommandLine(
+           user_flags,
+           *CommandLine::ForCurrentProcess(),
+           NULL)) {
+    DBusThreadManager::Get()->GetSessionManagerClient()->SetFlagsForUser(
+        chromeos::login::kGuestUserName,
+        CommandLine::StringVector());
+  }
+
   RestartChrome(cmd_line_str);
 }
 
@@ -421,7 +458,7 @@ scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
   }
 
   if (authenticator_.get() == NULL) {
-    authenticator_ = new ParallelAuthenticator(consumer);
+    authenticator_ = new ChromeCryptohomeAuthenticator(consumer);
   } else {
     // TODO(nkostylev): Fix this hack by improving Authenticator dependencies.
     authenticator_->SetConsumer(consumer);
@@ -442,6 +479,14 @@ void LoginUtilsImpl::OnRlzInitialized() {
 #endif
 
 void LoginUtilsImpl::AttemptRestart(Profile* profile) {
+  if (UserSessionManager::GetInstance()
+          ->CheckEasyUnlockKeyOps(
+              base::Bind(&LoginUtilsImpl::AttemptRestart,
+                         base::Unretained(this),
+                         profile))) {
+    return;
+  }
+
   if (UserSessionManager::GetInstance()->GetSigninSessionRestoreStrategy() !=
       OAuth2LoginManager::RESTORE_FROM_COOKIE_JAR) {
     chrome::AttemptRestart();

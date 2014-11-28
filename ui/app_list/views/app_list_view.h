@@ -42,7 +42,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
                                     public AppListViewDelegateObserver,
                                     public SpeechUIModelObserver {
  public:
-  // Takes ownership of |delegate|.
+  // Does not take ownership of |delegate|.
   explicit AppListView(AppListViewDelegate* delegate);
   virtual ~AppListView();
 
@@ -100,6 +100,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 
   // Overridden from AppListViewDelegateObserver:
   virtual void OnProfilesChanged() OVERRIDE;
+  virtual void OnShutdown() OVERRIDE;
 
   void Prerender();
 
@@ -156,7 +157,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   virtual void OnSpeechRecognitionStateChanged(
       SpeechRecognitionState new_state) OVERRIDE;
 
-  scoped_ptr<AppListViewDelegate> delegate_;
+  AppListViewDelegate* delegate_;  // Weak. Owned by AppListService.
 
   AppListMainView* app_list_main_view_;
   SpeechView* speech_view_;

@@ -16,20 +16,20 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.common.base.Preconditions;
-import com.google.ipc.invalidation.common.CommonProtoStrings2;
 import com.google.ipc.invalidation.common.DigestFunction;
 import com.google.ipc.invalidation.external.client.InvalidationClient;
 import com.google.ipc.invalidation.external.client.InvalidationListener;
 import com.google.ipc.invalidation.external.client.SystemResources;
+import com.google.ipc.invalidation.ticl.proto.ChannelCommon.NetworkEndpointId;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ClientConfigP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.RegistrationSummary;
+import com.google.ipc.invalidation.util.Bytes;
 import com.google.ipc.invalidation.util.InternalBase;
+import com.google.ipc.invalidation.util.Preconditions;
 import com.google.ipc.invalidation.util.TextBuilder;
-import com.google.protobuf.ByteString;
-import com.google.protos.ipc.invalidation.ChannelCommon.NetworkEndpointId;
-import com.google.protos.ipc.invalidation.ClientProtocol.ClientConfigP;
-import com.google.protos.ipc.invalidation.ClientProtocol.ObjectIdP;
-import com.google.protos.ipc.invalidation.ClientProtocol.RegistrationSummary;
 
+import java.util.ArrayList;
 import java.util.Collection;
 
 
@@ -52,6 +52,14 @@ public interface TestableInvalidationClient extends InvalidationClient {
     private final Collection<ObjectIdP> registeredObjects;
 
     public RegistrationManagerState(RegistrationSummary clientSummary,
+        RegistrationSummary serverSummary, ObjectIdP[] registeredObjects) {
+      this(clientSummary, serverSummary, new ArrayList<ObjectIdP>(registeredObjects.length));
+      for (ObjectIdP registeredObject : registeredObjects) {
+        this.registeredObjects.add(registeredObject);
+      }
+    }
+
+    public RegistrationManagerState(RegistrationSummary clientSummary,
         RegistrationSummary serverSummary, Collection<ObjectIdP> registeredObjects) {
       this.clientSummary = Preconditions.checkNotNull(clientSummary);
       this.serverSummary = Preconditions.checkNotNull(serverSummary);
@@ -72,13 +80,9 @@ public interface TestableInvalidationClient extends InvalidationClient {
 
     @Override
     public void toCompactString(TextBuilder builder) {
-      builder.append("<RegistrationManagerState: clientSummary=");
-      CommonProtoStrings2.toCompactString(builder, clientSummary);
-      builder.append(", serverSummary=");
-      CommonProtoStrings2.toCompactString(builder, serverSummary);
-      builder.append(", registeredObjects=");
-      CommonProtoStrings2.toCompactStringForObjectIds(builder, registeredObjects);
-      builder.append(">");
+      builder.append("<RegistrationManagerState: clientSummary=").append(clientSummary);
+      builder.append(", serverSummary=").append(serverSummary);
+      builder.append(", registeredObjects=<").append(registeredObjects).append(">");
     }
   }
 
@@ -136,7 +140,7 @@ public interface TestableInvalidationClient extends InvalidationClient {
   InvalidationListener getInvalidationListenerForTest();
 
   /** Returns the current client token. */
-  ByteString getClientTokenForTest();
+  Bytes getClientTokenForTest();
 
   /** Returns the single key used to write all the Ticl state. */
   String getClientTokenKeyForTest();

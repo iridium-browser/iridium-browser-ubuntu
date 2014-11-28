@@ -4,7 +4,7 @@
 
 #include "chrome/common/extensions/manifest_url_handler.h"
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
@@ -12,14 +12,15 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
+#include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/api_permission_set.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -56,9 +57,17 @@ const GURL ManifestURL::GetHomepageURL(const Extension* extension) {
   const GURL& homepage_url = GetManifestURL(extension, keys::kHomepageURL);
   if (homepage_url.is_valid())
     return homepage_url;
-  return UpdatesFromGallery(extension) ?
-      GURL(extension_urls::GetWebstoreItemDetailURLPrefix() + extension->id()) :
-      GURL::EmptyGURL();
+  bool use_webstore_url = UpdatesFromGallery(extension) &&
+                          !SharedModuleInfo::IsSharedModule(extension);
+  return use_webstore_url
+             ? GURL(extension_urls::GetWebstoreItemDetailURLPrefix() +
+                    extension->id())
+             : GURL::EmptyGURL();
+}
+
+// static
+bool ManifestURL::SpecifiedHomepageURL(const Extension* extension) {
+  return GetManifestURL(extension, keys::kHomepageURL).is_valid();
 }
 
 // static
@@ -77,11 +86,6 @@ bool  ManifestURL::UpdatesFromGallery(const base::DictionaryValue* manifest) {
   if (!manifest->GetString(keys::kUpdateURL, &url))
     return false;
   return extension_urls::IsWebstoreUpdateUrl(GURL(url));
-}
-
-// static
-const GURL& ManifestURL::GetOptionsPage(const Extension* extension) {
-  return GetManifestURL(extension, keys::kOptionsPage);
 }
 
 // static
@@ -198,74 +202,6 @@ bool UpdateURLHandler::Parse(Extension* extension, base::string16* error) {
 
 const std::vector<std::string> UpdateURLHandler::Keys() const {
   return SingleKey(keys::kUpdateURL);
-}
-
-OptionsPageHandler::OptionsPageHandler() {
-}
-
-OptionsPageHandler::~OptionsPageHandler() {
-}
-
-bool OptionsPageHandler::Parse(Extension* extension, base::string16* error) {
-  scoped_ptr<ManifestURL> manifest_url(new ManifestURL);
-  std::string options_str;
-  if (!extension->manifest()->GetString(keys::kOptionsPage, &options_str)) {
-    *error = base::ASCIIToUTF16(errors::kInvalidOptionsPage);
-    return false;
-  }
-
-  if (extension->is_hosted_app()) {
-    // hosted apps require an absolute URL.
-    GURL options_url(options_str);
-    if (!options_url.is_valid() ||
-        !options_url.SchemeIsHTTPOrHTTPS()) {
-      *error = base::ASCIIToUTF16(errors::kInvalidOptionsPageInHostedApp);
-      return false;
-    }
-    manifest_url->url_ = options_url;
-  } else {
-    GURL absolute(options_str);
-    if (absolute.is_valid()) {
-      *error =
-          base::ASCIIToUTF16(errors::kInvalidOptionsPageExpectUrlInPackage);
-      return false;
-    }
-    manifest_url->url_ = extension->GetResourceURL(options_str);
-    if (!manifest_url->url_.is_valid()) {
-      *error = base::ASCIIToUTF16(errors::kInvalidOptionsPage);
-      return false;
-    }
-  }
-
-  extension->SetManifestData(keys::kOptionsPage, manifest_url.release());
-  return true;
-}
-
-bool OptionsPageHandler::Validate(const Extension* extension,
-                                  std::string* error,
-                                  std::vector<InstallWarning>* warnings) const {
-  // Validate path to the options page.  Don't check the URL for hosted apps,
-  // because they are expected to refer to an external URL.
-  if (!extensions::ManifestURL::GetOptionsPage(extension).is_empty() &&
-      !extension->is_hosted_app()) {
-    const base::FilePath options_path =
-        extensions::file_util::ExtensionURLToRelativeFilePath(
-            extensions::ManifestURL::GetOptionsPage(extension));
-    const base::FilePath path =
-        extension->GetResource(options_path).GetFilePath();
-    if (path.empty() || !base::PathExists(path)) {
-      *error =
-          l10n_util::GetStringFUTF8(
-              IDS_EXTENSION_LOAD_OPTIONS_PAGE_FAILED,
-              options_path.LossyDisplayName());
-      return false;
-    }
-  }
-  return true;
-}
-
-const std::vector<std::string> OptionsPageHandler::Keys() const {
-  return SingleKey(keys::kOptionsPage);
 }
 
 AboutPageHandler::AboutPageHandler() {

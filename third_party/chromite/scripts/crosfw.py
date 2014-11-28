@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -101,6 +99,8 @@ Note the standard bmpblk is at:
   /home/$USER/trunk/src/third_party/chromiumos-overlay/sys-boot/
       chromeos-bootimage/files/bmpblk.bin"
 """
+
+from __future__ import print_function
 
 import glob
 import logging

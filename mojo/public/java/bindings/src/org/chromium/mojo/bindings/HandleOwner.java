@@ -19,4 +19,11 @@ public interface HandleOwner<H extends Handle> extends Closeable {
      * Pass the handle owned by this class.
      */
     public H passHandle();
+
+    /**
+     * @see java.io.Closeable#close()
+     */
+    @Override
+    public void close();
+
 }

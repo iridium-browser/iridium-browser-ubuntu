@@ -9,8 +9,8 @@ module mojo {
 
 interface ContentHandler {
   OnConnect(string url,
-            URLResponse url_response,
-            ServiceProvider service_provider);
+            URLResponse response,
+            ServiceProvider&? service_provider);
 };
 
 }

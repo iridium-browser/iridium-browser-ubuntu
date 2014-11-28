@@ -5,6 +5,7 @@
 #include "media/video/capture/video_capture_types.h"
 
 #include "base/logging.h"
+#include "base/strings/stringprintf.h"
 #include "media/base/limits.h"
 
 namespace media {
@@ -28,6 +29,13 @@ bool VideoCaptureFormat::IsValid() const {
          (frame_rate < media::limits::kMaxFramesPerSecond) &&
          (pixel_format >= PIXEL_FORMAT_UNKNOWN) &&
          (pixel_format < PIXEL_FORMAT_MAX);
+}
+
+std::string VideoCaptureFormat::ToString() const {
+  return base::StringPrintf("resolution: %s, fps: %f, pixel format: %s",
+                            frame_size.ToString().c_str(),
+                            frame_rate,
+                            PixelFormatToString(pixel_format).c_str());
 }
 
 std::string VideoCaptureFormat::PixelFormatToString(VideoPixelFormat format) {
@@ -59,6 +67,6 @@ std::string VideoCaptureFormat::PixelFormatToString(VideoPixelFormat format) {
   return "";
 }
 
-VideoCaptureParams::VideoCaptureParams() : allow_resolution_change(false) {}
-
+VideoCaptureParams::VideoCaptureParams()
+    : resolution_change_policy(RESOLUTION_POLICY_FIXED) {}
 }  // namespace media

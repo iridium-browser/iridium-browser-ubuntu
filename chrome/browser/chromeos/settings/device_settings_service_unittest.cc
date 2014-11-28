@@ -9,8 +9,8 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service_factory.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/test/base/testing_profile.h"
@@ -497,8 +497,8 @@ TEST_F(DeviceSettingsServiceTest, OnTPMTokenReadyForNonOwner) {
 
   const std::string& user_id = device_policy_.policy_data().username();
   InitOwner(user_id, false);
-  OwnerSettingsService* service =
-      OwnerSettingsServiceFactory::GetForProfile(profile_.get());
+  OwnerSettingsServiceChromeOS* service =
+      OwnerSettingsServiceChromeOSFactory::GetForProfile(profile_.get());
   ASSERT_TRUE(service);
   service->IsOwnerAsync(base::Bind(&DeviceSettingsServiceTest::OnIsOwner,
                                    base::Unretained(this)));
@@ -516,7 +516,7 @@ TEST_F(DeviceSettingsServiceTest, OnTPMTokenReadyForNonOwner) {
             device_settings_service_.GetOwnershipStatus());
   EXPECT_FALSE(is_owner_set_);
 
-  service->OnTPMTokenReady();
+  service->OnTPMTokenReady(true /* is ready */);
   FlushDeviceSettings();
 
   EXPECT_FALSE(device_settings_service_.HasPrivateOwnerKey());
@@ -542,8 +542,8 @@ TEST_F(DeviceSettingsServiceTest, OnTPMTokenReadyForOwner) {
   const std::string& user_id = device_policy_.policy_data().username();
   owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   InitOwner(user_id, false);
-  OwnerSettingsService* service =
-      OwnerSettingsServiceFactory::GetForProfile(profile_.get());
+  OwnerSettingsServiceChromeOS* service =
+      OwnerSettingsServiceChromeOSFactory::GetForProfile(profile_.get());
   ASSERT_TRUE(service);
   service->IsOwnerAsync(base::Bind(&DeviceSettingsServiceTest::OnIsOwner,
                                    base::Unretained(this)));
@@ -560,7 +560,7 @@ TEST_F(DeviceSettingsServiceTest, OnTPMTokenReadyForOwner) {
   EXPECT_FALSE(is_owner_set_);
 
   owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
-  service->OnTPMTokenReady();
+  service->OnTPMTokenReady(true /* is ready */);
   FlushDeviceSettings();
 
   EXPECT_TRUE(device_settings_service_.HasPrivateOwnerKey());
@@ -599,8 +599,8 @@ TEST_F(DeviceSettingsServiceTest, IsCurrentUserOwnerAsyncWithLoadedCerts) {
             device_settings_service_.GetOwnershipStatus());
   EXPECT_FALSE(is_owner_set_);
 
-  OwnerSettingsService* service =
-      OwnerSettingsServiceFactory::GetForProfile(profile_.get());
+  OwnerSettingsServiceChromeOS* service =
+      OwnerSettingsServiceChromeOSFactory::GetForProfile(profile_.get());
   ASSERT_TRUE(service);
   service->IsOwnerAsync(base::Bind(&DeviceSettingsServiceTest::OnIsOwner,
                                    base::Unretained(this)));

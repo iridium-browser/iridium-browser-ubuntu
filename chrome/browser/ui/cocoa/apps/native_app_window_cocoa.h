@@ -8,19 +8,16 @@
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
-#include "apps/size_constraints.h"
-#include "apps/ui/native_app_window.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/native_app_window.h"
+#include "extensions/browser/app_window/size_constraints.h"
 #include "extensions/common/draggable_region.h"
 #include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/gfx/rect.h"
-
-namespace apps {
-class AppWindow;
-}
 
 class ExtensionKeybindingRegistryCocoa;
 class NativeAppWindowCocoa;
@@ -47,11 +44,11 @@ class SkRegion;
 @end
 
 // Cocoa bridge to AppWindow.
-class NativeAppWindowCocoa : public apps::NativeAppWindow,
+class NativeAppWindowCocoa : public extensions::NativeAppWindow,
                              public content::WebContentsObserver {
  public:
-  NativeAppWindowCocoa(apps::AppWindow* app_window,
-                       const apps::AppWindow::CreateParams& params);
+  NativeAppWindowCocoa(extensions::AppWindow* app_window,
+                       const extensions::AppWindow::CreateParams& params);
 
   // ui::BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
@@ -125,7 +122,6 @@ class NativeAppWindowCocoa : public apps::NativeAppWindow,
   // NativeAppWindow implementation.
   virtual void SetFullscreen(int fullscreen_types) OVERRIDE;
   virtual bool IsFullscreenOrPending() const OVERRIDE;
-  virtual bool IsDetached() const OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
   virtual void UpdateWindowTitle() OVERRIDE;
   virtual void UpdateBadgeIcon() OVERRIDE;
@@ -152,6 +148,7 @@ class NativeAppWindowCocoa : public apps::NativeAppWindow,
   virtual gfx::Size GetContentMaximumSize() const OVERRIDE;
   virtual void SetContentSizeConstraints(const gfx::Size& min_size,
                                          const gfx::Size& max_size) OVERRIDE;
+  virtual void SetVisibleOnAllWorkspaces(bool always_visible) OVERRIDE;
 
   // WebContentsObserver implementation.
   virtual void RenderViewCreated(content::RenderViewHost* rvh) OVERRIDE;
@@ -187,7 +184,7 @@ class NativeAppWindowCocoa : public apps::NativeAppWindow,
   // Hides the window unconditionally. Used by Hide and HideWithApp.
   void HideWithoutMarkingHidden();
 
-  apps::AppWindow* app_window_;  // weak - AppWindow owns NativeAppWindow.
+  extensions::AppWindow* app_window_;  // weak - AppWindow owns NativeAppWindow.
 
   bool has_frame_;
 
@@ -203,14 +200,13 @@ class NativeAppWindowCocoa : public apps::NativeAppWindow,
   bool shows_resize_controls_;
   bool shows_fullscreen_controls_;
 
-  apps::SizeConstraints size_constraints_;
+  extensions::SizeConstraints size_constraints_;
 
   bool has_frame_color_;
   SkColor active_frame_color_;
   SkColor inactive_frame_color_;
 
   base::scoped_nsobject<NativeAppWindowController> window_controller_;
-  NSInteger attention_request_id_;  // identifier from requestUserAttention
 
   // For system drag, the whole window is draggable and the non-draggable areas
   // have to been explicitly excluded.

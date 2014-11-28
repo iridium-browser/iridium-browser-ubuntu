@@ -83,52 +83,6 @@
 
 namespace blink {
 
-// Allocates new storage via fastMalloc.
-// Returns 0 if array failed to convert for any reason.
-static float* jsArrayToFloatArray(v8::Handle<v8::Array> array, uint32_t len, ExceptionState& exceptionState)
-{
-    // Convert the data element-by-element.
-    if (len > std::numeric_limits<uint32_t>::max() / sizeof(float)) {
-        exceptionState.throwTypeError("Array length exceeds supported limit.");
-        return 0;
-    }
-    float* data = static_cast<float*>(fastMalloc(len * sizeof(float)));
-
-    for (uint32_t i = 0; i < len; i++) {
-        v8::Local<v8::Value> val = array->Get(i);
-        float value = toFloat(val, exceptionState);
-        if (exceptionState.hadException()) {
-            fastFree(data);
-            return 0;
-        }
-        data[i] = value;
-    }
-    return data;
-}
-
-// Allocates new storage via fastMalloc.
-// Returns 0 if array failed to convert for any reason.
-static int* jsArrayToIntArray(v8::Handle<v8::Array> array, uint32_t len, ExceptionState& exceptionState)
-{
-    // Convert the data element-by-element.
-    if (len > std::numeric_limits<uint32_t>::max() / sizeof(int)) {
-        exceptionState.throwTypeError("Array length exceeds supported limit.");
-        return 0;
-    }
-    int* data = static_cast<int*>(fastMalloc(len * sizeof(int)));
-
-    for (uint32_t i = 0; i < len; i++) {
-        v8::Local<v8::Value> val = array->Get(i);
-        int ival = toInt32(val, exceptionState);
-        if (exceptionState.hadException()) {
-            fastFree(data);
-            return 0;
-        }
-        data[i] = ival;
-    }
-    return data;
-}
-
 static v8::Handle<v8::Value> toV8Object(const WebGLGetInfo& args, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     switch (args.getType()) {
@@ -291,7 +245,7 @@ static void getObjectParameter(const v8::FunctionCallbackInfo<v8::Value>& info, 
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     unsigned target;
     unsigned pname;
     {
@@ -324,7 +278,7 @@ static void getObjectParameter(const v8::FunctionCallbackInfo<v8::Value>& info, 
 
 static WebGLUniformLocation* toWebGLUniformLocation(v8::Handle<v8::Value> value, v8::Isolate* isolate)
 {
-    return V8WebGLUniformLocation::toNativeWithTypeCheck(isolate, value);
+    return V8WebGLUniformLocation::toImplWithTypeCheck(isolate, value);
 }
 
 void V8WebGLRenderingContext::getBufferParameterMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -336,7 +290,7 @@ void V8WebGLRenderingContext::getBufferParameterMethodCustom(const v8::FunctionC
 void V8WebGLRenderingContext::getExtensionMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "getExtension", "WebGLRenderingContext", info.Holder(), info.GetIsolate());
-    WebGLRenderingContext* impl = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* impl = V8WebGLRenderingContext::toImpl(info.Holder());
     if (info.Length() < 1) {
         exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(1, info.Length()));
         exceptionState.throwIfNeeded();
@@ -356,7 +310,7 @@ void V8WebGLRenderingContext::getFramebufferAttachmentParameterMethodCustom(cons
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     unsigned target;
     unsigned attachment;
     unsigned pname;
@@ -380,7 +334,7 @@ void V8WebGLRenderingContext::getParameterMethodCustom(const v8::FunctionCallbac
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     unsigned pname;
     {
         v8::TryCatch block;
@@ -400,7 +354,7 @@ void V8WebGLRenderingContext::getProgramParameterMethodCustom(const v8::Function
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     WebGLProgram* program;
     unsigned pname;
     {
@@ -411,7 +365,7 @@ void V8WebGLRenderingContext::getProgramParameterMethodCustom(const v8::Function
             exceptionState.throwIfNeeded();
             return;
         }
-        TONATIVE_VOID_INTERNAL(program, V8WebGLProgram::toNativeWithTypeCheck(info.GetIsolate(), info[0]));
+        TONATIVE_VOID_INTERNAL(program, V8WebGLProgram::toImplWithTypeCheck(info.GetIsolate(), info[0]));
         TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(pname, toUInt32(info[1], exceptionState), exceptionState);
     }
     WebGLGetInfo args = context->getProgramParameter(program, pname);
@@ -433,7 +387,7 @@ void V8WebGLRenderingContext::getShaderParameterMethodCustom(const v8::FunctionC
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     WebGLShader* shader;
     unsigned pname;
     {
@@ -444,7 +398,7 @@ void V8WebGLRenderingContext::getShaderParameterMethodCustom(const v8::FunctionC
             exceptionState.throwIfNeeded();
             return;
         }
-        TONATIVE_VOID_INTERNAL(shader, V8WebGLShader::toNativeWithTypeCheck(info.GetIsolate(), info[0]));
+        TONATIVE_VOID_INTERNAL(shader, V8WebGLShader::toImplWithTypeCheck(info.GetIsolate(), info[0]));
         TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(pname, toUInt32(info[1], exceptionState), exceptionState);
     }
     WebGLGetInfo args = context->getShaderParameter(shader, pname);
@@ -466,7 +420,7 @@ void V8WebGLRenderingContext::getUniformMethodCustom(const v8::FunctionCallbackI
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     WebGLProgram* program;
     WebGLUniformLocation* location;
     {
@@ -476,12 +430,12 @@ void V8WebGLRenderingContext::getUniformMethodCustom(const v8::FunctionCallbackI
             V8ThrowException::throwTypeError(ExceptionMessages::failedToExecute("getUniform", "WebGLRenderingContext", "parameter 1 is not of type 'WebGLProgram'."), info.GetIsolate());
             return;
         }
-        TONATIVE_VOID_INTERNAL(program, V8WebGLProgram::toNativeWithTypeCheck(info.GetIsolate(), info[0]));
+        TONATIVE_VOID_INTERNAL(program, V8WebGLProgram::toImplWithTypeCheck(info.GetIsolate(), info[0]));
         if (info.Length() > 1 && !isUndefinedOrNull(info[1]) && !V8WebGLUniformLocation::hasInstance(info[1], info.GetIsolate())) {
             V8ThrowException::throwTypeError(ExceptionMessages::failedToExecute("getUniform", "WebGLRenderingContext", "parameter 2 is not of type 'WebGLUniformLocation'."), info.GetIsolate());
             return;
         }
-        TONATIVE_VOID_INTERNAL(location, V8WebGLUniformLocation::toNativeWithTypeCheck(info.GetIsolate(), info[1]));
+        TONATIVE_VOID_INTERNAL(location, V8WebGLUniformLocation::toImplWithTypeCheck(info.GetIsolate(), info[1]));
     }
     WebGLGetInfo args = context->getUniform(program, location);
     v8SetReturnValue(info, toV8Object(args, info.Holder(), info.GetIsolate()));
@@ -555,11 +509,11 @@ static void vertexAttribAndUniformHelperf(const v8::FunctionCallbackInfo<v8::Val
         location = toWebGLUniformLocation(info[uniformLocationArgumentIndex], info.GetIsolate());
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
 
     const int indexArrayArgument = 1;
     if (V8Float32Array::hasInstance(info[indexArrayArgument], info.GetIsolate())) {
-        Float32Array* array = V8Float32Array::toNative(info[indexArrayArgument]->ToObject());
+        Float32Array* array = V8Float32Array::toImpl(info[indexArrayArgument]->ToObject());
         ASSERT(array);
         switch (functionToCall) {
         case kUniform1v: context->uniform1fv(location, array); break;
@@ -581,28 +535,24 @@ static void vertexAttribAndUniformHelperf(const v8::FunctionCallbackInfo<v8::Val
         return;
     }
     v8::Handle<v8::Array> array = v8::Local<v8::Array>::Cast(info[1]);
-    uint32_t len = array->Length();
-    float* data = jsArrayToFloatArray(array, len, exceptionState);
-    if (exceptionState.throwIfNeeded())
-        return;
-    if (!data) {
-        // FIXME: consider different / better exception type.
-        exceptionState.throwDOMException(SyntaxError, "Failed to convert array argument");
-        exceptionState.throwIfNeeded();
+    if (array->Length() > WTF::DefaultAllocatorQuantizer::kMaxUnquantizedAllocation / sizeof(float)) {
+        exceptionState.throwTypeError("Array length exceeds supported limit.");
         return;
     }
+    Vector<float> implArray = toImplArray<float>(array, 0, info.GetIsolate(), exceptionState);
+    if (exceptionState.hadException())
+        return;
     switch (functionToCall) {
-    case kUniform1v: context->uniform1fv(location, data, len); break;
-    case kUniform2v: context->uniform2fv(location, data, len); break;
-    case kUniform3v: context->uniform3fv(location, data, len); break;
-    case kUniform4v: context->uniform4fv(location, data, len); break;
-    case kVertexAttrib1v: context->vertexAttrib1fv(index, data, len); break;
-    case kVertexAttrib2v: context->vertexAttrib2fv(index, data, len); break;
-    case kVertexAttrib3v: context->vertexAttrib3fv(index, data, len); break;
-    case kVertexAttrib4v: context->vertexAttrib4fv(index, data, len); break;
+    case kUniform1v: context->uniform1fv(location, implArray.data(), implArray.size()); break;
+    case kUniform2v: context->uniform2fv(location, implArray.data(), implArray.size()); break;
+    case kUniform3v: context->uniform3fv(location, implArray.data(), implArray.size()); break;
+    case kUniform4v: context->uniform4fv(location, implArray.data(), implArray.size()); break;
+    case kVertexAttrib1v: context->vertexAttrib1fv(index, implArray.data(), implArray.size()); break;
+    case kVertexAttrib2v: context->vertexAttrib2fv(index, implArray.data(), implArray.size()); break;
+    case kVertexAttrib3v: context->vertexAttrib3fv(index, implArray.data(), implArray.size()); break;
+    case kVertexAttrib4v: context->vertexAttrib4fv(index, implArray.data(), implArray.size()); break;
     default: ASSERT_NOT_REACHED(); break;
     }
-    fastFree(data);
 }
 
 static void uniformHelperi(const v8::FunctionCallbackInfo<v8::Value>& info, FunctionToCall functionToCall, ExceptionState& exceptionState)
@@ -624,7 +574,7 @@ static void uniformHelperi(const v8::FunctionCallbackInfo<v8::Value>& info, Func
     }
 
     const int uniformLocationArgumentIndex = 0;
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
     if (info.Length() > 0 && !isUndefinedOrNull(info[uniformLocationArgumentIndex]) && !V8WebGLUniformLocation::hasInstance(info[uniformLocationArgumentIndex], info.GetIsolate())) {
         exceptionState.throwTypeError(ExceptionMessages::argumentNullOrIncorrectType(uniformLocationArgumentIndex + 1, "WebGLUniformLocation"));
         exceptionState.throwIfNeeded();
@@ -634,7 +584,7 @@ static void uniformHelperi(const v8::FunctionCallbackInfo<v8::Value>& info, Func
 
     const int indexArrayArgumentIndex = 1;
     if (V8Int32Array::hasInstance(info[indexArrayArgumentIndex], info.GetIsolate())) {
-        Int32Array* array = V8Int32Array::toNative(info[indexArrayArgumentIndex]->ToObject());
+        Int32Array* array = V8Int32Array::toImpl(info[indexArrayArgumentIndex]->ToObject());
         ASSERT(array);
         switch (functionToCall) {
         case kUniform1v: context->uniform1iv(location, array); break;
@@ -652,24 +602,20 @@ static void uniformHelperi(const v8::FunctionCallbackInfo<v8::Value>& info, Func
         return;
     }
     v8::Handle<v8::Array> array = v8::Local<v8::Array>::Cast(info[indexArrayArgumentIndex]);
-    uint32_t len = array->Length();
-    int* data = jsArrayToIntArray(array, len, exceptionState);
-    if (exceptionState.throwIfNeeded())
-        return;
-    if (!data) {
-        // FIXME: consider different / better exception type.
-        exceptionState.throwDOMException(SyntaxError, "Failed to convert array argument");
-        exceptionState.throwIfNeeded();
+    if (array->Length() >  WTF::DefaultAllocatorQuantizer::kMaxUnquantizedAllocation / sizeof(int)) {
+        exceptionState.throwTypeError("Array length exceeds supported limit.");
         return;
     }
+    Vector<int> implArray = toImplArray<int>(array, 0, info.GetIsolate(), exceptionState);
+    if (exceptionState.hadException())
+        return;
     switch (functionToCall) {
-    case kUniform1v: context->uniform1iv(location, data, len); break;
-    case kUniform2v: context->uniform2iv(location, data, len); break;
-    case kUniform3v: context->uniform3iv(location, data, len); break;
-    case kUniform4v: context->uniform4iv(location, data, len); break;
+    case kUniform1v: context->uniform1iv(location, implArray.data(), implArray.size()); break;
+    case kUniform2v: context->uniform2iv(location, implArray.data(), implArray.size()); break;
+    case kUniform3v: context->uniform3iv(location, implArray.data(), implArray.size()); break;
+    case kUniform4v: context->uniform4iv(location, implArray.data(), implArray.size()); break;
     default: ASSERT_NOT_REACHED(); break;
     }
-    fastFree(data);
 }
 
 void V8WebGLRenderingContext::uniform1fvMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -737,7 +683,7 @@ static void uniformMatrixHelper(const v8::FunctionCallbackInfo<v8::Value>& info,
         return;
     }
 
-    WebGLRenderingContext* context = V8WebGLRenderingContext::toNative(info.Holder());
+    WebGLRenderingContext* context = V8WebGLRenderingContext::toImpl(info.Holder());
 
     const int uniformLocationArgumentIndex = 0;
     if (info.Length() > 0 && !isUndefinedOrNull(info[uniformLocationArgumentIndex]) && !V8WebGLUniformLocation::hasInstance(info[uniformLocationArgumentIndex], info.GetIsolate())) {
@@ -750,7 +696,7 @@ static void uniformMatrixHelper(const v8::FunctionCallbackInfo<v8::Value>& info,
     bool transpose = info[1]->BooleanValue();
     const int arrayArgumentIndex = 2;
     if (V8Float32Array::hasInstance(info[arrayArgumentIndex], info.GetIsolate())) {
-        Float32Array* array = V8Float32Array::toNative(info[arrayArgumentIndex]->ToObject());
+        Float32Array* array = V8Float32Array::toImpl(info[arrayArgumentIndex]->ToObject());
         ASSERT(array);
         switch (matrixSize) {
         case 2: context->uniformMatrix2fv(location, transpose, array); break;
@@ -767,23 +713,19 @@ static void uniformMatrixHelper(const v8::FunctionCallbackInfo<v8::Value>& info,
         return;
     }
     v8::Handle<v8::Array> array = v8::Local<v8::Array>::Cast(info[2]);
-    uint32_t len = array->Length();
-    float* data = jsArrayToFloatArray(array, len, exceptionState);
-    if (exceptionState.throwIfNeeded())
-        return;
-    if (!data) {
-        // FIXME: consider different / better exception type.
-        exceptionState.throwDOMException(SyntaxError, "failed to convert Array value");
-        exceptionState.throwIfNeeded();
+    if (array->Length() >  WTF::DefaultAllocatorQuantizer::kMaxUnquantizedAllocation / sizeof(float)) {
+        exceptionState.throwTypeError("Array length exceeds supported limit.");
         return;
     }
+    Vector<float> implArray = toImplArray<float>(array, 0, info.GetIsolate(), exceptionState);
+    if (exceptionState.hadException())
+        return;
     switch (matrixSize) {
-    case 2: context->uniformMatrix2fv(location, transpose, data, len); break;
-    case 3: context->uniformMatrix3fv(location, transpose, data, len); break;
-    case 4: context->uniformMatrix4fv(location, transpose, data, len); break;
+    case 2: context->uniformMatrix2fv(location, transpose, implArray.data(), implArray.size()); break;
+    case 3: context->uniformMatrix3fv(location, transpose, implArray.data(), implArray.size()); break;
+    case 4: context->uniformMatrix4fv(location, transpose, implArray.data(), implArray.size()); break;
     default: ASSERT_NOT_REACHED(); break;
     }
-    fastFree(data);
 }
 
 void V8WebGLRenderingContext::uniformMatrix2fvMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)

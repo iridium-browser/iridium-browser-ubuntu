@@ -138,8 +138,17 @@ views::Widget* PageActionImageView::GetParentForContextMenu() {
   return GetWidget();
 }
 
+ExtensionActionViewController*
+PageActionImageView::GetPreferredPopupViewController() {
+  return view_controller_.get();
+}
+
 views::View* PageActionImageView::GetReferenceViewForPopup() {
   return this;
+}
+
+views::MenuButton* PageActionImageView::GetContextMenuButton() {
+  return NULL;  // No menu button for page action views.
 }
 
 content::WebContents* PageActionImageView::GetCurrentWebContents() {

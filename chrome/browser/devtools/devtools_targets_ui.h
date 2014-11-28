@@ -10,7 +10,7 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/devtools/device/port_forwarding_controller.h"
+#include "chrome/browser/devtools/device/devtools_android_bridge.h"
 
 namespace base {
 class ListValue;
@@ -32,10 +32,7 @@ class DevToolsTargetsUIHandler {
 
   std::string source_id() const { return source_id_; }
 
-  static scoped_ptr<DevToolsTargetsUIHandler> CreateForRenderers(
-      const Callback& callback);
-
-  static scoped_ptr<DevToolsTargetsUIHandler> CreateForWorkers(
+  static scoped_ptr<DevToolsTargetsUIHandler> CreateForLocal(
       const Callback& callback);
 
   static scoped_ptr<DevToolsTargetsUIHandler> CreateForAdb(
@@ -48,6 +45,8 @@ class DevToolsTargetsUIHandler {
 
   virtual scoped_refptr<content::DevToolsAgentHost> GetBrowserAgentHost(
       const std::string& browser_id);
+
+  virtual void ForceUpdate();
 
  protected:
   base::DictionaryValue* Serialize(const DevToolsTargetImpl& target);
@@ -64,7 +63,7 @@ class DevToolsTargetsUIHandler {
 };
 
 class PortForwardingStatusSerializer
-    : private PortForwardingController::Listener {
+    : private DevToolsAndroidBridge::PortForwardingListener {
  public:
   typedef base::Callback<void(const base::Value&)> Callback;
 

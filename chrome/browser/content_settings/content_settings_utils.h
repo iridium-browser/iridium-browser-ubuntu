@@ -8,8 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 
 namespace base {
@@ -30,6 +30,10 @@ std::string GetTypeName(ContentSettingsType type);
 
 bool GetTypeFromName(const std::string& name,
                      ContentSettingsType* return_setting);
+
+std::string ContentSettingToString(ContentSetting setting);
+
+ContentSetting ContentSettingFromString(const std::string& name);
 
 // Converts |Value| to |ContentSetting|.
 ContentSetting ValueToContentSetting(const base::Value* value);

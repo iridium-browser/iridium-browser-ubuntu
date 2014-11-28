@@ -52,6 +52,7 @@
 #include "webrtc/base/stringutils.h"
 #include "webrtc/common.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/video_engine/include/vie_network.h"
 
 #ifdef WIN32
 #include <objbase.h>  // NOLINT
@@ -119,6 +120,7 @@ static const int kOpusStereoBitrate = 64000;
 // Opus bitrate should be in the range between 6000 and 510000.
 static const int kOpusMinBitrate = 6000;
 static const int kOpusMaxBitrate = 510000;
+
 // Default audio dscp value.
 // See http://tools.ietf.org/html/rfc2474 for details.
 // See also http://tools.ietf.org/html/draft-jennings-rtcweb-qos-00
@@ -237,7 +239,6 @@ static AudioOptions GetDefaultEngineOptions() {
   options.experimental_aec.Set(false);
   options.experimental_ns.Set(false);
   options.aec_dump.Set(false);
-  options.opus_fec.Set(false);
   return options;
 }
 
@@ -404,6 +405,7 @@ static bool IsOpusStereoEnabled(const AudioCodec& codec) {
   return codec.GetParam(kCodecParamStereo, &value) && value == 1;
 }
 
+// TODO(minyue): Clamp bitrate when invalid.
 static bool IsValidOpusBitrate(int bitrate) {
   return (bitrate >= kOpusMinBitrate && bitrate <= kOpusMaxBitrate);
 }
@@ -430,12 +432,56 @@ static bool IsOpusFecEnabled(const AudioCodec& codec) {
   return codec.GetParam(kCodecParamUseInbandFec, &value) && value == 1;
 }
 
-// Set params[kCodecParamUseInbandFec]. Caller should make sure codec is Opus.
-static void SetOpusFec(AudioCodec* codec, bool opus_fec) {
-  if (opus_fec) {
-    codec->SetParam(kCodecParamUseInbandFec, 1);
+// Returns kOpusDefaultPlaybackRate if params[kCodecParamMaxPlaybackRate] is not
+// defined. Returns the value of params[kCodecParamMaxPlaybackRate] otherwise.
+static int GetOpusMaxPlaybackRate(const AudioCodec& codec) {
+  int value;
+  if (codec.GetParam(kCodecParamMaxPlaybackRate, &value)) {
+    return value;
+  }
+  return kOpusDefaultMaxPlaybackRate;
+}
+
+static void GetOpusConfig(const AudioCodec& codec, webrtc::CodecInst* voe_codec,
+                          bool* enable_codec_fec, int* max_playback_rate) {
+  *enable_codec_fec = IsOpusFecEnabled(codec);
+  *max_playback_rate = GetOpusMaxPlaybackRate(codec);
+
+  // If OPUS, change what we send according to the "stereo" codec
+  // parameter, and not the "channels" parameter.  We set
+  // voe_codec.channels to 2 if "stereo=1" and 1 otherwise.  If
+  // the bitrate is not specified, i.e. is zero, we set it to the
+  // appropriate default value for mono or stereo Opus.
+
+  // TODO(minyue): The determination of bit rate might take the maximum playback
+  // rate into account.
+
+  if (IsOpusStereoEnabled(codec)) {
+    voe_codec->channels = 2;
+    if (!IsValidOpusBitrate(codec.bitrate)) {
+      if (codec.bitrate != 0) {
+        LOG(LS_WARNING) << "Overrides the invalid supplied bitrate("
+                        << codec.bitrate
+                        << ") with default opus stereo bitrate: "
+                        << kOpusStereoBitrate;
+      }
+      voe_codec->rate = kOpusStereoBitrate;
+    }
   } else {
-    codec->RemoveParam(kCodecParamUseInbandFec);
+    voe_codec->channels = 1;
+    if (!IsValidOpusBitrate(codec.bitrate)) {
+      if (codec.bitrate != 0) {
+        LOG(LS_WARNING) << "Overrides the invalid supplied bitrate("
+                        << codec.bitrate
+                        << ") with default opus mono bitrate: "
+                        << kOpusMonoBitrate;
+      }
+      voe_codec->rate = kOpusMonoBitrate;
+    }
+  }
+  int bitrate_from_params = GetOpusBitrateFromParams(codec);
+  if (bitrate_from_params != 0) {
+    voe_codec->rate = bitrate_from_params;
   }
 }
 
@@ -483,7 +529,6 @@ void WebRtcVoiceEngine::ConstructCodecs() {
           }
           // TODO(hellner): Add ptime, sprop-stereo, stereo and useinbandfec
           // when they can be set to values other than the default.
-          SetOpusFec(&codec, false);
         }
         codecs_.push_back(codec);
       } else {
@@ -816,30 +861,6 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
     }
   }
 
-  bool experimental_ns;
-  if (options.experimental_ns.Get(&experimental_ns)) {
-    webrtc::AudioProcessing* audioproc =
-        voe_wrapper_->base()->audio_processing();
-#ifdef USE_WEBRTC_DEV_BRANCH
-    webrtc::Config config;
-    config.Set<webrtc::ExperimentalNs>(new webrtc::ExperimentalNs(
-        experimental_ns));
-    audioproc->SetExtraOptions(config);
-#else
-    // We check audioproc for the benefit of tests, since FakeWebRtcVoiceEngine
-    // returns NULL on audio_processing().
-    if (audioproc) {
-      if (audioproc->EnableExperimentalNs(experimental_ns) == -1) {
-        LOG_RTCERR1(EnableExperimentalNs, experimental_ns);
-        return false;
-      }
-    } else {
-      LOG(LS_VERBOSE) << "Experimental noise suppression set to "
-                      << experimental_ns;
-    }
-#endif
-  }
-
   bool highpass_filter;
   if (options.highpass_filter.Get(&highpass_filter)) {
     LOG(LS_INFO) << "High pass filter enabled? " << highpass_filter;
@@ -885,20 +906,50 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
       StopAecDump();
   }
 
+  webrtc::Config config;
+
+  experimental_aec_.SetFrom(options.experimental_aec);
   bool experimental_aec;
-  if (options.experimental_aec.Get(&experimental_aec)) {
-    LOG(LS_INFO) << "Experimental aec is " << experimental_aec;
-    webrtc::AudioProcessing* audioproc =
-        voe_wrapper_->base()->audio_processing();
+  if (experimental_aec_.Get(&experimental_aec)) {
+    LOG(LS_INFO) << "Experimental aec is enabled? " << experimental_aec;
+    config.Set<webrtc::DelayCorrection>(
+        new webrtc::DelayCorrection(experimental_aec));
+  }
+
+#ifdef USE_WEBRTC_DEV_BRANCH
+  experimental_ns_.SetFrom(options.experimental_ns);
+  bool experimental_ns;
+  if (experimental_ns_.Get(&experimental_ns)) {
+    LOG(LS_INFO) << "Experimental ns is enabled? " << experimental_ns;
+    config.Set<webrtc::ExperimentalNs>(
+        new webrtc::ExperimentalNs(experimental_ns));
+  }
+#endif
+
+  // We check audioproc for the benefit of tests, since FakeWebRtcVoiceEngine
+  // returns NULL on audio_processing().
+  webrtc::AudioProcessing* audioproc = voe_wrapper_->base()->audio_processing();
+  if (audioproc) {
+    audioproc->SetExtraOptions(config);
+  }
+
+#ifndef USE_WEBRTC_DEV_BRANCH
+  bool experimental_ns;
+  if (options.experimental_ns.Get(&experimental_ns)) {
+    LOG(LS_INFO) << "Experimental ns is enabled? " << experimental_ns;
     // We check audioproc for the benefit of tests, since FakeWebRtcVoiceEngine
     // returns NULL on audio_processing().
     if (audioproc) {
-      webrtc::Config config;
-      config.Set<webrtc::DelayCorrection>(
-          new webrtc::DelayCorrection(experimental_aec));
-      audioproc->SetExtraOptions(config);
+      if (audioproc->EnableExperimentalNs(experimental_ns) == -1) {
+        LOG_RTCERR1(EnableExperimentalNs, experimental_ns);
+        return false;
+      }
+    } else {
+      LOG(LS_VERBOSE) << "Experimental noise suppression set to "
+                      << experimental_ns;
     }
   }
+#endif
 
   uint32 recording_sample_rate;
   if (options.recording_sample_rate.Get(&recording_sample_rate)) {
@@ -913,16 +964,6 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
     LOG(LS_INFO) << "Playout sample rate is " << playout_sample_rate;
     if (voe_wrapper_->hw()->SetPlayoutSampleRate(playout_sample_rate)) {
       LOG_RTCERR1(SetPlayoutSampleRate, playout_sample_rate);
-    }
-  }
-
-  bool opus_fec;
-  if (options.opus_fec.Get(&opus_fec)) {
-    LOG(LS_INFO) << "Opus FEC is enabled? " << opus_fec;
-    for (std::vector<AudioCodec>::iterator it = codecs_.begin();
-        it != codecs_.end(); ++it) {
-      if (IsOpus(*it))
-        SetOpusFec(&(*it), opus_fec);
     }
   }
 
@@ -1780,6 +1821,8 @@ WebRtcVoiceMediaChannel::WebRtcVoiceMediaChannel(WebRtcVoiceEngine *engine)
       typing_noise_detected_(false),
       desired_send_(SEND_NOTHING),
       send_(SEND_NOTHING),
+      shared_bwe_vie_(NULL),
+      shared_bwe_vie_channel_(-1),
       default_receive_ssrc_(0) {
   engine->RegisterChannel(this);
   LOG(LS_VERBOSE) << "WebRtcVoiceMediaChannel::WebRtcVoiceMediaChannel "
@@ -1791,6 +1834,7 @@ WebRtcVoiceMediaChannel::WebRtcVoiceMediaChannel(WebRtcVoiceEngine *engine)
 WebRtcVoiceMediaChannel::~WebRtcVoiceMediaChannel() {
   LOG(LS_VERBOSE) << "WebRtcVoiceMediaChannel::~WebRtcVoiceMediaChannel "
                   << voe_channel();
+  SetupSharedBandwidthEstimation(NULL, -1);
 
   // Remove any remaining send streams, the default channel will be deleted
   // later.
@@ -1889,6 +1933,12 @@ bool WebRtcVoiceMediaChannel::SetOptions(const AudioOptions& options) {
     if (MediaChannel::SetDscp(dscp) != 0) {
       LOG(LS_WARNING) << "Failed to set DSCP settings for audio channel";
     }
+  }
+
+  // Force update of Video Engine BWE forwarding to reflect experiment setting.
+  if (!SetupSharedBandwidthEstimation(shared_bwe_vie_,
+                                      shared_bwe_vie_channel_)) {
+    return false;
   }
 
   LOG(LS_INFO) << "Set voice channel options.  Current options: "
@@ -1997,6 +2047,10 @@ bool WebRtcVoiceMediaChannel::SetSendCodecs(
   bool nack_enabled = nack_enabled_;
   bool enable_codec_fec = false;
 
+  // max_playback_rate <= 0 will not trigger setting of maximum encoding
+  // bandwidth.
+  int max_playback_rate = 0;
+
   // Set send codec (the first non-telephone-event/CN codec)
   for (std::vector<AudioCodec>::const_iterator it = codecs.begin();
        it != codecs.end(); ++it) {
@@ -2013,40 +2067,6 @@ bool WebRtcVoiceMediaChannel::SetSendCodecs(
       continue;
     }
 
-    // If OPUS, change what we send according to the "stereo" codec
-    // parameter, and not the "channels" parameter.  We set
-    // voe_codec.channels to 2 if "stereo=1" and 1 otherwise.  If
-    // the bitrate is not specified, i.e. is zero, we set it to the
-    // appropriate default value for mono or stereo Opus.
-    if (IsOpus(*it)) {
-      if (IsOpusStereoEnabled(*it)) {
-        voe_codec.channels = 2;
-        if (!IsValidOpusBitrate(it->bitrate)) {
-          if (it->bitrate != 0) {
-            LOG(LS_WARNING) << "Overrides the invalid supplied bitrate("
-                            << it->bitrate
-                            << ") with default opus stereo bitrate: "
-                            << kOpusStereoBitrate;
-          }
-          voe_codec.rate = kOpusStereoBitrate;
-        }
-      } else {
-        voe_codec.channels = 1;
-        if (!IsValidOpusBitrate(it->bitrate)) {
-          if (it->bitrate != 0) {
-            LOG(LS_WARNING) << "Overrides the invalid supplied bitrate("
-                            << it->bitrate
-                            << ") with default opus mono bitrate: "
-                            << kOpusMonoBitrate;
-          }
-          voe_codec.rate = kOpusMonoBitrate;
-        }
-      }
-      int bitrate_from_params = GetOpusBitrateFromParams(*it);
-      if (bitrate_from_params != 0) {
-        voe_codec.rate = bitrate_from_params;
-      }
-    }
 
     // We'll use the first codec in the list to actually send audio data.
     // Be sure to use the payload type requested by the remote side.
@@ -2076,8 +2096,11 @@ bool WebRtcVoiceMediaChannel::SetSendCodecs(
     } else {
       send_codec = voe_codec;
       nack_enabled = IsNackEnabled(*it);
-      // For Opus as the send codec, we enable inband FEC if requested.
-      enable_codec_fec = IsOpus(*it) && IsOpusFecEnabled(*it);
+      // For Opus as the send codec, we are to enable inband FEC if requested
+      // and set maximum playback rate.
+      if (IsOpus(*it)) {
+        GetOpusConfig(*it, &send_codec, &enable_codec_fec, &max_playback_rate);
+      }
     }
     found_send_codec = true;
     break;
@@ -2109,6 +2132,21 @@ bool WebRtcVoiceMediaChannel::SetSendCodecs(
       return false;
     }
 #endif  // USE_WEBRTC_DEV_BRANCH
+  }
+
+  // maxplaybackrate should be set after SetSendCodec.
+  if (max_playback_rate > 0) {
+    LOG(LS_INFO) << "Attempt to set maximum playback rate to "
+                 << max_playback_rate
+                 << " Hz on channel "
+                 << channel;
+#ifdef USE_WEBRTC_DEV_BRANCH
+    // (max_playback_rate + 1) >> 1 is to obtain ceil(max_playback_rate / 2.0).
+    if (engine()->voe()->codec()->SetOpusMaxPlaybackRate(
+        channel, max_playback_rate) == -1) {
+      LOG(LS_WARNING) << "Could not set maximum playback rate.";
+    }
+#endif
   }
 
   // Always update the |send_codec_| to the currently set send codec.
@@ -2552,8 +2590,8 @@ bool WebRtcVoiceMediaChannel::AddSendStream(const StreamParams& sp) {
   }
 
   if (engine()->voe()->rtp()->SetRTCP_CNAME(channel, sp.cname.c_str()) == -1) {
-     LOG_RTCERR2(SetRTCP_CNAME, channel, sp.cname);
-     return false;
+    LOG_RTCERR2(SetRTCP_CNAME, channel, sp.cname);
+    return false;
   }
 
   // Set the current codecs to be used for the new channel.
@@ -2625,6 +2663,9 @@ bool WebRtcVoiceMediaChannel::AddRecvStream(const StreamParams& sp) {
     receive_channels_.insert(std::make_pair(
         default_receive_ssrc_,
         new WebRtcVoiceChannelRenderer(voe_channel(), audio_transport)));
+    if (!SetupSharedBweOnChannel(voe_channel())) {
+      return false;
+    }
     return SetPlayout(voe_channel(), playout_);
   }
 
@@ -2709,6 +2750,11 @@ bool WebRtcVoiceMediaChannel::ConfigureRecvChannel(int channel) {
 
   // Set RTP header extension for the new channel.
   if (!SetChannelRecvRtpHeaderExtensions(channel, receive_extensions_)) {
+    return false;
+  }
+
+  // Set up channel to be able to forward incoming packets to video engine BWE.
+  if (!SetupSharedBweOnChannel(channel)) {
     return false;
   }
 
@@ -3081,7 +3127,8 @@ void WebRtcVoiceMediaChannel::OnPacketReceived(
   engine()->voe()->network()->ReceivedRTPPacket(
       which_channel,
       packet->data(),
-      static_cast<unsigned int>(packet->length()));
+      static_cast<unsigned int>(packet->length()),
+      webrtc::PacketTime(packet_time.timestamp, packet_time.not_before));
 }
 
 void WebRtcVoiceMediaChannel::OnRtcpReceived(
@@ -3475,6 +3522,23 @@ int WebRtcVoiceMediaChannel::GetSendChannelNum(uint32 ssrc) {
   return -1;
 }
 
+bool WebRtcVoiceMediaChannel::SetupSharedBandwidthEstimation(
+    webrtc::VideoEngine* vie, int vie_channel) {
+  shared_bwe_vie_ = vie;
+  shared_bwe_vie_channel_ = vie_channel;
+
+  if (!SetupSharedBweOnChannel(voe_channel())) {
+    return false;
+  }
+  for (ChannelMap::iterator it = receive_channels_.begin();
+      it != receive_channels_.end(); ++it) {
+    if (!SetupSharedBweOnChannel(it->second->channel())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool WebRtcVoiceMediaChannel::GetRedSendCodec(const AudioCodec& red_codec,
     const std::vector<AudioCodec>& all_codecs, webrtc::CodecInst* send_codec) {
   // Get the RED encodings from the parameter with no name. This may
@@ -3620,6 +3684,25 @@ bool WebRtcVoiceMediaChannel::SetHeaderExtension(ExtensionSetterFunction setter,
   if ((engine()->voe()->rtp()->*setter)(channel_id, enable, id) != 0) {
     LOG_RTCERR4(*setter, uri, channel_id, enable, id);
     return false;
+  }
+  return true;
+}
+
+bool WebRtcVoiceMediaChannel::SetupSharedBweOnChannel(int voe_channel) {
+  webrtc::ViENetwork* vie_network = NULL;
+  int vie_channel = -1;
+  if (options_.combined_audio_video_bwe.GetWithDefaultIfUnset(false) &&
+      shared_bwe_vie_ != NULL && shared_bwe_vie_channel_ != -1) {
+    vie_network = webrtc::ViENetwork::GetInterface(shared_bwe_vie_);
+    vie_channel = shared_bwe_vie_channel_;
+  }
+  if (engine()->voe()->rtp()->SetVideoEngineBWETarget(voe_channel, vie_network,
+      vie_channel) == -1) {
+    LOG_RTCERR3(SetVideoEngineBWETarget, voe_channel, vie_network, vie_channel);
+    if (vie_network != NULL) {
+      // Don't fail if we're tearing down.
+      return false;
+    }
   }
   return true;
 }

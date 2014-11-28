@@ -29,7 +29,6 @@
  */
 
 #include "config.h"
-
 #include "modules/webdatabase/InspectorDatabaseResource.h"
 
 #include "modules/webdatabase/Database.h"

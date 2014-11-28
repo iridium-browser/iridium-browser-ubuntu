@@ -5,16 +5,14 @@
 #ifndef ATHENA_SYSTEM_ORIENTATION_CONTROLLER_H_
 #define ATHENA_SYSTEM_ORIENTATION_CONTROLLER_H_
 
-#include "athena/system/device_socket_listener.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chromeos/accelerometer/accelerometer_reader.h"
 #include "ui/gfx/display.h"
 
 namespace base {
-class FilePath;
-class FilePathWatcher;
 class TaskRunner;
 }
 
@@ -23,39 +21,23 @@ namespace athena {
 // Monitors accelerometers, detecting orientation changes. When a change is
 // detected rotates the root window to match.
 class OrientationController
-    : public DeviceSocketListener,
-      public base::RefCountedThreadSafe<OrientationController> {
+    : public chromeos::AccelerometerReader::Delegate {
  public:
-  OrientationController(scoped_refptr<base::TaskRunner> io_task_runner);
-
- private:
-  friend class base::RefCountedThreadSafe<OrientationController>;
-
+  OrientationController();
   virtual ~OrientationController();
 
-  // Watch for the socket path to be created, called on the IO thread.
-  void WatchForSocketPathOnIO();
-  void OnFilePathChangedOnIO(const base::FilePath& path, bool error);
+  void InitWith(scoped_refptr<base::TaskRunner> blocking_task_runner);
+  void Shutdown();
 
-  // Overridden from device::DeviceSocketListener:
-  virtual void OnDataAvailableOnIO(const void* data) OVERRIDE;
+  // chromeos::AccelerometerReader::Delegate
+  virtual void HandleAccelerometerUpdate(
+      const ui::AccelerometerUpdate& update) OVERRIDE;
 
-  // Rotates the display to |rotation|, called on the UI thread.
-  void RotateOnUI(gfx::Display::Rotation rotation);
-
+ private:
   // The last configured rotation.
   gfx::Display::Rotation current_rotation_;
 
-  // The timestamp of the last applied orientation change.
-  int64_t last_orientation_change_time_;
-
-  // A task runner for the UI thread.
-  scoped_refptr<base::TaskRunner> ui_task_runner_;
-
-  // File path watcher used to detect when sensors are present.
-  scoped_ptr<base::FilePathWatcher> watcher_;
-
-  base::WeakPtrFactory<OrientationController> weak_factory_;
+  scoped_ptr<chromeos::AccelerometerReader> accelerometer_reader_;
 
   DISALLOW_COPY_AND_ASSIGN(OrientationController);
 };

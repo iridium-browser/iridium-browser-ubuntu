@@ -42,6 +42,7 @@ class XPathNSResolver;
 class XPathResult;
 
 class XPathEvaluator FINAL : public RefCountedWillBeGarbageCollected<XPathEvaluator>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<XPathEvaluator> create()
     {
@@ -56,12 +57,9 @@ public:
     void trace(Visitor*) { }
 
 private:
-    XPathEvaluator()
-    {
-        ScriptWrappable::init(this);
-    }
+    XPathEvaluator() { }
 };
 
-}
+} // namespace blink
 
 #endif // XPathEvaluator_h

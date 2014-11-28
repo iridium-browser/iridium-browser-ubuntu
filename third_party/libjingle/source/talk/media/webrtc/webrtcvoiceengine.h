@@ -54,6 +54,10 @@
 #error "Bogus include."
 #endif
 
+namespace webrtc {
+class VideoEngine;
+}
+
 namespace cricket {
 
 // WebRtcSoundclipStream is an adapter object that allows a memory stream to be
@@ -280,6 +284,13 @@ class WebRtcVoiceEngine
   uint32 rx_processor_ssrc_;
 
   rtc::CriticalSection signal_media_critical_;
+
+  // Cache received experimental_aec and experimental_ns values, and apply them
+  // in case they are missing in the audio options. We need to do this because
+  // SetExtraOptions() will revert to defaults for options which are not
+  // provided.
+  Settable<bool> experimental_aec_;
+  Settable<bool> experimental_ns_;
 };
 
 // WebRtcMediaChannel is a class that implements the common WebRtc channel
@@ -377,6 +388,8 @@ class WebRtcVoiceMediaChannel
   int GetReceiveChannelNum(uint32 ssrc);
   int GetSendChannelNum(uint32 ssrc);
 
+  bool SetupSharedBandwidthEstimation(webrtc::VideoEngine* vie,
+                                      int vie_channel);
  protected:
   int GetLastEngineError() { return engine()->GetLastEngineError(); }
   int GetOutputLevel(int channel);
@@ -419,6 +432,7 @@ class WebRtcVoiceMediaChannel
 
   bool SetHeaderExtension(ExtensionSetterFunction setter, int channel_id,
                           const RtpHeaderExtension* extension);
+  bool SetupSharedBweOnChannel(int voe_channel);
 
   bool SetChannelRecvRtpHeaderExtensions(
     int channel_id,
@@ -442,6 +456,11 @@ class WebRtcVoiceMediaChannel
   bool typing_noise_detected_;
   SendFlags desired_send_;
   SendFlags send_;
+  // shared_bwe_vie_ and shared_bwe_vie_channel_ together identifies a WebRTC
+  // VideoEngine channel that this voice channel should forward incoming packets
+  // to for Bandwidth Estimation purposes.
+  webrtc::VideoEngine* shared_bwe_vie_;
+  int shared_bwe_vie_channel_;
 
   // send_channels_ contains the channels which are being used for sending.
   // When the default channel (voe_channel) is used for sending, it is

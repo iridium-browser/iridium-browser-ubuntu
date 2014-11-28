@@ -20,9 +20,9 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/upgrade_detector.h"
+#include "chrome/grit/locale_settings.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -81,6 +81,10 @@ class SystemTrayDelegateLinux : public ash::SystemTrayDelegate,
 
   virtual const base::string16 GetSupervisedUserMessage() const OVERRIDE {
     return base::string16();
+  }
+
+  virtual bool IsUserSupervised() const OVERRIDE {
+    return false;
   }
 
   virtual bool SystemShouldUpgrade() const OVERRIDE {
@@ -209,12 +213,10 @@ class SystemTrayDelegateLinux : public ash::SystemTrayDelegate,
   virtual void ActivateIMEProperty(const std::string& key) OVERRIDE {
   }
 
-  virtual void ShowNetworkConfigure(const std::string& network_id,
-                                    gfx::NativeWindow parent_window) OVERRIDE {
+  virtual void ShowNetworkConfigure(const std::string& network_id) OVERRIDE {
   }
 
-  virtual bool EnrollNetwork(const std::string& network_id,
-                             gfx::NativeWindow parent_window) OVERRIDE {
+  virtual bool EnrollNetwork(const std::string& network_id) OVERRIDE {
     return true;
   }
 

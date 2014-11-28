@@ -33,10 +33,10 @@ ConflictResolver::~ConflictResolver() {}
 void ConflictResolver::RunPreflight(scoped_ptr<SyncTaskToken> token) {
   token->InitializeTaskLog("Conflict Resolution");
 
-  scoped_ptr<BlockingFactor> blocking_factor(new BlockingFactor);
-  blocking_factor->exclusive = true;
-  SyncTaskManager::UpdateBlockingFactor(
-      token.Pass(), blocking_factor.Pass(),
+  scoped_ptr<TaskBlocker> task_blocker(new TaskBlocker);
+  task_blocker->exclusive = true;
+  SyncTaskManager::UpdateTaskBlocker(
+      token.Pass(), task_blocker.Pass(),
       base::Bind(&ConflictResolver::RunExclusive,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -268,8 +268,9 @@ void ConflictResolver::DidRemoveFile(scoped_ptr<SyncTaskToken> token,
     return;
   }
 
-  metadata_database()->UpdateByDeletedRemoteFileList(
-      deleted_file_ids_, SyncTaskToken::WrapToCallback(token.Pass()));
+  status = metadata_database()->UpdateByDeletedRemoteFileList(
+      deleted_file_ids_);
+  SyncTaskManager::NotifyTaskDone(token.Pass(), status);
 }
 
 bool ConflictResolver::IsContextReady() {
@@ -299,8 +300,8 @@ void ConflictResolver::DidGetRemoteMetadata(
   }
 
   if (error != google_apis::HTTP_NOT_FOUND) {
-    metadata_database()->UpdateByDeletedRemoteFile(
-        file_id, SyncTaskToken::WrapToCallback(token.Pass()));
+    status = metadata_database()->UpdateByDeletedRemoteFile(file_id);
+    SyncTaskManager::NotifyTaskDone(token.Pass(), status);
     return;
   }
 
@@ -310,8 +311,8 @@ void ConflictResolver::DidGetRemoteMetadata(
     return;
   }
 
-  metadata_database()->UpdateByFileResource(
-      *entry, SyncTaskToken::WrapToCallback(token.Pass()));
+  status = metadata_database()->UpdateByFileResource(*entry);
+  SyncTaskManager::NotifyTaskDone(token.Pass(), status);
 }
 
 drive::DriveServiceInterface* ConflictResolver::drive_service() {

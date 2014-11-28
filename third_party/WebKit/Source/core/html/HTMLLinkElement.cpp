@@ -140,7 +140,6 @@ inline HTMLLinkElement::HTMLLinkElement(Document& document, bool createdByParser
     , m_createdByParser(createdByParser)
     , m_isInShadowTree(false)
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<HTMLLinkElement> HTMLLinkElement::create(Document& document, bool createdByParser)
@@ -175,7 +174,7 @@ void HTMLLinkElement::parseAttribute(const QualifiedName& name, const AtomicStri
         parseSizesAttribute(value, m_iconSizes);
         process();
     } else if (name == mediaAttr) {
-        m_media = value.string().lower();
+        m_media = value.lower();
         process();
     } else if (name == disabledAttr) {
         if (LinkStyle* link = linkStyle())
@@ -209,9 +208,9 @@ LinkResource* HTMLLinkElement::linkResourceToProcess()
     }
 
     if (!m_link) {
-        if (m_relAttribute.isImport() && RuntimeEnabledFeatures::htmlImportsEnabled()) {
+        if (m_relAttribute.isImport()) {
             m_link = LinkImport::create(this);
-        } else if (m_relAttribute.isManifest() && RuntimeEnabledFeatures::manifestEnabled()) {
+        } else if (m_relAttribute.isManifest()) {
             m_link = LinkManifest::create(this);
         } else {
             OwnPtrWillBeRawPtr<LinkStyle> link = LinkStyle::create(this);

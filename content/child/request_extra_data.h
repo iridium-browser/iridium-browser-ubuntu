@@ -7,10 +7,10 @@
 
 #include "base/compiler_specific.h"
 #include "content/common/content_export.h"
-#include "content/public/common/page_transition_types.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebPageVisibilityState.h"
+#include "ui/base/page_transition_types.h"
 
 namespace content {
 
@@ -53,8 +53,8 @@ class CONTENT_EXPORT RequestExtraData
   void set_allow_download(bool allow_download) {
     allow_download_ = allow_download;
   }
-  PageTransition transition_type() const { return transition_type_; }
-  void set_transition_type(PageTransition transition_type) {
+  ui::PageTransition transition_type() const { return transition_type_; }
+  void set_transition_type(ui::PageTransition transition_type) {
     transition_type_ = transition_type;
   }
   bool should_replace_current_entry() const {
@@ -90,11 +90,16 @@ class CONTENT_EXPORT RequestExtraData
   // override and an empty string to indicate that there should be no user
   // agent.
   const blink::WebString& custom_user_agent() const {
-      return custom_user_agent_;
+    return custom_user_agent_;
   }
-  void set_custom_user_agent(
-      const blink::WebString& custom_user_agent) {
+  void set_custom_user_agent(const blink::WebString& custom_user_agent) {
     custom_user_agent_ = custom_user_agent;
+  }
+  const blink::WebString& requested_with() const {
+    return requested_with_;
+  }
+  void set_requested_with(const blink::WebString& requested_with) {
+    requested_with_ = requested_with;
   }
 
  private:
@@ -105,12 +110,13 @@ class CONTENT_EXPORT RequestExtraData
   bool parent_is_main_frame_;
   int parent_render_frame_id_;
   bool allow_download_;
-  PageTransition transition_type_;
+  ui::PageTransition transition_type_;
   bool should_replace_current_entry_;
   int transferred_request_child_id_;
   int transferred_request_request_id_;
   int service_worker_provider_id_;
   blink::WebString custom_user_agent_;
+  blink::WebString requested_with_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestExtraData);
 };

@@ -33,7 +33,10 @@ const gfx::Rect kOverlayBottomRightRect(64, 64, 64, 64);
 const gfx::PointF kUVTopLeft(0.1f, 0.2f);
 const gfx::PointF kUVBottomRight(1.0f, 1.0f);
 
-void MailboxReleased(unsigned sync_point, bool lost_resource) {}
+void MailboxReleased(unsigned sync_point,
+                     bool lost_resource,
+                     BlockingTaskRunner* main_thread_task_runner) {
+}
 
 class SingleOverlayValidator : public OverlayCandidateValidator {
  public:
@@ -105,7 +108,7 @@ class OverlayOutputSurface : public OutputSurface {
 };
 
 scoped_ptr<RenderPass> CreateRenderPass() {
-  RenderPass::Id id(1, 0);
+  RenderPassId id(1, 0);
   gfx::Rect output_rect(0, 0, 256, 256);
   bool has_transparent_background = true;
 
@@ -127,8 +130,8 @@ ResourceProvider::ResourceId CreateResource(
   TextureMailbox mailbox =
       TextureMailbox(gpu::Mailbox::Generate(), GL_TEXTURE_2D, sync_point);
   mailbox.set_allow_overlay(true);
-  scoped_ptr<SingleReleaseCallback> release_callback =
-      SingleReleaseCallback::Create(base::Bind(&MailboxReleased));
+  scoped_ptr<SingleReleaseCallbackImpl> release_callback =
+      SingleReleaseCallbackImpl::Create(base::Bind(&MailboxReleased));
 
   return resource_provider->CreateResourceFromTextureMailbox(
       mailbox, release_callback.Pass());
@@ -203,12 +206,13 @@ static void CompareRenderPassLists(const RenderPassList& expected_list,
               actual->shared_quad_state_list.size());
     EXPECT_EQ(expected->quad_list.size(), actual->quad_list.size());
 
-    for (size_t i = 0; i < expected->quad_list.size(); ++i) {
-      EXPECT_EQ(expected->quad_list[i]->rect.ToString(),
-                actual->quad_list[i]->rect.ToString());
-      EXPECT_EQ(
-          expected->quad_list[i]->shared_quad_state->content_bounds.ToString(),
-          actual->quad_list[i]->shared_quad_state->content_bounds.ToString());
+    for (QuadList::Iterator exp_iter = expected->quad_list.begin(),
+                            act_iter = actual->quad_list.begin();
+         exp_iter != expected->quad_list.end();
+         ++exp_iter, ++act_iter) {
+      EXPECT_EQ(exp_iter->rect.ToString(), act_iter->rect.ToString());
+      EXPECT_EQ(exp_iter->shared_quad_state->content_bounds.ToString(),
+                act_iter->shared_quad_state->content_bounds.ToString());
     }
   }
 }
@@ -233,7 +237,7 @@ TEST(OverlayTest, OverlaysProcessorHasStrategy) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      &output_surface, shared_bitmap_manager.get(), 0, false, 1, false));
+      &output_surface, shared_bitmap_manager.get(), NULL, 0, false, 1, false));
 
   scoped_ptr<DefaultOverlayProcessor> overlay_processor(
       new DefaultOverlayProcessor(&output_surface, resource_provider.get()));
@@ -251,9 +255,13 @@ class SingleOverlayOnTopTest : public testing::Test {
     EXPECT_TRUE(output_surface_->overlay_candidate_validator() != NULL);
 
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    resource_provider_ = ResourceProvider::Create(
-        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
-        false);
+    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                  shared_bitmap_manager_.get(),
+                                                  NULL,
+                                                  0,
+                                                  false,
+                                                  1,
+                                                  false);
 
     overlay_processor_.reset(new SingleOverlayProcessor(
         output_surface_.get(), resource_provider_.get()));
@@ -301,7 +309,7 @@ TEST_F(SingleOverlayOnTopTest, SuccessfullOverlay) {
   for (QuadList::ConstBackToFrontIterator it = quad_list.BackToFrontBegin();
        it != quad_list.BackToFrontEnd();
        ++it) {
-    EXPECT_NE(DrawQuad::TEXTURE_CONTENT, (*it)->material);
+    EXPECT_NE(DrawQuad::TEXTURE_CONTENT, it->material);
   }
 
   // Check that the right resource id got extracted.
@@ -545,7 +553,6 @@ class FakeRendererClient : public RendererClient {
  public:
   // RendererClient methods.
   virtual void SetFullRootLayerDamage() OVERRIDE {}
-  virtual void RunOnDemandRasterTask(Task* on_demand_raster_task) OVERRIDE {}
 };
 
 class MockOverlayScheduler {
@@ -564,9 +571,8 @@ class GLRendererWithOverlaysTest : public testing::Test {
     provider_ = TestContextProvider::Create();
     output_surface_.reset(new OverlayOutputSurface(provider_));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
-    resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1,
-        false);
+    resource_provider_ = ResourceProvider::Create(
+        output_surface_.get(), NULL, NULL, 0, false, 1, false);
 
     provider_->support()->SetScheduleOverlayPlaneCallback(base::Bind(
         &MockOverlayScheduler::Schedule, base::Unretained(&scheduler_)));

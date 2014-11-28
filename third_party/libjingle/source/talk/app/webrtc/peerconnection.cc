@@ -39,6 +39,7 @@
 #include "talk/session/media/channelmanager.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/base/stringencode.h"
+#include "webrtc/system_wrappers/interface/field_trial.h"
 
 namespace {
 
@@ -85,11 +86,12 @@ struct SetSessionDescriptionMsg : public rtc::MessageData {
 };
 
 struct GetStatsMsg : public rtc::MessageData {
-  explicit GetStatsMsg(webrtc::StatsObserver* observer)
-      : observer(observer) {
+  GetStatsMsg(webrtc::StatsObserver* observer,
+              webrtc::MediaStreamTrackInterface* track)
+      : observer(observer), track(track) {
   }
-  webrtc::StatsReports reports;
   rtc::scoped_refptr<webrtc::StatsObserver> observer;
+  rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track;
 };
 
 // |in_str| should be of format
@@ -352,10 +354,14 @@ bool PeerConnection::DoInitialize(
                             cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
                             cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET;
   bool value;
+  // If IPv6 flag was specified, we'll not override it by experiment.
   if (FindConstraint(
-        constraints,
-        MediaConstraintsInterface::kEnableIPv6,
-        &value, NULL) && value) {
+          constraints, MediaConstraintsInterface::kEnableIPv6, &value, NULL)) {
+    if (value) {
+      portallocator_flags |= cricket::PORTALLOCATOR_ENABLE_IPV6;
+    }
+  } else if (webrtc::field_trial::FindFullName("WebRTC-IPv6Default") ==
+             "Enabled") {
     portallocator_flags |= cricket::PORTALLOCATOR_ENABLE_IPV6;
   }
 
@@ -446,17 +452,15 @@ rtc::scoped_refptr<DtmfSenderInterface> PeerConnection::CreateDtmfSender(
 bool PeerConnection::GetStats(StatsObserver* observer,
                               MediaStreamTrackInterface* track,
                               StatsOutputLevel level) {
+  ASSERT(signaling_thread()->IsCurrent());
   if (!VERIFY(observer != NULL)) {
     LOG(LS_ERROR) << "GetStats - observer is NULL.";
     return false;
   }
 
   stats_->UpdateStats(level);
-  rtc::scoped_ptr<GetStatsMsg> msg(new GetStatsMsg(observer));
-  if (!stats_->GetStats(track, &(msg->reports))) {
-    return false;
-  }
-  signaling_thread()->Post(this, MSG_GETSTATS, msg.release());
+  signaling_thread()->Post(this, MSG_GETSTATS,
+                           new GetStatsMsg(observer, track));
   return true;
 }
 
@@ -509,10 +513,6 @@ void PeerConnection::CreateOffer(CreateSessionDescriptionObserver* observer,
     return;
   }
   RTCOfferAnswerOptions options;
-  // Defaults to receiving audio and not receiving video.
-  options.offer_to_receive_audio =
-      RTCOfferAnswerOptions::kOfferToReceiveMediaTrue;
-  options.offer_to_receive_video = 0;
 
   bool value;
   size_t mandatory_constraints = 0;
@@ -673,7 +673,7 @@ bool PeerConnection::UpdateIce(const RTCConfiguration& config) {
       }
     }
   }
-  return session_->UpdateIce(config.type);
+  return session_->SetIceTransports(config.type);
 }
 
 bool PeerConnection::AddIceCandidate(
@@ -757,7 +757,9 @@ void PeerConnection::OnMessage(rtc::Message* msg) {
     }
     case MSG_GETSTATS: {
       GetStatsMsg* param = static_cast<GetStatsMsg*>(msg->pdata);
-      param->observer->OnComplete(param->reports);
+      StatsReports reports;
+      stats_->GetStats(param->track, &reports);
+      param->observer->OnComplete(reports);
       delete param;
       break;
     }

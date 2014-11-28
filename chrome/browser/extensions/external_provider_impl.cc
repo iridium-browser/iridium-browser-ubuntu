@@ -18,6 +18,7 @@
 #include "base/version.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/external_component_loader.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
@@ -26,6 +27,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/external_provider_interface.h"
@@ -66,6 +68,7 @@ const char ExternalProviderImpl::kIsFromWebstore[] = "is_from_webstore";
 const char ExternalProviderImpl::kKeepIfPresent[] = "keep_if_present";
 const char ExternalProviderImpl::kWasInstalledByOem[] = "was_installed_by_oem";
 const char ExternalProviderImpl::kSupportedLocales[] = "supported_locales";
+const char ExternalProviderImpl::kMayBeUntrusted[] = "may_be_untrusted";
 
 ExternalProviderImpl::ExternalProviderImpl(
     VisitorInterface* service,
@@ -113,7 +116,7 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
     const std::string& extension_id = i.key();
     const base::DictionaryValue* extension = NULL;
 
-    if (!Extension::IdIsValid(extension_id)) {
+    if (!crx_file::id_util::IdIsValid(extension_id)) {
       LOG(WARNING) << "Malformed extension dictionary: key "
                    << extension_id.c_str() << " is not a valid id.";
       continue;
@@ -204,12 +207,12 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
         is_bookmark_app) {
       creation_flags |= Extension::FROM_BOOKMARK;
     }
-    bool is_from_webstore;
+    bool is_from_webstore = false;
     if (extension->GetBoolean(kIsFromWebstore, &is_from_webstore) &&
         is_from_webstore) {
       creation_flags |= Extension::FROM_WEBSTORE;
     }
-    bool keep_if_present;
+    bool keep_if_present = false;
     if (extension->GetBoolean(kKeepIfPresent, &keep_if_present) &&
         keep_if_present && profile_) {
       ExtensionServiceInterface* extension_service =
@@ -223,10 +226,15 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
         continue;
       }
     }
-    bool was_installed_by_oem;
+    bool was_installed_by_oem = false;
     if (extension->GetBoolean(kWasInstalledByOem, &was_installed_by_oem) &&
         was_installed_by_oem) {
       creation_flags |= Extension::WAS_INSTALLED_BY_OEM;
+    }
+    bool may_be_untrusted = false;
+    if (extension->GetBoolean(kMayBeUntrusted, &may_be_untrusted) &&
+        may_be_untrusted) {
+      creation_flags |= Extension::MAY_BE_UNTRUSTED;
     }
 
     std::string install_parameter;
@@ -380,14 +388,16 @@ void ExternalProviderImpl::CreateExternalProviders(
       NOTREACHED();
     }
   } else {
-    external_loader = new ExternalPolicyLoader(profile);
+    external_loader = new ExternalPolicyLoader(
+        ExtensionManagementFactory::GetForBrowserContext(profile));
   }
 #else
-  external_loader = new ExternalPolicyLoader(profile);
+  external_loader = new ExternalPolicyLoader(
+      ExtensionManagementFactory::GetForBrowserContext(profile));
 #endif
 
   // Policies are mandatory so they can't be skipped with command line flag.
-  if (external_loader) {
+  if (external_loader.get()) {
     provider_list->push_back(
         linked_ptr<ExternalProviderInterface>(
             new ExternalProviderImpl(

@@ -6,6 +6,7 @@
 #define CC_SURFACES_DISPLAY_CLIENT_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "base/time/time.h"
 
 namespace cc {
 
@@ -14,6 +15,11 @@ class OutputSurface;
 class DisplayClient {
  public:
   virtual scoped_ptr<OutputSurface> CreateOutputSurface() = 0;
+  virtual void DisplayDamaged() = 0;
+  virtual void DidSwapBuffers() = 0;
+  virtual void DidSwapBuffersComplete() = 0;
+  virtual void CommitVSyncParameters(base::TimeTicks timebase,
+                                     base::TimeDelta interval) = 0;
 
  protected:
   virtual ~DisplayClient() {}

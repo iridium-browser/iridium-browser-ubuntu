@@ -27,6 +27,7 @@
 #include "content/renderer/media/webrtc/webrtc_video_capturer_adapter.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/media/webrtc_local_audio_track.h"
+#include "content/renderer/media/webrtc_logging.h"
 #include "content/renderer/media/webrtc_uma_histograms.h"
 #include "content/renderer/p2p/ipc_network_manager.h"
 #include "content/renderer/p2p/ipc_socket_factory.h"
@@ -180,7 +181,7 @@ PeerConnectionDependencyFactory::PeerConnectionDependencyFactory(
 
 PeerConnectionDependencyFactory::~PeerConnectionDependencyFactory() {
   CleanupPeerConnectionFactory();
-  if (aec_dump_message_filter_)
+  if (aec_dump_message_filter_.get())
     aec_dump_message_filter_->RemoveDelegate(this);
 }
 
@@ -216,15 +217,17 @@ bool PeerConnectionDependencyFactory::InitializeMediaStreamAudioSource(
       CreateAudioCapturer(render_view_id, device_info, audio_constraints,
                           source_data));
   if (!capturer.get()) {
-    DLOG(WARNING) << "Failed to create the capturer for device "
-        << device_info.device.id;
+    const std::string log_string =
+        "PCDF::InitializeMediaStreamAudioSource: fails to create capturer";
+    WebRtcLogMessage(log_string);
+    DVLOG(1) << log_string;
     // TODO(xians): Don't we need to check if source_observer is observing
     // something? If not, then it looks like we have a leak here.
     // OTOH, if it _is_ observing something, then the callback might
     // be called multiple times which is likely also a bug.
     return false;
   }
-  source_data->SetAudioCapturer(capturer);
+  source_data->SetAudioCapturer(capturer.get());
 
   // Creates a LocalAudioSource object which holds audio options.
   // TODO(xians): The option should apply to the track instead of the source.
@@ -237,7 +240,7 @@ bool PeerConnectionDependencyFactory::InitializeMediaStreamAudioSource(
     DLOG(WARNING) << "Failed to create rtc LocalAudioSource.";
     return false;
   }
-  source_data->SetLocalAudioSource(rtc_source);
+  source_data->SetLocalAudioSource(rtc_source.get());
   return true;
 }
 
@@ -248,7 +251,7 @@ PeerConnectionDependencyFactory::CreateVideoCapturer(
   // before we can use an instance of a WebRtcVideoCapturerAdapter. This is
   // since the base class of WebRtcVideoCapturerAdapter is a
   // cricket::VideoCapturer and it uses the libjingle thread wrappers.
-  if (!GetPcFactory())
+  if (!GetPcFactory().get())
     return NULL;
   return new WebRtcVideoCapturerAdapter(is_screeencast);
 }
@@ -265,9 +268,9 @@ PeerConnectionDependencyFactory::CreateVideoSource(
 
 const scoped_refptr<webrtc::PeerConnectionFactoryInterface>&
 PeerConnectionDependencyFactory::GetPcFactory() {
-  if (!pc_factory_)
+  if (!pc_factory_.get())
     CreatePeerConnectionFactory();
-  CHECK(pc_factory_);
+  CHECK(pc_factory_.get());
   return pc_factory_;
 }
 
@@ -326,12 +329,12 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
   scoped_refptr<media::GpuVideoAcceleratorFactories> gpu_factories =
       RenderThreadImpl::current()->GetGpuFactories();
   if (!cmd_line->HasSwitch(switches::kDisableWebRtcHWDecoding)) {
-    if (gpu_factories)
+    if (gpu_factories.get())
       decoder_factory.reset(new RTCVideoDecoderFactory(gpu_factories));
   }
 
   if (!cmd_line->HasSwitch(switches::kDisableWebRtcHWEncoding)) {
-    if (gpu_factories)
+    if (gpu_factories.get())
       encoder_factory.reset(new RTCVideoEncoderFactory(gpu_factories));
   }
 
@@ -348,7 +351,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
                                           audio_device_.get(),
                                           encoder_factory.release(),
                                           decoder_factory.release()));
-  CHECK(factory);
+  CHECK(factory.get());
 
   pc_factory_ = factory;
   webrtc::PeerConnectionFactoryInterface::Options factory_options;
@@ -364,7 +367,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
     // In unit tests not creating a message filter, |aec_dump_message_filter_|
     // will be NULL. We can just ignore that. Other unit tests and browser tests
     // ensure that we do get the filter when we should.
-    if (aec_dump_message_filter_)
+    if (aec_dump_message_filter_.get())
       aec_dump_message_filter_->AddDelegate(this);
   }
 }
@@ -381,7 +384,7 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
     webrtc::PeerConnectionObserver* observer) {
   CHECK(web_frame);
   CHECK(observer);
-  if (!GetPcFactory())
+  if (!GetPcFactory().get())
     return NULL;
 
   scoped_refptr<P2PPortAllocatorFactory> pa_factory =
@@ -449,10 +452,8 @@ void PeerConnectionDependencyFactory::CreateLocalAudioTrack(
   // TODO(xians): Merge |source| to the capturer(). We can't do this today
   // because only one capturer() is supported while one |source| is created
   // for each audio track.
-  scoped_ptr<WebRtcLocalAudioTrack> audio_track(
-      new WebRtcLocalAudioTrack(adapter,
-                                source_data->GetAudioCapturer(),
-                                webaudio_source));
+  scoped_ptr<WebRtcLocalAudioTrack> audio_track(new WebRtcLocalAudioTrack(
+      adapter.get(), source_data->GetAudioCapturer(), webaudio_source.get()));
 
   StartLocalAudioTrack(audio_track.get());
 
@@ -656,7 +657,7 @@ void PeerConnectionDependencyFactory::OnIpcClosing() {
 }
 
 void PeerConnectionDependencyFactory::EnsureWebRtcAudioDeviceImpl() {
-  if (audio_device_)
+  if (audio_device_.get())
     return;
 
   audio_device_ = new WebRtcAudioDeviceImpl();

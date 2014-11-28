@@ -24,7 +24,6 @@
 #include "cc/layers/layer_position_constraint.h"
 #include "cc/layers/render_surface_impl.h"
 #include "cc/output/filter_operations.h"
-#include "cc/quads/render_pass.h"
 #include "cc/quads/shared_quad_state.h"
 #include "cc/resources/resource_provider.h"
 #include "skia/ext/refptr.h"
@@ -50,11 +49,15 @@ namespace cc {
 class LayerTreeHostImpl;
 class LayerTreeImpl;
 class MicroBenchmarkImpl;
+class Occlusion;
 template <typename LayerType>
 class OcclusionTracker;
+class RenderPass;
+class RenderPassId;
 class Renderer;
 class ScrollbarAnimationController;
 class ScrollbarLayerImplBase;
+class SimpleEnclosedRegion;
 class Tile;
 
 struct AppendQuadsData;
@@ -199,11 +202,11 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
 
   virtual bool HasDelegatedContent() const;
   virtual bool HasContributingDelegatedRenderPasses() const;
-  virtual RenderPass::Id FirstContributingRenderPassId() const;
-  virtual RenderPass::Id NextContributingRenderPassId(RenderPass::Id id) const;
+  virtual RenderPassId FirstContributingRenderPassId() const;
+  virtual RenderPassId NextContributingRenderPassId(RenderPassId id) const;
 
-  virtual void UpdateTiles(
-      const OcclusionTracker<LayerImpl>* occlusion_tracker) {}
+  virtual void UpdateTiles(const Occlusion& occlusion_in_layer_space,
+                           bool resourceless_software_draw) {}
   virtual void NotifyTileStateChanged(const Tile* tile) {}
 
   virtual ScrollbarLayerImplBase* ToScrollbarLayer();
@@ -360,12 +363,9 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // them from the other values.
 
   void SetBounds(const gfx::Size& bounds);
-  void SetTemporaryImplBounds(const gfx::SizeF& bounds);
   gfx::Size bounds() const;
-  gfx::Vector2dF BoundsDelta() const {
-    return gfx::Vector2dF(temporary_impl_bounds_.width() - bounds_.width(),
-                          temporary_impl_bounds_.height() - bounds_.height());
-  }
+  void SetBoundsDelta(const gfx::Vector2dF& bounds_delta);
+  gfx::Vector2dF bounds_delta() const { return bounds_delta_; }
 
   void SetContentBounds(const gfx::Size& content_bounds);
   gfx::Size content_bounds() const { return draw_properties_.content_bounds; }
@@ -492,7 +492,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
     return layer_animation_controller_.get();
   }
 
-  virtual Region VisibleContentOpaqueRegion() const;
+  virtual SimpleEnclosedRegion VisibleContentOpaqueRegion() const;
 
   virtual void DidBecomeActive();
 
@@ -606,7 +606,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // Properties synchronized from the associated Layer.
   gfx::Point3F transform_origin_;
   gfx::Size bounds_;
-  gfx::SizeF temporary_impl_bounds_;
+  gfx::Vector2dF bounds_delta_;
   gfx::Vector2d scroll_offset_;
   ScrollOffsetDelegate* scroll_offset_delegate_;
   LayerImpl* scroll_clip_layer_;

@@ -42,6 +42,7 @@ class GenericEventQueue;
 
 class SourceBufferList FINAL : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<SourceBufferList>, public EventTargetWithInlineData {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<SourceBufferList>);
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SourceBufferList);
 public:
     static SourceBufferList* create(ExecutionContext* context, GenericEventQueue* asyncEventQueue)
@@ -54,7 +55,9 @@ public:
     SourceBuffer* item(unsigned long index) const { return (index < m_list.size()) ? m_list[index].get() : 0; }
 
     void add(SourceBuffer*);
+    void insert(size_t position, SourceBuffer*);
     void remove(SourceBuffer*);
+    size_t find(SourceBuffer* buffer) { return m_list.find(buffer); }
     bool contains(SourceBuffer* buffer) { return m_list.find(buffer) != kNotFound; }
     void clear();
 
@@ -77,4 +80,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // SourceBufferList_h

@@ -6,24 +6,22 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chromeos/chromeos_switches.h"
-#include "components/pairing/fake_host_pairing_controller.h"
+#include "components/pairing/host_pairing_controller.h"
 
 namespace chromeos {
 
 using namespace host_pairing;
 using namespace pairing_chromeos;
 
-HostPairingScreen::HostPairingScreen(ScreenObserver* observer,
-                                     HostPairingScreenActor* actor)
+HostPairingScreen::HostPairingScreen(
+    ScreenObserver* observer,
+    HostPairingScreenActor* actor,
+    pairing_chromeos::HostPairingController* controller)
     : WizardScreen(observer),
       actor_(actor),
+      controller_(controller),
       current_stage_(HostPairingController::STAGE_NONE) {
   actor_->SetDelegate(this);
-  std::string controller_config =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kShowHostPairingDemo);
-  controller_.reset(new FakeHostPairingController(controller_config));
   controller_->AddObserver(this);
 }
 
@@ -48,7 +46,7 @@ void HostPairingScreen::PrepareToShow() {
 void HostPairingScreen::Show() {
   if (actor_)
     actor_->Show();
-  controller_->StartPairing();
+  PairingStageChanged(controller_->GetCurrentStage());
 }
 
 void HostPairingScreen::Hide() {
@@ -61,10 +59,12 @@ std::string HostPairingScreen::GetName() const {
 }
 
 void HostPairingScreen::PairingStageChanged(Stage new_stage) {
-  DCHECK(new_stage != current_stage_);
-
   std::string desired_page;
   switch (new_stage) {
+    case HostPairingController::STAGE_NONE:
+    case HostPairingController::STAGE_INITIALIZATION_ERROR: {
+      break;
+    }
     case HostPairingController::STAGE_WAITING_FOR_CONTROLLER:
     case HostPairingController::STAGE_WAITING_FOR_CONTROLLER_AFTER_UPDATE: {
       desired_page = kPageWelcome;
@@ -100,11 +100,7 @@ void HostPairingScreen::PairingStageChanged(Stage new_stage) {
       break;
     }
     case HostPairingController::STAGE_FINISHED: {
-      get_screen_observer()->OnExit(WizardController::HOST_PAIRING_FINISHED);
-      break;
-    }
-    default: {
-      NOTREACHED();
+      // This page is closed in EnrollHost.
       break;
     }
   }
@@ -114,9 +110,19 @@ void HostPairingScreen::PairingStageChanged(Stage new_stage) {
   CommitContextChanges();
 }
 
-void HostPairingScreen::UpdateAdvanced(const UpdateProgress& progress) {
-  context_.SetDouble(kContextKeyUpdateProgress, progress.progress);
-  CommitContextChanges();
+void HostPairingScreen::ConfigureHost(bool accepted_eula,
+                                      const std::string& lang,
+                                      const std::string& timezone,
+                                      bool send_reports,
+                                      const std::string& keyboard_layout) {
+  // TODO(zork): Get configuration from UI and send to Host.
+  // (http://crbug.com/405744)
+}
+
+void HostPairingScreen::EnrollHost(const std::string& auth_token) {
+  controller_->RemoveObserver(this);
+  WizardController::default_controller()->OnEnrollmentAuthTokenReceived(
+      auth_token);
 }
 
 void HostPairingScreen::OnActorDestroyed(HostPairingScreenActor* actor) {

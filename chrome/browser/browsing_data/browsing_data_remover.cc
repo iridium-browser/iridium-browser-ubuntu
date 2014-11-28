@@ -33,7 +33,6 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_service.h"
@@ -49,7 +48,10 @@
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/pnacl_host.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/power/origin_power_map.h"
+#include "components/power/origin_power_map_factory.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/download_manager.h"
@@ -70,9 +72,9 @@
 #include "net/ssl/channel_id_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/browser/quota/special_storage_policy.h"
-#include "webkit/common/quota/quota_types.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/browser/quota/special_storage_policy.h"
+#include "storage/common/quota/quota_types.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -106,9 +108,10 @@ BrowsingDataRemover::CompletionInhibitor*
 
 // Helper to create callback for BrowsingDataRemover::DoesOriginMatchMask.
 // Static.
-bool DoesOriginMatchMask(int origin_set_mask,
-                         const GURL& origin,
-                         quota::SpecialStoragePolicy* special_storage_policy) {
+bool DoesOriginMatchMask(
+    int origin_set_mask,
+    const GURL& origin,
+    storage::SpecialStoragePolicy* special_storage_policy) {
   return BrowsingDataHelper::DoesOriginMatchMask(
       origin, origin_set_mask, special_storage_policy);
 }
@@ -299,6 +302,13 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       extensions::ActivityLog::GetInstance(profile_)->RemoveURLs(restrict_urls);
 #endif
     }
+
+    // The power consumption history by origin contains details of websites
+    // that were visited.
+    power::OriginPowerMap* origin_power_map =
+        power::OriginPowerMapFactory::GetForBrowserContext(profile_);
+    if (origin_power_map)
+      origin_power_map->ClearOriginMap();
 
     // Need to clear the host cache and accumulated speculative data, as it also
     // reveals some history: we have no mechanism to track when these items were
@@ -570,7 +580,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
 
   if (remove_mask & REMOVE_CACHE) {
     // Tell the renderers to clear their cache.
-    WebCacheManager::GetInstance()->ClearCache();
+    web_cache::WebCacheManager::GetInstance()->ClearCache();
 
     // Invoke DoClearCache on the IO thread.
     waiting_for_clear_cache_ = true;

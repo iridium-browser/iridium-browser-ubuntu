@@ -5,6 +5,8 @@
 #ifndef UI_APP_LIST_VIEWS_CONTENTS_SWITCHER_VIEW_H_
 #define UI_APP_LIST_VIEWS_CONTENTS_SWITCHER_VIEW_H_
 
+#include <map>
+
 #include "base/basictypes.h"
 #include "ui/app_list/pagination_model_observer.h"
 #include "ui/views/controls/button/button.h"
@@ -26,8 +28,7 @@ class ContentsSwitcherView : public views::View,
   ContentsView* contents_view() const { return contents_view_; }
 
   // Adds a switcher button using |resource_id| as the button's image, which
-  // opens the page with index |page_index| in the ContentsView. |resource_id|
-  // is ignored if it is 0.
+  // opens the page with index |page_index| in the ContentsView.
   void AddSwitcherButton(int resource_id, int page_index);
 
  private:
@@ -42,9 +43,6 @@ class ContentsSwitcherView : public views::View,
   virtual void TransitionChanged() OVERRIDE;
 
   ContentsView* contents_view_;  // Owned by views hierarchy.
-
-  // Stores Views owned by views hierarchy.
-  std::vector<views::View*> page_active_indicators_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentsSwitcherView);
 };

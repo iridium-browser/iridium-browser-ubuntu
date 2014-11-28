@@ -44,11 +44,6 @@
 
 namespace blink {
 
-bool FontPlatformFeatures::canReturnFallbackFontsForComplexText()
-{
-    return true;
-}
-
 bool FontPlatformFeatures::canExpandAroundIdeographsInComplexText()
 {
     return true;
@@ -57,7 +52,7 @@ bool FontPlatformFeatures::canExpandAroundIdeographsInComplexText()
 static void setupPaint(SkPaint* paint, const SimpleFontData* fontData, const Font* font, bool shouldAntialias, bool shouldSmoothFonts)
 {
     const FontPlatformData& platformData = fontData->platformData();
-    const float textSize = platformData.m_size >= 0 ? platformData.m_size : 12;
+    const float textSize = platformData.m_textSize >= 0 ? platformData.m_textSize : 12;
 
     paint->setAntiAlias(shouldAntialias);
     paint->setEmbeddedBitmapText(false);
@@ -65,7 +60,7 @@ static void setupPaint(SkPaint* paint, const SimpleFontData* fontData, const Fon
     paint->setVerticalText(platformData.orientation() == Vertical);
     paint->setTypeface(platformData.typeface());
     paint->setFakeBoldText(platformData.m_syntheticBold);
-    paint->setTextSkewX(platformData.m_syntheticOblique ? -SK_Scalar1 / 4 : 0);
+    paint->setTextSkewX(platformData.m_syntheticItalic ? -SK_Scalar1 / 4 : 0);
     paint->setAutohinted(false); // freetype specific
     paint->setLCDRenderText(shouldSmoothFonts);
     paint->setSubpixelText(true);
@@ -170,6 +165,18 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
     }
     if (font->platformData().orientation() == Vertical)
         gc->restore();
+}
+
+void Font::drawTextBlob(GraphicsContext*, const SkTextBlob*, const SkPoint&) const
+{
+    // FIXME: Add text blob support to FontMac.
+}
+
+PassTextBlobPtr Font::buildTextBlob(const GlyphBuffer& glyphBuffer, float initialAdvance,
+    const FloatRect& bounds, float& advance, bool couldUseLCD) const
+{
+    // FIXME: Add text blob support to FontMac.
+    return nullptr;
 }
 
 } // namespace blink

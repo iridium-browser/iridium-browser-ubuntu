@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
+
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -20,9 +22,7 @@
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
 #include "chrome/browser/chromeos/system/automatic_reboot_manager.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -31,6 +31,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/extension.h"
+#include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -68,8 +69,7 @@ class KioskAppUpdateServiceTest : public extensions::PlatformAppBrowserTest {
     update_service_ = KioskAppUpdateServiceFactory::GetForProfile(profile());
     update_service_->set_app_id(app_->id());
 
-    content::BrowserThread::GetBlockingPool()->FlushForTesting();
-    content::RunAllPendingInMessageLoop();
+    content::RunAllBlockingPoolTasksUntilIdle();
   }
 
   void FireAppUpdateAvailable() {

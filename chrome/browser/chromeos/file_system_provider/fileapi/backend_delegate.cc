@@ -10,9 +10,9 @@
 #include "chrome/browser/chromeos/file_system_provider/fileapi/file_stream_writer.h"
 #include "chrome/browser/chromeos/file_system_provider/fileapi/provider_async_file_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "webkit/browser/blob/file_stream_reader.h"
-#include "webkit/browser/fileapi/file_stream_writer.h"
-#include "webkit/browser/fileapi/file_system_url.h"
+#include "storage/browser/blob/file_stream_reader.h"
+#include "storage/browser/fileapi/file_stream_writer.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 using content::BrowserThread;
 
@@ -31,38 +31,52 @@ BackendDelegate::BackendDelegate()
 
 BackendDelegate::~BackendDelegate() {}
 
-fileapi::AsyncFileUtil* BackendDelegate::GetAsyncFileUtil(
-    fileapi::FileSystemType type) {
+storage::AsyncFileUtil* BackendDelegate::GetAsyncFileUtil(
+    storage::FileSystemType type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK_EQ(fileapi::kFileSystemTypeProvided, type);
+  DCHECK_EQ(storage::kFileSystemTypeProvided, type);
   return async_file_util_.get();
 }
 
-scoped_ptr<webkit_blob::FileStreamReader>
-BackendDelegate::CreateFileStreamReader(
-    const fileapi::FileSystemURL& url,
+scoped_ptr<storage::FileStreamReader> BackendDelegate::CreateFileStreamReader(
+    const storage::FileSystemURL& url,
     int64 offset,
+    int64 max_bytes_to_read,
     const base::Time& expected_modification_time,
-    fileapi::FileSystemContext* context) {
+    storage::FileSystemContext* context) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK_EQ(fileapi::kFileSystemTypeProvided, url.type());
+  DCHECK_EQ(storage::kFileSystemTypeProvided, url.type());
 
-  return scoped_ptr<webkit_blob::FileStreamReader>(
-      new BufferingFileStreamReader(
-          scoped_ptr<webkit_blob::FileStreamReader>(new FileStreamReader(
-              context, url, offset, expected_modification_time)),
-          kReaderBufferSize));
+  return scoped_ptr<storage::FileStreamReader>(new BufferingFileStreamReader(
+      scoped_ptr<storage::FileStreamReader>(new FileStreamReader(
+          context, url, offset, expected_modification_time)),
+      kReaderBufferSize,
+      max_bytes_to_read));
 }
 
-scoped_ptr<fileapi::FileStreamWriter> BackendDelegate::CreateFileStreamWriter(
-    const fileapi::FileSystemURL& url,
+scoped_ptr<storage::FileStreamWriter> BackendDelegate::CreateFileStreamWriter(
+    const storage::FileSystemURL& url,
     int64 offset,
-    fileapi::FileSystemContext* context) {
+    storage::FileSystemContext* context) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK_EQ(fileapi::kFileSystemTypeProvided, url.type());
+  DCHECK_EQ(storage::kFileSystemTypeProvided, url.type());
 
-  return scoped_ptr<fileapi::FileStreamWriter>(
+  return scoped_ptr<storage::FileStreamWriter>(
       new FileStreamWriter(url, offset));
+}
+
+storage::WatcherManager* BackendDelegate::GetWatcherManager(
+    const storage::FileSystemURL& url) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+void BackendDelegate::GetRedirectURLForContents(
+    const storage::FileSystemURL& url,
+    const storage::URLCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_EQ(storage::kFileSystemTypeProvided, url.type());
+  callback.Run(GURL());
 }
 
 }  // namespace file_system_provider

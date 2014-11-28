@@ -21,6 +21,9 @@ class VersionUpdaterCros : public VersionUpdater,
   virtual void GetChannel(bool get_current_channel,
                           const ChannelCallback& callback) OVERRIDE;
 
+  // Gets the last update status, without triggering a new check or download.
+  void GetUpdateStatus(const StatusCallback& callback);
+
  protected:
   friend class VersionUpdater;
 
@@ -41,6 +44,9 @@ class VersionUpdaterCros : public VersionUpdater,
 
   // Last state received via UpdateStatusChanged().
   chromeos::UpdateEngineClient::UpdateStatusOperation last_operation_;
+
+  // True if an update check should be scheduled when the update engine is idle.
+  bool check_for_update_when_idle_;
 
   base::WeakPtrFactory<VersionUpdaterCros> weak_ptr_factory_;
 

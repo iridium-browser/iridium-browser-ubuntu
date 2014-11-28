@@ -1,0 +1,47 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//mojo/public/tools/bindings/mojom.gni")
+
+group("echo") {
+  deps = [
+    ":client",
+    ":service"
+  ]
+}
+
+# GYP version: mojo/mojo_examples.gypi:mojo_echo_client
+shared_library("client") {
+  output_name = "mojo_echo_client"
+
+  deps = [
+    ":bindings",
+    "//mojo/public/c/system:for_shared_library",
+    "//mojo/public/cpp/application:standalone",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/utility",
+  ]
+
+  sources = [ "echo_client.cc" ]
+}
+
+# GYP version: mojo/mojo_examples.gypi:mojo_echo_service
+shared_library("service") {
+  output_name = "mojo_echo_service"
+
+  deps = [
+    ":bindings",
+    "//mojo/public/c/system:for_shared_library",
+    "//mojo/public/cpp/application:standalone",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/utility",
+  ]
+
+  sources = [ "echo_service.cc" ]
+}
+
+# GYP version: mojo/mojo_examples.gypi:mojo_echo_service_bindings
+mojom("bindings") {
+  sources = [ "echo_service.mojom" ]
+}

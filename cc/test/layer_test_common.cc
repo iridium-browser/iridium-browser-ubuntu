@@ -40,8 +40,10 @@ void LayerTestCommon::VerifyQuadsExactlyCoverRect(const QuadList& quads,
                                                   const gfx::Rect& rect) {
   Region remaining = rect;
 
-  for (size_t i = 0; i < quads.size(); ++i) {
-    DrawQuad* quad = quads[i];
+  size_t i = 0;
+  for (QuadList::ConstIterator iter = quads.begin(); iter != quads.end();
+       ++iter) {
+    const DrawQuad* quad = &*iter;
     gfx::RectF quad_rectf =
         MathUtil::MapClippedRect(quad->quadTransform(), gfx::RectF(quad->rect));
 
@@ -58,25 +60,29 @@ void LayerTestCommon::VerifyQuadsExactlyCoverRect(const QuadList& quads,
         << quad_string << i << " remaining: " << remaining.ToString()
         << " quad: " << quad_rect.ToString();
     remaining.Subtract(quad_rect);
+
+    ++i;
   }
 
   EXPECT_TRUE(remaining.IsEmpty());
 }
 
 // static
-void LayerTestCommon::VerifyQuadsCoverRectWithOcclusion(
-    const QuadList& quads,
-    const gfx::Rect& rect,
-    const gfx::Rect& occluded,
-    size_t* partially_occluded_count) {
+void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
+                                             const gfx::Rect& occluded,
+                                             size_t* partially_occluded_count) {
   // No quad should exist if it's fully occluded.
-  for (size_t i = 0; i < quads.size(); ++i) {
-    EXPECT_FALSE(occluded.Contains(quads[i]->visible_rect));
+  for (QuadList::ConstIterator iter = quads.begin(); iter != quads.end();
+       ++iter) {
+    gfx::Rect target_visible_rect = MathUtil::MapEnclosingClippedRect(
+        iter->quadTransform(), iter->visible_rect);
+    EXPECT_FALSE(occluded.Contains(target_visible_rect));
   }
 
   // Quads that are fully occluded on one axis only should be shrunken.
-  for (size_t i = 0; i < quads.size(); ++i) {
-    DrawQuad* quad = quads[i];
+  for (QuadList::ConstIterator iter = quads.begin(); iter != quads.end();
+       ++iter) {
+    const DrawQuad* quad = &*iter;
     DCHECK(quad->quadTransform().IsIdentityOrIntegerTranslation());
     gfx::Rect target_rect =
         MathUtil::MapEnclosingClippedRect(quad->quadTransform(), quad->rect);
@@ -101,7 +107,8 @@ void LayerTestCommon::VerifyQuadsCoverRectWithOcclusion(
 }
 
 LayerTestCommon::LayerImplTest::LayerImplTest()
-    : host_(FakeLayerTreeHost::Create()),
+    : client_(FakeLayerTreeHostClient::DIRECT_3D),
+      host_(FakeLayerTreeHost::Create(&client_)),
       root_layer_impl_(LayerImpl::Create(host_->host_impl()->active_tree(), 1)),
       render_pass_(RenderPass::Create()) {
   scoped_ptr<FakeOutputSurface> output_surface = FakeOutputSurface::Create3d();
@@ -134,7 +141,7 @@ void LayerTestCommon::LayerImplTest::AppendQuadsWithOcclusion(
 
 void LayerTestCommon::LayerImplTest::AppendQuadsForPassWithOcclusion(
     LayerImpl* layer_impl,
-    const RenderPass::Id& id,
+    const RenderPassId& id,
     const gfx::Rect& occluded) {
   AppendQuadsData data(id);
 
@@ -156,7 +163,7 @@ void LayerTestCommon::LayerImplTest::AppendSurfaceQuadsWithOcclusion(
   occlusion_tracker_.set_occluded_target_rect_for_contributing_surface(
       occluded);
   bool for_replica = false;
-  RenderPass::Id id(1, 1);
+  RenderPassId id(1, 1);
   surface_impl->AppendQuads(
       render_pass_.get(), occlusion_tracker_, &data, for_replica, id);
 }

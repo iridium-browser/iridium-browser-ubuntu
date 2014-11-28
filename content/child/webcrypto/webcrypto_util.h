@@ -7,9 +7,7 @@
 
 #include <stdint.h>
 #include <string>
-#include <vector>
 
-#include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/platform/WebCryptoAlgorithm.h"
@@ -21,18 +19,6 @@ namespace webcrypto {
 
 class Status;
 
-// This function decodes unpadded 'base64url' encoded data, as described in
-// RFC4648 (http://www.ietf.org/rfc/rfc4648.txt) Section 5.
-// In Web Crypto, this type of encoding is only used inside JWK.
-CONTENT_EXPORT bool Base64DecodeUrlSafe(const std::string& input,
-                                        std::string* output);
-
-// Returns an unpadded 'base64url' encoding of the input data, the opposite of
-// Base64DecodeUrlSafe() above.
-CONTENT_EXPORT std::string Base64EncodeUrlSafe(const base::StringPiece& input);
-CONTENT_EXPORT std::string Base64EncodeUrlSafe(
-    const std::vector<uint8_t>& input);
-
 // Composes a Web Crypto usage mask from an array of JWK key_ops values.
 CONTENT_EXPORT Status GetWebCryptoUsagesFromJwkKeyOps(
     const base::ListValue* jwk_key_ops_value,
@@ -41,11 +27,6 @@ CONTENT_EXPORT Status GetWebCryptoUsagesFromJwkKeyOps(
 // Composes a JWK key_ops array from a Web Crypto usage mask.
 base::ListValue* CreateJwkKeyOpsFromWebCryptoUsages(
     blink::WebCryptoKeyUsageMask usage_mask);
-
-// Returns the "hash" param for an algorithm if it exists, otherwise returns
-// a null algorithm.
-blink::WebCryptoAlgorithm GetInnerHashAlgorithm(
-    const blink::WebCryptoAlgorithm& algorithm);
 
 // Creates a WebCryptoAlgorithm without any parameters.
 CONTENT_EXPORT blink::WebCryptoAlgorithm CreateAlgorithm(

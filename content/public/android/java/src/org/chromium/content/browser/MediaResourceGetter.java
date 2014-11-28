@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.MediaMetadataRetriever;
@@ -13,11 +14,10 @@ import android.os.ParcelFileDescriptor;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.PathUtils;
+import org.chromium.base.VisibleForTesting;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,11 +34,9 @@ import java.util.Map;
 class MediaResourceGetter {
 
     private static final String TAG = "MediaResourceGetter";
-    private static final MediaMetadata EMPTY_METADATA = new MediaMetadata(0,0,0,false);
+    private static final MediaMetadata EMPTY_METADATA = new MediaMetadata(0, 0, 0, false);
 
     private final MediaMetadataRetriever mRetriever = new MediaMetadataRetriever();
-
-    private static String PACKAGE_NAME = null;
 
     @VisibleForTesting
     static class MediaMetadata {
@@ -98,7 +96,7 @@ class MediaResourceGetter {
                 return false;
             if (getClass() != obj.getClass())
                 return false;
-            MediaMetadata other = (MediaMetadata)obj;
+            MediaMetadata other = (MediaMetadata) obj;
             if (mDurationInMilliseconds != other.mDurationInMilliseconds)
                 return false;
             if (mHeight != other.mHeight)
@@ -116,7 +114,6 @@ class MediaResourceGetter {
                                                       final String url,
                                                       final String cookies,
                                                       final String userAgent) {
-        PACKAGE_NAME = context.getPackageName();
         return new MediaResourceGetter().extract(
                 context, url, cookies, userAgent);
     }
@@ -226,7 +223,7 @@ class MediaResourceGetter {
                 Log.e(TAG, "File does not exist.");
                 return false;
             }
-            if (!filePathAcceptable(file)) {
+            if (!filePathAcceptable(file, context)) {
                 Log.e(TAG, "Refusing to read from unsafe file location.");
                 return false;
             }
@@ -305,7 +302,7 @@ class MediaResourceGetter {
      * safe to read from, such as /mnt/sdcard.
      */
     @VisibleForTesting
-    boolean filePathAcceptable(File file) {
+    boolean filePathAcceptable(File file, Context context) {
         final String path;
         try {
             path = file.getCanonicalPath();
@@ -318,7 +315,7 @@ class MediaResourceGetter {
         // well-known paths we are matching against. If we don't, then we can
         // get unusual results in testing systems or possibly on rooted devices.
         // Note that canonicalized directory paths always end with '/'.
-        List<String> acceptablePaths = canonicalize(getRawAcceptableDirectories());
+        List<String> acceptablePaths = canonicalize(getRawAcceptableDirectories(context));
         acceptablePaths.add(getExternalStorageDirectory());
         Log.d(TAG, "canonicalized file path: " + path);
         for (String acceptablePath : acceptablePaths) {
@@ -364,12 +361,12 @@ class MediaResourceGetter {
         return info.getType();
     }
 
-    private List<String> getRawAcceptableDirectories() {
+    @SuppressLint("SdCardPath")
+    private List<String> getRawAcceptableDirectories(Context context) {
         List<String> result = new ArrayList<String>();
         result.add("/mnt/sdcard/");
         result.add("/sdcard/");
-        if (PACKAGE_NAME != null)
-            result.add("/data/data/" + PACKAGE_NAME + "/cache/");
+        result.add("/data/data/" + context.getPackageName() + "/cache/");
         return result;
     }
 
@@ -408,7 +405,7 @@ class MediaResourceGetter {
     }
 
     @VisibleForTesting
-    void configure(String url, Map<String,String> headers) {
+    void configure(String url, Map<String, String> headers) {
         mRetriever.setDataSource(url, headers);
     }
 

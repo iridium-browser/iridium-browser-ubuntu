@@ -13,7 +13,7 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/browser/history/history_types.h"
+#include "components/history/core/browser/history_types.h"
 #include "url/gurl.h"
 
 struct ImportedBookmarkEntry;
@@ -23,6 +23,7 @@ class TemplateURL;
 
 namespace autofill {
 struct PasswordForm;
+class AutofillEntry;
 }
 
 #if defined(OS_WIN)
@@ -88,6 +89,10 @@ class ProfileWriter : public base::RefCountedThreadSafe<ProfileWriter> {
   // same host+path combination.
   virtual void AddKeywords(ScopedVector<TemplateURL> template_urls,
                            bool unique_on_host_and_path);
+
+  // Adds the imported autofill entries to the autofill database.
+  virtual void AddAutofillFormDataEntries(
+      const std::vector<autofill::AutofillEntry>& autofill_entries);
 
  protected:
   friend class base::RefCountedThreadSafe<ProfileWriter>;

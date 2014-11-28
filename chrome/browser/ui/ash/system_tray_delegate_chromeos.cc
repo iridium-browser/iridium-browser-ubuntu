@@ -87,6 +87,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/ime/extension_ime_util.h"
@@ -106,9 +108,6 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_device.h"
-#include "grit/ash_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "net/base/escape.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -186,8 +185,7 @@ void OnAcceptMultiprofilesIntro(bool no_show_again) {
 }  // namespace
 
 SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
-    : weak_ptr_factory_(this),
-      user_profile_(NULL),
+    : user_profile_(NULL),
       clock_type_(base::GetHourClockType()),
       search_key_mapped_to_(input_method::kSearchKey),
       screen_locked_(false),
@@ -198,7 +196,8 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
       device_settings_observer_(CrosSettings::Get()->AddSettingsObserver(
           kSystemUse24HourClock,
           base::Bind(&SystemTrayDelegateChromeOS::UpdateClockType,
-                     base::Unretained(this)))) {
+                     base::Unretained(this)))),
+      weak_ptr_factory_(this) {
   // Register notifications on construction so that events such as
   // PROFILE_CREATED do not get missed if they happen before Initialize().
   registrar_.reset(new content::NotificationRegistrar);
@@ -395,11 +394,16 @@ SystemTrayDelegateChromeOS::GetSupervisedUserManagerName() const {
 
 const base::string16 SystemTrayDelegateChromeOS::GetSupervisedUserMessage()
     const {
-  if (GetUserLoginStatus() != ash::user::LOGGED_IN_SUPERVISED)
+  if (!IsUserSupervised())
     return base::string16();
   return l10n_util::GetStringFUTF16(
       IDS_USER_IS_SUPERVISED_BY_NOTICE,
       base::UTF8ToUTF16(GetSupervisedUserManager()));
+}
+
+bool SystemTrayDelegateChromeOS::IsUserSupervised() const {
+  user_manager::User* user = user_manager::UserManager::Get()->GetActiveUser();
+  return user && user->IsSupervised();
 }
 
 bool SystemTrayDelegateChromeOS::SystemShouldUpgrade() const {
@@ -694,7 +698,8 @@ void SystemTrayDelegateChromeOS::GetCurrentIME(ash::IMEInfo* info) {
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::Get();
   input_method::InputMethodUtil* util = manager->GetInputMethodUtil();
-  input_method::InputMethodDescriptor ime = manager->GetCurrentInputMethod();
+  input_method::InputMethodDescriptor ime =
+      manager->GetActiveIMEState()->GetCurrentInputMethod();
   ExtractIMEInfo(ime, *util, info);
   info->selected = true;
 }
@@ -704,8 +709,9 @@ void SystemTrayDelegateChromeOS::GetAvailableIMEList(ash::IMEInfoList* list) {
       input_method::InputMethodManager::Get();
   input_method::InputMethodUtil* util = manager->GetInputMethodUtil();
   scoped_ptr<input_method::InputMethodDescriptors> ime_descriptors(
-      manager->GetActiveInputMethods());
-  std::string current = manager->GetCurrentInputMethod().id();
+      manager->GetActiveIMEState()->GetActiveInputMethods());
+  std::string current =
+      manager->GetActiveIMEState()->GetCurrentInputMethod().id();
   for (size_t i = 0; i < ime_descriptors->size(); i++) {
     input_method::InputMethodDescriptor& ime = ime_descriptors->at(i);
     ash::IMEInfo info;
@@ -730,7 +736,9 @@ void SystemTrayDelegateChromeOS::GetCurrentIMEProperties(
 }
 
 void SystemTrayDelegateChromeOS::SwitchIME(const std::string& ime_id) {
-  input_method::InputMethodManager::Get()->ChangeInputMethod(ime_id);
+  input_method::InputMethodManager::Get()
+      ->GetActiveIMEState()
+      ->ChangeInputMethod(ime_id, false /* show_message */);
 }
 
 void SystemTrayDelegateChromeOS::ActivateIMEProperty(const std::string& key) {
@@ -738,15 +746,13 @@ void SystemTrayDelegateChromeOS::ActivateIMEProperty(const std::string& key) {
 }
 
 void SystemTrayDelegateChromeOS::ShowNetworkConfigure(
-    const std::string& network_id,
-    gfx::NativeWindow parent_window) {
-  NetworkConfigView::Show(network_id, parent_window);
+    const std::string& network_id) {
+  NetworkConfigView::Show(network_id, GetNativeWindow());
 }
 
 bool SystemTrayDelegateChromeOS::EnrollNetwork(
-    const std::string& network_id,
-    gfx::NativeWindow parent_window) {
-  return enrollment::CreateDialog(network_id, parent_window);
+    const std::string& network_id) {
+  return enrollment::CreateDialog(network_id, GetNativeWindow());
 }
 
 void SystemTrayDelegateChromeOS::ManageBluetoothDevices() {
@@ -866,7 +872,7 @@ void SystemTrayDelegateChromeOS::SetProfile(Profile* profile) {
   user_profile_ = profile;
 
   // Start observing the AppWindowRegistry of the newly set |user_profile_|.
-  apps::AppWindowRegistry::Get(user_profile_)->AddObserver(this);
+  extensions::AppWindowRegistry::Get(user_profile_)->AddObserver(this);
 
   PrefService* prefs = profile->GetPrefs();
   user_pref_registrar_.reset(new PrefChangeRegistrar);
@@ -1008,9 +1014,9 @@ void SystemTrayDelegateChromeOS::StopObservingAppWindowRegistry() {
   if (!user_profile_)
     return;
 
-  apps::AppWindowRegistry* registry =
-      apps::AppWindowRegistry::Factory::GetForBrowserContext(user_profile_,
-                                                             false);
+  extensions::AppWindowRegistry* registry =
+      extensions::AppWindowRegistry::Factory::GetForBrowserContext(
+          user_profile_, false);
   if (registry)
     registry->RemoveObserver(this);
 }
@@ -1030,7 +1036,8 @@ void SystemTrayDelegateChromeOS::NotifyIfLastWindowClosed() {
     }
   }
 
-  if (!apps::AppWindowRegistry::Get(user_profile_)->app_windows().empty()) {
+  if (!extensions::AppWindowRegistry::Get(
+          user_profile_)->app_windows().empty()) {
     // The current user has at least one open app window.
     return;
   }
@@ -1276,9 +1283,9 @@ void SystemTrayDelegateChromeOS::OnBrowserRemoved(Browser* browser) {
   NotifyIfLastWindowClosed();
 }
 
-// Overridden from apps::AppWindowRegistry::Observer.
+// Overridden from extensions::AppWindowRegistry::Observer.
 void SystemTrayDelegateChromeOS::OnAppWindowRemoved(
-    apps::AppWindow* app_window) {
+    extensions::AppWindow* app_window) {
   NotifyIfLastWindowClosed();
 }
 

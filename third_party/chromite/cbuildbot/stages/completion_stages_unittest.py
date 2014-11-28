@@ -5,6 +5,8 @@
 
 """Unittests for completion stages."""
 
+from __future__ import print_function
+
 import mox
 import os
 import sys
@@ -249,6 +251,36 @@ class MasterSlaveSyncCompletionStageTestWithLKGMSync(
         self._run, sync_stage, success=True)
 
 
+class CanaryCompletionStageTest(
+    generic_stages_unittest.AbstractStageTest):
+  """Tests how canary master handles failures in CanaryCompletionStage."""
+  BOT_ID = 'master-release'
+
+  # pylint: disable=E1120
+  def _Prepare(self, bot_id=BOT_ID, **kwargs):
+    super(CanaryCompletionStageTest, self)._Prepare(bot_id, **kwargs)
+
+  def setUp(self):
+    self.build_type = constants.CANARY_TYPE
+    self._Prepare()
+
+  def ConstructStage(self):
+    """Returns a CanaryCompletionStage object."""
+    sync_stage = sync_stages.ManifestVersionedSyncStage(self._run)
+    return completion_stages.CanaryCompletionStage(
+        self._run, sync_stage, success=True)
+
+  def testComposeTreeStatusMessage(self):
+    """Tests that the status message is constructed as expected."""
+    failing = ['foo1', 'foo2', 'foo3', 'foo4', 'foo5']
+    inflight = ['bar']
+    no_stat = []
+    stage = self.ConstructStage()
+    self.assertEqual(
+        stage._ComposeTreeStatusMessage(failing, inflight, no_stat),
+        'bar timed out; foo1,foo2 and 3 others failed')
+
+
 class CommitQueueCompletionStageTest(
     generic_stages_unittest.AbstractStageTest):
   """Tests how CQ master handles changes in CommitQueueCompletionStage."""
@@ -257,7 +289,7 @@ class CommitQueueCompletionStageTest(
   # pylint: disable=E1120
   def _Prepare(self, bot_id=BOT_ID, **kwargs):
     super(CommitQueueCompletionStageTest, self)._Prepare(bot_id, **kwargs)
-    self._run.config['master'] = True
+    self.assertTrue(self._run.config['master'])
 
   def setUp(self):
     self.build_type = constants.PFQ_TYPE

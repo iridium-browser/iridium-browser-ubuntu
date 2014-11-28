@@ -14,21 +14,30 @@
 #include "cc/surfaces/display_client.h"
 #include "cc/surfaces/surface.h"
 #include "cc/surfaces/surface_aggregator.h"
+#include "cc/surfaces/surface_manager.h"
+#include "cc/trees/blocking_task_runner.h"
 
 namespace cc {
 
 Display::Display(DisplayClient* client,
                  SurfaceManager* manager,
                  SharedBitmapManager* bitmap_manager)
-    : client_(client), manager_(manager), bitmap_manager_(bitmap_manager) {
+    : client_(client),
+      manager_(manager),
+      bitmap_manager_(bitmap_manager),
+      blocking_main_thread_task_runner_(
+          BlockingTaskRunner::Create(base::MessageLoopProxy::current())) {
+  manager_->AddObserver(this);
 }
 
 Display::~Display() {
+  manager_->RemoveObserver(this);
 }
 
 void Display::Resize(SurfaceId id, const gfx::Size& size) {
   current_surface_id_ = id;
   current_surface_size_ = size;
+  client_->DisplayDamaged();
 }
 
 void Display::InitializeOutputSurface() {
@@ -45,6 +54,7 @@ void Display::InitializeOutputSurface() {
   scoped_ptr<ResourceProvider> resource_provider =
       ResourceProvider::Create(output_surface.get(),
                                bitmap_manager_,
+                               blocking_main_thread_task_runner_.get(),
                                highp_threshold_min,
                                use_rgba_4444_texture_format,
                                id_allocation_chunk_size,
@@ -85,6 +95,8 @@ bool Display::Draw() {
   if (!output_surface_)
     return false;
 
+  // TODO(skyostil): We should hold a BlockingTaskRunner::CapturePostTasks
+  // while Aggregate is called to immediately run release callbacks afterward.
   scoped_ptr<CompositorFrame> frame =
       aggregator_->Aggregate(current_surface_id_);
   if (!frame)
@@ -108,13 +120,44 @@ bool Display::Draw() {
                        device_viewport_rect,
                        device_clip_rect,
                        disable_picture_quad_image_filtering);
-  CompositorFrameMetadata metadata;
-  renderer_->SwapBuffers(metadata);
+  renderer_->SwapBuffers(frame->metadata);
+  for (SurfaceAggregator::SurfaceIndexMap::iterator it =
+           aggregator_->previous_contained_surfaces().begin();
+       it != aggregator_->previous_contained_surfaces().end();
+       ++it) {
+    Surface* surface = manager_->GetSurfaceForId(it->first);
+    if (surface)
+      surface->RunDrawCallbacks();
+  }
   return true;
+}
+
+void Display::DidSwapBuffers() {
+  client_->DidSwapBuffers();
+}
+
+void Display::DidSwapBuffersComplete() {
+  client_->DidSwapBuffersComplete();
+}
+
+void Display::CommitVSyncParameters(base::TimeTicks timebase,
+                                    base::TimeDelta interval) {
+  client_->CommitVSyncParameters(timebase, interval);
+}
+
+void Display::OnSurfaceDamaged(SurfaceId surface) {
+  if (aggregator_ && aggregator_->previous_contained_surfaces().count(surface))
+    client_->DisplayDamaged();
 }
 
 SurfaceId Display::CurrentSurfaceId() {
   return current_surface_id_;
+}
+
+int Display::GetMaxFramesPending() {
+  if (!output_surface_)
+    return OutputSurface::DEFAULT_MAX_FRAMES_PENDING;
+  return output_surface_->capabilities().max_frames_pending;
 }
 
 }  // namespace cc

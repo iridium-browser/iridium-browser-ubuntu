@@ -15,12 +15,12 @@
  */
 package com.google.ipc.invalidation.ticl.android2.channel;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources;
 import com.google.ipc.invalidation.ticl.TestableNetworkChannel;
 import com.google.ipc.invalidation.ticl.android2.ProtocolIntents;
 import com.google.ipc.invalidation.ticl.android2.ResourcesFactory.AndroidResources;
-import com.google.protos.ipc.invalidation.ChannelCommon.NetworkEndpointId;
+import com.google.ipc.invalidation.ticl.proto.ChannelCommon.NetworkEndpointId;
+import com.google.ipc.invalidation.util.Preconditions;
 
 import android.content.Context;
 import android.content.Intent;

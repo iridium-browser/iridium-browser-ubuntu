@@ -49,23 +49,30 @@ class PolymerCalculatorPage(PolymerPage):
     interaction.End()
 
   def SlidePanel(self, action_runner):
-    interaction = action_runner.BeginInteraction(
-        'Action_SwipeAction', is_smooth=True)
-    action_runner.SwipeElement(
-        left_start_ratio=0.1, top_start_ratio=0.2,
-        direction='left', distance=300, speed_in_pixels_per_second=5000,
-        element_function='''
-            document.querySelector(
-              'body /deep/ #outerPanels'
-            ).querySelector(
-              '#advanced'
-            ).shadowRoot.querySelector(
-              '.handle-bar'
-            )''')
-    action_runner.WaitForJavaScriptCondition('''
-        var outer = document.querySelector("body /deep/ #outerPanels");
-        outer.opened || outer.wideMode;''')
-    interaction.End()
+    # only bother with this interaction if the drawer is hidden
+    opened = action_runner.EvaluateJavaScript('''
+        (function() {
+          var outer = document.querySelector("body /deep/ #outerPanels");
+          return outer.opened || outer.wideMode;
+          }());''')
+    if not opened:
+      interaction = action_runner.BeginInteraction(
+          'Action_SwipeAction', is_smooth=True)
+      action_runner.SwipeElement(
+          left_start_ratio=0.1, top_start_ratio=0.2,
+          direction='left', distance=300, speed_in_pixels_per_second=5000,
+          element_function='''
+              document.querySelector(
+                'body /deep/ #outerPanels'
+              ).querySelector(
+                '#advanced'
+              ).shadowRoot.querySelector(
+                '.handle-bar'
+              )''')
+      action_runner.WaitForJavaScriptCondition('''
+          var outer = document.querySelector("body /deep/ #outerPanels");
+          outer.opened || outer.wideMode;''')
+      interaction.End()
 
 
 class PolymerShadowPage(PolymerPage):
@@ -80,7 +87,9 @@ class PolymerShadowPage(PolymerPage):
         "document.getElementById('fab').scrollIntoView()")
     action_runner.Wait(5)
     self.AnimateShadow(action_runner, 'card')
-    self.AnimateShadow(action_runner, 'fab')
+    #FIXME(wiltzius) disabling until this issue is fixed:
+    # https://github.com/Polymer/paper-shadow/issues/12
+    #self.AnimateShadow(action_runner, 'fab')
 
   def AnimateShadow(self, action_runner, eid):
     for i in range(1, 6):
@@ -102,15 +111,12 @@ class PolymerSampler(PolymerPage):
           content page or not.
     """
     super(PolymerSampler, self).__init__(
-      url=('http://www.polymer-project.org/components/paper-elements/demo.html#'
-          + anchor),
+      url=('http://www.polymer-project.org/components/%s/demo.html' % anchor),
       page_set=page_set)
     self.scrolling_page = scrolling_page
-    self.iframe_js = 'document.querySelector("sampler-scaffold").$.frame'
+    self.iframe_js = 'document'
 
   def RunNavigateSteps(self, action_runner):
-    #FIXME(wiltzius) workaround for crbug.com/391672
-    action_runner.ExecuteJavaScript('window.location.href="about:blank";')
     super(PolymerSampler, self).RunNavigateSteps(action_runner)
     waitForLoadJS = """
       window.Polymer.whenPolymerReady(function() {
@@ -131,7 +137,7 @@ class PolymerSampler(PolymerPage):
     self.TouchEverything(action_runner)
 
   def ScrollContentPane(self, action_runner):
-    element_function = (self.iframe_js + '.contentDocument.querySelector('
+    element_function = (self.iframe_js + '.querySelector('
         '"core-scroll-header-panel").$.mainContainer')
     interaction = action_runner.BeginInteraction('Scroll_Page', is_smooth=True)
     action_runner.ScrollElement(use_touch=True,
@@ -168,7 +174,7 @@ class PolymerSampler(PolymerPage):
     # Find all widgets of this type, but skip any that are disabled or are
     # currently active as they typically don't produce animation frames.
     element_list_query = (self.iframe_js +
-        ('.contentDocument.querySelectorAll("body %s:not([disabled]):'
+        ('.querySelectorAll("body %s:not([disabled]):'
          'not([active])")' % widget_type))
     roles_count_query = element_list_query + '.length'
     for i in range(action_runner.EvaluateJavaScript(roles_count_query)):
@@ -215,7 +221,9 @@ class PolymerPageSet(page_set_module.PageSet):
         'paper-icon-button',
         # crbug.com/394756
         # 'paper-radio-button',
-        'paper-shadow',
+        #FIXME(wiltzius) Disabling x-shadow until this issue is fixed:
+        # https://github.com/Polymer/paper-shadow/issues/12
+        #'paper-shadow',
         'paper-tabs',
         'paper-toggle-button',
         ]
@@ -224,8 +232,7 @@ class PolymerPageSet(page_set_module.PageSet):
 
     # Polymer Sampler subpages that are interesting to scroll
     SCROLLABLE_PAGES = [
-        # crbug.com/394756
-        # 'core-scroll-header-panel',
+        'core-scroll-header-panel',
         ]
     for p in SCROLLABLE_PAGES:
       self.AddPage(PolymerSampler(self, p, scrolling_page=True))

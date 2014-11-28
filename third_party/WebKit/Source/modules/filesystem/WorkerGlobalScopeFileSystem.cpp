@@ -45,7 +45,7 @@
 
 namespace blink {
 
-void WorkerGlobalScopeFileSystem::webkitRequestFileSystem(WorkerGlobalScope& worker, int type, long long size, PassOwnPtr<FileSystemCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback)
+void WorkerGlobalScopeFileSystem::webkitRequestFileSystem(WorkerGlobalScope& worker, int type, long long size, FileSystemCallback* successCallback, ErrorCallback* errorCallback)
 {
     ExecutionContext* secureContext = worker.executionContext();
     if (!secureContext->securityOrigin()->canAccessFileSystem()) {
@@ -76,7 +76,7 @@ DOMFileSystemSync* WorkerGlobalScopeFileSystem::webkitRequestFileSystemSync(Work
         return 0;
     }
 
-    RefPtr<FileSystemSyncCallbackHelper> helper = FileSystemSyncCallbackHelper::create();
+    FileSystemSyncCallbackHelper* helper = FileSystemSyncCallbackHelper::create();
     OwnPtr<AsyncFileSystemCallbacks> callbacks = FileSystemCallbacks::create(helper->successCallback(), helper->errorCallback(), &worker, fileSystemType);
     callbacks->setShouldBlockUntilCompletion(true);
 
@@ -84,7 +84,7 @@ DOMFileSystemSync* WorkerGlobalScopeFileSystem::webkitRequestFileSystemSync(Work
     return helper->getResult(exceptionState);
 }
 
-void WorkerGlobalScopeFileSystem::webkitResolveLocalFileSystemURL(WorkerGlobalScope& worker, const String& url, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback)
+void WorkerGlobalScopeFileSystem::webkitResolveLocalFileSystemURL(WorkerGlobalScope& worker, const String& url, EntryCallback* successCallback, ErrorCallback* errorCallback)
 {
     KURL completedURL = worker.completeURL(url);
     ExecutionContext* secureContext = worker.executionContext();
@@ -115,7 +115,7 @@ EntrySync* WorkerGlobalScopeFileSystem::webkitResolveLocalFileSystemSyncURL(Work
         return 0;
     }
 
-    RefPtr<EntrySyncCallbackHelper> resolveURLHelper = EntrySyncCallbackHelper::create();
+    EntrySyncCallbackHelper* resolveURLHelper = EntrySyncCallbackHelper::create();
     OwnPtr<AsyncFileSystemCallbacks> callbacks = ResolveURICallbacks::create(resolveURLHelper->successCallback(), resolveURLHelper->errorCallback(), &worker);
     callbacks->setShouldBlockUntilCompletion(true);
 

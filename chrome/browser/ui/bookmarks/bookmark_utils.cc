@@ -21,16 +21,19 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/search/search.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/extension_registry.h"
-#include "extensions/common/extension_set.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension_set.h"
+#endif
 
 namespace chrome {
 
@@ -154,6 +157,7 @@ void GetURLsForOpenTabs(Browser* browser,
 // Indicates how the bookmark shortcut has been changed by extensions associated
 // with |profile|, if at all.
 BookmarkShortcutDisposition GetBookmarkShortcutDisposition(Profile* profile) {
+#if defined(ENABLE_EXTENSIONS)
   extensions::CommandService* command_service =
       extensions::CommandService::Get(profile);
 
@@ -172,15 +176,18 @@ BookmarkShortcutDisposition GetBookmarkShortcutDisposition(Profile* profile) {
        i != extension_set.end();
        ++i) {
     // Use the overridden disposition if any extension wants it.
-    if (command_service->OverridesBookmarkShortcut(*i))
+    if (command_service->OverridesBookmarkShortcut(i->get()))
       return BOOKMARK_SHORTCUT_DISPOSITION_OVERRIDDEN;
 
-    if (!removed && extensions::CommandService::RemovesBookmarkShortcut(*i))
+    if (!removed &&
+        extensions::CommandService::RemovesBookmarkShortcut(i->get())) {
       removed = true;
+    }
   }
 
   if (removed)
     return BOOKMARK_SHORTCUT_DISPOSITION_REMOVED;
+#endif
   return BOOKMARK_SHORTCUT_DISPOSITION_UNCHANGED;
 }
 
@@ -214,7 +221,7 @@ void OpenAll(gfx::NativeWindow parent,
 
     content::WebContents* opened_tab = navigator->OpenURL(
         content::OpenURLParams(*url, content::Referrer(), disposition,
-                               content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+                               ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
 
     if (!opened_first_url) {
       opened_first_url = true;
@@ -295,10 +302,11 @@ void GetURLAndTitleToBookmark(content::WebContents* web_contents,
 
 void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context) {
   PrefService* prefs = user_prefs::UserPrefs::Get(browser_context);
-  const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
+  const bool always_show =
+      !prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar);
 
   // The user changed when the bookmark bar is shown, update the preferences.
-  prefs->SetBoolean(prefs::kShowBookmarkBar, always_show);
+  prefs->SetBoolean(bookmarks::prefs::kShowBookmarkBar, always_show);
 }
 
 base::string16 FormatBookmarkURLForDisplay(const GURL& url,
@@ -335,7 +343,8 @@ bool ShouldShowAppsShortcutInBookmarkBar(
   Profile* profile,
   chrome::HostDesktopType host_desktop_type) {
   return IsAppsShortcutEnabled(profile, host_desktop_type) &&
-      profile->GetPrefs()->GetBoolean(prefs::kShowAppsShortcutInBookmarkBar);
+         profile->GetPrefs()->GetBoolean(
+             bookmarks::prefs::kShowAppsShortcutInBookmarkBar);
 }
 
 bool ShouldRemoveBookmarkThisPageUI(Profile* profile) {
@@ -344,6 +353,7 @@ bool ShouldRemoveBookmarkThisPageUI(Profile* profile) {
 }
 
 bool ShouldRemoveBookmarkOpenPagesUI(Profile* profile) {
+#if defined(ENABLE_EXTENSIONS)
   extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(profile);
   if (!registry)
@@ -355,9 +365,10 @@ bool ShouldRemoveBookmarkOpenPagesUI(Profile* profile) {
   for (extensions::ExtensionSet::const_iterator i = extension_set.begin();
        i != extension_set.end();
        ++i) {
-    if (extensions::CommandService::RemovesBookmarkOpenPagesShortcut(*i))
+    if (extensions::CommandService::RemovesBookmarkOpenPagesShortcut(i->get()))
       return true;
   }
+#endif
 
   return false;
 }

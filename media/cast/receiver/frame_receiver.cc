@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "media/cast/cast_environment.h"
-#include "media/cast/net/rtcp/rtcp_receiver.h"
 
 namespace {
 const int kMinSchedulingDelayMs = 1;
@@ -74,7 +73,7 @@ void FrameReceiver::RequestEncodedFrame(
 bool FrameReceiver::ProcessPacket(scoped_ptr<Packet> packet) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
 
-  if (RtcpReceiver::IsRtcpPacket(&packet->front(), packet->size())) {
+  if (Rtcp::IsRtcpPacket(&packet->front(), packet->size())) {
     rtcp_.IncomingRtcpPacket(&packet->front(), packet->size());
   } else {
     RtpCastHeader rtp_header;
@@ -203,8 +202,7 @@ void FrameReceiver::EmitAvailableEncodedFrames() {
     }
 
     const base::TimeTicks now = cast_environment_->Clock()->NowTicks();
-    const base::TimeTicks playout_time =
-        GetPlayoutTime(encoded_frame->rtp_timestamp);
+    const base::TimeTicks playout_time = GetPlayoutTime(*encoded_frame);
 
     // If we have multiple decodable frames, and the current frame is
     // too old, then skip it and decode the next frame instead.
@@ -218,9 +216,10 @@ void FrameReceiver::EmitAvailableEncodedFrames() {
     // skipping one or more frames.  Skip if the missing frame wouldn't complete
     // playing before the start of playback of the available frame.
     if (!is_consecutively_next_frame) {
-      // TODO(miu): Also account for expected decode time here?
+      // This assumes that decoding takes as long as playing, which might
+      // not be true.
       const base::TimeTicks earliest_possible_end_time_of_missing_frame =
-          now + expected_frame_duration_;
+          now + expected_frame_duration_ * 2;
       if (earliest_possible_end_time_of_missing_frame < playout_time) {
         VLOG(1) << "Wait for next consecutive frame instead of skipping.";
         if (!is_waiting_for_consecutive_frame_) {
@@ -235,6 +234,11 @@ void FrameReceiver::EmitAvailableEncodedFrames() {
         return;
       }
     }
+
+    // At this point, we have the complete next frame, or a decodable
+    // frame from somewhere later in the stream, AND we have given up
+    // on waiting for any frames in between, so now we can ACK the frame.
+    framer_.AckFrame(encoded_frame->frame_id);
 
     // Decrypt the payload data in the frame, if crypto is being used.
     if (decryptor_.is_activated()) {
@@ -252,9 +256,15 @@ void FrameReceiver::EmitAvailableEncodedFrames() {
     // At this point, we have a decrypted EncodedFrame ready to be emitted.
     encoded_frame->reference_time = playout_time;
     framer_.ReleaseFrame(encoded_frame->frame_id);
+    if (encoded_frame->new_playout_delay_ms) {
+      target_playout_delay_ = base::TimeDelta::FromMilliseconds(
+          encoded_frame->new_playout_delay_ms);
+    }
     cast_environment_->PostTask(CastEnvironment::MAIN,
                                 FROM_HERE,
-                                base::Bind(frame_request_queue_.front(),
+                                base::Bind(&FrameReceiver::EmitOneFrame,
+                                           weak_factory_.GetWeakPtr(),
+                                           frame_request_queue_.front(),
                                            base::Passed(&encoded_frame)));
     frame_request_queue_.pop_front();
   }
@@ -267,13 +277,25 @@ void FrameReceiver::EmitAvailableEncodedFramesAfterWaiting() {
   EmitAvailableEncodedFrames();
 }
 
-base::TimeTicks FrameReceiver::GetPlayoutTime(uint32 rtp_timestamp) const {
+void FrameReceiver::EmitOneFrame(const ReceiveEncodedFrameCallback& callback,
+                                 scoped_ptr<EncodedFrame> encoded_frame) const {
+  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
+  if (!callback.is_null())
+    callback.Run(encoded_frame.Pass());
+}
+
+base::TimeTicks FrameReceiver::GetPlayoutTime(const EncodedFrame& frame) const {
+  base::TimeDelta target_playout_delay = target_playout_delay_;
+  if (frame.new_playout_delay_ms) {
+    target_playout_delay = base::TimeDelta::FromMilliseconds(
+        frame.new_playout_delay_ms);
+  }
   return lip_sync_reference_time_ +
       lip_sync_drift_.Current() +
       RtpDeltaToTimeDelta(
-          static_cast<int32>(rtp_timestamp - lip_sync_rtp_timestamp_),
+          static_cast<int32>(frame.rtp_timestamp - lip_sync_rtp_timestamp_),
           rtp_timebase_) +
-      target_playout_delay_;
+      target_playout_delay;
 }
 
 void FrameReceiver::ScheduleNextCastMessage() {

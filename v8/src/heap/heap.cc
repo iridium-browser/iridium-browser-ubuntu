@@ -6,6 +6,7 @@
 
 #include "src/accessors.h"
 #include "src/api.h"
+#include "src/base/bits.h"
 #include "src/base/once.h"
 #include "src/base/utils/random-number-generator.h"
 #include "src/bootstrapper.h"
@@ -16,6 +17,7 @@
 #include "src/debug.h"
 #include "src/deoptimizer.h"
 #include "src/global-handles.h"
+#include "src/heap/gc-idle-time-handler.h"
 #include "src/heap/incremental-marking.h"
 #include "src/heap/mark-compact.h"
 #include "src/heap/objects-visiting-inl.h"
@@ -119,12 +121,7 @@ Heap::Heap()
       store_buffer_(this),
       marking_(this),
       incremental_marking_(this),
-      number_idle_notifications_(0),
-      last_idle_notification_gc_count_(0),
-      last_idle_notification_gc_count_init_(false),
-      mark_sweeps_since_idle_round_started_(0),
       gc_count_at_last_idle_gc_(0),
-      scavenges_since_last_idle_round_(kIdleScavengeThreshold),
       full_codegen_bytes_generated_(0),
       crankshaft_codegen_bytes_generated_(0),
       gcs_since_last_deopt_(0),
@@ -849,8 +846,7 @@ bool Heap::CollectGarbage(GarbageCollector collector, const char* gc_reason,
   // Start incremental marking for the next cycle. The heap snapshot
   // generator needs incremental marking to stay off after it aborted.
   if (!mark_compact_collector()->abort_incremental_marking() &&
-      incremental_marking()->IsStopped() &&
-      incremental_marking()->WorthActivating() && NextGCIsLikelyToBeFull()) {
+      WorthActivatingIncrementalMarking()) {
     incremental_marking()->Start();
   }
 
@@ -1277,21 +1273,17 @@ static void VerifyNonPointerSpacePointers(Heap* heap) {
        object = code_it.Next())
     object->Iterate(&v);
 
-  // The old data space was normally swept conservatively so that the iterator
-  // doesn't work, so we normally skip the next bit.
-  if (heap->old_data_space()->swept_precisely()) {
     HeapObjectIterator data_it(heap->old_data_space());
     for (HeapObject* object = data_it.Next(); object != NULL;
          object = data_it.Next())
       object->Iterate(&v);
-  }
 }
 #endif  // VERIFY_HEAP
 
 
 void Heap::CheckNewSpaceExpansionCriteria() {
-  if (new_space_.Capacity() < new_space_.MaximumCapacity() &&
-      survived_since_last_expansion_ > new_space_.Capacity()) {
+  if (new_space_.TotalCapacity() < new_space_.MaximumCapacity() &&
+      survived_since_last_expansion_ > new_space_.TotalCapacity()) {
     // Grow the size of new space if there is room to grow, enough data
     // has survived scavenge since the last expansion and we are not in
     // high promotion mode.
@@ -1557,7 +1549,7 @@ void Heap::Scavenge() {
 
   gc_state_ = NOT_IN_GC;
 
-  scavenges_since_last_idle_round_++;
+  gc_idle_time_handler_.NotifyScavenge();
 }
 
 
@@ -2072,7 +2064,10 @@ class ScavengingVisitor : public StaticVisitorBase {
     ObjectEvacuationStrategy<POINTER_OBJECT>::template VisitSpecialized<
         JSFunction::kSize>(map, slot, object);
 
-    HeapObject* target = *slot;
+    MapWord map_word = object->map_word();
+    DCHECK(map_word.IsForwardingAddress());
+    HeapObject* target = map_word.ToForwardingAddress();
+
     MarkBit mark_bit = Marking::MarkBitFrom(target);
     if (Marking::IsBlack(mark_bit)) {
       // This object is black and it might not be rescanned by marker.
@@ -2509,7 +2504,7 @@ bool Heap::CreateInitialMaps() {
     ALLOCATE_MAP(ODDBALL_TYPE, Oddball::kSize, exception);
     ALLOCATE_MAP(ODDBALL_TYPE, Oddball::kSize, termination_exception);
 
-    for (unsigned i = 0; i < ARRAY_SIZE(string_type_table); i++) {
+    for (unsigned i = 0; i < arraysize(string_type_table); i++) {
       const StringTypeTable& entry = string_type_table[i];
       {
         AllocationResult allocation = AllocateMap(entry.type, entry.size);
@@ -2525,8 +2520,8 @@ bool Heap::CreateInitialMaps() {
     ALLOCATE_VARSIZE_MAP(STRING_TYPE, undetectable_string)
     undetectable_string_map()->set_is_undetectable();
 
-    ALLOCATE_VARSIZE_MAP(ASCII_STRING_TYPE, undetectable_ascii_string);
-    undetectable_ascii_string_map()->set_is_undetectable();
+    ALLOCATE_VARSIZE_MAP(ONE_BYTE_STRING_TYPE, undetectable_one_byte_string);
+    undetectable_one_byte_string_map()->set_is_undetectable();
 
     ALLOCATE_VARSIZE_MAP(FIXED_DOUBLE_ARRAY_TYPE, fixed_double_array)
     ALLOCATE_VARSIZE_MAP(BYTE_ARRAY_TYPE, byte_array)
@@ -2555,7 +2550,7 @@ bool Heap::CreateInitialMaps() {
     ALLOCATE_MAP(FILLER_TYPE, 2 * kPointerSize, two_pointer_filler)
 
 
-    for (unsigned i = 0; i < ARRAY_SIZE(struct_table); i++) {
+    for (unsigned i = 0; i < arraysize(struct_table); i++) {
       const StructTable& entry = struct_table[i];
       Map* map;
       if (!AllocateMap(entry.type, entry.size).To(&map)) return false;
@@ -2699,13 +2694,13 @@ void Heap::CreateApiObjects() {
 
 
 void Heap::CreateJSEntryStub() {
-  JSEntryStub stub(isolate());
+  JSEntryStub stub(isolate(), StackFrame::ENTRY);
   set_js_entry_code(*stub.GetCode());
 }
 
 
 void Heap::CreateJSConstructEntryStub() {
-  JSConstructEntryStub stub(isolate());
+  JSEntryStub stub(isolate(), StackFrame::ENTRY_CONSTRUCT);
   set_js_construct_entry_code(*stub.GetCode());
 }
 
@@ -2800,7 +2795,7 @@ void Heap::CreateInitialObjects() {
                                      handle(Smi::FromInt(-5), isolate()),
                                      Oddball::kException));
 
-  for (unsigned i = 0; i < ARRAY_SIZE(constant_string_table); i++) {
+  for (unsigned i = 0; i < arraysize(constant_string_table); i++) {
     Handle<String> str =
         factory->InternalizeUtf8String(constant_string_table[i].contents);
     roots_[constant_string_table[i].index] = *str;
@@ -2834,7 +2829,7 @@ void Heap::CreateInitialObjects() {
 
   // Allocate the dictionary of intrinsic function names.
   Handle<NameDictionary> intrinsic_names =
-      NameDictionary::New(isolate(), Runtime::kNumFunctions);
+      NameDictionary::New(isolate(), Runtime::kNumFunctions, TENURED);
   Runtime::InitializeIntrinsicFunctionNames(isolate(), intrinsic_names);
   set_intrinsic_function_names(*intrinsic_names);
 
@@ -2868,15 +2863,18 @@ void Heap::CreateInitialObjects() {
   // Number of queued microtasks stored in Isolate::pending_microtask_count().
   set_microtask_queue(empty_fixed_array());
 
-  set_detailed_stack_trace_symbol(*factory->NewPrivateSymbol());
-  set_elements_transition_symbol(*factory->NewPrivateSymbol());
-  set_frozen_symbol(*factory->NewPrivateSymbol());
-  set_megamorphic_symbol(*factory->NewPrivateSymbol());
-  set_nonexistent_symbol(*factory->NewPrivateSymbol());
-  set_normal_ic_symbol(*factory->NewPrivateSymbol());
-  set_observed_symbol(*factory->NewPrivateSymbol());
-  set_stack_trace_symbol(*factory->NewPrivateSymbol());
-  set_uninitialized_symbol(*factory->NewPrivateSymbol());
+  set_detailed_stack_trace_symbol(*factory->NewPrivateOwnSymbol());
+  set_elements_transition_symbol(*factory->NewPrivateOwnSymbol());
+  set_frozen_symbol(*factory->NewPrivateOwnSymbol());
+  set_megamorphic_symbol(*factory->NewPrivateOwnSymbol());
+  set_premonomorphic_symbol(*factory->NewPrivateOwnSymbol());
+  set_generic_symbol(*factory->NewPrivateOwnSymbol());
+  set_nonexistent_symbol(*factory->NewPrivateOwnSymbol());
+  set_normal_ic_symbol(*factory->NewPrivateOwnSymbol());
+  set_observed_symbol(*factory->NewPrivateOwnSymbol());
+  set_stack_trace_symbol(*factory->NewPrivateOwnSymbol());
+  set_uninitialized_symbol(*factory->NewPrivateOwnSymbol());
+  set_home_object_symbol(*factory->NewPrivateOwnSymbol());
 
   Handle<SeededNumberDictionary> slow_element_dictionary =
       SeededNumberDictionary::New(isolate(), 0, TENURED);
@@ -2927,7 +2925,7 @@ bool Heap::RootCanBeWrittenAfterInitialization(Heap::RootListIndex root_index) {
       kStringTableRootIndex,
   };
 
-  for (unsigned int i = 0; i < ARRAY_SIZE(writable_roots); i++) {
+  for (unsigned int i = 0; i < arraysize(writable_roots); i++) {
     if (root_index == writable_roots[i]) return true;
   }
   return false;
@@ -3321,7 +3319,6 @@ void Heap::RightTrimFixedArray(FixedArrayBase* object, int elements_to_trim) {
   const int bytes_to_trim = elements_to_trim * element_size;
 
   // For now this trick is only applied to objects in new and paged space.
-  DCHECK(!lo_space()->Contains(object));
   DCHECK(object->map() != fixed_cow_array_map());
 
   const int len = object->length();
@@ -3333,7 +3330,12 @@ void Heap::RightTrimFixedArray(FixedArrayBase* object, int elements_to_trim) {
   // Technically in new space this write might be omitted (except for
   // debug mode which iterates through the heap), but to play safer
   // we still do it.
-  CreateFillerObjectAt(new_end, bytes_to_trim);
+  // We do not create a filler for objects in large object space.
+  // TODO(hpayer): We should shrink the large object page if the size
+  // of the object changed significantly.
+  if (!lo_space()->Contains(object)) {
+    CreateFillerObjectAt(new_end, bytes_to_trim);
+  }
 
   // Initialize header of the trimmed array. We are storing the new length
   // using release store after creating a filler for the left-over space to
@@ -3763,7 +3765,7 @@ AllocationResult Heap::CopyJSObject(JSObject* source, AllocationSite* site) {
 
 static inline void WriteOneByteData(Vector<const char> vector, uint8_t* chars,
                                     int len) {
-  // Only works for ascii.
+  // Only works for one byte strings.
   DCHECK(vector.length() == len);
   MemCopy(chars, vector.start(), len);
 }
@@ -3818,7 +3820,7 @@ AllocationResult Heap::AllocateInternalizedStringImpl(T t, int chars,
   DCHECK_LE(0, chars);
   DCHECK_GE(String::kMaxLength, chars);
   if (is_one_byte) {
-    map = ascii_internalized_string_map();
+    map = one_byte_internalized_string_map();
     size = SeqOneByteString::SizeFor(chars);
   } else {
     map = internalized_string_map();
@@ -3876,7 +3878,7 @@ AllocationResult Heap::AllocateRawOneByteString(int length,
   }
 
   // Partially initialize the object.
-  result->set_map_no_write_barrier(ascii_string_map());
+  result->set_map_no_write_barrier(one_byte_string_map());
   String::cast(result)->set_length(length);
   String::cast(result)->set_hash_field(String::kEmptyHashField);
   DCHECK_EQ(size, HeapObject::cast(result)->Size());
@@ -4241,9 +4243,7 @@ AllocationResult Heap::AllocateStruct(InstanceType type) {
 bool Heap::IsHeapIterable() {
   // TODO(hpayer): This function is not correct. Allocation folding in old
   // space breaks the iterability.
-  return (old_pointer_space()->swept_precisely() &&
-          old_data_space()->swept_precisely() &&
-          new_space_top_after_last_gc_ == new_space()->top());
+  return new_space_top_after_last_gc_ == new_space()->top();
 }
 
 
@@ -4259,119 +4259,124 @@ void Heap::MakeHeapIterable() {
 }
 
 
+void Heap::IdleMarkCompact(const char* message) {
+  bool uncommit = false;
+  if (gc_count_at_last_idle_gc_ == gc_count_) {
+    // No GC since the last full GC, the mutator is probably not active.
+    isolate_->compilation_cache()->Clear();
+    uncommit = true;
+  }
+  CollectAllGarbage(kReduceMemoryFootprintMask, message);
+  gc_idle_time_handler_.NotifyIdleMarkCompact();
+  gc_count_at_last_idle_gc_ = gc_count_;
+  if (uncommit) {
+    new_space_.Shrink();
+    UncommitFromSpace();
+  }
+}
+
+
 void Heap::AdvanceIdleIncrementalMarking(intptr_t step_size) {
   incremental_marking()->Step(step_size,
                               IncrementalMarking::NO_GC_VIA_STACK_GUARD, true);
 
   if (incremental_marking()->IsComplete()) {
-    bool uncommit = false;
-    if (gc_count_at_last_idle_gc_ == gc_count_) {
-      // No GC since the last full GC, the mutator is probably not active.
-      isolate_->compilation_cache()->Clear();
-      uncommit = true;
-    }
-    CollectAllGarbage(kReduceMemoryFootprintMask,
-                      "idle notification: finalize incremental");
-    mark_sweeps_since_idle_round_started_++;
-    gc_count_at_last_idle_gc_ = gc_count_;
-    if (uncommit) {
-      new_space_.Shrink();
-      UncommitFromSpace();
-    }
+    IdleMarkCompact("idle notification: finalize incremental");
   }
 }
 
 
-bool Heap::IdleNotification(int hint) {
+bool Heap::WorthActivatingIncrementalMarking() {
+  return incremental_marking()->IsStopped() &&
+         incremental_marking()->WorthActivating() && NextGCIsLikelyToBeFull();
+}
+
+
+bool Heap::IdleNotification(int idle_time_in_ms) {
   // If incremental marking is off, we do not perform idle notification.
   if (!FLAG_incremental_marking) return true;
-
-  // Hints greater than this value indicate that
-  // the embedder is requesting a lot of GC work.
-  const int kMaxHint = 1000;
-  const int kMinHintForIncrementalMarking = 10;
-  // Minimal hint that allows to do full GC.
-  const int kMinHintForFullGC = 100;
-  intptr_t size_factor = Min(Max(hint, 20), kMaxHint) / 4;
-  // The size factor is in range [5..250]. The numbers here are chosen from
-  // experiments. If you changes them, make sure to test with
-  // chrome/performance_ui_tests --gtest_filter="GeneralMixMemoryTest.*
-  intptr_t step_size = size_factor * IncrementalMarking::kAllocatedThreshold;
-
-  isolate()->counters()->gc_idle_time_allotted_in_ms()->AddSample(hint);
+  base::ElapsedTimer timer;
+  timer.Start();
+  isolate()->counters()->gc_idle_time_allotted_in_ms()->AddSample(
+      idle_time_in_ms);
   HistogramTimerScope idle_notification_scope(
       isolate_->counters()->gc_idle_notification());
 
-  if (contexts_disposed_ > 0) {
-    contexts_disposed_ = 0;
-    int mark_sweep_time = Min(TimeMarkSweepWouldTakeInMs(), 1000);
-    if (hint >= mark_sweep_time && !FLAG_expose_gc &&
-        incremental_marking()->IsStopped()) {
+  GCIdleTimeHandler::HeapState heap_state;
+  heap_state.contexts_disposed = contexts_disposed_;
+  heap_state.size_of_objects = static_cast<size_t>(SizeOfObjects());
+  heap_state.incremental_marking_stopped = incremental_marking()->IsStopped();
+  // TODO(ulan): Start incremental marking only for large heaps.
+  heap_state.can_start_incremental_marking =
+      incremental_marking()->ShouldActivate();
+  heap_state.sweeping_in_progress =
+      mark_compact_collector()->sweeping_in_progress();
+  heap_state.mark_compact_speed_in_bytes_per_ms =
+      static_cast<size_t>(tracer()->MarkCompactSpeedInBytesPerMillisecond());
+  heap_state.incremental_marking_speed_in_bytes_per_ms = static_cast<size_t>(
+      tracer()->IncrementalMarkingSpeedInBytesPerMillisecond());
+  heap_state.scavenge_speed_in_bytes_per_ms =
+      static_cast<size_t>(tracer()->ScavengeSpeedInBytesPerMillisecond());
+  heap_state.available_new_space_memory = new_space_.Available();
+  heap_state.new_space_capacity = new_space_.Capacity();
+  heap_state.new_space_allocation_throughput_in_bytes_per_ms =
+      static_cast<size_t>(
+          tracer()->NewSpaceAllocationThroughputInBytesPerMillisecond());
+
+  GCIdleTimeAction action =
+      gc_idle_time_handler_.Compute(idle_time_in_ms, heap_state);
+
+  bool result = false;
+  switch (action.type) {
+    case DONE:
+      result = true;
+      break;
+    case DO_INCREMENTAL_MARKING:
+      if (incremental_marking()->IsStopped()) {
+        incremental_marking()->Start();
+      }
+      AdvanceIdleIncrementalMarking(action.parameter);
+      break;
+    case DO_FULL_GC: {
       HistogramTimerScope scope(isolate_->counters()->gc_context());
-      CollectAllGarbage(kReduceMemoryFootprintMask,
-                        "idle notification: contexts disposed");
-    } else {
-      AdvanceIdleIncrementalMarking(step_size);
+      if (contexts_disposed_) {
+        CollectAllGarbage(kReduceMemoryFootprintMask,
+                          "idle notification: contexts disposed");
+        gc_idle_time_handler_.NotifyIdleMarkCompact();
+        gc_count_at_last_idle_gc_ = gc_count_;
+      } else {
+        IdleMarkCompact("idle notification: finalize idle round");
+      }
+      break;
     }
-
-    // After context disposal there is likely a lot of garbage remaining, reset
-    // the idle notification counters in order to trigger more incremental GCs
-    // on subsequent idle notifications.
-    StartIdleRound();
-    return false;
+    case DO_SCAVENGE:
+      CollectGarbage(NEW_SPACE, "idle notification: scavenge");
+      break;
+    case DO_FINALIZE_SWEEPING:
+      mark_compact_collector()->EnsureSweepingCompleted();
+      break;
+    case DO_NOTHING:
+      break;
   }
 
-  // By doing small chunks of GC work in each IdleNotification,
-  // perform a round of incremental GCs and after that wait until
-  // the mutator creates enough garbage to justify a new round.
-  // An incremental GC progresses as follows:
-  // 1. many incremental marking steps,
-  // 2. one old space mark-sweep-compact,
-  // Use mark-sweep-compact events to count incremental GCs in a round.
-
-  if (mark_sweeps_since_idle_round_started_ >= kMaxMarkSweepsInIdleRound) {
-    if (EnoughGarbageSinceLastIdleRound()) {
-      StartIdleRound();
-    } else {
-      return true;
-    }
+  int actual_time_ms = static_cast<int>(timer.Elapsed().InMilliseconds());
+  if (actual_time_ms <= idle_time_in_ms) {
+    isolate()->counters()->gc_idle_time_limit_undershot()->AddSample(
+        idle_time_in_ms - actual_time_ms);
+  } else {
+    isolate()->counters()->gc_idle_time_limit_overshot()->AddSample(
+        actual_time_ms - idle_time_in_ms);
   }
 
-  int remaining_mark_sweeps =
-      kMaxMarkSweepsInIdleRound - mark_sweeps_since_idle_round_started_;
-
-  if (incremental_marking()->IsStopped()) {
-    // If there are no more than two GCs left in this idle round and we are
-    // allowed to do a full GC, then make those GCs full in order to compact
-    // the code space.
-    // TODO(ulan): Once we enable code compaction for incremental marking,
-    // we can get rid of this special case and always start incremental marking.
-    if (remaining_mark_sweeps <= 2 && hint >= kMinHintForFullGC) {
-      CollectAllGarbage(kReduceMemoryFootprintMask,
-                        "idle notification: finalize idle round");
-      mark_sweeps_since_idle_round_started_++;
-    } else if (hint > kMinHintForIncrementalMarking) {
-      incremental_marking()->Start();
-    }
-  }
-  if (!incremental_marking()->IsStopped() &&
-      hint > kMinHintForIncrementalMarking) {
-    AdvanceIdleIncrementalMarking(step_size);
+  if (FLAG_trace_idle_notification) {
+    PrintF("Idle notification: requested idle time %d ms, actual time %d ms [",
+           idle_time_in_ms, actual_time_ms);
+    action.Print();
+    PrintF("]\n");
   }
 
-  if (mark_sweeps_since_idle_round_started_ >= kMaxMarkSweepsInIdleRound) {
-    FinishIdleRound();
-    return true;
-  }
-
-  // If the IdleNotifcation is called with a large hint we will wait for
-  // the sweepter threads here.
-  if (hint >= kMinHintForFullGC &&
-      mark_compact_collector()->sweeping_in_progress()) {
-    mark_compact_collector()->EnsureSweepingCompleted();
-  }
-
-  return false;
+  contexts_disposed_ = 0;
+  return result;
 }
 
 
@@ -4743,7 +4748,7 @@ void Heap::IterateStrongRoots(ObjectVisitor* v, VisitMode mode) {
   v->VisitPointers(&roots_[0], &roots_[kStrongRootListLength]);
   v->Synchronize(VisitorSynchronization::kStrongRootList);
 
-  v->VisitPointer(BitCast<Object**>(&hidden_string_));
+  v->VisitPointer(bit_cast<Object**>(&hidden_string_));
   v->Synchronize(VisitorSynchronization::kInternalizedString);
 
   isolate_->bootstrapper()->Iterate(v);
@@ -4877,8 +4882,10 @@ bool Heap::ConfigureHeap(int max_semi_space_size, int max_old_space_size,
 
   // The new space size must be a power of two to support single-bit testing
   // for containment.
-  max_semi_space_size_ = RoundUpToPowerOf2(max_semi_space_size_);
-  reserved_semispace_size_ = RoundUpToPowerOf2(reserved_semispace_size_);
+  max_semi_space_size_ =
+      base::bits::RoundUpToPowerOfTwo32(max_semi_space_size_);
+  reserved_semispace_size_ =
+      base::bits::RoundUpToPowerOfTwo32(reserved_semispace_size_);
 
   if (FLAG_min_semi_space_size > 0) {
     int initial_semispace_size = FLAG_min_semi_space_size * MB;

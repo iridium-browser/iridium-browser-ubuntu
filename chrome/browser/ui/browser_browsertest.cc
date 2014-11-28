@@ -55,6 +55,8 @@
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -74,7 +76,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/frame_navigate_params.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -83,11 +84,10 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -419,7 +419,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
   GURL url(ui_test_utils::GetTestUrl(base::FilePath(
       base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
   ui_test_utils::NavigateToURL(browser(), url);
-  AddTabAtIndex(0, url, content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, url, ui::PAGE_TRANSITION_TYPED);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
   WebContents* second_tab = browser()->tab_strip_model()->GetWebContentsAt(1);
@@ -454,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_ThirtyFourTabs) {
   const int kTabCount = 34;
   for (int ix = 0; ix != (kTabCount - 1); ++ix) {
     chrome::AddSelectedTabWithURL(browser(), url,
-                                  content::PAGE_TRANSITION_TYPED);
+                                  ui::PAGE_TRANSITION_TYPED);
   }
   EXPECT_EQ(kTabCount, browser()->tab_strip_model()->count());
 
@@ -493,7 +493,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ClearPendingOnFailUnlessNTP) {
         content::Source<NavigationController>(
             &web_contents->GetController()));
     browser()->OpenURL(OpenURLParams(abort_url, Referrer(), CURRENT_TAB,
-                                     content::PAGE_TRANSITION_TYPED, false));
+                                     ui::PAGE_TRANSITION_TYPED, false));
     stop_observer.Wait();
     EXPECT_TRUE(web_contents->GetController().GetPendingEntry());
     EXPECT_EQ(abort_url, web_contents->GetVisibleURL());
@@ -511,7 +511,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ClearPendingOnFailUnlessNTP) {
         content::Source<NavigationController>(
             &web_contents->GetController()));
     browser()->OpenURL(OpenURLParams(abort_url, Referrer(), CURRENT_TAB,
-                                     content::PAGE_TRANSITION_TYPED, false));
+                                     ui::PAGE_TRANSITION_TYPED, false));
     stop_observer.Wait();
     EXPECT_FALSE(web_contents->GetController().GetPendingEntry());
     EXPECT_EQ(real_url, web_contents->GetVisibleURL());
@@ -696,8 +696,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NoStopDuringTransferUntilCommit) {
     EXPECT_EQ(2U, redirect_observer.params().redirects.size());
     EXPECT_EQ(redirect_url, redirect_observer.params().redirects.at(0));
     EXPECT_EQ(dest_url, redirect_observer.params().redirects.at(1));
-    EXPECT_TRUE(PageTransitionCoreTypeIs(redirect_observer.params().transition,
-                                         content::PAGE_TRANSITION_TYPED));
+    EXPECT_TRUE(ui::PageTransitionCoreTypeIs(
+        redirect_observer.params().transition, ui::PAGE_TRANSITION_TYPED));
   }
 
   // Restore previous browser client.
@@ -733,7 +733,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SingleBeforeUnloadAfterRedirect) {
   GURL redirect_url(test_server()->GetURL("server-redirect?" +
       https_url.spec()));
   browser()->OpenURL(OpenURLParams(redirect_url, Referrer(), CURRENT_TAB,
-                                   content::PAGE_TRANSITION_TYPED, false));
+                                   ui::PAGE_TRANSITION_TYPED, false));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   EXPECT_TRUE(
       static_cast<JavaScriptAppModalDialog*>(alert)->is_before_unload_dialog());
@@ -755,7 +755,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
   ASSERT_TRUE(test_server()->Start());
   GURL url2(test_server()->GetURL("files/title1.html"));
   browser()->OpenURL(OpenURLParams(
-      url2, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+      url2, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
 
   content::WindowedNotificationObserver host_destroyed_observer(
       content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
@@ -783,26 +783,19 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
       ExecuteJavaScript(ASCIIToUTF16("onbeforeunload=null;"));
 }
 
-// Crashy on mac.  http://crbug.com/38522  Crashy on win too (after 3 years).
-#if defined(OS_MACOSX) || defined(OS_WIN)
-#define MAYBE_SingleBeforeUnloadAfterWindowClose \
-        DISABLED_SingleBeforeUnloadAfterWindowClose
-#else
-#define MAYBE_SingleBeforeUnloadAfterWindowClose \
-        SingleBeforeUnloadAfterWindowClose
-#endif
-
 // Test for crbug.com/11647.  A page closed with window.close() should not have
 // two beforeunload dialogs shown.
-IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_SingleBeforeUnloadAfterWindowClose) {
+// http://crbug.com/410891
+IN_PROC_BROWSER_TEST_F(BrowserTest,
+                       DISABLED_SingleBeforeUnloadAfterWindowClose) {
   browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame()->
-      ExecuteJavaScript(ASCIIToUTF16(kOpenNewBeforeUnloadPage));
+      ExecuteJavaScriptForTests(ASCIIToUTF16(kOpenNewBeforeUnloadPage));
 
   // Close the new window with JavaScript, which should show a single
   // beforeunload dialog.  Then show another alert, to make it easy to verify
   // that a second beforeunload dialog isn't shown.
   browser()->tab_strip_model()->GetWebContentsAt(0)->GetMainFrame()->
-      ExecuteJavaScript(ASCIIToUTF16("w.close(); alert('bar');"));
+      ExecuteJavaScriptForTests(ASCIIToUTF16("w.close(); alert('bar');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->native_dialog()->AcceptAppModalDialog();
 
@@ -837,7 +830,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_BeforeUnloadVsBeforeReload) {
   // Navigate to another url, and check that we get a "before unload" dialog.
   GURL url2(url::kAboutBlankURL);
   browser()->OpenURL(OpenURLParams(
-      url2, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+      url2, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
 
   alert = ui_test_utils::WaitForAppModalDialog();
   EXPECT_FALSE(static_cast<JavaScriptAppModalDialog*>(alert)->is_reload());
@@ -958,7 +951,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   content::WindowedNotificationObserver nav_observer(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::NotificationService::AllSources());
-  oldtab->GetMainFrame()->ExecuteJavaScript(ASCIIToUTF16(redirect_popup));
+  oldtab->GetMainFrame()->
+      ExecuteJavaScriptForTests(ASCIIToUTF16(redirect_popup));
 
   // Wait for popup window to appear and finish navigating.
   popup_observer.Wait();
@@ -991,7 +985,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   content::WindowedNotificationObserver nav_observer2(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::NotificationService::AllSources());
-  oldtab->GetMainFrame()->ExecuteJavaScript(ASCIIToUTF16(refresh_popup));
+  oldtab->GetMainFrame()->
+      ExecuteJavaScriptForTests(ASCIIToUTF16(refresh_popup));
 
   // Wait for popup window to appear and finish navigating.
   popup_observer2.Wait();
@@ -1044,7 +1039,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
   content::WindowedNotificationObserver nav_observer(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::NotificationService::AllSources());
-  oldtab->GetMainFrame()->ExecuteJavaScript(ASCIIToUTF16(dont_fork_popup));
+  oldtab->GetMainFrame()->
+      ExecuteJavaScriptForTests(ASCIIToUTF16(dont_fork_popup));
 
   // Wait for popup window to appear and finish navigating.
   popup_observer.Wait();
@@ -1070,7 +1066,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
   content::WindowedNotificationObserver nav_observer2(
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::NotificationService::AllSources());
-  oldtab->GetMainFrame()->ExecuteJavaScript(ASCIIToUTF16(navigate_str));
+  oldtab->GetMainFrame()->ExecuteJavaScriptForTests(ASCIIToUTF16(navigate_str));
   nav_observer2.Wait();
   ASSERT_TRUE(oldtab->GetController().GetLastCommittedEntry());
   EXPECT_EQ(https_url.spec(),
@@ -1188,7 +1184,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
   WebContents* initial_tab = browser()->tab_strip_model()->GetWebContentsAt(0);
   WebContents* app_tab = chrome::AddSelectedTabWithURL(
-      browser(), http_url, content::PAGE_TRANSITION_TYPED);
+      browser(), http_url, ui::PAGE_TRANSITION_TYPED);
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
                                         browser()->host_desktop_type()));
@@ -1297,7 +1293,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_TabClosingWhenRemovingExtension) {
       extensions::TabHelper::FromWebContents(app_contents);
   extensions_tab_helper->SetExtensionApp(extension_app);
 
-  model->AddWebContents(app_contents, 0, content::PageTransitionFromInt(0),
+  model->AddWebContents(app_contents, 0, ui::PageTransitionFromInt(0),
                         TabStripModel::ADD_NONE);
   model->SetTabPinned(0, true);
   ui_test_utils::NavigateToURL(browser(), url);
@@ -1420,7 +1416,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
 
   // Open a new tab with a page in English.
   AddTabAtIndex(0, GURL(test_server()->GetURL("files/english_page.html")),
-                content::PAGE_TRANSITION_TYPED);
+                ui::PAGE_TRANSITION_TYPED);
 
   WebContents* current_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1481,7 +1477,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   extensions::TabHelper* extensions_tab_helper =
       extensions::TabHelper::FromWebContents(app_contents);
   extensions_tab_helper->SetExtensionApp(extension_app);
-  model->AddWebContents(app_contents, 0, content::PageTransitionFromInt(0),
+  model->AddWebContents(app_contents, 0, ui::PageTransitionFromInt(0),
                         TabStripModel::ADD_NONE);
   model->SetTabPinned(0, true);
   ui_test_utils::NavigateToURL(browser(), url);
@@ -1836,7 +1832,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
     content::HostZoomMap::ZoomLevelChangedCallback callback(
         base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
     scoped_ptr<content::HostZoomMap::Subscription> sub =
-        content::HostZoomMap::GetForBrowserContext(
+        content::HostZoomMap::GetDefaultForBrowserContext(
             browser()->profile())->AddZoomLevelChangedCallback(callback);
     chrome::Zoom(browser(), content::PAGE_ZOOM_IN);
     loop_runner->Run();
@@ -1852,7 +1848,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
     content::HostZoomMap::ZoomLevelChangedCallback callback(
         base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
     scoped_ptr<content::HostZoomMap::Subscription> sub =
-        content::HostZoomMap::GetForBrowserContext(
+        content::HostZoomMap::GetDefaultForBrowserContext(
             browser()->profile())->AddZoomLevelChangedCallback(callback);
     chrome::Zoom(browser(), content::PAGE_ZOOM_RESET);
     loop_runner->Run();
@@ -1868,7 +1864,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
     content::HostZoomMap::ZoomLevelChangedCallback callback(
         base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
     scoped_ptr<content::HostZoomMap::Subscription> sub =
-        content::HostZoomMap::GetForBrowserContext(
+        content::HostZoomMap::GetDefaultForBrowserContext(
             browser()->profile())->AddZoomLevelChangedCallback(callback);
     chrome::Zoom(browser(), content::PAGE_ZOOM_OUT);
     loop_runner->Run();
@@ -1981,13 +1977,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialClosesDialogs) {
   EXPECT_FALSE(contents->GetRenderProcessHost()->IgnoreInputEvents());
 }
 
-#if defined(OS_MACOSX)
-// http://crbug.com/393218
-#define MAYBE_InterstitialCloseTab DISABLED_InterstitialCloseTab
-#else
-#define MAYBE_InterstitialCloseTab InterstitialCloseTab
-#endif
-IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_InterstitialCloseTab) {
+
+IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCloseTab) {
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
   {
@@ -2093,7 +2084,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(1, popup_browser->tab_strip_model()->count());
 
   // Now try opening another tab in the popup browser.
-  AddTabWithURLParams params1(url, content::PAGE_TRANSITION_TYPED);
+  AddTabWithURLParams params1(url, ui::PAGE_TRANSITION_TYPED);
   popup_browser->AddTabWithURL(&params1);
   EXPECT_EQ(popup_browser, params1.target);
 
@@ -2111,7 +2102,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
 
   // Now try opening another tab in the app browser.
   AddTabWithURLParams params2(GURL(url::kAboutBlankURL),
-                              content::PAGE_TRANSITION_TYPED);
+                              ui::PAGE_TRANSITION_TYPED);
   app_browser->AddTabWithURL(&params2);
   EXPECT_EQ(app_browser, params2.target);
 
@@ -2129,7 +2120,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
 
   // Now try opening another tab in the app popup browser.
   AddTabWithURLParams params3(GURL(url::kAboutBlankURL),
-                              content::PAGE_TRANSITION_TYPED);
+                              ui::PAGE_TRANSITION_TYPED);
   app_popup_browser->AddTabWithURL(&params3);
   EXPECT_EQ(app_popup_browser, params3.target);
 

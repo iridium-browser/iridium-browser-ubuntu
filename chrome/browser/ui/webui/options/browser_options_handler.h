@@ -29,6 +29,7 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -56,6 +57,7 @@ class BrowserOptionsHandler
       public ShellIntegration::DefaultWebClientObserver,
 #if defined(OS_CHROMEOS)
       public chromeos::system::PointerDeviceObserver::Observer,
+      public policy::ConsumerManagementService::Observer,
 #endif
       public TemplateURLServiceObserver,
       public extensions::ExtensionRegistryObserver,
@@ -76,9 +78,11 @@ class BrowserOptionsHandler
   virtual void OnStateChanged() OVERRIDE;
 
   // SigninManagerBase::Observer implementation.
-  virtual void GoogleSigninSucceeded(const std::string& username,
+  virtual void GoogleSigninSucceeded(const std::string& account_id,
+                                     const std::string& username,
                                      const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& username) OVERRIDE;
+  virtual void GoogleSignedOut(const std::string& account_id,
+                               const std::string& username) OVERRIDE;
 
   // ShellIntegration::DefaultWebClientObserver implementation.
   virtual void SetDefaultWebClientUIState(
@@ -127,6 +131,9 @@ class BrowserOptionsHandler
 
   // Will be called when powerwash dialog is shown.
   void OnPowerwashDialogShow(const base::ListValue* args);
+
+  // ConsumerManagementService::Observer:
+  virtual void OnConsumerManagementStatusChanged() OVERRIDE;
 #endif
 
   void UpdateSyncState();
@@ -275,6 +282,9 @@ class BrowserOptionsHandler
   // Callback for "requestHotwordAvailable" message.
   void HandleRequestHotwordAvailable(const base::ListValue* args);
 
+  // Callback for "launchHotwordAudioVerificationApp" message.
+  void HandleLaunchHotwordAudioVerificationApp(const base::ListValue* args);
+
   // Callback for "launchEasyUnlockSetup" message.
   void HandleLaunchEasyUnlockSetup(const base::ListValue* args);
 
@@ -324,6 +334,20 @@ class BrowserOptionsHandler
 
   // Setup the UI for showing which settings are extension controlled.
   void SetupExtensionControlledIndicators();
+
+  // Setup the value and the disabled property for metrics reporting for (except
+  // CrOS and Android).
+  void SetupMetricsReportingCheckbox();
+
+  // Called when the MetricsReportingEnabled checkbox values are changed.
+  // |args| will contain the checkbox checked state as a boolean.
+  void HandleMetricsReportingChange(const base::ListValue* args);
+
+  // Notifies the result of MetricsReportingEnabled change to Javascript layer.
+  void MetricsReportingChangeCallback(bool enabled);
+
+  // Calls a Javascript function to set the state of MetricsReporting checkbox.
+  void SetMetricsReportingCheckbox(bool checked, bool disabled);
 
 #if defined(OS_CHROMEOS)
   // Setup the accessibility features for ChromeOS.

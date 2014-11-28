@@ -32,3 +32,15 @@
 ## http://skbug.com/123456 : ignoring failures on gradtext GM test
 ## epoger will rebaseline by 25 Dec 2013
 #gradtext
+
+# jvanverth
+fontcache
+
+# reed - conservative_rasterclip CL
+multipicturedraw_pathclip_tiled
+
+# rileya - https://codereview.chromium.org/516463005/ will rebaseline after bots cycle
+yuv_to_rgb_effect
+
+#edgdaniel https://codereview.chromium.org/703783002/
+dashing

@@ -10,7 +10,6 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "media/cast/net/rtcp/rtcp_receiver.h"
 #include "media/cast/receiver/audio_decoder.h"
 #include "media/cast/receiver/video_decoder.h"
 
@@ -32,7 +31,9 @@ CastReceiverImpl::CastReceiverImpl(
     const FrameReceiverConfig& video_config,
     PacketSender* const packet_sender)
     : cast_environment_(cast_environment),
-      pacer_(cast_environment->Clock(),
+      pacer_(kTargetBurstSize,
+             kMaxBurstSize,
+             cast_environment->Clock(),
              cast_environment->Logging(),
              packet_sender,
              cast_environment->GetTaskRunner(CastEnvironment::MAIN)),
@@ -52,8 +53,8 @@ void CastReceiverImpl::DispatchReceivedPacket(scoped_ptr<Packet> packet) {
   const size_t length = packet->size();
 
   uint32 ssrc_of_sender;
-  if (RtcpReceiver::IsRtcpPacket(data, length)) {
-    ssrc_of_sender = RtcpReceiver::GetSsrcOfSender(data, length);
+  if (Rtcp::IsRtcpPacket(data, length)) {
+    ssrc_of_sender = Rtcp::GetSsrcOfSender(data, length);
   } else if (!FrameReceiver::ParseSenderSsrc(data, length, &ssrc_of_sender)) {
     VLOG(1) << "Invalid RTP packet.";
     return;
@@ -212,7 +213,7 @@ void CastReceiverImpl::EmitDecodedVideoFrame(
     const scoped_refptr<VideoFrame>& video_frame,
     bool is_continuous) {
   DCHECK(cast_environment->CurrentlyOn(CastEnvironment::MAIN));
-  if (video_frame) {
+  if (video_frame.get()) {
     const base::TimeTicks now = cast_environment->Clock()->NowTicks();
     cast_environment->Logging()->InsertFrameEvent(
         now, FRAME_DECODED, VIDEO_EVENT, rtp_timestamp, frame_id);

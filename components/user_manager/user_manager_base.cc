@@ -62,6 +62,11 @@ const char kUserForceOnlineSignin[] = "UserForceOnlineSignin";
 // kiosk, public account, etc.).
 const char kLastLoggedInRegularUser[] = "LastLoggedInRegularUser";
 
+// A string pref containing the ID of the last active user.
+// In case of browser crash, this pref will be used to set active user after
+// session restore.
+const char kLastActiveUser[] = "LastActiveUser";
+
 // Upper bound for a histogram metric reporting the amount of time between
 // one regular user logging out and a different regular user logging in.
 const int kLogoutToLoginDelayMaxSec = 1800;
@@ -77,6 +82,12 @@ void OnRemoveUserComplete(const std::string& user_email,
   }
 }
 
+// Runs on SequencedWorkerPool thread. Passes resolved locale to UI thread.
+void ResolveLocale(const std::string& raw_locale,
+                   std::string* resolved_locale) {
+  ignore_result(l10n_util::CheckAndResolveLocale(raw_locale, resolved_locale));
+}
+
 }  // namespace
 
 // static
@@ -88,6 +99,7 @@ void UserManagerBase::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(kUserDisplayEmail);
   registry->RegisterDictionaryPref(kUserOAuthTokenStatus);
   registry->RegisterDictionaryPref(kUserForceOnlineSignin);
+  registry->RegisterStringPref(kLastActiveUser, std::string());
 }
 
 UserManagerBase::UserManagerBase(
@@ -102,6 +114,7 @@ UserManagerBase::UserManagerBase(
       is_current_user_ephemeral_regular_user_(false),
       ephemeral_users_enabled_(false),
       manager_creation_time_(base::TimeTicks::Now()),
+      last_session_active_user_initialized_(false),
       task_runner_(task_runner),
       blocking_task_runner_(blocking_task_runner),
       weak_factory_(this) {
@@ -146,6 +159,11 @@ void UserManagerBase::UserLoggedIn(const std::string& user_id,
                                    const std::string& username_hash,
                                    bool browser_restart) {
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  if (!last_session_active_user_initialized_) {
+    last_session_active_user_ = GetLocalState()->GetString(kLastActiveUser);
+    last_session_active_user_initialized_ = true;
+  }
 
   User* user = FindUserInListAndModify(user_id);
   if (active_user_ && user) {
@@ -248,6 +266,17 @@ void UserManagerBase::SwitchActiveUser(const std::string& user_id) {
 
   NotifyActiveUserHashChanged(active_user_->username_hash());
   NotifyActiveUserChanged(active_user_);
+}
+
+void UserManagerBase::SwitchToLastActiveUser() {
+  if (last_session_active_user_.empty())
+    return;
+
+  if (GetActiveUser()->email() != last_session_active_user_)
+    SwitchActiveUser(last_session_active_user_);
+
+  // Make sure that this function gets run only once.
+  last_session_active_user_.clear();
 }
 
 void UserManagerBase::SessionStarted() {
@@ -628,6 +657,10 @@ void UserManagerBase::NotifyLocalStateChanged() {
       UserManager::Observer, observer_list_, LocalStateChanged(this));
 }
 
+void UserManagerBase::ForceUpdateState() {
+  UpdateLoginState();
+}
+
 bool UserManagerBase::CanUserBeRemoved(const User* user) const {
   // Only regular and supervised users are allowed to be manually removed.
   if (!user || (user->GetType() != USER_TYPE_REGULAR &&
@@ -876,6 +909,10 @@ void UserManagerBase::RemoveNonCryptohomeData(const std::string& user_id) {
 
   DictionaryPrefUpdate prefs_force_online_update(prefs, kUserForceOnlineSignin);
   prefs_force_online_update->RemoveWithoutPathExpansion(user_id, NULL);
+
+  std::string last_active_user = GetLocalState()->GetString(kLastActiveUser);
+  if (user_id == last_active_user)
+    GetLocalState()->SetString(kLastActiveUser, std::string());
 }
 
 User* UserManagerBase::RemoveRegularOrSupervisedUserFromList(
@@ -957,6 +994,9 @@ void UserManagerBase::UpdateLoginState() {
 }
 
 void UserManagerBase::SetLRUUser(User* user) {
+  GetLocalState()->SetString(kLastActiveUser, user->email());
+  GetLocalState()->CommitPendingWrite();
+
   UserList::iterator it =
       std::find(lru_logged_in_users_.begin(), lru_logged_in_users_.end(), user);
   if (it != lru_logged_in_users_.end())
@@ -986,36 +1026,31 @@ void UserManagerBase::SendRegularUserLoginMetrics(const std::string& user_id) {
 
 void UserManagerBase::UpdateUserAccountLocale(const std::string& user_id,
                                               const std::string& locale) {
+  scoped_ptr<std::string> resolved_locale(new std::string());
   if (!locale.empty() && locale != GetApplicationLocale()) {
-    base::Callback<void(const std::string&)> on_resolve_callback =
+    // base::Pased will NULL out |resolved_locale|, so cache the underlying ptr.
+    std::string* raw_resolved_locale = resolved_locale.get();
+    blocking_task_runner_->PostTaskAndReply(
+        FROM_HERE,
+        base::Bind(ResolveLocale,
+                   locale,
+                   base::Unretained(raw_resolved_locale)),
         base::Bind(&UserManagerBase::DoUpdateAccountLocale,
                    weak_factory_.GetWeakPtr(),
-                   user_id);
-    blocking_task_runner_->PostTask(FROM_HERE,
-                                    base::Bind(&UserManagerBase::ResolveLocale,
-                                               weak_factory_.GetWeakPtr(),
-                                               locale,
-                                               on_resolve_callback));
+                   user_id,
+                   base::Passed(&resolved_locale)));
   } else {
-    DoUpdateAccountLocale(user_id, locale);
+    resolved_locale.reset(new std::string(locale));
+    DoUpdateAccountLocale(user_id, resolved_locale.Pass());
   }
-}
-
-void UserManagerBase::ResolveLocale(
-    const std::string& raw_locale,
-    base::Callback<void(const std::string&)> on_resolve_callback) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
-  std::string resolved_locale;
-  ignore_result(l10n_util::CheckAndResolveLocale(raw_locale, &resolved_locale));
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(on_resolve_callback, resolved_locale));
 }
 
 void UserManagerBase::DoUpdateAccountLocale(
     const std::string& user_id,
-    const std::string& resolved_locale) {
-  if (User* user = FindUserAndModify(user_id))
-    user->SetAccountLocale(resolved_locale);
+    scoped_ptr<std::string> resolved_locale) {
+  User* user = FindUserAndModify(user_id);
+  if (user && resolved_locale)
+    user->SetAccountLocale(*resolved_locale);
 }
 
 void UserManagerBase::DeleteUser(User* user) {

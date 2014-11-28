@@ -15,6 +15,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/stringize_macros.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
@@ -74,7 +75,8 @@ VideoFrameTexture::~VideoFrameTexture() {
   base::ResetAndReturn(&no_longer_needed_cb_).Run();
 }
 
-RenderingHelper::RenderedVideo::RenderedVideo() : last_frame_rendered(false) {
+RenderingHelper::RenderedVideo::RenderedVideo()
+    : last_frame_rendered(false), is_flushing(false), frames_to_drop(0) {
 }
 
 RenderingHelper::RenderedVideo::~RenderedVideo() {
@@ -111,6 +113,9 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
     UnInitialize(&done);
     done.Wait();
   }
+
+  render_task_.Reset(
+      base::Bind(&RenderingHelper::RenderContent, base::Unretained(this)));
 
   frame_duration_ = params.rendering_fps > 0
                         ? base::TimeDelta::FromSeconds(1) / params.rendering_fps
@@ -170,8 +175,8 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
 
   gl_surface_ = gfx::GLSurface::CreateViewGLSurface(window_);
   gl_context_ = gfx::GLContext::CreateGLContext(
-      NULL, gl_surface_, gfx::PreferIntegratedGpu);
-  gl_context_->MakeCurrent(gl_surface_);
+      NULL, gl_surface_.get(), gfx::PreferIntegratedGpu);
+  gl_context_->MakeCurrent(gl_surface_.get());
 
   CHECK_GT(params.window_sizes.size(), 0U);
   videos_.resize(params.window_sizes.size());
@@ -297,26 +302,20 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
   glEnableVertexAttribArray(tc_location);
   glVertexAttribPointer(tc_location, 2, GL_FLOAT, GL_FALSE, 0, kTextureCoords);
 
-  if (frame_duration_ != base::TimeDelta()) {
-    render_timer_.reset(new base::RepeatingTimer<RenderingHelper>());
-    render_timer_->Start(
-        FROM_HERE, frame_duration_, this, &RenderingHelper::RenderContent);
-  }
   done->Signal();
 }
 
 void RenderingHelper::UnInitialize(base::WaitableEvent* done) {
   CHECK_EQ(base::MessageLoop::current(), message_loop_);
 
-  // Deletion will also stop the timer.
-  render_timer_.reset();
+  render_task_.Cancel();
 
   if (render_as_thumbnails_) {
     glDeleteTextures(1, &thumbnails_texture_id_);
     glDeleteFramebuffersEXT(1, &thumbnails_fbo_id_);
   }
 
-  gl_context_->ReleaseCurrent(gl_surface_);
+  gl_context_->ReleaseCurrent(gl_surface_.get());
   gl_context_ = NULL;
   gl_surface_ = NULL;
 
@@ -395,6 +394,19 @@ void RenderingHelper::QueueVideoFrame(
     scoped_refptr<VideoFrameTexture> video_frame) {
   CHECK_EQ(base::MessageLoop::current(), message_loop_);
   RenderedVideo* video = &videos_[window_id];
+  DCHECK(!video->is_flushing);
+
+  // Start the rendering task when getting the first frame.
+  if (scheduled_render_time_.is_null() &&
+      (frame_duration_ != base::TimeDelta())) {
+    scheduled_render_time_ = base::TimeTicks::Now();
+    message_loop_->PostTask(FROM_HERE, render_task_.callback());
+  }
+
+  if (video->frames_to_drop > 0) {
+    --video->frames_to_drop;
+    return;
+  }
 
   // Pop the last frame if it has been rendered.
   if (video->last_frame_rendered) {
@@ -406,13 +418,6 @@ void RenderingHelper::QueueVideoFrame(
   }
 
   video->pending_frames.push(video_frame);
-}
-
-void RenderingHelper::DropPendingFrames(size_t window_id) {
-  CHECK_EQ(base::MessageLoop::current(), message_loop_);
-  RenderedVideo* video = &videos_[window_id];
-  video->pending_frames = std::queue<scoped_refptr<VideoFrameTexture> >();
-  video->last_frame_rendered = false;
 }
 
 void RenderingHelper::RenderTexture(uint32 texture_target, uint32 texture_id) {
@@ -503,8 +508,18 @@ void RenderingHelper::GetThumbnailsAsRGB(std::vector<unsigned char>* rgb,
   done->Signal();
 }
 
+void RenderingHelper::Flush(size_t window_id) {
+  videos_[window_id].is_flushing = true;
+}
+
 void RenderingHelper::RenderContent() {
   CHECK_EQ(base::MessageLoop::current(), message_loop_);
+
+  scheduled_render_time_ += frame_duration_;
+  base::TimeDelta delay = scheduled_render_time_ - base::TimeTicks::Now();
+  message_loop_->PostDelayedTask(
+      FROM_HERE, render_task_.callback(), std::max(delay, base::TimeDelta()));
+
   glUniform1i(glGetUniformLocation(program_, "tex_flip"), 1);
 
   // Frames that will be returned to the client (via the no_longer_needed_cb)
@@ -526,9 +541,13 @@ void RenderingHelper::RenderContent() {
       GLSetViewPort(video->render_area);
       RenderTexture(frame->texture_target(), frame->texture_id());
 
-      if (video->pending_frames.size() > 1) {
+      if (video->last_frame_rendered)
+        ++video->frames_to_drop;
+
+      if (video->pending_frames.size() > 1 || video->is_flushing) {
         frames_to_be_returned.push_back(video->pending_frames.front());
         video->pending_frames.pop();
+        video->last_frame_rendered = false;
       } else {
         video->last_frame_rendered = true;
       }

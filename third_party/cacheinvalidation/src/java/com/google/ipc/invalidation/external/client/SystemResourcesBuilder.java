@@ -16,12 +16,12 @@
 
 package com.google.ipc.invalidation.external.client;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.SystemResources.NetworkChannel;
 import com.google.ipc.invalidation.external.client.SystemResources.Scheduler;
 import com.google.ipc.invalidation.external.client.SystemResources.Storage;
 import com.google.ipc.invalidation.ticl.BasicSystemResources;
+import com.google.ipc.invalidation.util.Preconditions;
 
 
 /**

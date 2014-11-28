@@ -5,7 +5,7 @@
 
 """Client tool to trigger tasks or retrieve results from a Swarming server."""
 
-__version__ = '0.4.13'
+__version__ = '0.4.16'
 
 import getpass
 import hashlib
@@ -33,6 +33,7 @@ from utils import tools
 from utils import zip_package
 
 import auth
+import isolated_format
 import isolateserver
 import run_isolated
 
@@ -186,6 +187,12 @@ class TaskOutputCollector(object):
           shard_index, self.shard_count - 1)
       return
 
+    result = result.copy()
+
+    isolated_files_location = extract_output_files_location(result['output'])
+    if isolated_files_location:
+      result['isolated_out'] = isolated_files_location
+
     # Store result dict of that shard, ignore results we've already seen.
     with self._lock:
       if shard_index in self._per_shard_results:
@@ -195,16 +202,16 @@ class TaskOutputCollector(object):
 
     # Fetch output files if necessary.
     if self.task_output_dir:
-      isolated_files_location = extract_output_files_location(result['output'])
       if isolated_files_location:
-        isolate_server, namespace, isolated_hash = isolated_files_location
-        storage = self._get_storage(isolate_server, namespace)
+        storage = self._get_storage(
+            isolated_files_location['server'],
+            isolated_files_location['namespace'])
         if storage:
           # Output files are supposed to be small and they are not reused across
           # tasks. So use MemoryCache for them instead of on-disk cache. Make
           # files writable, so that calling script can delete them.
           isolateserver.fetch_isolated(
-              isolated_hash,
+              isolated_files_location['hash'],
               storage,
               isolateserver.MemoryCache(file_mode_mask=0700),
               os.path.join(self.task_output_dir, str(shard_index)),
@@ -312,7 +319,14 @@ def extract_output_files_location(task_log):
     isolate_server = to_ascii(data['storage'])
     if not file_path.is_url(isolate_server):
       raise ValueError()
-    return (isolate_server, namespace, isolated_hash)
+    data = {
+        'hash': isolated_hash,
+        'namespace': namespace,
+        'server': isolate_server,
+        'view_url': '%s/browse?%s' % (isolate_server, urllib.urlencode(
+            [('namespace', namespace), ('hash', isolated_hash)])),
+    }
+    return data
   except (KeyError, ValueError):
     logging.warning(
         'Unexpected value of run_isolated_out_hack: %s', match.group(1))
@@ -542,7 +556,7 @@ def archive(isolate_server, namespace, isolated, algo, verbose):
     logging.info(' '.join(cmd))
     if subprocess.call(cmd, verbose):
       return
-    return isolateserver.hash_file(isolated, algo)
+    return isolated_format.hash_file(isolated, algo)
   finally:
     if tempdir:
       shutil.rmtree(tempdir)
@@ -704,7 +718,7 @@ def isolated_to_hash(isolate_server, namespace, arg, algo, verbose):
       on_error.report('Archival failure %s' % arg)
       return None, True
     return file_hash, True
-  elif isolateserver.is_valid_hash(arg, algo):
+  elif isolated_format.is_valid_hash(arg, algo):
     return arg, False
   else:
     on_error.report('Invalid hash %s' % arg)
@@ -942,6 +956,74 @@ def extract_isolated_command_extra_args(args):
   return (args[:index], args[index+1:])
 
 
+def CMDbots(parser, args):
+  """Returns information about the bots connected to the Swarming server."""
+  add_filter_options(parser)
+  parser.filter_group.add_option(
+      '--dead-only', action='store_true',
+      help='Only print dead bots, useful to reap them and reimage broken bots')
+  parser.filter_group.add_option(
+      '-k', '--keep-dead', action='store_true',
+      help='Do not filter out dead bots')
+  parser.filter_group.add_option(
+      '-b', '--bare', action='store_true',
+      help='Do not print out dimensions')
+  options, args = parser.parse_args(args)
+
+  if options.keep_dead and options.dead_only:
+    parser.error('Use only one of --keep-dead and --dead-only')
+
+  auth.ensure_logged_in(options.swarming)
+
+  bots = []
+  cursor = None
+  limit = 250
+  # Iterate via cursors.
+  base_url = options.swarming + '/swarming/api/v1/client/bots?limit=%d' % limit
+  while True:
+    url = base_url
+    if cursor:
+      url += '&cursor=%s' % urllib.quote(cursor)
+    data = net.url_read_json(url)
+    if data is None:
+      print >> sys.stderr, 'Failed to access %s' % options.swarming
+      return 1
+    bots.extend(data['items'])
+    cursor = data['cursor']
+    if not cursor:
+      break
+
+  for bot in natsort.natsorted(bots, key=lambda x: x['id']):
+    if options.dead_only:
+      if not bot['is_dead']:
+        continue
+    elif not options.keep_dead and bot['is_dead']:
+      continue
+
+    # If the user requested to filter on dimensions, ensure the bot has all the
+    # dimensions requested.
+    dimensions = bot['dimensions']
+    for key, value in options.dimensions:
+      if key not in dimensions:
+        break
+      # A bot can have multiple value for a key, for example,
+      # {'os': ['Windows', 'Windows-6.1']}, so that --dimension os=Windows will
+      # be accepted.
+      if isinstance(dimensions[key], list):
+        if value not in dimensions[key]:
+          break
+      else:
+        if value != dimensions[key]:
+          break
+    else:
+      print bot['id']
+      if not options.bare:
+        print '  %s' % json.dumps(dimensions, sort_keys=True)
+        if bot['task']:
+          print '  task: %s' % bot['task']
+  return 0
+
+
 @subcommand.usage('task_name')
 def CMDcollect(parser, args):
   """Retrieves results of a Swarming task.
@@ -973,56 +1055,60 @@ def CMDcollect(parser, args):
     return 1
 
 
+@subcommand.usage('[resource name]')
 def CMDquery(parser, args):
-  """Returns information about the bots connected to the Swarming server."""
-  add_filter_options(parser)
-  parser.filter_group.add_option(
-      '--dead-only', action='store_true',
-      help='Only print dead bots, useful to reap them and reimage broken bots')
-  parser.filter_group.add_option(
-      '-k', '--keep-dead', action='store_true',
-      help='Do not filter out dead bots')
-  parser.filter_group.add_option(
-      '-b', '--bare', action='store_true',
-      help='Do not print out dimensions')
-  options, args = parser.parse_args(args)
+  """Returns raw JSON information via an URL endpoint. Use 'list' to gather the
+  list of valid values from the server.
 
-  if options.keep_dead and options.dead_only:
-    parser.error('Use only one of --keep-dead and --dead-only')
+  Examples:
+    Printing the list of known URLs:
+      swarming.py query -S https://server-url list
+
+    Listing last 50 tasks on a specific bot named 'swarm1'
+      swarming.py query -S https://server-url --limit 50 bot/swarm1/tasks
+  """
+  CHUNK_SIZE = 250
+
+  parser.add_option(
+      '-L', '--limit', type='int', default=200,
+      help='Limit to enforce on limitless items (like number of tasks); '
+           'default=%default')
+  (options, args) = parser.parse_args(args)
+  if len(args) != 1:
+    parser.error('Must specify only one resource name.')
 
   auth.ensure_logged_in(options.swarming)
-  service = net.get_http_service(options.swarming)
 
-  data = service.json_request('GET', '/swarming/api/v1/bots')
+  base_url = options.swarming + '/swarming/api/v1/client/' + args[0]
+  url = base_url
+  if options.limit:
+    url += '?limit=%d' % min(CHUNK_SIZE, options.limit)
+  data = net.url_read_json(url)
   if data is None:
     print >> sys.stderr, 'Failed to access %s' % options.swarming
     return 1
-  for machine in natsort.natsorted(data['machines'], key=lambda x: x['id']):
-    if options.dead_only:
-      if not machine['is_dead']:
-        continue
-    elif not options.keep_dead and machine['is_dead']:
-      continue
 
-    # If the user requested to filter on dimensions, ensure the bot has all the
-    # dimensions requested.
-    dimensions = machine['dimensions']
-    for key, value in options.dimensions:
-      if key not in dimensions:
-        break
-      # A bot can have multiple value for a key, for example,
-      # {'os': ['Windows', 'Windows-6.1']}, so that --dimension os=Windows will
-      # be accepted.
-      if isinstance(dimensions[key], list):
-        if value not in dimensions[key]:
-          break
-      else:
-        if value != dimensions[key]:
-          break
-    else:
-      print machine['id']
-      if not options.bare:
-        print '  %s' % dimensions
+  # Some items support cursors. Try to get automatically if cursors are needed
+  # by looking at the 'cursor' items.
+  while (
+      data.get('cursor') and
+      (not options.limit or len(data['items']) < options.limit)):
+    url = base_url + '?cursor=%s' % urllib.quote(data['cursor'])
+    if options.limit:
+      url += '&limit=%d' % min(CHUNK_SIZE, options.limit - len(data['items']))
+    new = net.url_read_json(url)
+    if new is None:
+      print >> sys.stderr, 'Failed to access %s' % options.swarming
+      return 1
+    data['items'].extend(new['items'])
+    data['cursor'] = new['cursor']
+
+  if options.limit and len(data.get('items', [])) > options.limit:
+    data['items'] = data['items'][:options.limit]
+  data.pop('cursor', None)
+
+  json.dump(data, sys.stdout, indent=2, sort_keys=True)
+  sys.stdout.write('\n')
   return 0
 
 

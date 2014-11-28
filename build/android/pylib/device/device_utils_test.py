@@ -557,20 +557,13 @@ class DeviceUtilsKillAllTest(DeviceUtilsOldImplTest):
          'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
          'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
               'this.is.a.test.process\r\n'),
-        ("adb -s 0123456789abcdef shell 'ps'",
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
-              'this.is.a.test.process\r\n'),
         ("adb -s 0123456789abcdef shell 'kill -9 1234'", '')]):
-      self.device.KillAll('this.is.a.test.process', blocking=False)
+      self.assertEquals(1,
+          self.device.KillAll('this.is.a.test.process', blocking=False))
 
   def testKillAll_blocking(self):
     with mock.patch('time.sleep'):
       with self.assertCallsSequence([
-          ("adb -s 0123456789abcdef shell 'ps'",
-           'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
-           'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
-                'this.is.a.test.process\r\n'),
           ("adb -s 0123456789abcdef shell 'ps'",
            'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
            'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
@@ -582,7 +575,8 @@ class DeviceUtilsKillAllTest(DeviceUtilsOldImplTest):
                 'this.is.a.test.process\r\n'),
           ("adb -s 0123456789abcdef shell 'ps'",
            'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n')]):
-        self.device.KillAll('this.is.a.test.process', blocking=True)
+        self.assertEquals(1,
+            self.device.KillAll('this.is.a.test.process', blocking=True))
 
   def testKillAll_root(self):
     with self.assertCallsSequence([
@@ -590,12 +584,10 @@ class DeviceUtilsKillAllTest(DeviceUtilsOldImplTest):
            'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
            'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
                 'this.is.a.test.process\r\n'),
-          ("adb -s 0123456789abcdef shell 'ps'",
-           'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
-           'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
-                'this.is.a.test.process\r\n'),
+          ("adb -s 0123456789abcdef shell 'ls /root'", 'Permission denied\r\n'),
           ("adb -s 0123456789abcdef shell 'su -c kill -9 1234'", '')]):
-      self.device.KillAll('this.is.a.test.process', as_root=True)
+      self.assertEquals(1,
+          self.device.KillAll('this.is.a.test.process', as_root=True))
 
   def testKillAll_sigterm(self):
     with self.assertCallsSequence([
@@ -603,12 +595,9 @@ class DeviceUtilsKillAllTest(DeviceUtilsOldImplTest):
          'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
          'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
               'this.is.a.test.process\r\n'),
-        ("adb -s 0123456789abcdef shell 'ps'",
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\r\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab '
-              'this.is.a.test.process\r\n'),
         ("adb -s 0123456789abcdef shell 'kill -15 1234'", '')]):
-      self.device.KillAll('this.is.a.test.process', signum=signal.SIGTERM)
+      self.assertEquals(1,
+          self.device.KillAll('this.is.a.test.process', signum=signal.SIGTERM))
 
 
 class DeviceUtilsStartActivityTest(DeviceUtilsOldImplTest):
@@ -1207,6 +1196,44 @@ class DeviceUtilsWriteFileTest(DeviceUtilsOldImplTest):
       self.device.WriteFile('/test/file/no.permissions.to.write',
                             'new test file contents', as_root=True)
 
+class DeviceUtilsWriteTextFileTest(DeviceUtilsOldImplTest):
+
+  def testWriteTextFileTest_basic(self):
+    with self.assertCalls(
+        "adb -s 0123456789abcdef shell 'echo some.string"
+        " > /test/file/to.write; echo %$?'", '%0\r\n'):
+      self.device.WriteTextFile('/test/file/to.write', 'some.string')
+
+  def testWriteTextFileTest_stringWithSpaces(self):
+    with self.assertCalls(
+        "adb -s 0123456789abcdef shell 'echo '\\''some other string'\\''"
+        " > /test/file/to.write; echo %$?'", '%0\r\n'):
+      self.device.WriteTextFile('/test/file/to.write', 'some other string')
+
+  def testWriteTextFileTest_asRoot_withSu(self):
+    with self.assertCallsSequence([
+        ("adb -s 0123456789abcdef shell 'ls /root'", 'Permission denied\r\n'),
+        ("adb -s 0123456789abcdef shell 'su -c echo some.string"
+          " > /test/file/to.write; echo %$?'", '%0\r\n')]):
+      self.device.WriteTextFile('/test/file/to.write', 'some.string',
+                                as_root=True)
+
+  def testWriteTextFileTest_asRoot_withRoot(self):
+    with self.assertCallsSequence([
+        ("adb -s 0123456789abcdef shell 'ls /root'", 'hello\r\nworld\r\n'),
+        ("adb -s 0123456789abcdef shell 'echo some.string"
+          " > /test/file/to.write; echo %$?'", '%0\r\n')]):
+      self.device.WriteTextFile('/test/file/to.write', 'some.string',
+                                as_root=True)
+
+  def testWriteTextFileTest_asRoot_rejected(self):
+    with self.assertCallsSequence([
+        ("adb -s 0123456789abcdef shell 'ls /root'", 'Permission denied\r\n'),
+        ("adb -s 0123456789abcdef shell 'su -c echo some.string"
+          " > /test/file/to.write; echo %$?'", '%1\r\n')]):
+      with self.assertRaises(device_errors.CommandFailedError):
+        self.device.WriteTextFile('/test/file/to.write', 'some.string',
+                                  as_root=True)
 
 class DeviceUtilsLsTest(DeviceUtilsOldImplTest):
 
@@ -1285,7 +1312,7 @@ class DeviceUtilsSetJavaAssertsTest(DeviceUtilsOldImplTest):
            ('adb -s 0123456789abcdef shell '
                 'setprop dalvik.vm.enableassertions "all"',
             '')]):
-        self.device.SetJavaAsserts(True)
+        self.assertTrue(self.device.SetJavaAsserts(True))
 
   def testSetJavaAsserts_disable(self):
     mock_file = self.mockNamedTemporary(
@@ -1309,7 +1336,7 @@ class DeviceUtilsSetJavaAssertsTest(DeviceUtilsOldImplTest):
            ('adb -s 0123456789abcdef shell '
                 'setprop dalvik.vm.enableassertions ""',
             '')]):
-        self.device.SetJavaAsserts(False)
+        self.assertTrue(self.device.SetJavaAsserts(False))
 
   def testSetJavaAsserts_alreadyEnabled(self):
     mock_file = self.mockNamedTemporary(

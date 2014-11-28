@@ -305,6 +305,50 @@ bool test_munmap() {
   return true;
 }
 
+bool test_mmap_zero_size() {
+  /*
+   * This test fails under Non-SFI Mode under ARM QEMU, because ARM QEMU
+   * handles this case incorrectly.
+   */
+  if (NONSFI_MODE)
+    return true;
+
+  void *addr = mmap(NULL, 0, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_EQ(addr, MAP_FAILED);
+  ASSERT_EQ(errno, EINVAL);
+
+  /* Test behaviour when rounding up the size overflows. */
+  addr = mmap(NULL, ~(size_t) 0, PROT_READ | PROT_WRITE,
+              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_EQ(addr, MAP_FAILED);
+  ASSERT_EQ(errno, EINVAL);
+
+  return true;
+}
+
+bool test_munmap_zero_size() {
+  /* Allocate a valid address to test munmap() with. */
+  size_t map_size = 0x10000;
+  char *addr = (char *) mmap(NULL, map_size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  assert(addr != MAP_FAILED);
+
+  int rc = munmap(addr, 0);
+  ASSERT_EQ(rc, -1);
+  ASSERT_EQ(errno, EINVAL);
+
+  /* Test behaviour when rounding up the size overflows. */
+  rc = munmap(addr, ~(size_t) 0);
+  ASSERT_EQ(rc, -1);
+  ASSERT_EQ(errno, EINVAL);
+
+  /* Clean up. */
+  rc = munmap(addr, map_size);
+  ASSERT_EQ(rc, 0);
+  return true;
+}
+
 /*
  *   Verify that mprotect() changes the virtual address protection.
  */
@@ -552,6 +596,8 @@ bool testSuite() {
   ret &= test4();
 
   ret &= test_munmap();
+  ret &= test_mmap_zero_size();
+  ret &= test_munmap_zero_size();
   ret &= test_mprotect();
   ret &= test_mprotect_offset();
   ret &= test_mprotect_unmapped_memory();

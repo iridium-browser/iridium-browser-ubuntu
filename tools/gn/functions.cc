@@ -197,8 +197,8 @@ const char kConfig_Help[] =
     "   1. The values specified directly on the target (rather than using a\n"
     "      config.\n"
     "   2. The configs specified in the target's \"configs\" list, in order.\n"
-    "   3. Direct dependent configs from a breadth-first traversal of the\n"
-    "      dependency tree in the order that the targets appear in \"deps\".\n"
+    "   3. Public_configs from a breadth-first traversal of the dependency\n"
+    "      tree in the order that the targets appear in \"deps\".\n"
     "   4. All dependent configs from a breadth-first traversal of the\n"
     "      dependency tree in the order that the targets appear in \"deps\".\n"
     "\n"
@@ -206,7 +206,7 @@ const char kConfig_Help[] =
     CONFIG_VALUES_VARS_HELP
     "\n"
     "Variables on a target used to apply configs:\n"
-    "  all_dependent_configs, configs, direct_dependent_configs,\n"
+    "  all_dependent_configs, configs, public_configs,\n"
     "  forward_dependent_configs_from\n"
     "\n"
     "Example:\n"
@@ -489,8 +489,6 @@ const char kSetSourcesAssignmentFilter_Help[] =
     "  example, you may want to filter out all \"*_win.cc\" files on non-\n"
     "  Windows platforms.\n"
     "\n"
-    "  See \"gn help patterns\" for specifics on patterns.\n"
-    "\n"
     "  Typically this will be called once in the master build config script\n"
     "  to set up the filter for the current platform. Subsequent calls will\n"
     "  overwrite the previous values.\n"
@@ -499,9 +497,45 @@ const char kSetSourcesAssignmentFilter_Help[] =
     "  be filtered out, call set_sources_assignment_filter([]) to clear the\n"
     "  list of filters. This will apply until the current scope exits\n"
     "\n"
-    "Example:\n"
+    "How to use patterns\n"
+    "\n"
+    "  File patterns are VERY limited regular expressions. They must match\n"
+    "  the entire input string to be counted as a match. In regular\n"
+    "  expression parlance, there is an implicit \"^...$\" surrounding your\n"
+    "  input. If you want to match a substring, you need to use wildcards at\n"
+    "  the beginning and end.\n"
+    "\n"
+    "  There are only two special tokens understood by the pattern matcher.\n"
+    "  Everything else is a literal.\n"
+    "\n"
+    "   * Matches zero or more of any character. It does not depend on the\n"
+    "     preceding character (in regular expression parlance it is\n"
+    "     equivalent to \".*\").\n"
+    "\n"
+    "  \\b Matches a path boundary. This will match the beginning or end of\n"
+    "     a string, or a slash.\n"
+    "\n"
+    "Pattern examples\n"
+    "\n"
+    "  \"*asdf*\"\n"
+    "      Matches a string containing \"asdf\" anywhere.\n"
+    "\n"
+    "  \"asdf\"\n"
+    "      Matches only the exact string \"asdf\".\n"
+    "\n"
+    "  \"*.cc\"\n"
+    "      Matches strings ending in the literal \".cc\".\n"
+    "\n"
+    "  \"\\bwin/*\"\n"
+    "      Matches \"win/foo\" and \"foo/win/bar.cc\" but not \"iwin/foo\".\n"
+    "\n"
+    "Sources assignment example\n"
+    "\n"
     "  # Filter out all _win files.\n"
-    "  set_sources_assignment_filter([ \"*_win.cc\", \"*_win.h\" ])\n";
+    "  set_sources_assignment_filter([ \"*_win.cc\", \"*_win.h\" ])\n"
+    "  sources = [ \"a.cc\", \"b_win.cc\" ]\n"
+    "  print(sources)\n"
+    "  # Will print [ \"a.cc\" ]. b_win one was filtered out.\n";
 
 Value RunSetSourcesAssignmentFilter(Scope* scope,
                                     const FunctionCallNode* function,
@@ -643,14 +677,12 @@ struct FunctionInfoInitializer {
 
     INSERT_FUNCTION(Action, true)
     INSERT_FUNCTION(ActionForEach, true)
-    INSERT_FUNCTION(Component, true)
     INSERT_FUNCTION(Copy, true)
     INSERT_FUNCTION(Executable, true)
     INSERT_FUNCTION(Group, true)
     INSERT_FUNCTION(SharedLibrary, true)
     INSERT_FUNCTION(SourceSet, true)
     INSERT_FUNCTION(StaticLibrary, true)
-    INSERT_FUNCTION(Test, true)
 
     INSERT_FUNCTION(Assert, false)
     INSERT_FUNCTION(Config, false)
@@ -742,6 +774,8 @@ Value RunFunction(Scope* scope,
 
     Value result = found_function->second.executed_block_runner(
         function, args.list_value(), &block_scope, err);
+    if (err->has_error())
+      return Value();
 
     if (!block_scope.CheckForUnusedVars(err))
       return Value();

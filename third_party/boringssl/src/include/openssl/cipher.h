@@ -91,6 +91,12 @@ OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_256_gcm(void);
  * ciphertext. */
 OPENSSL_EXPORT const EVP_CIPHER *EVP_enc_null(void);
 
+/* EVP_rc2_40_cbc returns a cipher that implements 40-bit RC2 in CBC mode. This
+ * is obviously very, very weak and is included only in order to read PKCS#12
+ * files, which often encrypt the certificate chain using this cipher. It is
+ * deliberately not exported. */
+const EVP_CIPHER *EVP_rc2_40_cbc(void);
+
 /* EVP_get_cipherbynid returns the cipher corresponding to the given NID, or
  * NULL if no such cipher is known. */
 OPENSSL_EXPORT const EVP_CIPHER *EVP_get_cipherbynid(int nid);
@@ -254,6 +260,11 @@ OPENSSL_EXPORT int EVP_CIPHER_CTX_ctrl(EVP_CIPHER_CTX *ctx, int command,
  * returns one. Pass a non-zero |pad| to enable padding (the default) or zero
  * to disable. */
 OPENSSL_EXPORT int EVP_CIPHER_CTX_set_padding(EVP_CIPHER_CTX *ctx, int pad);
+
+/* EVP_CIPHER_CTX_set_key_length sets the key length for |ctx|. This is only
+ * valid for ciphers that can take a variable length key. It returns one on
+ * success and zero on error. */
+OPENSSL_EXPORT int EVP_CIPHER_CTX_set_key_length(EVP_CIPHER_CTX *ctx, unsigned key_len);
 
 
 /* Cipher accessors. */
@@ -461,6 +472,7 @@ typedef struct evp_cipher_info_st {
 #define CIPHER_F_aead_aes_key_wrap_seal 119
 #define CIPHER_F_aead_aes_key_wrap_init 120
 #define CIPHER_F_aead_aes_key_wrap_open 121
+#define CIPHER_F_EVP_CIPHER_CTX_set_key_length 122
 #define CIPHER_R_WRAP_MODE_NOT_ALLOWED 100
 #define CIPHER_R_AES_KEY_SETUP_FAILED 101
 #define CIPHER_R_INPUT_NOT_INITIALIZED 102
@@ -484,5 +496,6 @@ typedef struct evp_cipher_info_st {
 #define CIPHER_R_UNSUPPORTED_INPUT_SIZE 120
 #define CIPHER_R_UNSUPPORTED_AD_SIZE 121
 #define CIPHER_R_UNSUPPORTED_NONCE_SIZE 122
+#define CIPHER_R_INVALID_KEY_LENGTH 123
 
 #endif  /* OPENSSL_HEADER_CIPHER_H */

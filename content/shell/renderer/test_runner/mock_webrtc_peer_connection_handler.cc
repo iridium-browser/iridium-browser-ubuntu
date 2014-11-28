@@ -4,11 +4,11 @@
 
 #include "content/shell/renderer/test_runner/mock_webrtc_peer_connection_handler.h"
 
-#include "content/shell/renderer/test_runner/WebTestDelegate.h"
 #include "content/shell/renderer/test_runner/mock_constraints.h"
 #include "content/shell/renderer/test_runner/mock_webrtc_data_channel_handler.h"
 #include "content/shell/renderer/test_runner/mock_webrtc_dtmf_sender_handler.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
+#include "content/shell/renderer/test_runner/web_test_delegate.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
@@ -34,7 +34,7 @@ class RTCSessionDescriptionRequestSuccededTask
         request_(request),
         result_(result) {}
 
-  virtual void runIfValid() OVERRIDE { request_.requestSucceeded(result_); }
+  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
 
  private:
   WebRTCSessionDescriptionRequest request_;
@@ -50,7 +50,7 @@ class RTCSessionDescriptionRequestFailedTask
       : WebMethodTask<MockWebRTCPeerConnectionHandler>(object),
         request_(request) {}
 
-  virtual void runIfValid() OVERRIDE { request_.requestFailed("TEST_ERROR"); }
+  virtual void RunIfValid() OVERRIDE { request_.requestFailed("TEST_ERROR"); }
 
  private:
   WebRTCSessionDescriptionRequest request_;
@@ -66,7 +66,7 @@ class RTCStatsRequestSucceededTask
         request_(request),
         response_(response) {}
 
-  virtual void runIfValid() OVERRIDE { request_.requestSucceeded(response_); }
+  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(response_); }
 
  private:
   blink::WebRTCStatsRequest request_;
@@ -83,7 +83,7 @@ class RTCVoidRequestTask
         request_(request),
         succeeded_(succeeded) {}
 
-  virtual void runIfValid() OVERRIDE {
+  virtual void RunIfValid() OVERRIDE {
     if (succeeded_)
       request_.requestSucceeded();
     else
@@ -108,7 +108,7 @@ class RTCPeerConnectionStateTask
         connection_state_(connection_state),
         gathering_state_(gathering_state) {}
 
-  virtual void runIfValid() OVERRIDE {
+  virtual void RunIfValid() OVERRIDE {
     client_->didChangeICEGatheringState(gathering_state_);
     client_->didChangeICEConnectionState(connection_state_);
   }
@@ -129,7 +129,7 @@ class RemoteDataChannelTask
         client_(client),
         delegate_(delegate) {}
 
-  virtual void runIfValid() OVERRIDE {
+  virtual void RunIfValid() OVERRIDE {
     WebRTCDataChannelInit init;
     WebRTCDataChannelHandler* remote_data_channel =
         new MockWebRTCDataChannelHandler(
@@ -160,7 +160,7 @@ bool MockWebRTCPeerConnectionHandler::initialize(
     const WebRTCConfiguration& configuration,
     const WebMediaConstraints& constraints) {
   if (MockConstraints::VerifyConstraints(constraints)) {
-    interfaces_->GetDelegate()->postTask(new RTCPeerConnectionStateTask(
+    interfaces_->GetDelegate()->PostTask(new RTCPeerConnectionStateTask(
         this,
         client_,
         WebRTCPeerConnectionHandlerClient::ICEConnectionStateCompleted,
@@ -179,18 +179,18 @@ void MockWebRTCPeerConnectionHandler::createOffer(
       should_succeed == "true") {
     WebRTCSessionDescription session_description;
     session_description.initialize("offer", "local");
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCSessionDescriptionRequestSuccededTask(
             this, request, session_description));
   } else
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCSessionDescriptionRequestFailedTask(this, request));
 }
 
 void MockWebRTCPeerConnectionHandler::createOffer(
     const WebRTCSessionDescriptionRequest& request,
     const blink::WebRTCOfferOptions& options) {
-  interfaces_->GetDelegate()->postTask(
+  interfaces_->GetDelegate()->PostTask(
       new RTCSessionDescriptionRequestFailedTask(this, request));
 }
 
@@ -200,11 +200,11 @@ void MockWebRTCPeerConnectionHandler::createAnswer(
   if (!remote_description_.isNull()) {
     WebRTCSessionDescription session_description;
     session_description.initialize("answer", "local");
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCSessionDescriptionRequestSuccededTask(
             this, request, session_description));
   } else
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCSessionDescriptionRequestFailedTask(this, request));
 }
 
@@ -213,10 +213,10 @@ void MockWebRTCPeerConnectionHandler::setLocalDescription(
     const WebRTCSessionDescription& local_description) {
   if (!local_description.isNull() && local_description.sdp() == "local") {
     local_description_ = local_description;
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCVoidRequestTask(this, request, true));
   } else
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCVoidRequestTask(this, request, false));
 }
 
@@ -225,10 +225,10 @@ void MockWebRTCPeerConnectionHandler::setRemoteDescription(
     const WebRTCSessionDescription& remote_description) {
   if (!remote_description.isNull() && remote_description.sdp() == "remote") {
     remote_description_ = remote_description;
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCVoidRequestTask(this, request, true));
   } else
-    interfaces_->GetDelegate()->postTask(
+    interfaces_->GetDelegate()->PostTask(
         new RTCVoidRequestTask(this, request, false));
 }
 
@@ -255,7 +255,7 @@ bool MockWebRTCPeerConnectionHandler::addICECandidate(
 bool MockWebRTCPeerConnectionHandler::addICECandidate(
     const WebRTCVoidRequest& request,
     const WebRTCICECandidate& ice_candidate) {
-  interfaces_->GetDelegate()->postTask(
+  interfaces_->GetDelegate()->PostTask(
       new RTCVoidRequestTask(this, request, true));
   return true;
 }
@@ -278,7 +278,7 @@ void MockWebRTCPeerConnectionHandler::getStats(
     const WebRTCStatsRequest& request) {
   WebRTCStatsResponse response = request.createResponse();
   double current_date =
-      interfaces_->GetDelegate()->getCurrentTimeInMillisecond();
+      interfaces_->GetDelegate()->GetCurrentTimeInMillisecond();
   if (request.hasSelector()) {
     // FIXME: There is no check that the fetched values are valid.
     size_t report_index =
@@ -293,14 +293,14 @@ void MockWebRTCPeerConnectionHandler::getStats(
       response.addStatistic(report_index, "type", "video");
     }
   }
-  interfaces_->GetDelegate()->postTask(
+  interfaces_->GetDelegate()->PostTask(
       new RTCStatsRequestSucceededTask(this, request, response));
 }
 
 WebRTCDataChannelHandler* MockWebRTCPeerConnectionHandler::createDataChannel(
     const WebString& label,
     const blink::WebRTCDataChannelInit& init) {
-  interfaces_->GetDelegate()->postTask(
+  interfaces_->GetDelegate()->PostTask(
       new RemoteDataChannelTask(this, client_, interfaces_->GetDelegate()));
 
   return new MockWebRTCDataChannelHandler(
@@ -314,7 +314,7 @@ WebRTCDTMFSenderHandler* MockWebRTCPeerConnectionHandler::createDTMFSender(
 
 void MockWebRTCPeerConnectionHandler::stop() {
   stopped_ = true;
-  task_list_.revokeAll();
+  task_list_.RevokeAll();
 }
 
 }  // namespace content

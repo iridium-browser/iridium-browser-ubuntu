@@ -26,7 +26,7 @@ class BookmarkNodeDataTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     event_source_ = ui::PlatformEventSource::CreateDefault();
-    model_ = client_.CreateModel(false);
+    model_ = client_.CreateModel();
     test::WaitForBookmarkModelToLoad(model_.get());
     bool success = profile_dir_.CreateUniqueTempDir();
     ASSERT_TRUE(success);
@@ -45,7 +45,7 @@ class BookmarkNodeDataTest : public testing::Test {
 
  private:
   base::ScopedTempDir profile_dir_;
-  test::TestBookmarkClient client_;
+  TestBookmarkClient client_;
   scoped_ptr<BookmarkModel> model_;
   scoped_ptr<ui::PlatformEventSource> event_source_;
 

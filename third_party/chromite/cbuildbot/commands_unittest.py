@@ -1,22 +1,28 @@
 #!/usr/bin/python
-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Unittests for commands."""
 
+from __future__ import print_function
+
+import base64
 import os
 import sys
+
+from StringIO import StringIO
 
 import constants
 sys.path.insert(0, constants.SOURCE_ROOT)
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import failures_lib
 from chromite.lib import cros_build_lib_unittest
+from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
 from chromite.lib import git
+from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.scripts import pushimage
@@ -30,13 +36,15 @@ import mock
 class RunBuildScriptTest(cros_test_lib.TempDirTestCase):
   """Test RunBuildScript in a variety of cases."""
 
-  def _assertRunBuildScript(self, in_chroot=False, error=None, raises=None):
+  def _assertRunBuildScript(self, in_chroot=False, error=None, raises=None,
+                            **kwargs):
     """Test the RunBuildScript function.
 
     Args:
       in_chroot: Whether to enter the chroot or not.
       error: error result message to simulate.
       raises: If the command should fail, the exception to be raised.
+      kwargs: Extra kwargs passed to RunBuildScript.
     """
     # Write specified error message to status file.
     def WriteError(_cmd, extra_env=None, **_kwargs):
@@ -45,24 +53,27 @@ class RunBuildScriptTest(cros_test_lib.TempDirTestCase):
         osutils.WriteFile(status_file, error)
 
     buildroot = self.tempdir
-    os.makedirs(os.path.join(buildroot, '.repo'))
+    osutils.SafeMakedirs(os.path.join(buildroot, '.repo'))
     if error is not None:
-      os.makedirs(os.path.join(buildroot, 'chroot', 'tmp'))
+      osutils.SafeMakedirs(os.path.join(buildroot, 'chroot', 'tmp'))
 
     # Run the command, throwing an exception if it fails.
     with cros_build_lib_unittest.RunCommandMock() as m:
       cmd = ['example', 'command']
+      sudo_cmd = ['sudo', '--'] + cmd
       returncode = 1 if raises else 0
       m.AddCmdResult(cmd, returncode=returncode, side_effect=WriteError)
+      m.AddCmdResult(sudo_cmd, returncode=returncode, side_effect=WriteError)
       with mock.patch.object(git, 'ReinterpretPathForChroot',
                              side_effect=lambda x: x):
         with cros_test_lib.LoggingCapturer():
           # If the script failed, the exception should be raised and printed.
           if raises:
             self.assertRaises(raises, commands.RunBuildScript, buildroot,
-                              cmd, enter_chroot=in_chroot)
+                              cmd, enter_chroot=in_chroot, **kwargs)
           else:
-            commands.RunBuildScript(buildroot, cmd, enter_chroot=in_chroot)
+            commands.RunBuildScript(buildroot, cmd, enter_chroot=in_chroot,
+                                    **kwargs)
 
   def testSuccessOutsideChroot(self):
     """Test executing a command outside the chroot."""
@@ -94,6 +105,11 @@ class RunBuildScriptTest(cros_test_lib.TempDirTestCase):
     """Test detecting a package build failure."""
     self._assertRunBuildScript(in_chroot=True, error=constants.CHROME_CP,
                                raises=failures_lib.PackageBuildFailure)
+
+  def testSuccessWithSudo(self):
+    """Test a command run with sudo."""
+    self._assertRunBuildScript(in_chroot=False, sudo=True)
+    self._assertRunBuildScript(in_chroot=True, sudo=True)
 
 
 class RunTestSuiteTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
@@ -241,6 +257,23 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     commands.UprevPackages(self._buildroot, [self._board], self._overlays)
     self.assertCommandContains(['--boards=%s' % self._board, 'commit'])
 
+  def testVerifyBinpkgMissing(self):
+    """Test case where binpkg is missing."""
+    self.rc.AddCmdResult(partial_mock.ListRegex(r'emerge'),
+        output='\n[ebuild] %s' % constants.CHROME_CP)
+    self.assertRaises(commands.MissingBinpkg, commands.VerifyBinpkg,
+        self._buildroot, self._board, constants.CHROME_CP)
+
+  def testVerifyBinpkgPresent(self):
+    """Test case where binpkg is present."""
+    self.rc.AddCmdResult(partial_mock.ListRegex(r'emerge'),
+        output='\n[binary] %s' % constants.CHROME_CP)
+    commands.VerifyBinpkg(self._buildroot, self._board, constants.CHROME_CP)
+
+  def testVerifyChromeNotInstalled(self):
+    """Test case where Chrome is not installed at all."""
+    commands.VerifyBinpkg(self._buildroot, self._board, constants.CHROME_CP)
+
   def testBuild(self, default=False, **kwargs):
     """Base case where Build is called with minimal options."""
     kwargs.setdefault('build_autotest', default)
@@ -249,6 +282,41 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     kwargs.setdefault('skip_chroot_upgrade', default)
     commands.Build(buildroot=self._buildroot, board='x86-generic', **kwargs)
     self.assertCommandContains(['./build_packages'])
+
+  def testGetFirmwareVersions(self):
+    self.rc.SetDefaultCmdResult(output='''
+
+flashrom(8): a273d7fd6663c665176159496bc014ff */build/nyan/usr/sbin/flashrom
+             ELF 32-bit LSB executable, ARM, EABI5 version 1 (SYSV), statically linked, for GNU/Linux 2.6.16, BuildID[sha1]=61d8a9676e433414fb0e22fa819b55be86329e44, stripped
+
+
+BIOS image:   4aba4c07a65b7bf82d72d8ed892f5dc5 */build/nyan/tmp/portage/chromeos-base/chromeos-firmware-nyan-0.0.1-r20/work/chromeos-firmware-nyan-0.0.1/.dist/nyan_fw_5771.10.0.tbz2/image.bin
+BIOS version: Google_Nyan.5771.10.0
+EC image:     7b6bb5035fa8101b41c954bce5250dae */build/nyan/tmp/portage/chromeos-base/chromeos-firmware-nyan-0.0.1-r20/work/chromeos-firmware-nyan-0.0.1/.dist/nyan_ec_5771.10.0.tbz2/ec.bin
+EC version:   nyan_v1.1.1782-23f1337
+
+Package Content:
+d7124c9a2680ff57f1c7d6521ac5ef8c *./mosys
+ad9520c70add670d8f2770a2a3c4115a *./gbb_utility
+7b6bb5035fa8101b41c954bce5250dae *./ec.bin
+a273d7fd6663c665176159496bc014ff *./flashrom
+d149f6413749ca6a0edddd52926f95ca *./dump_fmap
+5bfe13d9b7fef1dfd9d3dac185f94994 *./crossystem
+3c3a99346d1ca1273cbcd86c104851ff *./shflags
+4aba4c07a65b7bf82d72d8ed892f5dc5 *./bios.bin
+2a484f3e107bf27a4d1068e03e74803c *./common.sh
+995a97518f90541d37c3f57a336d37db *./vpd
+b9270e726180af1ed59077d1ab2fc688 *./crosfw.sh
+f6b0b80d5f2d9a2fb41ebb6e2cee7ad8 *./updater4.sh
+4363fcfd6849b2ab1a7320b1c98a11f2 *./crosutil.sh
+''')
+    build_sbin = os.path.join(self._buildroot, constants.DEFAULT_CHROOT_DIR,
+                              'build', self._board, 'usr', 'sbin')
+    osutils.Touch(os.path.join(build_sbin, 'chromeos-firmwareupdate'),
+                  makedirs=True)
+    result = commands.GetFirmwareVersions(self._buildroot, self._board)
+    versions = ('Google_Nyan.5771.10.0', 'nyan_v1.1.1782-23f1337')
+    self.assertEquals(result, versions)
 
   def testBuildMaximum(self):
     """Base case where Build is called with all options (except extra_env)."""
@@ -319,15 +387,17 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     self.assertCommandContains(['./build_image'])
 
   def _TestChromeLKGM(self, chrome_revision):
-    """Helper method for testing the GetChromeLKGM method.
-
-    Args:
-      chrome_revision: either a number or None.
-    """
+    """Helper method for testing the GetChromeLKGM method."""
     chrome_lkgm = '3322.0.0'
-    output = '\n\n%s\n' % chrome_lkgm
-    self.rc.AddCmdResult(partial_mock.In('svn'), output=output)
-    self.assertEqual(chrome_lkgm, commands.GetChromeLKGM(chrome_revision))
+    url = '%s/+/%s/%s?format=text' % (
+        constants.CHROMIUM_SRC_PROJECT,
+        chrome_revision or 'refs/heads/master',
+        constants.PATH_TO_CHROME_LKGM)
+    with mock.patch.object(
+        gob_util, 'FetchUrl',
+        return_value=StringIO(base64.b64encode(chrome_lkgm))) as patcher:
+      self.assertEqual(chrome_lkgm, commands.GetChromeLKGM(chrome_revision))
+      patcher.assert_called_with(constants.EXTERNAL_GOB_HOST, url)
 
   def testChromeLKGM(self):
     """Verifies that we can get the chrome lkgm without a chrome revision."""
@@ -335,8 +405,7 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
 
   def testChromeLKGMWithRevision(self):
     """Verifies that we can get the chrome lkgm with a chrome revision."""
-    self._TestChromeLKGM(1234)
-    self.assertCommandContains(['svn', 'cat', '-r', '1234'])
+    self._TestChromeLKGM('deadbeef' * 5)
 
   def testAbortCQHWTests(self):
     commands.AbortCQHWTests('my-version', debug=False)
@@ -488,7 +557,6 @@ class UnmockedTests(cros_test_lib.TempDirTestCase):
     files = ('..|up', 'f.txt|MY FILE', 'm.log|MONKEY', 'b.bin|Yander',)
     commands.GenerateHtmlIndex(index, files)
     html = osutils.ReadFile(index)
-    osutils.WriteFile('/tmp/foo.html', html)
     for f in files:
       a = f.split('|')
       # TODO(build): Use assertIn w/python-2.7.
@@ -561,6 +629,8 @@ class ImageTestCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
     self._board = 'test-board'
     self._image_dir = 'image-dir'
     self._result_dir = 'result-dir'
+    self.PatchObject(git, 'ReinterpretPathForChroot',
+                     side_effect=lambda x: x)
 
   def testRunTestImage(self):
     """Verifies RunTestImage calls into test-image script properly."""
@@ -568,10 +638,14 @@ class ImageTestCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
                           self._result_dir)
     self.assertCommandContains(
         [
+          'sudo', '--',
+          os.path.join(self._build, 'chromite', 'bin', 'test_image'),
           '--board', self._board,
-          '--test_results_root', self._result_dir,
-          self._image_dir,
+          '--test_results_root',
+          cros_build_lib.ToChrootPath(self._result_dir),
+          cros_build_lib.ToChrootPath(self._image_dir),
         ],
+        enter_chroot=True,
     )
 
 

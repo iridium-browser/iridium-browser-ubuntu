@@ -15,7 +15,7 @@ config("openssl_config") {
 
 # Config internal to this build file.
 config("openssl_internal_config") {
-  visibility = ":*"  # Only targets in this file can depend on this.
+  visibility = [ ":*" ]  # Only targets in this file can depend on this.
 }
 
 # The list of BoringSSL files is kept in boringssl.gypi.
@@ -28,10 +28,13 @@ gypi_values = exec_script(
 component("boringssl") {
   sources = gypi_values.boringssl_lib_sources
 
-  direct_dependent_configs = [ ":openssl_config" ]
+  public_configs = [ ":openssl_config" ]
 
   cflags = []
-  defines = [ "BORINGSSL_IMPLEMENTATION" ]
+  defines = [
+    "BORINGSSL_IMPLEMENTATION",
+    "BORINGSSL_NO_STATIC_INITIALIZER",
+  ]
   if (is_component_build) {
     defines += [
       "BORINGSSL_SHARED_LIBRARY",

@@ -154,6 +154,7 @@ TranslatorPatterns = [
   # chromium/src/ppapi/native_client/src/trusted/plugin/pnacl_options.cc
   ( '(-sfi-.+)',        "env.append('LLC_FLAGS_EXTRA', $0)"),
   ( '(-mtls-use-call)', "env.append('LLC_FLAGS_EXTRA', $0)"),
+  ( '(-force-align-stack)', "env.append('LLC_FLAGS_EXTRA', $0)"),
   # These flags are usually used for linktime dead code/data
   # removal but also help with reloc overflows on ARM
   ( '(-fdata-sections)',     "env.append('LLC_FLAGS_EXTRA', $0)"),
@@ -248,6 +249,14 @@ def SetUpArch():
       # Once PNaCl's build of compiler-rt (libgcc.a) defines __aeabi_*
       # functions, we can drop the following ad-hoc option.
       'ARM_NONSFI': ['-arm-enable-aeabi-functions=0'],
+      # To translate x86-32 binary, we set -malign-double option so that the
+      # backend's datalayout matches the datalayout for "le32" used by the
+      # frontend. The le32 datalayout uses 8-byte alignment for the types i64
+      # and double. i386's datalayout usually uses only 4-byte alignment for
+      # these types, but -malign-double changes that to 8-byte alignment.
+      # This is only needed when translating LLVM IR that hasn't had PNaCl's IR
+      # simplification passes applied to it.
+      'X8632_NONSFI': ['-malign-double'],
       }
   env.set('LLC_FLAGS_ARCH', *llc_flags_map.get(env.getone('ARCH'), []))
   # When linking against a host OS's libc (such as Linux glibc), don't
@@ -429,7 +438,7 @@ def RunHostLD(infile, outfile):
     driver_tools.Run(['objcopy', '--redefine-sym', '_start=_user_start',
                       infile])
   lib_dir = (env.getone('BASE_LIB_NATIVE')
-             + 'x86-32-%s' % env.getone('TARGET_OS'))
+             + 'x86-32-%s/lib' % env.getone('TARGET_OS'))
   args = ['gcc', '-m32', infile, '-o', outfile,
           os.path.join(lib_dir, 'unsandboxed_irt.o'),
           os.path.join(lib_dir, 'irt_query_list.o'),

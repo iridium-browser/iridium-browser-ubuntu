@@ -43,7 +43,6 @@ using namespace HTMLNames;
 inline HTMLEmbedElement::HTMLEmbedElement(Document& document, bool createdByParser)
     : HTMLPlugInElement(embedTag, document, createdByParser, ShouldPreferPlugInsForImages)
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<HTMLEmbedElement> HTMLEmbedElement::create(Document& document, bool createdByParser)
@@ -91,7 +90,7 @@ void HTMLEmbedElement::collectStyleForPresentationAttribute(const QualifiedName&
 void HTMLEmbedElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == typeAttr) {
-        m_serviceType = value.string().lower();
+        m_serviceType = value.lower();
         size_t pos = m_serviceType.find(";");
         if (pos != kNotFound)
             m_serviceType = m_serviceType.left(pos);

@@ -22,11 +22,6 @@ PrintQueriesQueue::~PrintQueriesQueue() {
   queued_queries_.clear();
 }
 
-void PrintQueriesQueue::SetDestination(PrintDestinationInterface* destination) {
-  base::AutoLock lock(lock_);
-  destination_ = destination;
-}
-
 void PrintQueriesQueue::QueuePrinterQuery(PrinterQuery* job) {
   base::AutoLock lock(lock_);
   DCHECK(job);
@@ -49,10 +44,11 @@ scoped_refptr<PrinterQuery> PrintQueriesQueue::PopPrinterQuery(
   return NULL;
 }
 
-scoped_refptr<PrinterQuery> PrintQueriesQueue::CreatePrinterQuery() {
-  scoped_refptr<PrinterQuery> job = new printing::PrinterQuery;
-  base::AutoLock lock(lock_);
-  job->SetWorkerDestination(destination_);
+scoped_refptr<PrinterQuery> PrintQueriesQueue::CreatePrinterQuery(
+    int render_process_id,
+    int render_view_id) {
+  scoped_refptr<PrinterQuery> job =
+      new printing::PrinterQuery(render_process_id, render_view_id);
   return job;
 }
 
@@ -61,15 +57,13 @@ void PrintQueriesQueue::Shutdown() {
   {
     base::AutoLock lock(lock_);
     queued_queries_.swap(queries_to_stop);
-    destination_ = NULL;
   }
   // Stop all pending queries, requests to generate print preview do not have
   // corresponding PrintJob, so any pending preview requests are not covered
   // by PrintJobManager::StopJobs and should be stopped explicitly.
   for (PrinterQueries::iterator itr = queries_to_stop.begin();
        itr != queries_to_stop.end(); ++itr) {
-    (*itr)->message_loop()->PostTask(
-        FROM_HERE, base::Bind(&PrinterQuery::StopWorker, *itr));
+    (*itr)->PostTask(FROM_HERE, base::Bind(&PrinterQuery::StopWorker, *itr));
   }
 }
 
@@ -83,7 +77,7 @@ PrintJobManager::~PrintJobManager() {
 
 scoped_refptr<PrintQueriesQueue> PrintJobManager::queue() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (!queue_)
+  if (!queue_.get())
     queue_ = new PrintQueriesQueue();
   return queue_;
 }
@@ -94,7 +88,7 @@ void PrintJobManager::Shutdown() {
   is_shutdown_ = true;
   registrar_.RemoveAll();
   StopJobs(true);
-  if (queue_)
+  if (queue_.get())
     queue_->Shutdown();
   queue_ = NULL;
 }

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="extension_error.css">
 <link rel="stylesheet" href="extension_error_overlay.css">
 <link rel="stylesheet" href="extension_load_error.css">
+<link rel="stylesheet" href="extension_options_overlay.css">
 <link rel="stylesheet" href="pack_extension_overlay.css">
 <link rel="stylesheet" href="chrome://resources/css/alert_overlay.css">
 <link rel="stylesheet" href="chrome://resources/css/chrome_shared.css">
@@ -47,6 +48,7 @@
 <div id="overlay" class="overlay" hidden>
   <include src="extension_commands_overlay.html">
   <include src="extension_error_overlay.html">
+  <include src="extension_options_overlay.html">
   <include src="pack_extension_overlay.html">
   <include src="../../../../ui/webui/resources/html/alert_overlay.html">
 <if expr="chromeos">
@@ -131,14 +133,21 @@
           <span class="extension-title"></span>
           <span class="extension-version"></span>
         </div>
-        <p class="extension-description">
-          <span></span>
-          <a class="permissions-link"
-              i18n-content="extensionSettingsPermissions"
-              href="#">
-          </a>
+        <p class="corrupt-install-message"
+           i18n-content="extensionSettingsCorruptInstall" hidden></p>
+        <p class="extension-description"></p>
+        <div class="action-links">
+          <button class="permissions-link link-button"
+                  i18n-content="extensionSettingsPermissions"></button>
+          <button class="options-link link-button"
+                  i18n-content="extensionSettingsOptions" hidden></button>
           <a class="site-link" target="_parent" hidden></a>
-        </p>
+          <button class="launch-link link-button"
+                  i18n-content="extensionSettingsLaunch" hidden></button>
+          <button class="reload-link link-button"
+                  i18n-content="extensionSettingsReloadUnpacked" hidden>
+          </button>
+        </div>
         <div class="permanent-warnings">
           <div class="extension-warnings" hidden>
             <span i18n-content="extensionSettingsWarningsTitle"></span>
@@ -148,14 +157,6 @@
             <span i18n-content="extensionSettingsSuspiciousInstall"></span>
             <a target="_blank" class="learn-more-link"
                 i18n-values="href:extensionSettingsSuspiciousInstallHelpUrl"
-                i18n-content="extensionSettingsLearnMore"
-                href="#">
-            </a>
-          </div>
-          <div class="corrupt-install-message" hidden>
-            <span i18n-content="extensionSettingsCorruptInstall"></span>
-            <a target="_blank" class="learn-more-link"
-                i18n-values="href:extensionSettingsCorruptInstallHelpUrl"
                 i18n-content="extensionSettingsLearnMore"
                 href="#">
             </a>
@@ -210,27 +211,22 @@
               <span i18n-content="extensionSettingsAllowOnAllUrls"></span>
             </label>
           </div>
-          <span class="optional-controls-disableable">
-            <label class="file-access-control" hidden>
+          <div class="checkbox file-access-control" hidden>
+            <label>
               <input type="checkbox">
               <span i18n-content="extensionSettingsAllowFileAccess"></span>
             </label>
-            <a class="reload-link"
-                i18n-content="extensionSettingsReloadUnpacked"
-                href="#" hidden></a>
-            <a class="launch-link" i18n-content="extensionSettingsLaunch"
-                href="#" hidden></a>
-          </span>
-          <a class="options-link" i18n-content="extensionSettingsOptions"
-              href="#" hidden></a>
+          </div>
         </div>
         <div class="butter-bar"
             i18n-values=".innerHTML:extensionSettingsIncognitoWarning" hidden>
         </div>
       </div>
       <div class="enable-controls">
-        <a class="terminated-reload-link" href="#"
-            i18n-content="extensionSettingsReloadTerminated" hidden></a>
+        <div class="terminated-reload-link link-button"
+            i18n-content="extensionSettingsReloadTerminated" hidden></div>
+        <div class="corrupted-repair-button link-button"
+            i18n-content="extensionSettingsRepairCorrupted" hidden></div>
         <div class="checkbox enable-checkbox" hidden><label>
           <input type="checkbox">
           <span class="enable-checkbox-text">

@@ -3,8 +3,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import sys
+
 from buildbot_lib import (
-    BuildContext, BuildStatus, ParseStandardCommandLine,
+    BuildContext, BuildStatus, Command, ParseStandardCommandLine,
     RemoveSconsBuildDirectories, RunBuild, SetupLinuxEnvironment,
     SetupMacEnvironment, SetupWindowsEnvironment, SCons, Step )
 
@@ -14,12 +16,17 @@ def RunSconsTests(status, context):
   with Step('clobber scons', status):
     RemoveSconsBuildDirectories()
 
+  # Run checkdeps script to vet #includes.
+  with Step('checkdeps', status):
+    Command(context, cmd=[sys.executable, 'tools/checkdeps/checkdeps.py'])
+
   # Unlike their arm counterparts we do not run trusted tests on x86 bots.
   # Trusted tests get plenty of coverage by other bots, e.g. nacl-gcc bots.
   # We make the assumption here that there are no "exotic tests" which
   # are trusted in nature but are somehow depedent on the untrusted TC.
-  flags_build = ['skip_trusted_tests=1', 'do_not_run_tests=1']
-  flags_run = ['skip_trusted_tests=1']
+  flags_build = ['skip_trusted_tests=1', 'do_not_run_tests=1',
+                 'naclsdk_validate=0']
+  flags_run = ['skip_trusted_tests=1', 'naclsdk_validate=0']
   smoke_tests = ['small_tests', 'medium_tests']
 
   arch = context['default_scons_platform']
@@ -114,6 +121,11 @@ def RunSconsTests(status, context):
       SCons(context, parallel=True, mode=irt_mode,
             args=flags_run + ['pnacl_unsandboxed=1'] + tests)
 
+  # Test MinSFI.
+  if not context.Windows() and (arch == 'x86-32' or arch == 'x86-64'):
+    with Step('minsfi_tests ' + arch, status, halt_on_fail=False):
+      SCons(context, parallel=True,
+            args=flags_run + ['minsfi=1', 'minsfi_tests'])
 
 def Main():
   context = BuildContext()

@@ -7,8 +7,10 @@
 
 #include "athena/activity/public/activity.h"
 #include "athena/activity/public/activity_view_model.h"
-#include "base/memory/scoped_ptr.h"
-#include "ui/gfx/image/image_skia.h"
+
+namespace gfx {
+class ImageSkia;
+}
 
 namespace athena {
 namespace test {
@@ -21,23 +23,28 @@ class SampleActivity : public Activity,
                  const base::string16& title);
   virtual ~SampleActivity();
 
- private:
   // athena::Activity:
   virtual athena::ActivityViewModel* GetActivityViewModel() OVERRIDE;
   virtual void SetCurrentState(Activity::ActivityState state) OVERRIDE;
   virtual ActivityState GetCurrentState() OVERRIDE;
   virtual bool IsVisible() OVERRIDE;
   virtual ActivityMediaState GetMediaState() OVERRIDE;
+  virtual aura::Window* GetWindow() OVERRIDE;
+  virtual content::WebContents* GetWebContents() OVERRIDE;
 
   // athena::ActivityViewModel:
   virtual void Init() OVERRIDE;
   virtual SkColor GetRepresentativeColor() const OVERRIDE;
   virtual base::string16 GetTitle() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual bool UsesFrame() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
-  virtual void CreateOverviewModeImage() OVERRIDE;
+  virtual views::Widget* CreateWidget() OVERRIDE;
   virtual gfx::ImageSkia GetOverviewModeImage() OVERRIDE;
+  virtual void PrepareContentsForOverview() OVERRIDE;
+  virtual void ResetContentsView() OVERRIDE;
 
+ private:
   SkColor color_;
   SkColor contents_color_;
   base::string16 title_;

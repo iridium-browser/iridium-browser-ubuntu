@@ -51,12 +51,13 @@ class InlineLoginHandlerImpl : public InlineLoginHandler,
   virtual void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& url,
-      content::PageTransition transition_type) OVERRIDE;
+      ui::PageTransition transition_type) OVERRIDE;
 
-  base::WeakPtrFactory<InlineLoginHandlerImpl> weak_factory_;
   // True if the user has navigated to untrusted domains during the signin
   // process.
   bool confirm_untrusted_signin_;
+
+  base::WeakPtrFactory<InlineLoginHandlerImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InlineLoginHandlerImpl);
 };

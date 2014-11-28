@@ -27,8 +27,8 @@
 #include "base/debug/alias.h"
 #include "base/debug/stack_trace.h"
 #include "base/environment.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -450,10 +450,8 @@ class NSSInitSingleton {
     return crypto::ScopedPK11Slot(slot);
   }
 
-  bool InitializeNSSForChromeOSUser(
-      const std::string& email,
-      const std::string& username_hash,
-      const base::FilePath& path) {
+  bool InitializeNSSForChromeOSUser(const std::string& username_hash,
+                                    const base::FilePath& path) {
     DCHECK(thread_checker_.CalledOnValidThread());
     if (chromeos_user_map_.find(username_hash) != chromeos_user_map_.end()) {
       // This user already exists in our mapping.
@@ -750,12 +748,12 @@ class NSSInitSingleton {
                            0, NSS_USE_ALG_IN_CERT_SIGNATURE);
 
     // The UMA bit is conditionally set for this histogram in
-    // chrome/common/startup_metric_utils.cc .
-    HISTOGRAM_CUSTOM_TIMES("Startup.SlowStartupNSSInit",
-                           base::TimeTicks::Now() - start_time,
-                           base::TimeDelta::FromMilliseconds(10),
-                           base::TimeDelta::FromHours(1),
-                           50);
+    // components/startup_metric_utils.cc .
+    LOCAL_HISTOGRAM_CUSTOM_TIMES("Startup.SlowStartupNSSInit",
+                                 base::TimeTicks::Now() - start_time,
+                                 base::TimeDelta::FromMilliseconds(10),
+                                 base::TimeDelta::FromHours(1),
+                                 50);
   }
 
   // NOTE(willchan): We don't actually execute this code since we leak NSS to
@@ -1045,12 +1043,10 @@ void InitializeTPMTokenAndSystemSlot(
                                                         callback);
 }
 
-bool InitializeNSSForChromeOSUser(
-    const std::string& email,
-    const std::string& username_hash,
-    const base::FilePath& path) {
-  return g_nss_singleton.Get().InitializeNSSForChromeOSUser(
-      email, username_hash, path);
+bool InitializeNSSForChromeOSUser(const std::string& username_hash,
+                                  const base::FilePath& path) {
+  return g_nss_singleton.Get().InitializeNSSForChromeOSUser(username_hash,
+                                                            path);
 }
 
 bool ShouldInitializeTPMForChromeOSUser(const std::string& username_hash) {

@@ -21,7 +21,9 @@
 
 namespace cc {
 
-ScrollAndScaleSet::ScrollAndScaleSet() {}
+ScrollAndScaleSet::ScrollAndScaleSet()
+    : page_scale_delta(1.f), top_controls_delta(0.f) {
+}
 
 ScrollAndScaleSet::~ScrollAndScaleSet() {}
 
@@ -1094,7 +1096,7 @@ static inline void CalculateAnimationContentsScale(
   }
 
   float layer_maximum_animated_scale = 0.f;
-  if (!layer->layer_animation_controller()->MaximumScale(
+  if (!layer->layer_animation_controller()->MaximumTargetScale(
           &layer_maximum_animated_scale)) {
     *combined_maximum_animation_contents_scale = 0.f;
     return;
@@ -1945,8 +1947,11 @@ static void CalculateDrawPropertiesInternal(
         // here, or DCHECK that the transform is invertible.
       }
 
+      gfx::Rect surface_clip_rect_in_target_space = gfx::IntersectRects(
+          data_from_ancestor.clip_rect_of_target_surface_in_target_space,
+          ancestor_clip_rect_in_target_space);
       gfx::Rect projected_surface_rect = MathUtil::ProjectEnclosingClippedRect(
-          inverse_surface_draw_transform, ancestor_clip_rect_in_target_space);
+          inverse_surface_draw_transform, surface_clip_rect_in_target_space);
 
       if (layer_draw_properties.num_unclipped_descendants > 0) {
         // If we have unclipped descendants, we cannot count on the render
@@ -2327,7 +2332,7 @@ static void CalculateDrawPropertiesInternal(
     layer->render_target()->render_surface()->
         AddContributingDelegatedRenderPassLayer(layer);
   }
-}
+}  // NOLINT(readability/fn_size)
 
 template <typename LayerType, typename RenderSurfaceLayerListType>
 static void ProcessCalcDrawPropsInputs(

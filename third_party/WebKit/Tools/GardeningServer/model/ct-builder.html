@@ -5,11 +5,14 @@ found in the LICENSE file.
 -->
 
 <script>
-function CTBuilder(masterUrl, builder, firstFailingBuild) {
+function CTBuilder(masterUrl, builder, firstFailingBuild, failingBuildCount) {
   this.masterUrl = masterUrl;
   this.builder = builder;
   this.firstFailingBuild = firstFailingBuild;
-  this.buildUrl = "{1}/builders/{2}/builds/{3}".assign(
-      masterUrl, encodeURIComponent(builder), firstFailingBuild);
+  this.failingBuildCount = failingBuildCount;
+  this.buildUrl = "{1}/builders/{2}".assign(
+      masterUrl, encodeURIComponent(builder));
+  if (firstFailingBuild)
+      this.buildUrl += "/builds/" + firstFailingBuild;
 }
 </script>

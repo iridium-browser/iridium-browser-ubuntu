@@ -20,69 +20,59 @@ static void fx_info_callback(const char *msg, void *client_data)
 {
     (void)client_data;
 }
-typedef struct {
-    const unsigned char* src_data;
-    int					 src_size;
-    int					 offset;
-} decodeData;
-static OPJ_SIZE_T opj_read_from_memory (void * p_buffer, OPJ_SIZE_T p_nb_bytes,  decodeData* srcData)
+struct DecodeData {
+    unsigned char* src_data;
+    OPJ_SIZE_T     src_size;
+    OPJ_SIZE_T     offset;
+};
+static OPJ_SIZE_T opj_read_from_memory (void * p_buffer, OPJ_SIZE_T p_nb_bytes,  void* p_user_data)
 {
-    if(srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
+    DecodeData* srcData = static_cast<DecodeData*>(p_user_data);
+    if (srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
         return -1;
     }
-    OPJ_SIZE_T readlength = p_nb_bytes;
-    OPJ_SIZE_T bufferLength = (OPJ_SIZE_T)(srcData->src_size - srcData->offset);
-    if(bufferLength <= 0) {
-        return 0;
-    }
-    if(bufferLength <= p_nb_bytes) {
-        readlength = bufferLength;
-    }
-    memcpy(p_buffer, &(srcData->src_data[srcData->offset]), readlength);
-    srcData->offset += (int)readlength;
+    OPJ_SIZE_T bufferLength = srcData->src_size - srcData->offset;
+    OPJ_SIZE_T readlength = p_nb_bytes < bufferLength ? p_nb_bytes : bufferLength;
+    memcpy(p_buffer, &srcData->src_data[srcData->offset], readlength);
+    srcData->offset += readlength;
     return readlength;
 }
-static OPJ_SIZE_T opj_write_from_memory (void * p_buffer, OPJ_SIZE_T p_nb_bytes, decodeData* srcData)
+static OPJ_SIZE_T opj_write_from_memory (void * p_buffer, OPJ_SIZE_T p_nb_bytes, void* p_user_data)
 {
-    if(srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
+    DecodeData* srcData = static_cast<DecodeData*>(p_user_data);
+    if (srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
         return -1;
     }
-    OPJ_SIZE_T writeLength = p_nb_bytes;
-    OPJ_SIZE_T bufferLength = (OPJ_SIZE_T)(srcData->src_size - srcData->offset);
-    if(bufferLength <= p_nb_bytes) {
-        writeLength = bufferLength;
-    }
-    memcpy((void*&)(srcData->src_data[srcData->offset]), p_buffer, writeLength);
-    srcData->offset += (int)writeLength;
+    OPJ_SIZE_T bufferLength = srcData->src_size - srcData->offset;
+    OPJ_SIZE_T writeLength = p_nb_bytes < bufferLength ? p_nb_bytes : bufferLength;
+    memcpy(&srcData->src_data[srcData->offset], p_buffer, writeLength);
+    srcData->offset += writeLength;
     return writeLength;
 }
-static OPJ_OFF_T opj_skip_from_memory (OPJ_OFF_T p_nb_bytes, decodeData* srcData)
+static OPJ_OFF_T opj_skip_from_memory (OPJ_OFF_T p_nb_bytes, void* p_user_data)
 {
-    if(srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
+    DecodeData* srcData = static_cast<DecodeData*>(p_user_data);
+    if (srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
         return -1;
     }
-    OPJ_OFF_T postion = srcData->offset + p_nb_bytes;
-    if(postion < 0 ) {
-        postion = 0;
-    } else if (postion > srcData->src_size) {
-    }
-    srcData->offset = (int)postion;
-    return p_nb_bytes;
+    OPJ_SIZE_T bufferLength = srcData->src_size - srcData->offset;
+    OPJ_SIZE_T skipLength = p_nb_bytes < bufferLength ? p_nb_bytes : bufferLength;
+    srcData->offset += skipLength;
+    return skipLength;
 }
-static OPJ_BOOL opj_seek_from_memory (OPJ_OFF_T p_nb_bytes, decodeData * srcData)
+static OPJ_BOOL opj_seek_from_memory (OPJ_OFF_T p_nb_bytes, void* p_user_data)
 {
-    if(srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
-        return -1;
+    DecodeData* srcData = static_cast<DecodeData*>(p_user_data);
+    if (srcData == NULL || srcData->src_size == 0 || srcData->src_data == NULL || srcData->offset >= srcData->src_size) {
+        return OPJ_FALSE;
     }
-    srcData->offset = (int)p_nb_bytes;
-    if(srcData->offset < 0) {
-        srcData->offset = 0;
-    } else if(srcData->offset > srcData->src_size) {
-        srcData->offset = srcData->src_size;
+    if (p_nb_bytes >= srcData->src_size) {
+        return OPJ_FALSE;
     }
+    srcData->offset = p_nb_bytes;
     return OPJ_TRUE;
 }
-opj_stream_t* fx_opj_stream_create_memory_stream (decodeData* data,	OPJ_SIZE_T p_size, 	OPJ_BOOL p_is_read_stream)
+opj_stream_t* fx_opj_stream_create_memory_stream (DecodeData* data,	OPJ_SIZE_T p_size, 	OPJ_BOOL p_is_read_stream)
 {
     opj_stream_t* l_stream = 00;
     if (!data || ! data->src_data || data->src_size <= 0 ) {
@@ -92,12 +82,12 @@ opj_stream_t* fx_opj_stream_create_memory_stream (decodeData* data,	OPJ_SIZE_T p
     if (! l_stream) {
         return NULL;
     }
-    opj_stream_set_user_data_v3(l_stream, data, NULL);
+    opj_stream_set_user_data(l_stream, data, NULL);
     opj_stream_set_user_data_length(l_stream, data->src_size);
-    opj_stream_set_read_function(l_stream, (opj_stream_read_fn) opj_read_from_memory);
-    opj_stream_set_write_function(l_stream, (opj_stream_write_fn) opj_write_from_memory);
-    opj_stream_set_skip_function(l_stream, (opj_stream_skip_fn) opj_skip_from_memory);
-    opj_stream_set_seek_function(l_stream, (opj_stream_seek_fn) opj_seek_from_memory);
+    opj_stream_set_read_function(l_stream, opj_read_from_memory);
+    opj_stream_set_write_function(l_stream, opj_write_from_memory);
+    opj_stream_set_skip_function(l_stream, opj_skip_from_memory);
+    opj_stream_set_seek_function(l_stream, opj_seek_from_memory);
     return l_stream;
 }
 static void sycc_to_rgb(int offset, int upb, int y, int cb, int cr,
@@ -581,22 +571,26 @@ CJPX_Decoder::~CJPX_Decoder()
 }
 FX_BOOL CJPX_Decoder::Init(const unsigned char* src_data, int src_size)
 {
-    opj_dparameters_t parameters;
+    static const unsigned char szJP2Header[] = { 0x00, 0x00, 0x00, 0x0c, 0x6a, 0x50, 0x20, 0x20, 0x0d, 0x0a, 0x87, 0x0a };
+    if (!src_data || src_size < sizeof(szJP2Header)) {
+        return FALSE;
+    }
     image = NULL;
     m_SrcData = src_data;
     m_SrcSize = src_size;
-    decodeData srcData;
+    DecodeData srcData;
     srcData.offset  = 0;
     srcData.src_size = src_size;
-    srcData.src_data = src_data;
+    srcData.src_data = const_cast<unsigned char*>(src_data);
     l_stream = fx_opj_stream_create_memory_stream(&srcData, OPJ_J2K_STREAM_CHUNK_SIZE, 1);
     if (l_stream == NULL) {
         return FALSE;
     }
+    opj_dparameters_t parameters;
     opj_set_default_decoder_parameters(&parameters);
     parameters.decod_format = 0;
     parameters.cod_format = 3;
-    if(FXSYS_memcmp32(m_SrcData, "\x00\x00\x00\x0c\x6a\x50\x20\x20\x0d\x0a\x87\x0a", 12) == 0) {
+    if(FXSYS_memcmp32(m_SrcData, szJP2Header, sizeof(szJP2Header)) == 0) {
         l_codec = opj_create_decompress(OPJ_CODEC_JP2);
         parameters.decod_format = 1;
     } else {
@@ -615,11 +609,13 @@ FX_BOOL CJPX_Decoder::Init(const unsigned char* src_data, int src_size)
         image = NULL;
         return FALSE;
     }
+/*
     if(this->m_useColorSpace) {
         image->useColorSpace = 1;
     } else {
         image->useColorSpace = 0;
     }
+*/
     if (!parameters.nb_tile_to_decode) {
         if (!opj_set_decode_area(l_codec, image, parameters.DA_x0,
                                     parameters.DA_y0, parameters.DA_x1, parameters.DA_y1)) {
@@ -649,7 +645,8 @@ FX_BOOL CJPX_Decoder::Init(const unsigned char* src_data, int src_size)
     if(image->color_space == OPJ_CLRSPC_SYCC) {
         color_sycc_to_rgb(image);
     }
-    if(image->icc_profile_buf && !image->useColorSpace) {
+    //if(image->icc_profile_buf && !image->useColorSpace) {
+    if(image->icc_profile_buf) {
         FX_Free(image->icc_profile_buf);
         image->icc_profile_buf = NULL;
         image->icc_profile_len = 0;

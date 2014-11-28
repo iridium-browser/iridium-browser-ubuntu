@@ -42,8 +42,10 @@ template <DemuxerStream::Type StreamType>
 DecoderStream<StreamType>::DecoderStream(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     ScopedVector<Decoder> decoders,
-    const SetDecryptorReadyCB& set_decryptor_ready_cb)
+    const SetDecryptorReadyCB& set_decryptor_ready_cb,
+    const scoped_refptr<MediaLog>& media_log)
     : task_runner_(task_runner),
+      media_log_(media_log),
       state_(STATE_UNINITIALIZED),
       stream_(NULL),
       low_delay_(false),
@@ -52,6 +54,7 @@ DecoderStream<StreamType>::DecoderStream(
                                           decoders.Pass(),
                                           set_decryptor_ready_cb)),
       active_splice_(false),
+      decoding_eos_(false),
       pending_decode_requests_(0),
       weak_factory_(this) {}
 
@@ -207,7 +210,7 @@ bool DecoderStream<StreamType>::CanDecodeMore() const {
   // empty.
   int num_decodes =
       static_cast<int>(ready_outputs_.size()) + pending_decode_requests_;
-  return num_decodes < GetMaxDecodeRequests();
+  return !decoding_eos_ && num_decodes < GetMaxDecodeRequests();
 }
 
 template <DemuxerStream::Type StreamType>
@@ -227,16 +230,23 @@ void DecoderStream<StreamType>::OnDecoderSelected(
 
   if (!selected_decoder) {
     state_ = STATE_UNINITIALIZED;
-    StreamTraits::FinishInitialization(
-        base::ResetAndReturn(&init_cb_), selected_decoder.get(), stream_);
+    base::ResetAndReturn(&init_cb_).Run(false);
     return;
   }
 
   state_ = STATE_NORMAL;
   decoder_ = selected_decoder.Pass();
   decrypting_demuxer_stream_ = decrypting_demuxer_stream.Pass();
-  StreamTraits::FinishInitialization(
-      base::ResetAndReturn(&init_cb_), decoder_.get(), stream_);
+
+  const std::string stream_type = DecoderStreamTraits<StreamType>::ToString();
+  media_log_->SetBooleanProperty((stream_type + "_dds").c_str(),
+                                 decrypting_demuxer_stream_);
+  media_log_->SetStringProperty((stream_type + "_decoder").c_str(),
+                                decoder_->GetDisplayName());
+
+  if (StreamTraits::NeedsBitstreamConversion(decoder_.get()))
+    stream_->EnableBitstreamConverter();
+  base::ResetAndReturn(&init_cb_).Run(true);
 }
 
 template <DemuxerStream::Type StreamType>
@@ -254,11 +264,15 @@ void DecoderStream<StreamType>::Decode(
   DCHECK(state_ == STATE_NORMAL || state_ == STATE_FLUSHING_DECODER) << state_;
   DCHECK_LT(pending_decode_requests_, GetMaxDecodeRequests());
   DCHECK(reset_cb_.is_null());
-  DCHECK(buffer);
+  DCHECK(buffer.get());
 
   int buffer_size = buffer->end_of_stream() ? 0 : buffer->data_size();
 
   TRACE_EVENT_ASYNC_BEGIN0("media", GetTraceString<StreamType>(), this);
+
+  if (buffer->end_of_stream())
+    decoding_eos_ = true;
+
   ++pending_decode_requests_;
   decoder_->Decode(buffer,
                    base::Bind(&DecoderStream<StreamType>::OnDecodeDone,
@@ -285,6 +299,9 @@ void DecoderStream<StreamType>::OnDecodeDone(int buffer_size,
   --pending_decode_requests_;
 
   TRACE_EVENT_ASYNC_END0("media", GetTraceString<StreamType>(), this);
+
+  if (end_of_stream)
+    decoding_eos_ = false;
 
   if (state_ == STATE_ERROR) {
     DCHECK(read_cb_.is_null());
@@ -338,7 +355,7 @@ template <DemuxerStream::Type StreamType>
 void DecoderStream<StreamType>::OnDecodeOutputReady(
     const scoped_refptr<Output>& output) {
   FUNCTION_DVLOG(2) << ": " << output->timestamp().InMilliseconds() << " ms";
-  DCHECK(output);
+  DCHECK(output.get());
   DCHECK(!output->end_of_stream());
   DCHECK(state_ == STATE_NORMAL || state_ == STATE_FLUSHING_DECODER ||
          state_ == STATE_PENDING_DEMUXER_READ || state_ == STATE_ERROR)
@@ -385,7 +402,8 @@ void DecoderStream<StreamType>::OnBufferReady(
     DemuxerStream::Status status,
     const scoped_refptr<DecoderBuffer>& buffer) {
   FUNCTION_DVLOG(2) << ": " << status << ", "
-                    << (buffer ? buffer->AsHumanReadableString() : "NULL");
+                    << (buffer.get() ? buffer->AsHumanReadableString()
+                                     : "NULL");
 
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(state_ == STATE_PENDING_DEMUXER_READ || state_ == STATE_ERROR)
@@ -447,7 +465,7 @@ void DecoderStream<StreamType>::OnBufferReady(
   Decode(buffer);
 
   // Read more data if the decoder supports multiple parallel decoding requests.
-  if (CanDecodeMore() && !buffer->end_of_stream())
+  if (CanDecodeMore())
     ReadFromDemuxerStream();
 }
 

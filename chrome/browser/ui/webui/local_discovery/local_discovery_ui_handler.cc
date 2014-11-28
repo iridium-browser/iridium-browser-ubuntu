@@ -29,19 +29,19 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/cloud_devices/common/cloud_devices_switches.h"
 #include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
-#include "content/public/common/page_transition_types.h"
-#include "grit/generated_resources.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 
 #if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
 #define CLOUD_PRINT_CONNECTOR_UI_AVAILABLE
@@ -291,7 +291,7 @@ void LocalDiscoveryUIHandler::HandleOpenCloudPrintURL(
 
   chrome::AddSelectedTabWithURL(browser,
                                 cloud_devices::GetCloudPrintManageDeviceURL(id),
-                                content::PAGE_TRANSITION_FROM_API);
+                                ui::PAGE_TRANSITION_FROM_API);
 }
 
 void LocalDiscoveryUIHandler::HandleShowSyncUI(
@@ -305,7 +305,7 @@ void LocalDiscoveryUIHandler::HandleShowSyncUI(
 
   browser->OpenURL(
       content::OpenURLParams(url, content::Referrer(), SINGLETON_TAB,
-                             content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+                             ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
 }
 
 void LocalDiscoveryUIHandler::StartRegisterHTTP(
@@ -480,12 +480,14 @@ void LocalDiscoveryUIHandler::OnDeviceListUnavailable() {
 }
 
 void LocalDiscoveryUIHandler::GoogleSigninSucceeded(
+    const std::string& account_id,
     const std::string& username,
     const std::string& password) {
   CheckUserLoggedIn();
 }
 
-void LocalDiscoveryUIHandler::GoogleSignedOut(const std::string& username) {
+void LocalDiscoveryUIHandler::GoogleSignedOut(const std::string& account_id,
+                                              const std::string& username) {
   CheckUserLoggedIn();
 }
 
@@ -562,8 +564,9 @@ void LocalDiscoveryUIHandler::PrivetClientToV3(
 
 void LocalDiscoveryUIHandler::CheckUserLoggedIn() {
   base::FundamentalValue logged_in_value(!GetSyncAccount().empty());
-  web_ui()->CallJavascriptFunction("local_discovery.setUserLoggedIn",
-                                   logged_in_value);
+  base::FundamentalValue is_supervised_value(IsUserSupervisedOrOffTheRecord());
+  web_ui()->CallJavascriptFunction(
+      "local_discovery.setUserLoggedIn", logged_in_value, is_supervised_value);
 }
 
 void LocalDiscoveryUIHandler::CheckListingDone() {
@@ -634,6 +637,12 @@ void LocalDiscoveryUIHandler::CreatePrivetV3Client(
   privet_resolution_->Start();
 }
 
+bool LocalDiscoveryUIHandler::IsUserSupervisedOrOffTheRecord() {
+  Profile* profile = Profile::FromWebUI(web_ui());
+
+  return profile->IsSupervised() || profile->IsOffTheRecord();
+}
+
 #if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)
 void LocalDiscoveryUIHandler::StartCloudPrintConnector() {
   Profile* profile = Profile::FromWebUI(web_ui());
@@ -677,7 +686,7 @@ void LocalDiscoveryUIHandler::ShowCloudPrintSetupDialog(
           CloudPrintProxyServiceFactory::GetForProfile(profile)->proxy_id()),
       content::Referrer(),
       CURRENT_TAB,
-      content::PAGE_TRANSITION_LINK,
+      ui::PAGE_TRANSITION_LINK,
       false);
   web_ui()->GetWebContents()->OpenURL(params);
 }

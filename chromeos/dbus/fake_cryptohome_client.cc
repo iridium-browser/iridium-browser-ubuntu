@@ -5,7 +5,7 @@
 #include "chromeos/dbus/fake_cryptohome_client.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -458,6 +458,16 @@ void FakeCryptohomeClient::TpmAttestationDeleteKeys(
     const BoolDBusMethodCallback& callback) {
   base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(callback, DBUS_METHOD_CALL_SUCCESS, false));
+}
+
+void FakeCryptohomeClient::GetKeyDataEx(
+    const cryptohome::AccountIdentifier& id,
+    const cryptohome::AuthorizationRequest& auth,
+    const cryptohome::GetKeyDataRequest& request,
+    const ProtobufMethodCallback& callback) {
+  cryptohome::BaseReply reply;
+  reply.MutableExtension(cryptohome::GetKeyDataReply::reply);
+  ReturnProtobufMethodCallback(reply, callback);
 }
 
 void FakeCryptohomeClient::CheckKeyEx(

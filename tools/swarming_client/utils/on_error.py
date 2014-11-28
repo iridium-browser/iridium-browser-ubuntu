@@ -118,8 +118,7 @@ def _post(params):
   if not _SERVER:
     return None
   return _SERVER.json_request(
-      'POST', '/ereporter2/api/v1/on_error', body=params, max_attempts=1,
-      timeout=20)
+      '/ereporter2/api/v1/on_error', data=params, max_attempts=1, timeout=20)
 
 
 def _serialize_env():
@@ -240,8 +239,7 @@ def report_on_exception_exit(server):
     # server they also own. Please send a CL if you desire this functionality.
     return False
 
-  _SERVER = net.get_http_service(
-      server, allow_cached=False, use_count_key=False)
+  _SERVER = net.get_http_service(server, allow_cached=False)
   atexit.register(_check_for_exception_on_exit)
   return True
 

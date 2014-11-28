@@ -5,6 +5,7 @@
 {
   'targets': [
     {
+      # GN version: //apps
       'target_name': 'apps',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
@@ -15,6 +16,7 @@
       # browser, then we can clean up these dependencies.
       'dependencies': [
         'browser_extensions',
+        'chrome_resources.gyp:theme_resources',
         'common/extensions/api/api.gyp:chrome_api',
         '../skia/skia.gyp:skia',
       ],
@@ -23,7 +25,7 @@
         '<(grit_out_dir)',
       ],
       'sources': [
-        'app_delegate.h',
+        # Note: file list duplicated in GN build.
         'app_lifetime_monitor.cc',
         'app_lifetime_monitor.h',
         'app_lifetime_monitor_factory.cc',
@@ -36,16 +38,6 @@
         'app_restore_service.h',
         'app_restore_service_factory.cc',
         'app_restore_service_factory.h',
-        'app_window.cc',
-        'app_window.h',
-        'app_window_contents.cc',
-        'app_window_contents.h',
-        'app_window_geometry_cache.cc',
-        'app_window_geometry_cache.h',
-        'app_window_registry.cc',
-        'app_window_registry.h',
-        'app_web_contents_helper.cc',
-        'app_web_contents_helper.h',
         'browser_context_keyed_service_factories.cc',
         'browser_context_keyed_service_factories.h',
         'custom_launcher_page_contents.cc',
@@ -53,37 +45,20 @@
         'launcher.cc',
         'launcher.h',
         'metrics_names.h',
-        'pref_names.cc',
-        'pref_names.h',
-        'prefs.cc',
-        'prefs.h',
+        'saved_devices_service.cc',
+        'saved_devices_service.h',
+        'saved_devices_service_factory.cc',
+        'saved_devices_service_factory.h',
         'saved_files_service.cc',
         'saved_files_service.h',
         'saved_files_service_factory.cc',
         'saved_files_service_factory.h',
-        'size_constraints.cc',
-        'size_constraints.h',
         'switches.cc',
         'switches.h',
-        'ui/apps_client.cc',
-        'ui/apps_client.h',
-        'ui/native_app_window.h',
         'ui/views/app_window_frame_view.cc',
         'ui/views/app_window_frame_view.h',
-        'ui/views/native_app_window_views.cc',
-        'ui/views/native_app_window_views.h',
-        'ui/web_contents_sizer.h',
       ],
       'conditions': [
-        ['OS=="mac"', {
-          'sources': [
-            'ui/web_contents_sizer.mm',
-          ],
-        }, {  # OS!=mac
-          'sources': [
-            'ui/web_contents_sizer.cc',
-          ],
-        }],
         ['chromeos==1',
           {
             'dependencies': [
@@ -95,16 +70,16 @@
           {
             'dependencies!': [
               'browser_extensions',
+              'common/extensions/api/api.gyp:chrome_api',
             ],
             'sources/': [
               ['exclude', '.*'],
-              ['include', 'ui/web_contents_sizer\.cc$'],
-              ['include', 'ui/web_contents_sizer\.mm$'],
             ],
           }
         ],
         ['toolkit_views==1', {
           'dependencies': [
+            '../components/components.gyp:native_app_window',
             '../ui/strings/ui_strings.gyp:ui_strings',
             '../ui/views/views.gyp:views',
           ],

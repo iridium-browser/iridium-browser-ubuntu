@@ -87,6 +87,13 @@ scoped_refptr<base::debug::ConvertableToTraceFormat>
 class CC_EXPORT TileManager : public RasterizerClient,
                               public RefCountedManager<Tile> {
  public:
+  enum NamedTaskSet {
+    REQUIRED_FOR_ACTIVATION = 0,
+    ALL = 1,
+    // Adding additional values requires increasing kNumberOfTaskSets in
+    // rasterizer.h
+  };
+
   static scoped_ptr<TileManager> Create(
       TileManagerClient* client,
       base::SequencedTaskRunner* task_runner,
@@ -103,7 +110,6 @@ class CC_EXPORT TileManager : public RasterizerClient,
   scoped_refptr<Tile> CreateTile(PicturePileImpl* picture_pile,
                                  const gfx::Size& tile_size,
                                  const gfx::Rect& content_rect,
-                                 const gfx::Rect& opaque_rect,
                                  float contents_scale,
                                  int layer_id,
                                  int source_frame_number,
@@ -157,9 +163,18 @@ class CC_EXPORT TileManager : public RasterizerClient,
     CleanUpReleasedTiles();
   }
 
+  std::vector<Tile*> AllTilesForTesting() const {
+    std::vector<Tile*> tiles;
+    for (TileMap::const_iterator it = tiles_.begin(); it != tiles_.end();
+         ++it) {
+      tiles.push_back(it->second);
+    }
+    return tiles;
+  }
+
  protected:
   TileManager(TileManagerClient* client,
-              base::SequencedTaskRunner* task_runner,
+              const scoped_refptr<base::SequencedTaskRunner>& task_runner,
               ResourcePool* resource_pool,
               Rasterizer* rasterizer,
               RenderingStatsInstrumentation* rendering_stats_instrumentation);
@@ -175,9 +190,8 @@ class CC_EXPORT TileManager : public RasterizerClient,
   virtual void Release(Tile* tile) OVERRIDE;
 
   // Overriden from RasterizerClient:
-  virtual bool ShouldForceTasksRequiredForActivationToComplete() const OVERRIDE;
-  virtual void DidFinishRunningTasks() OVERRIDE;
-  virtual void DidFinishRunningTasksRequiredForActivation() OVERRIDE;
+  virtual void DidFinishRunningTasks(TaskSet task_set) OVERRIDE;
+  virtual TaskSetCollection TasksThatShouldBeForcedToComplete() const OVERRIDE;
 
   typedef std::vector<Tile*> TileVector;
   typedef std::set<Tile*> TileSet;
@@ -242,6 +256,7 @@ class CC_EXPORT TileManager : public RasterizerClient,
 
   bool did_initialize_visible_tile_;
   bool did_check_for_completed_tasks_since_last_schedule_tasks_;
+  bool did_oom_on_last_assign_;
 
   typedef base::hash_map<uint32_t, scoped_refptr<ImageDecodeTask> >
       PixelRefTaskMap;

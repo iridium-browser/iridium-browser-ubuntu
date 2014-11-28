@@ -29,10 +29,9 @@
 
 class SkBitmap;
 class FrameMsg_Navigate;
+struct FrameMsg_Navigate_Params;
 struct MediaPlayerAction;
 struct ViewHostMsg_CreateWindow_Params;
-struct ViewHostMsg_ShowPopup_Params;
-struct FrameMsg_Navigate_Params;
 struct ViewMsg_PostMessage_Params;
 
 namespace base {
@@ -96,13 +95,6 @@ class CONTENT_EXPORT RenderViewHostImpl
     // The standard state for a RVH handling the communication with a
     // RenderView.
     STATE_DEFAULT = 0,
-    // The RVH has sent the SwapOut request to the renderer, but has not
-    // received the SwapOutACK yet. The new page has not been committed yet
-    // either.
-    STATE_WAITING_FOR_UNLOAD_ACK,
-    // The RVH received the SwapOutACK from the RenderView, but the new page has
-    // not been committed yet.
-    STATE_WAITING_FOR_COMMIT,
     // The RVH is waiting for the CloseACK from the RenderView.
     STATE_WAITING_FOR_CLOSE,
     // The RVH has not received the SwapOutACK yet, but the new page has
@@ -244,22 +236,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Returns the content specific prefs for this RenderViewHost.
   WebPreferences ComputeWebkitPrefs(const GURL& url);
 
-  // Sends the given navigation message. Use this rather than sending it
-  // yourself since this does the internal bookkeeping described below. This
-  // function takes ownership of the provided message pointer.
-  //
-  // If a cross-site request is in progress, we may be suspended while waiting
-  // for the onbeforeunload handler, so this function might buffer the message
-  // rather than sending it.
-  // TODO(nasko): Remove this method once all callers are converted to use
-  // RenderFrameHostImpl.
-  void Navigate(const FrameMsg_Navigate_Params& message);
-
-  // Load the specified URL, this is a shortcut for Navigate().
-  // TODO(nasko): Remove this method once all callers are converted to use
-  // RenderFrameHostImpl.
-  void NavigateToURL(const GURL& url);
-
   // Whether this RenderViewHost has been swapped out to be displayed by a
   // different process.
   bool IsSwappedOut() const { return rvh_state_ == STATE_SWAPPED_OUT; }
@@ -276,12 +252,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Called when either the SwapOut request has been acknowledged or has timed
   // out.
   void OnSwappedOut(bool timed_out);
-
-  // Called when the RenderFrameHostManager has swapped in a new
-  // RenderFrameHost. Should |this| RVH switch to the pending shutdown state,
-  // |pending_delete_on_swap_out| will be executed upon reception of the
-  // SwapOutACK, or when the unload timer times out.
-  void WasSwappedOut(const base::Closure& pending_delete_on_swap_out);
 
   // Set |this| as pending shutdown. |on_swap_out| will be called
   // when the SwapOutACK is received, or when the unload timer times out.
@@ -321,11 +291,14 @@ class CONTENT_EXPORT RenderViewHostImpl
   // RenderWidgetHost public overrides.
   virtual void Init() OVERRIDE;
   virtual void Shutdown() OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
+  virtual void WasShown(const ui::LatencyInfo& latency_info) OVERRIDE;
   virtual bool IsRenderView() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void GotFocus() OVERRIDE;
   virtual void LostCapture() OVERRIDE;
   virtual void LostMouseLock() OVERRIDE;
+  virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void ForwardMouseEvent(
       const blink::WebMouseEvent& mouse_event) OVERRIDE;
   virtual void OnPointerEventActivate() OVERRIDE;
@@ -347,29 +320,15 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Creates a full screen RenderWidget.
   void CreateNewFullscreenWidget(int route_id);
 
-#if defined(OS_MACOSX)
-  // Select popup menu related methods (for external popup menus).
-  void DidSelectPopupMenuItem(int selected_index);
-  void DidCancelPopupMenu();
-#endif
-
 #if defined(ENABLE_BROWSER_CDMS)
   MediaWebContentsObserver* media_web_contents_observer() {
     return media_web_contents_observer_.get();
   }
 #endif
 
-#if defined(OS_ANDROID)
-  void DidSelectPopupMenuItems(const std::vector<int>& selected_indices);
-  void DidCancelPopupMenu();
-#endif
-
   int main_frame_routing_id() const {
     return main_frame_routing_id_;
   }
-
-  // Set the opener to null in the renderer process.
-  void DisownOpener();
 
   bool is_waiting_for_beforeunload_ack() {
     return is_waiting_for_beforeunload_ack_;
@@ -429,13 +388,12 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnRenderViewReady();
   void OnRenderProcessGone(int status, int error_code);
   void OnUpdateState(int32 page_id, const PageState& state);
-  void OnUpdateTargetURL(int32 page_id, const GURL& url);
+  void OnUpdateTargetURL(const GURL& url);
   void OnClose();
   void OnRequestMove(const gfx::Rect& pos);
   void OnDocumentAvailableInMainFrame(bool uses_temporary_zoom_level);
   void OnToggleFullscreen(bool enter_fullscreen);
   void OnDidContentsPreferredSizeChange(const gfx::Size& new_size);
-  void OnDidChangeScrollOffset();
   void OnPasteFromSelectionClipboard();
   void OnRouteCloseEvent();
   void OnRouteMessageEvent(const ViewMsg_PostMessage_Params& params);
@@ -448,17 +406,10 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
   void OnFocusedNodeChanged(bool is_editable_node);
-  void OnUpdateInspectorSetting(const std::string& key,
-                                const std::string& value);
   void OnClosePageACK();
   void OnDidZoomURL(double zoom_level, const GURL& url);
   void OnRunFileChooser(const FileChooserParams& params);
   void OnFocusedNodeTouched(bool editable);
-
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-  void OnShowPopup(const ViewHostMsg_ShowPopup_Params& params);
-  void OnHidePopup();
-#endif
 
  private:
   // TODO(nasko): Temporarily friend RenderFrameHostImpl, so we don't duplicate
@@ -499,6 +450,10 @@ class CONTENT_EXPORT RenderViewHostImpl
   // See BindingsPolicy for details.
   int enabled_bindings_;
 
+  // The most recent page ID we've heard from the renderer process.  This is
+  // used as context when other session history related IPCs arrive.
+  // TODO(creis): Allocate this in WebContents/NavigationController instead.
+  int32 page_id_;
 
   // The current state of this RVH.
   // TODO(nasko): Move to RenderFrameHost, as this is per-frame state.
@@ -555,8 +510,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   // TODO(nasko): Move to RenderFrameHost, as this is per-frame state.
   base::Closure pending_shutdown_on_swap_out_;
 
-  base::WeakPtrFactory<RenderViewHostImpl> weak_factory_;
-
   // True if the current focused element is editable.
   bool is_focused_element_editable_;
 
@@ -566,6 +519,8 @@ class CONTENT_EXPORT RenderViewHostImpl
   scoped_ptr<WebPreferences> web_preferences_;
 
   bool updating_web_preferences_;
+
+  base::WeakPtrFactory<RenderViewHostImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostImpl);
 };

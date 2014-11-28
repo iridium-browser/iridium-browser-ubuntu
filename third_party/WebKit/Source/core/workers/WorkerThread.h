@@ -31,10 +31,8 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "platform/SharedTimer.h"
-#include "platform/heap/glue/MessageLoopInterruptor.h"
-#include "platform/heap/glue/PendingGCRunner.h"
+#include "platform/WebThreadSupportingGC.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "public/platform/WebThread.h"
 #include "wtf/Forward.h"
 #include "wtf/MessageQueue.h"
 #include "wtf/OwnPtr.h"
@@ -95,6 +93,8 @@ namespace blink {
         // Number of active worker threads.
         static unsigned workerThreadCount();
 
+        PlatformThreadId platformThreadId() const;
+
         void interruptAndDispatchInspectorCommands();
         void setWorkerInspectorController(WorkerInspectorController*);
 
@@ -121,9 +121,7 @@ namespace blink {
         bool m_terminated;
         OwnPtr<WorkerSharedTimer> m_sharedTimer;
         MessageQueue<WorkerThreadTask> m_debuggerMessageQueue;
-        OwnPtr<PendingGCRunner> m_pendingGCRunner;
         OwnPtr<WebThread::TaskObserver> m_microtaskRunner;
-        OwnPtr<MessageLoopInterruptor> m_messageLoopInterruptor;
 
         WorkerLoaderProxy& m_workerLoaderProxy;
         WorkerReportingProxy& m_workerReportingProxy;
@@ -146,7 +144,7 @@ namespace blink {
         // shut down. By deleting the WebThread first, we can guarantee that
         // no pending tasks on the thread might want to access any of the other
         // members during the WorkerThread's destruction.
-        OwnPtr<blink::WebThread> m_thread;
+        OwnPtr<WebThreadSupportingGC> m_thread;
     };
 
 } // namespace blink

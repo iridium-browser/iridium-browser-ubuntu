@@ -96,7 +96,7 @@ class SortComparator : public std::binary_function<const BookmarkNode*,
 
 // BookmarkModel --------------------------------------------------------------
 
-BookmarkModel::BookmarkModel(BookmarkClient* client, bool index_urls)
+BookmarkModel::BookmarkModel(BookmarkClient* client)
     : client_(client),
       loaded_(false),
       root_(GURL()),
@@ -105,7 +105,6 @@ BookmarkModel::BookmarkModel(BookmarkClient* client, bool index_urls)
       mobile_node_(NULL),
       next_node_id_(1),
       observers_(ObserverList<BookmarkModelObserver>::NOTIFY_EXISTING_ONLY),
-      index_urls_(index_urls),
       loaded_signal_(true, false),
       extensive_changes_(0) {
   DCHECK(client_);
@@ -879,9 +878,6 @@ void BookmarkModel::RemoveNodeAndGetRemovedUrls(BookmarkNode* node,
 BookmarkNode* BookmarkModel::AddNode(BookmarkNode* parent,
                                      int index,
                                      BookmarkNode* node) {
-  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
-                    OnWillAddBookmarkNode(this, node));
-
   parent->Add(node, index);
 
   if (store_.get())
@@ -1012,6 +1008,6 @@ scoped_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails(
       other_node,
       mobile_node,
       client_->GetLoadExtraNodesCallback(),
-      new BookmarkIndex(client_, index_urls_, accept_languages),
+      new BookmarkIndex(client_, accept_languages),
       next_node_id_));
 }

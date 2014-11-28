@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/browser/site_per_process_browsertest.h"
+
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "content/browser/frame_host/cross_process_frame_connector.h"
@@ -16,13 +18,11 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
-#include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
-#include "url/gurl.h"
 
 namespace content {
 
@@ -53,7 +53,7 @@ class SitePerProcessWebContentsObserver: public WebContentsObserver {
   virtual void DidCommitProvisionalLoadForFrame(
       RenderFrameHost* render_frame_host,
       const GURL& url,
-      PageTransition transition_type) OVERRIDE {
+      ui::PageTransition transition_type) OVERRIDE {
     navigation_url_ = url;
     navigation_succeeded_ = true;
   }
@@ -149,52 +149,54 @@ void RedirectNotificationObserver::Observe(
   running_ = false;
 }
 
-class SitePerProcessBrowserTest : public ContentBrowserTest {
- public:
-  SitePerProcessBrowserTest() {}
+//
+// SitePerProcessBrowserTest
+//
 
- protected:
-  // Start at a data URL so each extra navigation creates a navigation entry.
-  // (The first navigation will silently be classified as AUTO_SUBFRAME.)
-  // TODO(creis): This won't be necessary when we can wait for LOAD_STOP.
-  void StartFrameAtDataURL() {
-    std::string data_url_script =
-      "var iframes = document.getElementById('test');iframes.src="
-      "'data:text/html,dataurl';";
-    ASSERT_TRUE(ExecuteScript(shell()->web_contents(), data_url_script));
-  }
-
-  bool NavigateIframeToURL(Shell* window,
-                           const GURL& url,
-                           std::string iframe_id) {
-    // TODO(creis): This should wait for LOAD_STOP, but cross-site subframe
-    // navigations generate extra DidStartLoading and DidStopLoading messages.
-    // Until we replace swappedout:// with frame proxies, we need to listen for
-    // something else.  For now, we trigger NEW_SUBFRAME navigations and listen
-    // for commit.
-    std::string script = base::StringPrintf(
-        "setTimeout(\""
-        "var iframes = document.getElementById('%s');iframes.src='%s';"
-        "\",0)",
-        iframe_id.c_str(), url.spec().c_str());
-    WindowedNotificationObserver load_observer(
-        NOTIFICATION_NAV_ENTRY_COMMITTED,
-        Source<NavigationController>(
-            &window->web_contents()->GetController()));
-    bool result = ExecuteScript(window->web_contents(), script);
-    load_observer.Wait();
-    return result;
-  }
-
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(switches::kSitePerProcess);
-  }
+SitePerProcessBrowserTest::SitePerProcessBrowserTest() {
 };
 
-// Ensure that we can complete a cross-process subframe navigation.
-// Crashes ChromeOS bot, but the bug is probably present on other platforms
-// also. http://crbug.com/399775
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrossSiteIframe) {
+void SitePerProcessBrowserTest::StartFrameAtDataURL() {
+  std::string data_url_script =
+      "var iframes = document.getElementById('test');iframes.src="
+      "'data:text/html,dataurl';";
+  ASSERT_TRUE(ExecuteScript(shell()->web_contents(), data_url_script));
+}
+
+bool SitePerProcessBrowserTest::NavigateIframeToURL(Shell* window,
+                                                    const GURL& url,
+                                                    std::string iframe_id) {
+  // TODO(creis): This should wait for LOAD_STOP, but cross-site subframe
+  // navigations generate extra DidStartLoading and DidStopLoading messages.
+  // Until we replace swappedout:// with frame proxies, we need to listen for
+  // something else.  For now, we trigger NEW_SUBFRAME navigations and listen
+  // for commit.
+  std::string script = base::StringPrintf(
+      "setTimeout(\""
+      "var iframes = document.getElementById('%s');iframes.src='%s';"
+      "\",0)",
+      iframe_id.c_str(), url.spec().c_str());
+  WindowedNotificationObserver load_observer(
+      NOTIFICATION_NAV_ENTRY_COMMITTED,
+      Source<NavigationController>(
+          &window->web_contents()->GetController()));
+  bool result = ExecuteScript(window->web_contents(), script);
+  load_observer.Wait();
+  return result;
+}
+
+void SitePerProcessBrowserTest::SetUpCommandLine(CommandLine* command_line) {
+  command_line->AppendSwitch(switches::kSitePerProcess);
+};
+
+// It fails on ChromeOS and Android, so disabled while investigating.
+// http://crbug.com/399775
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#define MAYBE_CrossSiteIframe DISABLED_CrossSiteIframe
+#else
+#define MAYBE_CrossSiteIframe CrossSiteIframe
+#endif
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, MAYBE_CrossSiteIframe) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
   GURL main_url(test_server()->GetURL("files/site_per_process_main.html"));
@@ -299,13 +301,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrossSiteIframe) {
 
 // Crash a subframe and ensures its children are cleared from the FrameTree.
 // See http://crbug.com/338508.
+// TODO(creis): Disabled for flakiness; see http://crbug.com/405582.
 // TODO(creis): Enable this on Android when we can kill the process there.
-#if defined(OS_ANDROID)
-#define MAYBE_CrashSubframe DISABLED_CrashSubframe
-#else
-#define MAYBE_CrashSubframe CrashSubframe
-#endif
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, MAYBE_CrashSubframe) {
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrashSubframe) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
   GURL main_url(test_server()->GetURL("files/site_per_process_main.html"));
@@ -332,6 +330,10 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, MAYBE_CrashSubframe) {
   EXPECT_EQ(main_url, root->current_url());
   EXPECT_EQ(cross_site_url, child->current_url());
 
+  EXPECT_TRUE(
+      child->current_frame_host()->render_view_host()->IsRenderViewLive());
+  EXPECT_TRUE(child->current_frame_host()->IsRenderFrameLive());
+
   // Crash the subframe process.
   RenderProcessHost* root_process = root->current_frame_host()->GetProcess();
   RenderProcessHost* child_process = child->current_frame_host()->GetProcess();
@@ -347,6 +349,11 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, MAYBE_CrashSubframe) {
   EXPECT_EQ(1U, root->child_count());
   EXPECT_EQ(main_url, root->current_url());
   EXPECT_EQ(GURL(), child->current_url());
+
+  EXPECT_FALSE(
+      child->current_frame_host()->render_view_host()->IsRenderViewLive());
+  EXPECT_FALSE(child->current_frame_host()->IsRenderFrameLive());
+  EXPECT_FALSE(child->current_frame_host()->render_frame_created_);
 
   // Now crash the top-level page to clear the child frame.
   {

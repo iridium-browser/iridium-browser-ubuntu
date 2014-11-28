@@ -5,18 +5,13 @@
 #include "config.h"
 #include "core/inspector/ConsoleMessage.h"
 
-#include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/ScriptCallStackFactory.h"
+#include "bindings/core/v8/ScriptValue.h"
+#include "core/inspector/ScriptArguments.h"
+#include "wtf/CurrentTime.h"
+#include "wtf/PassOwnPtr.h"
 
 namespace blink {
-
-ConsoleMessage::ConsoleMessage()
-    : m_lineNumber(0)
-    , m_columnNumber(0)
-    , m_scriptState(nullptr)
-    , m_requestIdentifier(0)
-    , m_workerProxy(nullptr)
-{
-}
 
 ConsoleMessage::ConsoleMessage(MessageSource source,
     MessageLevel level,
@@ -26,12 +21,14 @@ ConsoleMessage::ConsoleMessage(MessageSource source,
     unsigned columnNumber)
     : m_source(source)
     , m_level(level)
+    , m_type(LogMessageType)
     , m_message(message)
+    , m_scriptId(0)
     , m_url(url)
     , m_lineNumber(lineNumber)
     , m_columnNumber(columnNumber)
-    , m_scriptState(nullptr)
     , m_requestIdentifier(0)
+    , m_timestamp(WTF::currentTime())
     , m_workerProxy(nullptr)
 {
 }
@@ -40,34 +37,24 @@ ConsoleMessage::~ConsoleMessage()
 {
 }
 
-PassRefPtrWillBeRawPtr<ScriptCallStack> ConsoleMessage::callStack() const
+MessageType ConsoleMessage::type() const
 {
-    return m_callStack;
+    return m_type;
 }
 
-void ConsoleMessage::setCallStack(PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
+void ConsoleMessage::setType(MessageType type)
 {
-    m_callStack = callStack;
+    m_type = type;
 }
 
-ScriptState* ConsoleMessage::scriptState() const
+int ConsoleMessage::scriptId() const
 {
-    return m_scriptState;
+    return m_scriptId;
 }
 
-void ConsoleMessage::setScriptState(ScriptState* scriptState)
+void ConsoleMessage::setScriptId(int scriptId)
 {
-    m_scriptState = scriptState;
-}
-
-unsigned long ConsoleMessage::requestIdentifier() const
-{
-    return m_requestIdentifier;
-}
-
-void ConsoleMessage::setRequestIdentifier(unsigned long requestIdentifier)
-{
-    m_requestIdentifier = requestIdentifier;
+    m_scriptId = scriptId;
 }
 
 const String& ConsoleMessage::url() const
@@ -90,6 +77,64 @@ void ConsoleMessage::setLineNumber(unsigned lineNumber)
     m_lineNumber = lineNumber;
 }
 
+PassRefPtrWillBeRawPtr<ScriptCallStack> ConsoleMessage::callStack() const
+{
+    return m_callStack;
+}
+
+void ConsoleMessage::setCallStack(PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
+{
+    m_callStack = callStack;
+}
+
+ScriptState* ConsoleMessage::scriptState() const
+{
+    if (m_scriptState)
+        return m_scriptState->get();
+    return nullptr;
+}
+
+void ConsoleMessage::setScriptState(ScriptState* scriptState)
+{
+    if (m_scriptState)
+        m_scriptState->clear();
+
+    if (scriptState)
+        m_scriptState = adoptPtr(new ScriptStateProtectingContext(scriptState));
+    else
+        m_scriptState.clear();
+}
+
+PassRefPtrWillBeRawPtr<ScriptArguments> ConsoleMessage::scriptArguments() const
+{
+    return m_scriptArguments;
+}
+
+void ConsoleMessage::setScriptArguments(PassRefPtrWillBeRawPtr<ScriptArguments> scriptArguments)
+{
+    m_scriptArguments = scriptArguments;
+}
+
+unsigned long ConsoleMessage::requestIdentifier() const
+{
+    return m_requestIdentifier;
+}
+
+void ConsoleMessage::setRequestIdentifier(unsigned long requestIdentifier)
+{
+    m_requestIdentifier = requestIdentifier;
+}
+
+double ConsoleMessage::timestamp() const
+{
+    return m_timestamp;
+}
+
+void ConsoleMessage::setTimestamp(double timestamp)
+{
+    m_timestamp = timestamp;
+}
+
 MessageSource ConsoleMessage::source() const
 {
     return m_source;
@@ -110,9 +155,50 @@ unsigned ConsoleMessage::columnNumber() const
     return m_columnNumber;
 }
 
+void ConsoleMessage::frameWindowDiscarded(LocalDOMWindow* window)
+{
+    if (scriptState() && scriptState()->domWindow() == window)
+        setScriptState(nullptr);
+
+    if (!m_scriptArguments)
+        return;
+    if (m_scriptArguments->scriptState()->domWindow() != window)
+        return;
+    if (!m_message)
+        m_message = "<message collected>";
+    m_scriptArguments.clear();
+}
+
+unsigned ConsoleMessage::argumentCount()
+{
+    if (m_scriptArguments)
+        return m_scriptArguments->argumentCount();
+    return 0;
+}
+
+void ConsoleMessage::collectCallStack()
+{
+    if (m_type == EndGroupMessageType)
+        return;
+
+    if (!m_callStack || m_source == ConsoleAPIMessageSource)
+        m_callStack = createScriptCallStackForConsole(ScriptCallStack::maxCallStackSizeToCapture, true);
+
+    if (m_callStack && m_callStack->size() && !m_scriptId) {
+        const ScriptCallFrame& frame = m_callStack->at(0);
+        m_url = frame.sourceURL();
+        m_lineNumber = frame.lineNumber();
+        m_columnNumber = frame.columnNumber();
+        return;
+    }
+
+    m_callStack.clear();
+}
+
 void ConsoleMessage::trace(Visitor* visitor)
 {
     visitor->trace(m_callStack);
+    visitor->trace(m_scriptArguments);
 }
 
 } // namespace blink

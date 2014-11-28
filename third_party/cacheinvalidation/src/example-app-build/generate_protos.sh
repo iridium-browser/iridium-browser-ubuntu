@@ -17,6 +17,6 @@
 # client into the generated-protos/ directory.
 TOOL=${PROTOC- `which protoc`}
 mkdir -p generated-protos/
-$TOOL --java_out=generated-protos/ ../proto/* --proto_path=../proto/
-EXAMPLE_PATH=../java/com/google/ipc/invalidation/examples/android2
-$TOOL --java_out=generated-protos/ $EXAMPLE_PATH/example_listener.proto --proto_path=$EXAMPLE_PATH
+$TOOL --javanano_out=optional_field_style=reftypes:generated-protos/ ../proto/* --proto_path=../proto/
+EXAMPLE_PATH=../javaexample/com/google/ipc/invalidation/examples/android2
+$TOOL --javanano_out=optional_field_style=reftypes:generated-protos/ $EXAMPLE_PATH/example_listener.proto --proto_path=$EXAMPLE_PATH

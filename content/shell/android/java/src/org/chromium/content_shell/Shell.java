@@ -26,7 +26,9 @@ import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewRenderView;
-import org.chromium.content.browser.LoadUrlParams;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationController;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -45,10 +47,14 @@ public class Shell extends LinearLayout {
     };
 
     private ContentViewCore mContentViewCore;
+    private WebContents mWebContents;
+    private NavigationController mNavigationController;
     private ContentViewClient mContentViewClient;
     private EditText mUrlTextView;
     private ImageButton mPrevButton;
     private ImageButton mNextButton;
+    private ImageButton mStopButton;
+    private ImageButton mReloadButton;
 
     private ClipDrawable mProgressDrawable;
 
@@ -160,8 +166,18 @@ public class Shell extends LinearLayout {
                 mNextButton.setVisibility(hasFocus ? GONE : VISIBLE);
                 mPrevButton.setVisibility(hasFocus ? GONE : VISIBLE);
                 if (!hasFocus) {
-                    mUrlTextView.setText(mContentViewCore.getUrl());
+                    mUrlTextView.setText(mWebContents.getUrl());
                 }
+            }
+        });
+        mUrlTextView.setOnKeyListener(new OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_BACK) {
+                    mContentViewCore.getContainerView().requestFocus();
+                    return true;
+                }
+                return false;
             }
         });
     }
@@ -175,10 +191,10 @@ public class Shell extends LinearLayout {
     public void loadUrl(String url) {
         if (url == null) return;
 
-        if (TextUtils.equals(url, mContentViewCore.getUrl())) {
-            mContentViewCore.reload(true);
+        if (TextUtils.equals(url, mWebContents.getUrl())) {
+            mNavigationController.reload(true);
         } else {
-            mContentViewCore.loadUrl(new LoadUrlParams(sanitizeUrl(url)));
+            mNavigationController.loadUrl(new LoadUrlParams(sanitizeUrl(url)));
         }
         mUrlTextView.clearFocus();
         // TODO(aurimas): Remove this when crbug.com/174541 is fixed.
@@ -192,7 +208,7 @@ public class Shell extends LinearLayout {
      * @return The sanitized URL.
      */
     public static String sanitizeUrl(String url) {
-        if (url == null) return url;
+        if (url == null) return null;
         if (url.startsWith("www.") || url.indexOf(":") == -1) url = "http://" + url;
         return url;
     }
@@ -202,7 +218,7 @@ public class Shell extends LinearLayout {
         mPrevButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (mContentViewCore.canGoBack()) mContentViewCore.goBack();
+                if (mNavigationController.canGoBack()) mNavigationController.goBack();
             }
         });
 
@@ -210,7 +226,21 @@ public class Shell extends LinearLayout {
         mNextButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (mContentViewCore.canGoForward()) mContentViewCore.goForward();
+                if (mNavigationController.canGoForward()) mNavigationController.goForward();
+            }
+        });
+        mStopButton = (ImageButton) findViewById(R.id.stop);
+        mStopButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mLoading) mWebContents.stop();
+            }
+        });
+        mReloadButton = (ImageButton) findViewById(R.id.reload);
+        mReloadButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                mNavigationController.reload(true);
             }
         });
     }
@@ -256,9 +286,12 @@ public class Shell extends LinearLayout {
         ContentView cv = ContentView.newInstance(context, mContentViewCore);
         mContentViewCore.initialize(cv, cv, nativeWebContents, mWindow);
         mContentViewCore.setContentViewClient(mContentViewClient);
-
+        mWebContents = mContentViewCore.getWebContents();
+        mNavigationController = mWebContents.getNavigationController();
         if (getParent() != null) mContentViewCore.onShow();
-        if (mContentViewCore.getUrl() != null) mUrlTextView.setText(mContentViewCore.getUrl());
+        if (mWebContents.getUrl() != null) {
+            mUrlTextView.setText(mWebContents.getUrl());
+        }
         ((FrameLayout) findViewById(R.id.contentview_holder)).addView(cv,
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -277,6 +310,10 @@ public class Shell extends LinearLayout {
     private void enableUiControl(int controlId, boolean enabled) {
         if (controlId == 0) mPrevButton.setEnabled(enabled);
         else if (controlId == 1) mNextButton.setEnabled(enabled);
+        else if (controlId == 2) {
+            mStopButton.setVisibility(enabled ? VISIBLE : GONE);
+            mReloadButton.setVisibility(enabled ? GONE : VISIBLE);
+        }
     }
 
     /**

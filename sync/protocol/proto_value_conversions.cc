@@ -243,6 +243,9 @@ base::DictionaryValue* PasswordSpecificsDataToValue(
   SET_BOOL(blacklisted);
   SET_INT32(type);
   SET_INT32(times_used);
+  SET_STR(display_name);
+  SET_STR(avatar_url);
+  SET_STR(federation_url);
   return value;
 }
 
@@ -897,7 +900,6 @@ base::DictionaryValue* GetUpdateTriggersToValue(
   SET_BOOL(invalidations_out_of_sync);
   SET_INT64(local_modification_nudges);
   SET_INT64(datatype_refresh_nudges);
-  SET_BOOL(initial_sync_in_progress);
   return value;
 }
 

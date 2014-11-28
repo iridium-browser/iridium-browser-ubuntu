@@ -36,7 +36,7 @@ URLRequestRedirectJob::URLRequestRedirectJob(URLRequest* request,
 void URLRequestRedirectJob::GetResponseInfo(HttpResponseInfo* info) {
   // Should only be called after the URLRequest has been notified there's header
   // information.
-  DCHECK(fake_headers_);
+  DCHECK(fake_headers_.get());
 
   // This assumes |info| is a freshly constructed HttpResponseInfo.
   info->headers = fake_headers_;
@@ -72,7 +72,7 @@ bool URLRequestRedirectJob::CopyFragmentOnRedirect(const GURL& location) const {
 int URLRequestRedirectJob::GetResponseCode() const {
   // Should only be called after the URLRequest has been notified there's header
   // information.
-  DCHECK(fake_headers_);
+  DCHECK(fake_headers_.get());
   return response_code_;
 }
 
@@ -89,6 +89,23 @@ void URLRequestRedirectJob::StartAsync() {
                          response_code_,
                          redirect_destination_.spec().c_str(),
                          redirect_reason_.c_str());
+
+  std::string http_origin;
+  const net::HttpRequestHeaders& request_headers =
+      request_->extra_request_headers();
+  if (request_headers.GetHeader("Origin", &http_origin)) {
+    // If this redirect is used in a cross-origin request, add CORS headers to
+    // make sure that the redirect gets through. Note that the destination URL
+    // is still subject to the usual CORS policy, i.e. the resource will only
+    // be available to web pages if the server serves the response with the
+    // required CORS response headers.
+    header_string += base::StringPrintf(
+        "\n"
+        "Access-Control-Allow-Origin: %s\n"
+        "Access-Control-Allow-Credentials: true",
+        http_origin.c_str());
+  }
+
   fake_headers_ = new HttpResponseHeaders(
       HttpUtil::AssembleRawHeaders(header_string.c_str(),
                                    header_string.length()));

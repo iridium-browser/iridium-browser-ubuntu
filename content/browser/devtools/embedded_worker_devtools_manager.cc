@@ -4,7 +4,6 @@
 
 #include "content/browser/devtools/embedded_worker_devtools_manager.h"
 
-#include "content/browser/devtools/devtools_manager_impl.h"
 #include "content/browser/devtools/devtools_protocol.h"
 #include "content/browser/devtools/devtools_protocol_constants.h"
 #include "content/browser/devtools/embedded_worker_devtools_agent_host.h"
@@ -28,22 +27,50 @@ scoped_refptr<DevToolsAgentHost> DevToolsAgentHost::GetForWorker(
 }
 
 EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::ServiceWorkerIdentifier(
-    const ServiceWorkerContextCore* const service_worker_context,
-    int64 service_worker_version_id)
-    : service_worker_context_(service_worker_context),
-      service_worker_version_id_(service_worker_version_id) {
+    const ServiceWorkerContextCore* context,
+    base::WeakPtr<ServiceWorkerContextCore> context_weak,
+    int64 version_id,
+    const GURL& url)
+    : context_(context),
+      context_weak_(context_weak),
+      version_id_(version_id),
+      url_(url) {
 }
 
 EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::ServiceWorkerIdentifier(
     const ServiceWorkerIdentifier& other)
-    : service_worker_context_(other.service_worker_context_),
-      service_worker_version_id_(other.service_worker_version_id_) {
+    : context_(other.context_),
+      context_weak_(other.context_weak_),
+      version_id_(other.version_id_),
+      url_(other.url_) {
+}
+
+EmbeddedWorkerDevToolsManager::
+ServiceWorkerIdentifier::~ServiceWorkerIdentifier() {
 }
 
 bool EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::Matches(
     const ServiceWorkerIdentifier& other) const {
-  return service_worker_context_ == other.service_worker_context_ &&
-         service_worker_version_id_ == other.service_worker_version_id_;
+  return context_ == other.context_ && version_id_ == other.version_id_;
+}
+
+const ServiceWorkerContextCore*
+EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::context() const {
+  return context_;
+}
+
+base::WeakPtr<ServiceWorkerContextCore>
+EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::context_weak() const {
+  return context_weak_;
+}
+
+int64
+EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::version_id() const {
+  return version_id_;
+}
+
+GURL EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier::url() const {
+  return url_;
 }
 
 // static
@@ -52,7 +79,8 @@ EmbeddedWorkerDevToolsManager* EmbeddedWorkerDevToolsManager::GetInstance() {
   return Singleton<EmbeddedWorkerDevToolsManager>::get();
 }
 
-DevToolsAgentHost* EmbeddedWorkerDevToolsManager::GetDevToolsAgentHostForWorker(
+DevToolsAgentHostImpl*
+EmbeddedWorkerDevToolsManager::GetDevToolsAgentHostForWorker(
     int worker_process_id,
     int worker_route_id) {
   AgentHostMap::iterator it = workers_.find(
@@ -108,6 +136,16 @@ void EmbeddedWorkerDevToolsManager::WorkerDestroyed(int worker_process_id,
   it->second->WorkerDestroyed();
 }
 
+void EmbeddedWorkerDevToolsManager::WorkerReadyForInspection(
+    int worker_process_id,
+    int worker_route_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  DCHECK(it != workers_.end());
+  it->second->WorkerReadyForInspection();
+}
+
 void EmbeddedWorkerDevToolsManager::WorkerContextStarted(int worker_process_id,
                                                          int worker_route_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -142,6 +180,18 @@ EmbeddedWorkerDevToolsManager::FindExistingServiceWorkerAgentHost(
       break;
   }
   return it;
+}
+
+DevToolsAgentHost::List
+EmbeddedWorkerDevToolsManager::GetOrCreateAllAgentHosts() {
+  DevToolsAgentHost::List result;
+  EmbeddedWorkerDevToolsManager* instance = GetInstance();
+  for (AgentHostMap::iterator it = instance->workers_.begin();
+      it != instance->workers_.end(); ++it) {
+    if (!it->second->IsTerminated())
+      result.push_back(it->second);
+  }
+  return result;
 }
 
 void EmbeddedWorkerDevToolsManager::WorkerRestarted(

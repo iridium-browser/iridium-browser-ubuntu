@@ -7,6 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/json/json_reader.h"
+#include "base/values.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
@@ -24,6 +26,11 @@ using ::testing::StrNe;
 
 MATCHER(IsEmpty, "") { return arg.empty(); }
 MATCHER(IsNotEmpty, "") { return !arg.empty(); }
+MATCHER(IsJSONDictionary, "") {
+  std::string result(arg.begin(), arg.end());
+  scoped_ptr<base::Value> root(base::JSONReader().ReadToValue(result));
+  return (root.get() && root->GetType() == base::Value::TYPE_DICTIONARY);
+}
 
 class GURL;
 
@@ -51,7 +58,8 @@ const char kKeyAsJWK[] =
     "      \"kid\": \"AAECAw\","
     "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw\""
     "    }"
-    "  ]"
+    "  ],"
+    "  \"type\": \"temporary\""
     "}";
 
 // Same kid as kKeyAsJWK, key to decrypt kEncryptedData2
@@ -203,6 +211,8 @@ class AesDecryptorTest : public testing::Test {
       : decryptor_(base::Bind(&AesDecryptorTest::OnSessionMessage,
                               base::Unretained(this)),
                    base::Bind(&AesDecryptorTest::OnSessionClosed,
+                              base::Unretained(this)),
+                   base::Bind(&AesDecryptorTest::OnSessionKeysChange,
                               base::Unretained(this))),
         decrypt_cb_(base::Bind(&AesDecryptorTest::BufferDecrypted,
                                base::Unretained(this))),
@@ -287,7 +297,8 @@ class AesDecryptorTest : public testing::Test {
   std::string CreateSession(const std::vector<uint8>& key_id) {
     DCHECK(!key_id.empty());
     EXPECT_CALL(*this,
-                OnSessionMessage(IsNotEmpty(), key_id, GURL::EmptyGURL()));
+                OnSessionMessage(
+                    IsNotEmpty(), IsJSONDictionary(), GURL::EmptyGURL()));
     decryptor_.CreateSession(std::string(),
                              &key_id[0],
                              key_id.size(),
@@ -298,23 +309,38 @@ class AesDecryptorTest : public testing::Test {
     return web_session_id_;
   }
 
-  // Releases the session specified by |session_id|.
-  void ReleaseSession(const std::string& session_id) {
+  // Closes the session specified by |session_id|.
+  void CloseSession(const std::string& session_id) {
     EXPECT_CALL(*this, OnSessionClosed(session_id));
-    decryptor_.ReleaseSession(session_id, CreatePromise(RESOLVED));
+    decryptor_.CloseSession(session_id, CreatePromise(RESOLVED));
+  }
+
+  // Removes the session specified by |session_id|. This should simply do a
+  // CloseSession().
+  // TODO(jrummell): Clean this up when the prefixed API is removed.
+  // http://crbug.com/249976.
+  void RemoveSession(const std::string& session_id) {
+    EXPECT_CALL(*this, OnSessionClosed(session_id));
+    decryptor_.RemoveSession(session_id, CreatePromise(RESOLVED));
   }
 
   // Updates the session specified by |session_id| with |key|. |result|
   // tests that the update succeeds or generates an error.
   void UpdateSessionAndExpect(std::string session_id,
                               const std::string& key,
-                              PromiseResult result) {
+                              PromiseResult expected_result) {
     DCHECK(!key.empty());
+
+    if (expected_result == RESOLVED) {
+      EXPECT_CALL(*this, OnSessionKeysChange(session_id, true));
+    } else {
+      EXPECT_CALL(*this, OnSessionKeysChange(_, _)).Times(0);
+    }
 
     decryptor_.UpdateSession(session_id,
                              reinterpret_cast<const uint8*>(key.c_str()),
                              key.length(),
-                             CreatePromise(result));
+                             CreatePromise(expected_result));
   }
 
   void GetUsableKeyIdsAndExpect(const std::string& session_id,
@@ -370,7 +396,7 @@ class AesDecryptorTest : public testing::Test {
     decryptor_.Decrypt(Decryptor::kVideo, encrypted, decrypt_cb_);
 
     std::vector<uint8> decrypted_text;
-    if (decrypted && decrypted->data_size()) {
+    if (decrypted.get() && decrypted->data_size()) {
       decrypted_text.assign(
         decrypted->data(), decrypted->data() + decrypted->data_size());
     }
@@ -397,6 +423,9 @@ class AesDecryptorTest : public testing::Test {
                void(const std::string& web_session_id,
                     const std::vector<uint8>& message,
                     const GURL& destination_url));
+  MOCK_METHOD2(OnSessionKeysChange,
+               void(const std::string& web_session_id,
+                    bool has_additional_usable_key));
   MOCK_METHOD1(OnSessionClosed, void(const std::string& web_session_id));
 
   AesDecryptor decryptor_;
@@ -638,7 +667,7 @@ TEST_F(AesDecryptorTest, SubsampleCypherBytesOnly) {
   DecryptAndExpect(encrypted_buffer, original_data_, SUCCESS);
 }
 
-TEST_F(AesDecryptorTest, ReleaseSession) {
+TEST_F(AesDecryptorTest, CloseSession) {
   std::string session_id = CreateSession(key_id_);
   scoped_refptr<DecoderBuffer> encrypted_buffer = CreateEncryptedBuffer(
       encrypted_data_, key_id_, iv_, no_subsample_entries_);
@@ -647,10 +676,12 @@ TEST_F(AesDecryptorTest, ReleaseSession) {
   ASSERT_NO_FATAL_FAILURE(
       DecryptAndExpect(encrypted_buffer, original_data_, SUCCESS));
 
-  ReleaseSession(session_id);
+  CloseSession(session_id);
 }
 
-TEST_F(AesDecryptorTest, NoKeyAfterReleaseSession) {
+TEST_F(AesDecryptorTest, RemoveSession) {
+  // TODO(jrummell): Clean this up when the prefixed API is removed.
+  // http://crbug.com/249976.
   std::string session_id = CreateSession(key_id_);
   scoped_refptr<DecoderBuffer> encrypted_buffer = CreateEncryptedBuffer(
       encrypted_data_, key_id_, iv_, no_subsample_entries_);
@@ -659,7 +690,19 @@ TEST_F(AesDecryptorTest, NoKeyAfterReleaseSession) {
   ASSERT_NO_FATAL_FAILURE(
       DecryptAndExpect(encrypted_buffer, original_data_, SUCCESS));
 
-  ReleaseSession(session_id);
+  RemoveSession(session_id);
+}
+
+TEST_F(AesDecryptorTest, NoKeyAfterCloseSession) {
+  std::string session_id = CreateSession(key_id_);
+  scoped_refptr<DecoderBuffer> encrypted_buffer = CreateEncryptedBuffer(
+      encrypted_data_, key_id_, iv_, no_subsample_entries_);
+
+  UpdateSessionAndExpect(session_id, kKeyAsJWK, RESOLVED);
+  ASSERT_NO_FATAL_FAILURE(
+      DecryptAndExpect(encrypted_buffer, original_data_, SUCCESS));
+
+  CloseSession(session_id);
   ASSERT_NO_FATAL_FAILURE(
       DecryptAndExpect(encrypted_buffer, original_data_, NO_KEY));
 }
@@ -683,7 +726,7 @@ TEST_F(AesDecryptorTest, LatestKeyUsed) {
       DecryptAndExpect(encrypted_buffer, original_data_, SUCCESS));
 }
 
-TEST_F(AesDecryptorTest, LatestKeyUsedAfterReleaseSession) {
+TEST_F(AesDecryptorTest, LatestKeyUsedAfterCloseSession) {
   std::string session_id1 = CreateSession(key_id_);
   scoped_refptr<DecoderBuffer> encrypted_buffer = CreateEncryptedBuffer(
       encrypted_data_, key_id_, iv_, no_subsample_entries_);
@@ -700,7 +743,7 @@ TEST_F(AesDecryptorTest, LatestKeyUsedAfterReleaseSession) {
       DecryptAndExpect(encrypted_buffer, original_data_, DATA_MISMATCH));
 
   // Close second session, should revert to original key.
-  ReleaseSession(session_id2);
+  CloseSession(session_id2);
   ASSERT_NO_FATAL_FAILURE(
       DecryptAndExpect(encrypted_buffer, original_data_, SUCCESS));
 }
@@ -832,7 +875,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  ]"
       "}";
   UpdateSessionAndExpect(session_id, kJwksWithEmptyKeyId, REJECTED);
-  ReleaseSession(session_id);
+  CloseSession(session_id);
 }
 
 TEST_F(AesDecryptorTest, GetKeyIds) {

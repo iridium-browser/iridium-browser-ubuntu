@@ -11,9 +11,9 @@ import android.preference.PreferenceManager;
 import android.util.Base64;
 import android.util.Log;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
+
+import org.chromium.base.VisibleForTesting;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -79,7 +79,9 @@ public class InvalidationPreferences {
     private final Context mContext;
 
     public InvalidationPreferences(Context context) {
-        this.mContext = Preconditions.checkNotNull(context.getApplicationContext());
+        Context appContext = context.getApplicationContext();
+        if (appContext == null) throw new NullPointerException("Unable to get application context");
+        mContext = appContext;
     }
 
     /** Returns a new {@link EditContext} to modify the preferences managed by this class. */
@@ -109,7 +111,7 @@ public class InvalidationPreferences {
 
     /** Sets the saved sync types to {@code syncTypes} in {@code editContext}. */
     public void setSyncTypes(EditContext editContext, Collection<String> syncTypes) {
-        Preconditions.checkNotNull(syncTypes);
+        if (syncTypes == null) throw new NullPointerException("syncTypes is null.");
         Set<String> selectedTypesSet = new HashSet<String>(syncTypes);
         editContext.mEditor.putStringSet(PrefKeys.SYNC_TANGO_TYPES, selectedTypesSet);
     }
@@ -134,7 +136,7 @@ public class InvalidationPreferences {
 
     /** Sets the saved non-sync object ids */
     public void setObjectIds(EditContext editContext, Collection<ObjectId> objectIds) {
-        Preconditions.checkNotNull(objectIds);
+        if (objectIds == null) throw new NullPointerException("objectIds is null.");
         Set<String> objectIdStrings = new HashSet<String>(objectIds.size());
         for (ObjectId objectId : objectIds) {
             objectIdStrings.add(getObjectIdString(objectId));

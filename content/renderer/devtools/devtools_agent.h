@@ -57,7 +57,6 @@ class DevToolsAgent : public RenderViewObserver,
       createClientMessageLoop() OVERRIDE;
   virtual void willEnterDebugLoop() OVERRIDE;
   virtual void didExitDebugLoop() OVERRIDE;
-  virtual void visitAllocatedObjects(AllocatedObjectVisitor* visitor) OVERRIDE;
 
   typedef void (*TraceEventCallback)(
       char phase, const unsigned char*, const char* name, unsigned long long id,
@@ -75,8 +74,6 @@ class DevToolsAgent : public RenderViewObserver,
   virtual void enableDeviceEmulation(
       const blink::WebDeviceEmulationParams& params) OVERRIDE;
   virtual void disableDeviceEmulation() OVERRIDE;
-  virtual void setTouchEventEmulationEnabled(bool enabled,
-                                             bool allow_pinch) OVERRIDE;
 
   void OnAttach(const std::string& host_id);
   void OnReattach(const std::string& host_id,

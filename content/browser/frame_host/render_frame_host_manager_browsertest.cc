@@ -398,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // If it navigates away to another process, the original window should
   // still be able to close it (using a cross-process close message).
   NavigateToURL(new_shell, cross_site_url);
-  EXPECT_EQ(new_site_instance,
+  EXPECT_EQ(new_site_instance.get(),
             new_shell->web_contents()->GetSiteInstance());
   WebContentsDestroyedWatcher close_watcher(new_shell->web_contents());
   EXPECT_TRUE(ExecuteScriptAndExtractBool(
@@ -411,10 +411,8 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
 // Test that setting the opener to null in a window affects cross-process
 // navigations, including those to existing entries.  http://crbug.com/156669.
-// Flaky on android: http://crbug.com/397185
-// Flaky on windows: http://crbug.com/291249
-// This test also crashes under ThreadSanitizer, http://crbug.com/356758.
-#if defined(OS_ANDROID) || defined(OS_WIN) || defined(THREAD_SANITIZER)
+// This test crashes under ThreadSanitizer, http://crbug.com/356758.
+#if defined(THREAD_SANITIZER)
 #define MAYBE_DisownOpener DISABLED_DisownOpener
 #else
 #define MAYBE_DisownOpener DisownOpener
@@ -444,6 +442,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, MAYBE_DisownOpener) {
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
+  EXPECT_TRUE(new_shell->web_contents()->HasOpener());
 
   // Wait for the navigation in the new tab to finish, if it hasn't.
   WaitForLoadStop(new_shell->web_contents());
@@ -460,10 +459,12 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, MAYBE_DisownOpener) {
   scoped_refptr<SiteInstance> new_site_instance(
       new_shell->web_contents()->GetSiteInstance());
   EXPECT_NE(orig_site_instance, new_site_instance);
+  EXPECT_TRUE(new_shell->web_contents()->HasOpener());
 
   // Now disown the opener.
   EXPECT_TRUE(ExecuteScript(new_shell->web_contents(),
                             "window.opener = null;"));
+  EXPECT_FALSE(new_shell->web_contents()->HasOpener());
 
   // Go back and ensure the opener is still null.
   {
@@ -477,6 +478,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, MAYBE_DisownOpener) {
       "window.domAutomationController.send(window.opener == null);",
       &success));
   EXPECT_TRUE(success);
+  EXPECT_FALSE(new_shell->web_contents()->HasOpener());
 
   // Now navigate forward again (creating a new process) and check opener.
   NavigateToURL(new_shell, GetCrossSiteURL("files/title1.html"));
@@ -486,6 +488,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, MAYBE_DisownOpener) {
       "window.domAutomationController.send(window.opener == null);",
       &success));
   EXPECT_TRUE(success);
+  EXPECT_FALSE(new_shell->web_contents()->HasOpener());
 }
 
 // Test that subframes can disown their openers.  http://crbug.com/225528.
@@ -570,7 +573,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WaitForLoadStop(new_contents);
   EXPECT_EQ("/files/title2.html", new_contents->GetLastCommittedURL().path());
   NavigateToURL(new_shell2, test_server()->GetURL("files/post_message.html"));
-  EXPECT_EQ(orig_site_instance, new_contents->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance.get(), new_contents->GetSiteInstance());
   RenderFrameHostManager* new_manager =
       static_cast<WebContentsImpl*>(new_contents)->GetRenderManagerForTesting();
 
@@ -1269,7 +1272,8 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
             new_shell->web_contents()->GetLastCommittedURL().path());
 
   // Should have the same SiteInstance.
-  EXPECT_EQ(orig_site_instance, new_shell->web_contents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance.get(),
+            new_shell->web_contents()->GetSiteInstance());
 
   // 2. Send the second tab to a different process.
   NavigateToURL(new_shell, GetCrossSiteURL("files/title1.html"));
@@ -1284,7 +1288,8 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WaitForLoadStop(shell()->web_contents());
   EXPECT_EQ(GetCrossSiteURL("files/title1.html"),
             shell()->web_contents()->GetLastCommittedURL());
-  EXPECT_EQ(new_site_instance, shell()->web_contents()->GetSiteInstance());
+  EXPECT_EQ(new_site_instance.get(),
+            shell()->web_contents()->GetSiteInstance());
 }
 
 // Ensure that renderer-side debug URLs do not cause a process swap, since they

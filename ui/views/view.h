@@ -1027,7 +1027,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Override returning true when the view needs to be notified when its visible
   // bounds relative to the root view may have changed. Only used by
   // NativeViewHost.
-  virtual bool NeedsNotificationWhenVisibleBoundsChange() const;
+  virtual bool GetNeedsNotificationWhenVisibleBoundsChange() const;
 
   // Notification that this View's visible bounds relative to the root view may
   // have changed. The visible bounds are the region of the View not clipped by
@@ -1118,6 +1118,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Overridden from ui::LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnDelegatedFrameDamage(
+      const gfx::Rect& damage_rect_in_dip) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE;
 

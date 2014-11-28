@@ -10,7 +10,7 @@
 #include <set>
 
 #include "chrome/browser/history/history_details.h"
-#include "chrome/browser/history/history_types.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "url/gurl.h"
 
@@ -21,7 +21,7 @@ struct URLVisitedDetails : public HistoryDetails {
   URLVisitedDetails();
   virtual ~URLVisitedDetails();
 
-  content::PageTransition transition;
+  ui::PageTransition transition;
 
   // The affected URLRow. The ID will be set to the value that is currently in
   // effect in the main history database.

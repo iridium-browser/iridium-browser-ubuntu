@@ -12,8 +12,12 @@
 #       List of source .mojom files to compile.
 #
 #   deps (optional)
+#
+#   public_deps (optional)
+#
+#   testonly (optional)
+#
 #   visibility (optional)
-#       Normal meaning.
 template("mojom") {
   assert(defined(invoker.sources),
          "\"sources\" must be defined for the $target_name template.")
@@ -45,8 +49,11 @@ template("mojom") {
     "$generator_root/generators/js_templates/interface_definition.tmpl",
     "$generator_root/generators/js_templates/module.js.tmpl",
     "$generator_root/generators/js_templates/struct_definition.tmpl",
+    "$generator_root/generators/python_templates/module_macros.tmpl",
+    "$generator_root/generators/python_templates/module.py.tmpl",
     "$generator_root/generators/mojom_cpp_generator.py",
     "$generator_root/generators/mojom_js_generator.py",
+    "$generator_root/generators/mojom_python_generator.py",
     "$generator_root/pylib/mojom/__init__.py",
     "$generator_root/pylib/mojom/error.py",
     "$generator_root/pylib/mojom/generate/__init__.py",
@@ -69,16 +76,28 @@ template("mojom") {
   generator_js_outputs = [
     "{{source_gen_dir}}/{{source_name_part}}.mojom.js",
   ]
+  generator_python_outputs = [
+    "{{source_gen_dir}}/{{source_name_part}}_mojom.py",
+  ]
 
-  target_visibility = ":$target_name"
+  if (defined(invoker.visibility)) {
+    # Need to save this because the the target_name is overwritten inside the
+    # action to be that of the action itself. Only define this in the case the
+    # var is used to avoid unused var error.
+    target_visibility = [ ":$target_name" ]
+  }
 
-  generator_target_name = target_name + "_generator"
+  generator_target_name = target_name + "__generator"
   action_foreach(generator_target_name) {
-    visibility = target_visibility
+    if (defined(invoker.visibility)) {
+      visibility = target_visibility + invoker.visibility
+    }
     script = generator_script
     inputs = generator_sources
     sources = invoker.sources
-    outputs = generator_cpp_outputs + generator_js_outputs
+    outputs = generator_cpp_outputs +
+              generator_js_outputs +
+              generator_python_outputs
     args = [
       "{{source}}",
       "--use_chromium_bundled_pylibs",
@@ -92,6 +111,9 @@ template("mojom") {
     if (defined(invoker.visibility)) {
       visibility = invoker.visibility
     }
+    if (defined(invoker.testonly)) {
+      testonly = invoker.testonly
+    }
     sources = process_file_template(invoker.sources, generator_cpp_outputs)
     data = process_file_template(invoker.sources, generator_js_outputs)
     deps = [
@@ -100,6 +122,9 @@ template("mojom") {
     ]
     if (defined(invoker.deps)) {
       deps += invoker.deps
+    }
+    if (defined(invoker.public_deps)) {
+      public_deps = invoker.public_deps
     }
   }
 }

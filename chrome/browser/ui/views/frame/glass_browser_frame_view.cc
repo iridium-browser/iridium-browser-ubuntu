@@ -21,15 +21,14 @@
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/win/dpi.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/win/hwnd_util.h"
@@ -113,7 +112,15 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   // minimize button.
   if (new_avatar_button()) {
     DCHECK(switches::IsNewAvatarMenu());
-    minimize_button_offset -= new_avatar_button()->width();
+    minimize_button_offset -=
+        new_avatar_button()->width() + kNewAvatarButtonOffset;
+
+    // In non-maximized mode, allow the new tab button to completely slide under
+    // the avatar button.
+    if (!frame()->IsMaximized() && !base::i18n::IsRTL()) {
+      minimize_button_offset +=
+          TabStrip::kNewTabButtonAssetWidth + kNewTabCaptionRestoredSpacing;
+    }
   }
 
   int tabstrip_x = browser_view()->ShouldShowAvatar() ?

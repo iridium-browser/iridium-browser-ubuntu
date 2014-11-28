@@ -46,11 +46,11 @@ class LocalToRemoteSyncer : public SyncTask {
                       const SyncFileMetadata& local_metadata,
                       const FileChange& local_change,
                       const base::FilePath& local_path,
-                      const fileapi::FileSystemURL& url);
+                      const storage::FileSystemURL& url);
   virtual ~LocalToRemoteSyncer();
   virtual void RunPreflight(scoped_ptr<SyncTaskToken> token) OVERRIDE;
 
-  const fileapi::FileSystemURL& url() const { return url_; }
+  const storage::FileSystemURL& url() const { return url_; }
   const base::FilePath& target_path() const { return target_path_; }
   SyncAction sync_action() const { return sync_action_; }
   bool needs_remote_change_listing() const {
@@ -80,9 +80,6 @@ class LocalToRemoteSyncer : public SyncTask {
                              google_apis::GDataErrorCode error,
                              const GURL&,
                              scoped_ptr<google_apis::FileResource>);
-  void DidUpdateDatabaseForUploadExistingFile(
-      scoped_ptr<SyncTaskToken> token,
-      SyncStatusCode status);
   void UpdateRemoteMetadata(const std::string& file_id,
                             scoped_ptr<SyncTaskToken> token);
   void DidGetRemoteMetadata(const std::string& file_id,
@@ -113,7 +110,7 @@ class LocalToRemoteSyncer : public SyncTask {
   FileChange local_change_;
   bool local_is_missing_;
   base::FilePath local_path_;
-  fileapi::FileSystemURL url_;
+  storage::FileSystemURL url_;
   SyncAction sync_action_;
 
   scoped_ptr<FileTracker> remote_file_tracker_;

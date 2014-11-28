@@ -84,7 +84,7 @@ class LocalVideoEncodeAcceleratorClient
 
   // Initialize the real HW encoder.
   void Initialize(const VideoSenderConfig& video_config) {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
 
     VideoCodecProfile output_profile = media::VIDEO_CODEC_PROFILE_UNKNOWN;
@@ -114,7 +114,11 @@ class LocalVideoEncodeAcceleratorClient
     UMA_HISTOGRAM_BOOLEAN("Cast.Sender.VideoEncodeAcceleratorInitializeSuccess",
                           result);
     if (!result) {
-      NotifyError(VideoEncodeAccelerator::kInvalidArgumentError);
+      cast_environment_->PostTask(
+          CastEnvironment::MAIN,
+          FROM_HERE,
+          base::Bind(&ExternalVideoEncoder::EncoderInitialized, weak_owner_,
+                     false));
       return;
     }
 
@@ -124,7 +128,7 @@ class LocalVideoEncodeAcceleratorClient
 
   // Destroy the VEA on the correct thread.
   void Destroy() {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     if (!video_encode_accelerator_)
       return;
 
@@ -141,7 +145,7 @@ class LocalVideoEncodeAcceleratorClient
   }
 
   void SetBitRate(uint32 bit_rate) {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
 
     video_encode_accelerator_->RequestEncodingParametersChange(bit_rate,
@@ -153,7 +157,7 @@ class LocalVideoEncodeAcceleratorClient
       const base::TimeTicks& capture_time,
       bool key_frame_requested,
       const VideoEncoder::FrameEncodedCallback& frame_encoded_callback) {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
 
     encoded_frame_data_storage_.push_back(
@@ -165,7 +169,7 @@ class LocalVideoEncodeAcceleratorClient
 
  protected:
   virtual void NotifyError(VideoEncodeAccelerator::Error error) OVERRIDE {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
     VLOG(1) << "ExternalVideoEncoder NotifyError: " << error;
 
@@ -179,7 +183,7 @@ class LocalVideoEncodeAcceleratorClient
   virtual void RequireBitstreamBuffers(unsigned int input_count,
                                        const gfx::Size& input_coded_size,
                                        size_t output_buffer_size) OVERRIDE {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
     DCHECK(video_encode_accelerator_);
 
@@ -196,7 +200,7 @@ class LocalVideoEncodeAcceleratorClient
   virtual void BitstreamBufferReady(int32 bitstream_buffer_id,
                                     size_t payload_size,
                                     bool key_frame) OVERRIDE {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
     if (bitstream_buffer_id < 0 ||
         bitstream_buffer_id >= static_cast<int32>(output_buffers_.size())) {
@@ -322,7 +326,7 @@ class LocalVideoEncodeAcceleratorClient
   }
 
   void ReceivedSharedMemory(scoped_ptr<base::SharedMemory> memory) {
-    DCHECK(encoder_task_runner_);
+    DCHECK(encoder_task_runner_.get());
     DCHECK(encoder_task_runner_->RunsTasksOnCurrentThread());
 
     output_buffers_.push_back(memory.release());
@@ -342,7 +346,8 @@ class LocalVideoEncodeAcceleratorClient
     cast_environment_->PostTask(
         CastEnvironment::MAIN,
         FROM_HERE,
-        base::Bind(&ExternalVideoEncoder::EncoderInitialized, weak_owner_));
+        base::Bind(&ExternalVideoEncoder::EncoderInitialized, weak_owner_,
+                   true));
   }
 
   static void DestroyVideoEncodeAcceleratorOnEncoderThread(
@@ -379,12 +384,14 @@ class LocalVideoEncodeAcceleratorClient
 ExternalVideoEncoder::ExternalVideoEncoder(
     scoped_refptr<CastEnvironment> cast_environment,
     const VideoSenderConfig& video_config,
+    const CastInitializationCallback& initialization_cb,
     const CreateVideoEncodeAcceleratorCallback& create_vea_cb,
     const CreateVideoEncodeMemoryCallback& create_video_encode_mem_cb)
     : video_config_(video_config),
       cast_environment_(cast_environment),
       encoder_active_(false),
       key_frame_requested_(false),
+      initialization_cb_(initialization_cb),
       weak_factory_(this) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
 
@@ -393,15 +400,20 @@ ExternalVideoEncoder::ExternalVideoEncoder(
                                                 create_vea_cb,
                                                 create_video_encode_mem_cb,
                                                 weak_factory_.GetWeakPtr());
-  DCHECK(video_accelerator_client_);
+  DCHECK(video_accelerator_client_.get());
 }
 
 ExternalVideoEncoder::~ExternalVideoEncoder() {
 }
 
-void ExternalVideoEncoder::EncoderInitialized() {
+void ExternalVideoEncoder::EncoderInitialized(bool success) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
-  encoder_active_ = true;
+  encoder_active_ = success;
+  DCHECK(!initialization_cb_.is_null());
+  initialization_cb_.Run(
+      success ?
+      STATUS_VIDEO_INITIALIZED : STATUS_HW_VIDEO_ENCODER_NOT_SUPPORTED);
+  initialization_cb_.Reset();
 }
 
 void ExternalVideoEncoder::EncoderError() {

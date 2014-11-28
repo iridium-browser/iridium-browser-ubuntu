@@ -19,11 +19,12 @@ class ClipboardApiTest : public ExtensionApiTest {
  public:
   bool LoadHostedApp(const std::string& app_name,
                      const std::string& launch_page);
-  bool ExecuteCopyInSelectedTab(bool* result);
-  bool ExecutePasteInSelectedTab(bool* result);
+  bool ExecuteCopyInSelectedTab();
+  bool ExecutePasteInSelectedTab();
+  bool ExecuteCommandInIframeInSelectedTab(const char* command);
 
  private:
-  bool ExecuteScriptInSelectedTab(const std::string& script, bool* result);
+  bool ExecuteScriptInSelectedTab(const std::string& script);
 };
 
 bool ClipboardApiTest::LoadHostedApp(const std::string& app_name,
@@ -55,28 +56,35 @@ bool ClipboardApiTest::LoadHostedApp(const std::string& app_name,
   return true;
 }
 
-bool ClipboardApiTest::ExecuteCopyInSelectedTab(bool* result) {
+bool ClipboardApiTest::ExecuteCopyInSelectedTab() {
   const char kScript[] =
       "window.domAutomationController.send(document.execCommand('copy'))";
-  return ExecuteScriptInSelectedTab(kScript, result);
+  return ExecuteScriptInSelectedTab(kScript);
 }
 
-bool ClipboardApiTest::ExecutePasteInSelectedTab(bool* result) {
+bool ClipboardApiTest::ExecutePasteInSelectedTab() {
   const char kScript[] =
       "window.domAutomationController.send(document.execCommand('paste'))";
-  return ExecuteScriptInSelectedTab(kScript, result);
+  return ExecuteScriptInSelectedTab(kScript);
 }
 
-bool ClipboardApiTest::ExecuteScriptInSelectedTab(const std::string& script,
-                                                  bool* result) {
-  if (!content::ExecuteScriptAndExtractBool(
-          browser()->tab_strip_model()->GetActiveWebContents(),
-          script,
-          result)) {
-    message_ = "Failed to execute script in selected tab.";
-    return false;
-  }
-  return true;
+bool ClipboardApiTest::ExecuteCommandInIframeInSelectedTab(
+    const char* command) {
+  const char kScript[] =
+      "var ifr = document.createElement('iframe');\n"
+      "document.body.appendChild(ifr);\n"
+      "ifr.contentDocument.write('<script>parent.domAutomationController.send("
+          "document.execCommand(\"%s\"))</script>');";
+  return ExecuteScriptInSelectedTab(base::StringPrintf(kScript, command));
+}
+
+bool ClipboardApiTest::ExecuteScriptInSelectedTab(const std::string& script) {
+  bool result;
+  CHECK(content::ExecuteScriptAndExtractBool(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        script,
+        &result));
+  return result;
 }
 
 }  // namespace
@@ -95,21 +103,19 @@ IN_PROC_BROWSER_TEST_F(ClipboardApiTest, ExtensionNoPermission) {
 IN_PROC_BROWSER_TEST_F(ClipboardApiTest, HostedApp) {
   ASSERT_TRUE(LoadHostedApp("hosted_app", "main.html")) << message_;
 
-  bool result = false;
-  ASSERT_TRUE(ExecuteCopyInSelectedTab(&result)) << message_;
-  EXPECT_TRUE(result);
-  ASSERT_TRUE(ExecutePasteInSelectedTab(&result)) << message_;
-  EXPECT_TRUE(result);
+  EXPECT_TRUE(ExecuteCopyInSelectedTab()) << message_;
+  EXPECT_TRUE(ExecutePasteInSelectedTab()) << message_;
+  EXPECT_TRUE(ExecuteCommandInIframeInSelectedTab("copy")) << message_;
+  EXPECT_TRUE(ExecuteCommandInIframeInSelectedTab("paste")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ClipboardApiTest, HostedAppNoPermission) {
   ASSERT_TRUE(LoadHostedApp("hosted_app_no_permission", "main.html"))
       << message_;
 
-  bool result = false;
-  ASSERT_TRUE(ExecuteCopyInSelectedTab(&result)) << message_;
-  EXPECT_FALSE(result);
-  ASSERT_TRUE(ExecutePasteInSelectedTab(&result)) << message_;
-  EXPECT_FALSE(result);
+  EXPECT_FALSE(ExecuteCopyInSelectedTab()) << message_;
+  EXPECT_FALSE(ExecutePasteInSelectedTab()) << message_;
+  EXPECT_FALSE(ExecuteCommandInIframeInSelectedTab("copy")) << message_;
+  EXPECT_FALSE(ExecuteCommandInIframeInSelectedTab("paste")) << message_;
 }
 

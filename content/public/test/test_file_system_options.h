@@ -5,18 +5,18 @@
 #ifndef CONTENT_PUBLIC_TEST_TEST_FILE_SYSTEM_OPTIONS_H_
 #define CONTENT_PUBLIC_TEST_TEST_FILE_SYSTEM_OPTIONS_H_
 
-#include "webkit/browser/fileapi/file_system_options.h"
+#include "storage/browser/fileapi/file_system_options.h"
 
 namespace content {
 
 // Returns Filesystem options for incognito mode.
-fileapi::FileSystemOptions CreateIncognitoFileSystemOptions();
+storage::FileSystemOptions CreateIncognitoFileSystemOptions();
 
 // Returns Filesystem options that allow file access.
-fileapi::FileSystemOptions CreateAllowFileAccessOptions();
+storage::FileSystemOptions CreateAllowFileAccessOptions();
 
 // Returns Filesystem options that disallow file access.
-fileapi::FileSystemOptions CreateDisallowFileAccessOptions();
+storage::FileSystemOptions CreateDisallowFileAccessOptions();
 
 }  // namespace content
 

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,13 +8,15 @@ Script that generates a tarball containing changes that are needed to create a
 complete sysroot from extracted prebuilt packages.
 """
 
+from __future__ import print_function
+
 import os
 
-from chromite.cbuildbot import portage_utilities
+from chromite.cbuildbot import constants
+from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
-from chromite.lib import commandline
-from chromite.cbuildbot import constants
+from chromite.lib import portage_util
 
 _CREATE_BATCH_CMD = ('rsync',)
 _CREATE_BATCH_EXCLUDE = ('--exclude=/tmp/', '--exclude=/var/cache/',
@@ -110,7 +111,7 @@ def GenerateSysroot(sysroot, board, build_tests, unpack_only=False):
     cmd.append('--nowithautotest')
   env = {'USE': os.environ.get('USE', ''),
          'PORTAGE_BINHOST': 'file://localhost%s' %
-         portage_utilities.GetBinaryPackageDir(board)}
+         portage_util.GetBinaryPackageDir(board)}
   cros_build_lib.RunCommand(cmd, extra_env=env)
 
 

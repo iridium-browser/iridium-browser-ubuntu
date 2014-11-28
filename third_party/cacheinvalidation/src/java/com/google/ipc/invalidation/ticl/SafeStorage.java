@@ -18,7 +18,6 @@ package com.google.ipc.invalidation.ticl;
 
 import static com.google.ipc.invalidation.external.client.SystemResources.Scheduler.NO_DELAY;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources;
 import com.google.ipc.invalidation.external.client.SystemResources.Scheduler;
 import com.google.ipc.invalidation.external.client.SystemResources.Storage;
@@ -26,6 +25,7 @@ import com.google.ipc.invalidation.external.client.types.Callback;
 import com.google.ipc.invalidation.external.client.types.SimplePair;
 import com.google.ipc.invalidation.external.client.types.Status;
 import com.google.ipc.invalidation.util.NamedRunnable;
+import com.google.ipc.invalidation.util.Preconditions;
 
 /**
  * An implementation of the Storage resource that schedules the callbacks on the given scheduler

@@ -263,11 +263,6 @@ enum NotificationType {
   // the details is history::KeywordSearchDeletedDetails.
   NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_DELETED,
 
-  // Sent by history when the favicon of a URL changes.  The source is the
-  // profile, and the details is FaviconChangedDetails (see
-  // chrome/browser/favicon/favicon_changed_details.h).
-  NOTIFICATION_FAVICON_CHANGED,
-
   // Sent by FaviconTabHelper when a tab's favicon has been successfully
   // updated. The details are a bool indicating whether the
   // NavigationEntry's favicon URL has changed since the previous
@@ -393,10 +388,6 @@ enum NotificationType {
 
   // Content Settings --------------------------------------------------------
 
-  // Sent when content settings change. The source is a HostContentSettings
-  // object, the details are ContentSettingsNotificationsDetails.
-  NOTIFICATION_CONTENT_SETTINGS_CHANGED,
-
   // Sent when the collect cookies dialog is shown. The source is a
   // TabSpecificContentSettings object, there are no details.
   NOTIFICATION_COLLECTED_COOKIES_SHOWN,
@@ -464,11 +455,6 @@ enum NotificationType {
 
   // Misc --------------------------------------------------------------------
 
-  // Sent when PerformanceMonitor has finished all the initial steps of data
-  // collection and has begun passively observing. The source is the
-  // PerformanceMonitor*. No details are expected.
-  NOTIFICATION_PERFORMANCE_MONITOR_INITIALIZED,
-
 #if defined(OS_CHROMEOS)
   // Sent when a chromium os user logs in.
   // The details are a chromeos::User object.
@@ -495,10 +481,6 @@ enum NotificationType {
   // Sent by UserManager when profile image download has failed or user has the
   // default profile image or no profile image at all. No details are expected.
   NOTIFICATION_PROFILE_IMAGE_UPDATE_FAILED,
-
-  // Sent when a chromium os user attempts to log in.  The source is
-  // all and the details are AuthenticationNotificationDetails.
-  NOTIFICATION_LOGIN_AUTHENTICATION,
 
   // Sent when a network error message is displayed on the WebUI login screen.
   // First paint event of this fires NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE.

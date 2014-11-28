@@ -10,8 +10,8 @@ import android.test.suitebuilder.annotation.SmallTest;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.NavigationHistory;
+import org.chromium.content_public.browser.NavigationController;
+import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.util.concurrent.Callable;
@@ -25,19 +25,19 @@ public class SaveRestoreStateTest extends AwTestBase {
         public final TestAwContentsClient contentsClient;
         public final AwTestContainerView testView;
         public final AwContents awContents;
-        public final ContentViewCore contentViewCore;
+        public final NavigationController navigationController;
 
         public TestVars(TestAwContentsClient contentsClient,
                         AwTestContainerView testView) {
             this.contentsClient = contentsClient;
             this.testView = testView;
             this.awContents = testView.getAwContents();
-            this.contentViewCore = this.awContents.getContentViewCore();
+            this.navigationController = this.awContents.getNavigationController();
         }
     }
 
     private TestVars createNewView() throws Exception {
-        TestAwContentsClient contentsClient = new TestAwContentsClient();;
+        TestAwContentsClient contentsClient = new TestAwContentsClient();
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(contentsClient);
         return new TestVars(contentsClient, testView);
     }
@@ -93,7 +93,7 @@ public class SaveRestoreStateTest extends AwTestBase {
         return runTestOnUiThreadAndGetResult(new Callable<NavigationHistory>() {
             @Override
             public NavigationHistory call() throws Exception {
-                return vars.contentViewCore.getNavigationHistory();
+                return vars.navigationController.getNavigationHistory();
             }
         });
     }
@@ -136,7 +136,7 @@ public class SaveRestoreStateTest extends AwTestBase {
         pollOnUiThread(new Callable<Boolean>() {
             @Override
             public Boolean call() throws Exception {
-                return TITLES[0].equals(restoredVars.contentViewCore.getTitle()) &&
+                return TITLES[0].equals(restoredVars.awContents.getTitle()) &&
                        TITLES[0].equals(restoredVars.contentsClient.getUpdatedTitle());
             }
         });

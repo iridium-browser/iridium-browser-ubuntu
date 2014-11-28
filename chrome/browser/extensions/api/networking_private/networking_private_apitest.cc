@@ -217,6 +217,10 @@ class ExtensionNetworkingPrivateApiTest
     // Note: These properties will show up in a "Cellular" object in ONC.
     service_test_->SetServiceProperty(
         "stub_cellular1",
+        shill::kAutoConnectProperty,
+        base::FundamentalValue(true));
+    service_test_->SetServiceProperty(
+        "stub_cellular1",
         shill::kNetworkTechnologyProperty,
         base::StringValue(shill::kNetworkTechnologyGsm));
     service_test_->SetServiceProperty(
@@ -263,6 +267,9 @@ class ExtensionNetworkingPrivateApiTest
 
     // Sends a notification about the added profile.
     profile_test->AddProfile(kUser1ProfilePath, userhash_);
+
+    // Enable technologies.
+    manager_test_->AddTechnology("wimax", true);
 
     // Add IPConfigs
     base::DictionaryValue ipconfig;
@@ -330,6 +337,18 @@ class ExtensionNetworkingPrivateApiTest
     service_test_->SetServiceProperty("stub_wifi2",
                                       shill::kConnectableProperty,
                                       base::FundamentalValue(true));
+
+    AddService("stub_wimax", "wimax", shill::kTypeWimax, shill::kStateOnline);
+    service_test_->SetServiceProperty("stub_wimax",
+                                      shill::kSignalStrengthProperty,
+                                      base::FundamentalValue(40));
+    service_test_->SetServiceProperty("stub_wimax",
+                                      shill::kProfileProperty,
+                                      base::StringValue(kUser1ProfilePath));
+    service_test_->SetServiceProperty("stub_wimax",
+                                      shill::kConnectableProperty,
+                                      base::FundamentalValue(true));
+    profile_test->AddService(kUser1ProfilePath, "stub_wimax");
 
     base::ListValue frequencies2;
     frequencies2.AppendInteger(2400);

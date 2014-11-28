@@ -9,6 +9,8 @@
 #include "SkBBoxRecord.h"
 #include "SkPatchUtils.h"
 
+#include "SkTextBlob.h"
+
 SkBBoxRecord::~SkBBoxRecord() {
     fSaveStack.deleteAll();
 }
@@ -272,6 +274,20 @@ void SkBBoxRecord::onDrawTextOnPath(const void* text, size_t byteLength, const S
     }
 }
 
+void SkBBoxRecord::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
+                                  const SkPaint& paint) {
+    SkRect bbox = blob->bounds();
+    bbox.offset(x, y);
+    // FIXME: implement implicit blob bounds!
+    if (bbox.isEmpty()) {
+        this->getClipBounds(&bbox);
+    }
+
+    if (this->transformBounds(bbox, &paint)) {
+        INHERITED::onDrawTextBlob(blob, x, y, paint);
+    }
+}
+
 void SkBBoxRecord::drawVertices(VertexMode mode, int vertexCount,
                                 const SkPoint vertices[], const SkPoint texs[],
                                 const SkColor colors[], SkXfermode* xfer,
@@ -297,8 +313,7 @@ void SkBBoxRecord::onDrawPatch(const SkPoint cubics[12], const SkColor colors[4]
 
 void SkBBoxRecord::onDrawPicture(const SkPicture* picture, const SkMatrix* matrix,
                                  const SkPaint* paint) {
-    SkRect bounds = SkRect::MakeWH(SkIntToScalar(picture->width()),
-                                   SkIntToScalar(picture->height()));
+    SkRect bounds = picture->cullRect();
     // todo: wonder if we should allow passing an optional matrix to transformBounds so we don't
     // end up transforming the rect twice.
     if (matrix) {

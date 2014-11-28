@@ -49,7 +49,7 @@ class UserMediaController;
 
 class UserMediaRequest FINAL : public GarbageCollectedFinalized<UserMediaRequest>, public ContextLifecycleObserver {
 public:
-    static UserMediaRequest* create(ExecutionContext*, UserMediaController*, const Dictionary& options, PassOwnPtr<NavigatorUserMediaSuccessCallback>, PassOwnPtr<NavigatorUserMediaErrorCallback>, ExceptionState&);
+    static UserMediaRequest* create(ExecutionContext*, UserMediaController*, const Dictionary& options, NavigatorUserMediaSuccessCallback*, NavigatorUserMediaErrorCallback*, ExceptionState&);
     virtual ~UserMediaRequest();
 
     NavigatorUserMediaSuccessCallback* successCallback() const { return m_successCallback.get(); }
@@ -71,18 +71,18 @@ public:
     // ContextLifecycleObserver
     virtual void contextDestroyed() OVERRIDE;
 
-    void trace(Visitor*) { }
+    void trace(Visitor*);
 
 private:
-    UserMediaRequest(ExecutionContext*, UserMediaController*, WebMediaConstraints audio, WebMediaConstraints video, PassOwnPtr<NavigatorUserMediaSuccessCallback>, PassOwnPtr<NavigatorUserMediaErrorCallback>);
+    UserMediaRequest(ExecutionContext*, UserMediaController*, WebMediaConstraints audio, WebMediaConstraints video, NavigatorUserMediaSuccessCallback*, NavigatorUserMediaErrorCallback*);
 
     WebMediaConstraints m_audio;
     WebMediaConstraints m_video;
 
     UserMediaController* m_controller;
 
-    OwnPtr<NavigatorUserMediaSuccessCallback> m_successCallback;
-    OwnPtr<NavigatorUserMediaErrorCallback> m_errorCallback;
+    Member<NavigatorUserMediaSuccessCallback> m_successCallback;
+    Member<NavigatorUserMediaErrorCallback> m_errorCallback;
 };
 
 } // namespace blink

@@ -153,7 +153,7 @@ void WebRtcLocalAudioRenderer::Stop() {
   // Stop the output audio stream, i.e, stop asking for data to render.
   // It is safer to call Stop() on the |sink_| to clean up the resources even
   // when the |sink_| is never started.
-  if (sink_) {
+  if (sink_.get()) {
     sink_->Stop();
     sink_ = NULL;
   }
@@ -273,7 +273,7 @@ void WebRtcLocalAudioRenderer::ReconfigureSink(
     DVLOG(1) << "DUCKING not forced ON for output";
   }
 
-  if (source_params_ == params)
+  if (source_params_.Equals(params))
     return;
 
   // Reset the |source_params_|, |sink_params_| and |loopback_fifo_| to match
@@ -282,8 +282,7 @@ void WebRtcLocalAudioRenderer::ReconfigureSink(
   source_params_ = params;
 
   sink_params_ = media::AudioParameters(source_params_.format(),
-      source_params_.channel_layout(), source_params_.channels(),
-      source_params_.input_channels(), source_params_.sample_rate(),
+      source_params_.channel_layout(), source_params_.sample_rate(),
       source_params_.bits_per_sample(),
 #if defined(OS_ANDROID)
       // On Android, input and output use the same sample rate. In order to
@@ -316,7 +315,7 @@ void WebRtcLocalAudioRenderer::ReconfigureSink(
     loopback_fifo_.reset(new_fifo);
   }
 
-  if (!sink_)
+  if (!sink_.get())
     return;  // WebRtcLocalAudioRenderer has not yet been started.
 
   // Stop |sink_| and re-create a new one to be initialized with different audio

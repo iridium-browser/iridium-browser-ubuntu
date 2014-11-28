@@ -27,6 +27,8 @@
 #include "core/html/canvas/DataView.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/custom/V8DataViewCustom.h"
+#include "bindings/core/v8/custom/V8TypedArrayCustom.h"
 #include "core/dom/ExceptionCode.h"
 #include "platform/CheckedInt.h"
 #include "wtf/CPU.h"
@@ -67,7 +69,6 @@ DataView::DataView(PassRefPtr<ArrayBuffer> buffer, unsigned byteOffset, unsigned
     : ArrayBufferView(buffer, byteOffset)
     , m_byteLength(byteLength)
 {
-    ScriptWrappable::init(this);
 }
 
 static bool needToFlipBytes(bool littleEndian)
@@ -239,10 +240,15 @@ void DataView::setFloat64(unsigned byteOffset, double value, bool littleEndian, 
     setData<double>(byteOffset, value, littleEndian, exceptionState);
 }
 
+v8::Handle<v8::Object> DataView::wrap(v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
+{
+    return V8TypedArray<DataView>::wrap(this, creationContext, isolate);
+}
+
 void DataView::neuter()
 {
     ArrayBufferView::neuter();
     m_byteLength = 0;
 }
 
-}
+} // namespace blink

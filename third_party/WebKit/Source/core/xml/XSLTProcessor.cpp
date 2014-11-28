@@ -86,7 +86,7 @@ PassRefPtrWillBeRawPtr<Document> XSLTProcessor::createDocumentFromSource(const S
             result->setTransformSourceDocument(oldDocument.get());
             result->updateSecurityOrigin(oldDocument->securityOrigin());
             result->setCookieURL(oldDocument->cookieURL());
-            result->contentSecurityPolicy()->copyStateFrom(oldDocument->contentSecurityPolicy());
+            result->initContentSecurityPolicy();
         }
     } else {
         result = LocalDOMWindow::createDocument(sourceMIMEType, init, forceXHTML);
@@ -162,6 +162,7 @@ void XSLTProcessor::trace(Visitor* visitor)
 {
     visitor->trace(m_stylesheet);
     visitor->trace(m_stylesheetRootNode);
+    visitor->trace(m_document);
 }
 
 } // namespace blink

@@ -52,6 +52,7 @@ class ResizableWidgetDelegate : public views::WidgetDelegateView {
  private:
   virtual bool CanResize() const OVERRIDE { return true; }
   virtual bool CanMaximize() const OVERRIDE { return true; }
+  virtual bool CanMinimize() const OVERRIDE { return true; }
   virtual void DeleteDelegate() OVERRIDE { delete this; }
 
   DISALLOW_COPY_AND_ASSIGN(ResizableWidgetDelegate);
@@ -86,6 +87,7 @@ class MaxSizeNCFV : public views::NonClientFrameView {
   virtual void ResetWindowControls() OVERRIDE {}
   virtual void UpdateWindowIcon() OVERRIDE {}
   virtual void UpdateWindowTitle() OVERRIDE {}
+  virtual void SizeConstraintsChanged() OVERRIDE {}
 
   DISALLOW_COPY_AND_ASSIGN(MaxSizeNCFV);
 };

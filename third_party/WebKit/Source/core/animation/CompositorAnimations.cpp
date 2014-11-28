@@ -31,6 +31,7 @@
 #include "config.h"
 #include "core/animation/CompositorAnimations.h"
 
+#include "core/animation/AnimationNode.h"
 #include "core/animation/AnimationTranslationUtil.h"
 #include "core/animation/CompositorAnimationsImpl.h"
 #include "core/animation/animatable/AnimatableDouble.h"
@@ -43,7 +44,7 @@
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "platform/geometry/FloatBox.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebAnimation.h"
+#include "public/platform/WebCompositorAnimation.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebFilterAnimationCurve.h"
 #include "public/platform/WebFilterKeyframe.h"
@@ -59,71 +60,17 @@ namespace blink {
 
 namespace {
 
-void getKeyframeValuesForProperty(const KeyframeEffectModelBase* effect, CSSPropertyID id, double scale, bool reverse, PropertySpecificKeyframeVector& values)
+void getKeyframeValuesForProperty(const KeyframeEffectModelBase* effect, CSSPropertyID id, double scale, PropertySpecificKeyframeVector& values)
 {
     ASSERT(values.isEmpty());
     const PropertySpecificKeyframeVector& group = effect->getPropertySpecificKeyframes(id);
 
-    if (reverse) {
-        for (size_t i = group.size(); i--;) {
-            double offset = (1 - group[i]->offset()) * scale;
-            values.append(group[i]->cloneWithOffset(offset));
-        }
-    } else {
-        for (size_t i = 0; i < group.size(); ++i) {
-            double offset = group[i]->offset() * scale;
-            values.append(group[i]->cloneWithOffset(offset));
-        }
+    for (size_t i = 0; i < group.size(); ++i) {
+        double offset = group[i]->offset() * scale;
+        values.append(group[i]->cloneWithOffset(offset));
     }
 }
 
-}
-
-// -----------------------------------------------------------------------
-// TimingFunctionReverser methods
-// -----------------------------------------------------------------------
-
-PassRefPtr<TimingFunction> CompositorAnimationsTimingFunctionReverser::reverse(const LinearTimingFunction* timefunc)
-{
-    return const_cast<LinearTimingFunction*>(timefunc);
-}
-
-PassRefPtr<TimingFunction> CompositorAnimationsTimingFunctionReverser::reverse(const CubicBezierTimingFunction* timefunc)
-{
-    switch (timefunc->subType()) {
-    case CubicBezierTimingFunction::EaseIn:
-        return CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseOut);
-    case CubicBezierTimingFunction::EaseOut:
-        return CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseIn);
-    case CubicBezierTimingFunction::EaseInOut:
-        return const_cast<CubicBezierTimingFunction*>(timefunc);
-    case CubicBezierTimingFunction::Ease: // Ease is not symmetrical
-    case CubicBezierTimingFunction::Custom:
-        return CubicBezierTimingFunction::create(1 - timefunc->x2(), 1 - timefunc->y2(), 1 - timefunc->x1(), 1 - timefunc->y1());
-    default:
-        ASSERT_NOT_REACHED();
-        return PassRefPtr<TimingFunction>();
-    }
-}
-
-PassRefPtr<TimingFunction> CompositorAnimationsTimingFunctionReverser::reverse(const TimingFunction* timefunc)
-{
-    switch (timefunc->type()) {
-    case TimingFunction::LinearFunction: {
-        const LinearTimingFunction* linear = toLinearTimingFunction(timefunc);
-        return reverse(linear);
-    }
-    case TimingFunction::CubicBezierFunction: {
-        const CubicBezierTimingFunction* cubic = toCubicBezierTimingFunction(timefunc);
-        return reverse(cubic);
-    }
-
-    // Steps function can not be reversed.
-    case TimingFunction::StepsFunction:
-    default:
-        ASSERT_NOT_REACHED();
-        return PassRefPtr<TimingFunction>();
-    }
 }
 
 bool CompositorAnimations::getAnimatedBoundingBox(FloatBox& box, const AnimationEffect& effect, double minValue, double maxValue) const
@@ -156,7 +103,7 @@ bool CompositorAnimations::getAnimatedBoundingBox(FloatBox& box, const Animation
             if (frames[j]->composite() != AnimationEffect::CompositeReplace)
                 return false;
 
-            const TimingFunction* timing = frames[j]->easing();
+            const TimingFunction& timing = frames[j]->easing();
             double min = 0;
             double max = 1;
             if (j == 0) {
@@ -174,8 +121,7 @@ bool CompositorAnimations::getAnimatedBoundingBox(FloatBox& box, const Animation
             }
 
             FloatBox bounds;
-            if (timing)
-                timing->range(&min, &max);
+            timing.range(&min, &max);
             if (!endTransform->transformOperations().blendedBoundsForBox(originalBox, startTransform->transformOperations(), min, max, &bounds))
                 return false;
             box.expandTo(bounds);
@@ -188,7 +134,7 @@ bool CompositorAnimations::getAnimatedBoundingBox(FloatBox& box, const Animation
 // CompositorAnimations public API
 // -----------------------------------------------------------------------
 
-bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& timing, const AnimationEffect& effect)
+bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& timing, const AnimationEffect& effect, double playerPlaybackRate)
 {
     const KeyframeEffectModelBase& keyframeEffect = toKeyframeEffectModelBase(effect);
 
@@ -224,19 +170,25 @@ bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& tim
             }
 
             // FIXME: Remove this check when crbug.com/229405 is resolved
-            if (i < frames.size() - 1 && frame->easing()->type() == TimingFunction::StepsFunction)
+            if (i < frames.size() - 1 && frame->easing().type() == TimingFunction::StepsFunction)
                 return false;
         }
     }
 
     CompositorAnimationsImpl::CompositorTiming out;
-    if (!CompositorAnimationsImpl::convertTimingForCompositor(timing, out))
+    if (!CompositorAnimationsImpl::convertTimingForCompositor(timing, 0, out, playerPlaybackRate))
         return false;
 
-    // FIXME: We should support non-linear timing functions in the compositor
-    // eventually.
-    if (timing.timingFunction->type() != TimingFunction::LinearFunction)
+    if (timing.timingFunction->type() != TimingFunction::LinearFunction) {
+        // Checks the of size of KeyframeVector instead of PropertySpecificKeyframeVector.
+        const KeyframeVector& keyframes = keyframeEffect.getFrames();
+        if (keyframes.size() == 2 && keyframes[0]->easing().type() == TimingFunction::LinearFunction && timing.timingFunction->type() != TimingFunction::StepsFunction)
+            return true;
+
+        // FIXME: Support non-linear timing functions in the compositor for
+        // more than two keyframes and step timing functions in the compositor.
         return false;
+    }
 
     return true;
 }
@@ -246,10 +198,10 @@ bool CompositorAnimations::canStartAnimationOnCompositor(const Element& element)
     return element.renderer() && element.renderer()->compositingState() == PaintsIntoOwnBacking;
 }
 
-bool CompositorAnimations::startAnimationOnCompositor(const Element& element, double startTime, const Timing& timing, const AnimationEffect& effect, Vector<int>& startedAnimationIds)
+bool CompositorAnimations::startAnimationOnCompositor(const Element& element, double startTime, double timeOffset, const Timing& timing, const AnimationEffect& effect, Vector<int>& startedAnimationIds, double playerPlaybackRate)
 {
     ASSERT(startedAnimationIds.isEmpty());
-    ASSERT(isCandidateForAnimationOnCompositor(timing, effect));
+    ASSERT(isCandidateForAnimationOnCompositor(timing, effect, playerPlaybackRate));
     ASSERT(canStartAnimationOnCompositor(element));
 
     const KeyframeEffectModelBase& keyframeEffect = toKeyframeEffectModelBase(effect);
@@ -257,8 +209,8 @@ bool CompositorAnimations::startAnimationOnCompositor(const Element& element, do
     RenderLayer* layer = toRenderBoxModelObject(element.renderer())->layer();
     ASSERT(layer);
 
-    Vector<OwnPtr<blink::WebAnimation> > animations;
-    CompositorAnimationsImpl::getAnimationOnCompositor(timing, startTime, keyframeEffect, animations);
+    Vector<OwnPtr<WebCompositorAnimation> > animations;
+    CompositorAnimationsImpl::getAnimationOnCompositor(timing, startTime, timeOffset, keyframeEffect, animations, playerPlaybackRate);
     ASSERT(!animations.isEmpty());
     for (size_t i = 0; i < animations.size(); ++i) {
         int id = animations[i]->id();
@@ -305,26 +257,16 @@ void CompositorAnimations::pauseAnimationForTestingOnCompositor(const Element& e
 // CompositorAnimationsImpl
 // -----------------------------------------------------------------------
 
-bool CompositorAnimationsImpl::convertTimingForCompositor(const Timing& timing, CompositorTiming& out)
+bool CompositorAnimationsImpl::convertTimingForCompositor(const Timing& timing, double timeOffset, CompositorTiming& out, double playerPlaybackRate)
 {
     timing.assertValid();
 
     // All fill modes are supported (the calling code handles them).
 
-    // FIXME: Support non-zero iteration start.
-    if (timing.iterationStart)
-        return false;
-
-    // FIXME: Compositor only supports positive, integer iteration counts.
-    // Zero iterations could be converted, but silly.
-    if ((std::floor(timing.iterationCount) != timing.iterationCount) || timing.iterationCount <= 0)
+    if (timing.iterationCount <= 0)
         return false;
 
     if (std::isnan(timing.iterationDuration) || !timing.iterationDuration)
-        return false;
-
-    // FIXME: Support other playback rates
-    if (timing.playbackRate != 1)
         return false;
 
     // All directions are supported.
@@ -337,20 +279,21 @@ bool CompositorAnimationsImpl::convertTimingForCompositor(const Timing& timing, 
     if (scaledStartDelay > 0 && scaledStartDelay > out.scaledDuration * timing.iterationCount)
         return false;
 
-    out.reverse = (timing.direction == Timing::PlaybackDirectionReverse
-        || timing.direction == Timing::PlaybackDirectionAlternateReverse);
-    out.alternate = (timing.direction == Timing::PlaybackDirectionAlternate
-        || timing.direction == Timing::PlaybackDirectionAlternateReverse);
+    out.direction = timing.direction;
 
     if (!std::isfinite(timing.iterationCount)) {
         out.adjustedIterationCount = -1;
     } else {
-        out.adjustedIterationCount = std::floor(timing.iterationCount);
+        out.adjustedIterationCount = timing.iterationCount;
         ASSERT(out.adjustedIterationCount > 0);
     }
 
     // Compositor's time offset is positive for seeking into the animation.
-    out.scaledTimeOffset = -scaledStartDelay;
+    out.scaledTimeOffset = -scaledStartDelay + timeOffset;
+    out.playbackRate = timing.playbackRate * playerPlaybackRate;
+    out.fillMode = timing.fillMode == Timing::FillModeAuto ? Timing::FillModeNone : timing.fillMode;
+    out.iterationStart = timing.iterationStart;
+
     return true;
 }
 
@@ -366,7 +309,7 @@ void addKeyframeWithTimingFunction(PlatformAnimationCurveType& curve, const Plat
 
     switch (timingFunction->type()) {
     case TimingFunction::LinearFunction:
-        curve.add(keyframe, blink::WebAnimationCurve::TimingFunctionTypeLinear);
+        curve.add(keyframe, WebCompositorAnimationCurve::TimingFunctionTypeLinear);
         return;
 
     case TimingFunction::CubicBezierFunction: {
@@ -376,19 +319,19 @@ void addKeyframeWithTimingFunction(PlatformAnimationCurveType& curve, const Plat
             curve.add(keyframe, cubic->x1(), cubic->y1(), cubic->x2(), cubic->y2());
         } else {
 
-            blink::WebAnimationCurve::TimingFunctionType easeType;
+            WebCompositorAnimationCurve::TimingFunctionType easeType;
             switch (cubic->subType()) {
             case CubicBezierTimingFunction::Ease:
-                easeType = blink::WebAnimationCurve::TimingFunctionTypeEase;
+                easeType = WebCompositorAnimationCurve::TimingFunctionTypeEase;
                 break;
             case CubicBezierTimingFunction::EaseIn:
-                easeType = blink::WebAnimationCurve::TimingFunctionTypeEaseIn;
+                easeType = WebCompositorAnimationCurve::TimingFunctionTypeEaseIn;
                 break;
             case CubicBezierTimingFunction::EaseOut:
-                easeType = blink::WebAnimationCurve::TimingFunctionTypeEaseOut;
+                easeType = WebCompositorAnimationCurve::TimingFunctionTypeEaseOut;
                 break;
             case CubicBezierTimingFunction::EaseInOut:
-                easeType = blink::WebAnimationCurve::TimingFunctionTypeEaseInOut;
+                easeType = WebCompositorAnimationCurve::TimingFunctionTypeEaseInOut;
                 break;
 
             // Custom Bezier are handled seperately.
@@ -412,17 +355,15 @@ void addKeyframeWithTimingFunction(PlatformAnimationCurveType& curve, const Plat
 
 } // namespace anoymous
 
-void CompositorAnimationsImpl::addKeyframesToCurve(blink::WebAnimationCurve& curve, const PropertySpecificKeyframeVector& keyframes, bool reverse)
+void CompositorAnimationsImpl::addKeyframesToCurve(WebCompositorAnimationCurve& curve, const PropertySpecificKeyframeVector& keyframes, const Timing& timing)
 {
     for (size_t i = 0; i < keyframes.size(); i++) {
-        RefPtr<TimingFunction> reversedTimingFunction;
         const TimingFunction* keyframeTimingFunction = 0;
         if (i < keyframes.size() - 1) { // Ignore timing function of last frame.
-            if (reverse) {
-                reversedTimingFunction = CompositorAnimationsTimingFunctionReverser::reverse(keyframes[i + 1]->easing());
-                keyframeTimingFunction = reversedTimingFunction.get();
+            if (keyframes.size() == 2 && keyframes[0]->easing().type() == TimingFunction::LinearFunction) {
+                keyframeTimingFunction = timing.timingFunction.get();
             } else {
-                keyframeTimingFunction = keyframes[i]->easing();
+                keyframeTimingFunction = &keyframes[i]->easing();
             }
         }
 
@@ -432,27 +373,27 @@ void CompositorAnimationsImpl::addKeyframesToCurve(blink::WebAnimationCurve& cur
         const AnimatableValue* value = keyframes[i]->getAnimatableValue().get();
 
         switch (curve.type()) {
-        case blink::WebAnimationCurve::AnimationCurveTypeFilter: {
-            OwnPtr<blink::WebFilterOperations> ops = adoptPtr(blink::Platform::current()->compositorSupport()->createFilterOperations());
+        case WebCompositorAnimationCurve::AnimationCurveTypeFilter: {
+            OwnPtr<WebFilterOperations> ops = adoptPtr(Platform::current()->compositorSupport()->createFilterOperations());
             toWebFilterOperations(toAnimatableFilterOperations(value)->operations(), ops.get());
 
-            blink::WebFilterKeyframe filterKeyframe(keyframes[i]->offset(), ops.release());
-            blink::WebFilterAnimationCurve* filterCurve = static_cast<blink::WebFilterAnimationCurve*>(&curve);
+            WebFilterKeyframe filterKeyframe(keyframes[i]->offset(), ops.release());
+            WebFilterAnimationCurve* filterCurve = static_cast<WebFilterAnimationCurve*>(&curve);
             addKeyframeWithTimingFunction(*filterCurve, filterKeyframe, keyframeTimingFunction);
             break;
         }
-        case blink::WebAnimationCurve::AnimationCurveTypeFloat: {
-            blink::WebFloatKeyframe floatKeyframe(keyframes[i]->offset(), toAnimatableDouble(value)->toDouble());
-            blink::WebFloatAnimationCurve* floatCurve = static_cast<blink::WebFloatAnimationCurve*>(&curve);
+        case WebCompositorAnimationCurve::AnimationCurveTypeFloat: {
+            WebFloatKeyframe floatKeyframe(keyframes[i]->offset(), toAnimatableDouble(value)->toDouble());
+            WebFloatAnimationCurve* floatCurve = static_cast<WebFloatAnimationCurve*>(&curve);
             addKeyframeWithTimingFunction(*floatCurve, floatKeyframe, keyframeTimingFunction);
             break;
         }
-        case blink::WebAnimationCurve::AnimationCurveTypeTransform: {
-            OwnPtr<blink::WebTransformOperations> ops = adoptPtr(blink::Platform::current()->compositorSupport()->createTransformOperations());
+        case WebCompositorAnimationCurve::AnimationCurveTypeTransform: {
+            OwnPtr<WebTransformOperations> ops = adoptPtr(Platform::current()->compositorSupport()->createTransformOperations());
             toWebTransformOperations(toAnimatableTransform(value)->transformOperations(), ops.get());
 
-            blink::WebTransformKeyframe transformKeyframe(keyframes[i]->offset(), ops.release());
-            blink::WebTransformAnimationCurve* transformCurve = static_cast<blink::WebTransformAnimationCurve*>(&curve);
+            WebTransformKeyframe transformKeyframe(keyframes[i]->offset(), ops.release());
+            WebTransformAnimationCurve* transformCurve = static_cast<WebTransformAnimationCurve*>(&curve);
             addKeyframeWithTimingFunction(*transformCurve, transformKeyframe, keyframeTimingFunction);
             break;
         }
@@ -462,11 +403,11 @@ void CompositorAnimationsImpl::addKeyframesToCurve(blink::WebAnimationCurve& cur
     }
 }
 
-void CompositorAnimationsImpl::getAnimationOnCompositor(const Timing& timing, double startTime, const KeyframeEffectModelBase& effect, Vector<OwnPtr<blink::WebAnimation> >& animations)
+void CompositorAnimationsImpl::getAnimationOnCompositor(const Timing& timing, double startTime, double timeOffset, const KeyframeEffectModelBase& effect, Vector<OwnPtr<WebCompositorAnimation> >& animations, double playerPlaybackRate)
 {
     ASSERT(animations.isEmpty());
     CompositorTiming compositorTiming;
-    bool timingValid = convertTimingForCompositor(timing, compositorTiming);
+    bool timingValid = convertTimingForCompositor(timing, timeOffset, compositorTiming, playerPlaybackRate);
     ASSERT_UNUSED(timingValid, timingValid);
 
     PropertySet properties = effect.properties();
@@ -474,30 +415,30 @@ void CompositorAnimationsImpl::getAnimationOnCompositor(const Timing& timing, do
     for (PropertySet::iterator it = properties.begin(); it != properties.end(); ++it) {
 
         PropertySpecificKeyframeVector values;
-        getKeyframeValuesForProperty(&effect, *it, compositorTiming.scaledDuration, compositorTiming.reverse, values);
+        getKeyframeValuesForProperty(&effect, *it, compositorTiming.scaledDuration, values);
 
-        blink::WebAnimation::TargetProperty targetProperty;
-        OwnPtr<blink::WebAnimationCurve> curve;
+        WebCompositorAnimation::TargetProperty targetProperty;
+        OwnPtr<WebCompositorAnimationCurve> curve;
         switch (*it) {
         case CSSPropertyOpacity: {
-            targetProperty = blink::WebAnimation::TargetPropertyOpacity;
+            targetProperty = WebCompositorAnimation::TargetPropertyOpacity;
 
-            blink::WebFloatAnimationCurve* floatCurve = blink::Platform::current()->compositorSupport()->createFloatAnimationCurve();
-            addKeyframesToCurve(*floatCurve, values, compositorTiming.reverse);
+            WebFloatAnimationCurve* floatCurve = Platform::current()->compositorSupport()->createFloatAnimationCurve();
+            addKeyframesToCurve(*floatCurve, values, timing);
             curve = adoptPtr(floatCurve);
             break;
         }
         case CSSPropertyWebkitFilter: {
-            targetProperty = blink::WebAnimation::TargetPropertyFilter;
-            blink::WebFilterAnimationCurve* filterCurve = blink::Platform::current()->compositorSupport()->createFilterAnimationCurve();
-            addKeyframesToCurve(*filterCurve, values, compositorTiming.reverse);
+            targetProperty = WebCompositorAnimation::TargetPropertyFilter;
+            WebFilterAnimationCurve* filterCurve = Platform::current()->compositorSupport()->createFilterAnimationCurve();
+            addKeyframesToCurve(*filterCurve, values, timing);
             curve = adoptPtr(filterCurve);
             break;
         }
         case CSSPropertyTransform: {
-            targetProperty = blink::WebAnimation::TargetPropertyTransform;
-            blink::WebTransformAnimationCurve* transformCurve = blink::Platform::current()->compositorSupport()->createTransformAnimationCurve();
-            addKeyframesToCurve(*transformCurve, values, compositorTiming.reverse);
+            targetProperty = WebCompositorAnimation::TargetPropertyTransform;
+            WebTransformAnimationCurve* transformCurve = Platform::current()->compositorSupport()->createTransformAnimationCurve();
+            addKeyframesToCurve(*transformCurve, values, timing);
             curve = adoptPtr(transformCurve);
             break;
         }
@@ -507,15 +448,49 @@ void CompositorAnimationsImpl::getAnimationOnCompositor(const Timing& timing, do
         }
         ASSERT(curve.get());
 
-        OwnPtr<blink::WebAnimation> animation = adoptPtr(blink::Platform::current()->compositorSupport()->createAnimation(*curve, targetProperty));
+        OwnPtr<WebCompositorAnimation> animation = adoptPtr(Platform::current()->compositorSupport()->createAnimation(*curve, targetProperty));
 
         if (!std::isnan(startTime))
             animation->setStartTime(startTime);
 
         animation->setIterations(compositorTiming.adjustedIterationCount);
+        animation->setIterationStart(compositorTiming.iterationStart);
         animation->setTimeOffset(compositorTiming.scaledTimeOffset);
-        animation->setAlternatesDirection(compositorTiming.alternate);
 
+        switch (compositorTiming.direction) {
+        case Timing::PlaybackDirectionNormal:
+            animation->setDirection(blink::WebCompositorAnimation::DirectionNormal);
+            break;
+        case Timing::PlaybackDirectionReverse:
+            animation->setDirection(blink::WebCompositorAnimation::DirectionReverse);
+            break;
+        case Timing::PlaybackDirectionAlternate:
+            animation->setDirection(blink::WebCompositorAnimation::DirectionAlternate);
+            break;
+        case Timing::PlaybackDirectionAlternateReverse:
+            animation->setDirection(blink::WebCompositorAnimation::DirectionAlternateReverse);
+            break;
+        default:
+            ASSERT_NOT_REACHED();
+        }
+        animation->setPlaybackRate(compositorTiming.playbackRate);
+
+        switch (compositorTiming.fillMode) {
+        case Timing::FillModeNone:
+            animation->setFillMode(blink::WebCompositorAnimation::FillModeNone);
+            break;
+        case Timing::FillModeForwards:
+            animation->setFillMode(blink::WebCompositorAnimation::FillModeForwards);
+            break;
+        case Timing::FillModeBackwards:
+            animation->setFillMode(blink::WebCompositorAnimation::FillModeBackwards);
+            break;
+        case Timing::FillModeBoth:
+            animation->setFillMode(blink::WebCompositorAnimation::FillModeBoth);
+            break;
+        default:
+            ASSERT_NOT_REACHED();
+        }
         animations.append(animation.release());
     }
     ASSERT(!animations.isEmpty());

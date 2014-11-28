@@ -4,8 +4,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,15 +22,15 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "storage/browser/blob/blob_url_request_job.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_operation_context.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/common/blob/blob_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/blob/blob_url_request_job.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_operation_context.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/common/blob/blob_data.h"
 
-using webkit_blob::BlobData;
-using webkit_blob::BlobURLRequestJob;
+using storage::BlobData;
+using storage::BlobURLRequestJob;
 
 namespace content {
 
@@ -47,8 +47,8 @@ const char kTestContentType[] = "foo/bar";
 const char kTestContentDisposition[] = "attachment; filename=foo.txt";
 
 const char kFileSystemURLOrigin[] = "http://remote";
-const fileapi::FileSystemType kFileSystemType =
-    fileapi::kFileSystemTypeTemporary;
+const storage::FileSystemType kFileSystemType =
+    storage::kFileSystemTypeTemporary;
 
 }  // namespace
 
@@ -114,7 +114,7 @@ class BlobURLRequestJobTest : public testing::Test {
     file_system_context_->OpenFileSystem(
         GURL(kFileSystemURLOrigin),
         kFileSystemType,
-        fileapi::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
+        storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
         base::Bind(&BlobURLRequestJobTest::OnValidateFileSystem,
                    base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
@@ -140,7 +140,7 @@ class BlobURLRequestJobTest : public testing::Test {
   void WriteFileSystemFile(const std::string& filename,
                            const char* buf, int buf_size,
                            base::Time* modification_time) {
-    fileapi::FileSystemURL url =
+    storage::FileSystemURL url =
         file_system_context_->CreateCrackedFileSystemURL(
             GURL(kFileSystemURLOrigin),
             kFileSystemType,
@@ -148,12 +148,12 @@ class BlobURLRequestJobTest : public testing::Test {
 
     ASSERT_EQ(base::File::FILE_OK,
               content::AsyncFileTestHelper::CreateFileWithData(
-                  file_system_context_, url, buf, buf_size));
+                  file_system_context_.get(), url, buf, buf_size));
 
     base::File::Info file_info;
     ASSERT_EQ(base::File::FILE_OK,
               content::AsyncFileTestHelper::GetMetadata(
-                  file_system_context_, url, &file_info));
+                  file_system_context_.get(), url, &file_info));
     if (modification_time)
       *modification_time = file_info.last_modified;
   }
@@ -243,7 +243,7 @@ class BlobURLRequestJobTest : public testing::Test {
   base::Time temp_file_system_file_modification_time2_;
 
   base::MessageLoopForIO message_loop_;
-  scoped_refptr<fileapi::FileSystemContext> file_system_context_;
+  scoped_refptr<storage::FileSystemContext> file_system_context_;
   scoped_refptr<BlobData> blob_data_;
   net::URLRequestJobFactoryImpl url_request_job_factory_;
   net::URLRequestContext url_request_context_;

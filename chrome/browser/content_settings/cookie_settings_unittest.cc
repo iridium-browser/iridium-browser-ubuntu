@@ -6,9 +6,9 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -116,12 +116,6 @@ TEST_F(CookieSettingsTest, CookiesThirdPartyBlockedExplicitAllow) {
   EXPECT_TRUE(cookie_settings_->IsSettingCookieAllowed(
       kAllowedSite, kFirstPartySite));
   EXPECT_FALSE(cookie_settings_->IsCookieSessionOnly(kAllowedSite));
-
-  // Extensions should always be allowed to use cookies.
-  EXPECT_TRUE(cookie_settings_->IsReadingCookieAllowed(
-      kAllowedSite, kExtensionURL));
-  EXPECT_TRUE(cookie_settings_->IsSettingCookieAllowed(
-      kAllowedSite, kExtensionURL));
 
   // Extensions should always be allowed to use cookies.
   EXPECT_TRUE(cookie_settings_->IsReadingCookieAllowed(
@@ -266,9 +260,16 @@ TEST_F(CookieSettingsTest, ExtensionsRegularSettings) {
 TEST_F(CookieSettingsTest, ExtensionsOwnCookies) {
   cookie_settings_->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
+#if defined(ENABLE_EXTENSIONS)
   // Extensions can always use cookies (and site data) in their own origin.
   EXPECT_TRUE(cookie_settings_->IsReadingCookieAllowed(
       kExtensionURL, kExtensionURL));
+#else
+  // Except if extensions are disabled. Then the extension-specific checks do
+  // not exist and the default setting is to block.
+  EXPECT_FALSE(cookie_settings_->IsReadingCookieAllowed(
+      kExtensionURL, kExtensionURL));
+#endif
 }
 
 TEST_F(CookieSettingsTest, ExtensionsThirdParty) {

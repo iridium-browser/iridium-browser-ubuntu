@@ -69,7 +69,7 @@ namespace {
 TEST(GraphicsContextTest, trackOpaqueTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -127,7 +127,7 @@ TEST(GraphicsContextTest, trackOpaqueTest)
 TEST(GraphicsContextTest, trackOpaqueClipTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     SkCanvas canvas(bitmap);
 
     GraphicsContext context(&canvas);
@@ -221,7 +221,7 @@ TEST(GraphicsContextTest, trackOpaqueClipTest)
 TEST(GraphicsContextTest, trackImageMask)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -243,6 +243,7 @@ TEST(GraphicsContextTest, trackImageMask)
     context.beginTransparencyLayer(1);
 
     OwnPtr<ImageBuffer> alphaImage = ImageBuffer::create(IntSize(100, 100));
+    EXPECT_FALSE(!alphaImage);
     alphaImage->context()->fillRect(IntRect(0, 0, 100, 100), alpha);
 
     context.setCompositeOperation(CompositeSourceOver);
@@ -258,7 +259,7 @@ TEST(GraphicsContextTest, trackImageMask)
 TEST(GraphicsContextTest, trackImageMaskWithOpaqueRect)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -280,6 +281,7 @@ TEST(GraphicsContextTest, trackImageMaskWithOpaqueRect)
     context.beginTransparencyLayer(1);
 
     OwnPtr<ImageBuffer> alphaImage = ImageBuffer::create(IntSize(100, 100));
+    EXPECT_FALSE(!alphaImage);
     alphaImage->context()->fillRect(IntRect(0, 0, 100, 100), alpha);
 
     context.setCompositeOperation(CompositeSourceOver);
@@ -298,7 +300,7 @@ TEST(GraphicsContextTest, trackImageMaskWithOpaqueRect)
 TEST(GraphicsContextTest, trackOpaqueJoinTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     SkCanvas canvas(bitmap);
 
     GraphicsContext context(&canvas);
@@ -355,7 +357,7 @@ TEST(GraphicsContextTest, trackOpaqueJoinTest)
 TEST(GraphicsContextTest, trackOpaqueLineTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -449,7 +451,7 @@ TEST(GraphicsContextTest, trackOpaqueLineTest)
 TEST(GraphicsContextTest, trackOpaquePathTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     SkCanvas canvas(bitmap);
 
     GraphicsContext context(&canvas);
@@ -507,7 +509,7 @@ TEST(GraphicsContextTest, trackOpaquePathTest)
 TEST(GraphicsContextTest, trackOpaqueImageTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     SkCanvas canvas(bitmap);
 
     GraphicsContext context(&canvas);
@@ -517,7 +519,7 @@ TEST(GraphicsContextTest, trackOpaqueImageTest)
     Color alpha(0.0f, 0.0f, 0.0f, 0.0f);
 
     SkBitmap opaqueBitmap;
-    ASSERT_TRUE(opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */));
+    opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */);
 
     for (int y = 0; y < opaqueBitmap.height(); ++y)
         for (int x = 0; x < opaqueBitmap.width(); ++x)
@@ -526,7 +528,7 @@ TEST(GraphicsContextTest, trackOpaqueImageTest)
     EXPECT_TRUE(opaqueImage->currentFrameKnownToBeOpaque());
 
     SkBitmap alphaBitmap;
-    ASSERT_TRUE(alphaBitmap.allocN32Pixels(10, 10));
+    alphaBitmap.allocN32Pixels(10, 10);
 
     for (int y = 0; y < alphaBitmap.height(); ++y)
         for (int x = 0; x < alphaBitmap.width(); ++x)
@@ -589,7 +591,7 @@ TEST(GraphicsContextTest, trackOpaqueImageTest)
 TEST(GraphicsContextTest, trackOpaqueOvalTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -645,7 +647,7 @@ TEST(GraphicsContextTest, trackOpaqueOvalTest)
 TEST(GraphicsContextTest, trackOpaqueRoundedRectTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     SkCanvas canvas(bitmap);
 
     GraphicsContext context(&canvas);
@@ -690,7 +692,7 @@ TEST(GraphicsContextTest, trackOpaqueTextTest)
 {
     int width = 200, height = 200;
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(width, height));
+    bitmap.allocN32Pixels(width, height);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
     SkRect textRect = SkRect::MakeWH(width, height);
@@ -734,7 +736,7 @@ TEST(GraphicsContextTest, trackOpaqueTextTest)
 TEST(GraphicsContextTest, trackOpaqueWritePixelsTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -744,13 +746,13 @@ TEST(GraphicsContextTest, trackOpaqueWritePixelsTest)
     Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
 
     SkBitmap opaqueBitmap;
-    ASSERT_TRUE(opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */));
+    opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */);
     for (int y = 0; y < opaqueBitmap.height(); ++y)
         for (int x = 0; x < opaqueBitmap.width(); ++x)
             *opaqueBitmap.getAddr32(x, y) = 0xFFFFFFFF;
 
     SkBitmap alphaBitmap;
-    ASSERT_TRUE(alphaBitmap.allocN32Pixels(10, 10));
+    alphaBitmap.allocN32Pixels(10, 10);
     for (int y = 0; y < alphaBitmap.height(); ++y)
         for (int x = 0; x < alphaBitmap.width(); ++x)
             *alphaBitmap.getAddr32(x, y) = 0x00000000;
@@ -786,7 +788,7 @@ TEST(GraphicsContextTest, trackOpaqueWritePixelsTest)
 TEST(GraphicsContextTest, trackOpaqueDrawBitmapTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -796,13 +798,13 @@ TEST(GraphicsContextTest, trackOpaqueDrawBitmapTest)
     Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
 
     SkBitmap opaqueBitmap;
-    ASSERT_TRUE(opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */));
+    opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */);
     for (int y = 0; y < opaqueBitmap.height(); ++y)
         for (int x = 0; x < opaqueBitmap.width(); ++x)
             *opaqueBitmap.getAddr32(x, y) = 0xFFFFFFFF;
 
     SkBitmap alphaBitmap;
-    ASSERT_TRUE(alphaBitmap.allocN32Pixels(10, 10));
+    alphaBitmap.allocN32Pixels(10, 10);
     for (int y = 0; y < alphaBitmap.height(); ++y)
         for (int x = 0; x < alphaBitmap.width(); ++x)
             *alphaBitmap.getAddr32(x, y) = 0x00000000;
@@ -838,7 +840,7 @@ TEST(GraphicsContextTest, trackOpaqueDrawBitmapTest)
 TEST(GraphicsContextTest, trackOpaqueDrawBitmapRectTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(200, 200));
+    bitmap.allocN32Pixels(200, 200);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -848,13 +850,13 @@ TEST(GraphicsContextTest, trackOpaqueDrawBitmapRectTest)
     Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
 
     SkBitmap opaqueBitmap;
-    ASSERT_TRUE(opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */));
+    opaqueBitmap.allocN32Pixels(10, 10, true /* opaque */);
     for (int y = 0; y < opaqueBitmap.height(); ++y)
         for (int x = 0; x < opaqueBitmap.width(); ++x)
             *opaqueBitmap.getAddr32(x, y) = 0xFFFFFFFF;
 
     SkBitmap alphaBitmap;
-    ASSERT_TRUE(alphaBitmap.allocN32Pixels(10, 10));
+    alphaBitmap.allocN32Pixels(10, 10);
     for (int y = 0; y < alphaBitmap.height(); ++y)
         for (int x = 0; x < alphaBitmap.width(); ++x)
             *alphaBitmap.getAddr32(x, y) = 0x00000000;
@@ -886,7 +888,7 @@ TEST(GraphicsContextTest, trackOpaqueDrawBitmapRectTest)
 TEST(GraphicsContextTest, contextTransparencyLayerTest)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -920,7 +922,7 @@ TEST(GraphicsContextTest, contextTransparencyLayerTest)
 TEST(GraphicsContextTest, UnboundedDrawsAreClipped)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -965,7 +967,7 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped)
 TEST(GraphicsContextTest, PreserveOpaqueOnlyMattersForFirstLayer)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -1045,7 +1047,7 @@ TEST(GraphicsContextTest, PreserveOpaqueOnlyMattersForFirstLayer)
 TEST(GraphicsContextTest, OpaqueRegionForLayerWithNonRectDeviceClip)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(100, 100));
+    bitmap.allocN32Pixels(100, 100);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -1085,7 +1087,7 @@ TEST(GraphicsContextTest, OpaqueRegionForLayerWithNonRectDeviceClip)
 TEST(GraphicsContextTest, OpaqueRegionForLayerWithRectDeviceClip)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(100, 100));
+    bitmap.allocN32Pixels(100, 100);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
@@ -1123,7 +1125,7 @@ TEST(GraphicsContextTest, OpaqueRegionForLayerWithRectDeviceClip)
 TEST(GraphicsContextTest, RecordingTotalMatrix)
 {
     SkBitmap bitmap;
-    ASSERT_TRUE(bitmap.allocN32Pixels(400, 400));
+    bitmap.allocN32Pixels(400, 400);
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
     GraphicsContext context(&canvas);
@@ -1154,45 +1156,36 @@ TEST(GraphicsContextTest, RecordingTotalMatrix)
     EXPECT_EQ(context.getCTM(), controlContext.getCTM());
 }
 
-TEST(GraphicsContextTest, DisplayList)
+TEST(GraphicsContextTest, RecordingCanvas)
 {
+    SkBitmap bitmap;
+    bitmap.allocN32Pixels(1, 1);
+    bitmap.eraseColor(0);
+    SkCanvas canvas(bitmap);
+    GraphicsContext context(&canvas);
+
     FloatRect rect(0, 0, 1, 1);
-    RefPtr<DisplayList> dl = adoptRef(new DisplayList(rect));
-
-    // picture() returns 0 initially
-    SkPicture* pic = dl->picture();
-    EXPECT_FALSE(pic);
-
-    // endRecording without a beginRecording does nothing
-    dl->endRecording();
-    pic = dl->picture();
-    EXPECT_FALSE(pic);
 
     // Two beginRecordings in a row generate two canvases.
     // Unfortunately the new one could be allocated in the same
     // spot as the old one so ref the first one to prolong its life.
-    IntSize size(1, 1);
-    SkCanvas* canvas1 = dl->beginRecording(size);
+    context.beginRecording(rect);
+    SkCanvas* canvas1 = context.canvas();
     EXPECT_TRUE(canvas1);
-    canvas1->ref();
-    SkCanvas* canvas2 = dl->beginRecording(size);
+    context.beginRecording(rect);
+    SkCanvas* canvas2 = context.canvas();
     EXPECT_TRUE(canvas2);
 
     EXPECT_NE(canvas1, canvas2);
     EXPECT_EQ(1, canvas1->getRefCnt());
-    canvas1->unref();
-
-    EXPECT_TRUE(dl->isRecording());
-
-    // picture() returns 0 during recording
-    pic = dl->picture();
-    EXPECT_FALSE(pic);
 
     // endRecording finally makes the picture accessible
-    dl->endRecording();
-    pic = dl->picture();
+    RefPtr<DisplayList> dl = context.endRecording();
+    SkPicture* pic = dl->picture();
     EXPECT_TRUE(pic);
     EXPECT_EQ(1, pic->getRefCnt());
+
+    context.endRecording();
 }
 
 } // namespace

@@ -650,7 +650,11 @@ datalist {
     display: none
 }
 
-area, param {
+area {
+    display: inline
+}
+
+param {
     display: none
 }
 
@@ -719,7 +723,8 @@ input::-webkit-calendar-picker-indicator:hover {
     background-color: #eee;
 }
 
-input:enabled:read-write:-webkit-any(:focus,:hover)::-webkit-calendar-picker-indicator {
+input:enabled:read-write:-webkit-any(:focus,:hover)::-webkit-calendar-picker-indicator,
+input::-webkit-calendar-picker-indicator:focus {
     opacity: 1;
     pointer-events: auto;
 }
@@ -1056,6 +1061,32 @@ bdo {
 
 textarea[dir=auto i] {
     unicode-bidi: -webkit-plaintext;
+}
+
+dialog:not([open]) {
+    display: none
+}
+
+dialog {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: -webkit-fit-content;
+    height: -webkit-fit-content;
+    margin: auto;
+    border: solid;
+    padding: 1em;
+    background: white;
+    color: black
+}
+
+dialog::backdrop {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(0,0,0,0.1)
 }
 
 /* page */

@@ -39,9 +39,13 @@ class TileManagerTest : public testing::TestWithParam<bool>,
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    resource_provider_ = ResourceProvider::Create(
-        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
-        false);
+    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                  shared_bitmap_manager_.get(),
+                                                  NULL,
+                                                  0,
+                                                  false,
+                                                  1,
+                                                  false);
     resource_pool_ = ResourcePool::Create(
         resource_provider_.get(), GL_TEXTURE_2D, RGBA_8888);
     tile_manager_ =
@@ -105,7 +109,6 @@ class TileManagerTest : public testing::TestWithParam<bool>,
       scoped_refptr<Tile> tile = tile_manager_->CreateTile(picture_pile_.get(),
                                                            tile_size,
                                                            gfx::Rect(),
-                                                           gfx::Rect(),
                                                            1.0,
                                                            0,
                                                            0,
@@ -126,7 +129,7 @@ class TileManagerTest : public testing::TestWithParam<bool>,
 
   void ReleaseTiles(TileVector* tiles) {
     for (TileVector::iterator it = tiles->begin(); it != tiles->end(); it++) {
-      Tile* tile = *it;
+      Tile* tile = it->get();
       tile->SetPriority(ACTIVE_TREE, TilePriority());
       tile->SetPriority(PENDING_TREE, TilePriority());
     }
@@ -138,7 +141,7 @@ class TileManagerTest : public testing::TestWithParam<bool>,
     int has_memory_count = 0;
     for (TileVector::const_iterator it = tiles.begin(); it != tiles.end();
          ++it) {
-      if (tile_manager_->HasBeenAssignedMemory(*it))
+      if (tile_manager_->HasBeenAssignedMemory(it->get()))
         ++has_memory_count;
     }
     return has_memory_count;
@@ -478,6 +481,11 @@ INSTANTIATE_TEST_CASE_P(TileManagerTests,
                         TileManagerTest,
                         ::testing::Values(true, false));
 
+class LowResTilingsSettings : public ImplSidePaintingSettings {
+ public:
+  LowResTilingsSettings() { create_low_res_tiling = true; }
+};
+
 class TileManagerTilePriorityQueueTest : public testing::Test {
  public:
   TileManagerTilePriorityQueueTest()
@@ -486,9 +494,7 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
         ready_to_activate_(false),
         id_(7),
         proxy_(base::MessageLoopProxy::current()),
-        host_impl_(ImplSidePaintingSettings(),
-                   &proxy_,
-                   &shared_bitmap_manager_) {}
+        host_impl_(LowResTilingsSettings(), &proxy_, &shared_bitmap_manager_) {}
 
   void SetTreePriority(TreePriority tree_priority) {
     GlobalStateThatImpactsTilePriority state;
@@ -642,37 +648,13 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
   // Renew all of the tile priorities.
   gfx::Rect viewport(50, 50, 100, 100);
   pending_layer_->HighResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_layer_->render_target(),
-      pending_layer_->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   pending_layer_->LowResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_layer_->render_target(),
-      pending_layer_->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   active_layer_->HighResTiling()->UpdateTilePriorities(
-      ACTIVE_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      active_layer_->render_target(),
-      active_layer_->draw_transform());
+      ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
   active_layer_->LowResTiling()->UpdateTilePriorities(
-      ACTIVE_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      active_layer_->render_target(),
-      active_layer_->draw_transform());
+      ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
 
   // Populate all tiles directly from the tilings.
   all_tiles.clear();
@@ -841,37 +823,13 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueue) {
   // Renew all of the tile priorities.
   gfx::Rect viewport(50, 50, 100, 100);
   pending_layer_->HighResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_layer_->render_target(),
-      pending_layer_->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   pending_layer_->LowResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_layer_->render_target(),
-      pending_layer_->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   active_layer_->HighResTiling()->UpdateTilePriorities(
-      ACTIVE_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      active_layer_->render_target(),
-      active_layer_->draw_transform());
+      ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
   active_layer_->LowResTiling()->UpdateTilePriorities(
-      ACTIVE_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      active_layer_->render_target(),
-      active_layer_->draw_transform());
+      ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
 
   // Populate all tiles directly from the tilings.
   all_tiles.clear();
@@ -970,15 +928,8 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueue) {
   EXPECT_EQ(all_tiles, new_content_tiles);
 }
 
-#if defined(OS_WIN)
-#define MAYBE_EvictionTilePriorityQueueWithOcclusion \
-  DISABLED_EvictionTilePriorityQueueWithOcclusion
-#else
-#define MAYBE_EvictionTilePriorityQueueWithOcclusion \
-  EvictionTilePriorityQueueWithOcclusion
-#endif
 TEST_F(TileManagerTilePriorityQueueTest,
-       MAYBE_EvictionTilePriorityQueueWithOcclusion) {
+       EvictionTilePriorityQueueWithOcclusion) {
   gfx::Size tile_size(102, 102);
   gfx::Size layer_bounds(1000, 1000);
 
@@ -1016,37 +967,13 @@ TEST_F(TileManagerTilePriorityQueueTest,
   // Renew all of the tile priorities.
   gfx::Rect viewport(layer_bounds);
   pending_layer_->HighResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_layer_->render_target(),
-      pending_layer_->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   pending_layer_->LowResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_layer_->render_target(),
-      pending_layer_->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   pending_child_layer->HighResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_child_layer->render_target(),
-      pending_child_layer->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
   pending_child_layer->LowResTiling()->UpdateTilePriorities(
-      PENDING_TREE,
-      viewport,
-      1.0f,
-      1.0,
-      NULL,
-      pending_child_layer->render_target(),
-      pending_child_layer->draw_transform());
+      PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
 
   // Populate all tiles directly from the tilings.
   all_tiles.clear();

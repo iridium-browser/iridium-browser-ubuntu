@@ -17,6 +17,7 @@
 #include "webrtc/modules/audio_conference_mixer/interface/audio_conference_mixer_defines.h"
 #include "webrtc/modules/audio_processing/rms_level.h"
 #include "webrtc/modules/bitrate_controller/include/bitrate_controller.h"
+#include "webrtc/modules/rtp_rtcp/interface/remote_ntp_time_estimator.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
 #include "webrtc/modules/utility/interface/file_player.h"
@@ -193,8 +194,6 @@ public:
     int32_t StartReceiving();
     int32_t StopReceiving();
 
-    int32_t SetNetEQPlayoutMode(NetEqModes mode);
-    int32_t GetNetEQPlayoutMode(NetEqModes& mode);
     int32_t RegisterVoiceEngineObserver(VoiceEngineObserver& observer);
     int32_t DeRegisterVoiceEngineObserver();
 
@@ -207,7 +206,7 @@ public:
     int32_t SetRecPayloadType(const CodecInst& codec);
     int32_t GetRecPayloadType(CodecInst& codec);
     int32_t SetSendCNPayloadType(int type, PayloadFrequencies frequency);
-    int SetOpusMaxBandwidth(int bandwidth_hz);
+    int SetOpusMaxPlaybackRate(int frequency_hz);
 
     // VoE dual-streaming.
     int SetSecondarySendCodec(const CodecInst& codec, int red_payload_type);
@@ -507,6 +506,7 @@ private:
                                   unsigned char id);
 
     int32_t GetPlayoutFrequency();
+    int GetRTT() const;
 
     CriticalSectionWrapper& _fileCritSect;
     CriticalSectionWrapper& _callbackCritSect;
@@ -548,7 +548,7 @@ private:
     uint32_t _timeStamp;
     uint8_t _sendTelephoneEventPayloadType;
 
-    scoped_ptr<RemoteNtpTimeEstimator> ntp_estimator_;
+    RemoteNtpTimeEstimator ntp_estimator_ GUARDED_BY(ts_stats_lock_);
 
     // Timestamp of the audio pulled from NetEq.
     uint32_t jitter_buffer_playout_timestamp_;
@@ -566,7 +566,7 @@ private:
     int64_t capture_start_rtp_time_stamp_;
     // The capture ntp time (in local timebase) of the first played out audio
     // frame.
-    int64_t capture_start_ntp_time_ms_;
+    int64_t capture_start_ntp_time_ms_ GUARDED_BY(ts_stats_lock_);
 
     // uses
     Statistics* _engineStatisticsPtr;

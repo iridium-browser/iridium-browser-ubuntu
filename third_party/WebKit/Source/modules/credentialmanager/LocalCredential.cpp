@@ -7,8 +7,15 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "platform/credentialmanager/PlatformLocalCredential.h"
+#include "public/platform/WebCredential.h"
+#include "public/platform/WebLocalCredential.h"
 
 namespace blink {
+
+LocalCredential* LocalCredential::create(WebLocalCredential* webLocalCredential)
+{
+    return new LocalCredential(webLocalCredential);
+}
 
 LocalCredential* LocalCredential::create(const String& id, const String& name, const String& avatar, const String& password, ExceptionState& exceptionState)
 {
@@ -18,10 +25,14 @@ LocalCredential* LocalCredential::create(const String& id, const String& name, c
     return new LocalCredential(id, name, avatarURL, password);
 }
 
+LocalCredential::LocalCredential(WebLocalCredential* webLocalCredential)
+    : Credential(webLocalCredential->platformCredential())
+{
+}
+
 LocalCredential::LocalCredential(const String& id, const String& name, const KURL& avatar, const String& password)
     : Credential(PlatformLocalCredential::create(id, name, avatar, password))
 {
-    ScriptWrappable::init(this);
 }
 
 const String& LocalCredential::password() const

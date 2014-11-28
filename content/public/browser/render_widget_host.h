@@ -198,8 +198,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   virtual void ForwardKeyboardEvent(
       const NativeWebKeyboardEvent& key_event) = 0;
 
-  virtual const gfx::Vector2d& GetLastScrollOffset() const = 0;
-
   virtual RenderProcessHost* GetProcess() const = 0;
 
   virtual int GetRoutingID() const = 0;
@@ -228,9 +226,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   virtual void RestartHangMonitorTimeout() = 0;
 
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
-
-  // Stops loading the page.
-  virtual void Stop() = 0;
 
   // Called to notify the RenderWidget that it has been resized.
   virtual void WasResized() = 0;

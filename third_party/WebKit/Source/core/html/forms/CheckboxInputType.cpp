@@ -97,14 +97,9 @@ void CheckboxInputType::didDispatchClick(Event* event, const ClickHandlingState&
     event->setDefaultHandled();
 }
 
-bool CheckboxInputType::isCheckbox() const
+bool CheckboxInputType::shouldAppearIndeterminate() const
 {
-    return true;
-}
-
-bool CheckboxInputType::supportsIndeterminateAppearance() const
-{
-    return true;
+    return element().indeterminate();
 }
 
 } // namespace blink

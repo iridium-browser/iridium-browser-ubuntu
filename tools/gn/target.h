@@ -19,12 +19,14 @@
 #include "tools/gn/item.h"
 #include "tools/gn/label_ptr.h"
 #include "tools/gn/ordered_set.h"
+#include "tools/gn/output_file.h"
 #include "tools/gn/source_file.h"
 #include "tools/gn/unique_vector.h"
 
 class InputFile;
 class Settings;
 class Token;
+class Toolchain;
 
 class Target : public Item {
  public:
@@ -51,16 +53,29 @@ class Target : public Item {
   // Item overrides.
   virtual Target* AsTarget() OVERRIDE;
   virtual const Target* AsTarget() const OVERRIDE;
-  virtual void OnResolved() OVERRIDE;
+  virtual bool OnResolved(Err* err) OVERRIDE;
 
   OutputType output_type() const { return output_type_; }
   void set_output_type(OutputType t) { output_type_ = t; }
 
+  // Can be linked into other targets.
   bool IsLinkable() const;
 
+  // Can have dependencies linked in.
+  bool IsFinal() const;
+
   // Will be the empty string to use the target label as the output name.
+  // See GetComputedOutputName().
   const std::string& output_name() const { return output_name_; }
   void set_output_name(const std::string& name) { output_name_ = name; }
+
+  // Returns the output name for this target, which is the output_name if
+  // specified, or the target label if not. If the flag is set, it will also
+  // include any output prefix specified on the tool (often "lib" on Linux).
+  //
+  // Because this depends on the tool for this target, the toolchain must
+  // have been set before calling.
+  std::string GetComputedOutputName(bool include_prefix) const;
 
   const std::string& output_extension() const { return output_extension_; }
   void set_output_extension(const std::string& extension) {
@@ -80,6 +95,20 @@ class Target : public Item {
   const FileList& public_headers() const { return public_headers_; }
   FileList& public_headers() { return public_headers_; }
 
+  // Whether this target's includes should be checked by "gn check".
+  bool check_includes() const { return check_includes_; }
+  void set_check_includes(bool ci) { check_includes_ = ci; }
+
+  // Whether this static_library target should have code linked in.
+  bool complete_static_lib() const { return complete_static_lib_; }
+  void set_complete_static_lib(bool complete) {
+    DCHECK_EQ(STATIC_LIBRARY, output_type_);
+    complete_static_lib_ = complete;
+  }
+
+  bool testonly() const { return testonly_; }
+  void set_testonly(bool value) { testonly_ = value; }
+
   // Compile-time extra dependencies.
   const FileList& inputs() const { return inputs_; }
   FileList& inputs() { return inputs_; }
@@ -96,16 +125,20 @@ class Target : public Item {
            output_type_ == COPY_FILES;
   }
 
-  // Linked dependencies.
-  const LabelTargetVector& deps() const { return deps_; }
-  LabelTargetVector& deps() { return deps_; }
+  // Linked private dependencies.
+  const LabelTargetVector& private_deps() const { return private_deps_; }
+  LabelTargetVector& private_deps() { return private_deps_; }
+
+  // Linked public dependencies.
+  const LabelTargetVector& public_deps() const { return public_deps_; }
+  LabelTargetVector& public_deps() { return public_deps_; }
 
   // Non-linked dependencies.
-  const LabelTargetVector& datadeps() const { return datadeps_; }
-  LabelTargetVector& datadeps() { return datadeps_; }
+  const LabelTargetVector& data_deps() const { return data_deps_; }
+  LabelTargetVector& data_deps() { return data_deps_; }
 
   // List of configs that this class inherits settings from. Once a target is
-  // resolved, this will also list all- and direct-dependent configs.
+  // resolved, this will also list all-dependent and public configs.
   const UniqueVector<LabelConfigPair>& configs() const { return configs_; }
   UniqueVector<LabelConfigPair>& configs() { return configs_; }
 
@@ -120,21 +153,29 @@ class Target : public Item {
   }
 
   // List of configs that targets depending directly on this one get. These
-  // configs are not added to this target.
-  const UniqueVector<LabelConfigPair>& direct_dependent_configs() const {
-    return direct_dependent_configs_;
+  // configs are also added to this target.
+  const UniqueVector<LabelConfigPair>& public_configs() const {
+    return public_configs_;
   }
-  UniqueVector<LabelConfigPair>& direct_dependent_configs() {
-    return direct_dependent_configs_;
+  UniqueVector<LabelConfigPair>& public_configs() {
+    return public_configs_;
   }
 
-  // A list of a subset of deps where we'll re-export direct_dependent_configs
-  // as direct_dependent_configs of this target.
+  // A list of a subset of deps where we'll re-export public_configs as
+  // public_configs of this target.
   const UniqueVector<LabelTargetPair>& forward_dependent_configs() const {
     return forward_dependent_configs_;
   }
   UniqueVector<LabelTargetPair>& forward_dependent_configs() {
     return forward_dependent_configs_;
+  }
+
+  // Dependencies that can include files from this target.
+  const std::set<Label>& allow_circular_includes_from() const {
+    return allow_circular_includes_from_;
+  }
+  std::set<Label>& allow_circular_includes_from() {
+    return allow_circular_includes_from_;
   }
 
   const UniqueVector<const Target*>& inherited_libraries() const {
@@ -155,6 +196,37 @@ class Target : public Item {
     return recursive_hard_deps_;
   }
 
+  // The toolchain is only known once this target is resolved (all if its
+  // dependencies are known). They will be null until then. Generally, this can
+  // only be used during target writing.
+  const Toolchain* toolchain() const { return toolchain_; }
+
+  // Sets the toolchain. The toolchain must include a tool for this target
+  // or the error will be set and the function will return false. Unusually,
+  // this function's "err" output is optional since this is commonly used
+  // frequently by unit tests which become needlessly verbose.
+  bool SetToolchain(const Toolchain* toolchain, Err* err = NULL);
+
+  // Returns outputs from this target. The link output file is the one that
+  // other targets link to when they depend on this target. This will only be
+  // valid for libraries and will be empty for all other target types.
+  //
+  // The dependency output file is the file that should be used to express
+  // a dependency on this one. It could be the same as the link output file
+  // (this will be the case for static libraries). For shared libraries it
+  // could be the same or different than the link output file, depending on the
+  // system. For actions this will be the stamp file.
+  //
+  // These are only known once the target is resolved and will be empty before
+  // that. This is a cache of the files to prevent every target that depends on
+  // a given library from recomputing the same pattern.
+  const OutputFile& link_output_file() const {
+    return link_output_file_;
+  }
+  const OutputFile& dependency_output_file() const {
+    return dependency_output_file_;
+  }
+
  private:
   // Pulls necessary information from dependencies to this one when all
   // dependencies have been resolved.
@@ -163,7 +235,16 @@ class Target : public Item {
   // These each pull specific things from dependencies to this one when all
   // deps have been resolved.
   void PullForwardedDependentConfigs();
+  void PullForwardedDependentConfigsFrom(const Target* from);
   void PullRecursiveHardDeps();
+
+  // Fills the link and dependency output files when a target is resolved.
+  void FillOutputFiles();
+
+  // Validates the given thing when a target is resolved.
+  bool CheckVisibility(Err* err) const;
+  bool CheckTestonly(Err* err) const;
+  bool CheckNoNestedStaticLibs(Err* err) const;
 
   OutputType output_type_;
   std::string output_name_;
@@ -172,29 +253,24 @@ class Target : public Item {
   FileList sources_;
   bool all_headers_public_;
   FileList public_headers_;
+  bool check_includes_;
+  bool complete_static_lib_;
+  bool testonly_;
   FileList inputs_;
   FileList data_;
 
   bool hard_dep_;
 
-  // Note that if there are any groups in the deps, once the target is resolved
-  // these vectors will list *both* the groups as well as the groups' deps.
-  //
-  // This is because, in general, groups should be "transparent" ways to add
-  // groups of dependencies, so adding the groups deps make this happen with
-  // no additional complexity when iterating over a target's deps.
-  //
-  // However, a group may also have specific settings and configs added to it,
-  // so we also need the group in the list so we find these things. But you
-  // shouldn't need to look inside the deps of the group since those will
-  // already be added.
-  LabelTargetVector deps_;
-  LabelTargetVector datadeps_;
+  LabelTargetVector private_deps_;
+  LabelTargetVector public_deps_;
+  LabelTargetVector data_deps_;
 
   UniqueVector<LabelConfigPair> configs_;
   UniqueVector<LabelConfigPair> all_dependent_configs_;
-  UniqueVector<LabelConfigPair> direct_dependent_configs_;
+  UniqueVector<LabelConfigPair> public_configs_;
   UniqueVector<LabelTargetPair> forward_dependent_configs_;
+
+  std::set<Label> allow_circular_includes_from_;
 
   bool external_;
 
@@ -216,6 +292,13 @@ class Target : public Item {
 
   ConfigValues config_values_;  // Used for all binary targets.
   ActionValues action_values_;  // Used for action[_foreach] targets.
+
+  // Toolchain used by this target. Null until target is resolved.
+  const Toolchain* toolchain_;
+
+  // Output files. Null until the target is resolved.
+  OutputFile link_output_file_;
+  OutputFile dependency_output_file_;
 
   DISALLOW_COPY_AND_ASSIGN(Target);
 };

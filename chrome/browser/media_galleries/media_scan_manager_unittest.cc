@@ -5,8 +5,8 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
@@ -189,8 +189,8 @@ class MediaScanManagerTest : public MediaScanManagerObserver,
   }
 
   void StartScan() {
-    media_scan_manager_->StartScan(profile_.get(), extension_,
-                                   true /* user_gesture */);
+    media_scan_manager_->StartScan(
+        profile_.get(), extension_.get(), true /* user_gesture */);
   }
 
   MediaGalleriesPreferences* gallery_prefs() {

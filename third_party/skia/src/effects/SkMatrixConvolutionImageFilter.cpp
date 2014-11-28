@@ -17,18 +17,6 @@
 #include "effects/GrMatrixConvolutionEffect.h"
 #endif
 
-static bool tile_mode_is_valid(SkMatrixConvolutionImageFilter::TileMode tileMode) {
-    switch (tileMode) {
-    case SkMatrixConvolutionImageFilter::kClamp_TileMode:
-    case SkMatrixConvolutionImageFilter::kRepeat_TileMode:
-    case SkMatrixConvolutionImageFilter::kClampToBlack_TileMode:
-        return true;
-    default:
-        break;
-    }
-    return false;
-}
-
 // We need to be able to read at most SK_MaxS32 bytes, so divide that
 // by the size of a scalar to know how many scalars we can read.
 static const int32_t gMaxKernelSize = SK_MaxS32 / sizeof(SkScalar);
@@ -42,8 +30,9 @@ SkMatrixConvolutionImageFilter::SkMatrixConvolutionImageFilter(
     TileMode tileMode,
     bool convolveAlpha,
     SkImageFilter* input,
-    const CropRect* cropRect)
-  : INHERITED(1, &input, cropRect),
+    const CropRect* cropRect,
+    uint32_t uniqueID)
+  : INHERITED(1, &input, cropRect, uniqueID),
     fKernelSize(kernelSize),
     fGain(gain),
     fBias(bias),
@@ -67,7 +56,8 @@ SkMatrixConvolutionImageFilter* SkMatrixConvolutionImageFilter::Create(
     TileMode tileMode,
     bool convolveAlpha,
     SkImageFilter* input,
-    const CropRect* cropRect) {
+    const CropRect* cropRect,
+    uint32_t uniqueID) {
     if (kernelSize.width() < 1 || kernelSize.height() < 1) {
         return NULL;
     }
@@ -79,7 +69,20 @@ SkMatrixConvolutionImageFilter* SkMatrixConvolutionImageFilter::Create(
     }
     return SkNEW_ARGS(SkMatrixConvolutionImageFilter, (kernelSize, kernel, gain, bias,
                                                        kernelOffset, tileMode, convolveAlpha,
-                                                       input, cropRect));
+                                                       input, cropRect, uniqueID));
+}
+
+#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
+static bool tile_mode_is_valid(SkMatrixConvolutionImageFilter::TileMode tileMode) {
+    switch (tileMode) {
+        case SkMatrixConvolutionImageFilter::kClamp_TileMode:
+        case SkMatrixConvolutionImageFilter::kRepeat_TileMode:
+        case SkMatrixConvolutionImageFilter::kClampToBlack_TileMode:
+            return true;
+        default:
+            break;
+    }
+    return false;
 }
 
 SkMatrixConvolutionImageFilter::SkMatrixConvolutionImageFilter(SkReadBuffer& buffer)
@@ -110,6 +113,33 @@ SkMatrixConvolutionImageFilter::SkMatrixConvolutionImageFilter(SkReadBuffer& buf
                     tile_mode_is_valid(fTileMode) &&
                     (fKernelOffset.fX >= 0) && (fKernelOffset.fX < fKernelSize.fWidth) &&
                     (fKernelOffset.fY >= 0) && (fKernelOffset.fY < fKernelSize.fHeight));
+}
+#endif
+
+SkFlattenable* SkMatrixConvolutionImageFilter::CreateProc(SkReadBuffer& buffer) {
+    SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 1);
+    SkISize kernelSize;
+    kernelSize.fWidth = buffer.readInt();
+    kernelSize.fHeight = buffer.readInt();
+    const int count = buffer.getArrayCount();
+
+    const int64_t kernelArea = sk_64_mul(kernelSize.width(), kernelSize.height());
+    if (!buffer.validate(kernelArea == count)) {
+        return NULL;
+    }
+    SkAutoSTArray<16, SkScalar> kernel(count);
+    if (!buffer.readScalarArray(kernel.get(), count)) {
+        return NULL;
+    }
+    SkScalar gain = buffer.readScalar();
+    SkScalar bias = buffer.readScalar();
+    SkIPoint kernelOffset;
+    kernelOffset.fX = buffer.readInt();
+    kernelOffset.fY = buffer.readInt();
+    TileMode tileMode = (TileMode)buffer.readInt();
+    bool convolveAlpha = buffer.readBool();
+    return Create(kernelSize, kernel.get(), gain, bias, kernelOffset, tileMode, convolveAlpha,
+                  common.getInput(0), &common.cropRect(), common.uniqueID());
 }
 
 void SkMatrixConvolutionImageFilter::flatten(SkWriteBuffer& buffer) const {
@@ -261,7 +291,7 @@ static SkBitmap unpremultiplyBitmap(const SkBitmap& src)
         return SkBitmap();
     }
     SkBitmap result;
-    if (!result.allocPixels(src.info())) {
+    if (!result.tryAllocPixels(src.info())) {
         return SkBitmap();
     }
     for (int y = 0; y < src.height(); ++y) {
@@ -303,7 +333,7 @@ bool SkMatrixConvolutionImageFilter::onFilterImage(Proxy* proxy,
         return false;
     }
 
-    if (!result->allocPixels(src.info().makeWH(bounds.width(), bounds.height()))) {
+    if (!result->tryAllocPixels(src.info().makeWH(bounds.width(), bounds.height()))) {
         return false;
     }
 
@@ -359,23 +389,23 @@ static GrTextureDomain::Mode convert_tilemodes(
     return GrTextureDomain::kIgnore_Mode;
 }
 
-bool SkMatrixConvolutionImageFilter::asNewEffect(GrEffect** effect,
-                                                 GrTexture* texture,
-                                                 const SkMatrix&,
-                                                 const SkIRect& bounds) const {
-    if (!effect) {
+bool SkMatrixConvolutionImageFilter::asFragmentProcessor(GrFragmentProcessor** fp,
+                                                         GrTexture* texture,
+                                                         const SkMatrix&,
+                                                         const SkIRect& bounds) const {
+    if (!fp) {
         return fKernelSize.width() * fKernelSize.height() <= MAX_KERNEL_SIZE;
     }
     SkASSERT(fKernelSize.width() * fKernelSize.height() <= MAX_KERNEL_SIZE);
-    *effect = GrMatrixConvolutionEffect::Create(texture,
-                                                bounds,
-                                                fKernelSize,
-                                                fKernel,
-                                                fGain,
-                                                fBias,
-                                                fKernelOffset,
-                                                convert_tilemodes(fTileMode),
-                                                fConvolveAlpha);
+    *fp = GrMatrixConvolutionEffect::Create(texture,
+                                            bounds,
+                                            fKernelSize,
+                                            fKernel,
+                                            fGain,
+                                            fBias,
+                                            fKernelOffset,
+                                            convert_tilemodes(fTileMode),
+                                            fConvolveAlpha);
     return true;
 }
 #endif

@@ -29,8 +29,6 @@ void TestDispatcherHostDelegate::RequestBeginning(
     content::ResourceContext* resource_context,
     content::AppCacheService* appcache_service,
     content::ResourceType resource_type,
-    int child_id,
-    int route_id,
     ScopedVector<content::ResourceThrottle>* throttles) {
   // This checks the same condition as the one for PNaCl in
   // AppendComponentUpdaterThrottles.

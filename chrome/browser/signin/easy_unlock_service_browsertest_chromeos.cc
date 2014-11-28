@@ -16,6 +16,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_power_manager_client.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
@@ -28,6 +30,9 @@
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+using chromeos::DBusThreadManagerSetter;
+using chromeos::FakePowerManagerClient;
+using chromeos::PowerManagerClient;
 using chromeos::ProfileHelper;
 using chromeos::LoginManagerTest;
 using chromeos::StartupUtils;
@@ -100,6 +105,12 @@ class EasyUnlockServiceTest : public InProcessBrowserTest {
 
     mock_adapter_ = new testing::NiceMock<MockBluetoothAdapter>();
     SetUpBluetoothMock(mock_adapter_, is_bluetooth_adapter_present_);
+
+    scoped_ptr<DBusThreadManagerSetter> dbus_setter =
+        chromeos::DBusThreadManager::GetSetterForTesting();
+    power_manager_client_ = new FakePowerManagerClient;
+    dbus_setter->SetPowerManagerClient(
+        scoped_ptr<PowerManagerClient>(power_manager_client_));
   }
 
   Profile* profile() const { return browser()->profile(); }
@@ -112,19 +123,23 @@ class EasyUnlockServiceTest : public InProcessBrowserTest {
     is_bluetooth_adapter_present_ = is_present;
   }
 
+  FakePowerManagerClient* power_manager_client() {
+    return power_manager_client_;
+  }
+
  private:
   policy::MockConfigurationPolicyProvider provider_;
   scoped_refptr<testing::NiceMock<MockBluetoothAdapter> > mock_adapter_;
   bool is_bluetooth_adapter_present_;
+  FakePowerManagerClient* power_manager_client_;
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockServiceTest);
 };
 
-// Tests that EasyUnlock is on by default.
-IN_PROC_BROWSER_TEST_F(EasyUnlockServiceTest, DefaultOn) {
-  EXPECT_TRUE(service()->IsAllowed());
+IN_PROC_BROWSER_TEST_F(EasyUnlockServiceTest, NoFinchNoService) {
+  EXPECT_FALSE(service()->IsAllowed());
 #if defined(GOOGLE_CHROME_BUILD)
-  EXPECT_TRUE(HasEasyUnlockApp());
+  EXPECT_FALSE(HasEasyUnlockApp());
 #endif
 }
 
@@ -164,6 +179,23 @@ class EasyUnlockServiceFinchEnabledTest : public EasyUnlockServiceTest {
  private:
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockServiceFinchEnabledTest);
 };
+
+IN_PROC_BROWSER_TEST_F(EasyUnlockServiceFinchEnabledTest, Enabled) {
+  EXPECT_TRUE(service()->IsAllowed());
+#if defined(GOOGLE_CHROME_BUILD)
+  EXPECT_TRUE(HasEasyUnlockApp());
+#endif
+}
+
+#if defined(GOOGLE_CHROME_BUILD)
+IN_PROC_BROWSER_TEST_F(EasyUnlockServiceFinchEnabledTest, UnloadsOnSuspend) {
+  EXPECT_TRUE(HasEasyUnlockApp());
+  power_manager_client()->SendSuspendImminent();
+  EXPECT_FALSE(HasEasyUnlockApp());
+  power_manager_client()->SendSuspendDone();
+  EXPECT_TRUE(HasEasyUnlockApp());
+}
+#endif
 
 // Tests that policy can override finch to turn easy unlock off.
 IN_PROC_BROWSER_TEST_F(EasyUnlockServiceFinchEnabledTest, PolicyOveride) {

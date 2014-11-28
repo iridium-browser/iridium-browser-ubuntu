@@ -30,9 +30,7 @@
 namespace blink {
 
 struct SecurityPolicyViolationEventInit : public EventInit {
-    SecurityPolicyViolationEventInit()
-    {
-    }
+    SecurityPolicyViolationEventInit() { }
 
     String documentURI;
     String referrer;
@@ -47,6 +45,7 @@ struct SecurityPolicyViolationEventInit : public EventInit {
 };
 
 class SecurityPolicyViolationEvent FINAL : public Event {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<SecurityPolicyViolationEvent> create()
     {
@@ -74,10 +73,7 @@ public:
     virtual void trace(Visitor* visitor) OVERRIDE { Event::trace(visitor); }
 
 private:
-    SecurityPolicyViolationEvent()
-    {
-        ScriptWrappable::init(this);
-    }
+    SecurityPolicyViolationEvent() { }
 
     SecurityPolicyViolationEvent(const AtomicString& type, const SecurityPolicyViolationEventInit& initializer)
         : Event(type, initializer)
@@ -90,10 +86,7 @@ private:
         , m_sourceFile(initializer.sourceFile)
         , m_lineNumber(initializer.lineNumber)
         , m_columnNumber(initializer.columnNumber)
-        , m_statusCode(initializer.statusCode)
-    {
-        ScriptWrappable::init(this);
-    }
+        , m_statusCode(initializer.statusCode) { }
 
     String m_documentURI;
     String m_referrer;

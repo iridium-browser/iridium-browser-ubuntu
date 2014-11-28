@@ -109,7 +109,11 @@
 #ifndef OPENSSL_HEADER_CRYPTO_INTERNAL_H
 #define OPENSSL_HEADER_CRYPTO_INTERNAL_H
 
-#include <openssl/base.h>
+#include <openssl/ex_data.h>
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
 
 
 /* st_CRYPTO_EX_DATA_IMPL contains an ex_data implementation. See the comments
@@ -127,6 +131,23 @@ struct st_CRYPTO_EX_DATA_IMPL {
   void (*free_ex_data)(int class_value, void *obj, CRYPTO_EX_DATA *ad);
 };
 
+
+#if defined(OPENSSL_WINDOWS)
+#define OPENSSL_U64(x) x##UI64
+#else
+
+#if defined(OPENSSL_64_BIT)
+#define OPENSSL_U64(x) x##UL
+#else
+#define OPENSSL_U64(x) x##ULL
+#endif
+
+#endif  /* OPENSSL_WINDOWS */
+
+#if defined(OPENSSL_X86) || defined(OPENSSL_X86_64)
+/* OPENSSL_cpuid_setup initializes OPENSSL_ia32cap_P. */
+void OPENSSL_cpuid_setup(void);
+#endif
 
 #if defined(__cplusplus)
 }  /* extern C */

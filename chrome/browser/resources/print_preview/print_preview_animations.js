@@ -37,19 +37,27 @@ function getFadeInAnimationCode(targetHeight) {
  * Fades in an element. Used for both printing options and error messages
  * appearing underneath the textfields.
  * @param {HTMLElement} el The element to be faded in.
+ * @param {boolean=} opt_justShow Whether {@code el} should be shown with no
+ *     animation.
  */
-function fadeInElement(el) {
+function fadeInElement(el, opt_justShow) {
   if (el.classList.contains('visible'))
     return;
   el.classList.remove('closing');
   el.hidden = false;
+  el.setAttribute('aria-hidden', 'false');
   el.style.height = 'auto';
   var height = el.offsetHeight;
-  el.style.height = height + 'px';
-  var animName = addAnimation(getFadeInAnimationCode(height));
-  animationEventTracker_.add(
-      el, 'webkitAnimationEnd', onFadeInAnimationEnd.bind(el), false);
-  el.style.webkitAnimationName = animName;
+  if (opt_justShow) {
+    el.style.height = '';
+    el.style.opacity = '';
+  } else {
+    el.style.height = height + 'px';
+    var animName = addAnimation(getFadeInAnimationCode(height));
+    animationEventTracker_.add(
+        el, 'webkitAnimationEnd', onFadeInAnimationEnd.bind(el), false);
+    el.style.webkitAnimationName = animName;
+  }
   el.classList.add('visible');
 }
 
@@ -70,6 +78,7 @@ function fadeOutElement(el) {
       el, 'webkitTransitionEnd', onFadeOutTransitionEnd.bind(el), false);
   el.classList.add('closing');
   el.classList.remove('visible');
+  el.setAttribute('aria-hidden', 'true');
 }
 
 /**
@@ -111,20 +120,23 @@ function fadeInAnimationCleanup(element) {
 /**
  * Fades in a printing option existing under |el|.
  * @param {HTMLElement} el The element to hide.
+ * @param {boolean=} opt_justShow Whether {@code el} should be hidden with no
+ *     animation.
  */
-function fadeInOption(el) {
+function fadeInOption(el, opt_justShow) {
   if (el.classList.contains('visible'))
     return;
   // To make the option visible during the first fade in.
   el.hidden = false;
 
-  wrapContentsInDiv(el.querySelector('h1'), ['invisible']);
+  var leftColumn = el.querySelector('.left-column');
+  wrapContentsInDiv(leftColumn, ['invisible']);
   var rightColumn = el.querySelector('.right-column');
   wrapContentsInDiv(rightColumn, ['invisible']);
 
   var toAnimate = el.querySelectorAll('.collapsible');
   for (var i = 0; i < toAnimate.length; i++)
-    fadeInElement(toAnimate[i]);
+    fadeInElement(toAnimate[i], opt_justShow);
   el.classList.add('visible');
 }
 
@@ -138,7 +150,8 @@ function fadeOutOption(el, opt_justHide) {
   if (!el.classList.contains('visible'))
     return;
 
-  wrapContentsInDiv(el.querySelector('h1'), ['visible']);
+  var leftColumn = el.querySelector('.left-column');
+  wrapContentsInDiv(leftColumn, ['visible']);
   var rightColumn = el.querySelector('.right-column');
   wrapContentsInDiv(rightColumn, ['visible']);
 

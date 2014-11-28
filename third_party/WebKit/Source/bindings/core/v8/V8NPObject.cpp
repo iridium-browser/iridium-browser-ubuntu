@@ -73,11 +73,11 @@ static void npObjectInvokeImpl(const v8::FunctionCallbackInfo<v8::Value>& info, 
     v8::Isolate* isolate = info.GetIsolate();
 
     // These three types are subtypes of HTMLPlugInElement.
-    HTMLPlugInElement* element = V8HTMLAppletElement::toNativeWithTypeCheck(isolate, info.Holder());
+    HTMLPlugInElement* element = V8HTMLAppletElement::toImplWithTypeCheck(isolate, info.Holder());
     if (!element) {
-        element = V8HTMLEmbedElement::toNativeWithTypeCheck(isolate, info.Holder());
+        element = V8HTMLEmbedElement::toImplWithTypeCheck(isolate, info.Holder());
         if (!element) {
-            element = V8HTMLObjectElement::toNativeWithTypeCheck(isolate, info.Holder());
+            element = V8HTMLObjectElement::toImplWithTypeCheck(isolate, info.Holder());
         }
     }
     if (element) {
@@ -470,14 +470,13 @@ v8::Local<v8::Object> createV8ObjectForNPObject(NPObject* object, NPObject* root
     if (value.IsEmpty())
         return value;
 
-    V8DOMWrapper::setNativeInfo(value, npObjectTypeInfo(), npObjectToInternalPointer(object));
+    V8DOMWrapper::setNativeInfo(value, npObjectTypeInfo(), npObjectToScriptWrappableBase(object));
 
     // KJS retains the object as part of its wrapper (see Bindings::CInstance).
     _NPN_RetainObject(object);
     _NPN_RegisterObject(object, root);
 
-    WrapperConfiguration configuration = buildWrapperConfiguration(object, WrapperConfiguration::Dependent);
-    staticNPObjectMap().set(object, value, configuration);
+    staticNPObjectMap().set(object, value, npObjectTypeInfo());
     ASSERT(V8DOMWrapper::isDOMWrapper(value));
     return value;
 }

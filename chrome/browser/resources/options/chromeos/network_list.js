@@ -2,6 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * @typedef {{
+ *   ConnectionState: string,
+ *   iconURL: string,
+ *   policyManaged: boolean,
+ *   servicePath: string
+ * }}
+ * @see chrome/browser/ui/webui/options/chromeos/internet_options_handler.cc
+ */
+var NetworkInfo;
+
 cr.define('options.network', function() {
   var ArrayDataModel = cr.ui.ArrayDataModel;
   var List = cr.ui.List;
@@ -29,7 +40,7 @@ cr.define('options.network', function() {
    */
   Constants.NETWORK_ORDER = ['Ethernet',
                              'WiFi',
-                             'Wimax',
+                             'WiMAX',
                              'Cellular',
                              'VPN',
                              'addConnection'];
@@ -61,6 +72,20 @@ cr.define('options.network', function() {
    * @private
    */
   var cellularSupportsScan_ = false;
+
+  /**
+   * Indicates the current SIM lock type of the cellular device.
+   * @type {boolean}
+   * @private
+   */
+  var cellularSimLockType_ = '';
+
+  /**
+   * Indicates whether the SIM card is absent on the cellular device.
+   * @type {boolean}
+   * @private
+   */
+  var cellularSimAbsent_ = false;
 
   /**
    * Indicates if WiMAX networks are available.
@@ -105,6 +130,7 @@ cr.define('options.network', function() {
    * connectivity.
    * @param {Object} data Description of the network list or command.
    * @constructor
+   * @extends {cr.ui.ListItem}
    */
   function NetworkListItem(data) {
     var el = cr.doc.createElement('li');
@@ -113,6 +139,13 @@ cr.define('options.network', function() {
       el.data_[key] = data[key];
     NetworkListItem.decorate(el);
     return el;
+  }
+
+  /**
+   * @param {string} action An action to send to coreOptionsUserMetricsAction.
+   */
+  function sendChromeMetricsAction(action) {
+    chrome.send('coreOptionsUserMetricsAction', [action]);
   }
 
   /**
@@ -262,6 +295,8 @@ cr.define('options.network', function() {
   /**
    * Creates a control that displays a popup menu when clicked.
    * @param {Object} data  Description of the control.
+   * @constructor
+   * @extends {NetworkListItem}
    */
   function NetworkMenuItem(data) {
     var el = new NetworkListItem(data);
@@ -358,18 +393,20 @@ cr.define('options.network', function() {
         this.menu_.style.setProperty('top', top + 'px');
         this.menu_.hidden = false;
       }
-      if (rescan)
-        chrome.send('refreshNetworks');
-    },
+      if (rescan) {
+        // TODO(stevenjb): chrome.networkingPrivate.requestNetworkScan
+        chrome.send('requestNetworkScan');
+      }
+    }
   };
 
   /**
    * Creates a control for selecting or configuring a network connection based
    * on the type of connection (e.g. wifi versus vpn).
-   * @param {Object} data Description of the network.
-   * @param {string} data.key Item key.
-   * @param {Array.<Object>} data.networkList Description of the network.
+   * @param {{key: string, networkList: Array.<NetworkInfo>}} data Description
+   *     of the network.
    * @constructor
+   * @extends {NetworkMenuItem}
    */
   function NetworkSelectorItem(data) {
     var el = new NetworkMenuItem(data);
@@ -385,7 +422,7 @@ cr.define('options.network', function() {
     decorate: function() {
       // TODO(kevers): Generalize method of setting default label.
       var policyManaged = false;
-      this.subtitle = loadTimeData.getString('OncStateNotConnected');
+      this.subtitle = loadTimeData.getString('OncConnectionStateNotConnected');
       var list = this.data_.networkList;
       var candidateURL = null;
       for (var i = 0; i < list.length; i++) {
@@ -429,7 +466,7 @@ cr.define('options.network', function() {
     /**
      * Creates a menu for selecting, configuring or disconnecting from a
      * network.
-     * @return {Element} The newly created menu.
+     * @return {!Element} The newly created menu.
      */
     createMenu: function() {
       var menu = this.ownerDocument.createElement('div');
@@ -439,18 +476,19 @@ cr.define('options.network', function() {
       Menu.decorate(menu);
       var addendum = [];
       if (this.data_.key == 'WiFi') {
-        addendum.push({label: loadTimeData.getString('joinOtherNetwork'),
-                       command: 'add',
-                       data: {Type: 'WiFi', servicePath: ''}});
+        addendum.push({
+          label: loadTimeData.getString('joinOtherNetwork'),
+          command: createAddConnectionCallback_('WiFi'),
+          data: {}
+        });
       } else if (this.data_.key == 'Cellular') {
         if (cellularEnabled_ && cellularSupportsScan_) {
-          entry = {
+          addendum.push({
             label: loadTimeData.getString('otherCellularNetworks'),
             command: createAddConnectionCallback_('Cellular'),
             addClass: ['other-cellulars'],
             data: {}
-          };
-          addendum.push(entry);
+          });
         }
 
         var label = enableDataRoaming_ ? 'disableDataRoaming' :
@@ -473,7 +511,14 @@ cr.define('options.network', function() {
           };
         }
         addendum.push(entry);
+      } else if (this.data_.key == 'VPN') {
+        addendum.push({
+          label: loadTimeData.getString('joinOtherNetwork'),
+          command: createAddConnectionCallback_('VPN'),
+          data: {}
+        });
       }
+
       var list = this.data.rememberedNetworks;
       if (list && list.length > 0) {
         var callback = function(list) {
@@ -481,8 +526,7 @@ cr.define('options.network', function() {
           var dialog = options.PreferredNetworks.getInstance();
           PageManager.showPageByName('preferredNetworksPage', false);
           dialog.update(list);
-          chrome.send('coreOptionsUserMetricsAction',
-                      ['Options_NetworkShowPreferred']);
+          sendChromeMetricsAction('Options_NetworkShowPreferred');
         };
         addendum.push({label: loadTimeData.getString('preferredNetworks'),
                        command: callback,
@@ -494,42 +538,58 @@ cr.define('options.network', function() {
       list = this.data.networkList;
       var empty = !list || list.length == 0;
       if (list) {
+        var connectedVpnServicePath = '';
         for (var i = 0; i < list.length; i++) {
           var data = list[i];
           this.createNetworkOptionsCallback_(networkGroup, data);
-          if (data.ConnectionState == 'Connected') {
-            if (data.Type == 'VPN') {
-              // Add separator
-              addendum.push({});
-              var i18nKey = 'disconnectNetwork';
-              addendum.push({label: loadTimeData.getString(i18nKey),
-                             command: 'disconnect',
-                             data: data});
-            }
+          // For VPN only, append a 'Disconnect' item to the dropdown menu.
+          if (!connectedVpnServicePath && data.Type == 'VPN' &&
+              (data.ConnectionState == 'Connected' ||
+               data.ConnectionState == 'Connecting')) {
+            connectedVpnServicePath = data.servicePath;
           }
         }
+        if (connectedVpnServicePath) {
+          var disconnectCallback = function() {
+            sendChromeMetricsAction('Options_NetworkDisconnectVPN');
+            // TODO(stevenjb): chrome.networkingPrivate.startDisconnect
+            chrome.send('startDisconnect', [connectedVpnServicePath]);
+          };
+          // Add separator
+          addendum.push({});
+          addendum.push({label: loadTimeData.getString('disconnectNetwork'),
+                         command: disconnectCallback,
+                         data: data});
+        }
       }
-      if (this.data_.key == 'WiFi' || this.data_.key == 'Wimax' ||
+      if (this.data_.key == 'WiFi' || this.data_.key == 'WiMAX' ||
           this.data_.key == 'Cellular') {
         addendum.push({});
         if (this.data_.key == 'WiFi') {
-          addendum.push({label: loadTimeData.getString('turnOffWifi'),
-                       command: function() {
-                         chrome.send('disableWifi');
-                       },
-                       data: {}});
-        } else if (this.data_.key == 'Wimax') {
-          addendum.push({label: loadTimeData.getString('turnOffWimax'),
-                       command: function() {
-                         chrome.send('disableWimax');
-                       },
-                       data: {}});
+          addendum.push({
+            label: loadTimeData.getString('turnOffWifi'),
+            command: function() {
+              sendChromeMetricsAction('Options_NetworkWifiToggle');
+              // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
+              chrome.send('disableNetworkType', ['WiFi']);
+            },
+            data: {}});
+        } else if (this.data_.key == 'WiMAX') {
+          addendum.push({
+            label: loadTimeData.getString('turnOffWimax'),
+            command: function() {
+              // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
+              chrome.send('disableNetworkType', ['WiMAX']);
+            },
+            data: {}});
         } else if (this.data_.key == 'Cellular') {
-          addendum.push({label: loadTimeData.getString('turnOffCellular'),
-                       command: function() {
-                         chrome.send('disableCellular');
-                       },
-                       data: {}});
+          addendum.push({
+            label: loadTimeData.getString('turnOffCellular'),
+            command: function() {
+              // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
+              chrome.send('disableNetworkType', ['Cellular']);
+            },
+            data: {}});
         }
       }
       if (!empty)
@@ -617,7 +677,8 @@ cr.define('options.network', function() {
     /**
      * Extracts a mapping of network names to menu element and position.
      * @param {!Element} menu The menu to process.
-     * @return {Object.<string, Element>} Network mapping.
+     * @return {Object.<string, ?{index: number, button: Element}>}
+     *     Network mapping.
      * @private
      */
     extractNetworkConnectButtons_: function(menu) {
@@ -643,7 +704,7 @@ cr.define('options.network', function() {
       var menuItem = createCallback_(parent,
                                      data,
                                      getNetworkName(data),
-                                     'options',
+                                     'showDetails',
                                      data.iconURL);
       if (data.policyManaged)
         menuItem.appendChild(new ManagedNetworkIndicator());
@@ -658,11 +719,10 @@ cr.define('options.network', function() {
 
   /**
    * Creates a button-like control for configurating internet connectivity.
-   * @param {Object} data Description of the network control.
-   * @param {string} data.key Item key.
-   * @param {string} data.subtitle Subtitle.
-   * @param {function} data.command Item callback.
+   * @param {{key: string, subtitle: string, command: Function}} data
+   *     Description of the network control.
    * @constructor
+   * @extends {NetworkListItem}
    */
   function NetworkButtonItem(data) {
     var el = new NetworkListItem(data);
@@ -694,11 +754,11 @@ cr.define('options.network', function() {
   /**
    * Adds a command to a menu for modifying network settings.
    * @param {!Element} menu Parent menu.
-   * @param {!Object} data Description of the network.
+   * @param {Object} data Description of the network.
    * @param {!string} label Display name for the menu item.
-   * @param {?(string|function)} command Callback function or name
+   * @param {?(string|!Function)} command Callback function or name
    *     of the command for |networkCommand|.
-   * @param {?string=} opt_iconURL Optional URL to an icon for the menu item.
+   * @param {string=} opt_iconURL Optional URL to an icon for the menu item.
    * @return {!Element} The created menu item.
    * @private
    */
@@ -721,19 +781,18 @@ cr.define('options.network', function() {
       var type = data.Type;
       var path = data.servicePath;
       callback = function() {
-        chrome.send('networkCommand',
-                    [type, path, command]);
+        chrome.send('networkCommand', [type, path, command]);
         closeMenu_();
       };
     } else if (command != null) {
       if (data) {
         callback = function() {
-          command(data);
+          (/** @type {Function} */(command))(data);
           closeMenu_();
         };
       } else {
         callback = function() {
-          command();
+          (/** @type {Function} */(command))();
           closeMenu_();
         };
       }
@@ -752,6 +811,7 @@ cr.define('options.network', function() {
   /**
    * A list of controls for manipulating network connectivity.
    * @constructor
+   * @extends {cr.ui.List}
    */
   var NetworkList = cr.ui.define('list');
 
@@ -830,8 +890,8 @@ cr.define('options.network', function() {
      * Finds the index of a network item within the data model based on
      * category.
      * @param {string} key Unique key for the item in the list.
-     * @return {number} The index of the network item, or |undefined| if it is
-     *     not found.
+     * @return {(number|undefined)} The index of the network item, or
+     *     |undefined| if it is not found.
      */
     indexOf: function(key) {
       var size = this.dataModel.length;
@@ -886,12 +946,19 @@ cr.define('options.network', function() {
       this.endBatchUpdates();
     },
 
-    /** @override */
+    /**
+     * @override
+     * @param {Object} entry
+     */
     createItem: function(entry) {
       if (entry.networkList)
-        return new NetworkSelectorItem(entry);
+        return new NetworkSelectorItem(
+            /** @type {{key: string, networkList: Array.<NetworkInfo>}} */(
+                entry));
       if (entry.command)
-        return new NetworkButtonItem(entry);
+        return new NetworkButtonItem(
+            /** @type {{key: string, subtitle: string, command: Function}} */(
+                entry));
       if (entry.menu)
         return new NetworkMenuItem(entry);
       return undefined;
@@ -934,8 +1001,12 @@ cr.define('options.network', function() {
 
   /**
    * Chrome callback for updating network controls.
-   * @param {Object} data Description of available network devices and their
-   *     corresponding state.
+   * @param {{wiredList: Array.<NetworkInfo>, wirelessList: Array.<NetworkInfo>,
+   *     vpnList: Array.<NetworkInfo>, rememberedList: Array.<NetworkInfo>,
+   *     wifiAvailable: boolean, wifiEnabled: boolean, wimaxAvailable: boolean,
+   *     wimaxEnabled: boolean, cellularAvailable: boolean,
+   *     cellularEnabled: boolean, cellularSupportsScan: boolean}} data
+   *     Description of available network devices and their corresponding state.
    */
   NetworkList.refreshNetworkData = function(data) {
     var networkList = $('network-list');
@@ -943,6 +1014,8 @@ cr.define('options.network', function() {
     cellularAvailable_ = data.cellularAvailable;
     cellularEnabled_ = data.cellularEnabled;
     cellularSupportsScan_ = data.cellularSupportsScan;
+    cellularSimAbsent_ = data.cellularSimAbsent;
+    cellularSimLockType_ = data.cellularSimLockType;
     wimaxAvailable_ = data.wimaxAvailable;
     wimaxEnabled_ = data.wimaxEnabled;
 
@@ -952,14 +1025,15 @@ cr.define('options.network', function() {
       var type = String('Ethernet');
       var path = ethernetConnection.servicePath;
       var ethernetOptions = function() {
-        chrome.send('networkCommand',
-                    [type, path, 'options']);
+        chrome.send('networkCommand', [type, path, 'showDetails']);
       };
-      networkList.update({key: 'Ethernet',
-                          subtitle: loadTimeData.getString('OncStateConnected'),
-                          iconURL: ethernetConnection.iconURL,
-                          command: ethernetOptions,
-                          policyManaged: ethernetConnection.policyManaged});
+      networkList.update(
+          { key: 'Ethernet',
+            subtitle: loadTimeData.getString('OncConnectionStateConnected'),
+            iconURL: ethernetConnection.iconURL,
+            command: ethernetOptions,
+            policyManaged: ethernetConnection.policyManaged }
+          );
     } else {
       networkList.deleteItem('Ethernet');
     }
@@ -967,14 +1041,14 @@ cr.define('options.network', function() {
     if (data.wifiEnabled)
       loadData_('WiFi', data.wirelessList, data.rememberedList);
     else
-      addEnableNetworkButton_('WiFi', 'enableWifi', 'WiFi');
+      addEnableNetworkButton_('WiFi');
 
     // Only show cellular control if available.
     if (data.cellularAvailable) {
       if (data.cellularEnabled)
         loadData_('Cellular', data.wirelessList, data.rememberedList);
       else
-        addEnableNetworkButton_('Cellular', 'enableCellular', 'Cellular');
+        addEnableNetworkButton_('Cellular');
     } else {
       networkList.deleteItem('Cellular');
     }
@@ -982,11 +1056,11 @@ cr.define('options.network', function() {
     // Only show wimax control if available. Uses cellular icons.
     if (data.wimaxAvailable) {
       if (data.wimaxEnabled)
-        loadData_('Wimax', data.wirelessList, data.rememberedList);
+        loadData_('WiMAX', data.wirelessList, data.rememberedList);
       else
-        addEnableNetworkButton_('Wimax', 'enableWimax', 'Cellular');
+        addEnableNetworkButton_('WiMAX');
     } else {
-      networkList.deleteItem('Wimax');
+      networkList.deleteItem('WiMAX');
     }
 
     // Only show VPN control if there is at least one VPN configured.
@@ -998,27 +1072,38 @@ cr.define('options.network', function() {
   };
 
   /**
-   * Replaces a network menu with a button for reenabling the type of network.
-   * @param {string} name The type of network (WiFi, Cellular or Wimax).
-   * @param {string} command The command for reenabling the network.
-   * @param {string} type of icon (WiFi or Cellular).
+   * Replaces a network menu with a button for enabling the network type.
+   * @param {string} type The type of network (WiFi, Cellular or Wimax).
    * @private
    */
-  function addEnableNetworkButton_(name, command, icon) {
+  function addEnableNetworkButton_(type) {
     var subtitle = loadTimeData.getString('networkDisabled');
+    var icon = (type == 'WiMAX') ? 'Cellular' : type;
     var enableNetwork = function() {
-      chrome.send(command);
+      if (type == 'WiFi')
+        sendChromeMetricsAction('Options_NetworkWifiToggle');
+      if (type == 'Cellular') {
+        if (cellularSimLockType_) {
+          chrome.send('simOperation', ['unlock']);
+          return;
+        } else if (cellularEnabled_ && cellularSimAbsent_) {
+          chrome.send('simOperation', ['configure']);
+          return;
+        }
+      }
+      // TODO(stevenjb): chrome.networkingPrivate.enableNetworkType
+      chrome.send('enableNetworkType', [type]);
     };
-    var networkList = $('network-list');
-    networkList.update({key: name,
-                        subtitle: subtitle,
-                        iconType: icon,
-                        command: enableNetwork});
+    $('network-list').update({key: type,
+                              subtitle: subtitle,
+                              iconType: icon,
+                              command: enableNetwork});
   }
 
   /**
    * Element for indicating a policy managed network.
    * @constructor
+   * @extends {options.ControlledSettingIndicator}
    */
   function ManagedNetworkIndicator() {
     var el = cr.doc.createElement('span');
@@ -1051,7 +1136,7 @@ cr.define('options.network', function() {
      * Handle mouse events received by the bubble, preventing focus blurring as
      * that would close any currently open menu and preventing propagation to
      * any elements located behind the bubble.
-     * @param {Event} Mouse event.
+     * @param {Event} event Mouse event.
      */
     stopEvent: function(event) {
       event.preventDefault();
@@ -1059,10 +1144,10 @@ cr.define('options.network', function() {
     },
 
     /** @override */
-    toggleBubble_: function() {
+    toggleBubble: function() {
       if (activeMenu_ && !$(activeMenu_).contains(this))
         closeMenu_();
-      ControlledSettingIndicator.prototype.toggleBubble_.call(this);
+      ControlledSettingIndicator.prototype.toggleBubble.call(this);
       if (this.showingBubble) {
         var bubble = PageManager.getVisibleBubble();
         bubble.addEventListener('mousedown', this.stopEvent);
@@ -1114,7 +1199,7 @@ cr.define('options.network', function() {
   /**
    * Fetches the active connection.
    * @param {Array.<Object>} networkList List of networks.
-   * @return {boolean} True if connected or connecting to a network.
+   * @return {Object}
    * @private
    */
   function getConnection_(networkList) {
@@ -1137,13 +1222,16 @@ cr.define('options.network', function() {
    */
   function createAddConnectionCallback_(type) {
     return function() {
+      if (type == 'WiFi')
+        sendChromeMetricsAction('Options_NetworkJoinOtherWifi');
+      else if (type == 'VPN')
+        sendChromeMetricsAction('Options_NetworkJoinOtherVPN');
       chrome.send('networkCommand', [type, '', 'add']);
     };
   }
 
   /**
    * Whether the Network list is disabled. Only used for display purpose.
-   * @type {boolean}
    */
   cr.defineProperty(NetworkList, 'disabled', cr.PropertyKind.BOOL_ATTR);
 

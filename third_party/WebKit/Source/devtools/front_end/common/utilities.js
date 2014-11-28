@@ -27,6 +27,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/** @typedef {Array|NodeList|Arguments|{length: number}} */
+var ArrayLike;
+
 /**
  * @param {!Object} obj
  * @return {boolean}
@@ -161,6 +164,20 @@ String.prototype.escapeForRegExp = function()
 String.prototype.escapeHTML = function()
 {
     return this.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); //" doublequotes just for editor
+}
+
+/**
+ * @return {string}
+ */
+String.prototype.unescapeHTML = function()
+{
+    return this.replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&#58;/g, ":")
+        .replace(/&quot;/g, "\"")
+        .replace(/&#60;/g, "<")
+        .replace(/&#62;/g, ">")
+        .replace(/&amp;/g, "&");
 }
 
 /**
@@ -393,7 +410,7 @@ Date.prototype.toISO8601Compact = function()
 /**
  * @return {string}
  */
- Date.prototype.toConsoleTime = function()
+Date.prototype.toConsoleTime = function()
 {
     /**
      * @param {number} x
@@ -1009,21 +1026,22 @@ String.vsprintf = function(format, substitutions)
 
 /**
  * @param {string} format
- * @param {?Array.<string>} substitutions
+ * @param {?ArrayLike} substitutions
  * @param {!Object.<string, function(string, ...):string>} formatters
  * @param {!T} initialValue
  * @param {function(T, string): T|undefined} append
- * @return {!{formattedResult: T, unusedSubstitutions: ?Array.<string>}};
+ * @param {!Array.<!Object>=} tokenizedFormat
+ * @return {!{formattedResult: T, unusedSubstitutions: ?ArrayLike}};
  * @template T
  */
-String.format = function(format, substitutions, formatters, initialValue, append)
+String.format = function(format, substitutions, formatters, initialValue, append, tokenizedFormat)
 {
     if (!format || !substitutions || !substitutions.length)
         return { formattedResult: append(initialValue, format), unusedSubstitutions: substitutions };
 
     function prettyFunctionName()
     {
-        return "String.format(\"" + format + "\", \"" + substitutions.join("\", \"") + "\")";
+        return "String.format(\"" + format + "\", \"" + Array.prototype.join.call(substitutions, "\", \"") + "\")";
     }
 
     function warn(msg)
@@ -1037,7 +1055,7 @@ String.format = function(format, substitutions, formatters, initialValue, append
     }
 
     var result = initialValue;
-    var tokens = String.tokenizeFormatString(format, formatters);
+    var tokens = tokenizedFormat || String.tokenizeFormatString(format, formatters);
     var usedSubstitutionIndexes = {};
 
     for (var i = 0; i < tokens.length; ++i) {
@@ -1146,6 +1164,15 @@ function countRegexMatches(regex, content)
 }
 
 /**
+ * @param {number} spacesCount
+ * @return {string}
+ */
+function spacesPadding(spacesCount)
+{
+    return Array(spacesCount).join("\u00a0");
+}
+
+/**
  * @param {number} value
  * @param {number} symbolsCount
  * @return {string}
@@ -1154,8 +1181,7 @@ function numberToStringWithSpacesPadding(value, symbolsCount)
 {
     var numberString = value.toString();
     var paddingLength = Math.max(0, symbolsCount - numberString.length);
-    var paddingString = Array(paddingLength + 1).join("\u00a0");
-    return paddingString + numberString;
+    return spacesPadding(paddingLength) + numberString;
 }
 
 /**
@@ -1274,7 +1300,7 @@ Map.prototype = {
      * @param {K} key
      * @param {V} value
      */
-    put: function(key, value)
+    set: function(key, value)
     {
         var objectIdentifier = key.__identifier;
         if (!objectIdentifier) {
@@ -1343,7 +1369,7 @@ Map.prototype = {
      * @param {K} key
      * @return {boolean}
      */
-    contains: function(key)
+    has: function(key)
     {
         var entry = this._map[key.__identifier];
         return !!entry;
@@ -1352,7 +1378,7 @@ Map.prototype = {
     /**
      * @return {number}
      */
-    size: function()
+    get size()
     {
         return this._size;
     },
@@ -1380,7 +1406,7 @@ StringMap.prototype = {
      * @param {string} key
      * @param {T} value
      */
-    put: function(key, value)
+    set: function(key, value)
     {
         if (key === "__proto__") {
             if (!this._hasProtoKey) {
@@ -1459,7 +1485,7 @@ StringMap.prototype = {
      * @param {string} key
      * @return {boolean}
      */
-    contains: function(key)
+    has: function(key)
     {
         var result;
         if (key === "__proto__")
@@ -1470,7 +1496,7 @@ StringMap.prototype = {
     /**
      * @return {number}
      */
-    size: function()
+    get size()
     {
         return this._size;
     },
@@ -1499,7 +1525,7 @@ StringMultimap.prototype = {
      * @param {string} key
      * @param {T} value
      */
-    put: function(key, value)
+    set: function(key, value)
     {
         if (key === "__proto__") {
             if (!this._hasProtoKey) {
@@ -1591,7 +1617,7 @@ StringSet.prototype = {
      */
     add: function(value)
     {
-        this._map.put(value, true);
+        this._map.set(value, true);
     },
 
     /**
@@ -1617,7 +1643,7 @@ StringSet.prototype = {
      */
     contains: function(value)
     {
-        return this._map.contains(value);
+        return this._map.has(value);
     },
 
     /**
@@ -1625,7 +1651,7 @@ StringSet.prototype = {
      */
     size: function()
     {
-        return this._map.size();
+        return this._map.size;
     },
 
     clear: function()
@@ -1636,37 +1662,32 @@ StringSet.prototype = {
 
 /**
  * @param {string} url
- * @param {boolean=} async
- * @param {function(?string)=} callback
- * @return {?string}
+ * @return {!Promise.<string>}
  */
-function loadXHR(url, async, callback)
+function loadXHR(url)
 {
-    function onReadyStateChanged()
-    {
-        if (xhr.readyState !== XMLHttpRequest.DONE)
-            return;
+    return new Promise(load);
 
-        if (xhr.status === 200) {
-            callback(xhr.responseText);
-            return;
+    function load(successCallback, failureCallback)
+    {
+        function onReadyStateChanged()
+        {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            if (xhr.status !== 200) {
+                xhr.onreadystatechange = null;
+                failureCallback(new Error(xhr.status));
+                return;
+            }
+            xhr.onreadystatechange = null;
+            successCallback(xhr.responseText);
         }
 
-        callback(null);
-   }
-
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", url, async);
-    if (async)
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", url, true);
         xhr.onreadystatechange = onReadyStateChanged;
-    xhr.send(null);
-
-    if (!async) {
-        if (xhr.status === 200)
-            return xhr.responseText;
-        return null;
+        xhr.send(null);
     }
-    return null;
 }
 
 /**
@@ -1721,31 +1742,6 @@ CallbackBarrier.prototype = {
 function suppressUnused(value)
 {
 }
-
-/**
- * @constructor
- * @param {!T} targetObject
- * @template T
- */
-function WeakReference(targetObject)
-{
-    this._targetObject = targetObject;
-}
-
-WeakReference.prototype = {
-    /**
-     * @return {?T}
-     */
-    get: function()
-    {
-        return this._targetObject;
-    },
-
-    clear: function()
-    {
-        this._targetObject = null;
-    }
-};
 
 /**
  * @param {function()} callback

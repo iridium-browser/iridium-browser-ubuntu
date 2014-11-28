@@ -34,8 +34,6 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_client_host.h"
-#include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -46,9 +44,9 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/url_constants.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 using base::DictionaryValue;
@@ -161,7 +159,7 @@ void DevToolsToolboxDelegate::WebContentsDestroyed() {
 
 BrowserWindow* DevToolsToolboxDelegate::GetInspectedBrowserWindow() {
   WebContents* inspected_contents =
-      inspected_contents_observer_->GetWebContents();
+      inspected_contents_observer_->web_contents();
   if (!inspected_contents)
     return NULL;
   Browser* browser = NULL;
@@ -294,10 +292,6 @@ DevToolsWindow::ObserverWithAccessor::ObserverWithAccessor(
 DevToolsWindow::ObserverWithAccessor::~ObserverWithAccessor() {
 }
 
-WebContents* DevToolsWindow::ObserverWithAccessor::GetWebContents() {
-  return web_contents();
-}
-
 // DevToolsWindow -------------------------------------------------------------
 
 const char DevToolsWindow::kDevToolsApp[] = "DevToolsApp";
@@ -324,12 +318,6 @@ DevToolsWindow::~DevToolsWindow() {
 }
 
 // static
-std::string DevToolsWindow::GetDevToolsWindowPlacementPrefKey() {
-  return std::string(prefs::kBrowserWindowPlacement) + "_" +
-      std::string(kDevToolsApp);
-}
-
-// static
 void DevToolsWindow::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDictionaryPref(
@@ -340,10 +328,6 @@ void DevToolsWindow::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterStringPref(
       prefs::kDevToolsAdbKey, std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-
-  registry->RegisterDictionaryPref(
-      GetDevToolsWindowPlacementPrefKey().c_str(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   registry->RegisterBooleanPref(
@@ -421,13 +405,11 @@ bool DevToolsWindow::IsDevToolsWindow(content::WebContents* web_contents) {
 // static
 DevToolsWindow* DevToolsWindow::OpenDevToolsWindowForWorker(
     Profile* profile,
-    DevToolsAgentHost* worker_agent) {
-  DevToolsWindow* window = FindDevToolsWindow(worker_agent);
+    const scoped_refptr<DevToolsAgentHost>& worker_agent) {
+  DevToolsWindow* window = FindDevToolsWindow(worker_agent.get());
   if (!window) {
     window = DevToolsWindow::CreateDevToolsWindowForWorker(profile);
-    // Will disconnect the current client host if there is one.
-    content::DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(
-        worker_agent, window->bindings_);
+    window->bindings_->AttachTo(worker_agent);
   }
   window->ScheduleShow(DevToolsToggleAction::Show());
   return window;
@@ -474,13 +456,13 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
 void DevToolsWindow::OpenExternalFrontend(
     Profile* profile,
     const std::string& frontend_url,
-    content::DevToolsAgentHost* agent_host) {
-  DevToolsWindow* window = FindDevToolsWindow(agent_host);
+    const scoped_refptr<content::DevToolsAgentHost>& agent_host,
+    bool isWorker) {
+  DevToolsWindow* window = FindDevToolsWindow(agent_host.get());
   if (!window) {
     window = Create(profile, DevToolsUI::GetProxyURL(frontend_url), NULL,
-                    false, true, false, "");
-    content::DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(
-        agent_host, window->bindings_);
+                    isWorker, true, false, "");
+    window->bindings_->AttachTo(agent_host);
   }
   window->ScheduleShow(DevToolsToggleAction::Show());
 }
@@ -493,7 +475,6 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
     const std::string& settings) {
   scoped_refptr<DevToolsAgentHost> agent(
       DevToolsAgentHost::GetOrCreateFor(inspected_web_contents));
-  content::DevToolsManager* manager = content::DevToolsManager::GetInstance();
   DevToolsWindow* window = FindDevToolsWindow(agent.get());
   bool do_open = force_open;
   if (!window) {
@@ -503,7 +484,7 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
         base::UserMetricsAction("DevTools_InspectRenderer"));
     window = Create(
         profile, GURL(), inspected_web_contents, false, false, true, settings);
-    manager->RegisterDevToolsClientHostFor(agent.get(), window->bindings_);
+    window->bindings_->AttachTo(agent.get());
     do_open = true;
   }
 
@@ -700,9 +681,14 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   // Set up delegate, so we get fully-functional window immediately.
   // It will not appear in UI though until |life_stage_ == kLoadCompleted|.
   main_web_contents_->SetDelegate(this);
-  bindings_ = new DevToolsUIBindings(
-      main_web_contents_,
-      DevToolsUIBindings::ApplyThemeToURL(profile, url));
+
+  main_web_contents_->GetController().LoadURL(
+      DevToolsUIBindings::ApplyThemeToURL(profile, url), content::Referrer(),
+      ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
+
+  bindings_ = DevToolsUIBindings::ForWebContents(main_web_contents_);
+  DCHECK(bindings_);
+
   // Bindings take ownership over devtools as its delegate.
   bindings_->SetDelegate(this);
   // DevTools uses chrome_page_zoom::Zoom(), so main_web_contents_ requires a
@@ -793,10 +779,9 @@ DevToolsWindow* DevToolsWindow::FindDevToolsWindow(
   if (!agent_host || g_instances == NULL)
     return NULL;
   DevToolsWindows* instances = g_instances.Pointer();
-  content::DevToolsManager* manager = content::DevToolsManager::GetInstance();
   for (DevToolsWindows::iterator it(instances->begin()); it != instances->end();
        ++it) {
-    if (manager->GetDevToolsAgentHostFor((*it)->bindings_) == agent_host)
+    if ((*it)->bindings_->IsAttachedTo(agent_host))
       return *it;
   }
   return NULL;
@@ -826,14 +811,7 @@ WebContents* DevToolsWindow::OpenURLFromTab(
         inspected_web_contents->OpenURL(params) : NULL;
   }
 
-  content::DevToolsManager* manager = content::DevToolsManager::GetInstance();
-  scoped_refptr<DevToolsAgentHost> agent_host(
-      manager->GetDevToolsAgentHostFor(bindings_));
-  if (!agent_host.get())
-    return NULL;
-  manager->ClientHostClosing(bindings_);
-  manager->RegisterDevToolsClientHostFor(agent_host.get(),
-                                         bindings_);
+  bindings_->Reattach();
 
   content::NavigationController::LoadURLParams load_url_params(params.url);
   main_web_contents_->GetController().LoadURLWithParams(load_url_params);
@@ -910,10 +888,8 @@ void DevToolsWindow::BeforeUnloadFired(WebContents* tab,
                                        bool* proceed_to_fire_unload) {
   if (!intercepted_page_beforeunload_) {
     // Docked devtools window closed directly.
-    if (proceed) {
-      content::DevToolsManager::GetInstance()->ClientHostClosing(
-          bindings_);
-    }
+    if (proceed)
+      bindings_->Detach();
     *proceed_to_fire_unload = proceed;
   } else {
     // Inspected page is attempting to close.
@@ -1068,7 +1044,7 @@ void DevToolsWindow::SetIsDocked(bool dock_requested) {
 void DevToolsWindow::OpenInNewTab(const std::string& url) {
   content::OpenURLParams params(
       GURL(url), content::Referrer(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false);
+      ui::PAGE_TRANSITION_LINK, false);
   WebContents* inspected_web_contents = GetInspectedWebContents();
   if (inspected_web_contents) {
     inspected_web_contents->OpenURL(params);
@@ -1147,18 +1123,18 @@ void DevToolsWindow::OnLoadCompleted() {
 }
 
 void DevToolsWindow::CreateDevToolsBrowser() {
-  std::string wp_key = GetDevToolsWindowPlacementPrefKey();
   PrefService* prefs = profile_->GetPrefs();
-  const base::DictionaryValue* wp_pref = prefs->GetDictionary(wp_key.c_str());
-  if (!wp_pref || wp_pref->empty()) {
-    DictionaryPrefUpdate update(prefs, wp_key.c_str());
-    base::DictionaryValue* defaults = update.Get();
-    defaults->SetInteger("left", 100);
-    defaults->SetInteger("top", 100);
-    defaults->SetInteger("right", 740);
-    defaults->SetInteger("bottom", 740);
-    defaults->SetBoolean("maximized", false);
-    defaults->SetBoolean("always_on_top", false);
+  if (!prefs->GetDictionary(prefs::kAppWindowPlacement)->HasKey(kDevToolsApp)) {
+    DictionaryPrefUpdate update(prefs, prefs::kAppWindowPlacement);
+    base::DictionaryValue* wp_prefs = update.Get();
+    base::DictionaryValue* dev_tools_defaults = new base::DictionaryValue;
+    wp_prefs->Set(kDevToolsApp, dev_tools_defaults);
+    dev_tools_defaults->SetInteger("left", 100);
+    dev_tools_defaults->SetInteger("top", 100);
+    dev_tools_defaults->SetInteger("right", 740);
+    dev_tools_defaults->SetInteger("bottom", 740);
+    dev_tools_defaults->SetBoolean("maximized", false);
+    dev_tools_defaults->SetBoolean("always_on_top", false);
   }
 
   browser_ = new Browser(Browser::CreateParams::CreateForDevTools(
@@ -1166,7 +1142,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
       chrome::GetHostDesktopTypeForNativeView(
           main_web_contents_->GetNativeView())));
   browser_->tab_strip_model()->AddWebContents(
-      main_web_contents_, -1, content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+      main_web_contents_, -1, ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
       TabStripModel::ADD_ACTIVE);
   main_web_contents_->GetRenderViewHost()->SyncRendererPrefs();
 }
@@ -1227,8 +1203,9 @@ void DevToolsWindow::UpdateBrowserWindow() {
 }
 
 WebContents* DevToolsWindow::GetInspectedWebContents() {
-  return inspected_contents_observer_ ?
-      inspected_contents_observer_->GetWebContents() : NULL;
+  return inspected_contents_observer_
+             ? inspected_contents_observer_->web_contents()
+             : NULL;
 }
 
 void DevToolsWindow::LoadCompleted() {

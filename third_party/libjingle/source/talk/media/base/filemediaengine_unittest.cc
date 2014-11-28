@@ -223,8 +223,6 @@ TEST_F(FileMediaEngineTest, TestDefaultImplementation) {
   EXPECT_TRUE(NULL == engine_->CreateSoundclip());
   cricket::AudioOptions audio_options;
   EXPECT_TRUE(engine_->SetAudioOptions(audio_options));
-  cricket::VideoOptions video_options;
-  EXPECT_TRUE(engine_->SetVideoOptions(video_options));
   VideoEncoderConfig video_encoder_config;
   EXPECT_TRUE(engine_->SetDefaultVideoEncoderConfig(video_encoder_config));
   EXPECT_TRUE(engine_->SetSoundDevices(NULL, NULL));
@@ -232,7 +230,6 @@ TEST_F(FileMediaEngineTest, TestDefaultImplementation) {
   EXPECT_TRUE(engine_->SetOutputVolume(0));
   EXPECT_EQ(0, engine_->GetInputLevel());
   EXPECT_TRUE(engine_->SetLocalMonitor(true));
-  EXPECT_TRUE(engine_->SetLocalRenderer(NULL));
   EXPECT_TRUE(engine_->SetVideoCapture(true));
   EXPECT_EQ(0U, engine_->audio_codecs().size());
   EXPECT_EQ(0U, engine_->video_codecs().size());

@@ -22,14 +22,15 @@ chrome/android/java/res
 chrome/app/theme
 chrome/browser/resources
 chrome/renderer/resources
+component/resources
 content/public/android/java/res
+content/app/resources
 content/renderer/resources
 content/shell/resources
 remoting/resources
 ui/resources
 ui/chromeos/resources
 ui/webui/resources/images
-webkit/glue/resources
 win8/metro_driver/resources
 "
 
@@ -380,6 +381,19 @@ function fail_if_not_installed {
   fi
 }
 
+# Check pngcrush version and exit if the version is in bad range.
+# See crbug.com/404893.
+function exit_if_bad_pngcrush_version {
+  local version=$(pngcrush -v | awk "/pngcrush 1.7./ {print \$3}")
+  local version_num=$(echo $version | sed "s/\.//g")
+  if [[ (1748 -lt $version_num && $version_num -lt 1773) ]] ; then
+    echo "Your pngcrush ($version) has a bug that exists from " \
+         "1.7.49 to 1.7.72  (see crbug.com/404893 for details)."
+    echo "Please upgrade pngcrush and try again"
+    exit 1;
+  fi
+}
+
 function show_help {
   local program=$(basename $0)
   echo \
@@ -460,6 +474,8 @@ shift $(($OPTIND -1))
 
 # Make sure we have all necessary commands installed.
 install_if_not_installed pngcrush pngcrush
+exit_if_bad_pngcrush_version
+
 if [ $OPTIMIZE_LEVEL -ge 1 ]; then
   install_if_not_installed optipng optipng
 

@@ -72,7 +72,6 @@ WebStorageQuotaType stringToStorageQuotaType(const String& type)
 
 StorageQuota::StorageQuota()
 {
-    ScriptWrappable::init(this);
 }
 
 Vector<String> StorageQuota::supportedTypes() const
@@ -95,7 +94,7 @@ ScriptPromise StorageQuota::queryInfo(ScriptState* scriptState, String type)
     }
 
     KURL storagePartition = KURL(KURL(), securityOrigin->toString());
-    OwnPtr<StorageQuotaCallbacks> callbacks = StorageQuotaCallbacksImpl::create(resolver);
+    OwnPtrWillBeRawPtr<StorageQuotaCallbacks> callbacks = StorageQuotaCallbacksImpl::create(resolver);
     Platform::current()->queryStorageUsageAndQuota(storagePartition, stringToStorageQuotaType(type), callbacks.release());
     return promise;
 }

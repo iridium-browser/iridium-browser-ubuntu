@@ -7,11 +7,11 @@
 #include <string>
 
 #include "extensions/renderer/script_context.h"
+#include "storage/common/fileapi/file_system_util.h"
 #include "third_party/WebKit/public/web/WebDOMFileSystem.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "v8/include/v8.h"
-#include "webkit/common/fileapi/file_system_util.h"
 
 namespace extensions {
 
@@ -30,11 +30,11 @@ void GetMediaFileSystemObject(const v8::FunctionCallbackInfo<v8::Value>& args) {
       blink::WebLocalFrame::frameForCurrentContext();
   const GURL origin = GURL(webframe->document().securityOrigin().toString());
   std::string fs_name =
-      fileapi::GetFileSystemName(origin, fileapi::kFileSystemTypeExternal);
+      storage::GetFileSystemName(origin, storage::kFileSystemTypeExternal);
   fs_name.append("_");
   fs_name.append(fs_mount);
   const GURL root_url(
-      fileapi::GetExternalFileSystemRootURIString(origin, fs_mount));
+      storage::GetExternalFileSystemRootURIString(origin, fs_mount));
   args.GetReturnValue().Set(
       blink::WebDOMFileSystem::create(webframe,
                                       blink::WebFileSystemTypeExternal,

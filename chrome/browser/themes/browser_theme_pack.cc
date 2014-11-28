@@ -18,10 +18,9 @@
 #include "base/values.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/extensions/manifest_handlers/theme_handler.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "extensions/common/id_util.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/resource/data_pack.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -34,6 +33,7 @@
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/resources/grit/ui_resources.h"
 
 using content::BrowserThread;
 using extensions::Extension;
@@ -477,8 +477,7 @@ SkBitmap CreateLowQualityResizedBitmap(const SkBitmap& source_bitmap,
                      ui::GetScaleForScaleFactor(desired_scale_factor) /
                      ui::GetScaleForScaleFactor(source_scale_factor)));
   SkBitmap scaled_bitmap;
-  if (!scaled_bitmap.allocN32Pixels(scaled_size.width(), scaled_size.height()))
-    SK_CRASH();
+  scaled_bitmap.allocN32Pixels(scaled_size.width(), scaled_size.height());
   scaled_bitmap.eraseARGB(0, 0, 0, 0);
   SkCanvas canvas(scaled_bitmap);
   SkRect scaled_bounds = RectToSkRect(gfx::Rect(scaled_size));
@@ -742,9 +741,8 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
   }
   // TODO(erg): Check endianess once DataPack works on the other endian.
   std::string theme_id(reinterpret_cast<char*>(pack->header_->theme_id),
-                       extensions::id_util::kIdSize);
-  std::string truncated_id =
-      expected_id.substr(0, extensions::id_util::kIdSize);
+                       crx_file::id_util::kIdSize);
+  std::string truncated_id = expected_id.substr(0, crx_file::id_util::kIdSize);
   if (theme_id != truncated_id) {
     DLOG(ERROR) << "Wrong id: " << theme_id << " vs " << expected_id;
     return NULL;
@@ -971,7 +969,7 @@ void BrowserThemePack::BuildHeader(const Extension* extension) {
   header_->little_endian = 1;
 
   const std::string& id = extension->id();
-  memcpy(header_->theme_id, id.c_str(), extensions::id_util::kIdSize);
+  memcpy(header_->theme_id, id.c_str(), crx_file::id_util::kIdSize);
 }
 
 void BrowserThemePack::BuildTintsFromJSON(

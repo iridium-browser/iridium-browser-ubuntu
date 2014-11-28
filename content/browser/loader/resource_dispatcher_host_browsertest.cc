@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/ref_counted.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -18,12 +19,12 @@
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_network_delegate.h"
-#include "content/test/net/url_request_failed_job.h"
-#include "content/test/net/url_request_mock_http_job.h"
 #include "net/base/net_errors.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/test/url_request/url_request_failed_job.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 
 using base::ASCIIToUTF16;
 
@@ -38,11 +39,15 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
   virtual void SetUpOnMainThread() OVERRIDE {
     base::FilePath path = GetTestFilePath("", "");
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&URLRequestMockHTTPJob::AddUrlHandler, path));
+        BrowserThread::IO,
+        FROM_HERE,
+        base::Bind(
+            &net::URLRequestMockHTTPJob::AddUrlHandler,
+            path,
+            make_scoped_refptr(content::BrowserThread::GetBlockingPool())));
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&URLRequestFailedJob::AddUrlHandler));
+        base::Bind(&net::URLRequestFailedJob::AddUrlHandler));
   }
 
   virtual void OnDownloadCreated(
@@ -53,7 +58,7 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
   }
 
   GURL GetMockURL(const std::string& file) {
-    return URLRequestMockHTTPJob::GetMockUrl(
+    return net::URLRequestMockHTTPJob::GetMockUrl(
         base::FilePath().AppendASCII(file));
   }
 
@@ -348,7 +353,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   // TODO(creis): If this causes crashes or hangs, it might be for the same
   // reason as ErrorPageTest::DNSError.  See bug 1199491 and
   // http://crbug.com/22877.
-  GURL failed_url = URLRequestFailedJob::GetMockHttpUrl(
+  GURL failed_url = net::URLRequestFailedJob::GetMockHttpUrl(
       net::ERR_NAME_NOT_RESOLVED);
   NavigateToURL(shell(), failed_url);
 
@@ -393,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   // TODO(creis): If this causes crashes or hangs, it might be for the same
   // reason as ErrorPageTest::DNSError.  See bug 1199491 and
   // http://crbug.com/22877.
-  GURL failed_url = URLRequestFailedJob::GetMockHttpUrl(
+  GURL failed_url = net::URLRequestFailedJob::GetMockHttpUrl(
       net::ERR_NAME_NOT_RESOLVED);
 
   NavigateToURL(shell(), failed_url);

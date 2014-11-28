@@ -23,14 +23,30 @@ class String;
 
 namespace internal {
 
+// std::numeric_limits<uint32_t>::max() is not a compile-time constant (until
+// C++11).
+const uint32_t kMaxUint32 = 0xFFFFFFFF;
+
+std::string MakeMessageWithArrayIndex(const char* message,
+                                      size_t size,
+                                      size_t index);
+
+std::string MakeMessageWithExpectedArraySize(const char* message,
+                                             size_t size,
+                                             size_t expected_size);
+
 template <typename T>
 struct ArrayDataTraits {
   typedef T StorageType;
   typedef T& Ref;
   typedef T const& ConstRef;
 
-  static size_t GetStorageSize(size_t num_elements) {
-    return sizeof(StorageType) * num_elements;
+  static const uint32_t kMaxNumElements =
+      (kMaxUint32 - sizeof(ArrayHeader)) / sizeof(StorageType);
+
+  static uint32_t GetStorageSize(uint32_t num_elements) {
+    MOJO_DCHECK(num_elements <= kMaxNumElements);
+    return sizeof(ArrayHeader) + sizeof(StorageType) * num_elements;
   }
   static Ref ToRef(StorageType* storage, size_t offset) {
     return storage[offset];
@@ -46,8 +62,12 @@ struct ArrayDataTraits<P*> {
   typedef P*& Ref;
   typedef P* const& ConstRef;
 
-  static size_t GetStorageSize(size_t num_elements) {
-    return sizeof(StorageType) * num_elements;
+  static const uint32_t kMaxNumElements =
+      (kMaxUint32 - sizeof(ArrayHeader)) / sizeof(StorageType);
+
+  static uint32_t GetStorageSize(uint32_t num_elements) {
+    MOJO_DCHECK(num_elements <= kMaxNumElements);
+    return sizeof(ArrayHeader) + sizeof(StorageType) * num_elements;
   }
   static Ref ToRef(StorageType* storage, size_t offset) {
     return storage[offset].ptr;
@@ -63,8 +83,12 @@ struct ArrayDataTraits<Array_Data<T>*> {
   typedef Array_Data<T>*& Ref;
   typedef Array_Data<T>* const& ConstRef;
 
-  static size_t GetStorageSize(size_t num_elements) {
-    return sizeof(StorageType) * num_elements;
+  static const uint32_t kMaxNumElements =
+      (kMaxUint32 - sizeof(ArrayHeader)) / sizeof(StorageType);
+
+  static uint32_t GetStorageSize(uint32_t num_elements) {
+    MOJO_DCHECK(num_elements <= kMaxNumElements);
+    return sizeof(ArrayHeader) + sizeof(StorageType) * num_elements;
   }
   static Ref ToRef(StorageType* storage, size_t offset) {
     return storage[offset].ptr;
@@ -97,12 +121,15 @@ struct ArrayDataTraits<bool> {
     uint8_t mask_;
   };
 
+  // Because each element consumes only 1/8 byte.
+  static const uint32_t kMaxNumElements = kMaxUint32;
+
   typedef uint8_t StorageType;
   typedef BitRef Ref;
   typedef bool ConstRef;
 
-  static size_t GetStorageSize(size_t num_elements) {
-    return ((num_elements + 7) / 8);
+  static uint32_t GetStorageSize(uint32_t num_elements) {
+    return sizeof(ArrayHeader) + ((num_elements + 7) / 8);
   }
   static BitRef ToRef(StorageType* storage, size_t offset) {
     return BitRef(&storage[offset / 8], 1 << (offset % 8));
@@ -114,7 +141,7 @@ struct ArrayDataTraits<bool> {
 
 // Array type information needed for valdiation.
 template <uint32_t in_expected_num_elements,
-          bool in_element_nullable,
+          bool in_element_is_nullable,
           typename InElementValidateParams>
 class ArrayValidateParams {
  public:
@@ -126,7 +153,7 @@ class ArrayValidateParams {
   // that number of elements.
   static const uint32_t expected_num_elements = in_expected_num_elements;
   // Whether the elements are nullable.
-  static const bool element_nullable = in_element_nullable;
+  static const bool element_is_nullable = in_element_is_nullable;
 };
 
 // NoValidateParams is used to indicate the end of an ArrayValidateParams chain.
@@ -153,11 +180,11 @@ struct ArraySerializationHelper<T, false> {
                                        std::vector<Handle>* handles) {
   }
 
-  template <bool element_nullable, typename ElementValidateParams>
+  template <bool element_is_nullable, typename ElementValidateParams>
   static bool ValidateElements(const ArrayHeader* header,
                                const ElementType* elements,
                                BoundsChecker* bounds_checker) {
-    MOJO_COMPILE_ASSERT(!element_nullable,
+    MOJO_COMPILE_ASSERT(!element_is_nullable,
                         Primitive_type_should_be_non_nullable);
     MOJO_COMPILE_ASSERT(
         (IsSame<ElementValidateParams, NoValidateParams>::value),
@@ -178,7 +205,7 @@ struct ArraySerializationHelper<Handle, true> {
                                        ElementType* elements,
                                        std::vector<Handle>* handles);
 
-  template <bool element_nullable, typename ElementValidateParams>
+  template <bool element_is_nullable, typename ElementValidateParams>
   static bool ValidateElements(const ArrayHeader* header,
                                const ElementType* elements,
                                BoundsChecker* bounds_checker) {
@@ -187,9 +214,13 @@ struct ArraySerializationHelper<Handle, true> {
         Handle_type_should_not_have_array_validate_params);
 
     for (uint32_t i = 0; i < header->num_elements; ++i) {
-      if (IsNonNullableValidationEnabled() && !element_nullable &&
+      if (!element_is_nullable &&
           elements[i].value() == kEncodedInvalidHandleValue) {
-        ReportValidationError(VALIDATION_ERROR_UNEXPECTED_INVALID_HANDLE);
+        ReportValidationError(
+            VALIDATION_ERROR_UNEXPECTED_INVALID_HANDLE,
+            MakeMessageWithArrayIndex(
+                "invalid handle in array expecting valid handles",
+                header->num_elements, i).c_str());
         return false;
       }
       if (!bounds_checker->ClaimHandle(elements[i])) {
@@ -219,12 +250,12 @@ struct ArraySerializationHelper<H, true> {
         header, elements, handles);
   }
 
-  template <bool element_nullable, typename ElementValidateParams>
+  template <bool element_is_nullable, typename ElementValidateParams>
   static bool ValidateElements(const ArrayHeader* header,
                                const ElementType* elements,
                                BoundsChecker* bounds_checker) {
     return ArraySerializationHelper<Handle, true>::
-        ValidateElements<element_nullable, ElementValidateParams>(
+        ValidateElements<element_is_nullable, ElementValidateParams>(
             header, elements, bounds_checker);
   }
 };
@@ -247,14 +278,17 @@ struct ArraySerializationHelper<P*, false> {
       Decode(&elements[i], handles);
   }
 
-  template <bool element_nullable, typename ElementValidateParams>
+  template <bool element_is_nullable, typename ElementValidateParams>
   static bool ValidateElements(const ArrayHeader* header,
                                const ElementType* elements,
                                BoundsChecker* bounds_checker) {
     for (uint32_t i = 0; i < header->num_elements; ++i) {
-      if (IsNonNullableValidationEnabled() && !element_nullable &&
-          !elements[i].offset) {
-        ReportValidationError(VALIDATION_ERROR_UNEXPECTED_NULL_POINTER);
+      if (!element_is_nullable && !elements[i].offset) {
+        ReportValidationError(
+            VALIDATION_ERROR_UNEXPECTED_NULL_POINTER,
+            MakeMessageWithArrayIndex(
+                "null in array expecting valid pointers",
+                header->num_elements, i).c_str());
         return false;
       }
       if (!ValidateEncodedPointer(&elements[i].offset)) {
@@ -298,11 +332,16 @@ class Array_Data {
   typedef typename Traits::ConstRef ConstRef;
   typedef ArraySerializationHelper<T, IsHandle<T>::value> Helper;
 
+  // Returns NULL if |num_elements| or the corresponding storage size cannot be
+  // stored in uint32_t.
   static Array_Data<T>* New(size_t num_elements, Buffer* buf) {
-    size_t num_bytes = sizeof(Array_Data<T>) +
-                       Traits::GetStorageSize(num_elements);
-    return new (buf->Allocate(num_bytes)) Array_Data<T>(num_bytes,
-                                                        num_elements);
+    if (num_elements > Traits::kMaxNumElements)
+      return NULL;
+
+    uint32_t num_bytes =
+        Traits::GetStorageSize(static_cast<uint32_t>(num_elements));
+    return new (buf->Allocate(num_bytes)) Array_Data<T>(
+        num_bytes, static_cast<uint32_t>(num_elements));
   }
 
   template <typename Params>
@@ -318,14 +357,18 @@ class Array_Data {
       return false;
     }
     const ArrayHeader* header = static_cast<const ArrayHeader*>(data);
-    if (header->num_bytes < (sizeof(Array_Data<T>) +
-                             Traits::GetStorageSize(header->num_elements))) {
+    if (header->num_elements > Traits::kMaxNumElements ||
+        header->num_bytes < Traits::GetStorageSize(header->num_elements)) {
       ReportValidationError(VALIDATION_ERROR_UNEXPECTED_ARRAY_HEADER);
       return false;
     }
     if (Params::expected_num_elements != 0 &&
         header->num_elements != Params::expected_num_elements) {
-      ReportValidationError(VALIDATION_ERROR_UNEXPECTED_ARRAY_HEADER);
+      ReportValidationError(
+          VALIDATION_ERROR_UNEXPECTED_ARRAY_HEADER,
+          MakeMessageWithExpectedArraySize(
+              "fixed-size array has wrong number of elements",
+              header->num_elements, Params::expected_num_elements).c_str());
       return false;
     }
     if (!bounds_checker->ClaimMemory(data, header->num_bytes)) {
@@ -335,7 +378,7 @@ class Array_Data {
 
     const Array_Data<T>* object = static_cast<const Array_Data<T>*>(data);
     return Helper::template ValidateElements<
-        Params::element_nullable, typename Params::ElementValidateParams>(
+        Params::element_is_nullable, typename Params::ElementValidateParams>(
             &object->header_, object->storage(), bounds_checker);
   }
 
@@ -370,9 +413,9 @@ class Array_Data {
   }
 
  private:
-  Array_Data(size_t num_bytes, size_t num_elements) {
-    header_.num_bytes = static_cast<uint32_t>(num_bytes);
-    header_.num_elements = static_cast<uint32_t>(num_elements);
+  Array_Data(uint32_t num_bytes, uint32_t num_elements) {
+    header_.num_bytes = num_bytes;
+    header_.num_elements = num_elements;
   }
   ~Array_Data() {}
 

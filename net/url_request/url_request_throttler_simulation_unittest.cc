@@ -17,10 +17,13 @@
 #include <vector>
 
 #include "base/environment.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/rand_util.h"
 #include "base/time/time.h"
 #include "net/base/request_priority.h"
+#include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
 #include "net/url_request/url_request_throttler_test_support.h"
@@ -124,7 +127,8 @@ class Server : public DiscreteTimeSimulation::Actor {
         num_current_tick_queries_(0),
         num_overloaded_ticks_(0),
         max_experienced_queries_per_tick_(0),
-        mock_request_(GURL(), DEFAULT_PRIORITY, NULL, &context_) {}
+        mock_request_(context_.CreateRequest(
+            GURL(), DEFAULT_PRIORITY, NULL, NULL)) {}
 
   void SetDowntime(const TimeTicks& start_time, const TimeDelta& duration) {
     start_downtime_ = start_time;
@@ -188,7 +192,7 @@ class Server : public DiscreteTimeSimulation::Actor {
   }
 
   const URLRequest& mock_request() const {
-    return mock_request_;
+    return *mock_request_.get();
   }
 
   std::string VisualizeASCII(int terminal_width) {
@@ -275,6 +279,8 @@ class Server : public DiscreteTimeSimulation::Actor {
     return output;
   }
 
+  const URLRequestContext& context() const { return context_; }
+
  private:
   TimeTicks now_;
   TimeTicks start_downtime_;  // Can be 0 to say "no downtime".
@@ -288,7 +294,7 @@ class Server : public DiscreteTimeSimulation::Actor {
   std::vector<int> requests_per_tick_;
 
   TestURLRequestContext context_;
-  TestURLRequest mock_request_;
+  scoped_ptr<URLRequest> mock_request_;
 
   DISALLOW_COPY_AND_ASSIGN(Server);
 };
@@ -427,7 +433,9 @@ class Requester : public DiscreteTimeSimulation::Actor {
 
     if (throttler_entry_->fake_now() - time_of_last_attempt_ >
         effective_delay) {
-      if (!throttler_entry_->ShouldRejectRequest(server_->mock_request())) {
+      if (!throttler_entry_->ShouldRejectRequest(
+              server_->mock_request(),
+              server_->context().network_delegate())) {
         int status_code = server_->HandleRequest();
         MockURLRequestThrottlerHeaderAdapter response_headers(status_code);
         throttler_entry_->UpdateWithResponse(std::string(), &response_headers);

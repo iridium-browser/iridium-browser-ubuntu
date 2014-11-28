@@ -6,7 +6,8 @@ action("devtools_protocol_constants") {
   script = "//content/public/browser/devtools_protocol_constants_generator.py"
 
   blink_protocol = "//third_party/WebKit/Source/devtools/protocol.json"
-  inputs = [ blink_protocol ]
+  browser_protocol = "//content/browser/devtools/browser_protocol.json"
+  inputs = [ blink_protocol, browser_protocol ]
   outputs = [
     "$target_gen_dir/devtools_protocol_constants.cc",
     "$target_gen_dir/devtools_protocol_constants.h",
@@ -15,20 +16,21 @@ action("devtools_protocol_constants") {
   args = [ "chrome" ]
   args += rebase_path(outputs, root_build_dir)
   args += [ rebase_path(blink_protocol, root_build_dir) ]
+  args += [ rebase_path(browser_protocol, root_build_dir) ]
 }
 
 # GYP version: chrome/chrome_debugger.gypi:debugger
 static_library("devtools") {
   # Note: new sources and deps should be generally added in (!is_android) below.
   sources = [
-    "chrome_devtools_manager_delegate.cc",
-    "chrome_devtools_manager_delegate.h",
     "devtools_network_conditions.cc",
     "devtools_network_conditions.h",
     "devtools_network_controller.cc",
     "devtools_network_controller.h",
     "devtools_network_interceptor.cc",
     "devtools_network_interceptor.h",
+    "devtools_network_protocol_handler.cc",
+    "devtools_network_protocol_handler.h",
     "devtools_network_transaction.cc",
     "devtools_network_transaction.h",
     "devtools_network_transaction_factory.cc",
@@ -64,6 +66,7 @@ static_library("devtools") {
       "//chrome:strings",
       "//chrome/app/theme:theme_resources",
       "//chrome/common/extensions/api",
+      "//chrome/common/extensions/api:api_registration",
       "//net:http_server",
       "//skia",
       "//third_party/icu",
@@ -96,6 +99,8 @@ static_library("devtools") {
       "device/usb/usb_device_provider.h",
       "browser_list_tabcontents_provider.cc",
       "browser_list_tabcontents_provider.h",
+      "chrome_devtools_manager_delegate.cc",
+      "chrome_devtools_manager_delegate.h",
       "devtools_contents_resizing_strategy.cc",
       "devtools_contents_resizing_strategy.h",
       "devtools_embedder_message_dispatcher.cc",

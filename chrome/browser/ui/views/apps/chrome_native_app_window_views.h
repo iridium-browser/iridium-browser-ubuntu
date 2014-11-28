@@ -5,9 +5,13 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_APPS_CHROME_NATIVE_APP_WINDOW_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_APPS_CHROME_NATIVE_APP_WINDOW_VIEWS_H_
 
-#include "apps/ui/views/native_app_window_views.h"
 #include "base/memory/scoped_ptr.h"
+#include "components/native_app_window/native_app_window_views.h"
 #include "ui/views/context_menu_controller.h"
+
+namespace apps {
+class AppWindowFrameView;
+}
 
 #if defined(USE_ASH)
 namespace ash {
@@ -21,8 +25,9 @@ namespace views {
 class MenuRunner;
 }
 
-class ChromeNativeAppWindowViews : public apps::NativeAppWindowViews,
-                                   public views::ContextMenuController {
+class ChromeNativeAppWindowViews
+    : public native_app_window::NativeAppWindowViews,
+      public views::ContextMenuController {
  public:
   ChromeNativeAppWindowViews();
   virtual ~ChromeNativeAppWindowViews();
@@ -36,9 +41,9 @@ class ChromeNativeAppWindowViews : public apps::NativeAppWindowViews,
                                   views::Widget* widget);
 
   virtual void InitializeDefaultWindow(
-      const apps::AppWindow::CreateParams& create_params);
+      const extensions::AppWindow::CreateParams& create_params);
   virtual void InitializePanelWindow(
-      const apps::AppWindow::CreateParams& create_params);
+      const extensions::AppWindow::CreateParams& create_params);
   virtual views::NonClientFrameView* CreateStandardDesktopAppFrame();
 
  private:
@@ -72,7 +77,6 @@ class ChromeNativeAppWindowViews : public apps::NativeAppWindowViews,
   // NativeAppWindow implementation.
   virtual void SetFullscreen(int fullscreen_types) OVERRIDE;
   virtual bool IsFullscreenOrPending() const OVERRIDE;
-  virtual bool IsDetached() const OVERRIDE;
   virtual void UpdateBadgeIcon() OVERRIDE;
   virtual void UpdateShape(scoped_ptr<SkRegion> region) OVERRIDE;
   virtual bool HasFrameColor() const OVERRIDE;
@@ -81,8 +85,8 @@ class ChromeNativeAppWindowViews : public apps::NativeAppWindowViews,
 
   // NativeAppWindowViews implementation.
   virtual void InitializeWindow(
-      apps::AppWindow* app_window,
-      const apps::AppWindow::CreateParams& create_params) OVERRIDE;
+      extensions::AppWindow* app_window,
+      const extensions::AppWindow::CreateParams& create_params) OVERRIDE;
 
   // True if the window is fullscreen or fullscreen is pending.
   bool is_fullscreen_;

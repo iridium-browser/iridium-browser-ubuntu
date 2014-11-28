@@ -27,6 +27,7 @@
 namespace blink {
 
 class SVGPathSegCurvetoQuadraticSmoothAbs FINAL : public SVGPathSegSingleCoordinate {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtr<SVGPathSegCurvetoQuadraticSmoothAbs> create(SVGPathElement* element, float x, float y)
     {
@@ -35,10 +36,7 @@ public:
 
 private:
     SVGPathSegCurvetoQuadraticSmoothAbs(SVGPathElement* element, float x, float y)
-        : SVGPathSegSingleCoordinate(element, x, y)
-    {
-        ScriptWrappable::init(this);
-    }
+        : SVGPathSegSingleCoordinate(element, x, y) { }
 
     virtual unsigned short pathSegType() const OVERRIDE { return PATHSEG_CURVETO_QUADRATIC_SMOOTH_ABS; }
     virtual String pathSegTypeAsLetter() const OVERRIDE { return "T"; }
@@ -46,4 +44,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // SVGPathSegCurvetoQuadraticSmoothAbs_h

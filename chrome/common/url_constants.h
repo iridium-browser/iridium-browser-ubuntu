@@ -64,7 +64,6 @@ extern const char kChromeUINewProfile[];
 extern const char kChromeUINewTabURL[];
 extern const char kChromeUIOmniboxURL[];
 extern const char kChromeUIPasswordManagerInternalsHost[];
-extern const char kChromeUIPerformanceMonitorURL[];
 extern const char kChromeUIPluginsURL[];
 extern const char kChromeUIPolicyURL[];
 extern const char kChromeUIProfileSigninConfirmationURL[];
@@ -200,7 +199,6 @@ extern const char kChromeUINetExportHost[];
 extern const char kChromeUINetInternalsHost[];
 extern const char kChromeUINewTabHost[];
 extern const char kChromeUIOmniboxHost[];
-extern const char kChromeUIPerformanceMonitorHost[];
 extern const char kChromeUIPluginsHost[];
 extern const char kChromeUIComponentsHost[];
 extern const char kChromeUIPolicyHost[];
@@ -208,7 +206,6 @@ extern const char kChromeUIProfileSigninConfirmationHost[];
 extern const char kChromeUIProvidedFileSystemsHost[];
 extern const char kChromeUIUserManagerHost[];
 extern const char kChromeUIPredictorsHost[];
-extern const char kChromeUIPrintHost[];
 extern const char kChromeUIProfilerHost[];
 extern const char kChromeUIQuotaInternalsHost[];
 extern const char kChromeUIQuitHost[];
@@ -245,6 +242,10 @@ extern const char kChromeUIWorkersHost[];
 
 extern const char kChromeUIScreenshotPath[];
 extern const char kChromeUIThemePath[];
+
+#if defined(ENABLE_FULL_PRINTING)
+extern const char kChromeUIPrintHost[];
+#endif  // ENABLE_FULL_PRINTING
 
 #if defined(OS_ANDROID)
 extern const char kChromeUIWelcomeHost[];
@@ -470,9 +471,6 @@ extern const char kLearnMoreEnterpriseURL[];
 // The URL for the Learn More link of the non-CWS bubble.
 extern const char kRemoveNonCWSExtensionURL[];
 
-// The URL for the Learn More link for the corrupt extension message.
-extern const char kCorruptExtensionURL[];
-
 extern const char kNotificationsHelpURL[];
 
 // The Welcome Notification More Info URL.
@@ -519,7 +517,7 @@ extern const char kChromeSearchMostVisitedUrl[];
 
 #if defined(OS_CHROMEOS)
 extern const char kCrosScheme[];
-extern const char kDriveScheme[];
+extern const char kExternalFileScheme[];
 #endif
 
 // "Learn more" URL for the Cloud Print section under Options.

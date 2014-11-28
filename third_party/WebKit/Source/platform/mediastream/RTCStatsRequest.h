@@ -31,17 +31,16 @@
 #ifndef RTCStatsRequest_h
 #define RTCStatsRequest_h
 
+#include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class MediaStreamComponent;
-class MediaStreamDescriptor;
 class RTCStatsResponseBase;
 
-class RTCStatsRequest : public RefCounted<RTCStatsRequest> {
+class RTCStatsRequest : public GarbageCollectedFinalized<RTCStatsRequest> {
 public:
     virtual ~RTCStatsRequest() { }
 
@@ -49,6 +48,8 @@ public:
     virtual bool hasSelector() = 0;
     virtual MediaStreamComponent* component() = 0;
     virtual void requestSucceeded(RTCStatsResponseBase*) = 0;
+
+    virtual void trace(Visitor*) { }
 
 protected:
     RTCStatsRequest() { }

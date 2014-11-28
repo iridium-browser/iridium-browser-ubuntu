@@ -10,19 +10,19 @@
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "cc/blink/web_layer_impl.h"
 #include "cc/layers/video_layer.h"
 #include "content/public/renderer/render_view.h"
-#include "content/renderer/compositor_bindings/web_layer_impl.h"
 #include "content/renderer/media/media_stream_audio_renderer.h"
 #include "content/renderer/media/media_stream_renderer_factory.h"
 #include "content/renderer/media/video_frame_provider.h"
-#include "content/renderer/media/webmediaplayer_delegate.h"
-#include "content/renderer/media/webmediaplayer_util.h"
 #include "content/renderer/render_frame_impl.h"
 #include "media/base/media_log.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_rotation.h"
 #include "media/base/video_util.h"
+#include "media/blink/webmediaplayer_delegate.h"
+#include "media/blink/webmediaplayer_util.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayerClient.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
@@ -81,7 +81,7 @@ namespace content {
 WebMediaPlayerMS::WebMediaPlayerMS(
     blink::WebFrame* frame,
     blink::WebMediaPlayerClient* client,
-    base::WeakPtr<WebMediaPlayerDelegate> delegate,
+    base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
     media::MediaLog* media_log,
     scoped_ptr<MediaStreamRendererFactory> factory)
     : frame_(frame),
@@ -210,7 +210,7 @@ void WebMediaPlayerMS::pause() {
 
   media_log_->AddEvent(media_log_->CreateEvent(media::MediaLogEvent::PAUSE));
 
-  if (!current_frame_)
+  if (!current_frame_.get())
     return;
 
   // Copy the frame so that rendering can show the last received frame.
@@ -333,12 +333,8 @@ void WebMediaPlayerMS::paint(blink::WebCanvas* canvas,
   DCHECK(thread_checker_.CalledOnValidThread());
 
   gfx::RectF dest_rect(rect.x, rect.y, rect.width, rect.height);
-  video_renderer_.Paint(current_frame_.get(),
-                        canvas,
-                        dest_rect,
-                        alpha,
-                        mode,
-                        media::VIDEO_ROTATION_0);
+  video_renderer_.Paint(
+      current_frame_, canvas, dest_rect, alpha, mode, media::VIDEO_ROTATION_0);
 
   {
     base::AutoLock auto_lock(current_frame_lock_);
@@ -358,7 +354,7 @@ bool WebMediaPlayerMS::didPassCORSAccessCheck() const {
 }
 
 double WebMediaPlayerMS::mediaTimeForTimeValue(double timeValue) const {
-  return ConvertSecondsToTimestamp(timeValue).InSecondsF();
+  return media::ConvertSecondsToTimestamp(timeValue).InSecondsF();
 }
 
 unsigned WebMediaPlayerMS::decodedFrameCount() const {
@@ -428,8 +424,8 @@ void WebMediaPlayerMS::OnFrameAvailable(
     SetReadyState(WebMediaPlayer::ReadyStateHaveEnoughData);
     GetClient()->sizeChanged();
 
-    if (video_frame_provider_) {
-      video_weblayer_.reset(new WebLayerImpl(
+    if (video_frame_provider_.get()) {
+      video_weblayer_.reset(new cc_blink::WebLayerImpl(
           cc::VideoLayer::Create(this, media::VIDEO_ROTATION_0)));
       video_weblayer_->setOpaque(true);
       GetClient()->setWebLayer(video_weblayer_.get());

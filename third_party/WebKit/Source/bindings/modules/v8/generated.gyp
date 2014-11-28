@@ -41,10 +41,8 @@
       'msvs_external_rule': 1,
       'inputs': [
         '<@(idl_lexer_parser_files)',  # to be explicit (covered by parsetab)
+        '<@(idl_cache_files)',
         '<@(idl_compiler_files)',
-        '<(bindings_scripts_output_dir)/lextab.py',
-        '<(bindings_scripts_output_dir)/parsetab.pickle',
-        '<(bindings_scripts_output_dir)/cached_jinja_templates.stamp',
         '<(bindings_dir)/IDLExtendedAttributes.txt',
         # If the dependency structure or public interface info (e.g.,
         # [ImplementedAs]) changes, we rebuild all files, since we're not
@@ -68,7 +66,6 @@
       # Update that regex if command line changes (other than changing flags)
       'action': [
         'python',
-        '-S',  # skip 'import site' to speed up startup
         '<(bindings_scripts_dir)/idl_compiler.py',
         '--cache-dir',
         '<(bindings_scripts_output_dir)',
@@ -109,9 +106,59 @@
   },
 ################################################################################
   {
+    # GN version: //third_party/WebKit/Source/bindings/modules/v8:bindings_modules_dictionary_impl_generated
+    # http://crbug.com/358074; See comments on
+    # 'bindings_core_v8_generated_individual' target
+    'target_name': 'bindings_modules_dictionary_impl_generated',
+    'type': 'none',
+    'hard_dependency': 1,
+    'dependencies': [
+      '<(bindings_scripts_dir)/scripts.gyp:cached_jinja_templates',
+      '<(bindings_scripts_dir)/scripts.gyp:cached_lex_yacc_tables',
+      '../../modules/generated.gyp:interfaces_info',
+    ],
+    'sources': [
+      '<@(modules_dictionary_idl_files)',
+    ],
+    'actions': [{
+      'action_name': 'idl_dictionary',
+      # See comment on bindings_core_dictionary_impl_generated
+      'explicit_idl_action': 1,
+      'msvs_cygwin_shell': 0,
+      'inputs': [
+        '<@(modules_dictionary_idl_files)',
+        '<@(idl_lexer_parser_files)',
+        '<@(idl_cache_files)',
+        '<@(idl_compiler_files)',
+        '<(bindings_dir)/IDLExtendedAttributes.txt',
+        '<(bindings_modules_output_dir)/InterfacesInfoModules.pickle',
+      ],
+      'outputs': [
+        '<@(generated_modules_dictionary_files)',
+      ],
+      'action': [
+        'python',
+        '<(bindings_scripts_dir)/idl_compiler.py',
+        '--cache-dir',
+        '<(bindings_scripts_output_dir)',
+        '--output-dir',
+        '<(SHARED_INTERMEDIATE_DIR)/blink/',
+        '--interfaces-info',
+        '<(bindings_modules_output_dir)/InterfacesInfoModules.pickle',
+        '--write-file-only-if-changed',
+        '<(write_file_only_if_changed)',
+        '--generate-dictionary-impl',
+        '<(modules_dictionary_idl_files_list)',
+      ],
+      'message': 'Generating modules IDL dictionary impl classes',
+    }],
+  },
+################################################################################
+  {
     'target_name': 'bindings_modules_v8_generated',
     'type': 'none',
     'dependencies': [
+      'bindings_modules_dictionary_impl_generated',
       'bindings_modules_v8_generated_aggregate',
       'bindings_modules_v8_generated_individual',
     ],

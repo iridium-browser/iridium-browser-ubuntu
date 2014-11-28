@@ -31,7 +31,6 @@ config("feature_flags") {
   # TODO(brettw) most of these need to be parameterized.
   defines = [
       "CHROMIUM_BUILD",
-      "ENABLE_NOTIFICATIONS",
       "ENABLE_EGLIMAGE=1",
       "ENABLE_BACKGROUND=1",
       "V8_DEPRECATION_WARNINGS",  # Don't use deprecated V8 APIs anywhere.
@@ -43,9 +42,16 @@ config("feature_flags") {
   if (enable_mdns) {
     defines += [ "ENABLE_MDNS=1" ]
   }
+  if (enable_notifications) {
+    defines += [ "ENABLE_NOTIFICATIONS" ]
+  }
   if (enable_pepper_cdms) {
     # TODO(brettw) should probably be "=1"
     defines += [ "ENABLE_PEPPER_CDMS" ]
+  }
+  if (enable_browser_cdms) {
+    # TODO(brettw) should probably be "=1"
+    defines += [ "ENABLE_BROWSER_CDMS" ]
   }
   if (enable_plugins) {
     defines += [ "ENABLE_PLUGINS=1" ]
@@ -135,9 +141,6 @@ config("feature_flags") {
   if (enable_themes) {
     defines += [ "ENABLE_THEMES=1" ]
   }
-  if (is_win && win_pdf_metafile_for_printing) {
-    defines += [ "WIN_PDF_METAFILE_FOR_PRINTING=1" ]
-  }
   if (enable_captive_portal_detection) {
     defines += [ "ENABLE_CAPTIVE_PORTAL_DETECTION=1" ]
   }
@@ -180,6 +183,12 @@ config("feature_flags") {
   if (enable_one_click_signin) {
     defines += [ "ENABLE_ONE_CLICK_SIGNIN" ]
   }
+  if (use_athena) {
+    defines += [ "USE_ATHENA=1" ]
+  }
+  if (enable_hidpi) {
+    defines += [ "ENABLE_HIDPI=1" ]
+  }
 }
 
 # Debug/release ----------------------------------------------------------------
@@ -207,6 +216,9 @@ config("debug") {
 }
 
 config("release") {
+  defines = [
+    "NDEBUG",
+  ]
 }
 
 # Default libraries ------------------------------------------------------------

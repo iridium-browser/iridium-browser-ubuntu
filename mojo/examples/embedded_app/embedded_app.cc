@@ -7,9 +7,12 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "mojo/application/application_runner_chromium.h"
+#include "mojo/public/c/system/main.h"
 #include "mojo/public/cpp/application/application_connection.h"
 #include "mojo/public/cpp/application/application_delegate.h"
 #include "mojo/public/cpp/application/application_impl.h"
+#include "mojo/public/cpp/application/connect.h"
 #include "mojo/public/cpp/application/interface_factory_impl.h"
 #include "mojo/services/public/cpp/view_manager/view.h"
 #include "mojo/services/public/cpp/view_manager/view_manager.h"
@@ -23,20 +26,16 @@
 
 namespace mojo {
 namespace examples {
-class EmbeddedApp;
 
-class NavigatorImpl : public InterfaceImpl<Navigator> {
- public:
-  explicit NavigatorImpl(EmbeddedApp* app) : app_(app) {}
+const SkColor kColors[] = {SK_ColorYELLOW, SK_ColorRED, SK_ColorGREEN,
+                           SK_ColorMAGENTA};
 
- private:
-  virtual void Navigate(
-      uint32 view_id,
-      NavigationDetailsPtr navigation_details,
-      ResponseDetailsPtr response_details) OVERRIDE;
-
-  EmbeddedApp* app_;
-  DISALLOW_COPY_AND_ASSIGN(NavigatorImpl);
+struct Window {
+  Window(View* root, scoped_ptr<ServiceProvider> embedder_service_provider)
+      : root(root),
+        embedder_service_provider(embedder_service_provider.Pass()) {}
+  View* root;
+  scoped_ptr<ServiceProvider> embedder_service_provider;
 };
 
 class EmbeddedApp
@@ -44,33 +43,20 @@ class EmbeddedApp
       public ViewManagerDelegate,
       public ViewObserver {
  public:
-  EmbeddedApp()
-      : navigator_factory_(this),
-        view_manager_(NULL),
-        view_manager_client_factory_(this) {
-    url::AddStandardScheme("mojo");
-  }
+  EmbeddedApp() { url::AddStandardScheme("mojo"); }
   virtual ~EmbeddedApp() {}
-
-  void SetViewColor(uint32 view_id, SkColor color) {
-    pending_view_colors_[view_id] = color;
-    ProcessPendingViewColor(view_id);
-  }
 
  private:
 
   // Overridden from ApplicationDelegate:
   virtual void Initialize(ApplicationImpl* app) MOJO_OVERRIDE {
-    // TODO(aa): Weird for embeddee to talk to embedder by URL. Seems like
-    // embedder should be able to specify the SP embeddee receives, then
-    // communication can be anonymous.
-    app->ConnectToService("mojo:mojo_window_manager", &navigator_host_);
+    view_manager_client_factory_.reset(
+        new ViewManagerClientFactory(app->shell(), this));
   }
 
   virtual bool ConfigureIncomingConnection(ApplicationConnection* connection)
       MOJO_OVERRIDE {
-    connection->AddService(&view_manager_client_factory_);
-    connection->AddService(&navigator_factory_);
+    connection->AddService(view_manager_client_factory_.get());
     return true;
   }
 
@@ -80,8 +66,8 @@ class EmbeddedApp
                        ServiceProviderImpl* exported_services,
                        scoped_ptr<ServiceProvider> imported_services) OVERRIDE {
     root->AddObserver(this);
-    roots_[root->id()] = root;
-    ProcessPendingViewColor(root->id());
+    windows_[root->id()] = new Window(root, imported_services.Pass());
+    root->SetColor(kColors[next_color_++ % arraysize(kColors)]);
   }
   virtual void OnViewManagerDisconnected(ViewManager* view_manager) OVERRIDE {
     base::MessageLoop::current()->Quit();
@@ -89,73 +75,36 @@ class EmbeddedApp
 
   // Overridden from ViewObserver:
   virtual void OnViewDestroyed(View* view) OVERRIDE {
-    DCHECK(roots_.find(view->id()) != roots_.end());
-    roots_.erase(view->id());
+    DCHECK(windows_.find(view->id()) != windows_.end());
+    windows_.erase(view->id());
   }
   virtual void OnViewInputEvent(View* view, const EventPtr& event) OVERRIDE {
     if (event->action == EVENT_TYPE_MOUSE_RELEASED) {
       if (event->flags & EVENT_FLAGS_LEFT_MOUSE_BUTTON) {
-        NavigationDetailsPtr nav_details(NavigationDetails::New());
-        nav_details->request->url =
-            "http://www.aaronboodman.com/z_dropbox/test.html";
-        navigator_host_->RequestNavigate(view->id(), TARGET_SOURCE_NODE,
-                                         nav_details.Pass());
+        URLRequestPtr request(URLRequest::New());
+        request->url = "http://www.aaronboodman.com/z_dropbox/test.html";
+        NavigatorHostPtr navigator_host;
+        ConnectToService(windows_[view->id()]->embedder_service_provider.get(),
+                         &navigator_host);
+        navigator_host->RequestNavigate(TARGET_SOURCE_NODE, request.Pass());
       }
     }
   }
 
-  void ProcessPendingViewColor(uint32 view_id) {
-    RootMap::iterator root = roots_.find(view_id);
-    if (root == roots_.end())
-      return;
+  scoped_ptr<ViewManagerClientFactory> view_manager_client_factory_;
 
-    PendingViewColors::iterator color = pending_view_colors_.find(view_id);
-    if (color == pending_view_colors_.end())
-      return;
+  typedef std::map<Id, Window*> WindowMap;
+  WindowMap windows_;
 
-    root->second->SetColor(color->second);
-    pending_view_colors_.erase(color);
-  }
-
-  InterfaceFactoryImplWithContext<NavigatorImpl, EmbeddedApp>
-      navigator_factory_;
-
-  ViewManager* view_manager_;
-  NavigatorHostPtr navigator_host_;
-  ViewManagerClientFactory view_manager_client_factory_;
-
-  typedef std::map<Id, View*> RootMap;
-  RootMap roots_;
-
-  // We can receive navigations for views we don't have yet.
-  typedef std::map<uint32, SkColor> PendingViewColors;
-  PendingViewColors pending_view_colors_;
+  int next_color_;
 
   DISALLOW_COPY_AND_ASSIGN(EmbeddedApp);
 };
 
-void NavigatorImpl::Navigate(uint32 view_id,
-                             NavigationDetailsPtr navigation_details,
-                             ResponseDetailsPtr response_details) {
-  GURL url(navigation_details->request->url.To<std::string>());
-  if (!url.is_valid()) {
-    LOG(ERROR) << "URL is invalid.";
-    return;
-  }
-  // TODO(aa): Verify new URL is same origin as current origin.
-  SkColor color = 0x00;
-  if (!base::HexStringToUInt(url.path().substr(1), &color)) {
-    LOG(ERROR) << "Invalid URL, path not convertible to integer";
-    return;
-  }
-  app_->SetViewColor(view_id, color);
-}
-
 }  // namespace examples
-
-// static
-ApplicationDelegate* ApplicationDelegate::Create() {
-  return new examples::EmbeddedApp;
-}
-
 }  // namespace mojo
+
+MojoResult MojoMain(MojoHandle shell_handle) {
+  mojo::ApplicationRunnerChromium runner(new mojo::examples::EmbeddedApp);
+  return runner.Run(shell_handle);
+}

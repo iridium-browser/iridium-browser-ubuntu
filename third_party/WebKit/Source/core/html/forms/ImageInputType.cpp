@@ -85,7 +85,7 @@ String ImageInputType::resultForDialogSubmit() const
 {
     StringBuilder result;
     result.appendNumber(m_clickLocation.x());
-    result.append(",");
+    result.append(',');
     result.appendNumber(m_clickLocation.y());
     return result.toString();
 }
@@ -165,11 +165,6 @@ bool ImageInputType::shouldRespectAlignAttribute()
 }
 
 bool ImageInputType::canBeSuccessfulSubmitButton()
-{
-    return true;
-}
-
-bool ImageInputType::isImageButton() const
 {
     return true;
 }

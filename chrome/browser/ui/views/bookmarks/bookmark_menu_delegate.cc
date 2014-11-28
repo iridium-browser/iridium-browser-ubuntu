@@ -20,12 +20,11 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/submenu_view.h"
@@ -184,7 +183,8 @@ bool BookmarkMenuDelegate::CanDrop(MenuItemView* menu,
   // bookmark bar and menus.
 
   if (!drop_data_.Read(data) || drop_data_.elements.size() != 1 ||
-      !profile_->GetPrefs()->GetBoolean(prefs::kEditBookmarksEnabled))
+      !profile_->GetPrefs()->GetBoolean(
+          bookmarks::prefs::kEditBookmarksEnabled))
     return false;
 
   if (drop_data_.has_single_url())

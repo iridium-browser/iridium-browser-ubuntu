@@ -55,6 +55,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include <openssl/crypto.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
@@ -285,7 +286,7 @@ static const struct set_name_fn name_fns[] =
 	{NULL, NULL, 0}
 	};
 
-static X509 *make_cert()
+static X509 *make_cert(void)
 	{
 	X509 *ret = NULL;
 	X509 *crt = NULL;
@@ -391,6 +392,8 @@ static void run_cert(X509 *crt, const char *nameincert,
 int
 main(void)
 	{
+	CRYPTO_library_init();
+
 	const struct set_name_fn *pfn = name_fns;
 	while (pfn->name) {
 		const char *const *pname = names;

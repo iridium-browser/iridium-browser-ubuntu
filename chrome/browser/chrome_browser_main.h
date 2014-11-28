@@ -23,6 +23,7 @@ class ChromeBrowserMainExtraParts;
 class FieldTrialSynchronizer;
 class MetricsService;
 class PrefService;
+class ProcessPowerCollector;
 class Profile;
 class StartupBrowserCreator;
 class StartupTimeBomb;
@@ -40,12 +41,8 @@ extern const char kMissingLocaleDataMessage[];
 #endif
 }
 
-namespace chrome_browser_metrics {
+namespace metrics {
 class TrackingSynchronizer;
-}
-
-namespace performance_monitor {
-class StartupTimer;
 }
 
 class ChromeBrowserMainParts : public content::BrowserMainParts {
@@ -134,11 +131,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // it is destroyed last.
   scoped_ptr<ShutdownWatcherHelper> shutdown_watcher_;
 
-  // A timer to hold data regarding startup and session restore times for
-  // PerformanceMonitor so that we don't have to start the entire
-  // PerformanceMonitor at browser startup.
-  scoped_ptr<performance_monitor::StartupTimer> startup_timer_;
-
   // Creating this object starts tracking the creation and deletion of Task
   // instance. This MUST be done before main_message_loop, so that it is
   // destroyed after the main_message_loop.
@@ -150,6 +142,11 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   ChromeBrowserFieldTrials browser_field_trials_;
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // A monitor for attributing power consumption to origins.
+  scoped_ptr<ProcessPowerCollector> process_power_collector_;
+#endif
+
   // Vector of additional ChromeBrowserMainExtraParts.
   // Parts are deleted in the inverse order they are added.
   std::vector<ChromeBrowserMainExtraParts*> chrome_extra_parts_;
@@ -157,8 +154,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Members initialized after / released before main_message_loop_ ------------
 
   scoped_ptr<BrowserProcessImpl> browser_process_;
-  scoped_refptr<chrome_browser_metrics::TrackingSynchronizer>
-      tracking_synchronizer_;
+  scoped_refptr<metrics::TrackingSynchronizer> tracking_synchronizer_;
 #if !defined(OS_ANDROID)
   // Browser creation happens on the Java side in Android.
   scoped_ptr<StartupBrowserCreator> browser_creator_;

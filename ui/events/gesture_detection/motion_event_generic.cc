@@ -16,7 +16,9 @@ PointerProperties::PointerProperties()
       raw_x(0),
       raw_y(0),
       pressure(0),
-      touch_major(0) {
+      touch_major(0),
+      touch_minor(0),
+      orientation(0) {
 }
 
 PointerProperties::PointerProperties(float x, float y)
@@ -27,11 +29,17 @@ PointerProperties::PointerProperties(float x, float y)
       raw_x(x),
       raw_y(y),
       pressure(0),
-      touch_major(0) {
+      touch_major(0),
+      touch_minor(0),
+      orientation(0) {
 }
 
 MotionEventGeneric::MotionEventGeneric()
-    : action_(ACTION_CANCEL), id_(0), action_index_(0), button_state_(0) {
+    : action_(ACTION_CANCEL),
+      id_(0),
+      action_index_(0),
+      button_state_(0),
+      flags_(0) {
 }
 
 MotionEventGeneric::MotionEventGeneric(Action action,
@@ -41,7 +49,8 @@ MotionEventGeneric::MotionEventGeneric(Action action,
       event_time_(event_time),
       id_(0),
       action_index_(0),
-      button_state_(0) {
+      button_state_(0),
+      flags_(0) {
   PushPointer(pointer);
 }
 
@@ -51,6 +60,7 @@ MotionEventGeneric::MotionEventGeneric(const MotionEventGeneric& other)
       id_(other.id_),
       action_index_(other.action_index_),
       button_state_(other.button_state_),
+      flags_(other.flags_),
       pointers_(other.pointers_) {
 }
 
@@ -103,6 +113,16 @@ float MotionEventGeneric::GetTouchMajor(size_t pointer_index) const {
   return pointers_[pointer_index].touch_major;
 }
 
+float MotionEventGeneric::GetTouchMinor(size_t pointer_index) const {
+  DCHECK_LT(pointer_index, pointers_->size());
+  return pointers_[pointer_index].touch_minor;
+}
+
+float MotionEventGeneric::GetOrientation(size_t pointer_index) const {
+  DCHECK_LT(pointer_index, pointers_->size());
+  return pointers_[pointer_index].orientation;
+}
+
 float MotionEventGeneric::GetPressure(size_t pointer_index) const {
   DCHECK_LT(pointer_index, pointers_->size());
   return pointers_[pointer_index].pressure;
@@ -116,6 +136,10 @@ MotionEvent::ToolType MotionEventGeneric::GetToolType(
 
 int MotionEventGeneric::GetButtonState() const {
   return button_state_;
+}
+
+int MotionEventGeneric::GetFlags() const {
+  return flags_;
 }
 
 base::TimeTicks MotionEventGeneric::GetEventTime() const {

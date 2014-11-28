@@ -60,15 +60,16 @@ FileGrid.decorate = function(self, metadataCache, volumeManager) {
 /**
  * Updates items to reflect metadata changes.
  * @param {string} type Type of metadata changed.
- * @param {Object.<string, Object>} props Map from entry URLs to metadata props.
+ * @param {Array.<Entry>} entries Entries whose metadata changed.
  */
 FileGrid.prototype.updateListItemsMetadata = function(type, entries) {
   var urls = util.entriesToURLs(entries);
   var boxes = this.querySelectorAll('.img-container');
   for (var i = 0; i < boxes.length; i++) {
     var box = boxes[i];
-    var entry = this.dataModel.item(this.getListItemAncestor(box));
-    if (!entry || !(entry.toURL() in urls))
+    var listItem = this.getListItemAncestor(box);
+    var entry = listItem && this.dataModel.item(listItem.listIndex);
+    if (!entry || urls.indexOf(entry.toURL()) === -1)
       continue;
 
     FileGrid.decorateThumbnailBox(box,
@@ -153,7 +154,7 @@ FileGrid.decorateThumbnailBox = function(
   if (entry.isDirectory) {
     box.setAttribute('generic-thumbnail', 'folder');
     if (locationInfo && locationInfo.isDriveBased) {
-      metadataCache.getOne(entry, 'drive', function(metadata) {
+      metadataCache.getOne(entry, 'external', function(metadata) {
         if (metadata.shared)
           box.classList.add('shared');
       });
@@ -163,15 +164,7 @@ FileGrid.decorateThumbnailBox = function(
     return;
   }
 
-  var metadataTypes = 'thumbnail|filesystem';
-
-  if (locationInfo && locationInfo.isDriveBased) {
-    metadataTypes += '|drive';
-  } else {
-    // TODO(dgozman): If we ask for 'media' for a Drive file we fall into an
-    // infinite loop.
-    metadataTypes += '|media';
-  }
+  var metadataTypes = 'thumbnail|filesystem|external|media';
 
   // Drive provides high quality thumbnails via USE_EMBEDDED, however local
   // images usually provide very tiny thumbnails, therefore USE_EMBEDDE can't
@@ -289,8 +282,8 @@ FileGrid.prototype.getHitIndex_ = function(coordinate, step, threshold) {
  *
  * @param {number} x X coordinate value.
  * @param {number} y Y coordinate value.
- * @param {=number} opt_width Width of the coordinate.
- * @param {=number} opt_height Height of the coordinate.
+ * @param {number=} opt_width Width of the coordinate.
+ * @param {number=} opt_height Height of the coordinate.
  * @return {Array.<number>} Index list of hit elements.
  */
 FileGrid.prototype.getHitElements = function(x, y, opt_width, opt_height) {

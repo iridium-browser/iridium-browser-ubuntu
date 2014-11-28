@@ -22,15 +22,13 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/extension.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
-#include "grit/theme_resources.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
 #include "skia/ext/image_operations.h"
@@ -432,7 +430,6 @@ CreateUrlApplicationShortcutView::CreateUrlApplicationShortcutView(
       web_contents_(web_contents),
       pending_download_id_(-1),
       weak_ptr_factory_(this)  {
-
   web_app::GetShortcutInfoForTab(web_contents_, &shortcut_info_);
   const WebApplicationInfo& app_info =
       extensions::TabHelper::FromWebContents(web_contents_)->web_app_info();

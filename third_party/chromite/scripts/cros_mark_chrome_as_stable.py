@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,30 +14,35 @@ Returns chrome-base/chromeos-chrome-8.0.552.0_alpha_r1
 emerge-x86-generic =chrome-base/chromeos-chrome-8.0.552.0_alpha_r1
 """
 
+from __future__ import print_function
+
+import base64
+import distutils.version
 import filecmp
 import optparse
 import os
 import re
 import sys
-import time
+import urlparse
 
 from chromite.cbuildbot import constants
-from chromite.cbuildbot import portage_utilities
 from chromite.lib import cros_build_lib
-from chromite.lib import gclient
 from chromite.lib import git
+from chromite.lib import gob_util
+from chromite.lib import portage_util
+from chromite.lib import timeout_util
 from chromite.scripts import cros_mark_as_stable
+
 
 # Helper regex's for finding ebuilds.
 _CHROME_VERSION_REGEX = r'\d+\.\d+\.\d+\.\d+'
 _NON_STICKY_REGEX = r'%s[(_rc.*)|(_alpha.*)]+' % _CHROME_VERSION_REGEX
 
 # Dir where all the action happens.
-_CHROME_OVERLAY_DIR = ('%(srcroot)s/third_party/chromiumos-overlay/' +
-                       constants.CHROME_CP)
+_OVERLAY_DIR = '%(srcroot)s/third_party/chromiumos-overlay/'
 
-_GIT_COMMIT_MESSAGE = ('Marking %(chrome_rev)s for chrome ebuild with version '
-                       '%(chrome_version)s as stable.')
+_GIT_COMMIT_MESSAGE = ('Marking %(chrome_rev)s for %(chrome_pn)s ebuild '
+                       'with version %(chrome_version)s as stable.')
 
 # URLs that print lists of chrome revisions between two versions of the browser.
 _CHROME_VERSION_URL = ('http://omahaproxy.appspot.com/changelog?'
@@ -48,12 +52,8 @@ _CHROME_VERSION_URL = ('http://omahaproxy.appspot.com/changelog?'
 _REV_TYPES_FOR_LINKS = [constants.CHROME_REV_LATEST,
                         constants.CHROME_REV_STICKY]
 
+# TODO(szager): This is inaccurate, but is it safe to change?  I have no idea.
 _CHROME_SVN_TAG = 'CROS_SVN_COMMIT'
-
-
-def _GetSvnUrl(base_url):
-  """Returns the path to the svn url for the given chrome branch."""
-  return os.path.join(base_url, 'trunk')
 
 
 def _GetVersionContents(chrome_version_info):
@@ -69,40 +69,37 @@ def _GetVersionContents(chrome_version_info):
   return '.'.join(chrome_version_array)
 
 
-def _GetSpecificVersionUrl(base_url, revision, time_to_wait=600):
+def _GetSpecificVersionUrl(git_url, revision, time_to_wait=600):
   """Returns the Chromium version, from a repository URL and version.
 
   Args:
-     base_url: URL for the root of the chromium checkout.
-     revision: the SVN revision we want to use.
+     git_url: Repository URL for chromium.
+     revision: the git revision we want to use.
      time_to_wait: the minimum period before abandoning our wait for the
          desired revision to be present.
   """
-  svn_url = os.path.join(_GetSvnUrl(base_url), 'src', 'chrome', 'VERSION')
-  if not revision or not (int(revision) > 0):
-    raise Exception('Revision must be positive, got %s' % revision)
+  parsed_url = urlparse.urlparse(git_url)
+  host = parsed_url[1]
+  path = parsed_url[2].rstrip('/') + (
+      '/+/%s/chrome/VERSION?format=text' % revision)
 
-  start = time.time()
-  # Use the fact we are SVN, hence ordered.
-  # Dodge the fact it will silently ignore the revision if it is not
-  # yet known.  (i.e. too high)
-  repo_version = gclient.GetTipOfTrunkSvnRevision(base_url)
-  while revision > repo_version:
-    if time.time() - start > time_to_wait:
-      raise Exception('Timeout Exceeeded')
+  # Allow for git repository replication lag with sleep/retry loop.
+  def _fetch():
+    fh = gob_util.FetchUrl(host, path, ignore_404=True)
+    return fh.read() if fh else None
 
-    msg = 'Repository only has version %s, looking for %s.  Sleeping...'
-    cros_build_lib.Info(msg, repo_version, revision)
-    time.sleep(30)
-    repo_version = gclient.GetTipOfTrunkSvnRevision(base_url)
+  def _wait_msg(_remaining_minutes):
+    cros_build_lib.Info(
+        'Repository does not yet have revision %s.  Sleeping...',
+        revision)
 
-  chrome_version_info = cros_build_lib.RunCommand(
-      ['svn', 'cat', '-r', revision, svn_url],
-      redirect_stdout=True,
-      error_message='Could not read version file at %s revision %s.' %
-                    (svn_url, revision)).output
-
-  return _GetVersionContents(chrome_version_info)
+  content = timeout_util.WaitForSuccess(
+      retry_check=lambda x: not bool(x),
+      func=_fetch,
+      timeout=time_to_wait,
+      period=30,
+      side_effect_func=_wait_msg)
+  return _GetVersionContents(base64.b64decode(content))
 
 
 def _GetTipOfTrunkVersionFile(root):
@@ -120,7 +117,7 @@ def _GetTipOfTrunkVersionFile(root):
   return _GetVersionContents(chrome_version_info)
 
 
-def CheckIfChromeRightForOS(url):
+def CheckIfChromeRightForOS(deps_content):
   """Checks if DEPS is right for Chrome OS.
 
   This function checks for a variable called 'buildspec_platforms' to
@@ -128,15 +125,12 @@ def CheckIfChromeRightForOS(url):
   then it chooses that DEPS.
 
   Args:
-    url: url where DEPS file present.
+    deps_content: Content of release buildspec DEPS file.
 
   Returns:
     True if DEPS is the right Chrome for Chrome OS.
   """
-  deps_contents = cros_build_lib.RunCommand(['svn', 'cat', url],
-                                            redirect_stdout=True).output
-
-  platforms_search = re.search(r'buildspec_platforms.*\s.*\s', deps_contents)
+  platforms_search = re.search(r'buildspec_platforms.*\s.*\s', deps_content)
 
   if platforms_search:
     platforms = platforms_search.group()
@@ -146,37 +140,40 @@ def CheckIfChromeRightForOS(url):
   return False
 
 
-def GetLatestRelease(base_url, branch=None):
-  """Gets the latest release version from the buildspec_url for the branch.
+def GetLatestRelease(git_url, branch=None):
+  """Gets the latest release version from the release tags in the repository.
 
   Args:
-    base_url: Base URL for the SVN repository.
+    git_url: URL of git repository.
     branch: If set, gets the latest release for branch, otherwise latest
       release.
 
   Returns:
     Latest version string.
   """
-  buildspec_url = os.path.join(base_url, 'releases')
-  svn_ls = cros_build_lib.RunCommand(['svn', 'ls', buildspec_url],
-                                     redirect_stdout=True).output
-  sorted_ls = cros_build_lib.RunCommand(['sort', '--version-sort', '-r'],
-                                        input=svn_ls,
-                                        redirect_stdout=True).output
+  # TODO(szager): This only works for public release buildspecs in the chromium
+  # src repository.  Internal buildspecs are tracked differently.  At the time
+  # of writing, I can't find any callers that use this method to scan for
+  # internal buildspecs.  But there may be something lurking...
+
+  parsed_url = urlparse.urlparse(git_url)
+  path = parsed_url[2].rstrip('/') + '/+refs/tags?format=JSON'
+  j = gob_util.FetchUrlJson(parsed_url[1], path, ignore_404=False)
   if branch:
     chrome_version_re = re.compile(r'^%s\.\d+.*' % branch)
   else:
     chrome_version_re = re.compile(r'^[0-9]+\..*')
-
-  for chrome_version in sorted_ls.splitlines():
-    if chrome_version_re.match(chrome_version):
-      deps_url = os.path.join(buildspec_url, chrome_version, 'DEPS')
-      deps_check = cros_build_lib.RunCommand(['svn', 'ls', deps_url],
-                                             error_code_ok=True,
-                                             redirect_stdout=True).output
-      if deps_check == 'DEPS\n':
-        if CheckIfChromeRightForOS(deps_url):
-          return chrome_version.rstrip('/')
+  matching_versions = [key for key in j.keys() if chrome_version_re.match(key)]
+  matching_versions.sort(key=distutils.version.LooseVersion)
+  for chrome_version in reversed(matching_versions):
+    path = parsed_url[2].rstrip() + (
+        '/+/refs/tags/%s/DEPS?format=text' % chrome_version)
+    fh = gob_util.FetchUrl(parsed_url[1], path, ignore_404=False)
+    content = fh.read() if fh else None
+    if content:
+      deps_content = base64.b64decode(content)
+      if CheckIfChromeRightForOS(deps_content):
+        return chrome_version
 
   return None
 
@@ -194,17 +191,17 @@ def _GetStickyEBuild(stable_ebuilds):
   elif len(sticky_ebuilds) > 1:
     cros_build_lib.Warning('More than one sticky ebuild found')
 
-  return portage_utilities.BestEBuild(sticky_ebuilds)
+  return portage_util.BestEBuild(sticky_ebuilds)
 
 
-class ChromeEBuild(portage_utilities.EBuild):
+class ChromeEBuild(portage_util.EBuild):
   """Thin sub-class of EBuild that adds a chrome_version field."""
-  chrome_version_re = re.compile(r'.*%s-(%s|9999).*' % (
-      constants.CHROME_PN, _CHROME_VERSION_REGEX))
+  chrome_version_re = re.compile(r'.*-(%s|9999).*' % (
+      _CHROME_VERSION_REGEX))
   chrome_version = ''
 
   def __init__(self, path):
-    portage_utilities.EBuild.__init__(self, path)
+    portage_util.EBuild.__init__(self, path)
     re_match = self.chrome_version_re.match(self.ebuild_path_no_revision)
     if re_match:
       self.chrome_version = re_match.group(1)
@@ -213,11 +210,11 @@ class ChromeEBuild(portage_utilities.EBuild):
     return self.ebuild_path
 
 
-def FindChromeCandidates(overlay_dir):
+def FindChromeCandidates(package_dir):
   """Return a tuple of chrome's unstable ebuild and stable ebuilds.
 
   Args:
-    overlay_dir: The path to chrome's portage overlay dir.
+    package_dir: The path to where the package ebuild is stored.
 
   Returns:
     Tuple [unstable_ebuild, stable_ebuilds].
@@ -228,7 +225,7 @@ def FindChromeCandidates(overlay_dir):
   stable_ebuilds = []
   unstable_ebuilds = []
   for path in [
-      os.path.join(overlay_dir, entry) for entry in os.listdir(overlay_dir)]:
+      os.path.join(package_dir, entry) for entry in os.listdir(package_dir)]:
     if path.endswith('.ebuild'):
       ebuild = ChromeEBuild(path)
       if not ebuild.chrome_version:
@@ -241,11 +238,11 @@ def FindChromeCandidates(overlay_dir):
 
   # Apply some sanity checks.
   if not unstable_ebuilds:
-    raise Exception('Missing 9999 ebuild for %s' % overlay_dir)
+    raise Exception('Missing 9999 ebuild for %s' % package_dir)
   if not stable_ebuilds:
-    cros_build_lib.Warning('Missing stable ebuild for %s' % overlay_dir)
+    cros_build_lib.Warning('Missing stable ebuild for %s' % package_dir)
 
-  return portage_utilities.BestEBuild(unstable_ebuilds), stable_ebuilds
+  return portage_util.BestEBuild(unstable_ebuilds), stable_ebuilds
 
 
 def FindChromeUprevCandidate(stable_ebuilds, chrome_rev, sticky_branch):
@@ -289,7 +286,7 @@ def FindChromeUprevCandidate(stable_ebuilds, chrome_rev, sticky_branch):
         candidates.append(ebuild)
 
   if candidates:
-    return portage_utilities.BestEBuild(candidates)
+    return portage_util.BestEBuild(candidates)
   else:
     return None
 
@@ -301,8 +298,9 @@ def _AnnotateAndPrint(text, url):
     text: Anchor text for the link
     url: the URL to which to link
   """
-  print >> sys.stderr, '\n@@@STEP_LINK@%(text)s@%(url)s@@@' % { 'text': text,
-                                                              'url': url }
+  print('\n@@@STEP_LINK@%(text)s@%(url)s@@@' % {'text': text, 'url': url},
+        file=sys.stderr)
+
 
 def GetChromeRevisionLinkFromVersions(old_chrome_version, chrome_version):
   """Return appropriately formatted link to revision info, given versions
@@ -319,6 +317,7 @@ def GetChromeRevisionLinkFromVersions(old_chrome_version, chrome_version):
   """
   return _CHROME_VERSION_URL % { 'old': old_chrome_version,
                                  'new': chrome_version }
+
 
 def GetChromeRevisionListLink(old_chrome, new_chrome, chrome_rev):
   """Returns a link to the list of revisions between two Chromium versions
@@ -340,8 +339,8 @@ def GetChromeRevisionListLink(old_chrome, new_chrome, chrome_rev):
                                            new_chrome.chrome_version)
 
 
-def MarkChromeEBuildAsStable(stable_candidate, unstable_ebuild, chrome_rev,
-                             chrome_version, commit, overlay_dir):
+def MarkChromeEBuildAsStable(stable_candidate, unstable_ebuild, chrome_pn,
+                             chrome_rev, chrome_version, commit, package_dir):
   r"""Uprevs the chrome ebuild specified by chrome_rev.
 
   This is the main function that uprevs the chrome_rev from a stable candidate
@@ -352,6 +351,7 @@ def MarkChromeEBuildAsStable(stable_candidate, unstable_ebuild, chrome_rev,
       revving from.  If None, builds the a new ebuild given the version
       and logic for chrome_rev type with revision set to 1.
     unstable_ebuild: ebuild corresponding to the unstable ebuild for chrome.
+    chrome_pn: package name.
     chrome_rev: one of constants.VALID_CHROME_REVISIONS or LOCAL
       constants.CHROME_REV_SPEC -  Requires commit value.  Revs the ebuild for
         the specified version and uses the portage suffix of _alpha.
@@ -363,8 +363,8 @@ def MarkChromeEBuildAsStable(stable_candidate, unstable_ebuild, chrome_rev,
         are release candidates for the next sticky version.
       constants.CHROME_REV_STICKY -  Revs the sticky version.
     chrome_version: The \d.\d.\d.\d version of Chrome.
-    commit: Used with constants.CHROME_REV_TOT.  The svn revision of chrome.
-    overlay_dir: Path to the chromeos-chrome package dir.
+    commit: Used with constants.CHROME_REV_TOT.  The git revision of chrome.
+    package_dir: Path to the chromeos-chrome package dir.
 
   Returns:
     Full portage version atom (including rc's, etc) that was revved.
@@ -394,14 +394,14 @@ def MarkChromeEBuildAsStable(stable_candidate, unstable_ebuild, chrome_rev,
         stable_candidate.current_revision + 1)
   else:
     suffix = 'rc' if mark_stable else 'alpha'
-    pf = '%s-%s_%s-r1' % (constants.CHROME_PN, chrome_version, suffix)
-    new_ebuild_path = os.path.join(overlay_dir, '%s.ebuild' % pf)
+    pf = '%s-%s_%s-r1' % (chrome_pn, chrome_version, suffix)
+    new_ebuild_path = os.path.join(package_dir, '%s.ebuild' % pf)
 
   chrome_variables = dict()
   if commit:
     chrome_variables[_CHROME_SVN_TAG] = commit
 
-  portage_utilities.EBuild.MarkAsStable(
+  portage_util.EBuild.MarkAsStable(
       unstable_ebuild.ebuild_path, new_ebuild_path,
       chrome_variables, make_stable=mark_stable)
   new_ebuild = ChromeEBuild(new_ebuild_path)
@@ -419,27 +419,17 @@ def MarkChromeEBuildAsStable(stable_candidate, unstable_ebuild, chrome_rev,
                                                 new_ebuild,
                                                 chrome_rev))
 
-  git.RunGit(overlay_dir, ['add', new_ebuild_path])
+  git.RunGit(package_dir, ['add', new_ebuild_path])
   if stable_candidate and not stable_candidate.IsSticky():
-    git.RunGit(overlay_dir, ['rm', stable_candidate.ebuild_path])
+    git.RunGit(package_dir, ['rm', stable_candidate.ebuild_path])
 
-  portage_utilities.EBuild.CommitChange(
-      _GIT_COMMIT_MESSAGE % {'chrome_rev': chrome_rev,
+  portage_util.EBuild.CommitChange(
+      _GIT_COMMIT_MESSAGE % {'chrome_pn': chrome_pn,
+                             'chrome_rev': chrome_rev,
                              'chrome_version': chrome_version},
-      overlay_dir)
+      package_dir)
 
   return '%s-%s' % (new_ebuild.package, new_ebuild.version)
-
-
-def ParseMaxRevision(revision_list):
-  """Returns the max revision from a list of url@revision string."""
-  revision_re = re.compile(r'.*@(\d+)')
-
-  def RevisionKey(revision):
-    return revision_re.match(revision).group(1)
-
-  max_revision = max(revision_list.split(), key=RevisionKey)
-  return max_revision.rpartition('@')[2]
 
 
 def main(_argv):
@@ -447,9 +437,10 @@ def main(_argv):
   usage = '%s OPTIONS [%s]' % (__file__, usage_options)
   parser = optparse.OptionParser(usage)
   parser.add_option('-b', '--boards', default=None)
-  parser.add_option('-c', '--chrome_url', default=gclient.GetBaseURLs()[0])
+  parser.add_option('-c', '--chrome_url',
+                    default=constants.CHROMIUM_GOB_URL)
   parser.add_option('-f', '--force_version', default=None,
-                    help='Chrome version or SVN revision number to use')
+                    help='Chrome version or git revision hash to use')
   parser.add_option('-s', '--srcroot', default=os.path.join(os.environ['HOME'],
                                                             'trunk', 'src'),
                     help='Path to the src directory')
@@ -466,14 +457,14 @@ def main(_argv):
     parser.error('--force_version is not compatible with the %r '
                  'option.' % (args[0],))
 
-  overlay_dir = os.path.abspath(_CHROME_OVERLAY_DIR %
-                                {'srcroot': options.srcroot})
+  overlay_dir = os.path.abspath(_OVERLAY_DIR % {'srcroot': options.srcroot})
+  chrome_package_dir = os.path.join(overlay_dir, constants.CHROME_CP)
   chrome_rev = args[0]
   version_to_uprev = None
   commit_to_use = None
   sticky_branch = None
 
-  (unstable_ebuild, stable_ebuilds) = FindChromeCandidates(overlay_dir)
+  (unstable_ebuild, stable_ebuilds) = FindChromeCandidates(chrome_package_dir)
 
   if chrome_rev == constants.CHROME_REV_LOCAL:
     if 'CHROME_ROOT' in os.environ:
@@ -490,11 +481,11 @@ def main(_argv):
     else:
       commit_to_use = options.force_version
       if '@' in commit_to_use:
-        commit_to_use = ParseMaxRevision(commit_to_use)
+        commit_to_use = commit_to_use.rpartition('@')[2]
       version_to_uprev = _GetSpecificVersionUrl(options.chrome_url,
                                                 commit_to_use)
   elif chrome_rev == constants.CHROME_REV_TOT:
-    commit_to_use = gclient.GetTipOfTrunkSvnRevision(options.chrome_url)
+    commit_to_use = gob_util.GetTipOfTrunkRevision(options.chrome_url)
     version_to_uprev = _GetSpecificVersionUrl(options.chrome_url,
                                               commit_to_use)
   elif chrome_rev == constants.CHROME_REV_LATEST:
@@ -520,22 +511,43 @@ def main(_argv):
     cros_build_lib.Info('No stable candidate found.')
 
   tracking_branch = 'remotes/m/%s' % os.path.basename(options.tracking_branch)
-  existing_branch = git.GetCurrentBranch(overlay_dir)
+  existing_branch = git.GetCurrentBranch(chrome_package_dir)
   work_branch = cros_mark_as_stable.GitBranch(constants.STABLE_EBUILD_BRANCH,
-                                              tracking_branch, overlay_dir)
+                                              tracking_branch,
+                                              chrome_package_dir)
   work_branch.CreateBranch()
 
   # In the case of uprevving overlays that have patches applied to them,
   # include the patched changes in the stabilizing branch.
   if existing_branch:
-    git.RunGit(overlay_dir, ['rebase', existing_branch])
+    git.RunGit(chrome_package_dir, ['rebase', existing_branch])
 
   chrome_version_atom = MarkChromeEBuildAsStable(
-      stable_candidate, unstable_ebuild, chrome_rev, version_to_uprev,
-      commit_to_use, overlay_dir)
-  # Explicit print to communicate to caller.
+      stable_candidate, unstable_ebuild, 'chromeos-chrome', chrome_rev,
+      version_to_uprev, commit_to_use, chrome_package_dir)
   if chrome_version_atom:
     if options.boards:
       cros_mark_as_stable.CleanStalePackages(options.boards.split(':'),
                                              [chrome_version_atom])
-    print 'CHROME_VERSION_ATOM=%s' % chrome_version_atom
+
+    # If we did rev Chrome, now is a good time to uprev other packages.
+    for other_ebuild in constants.OTHER_CHROME_PACKAGES:
+      other_ebuild_name = os.path.basename(other_ebuild)
+      other_package_dir = os.path.join(overlay_dir, other_ebuild)
+      (other_unstable_ebuild, other_stable_ebuilds) = FindChromeCandidates(
+          other_package_dir)
+      other_stable_candidate = FindChromeUprevCandidate(other_stable_ebuilds,
+                                                        chrome_rev,
+                                                        sticky_branch)
+      revved_atom = MarkChromeEBuildAsStable(other_stable_candidate,
+                                             other_unstable_ebuild,
+                                             other_ebuild_name,
+                                             chrome_rev, version_to_uprev,
+                                             commit_to_use, other_package_dir)
+      if revved_atom and options.boards:
+        cros_mark_as_stable.CleanStalePackages(options.boards.split(':'),
+                                               [revved_atom])
+
+  # Explicit print to communicate to caller.
+  if chrome_version_atom:
+    print('CHROME_VERSION_ATOM=%s' % chrome_version_atom)

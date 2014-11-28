@@ -9,6 +9,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
@@ -30,14 +31,13 @@
 #include "chrome/browser/ui/webui/options/options_handlers_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 
@@ -81,8 +81,6 @@ void ManageProfileHandler::GetLocalizedValues(
     base::DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
 
-  const bool using_new_profiles_ui = switches::IsNewAvatarMenu();
-
   static OptionsStringResource resources[] = {
     { "manageProfilesNameLabel", IDS_PROFILES_MANAGE_NAME_LABEL },
     { "manageProfilesDuplicateNameError",
@@ -98,25 +96,19 @@ void ManageProfileHandler::GetLocalizedValues(
         IDS_PROFILES_CREATE_SUPERVISED_ACCOUNT_DETAILS_OUT_OF_DATE_LABEL },
     { "manageProfilesSupervisedSignInAgainLink",
         IDS_PROFILES_CREATE_SUPERVISED_SIGN_IN_AGAIN_LINK },
-    { "manageProfilesConfirm", using_new_profiles_ui ? IDS_SAVE : IDS_OK },
-    { "deleteProfileTitle", using_new_profiles_ui ?
-          IDS_NEW_PROFILES_DELETE_TITLE : IDS_PROFILES_DELETE_TITLE },
-    { "deleteProfileOK", using_new_profiles_ui ?
-          IDS_NEW_PROFILES_DELETE_OK_BUTTON_LABEL :
-          IDS_PROFILES_DELETE_OK_BUTTON_LABEL },
-    { "deleteProfileMessage", using_new_profiles_ui ?
-        IDS_NEW_PROFILES_DELETE_MESSAGE : IDS_PROFILES_DELETE_MESSAGE },
+    { "manageProfilesConfirm", IDS_SAVE },
+    { "deleteProfileTitle", IDS_PROFILES_DELETE_TITLE },
+    { "deleteProfileOK", IDS_PROFILES_DELETE_OK_BUTTON_LABEL },
+    { "deleteProfileMessage", IDS_PROFILES_DELETE_MESSAGE },
     { "deleteSupervisedProfileAddendum",
         IDS_PROFILES_DELETE_SUPERVISED_ADDENDUM },
     { "disconnectManagedProfileTitle",
         IDS_PROFILES_DISCONNECT_MANAGED_PROFILE_TITLE },
     { "disconnectManagedProfileOK",
         IDS_PROFILES_DISCONNECT_MANAGED_PROFILE_OK_BUTTON_LABEL },
-    { "createProfileTitle", using_new_profiles_ui ?
-          IDS_NEW_PROFILES_CREATE_TITLE : IDS_PROFILES_CREATE_TITLE },
+    { "createProfileTitle", IDS_PROFILES_CREATE_TITLE },
     { "createProfileInstructions", IDS_PROFILES_CREATE_INSTRUCTIONS },
-    { "createProfileConfirm", using_new_profiles_ui ?
-          IDS_ADD : IDS_PROFILES_CREATE_CONFIRM },
+    { "createProfileConfirm", IDS_ADD },
     { "createProfileShortcutCheckbox", IDS_PROFILES_CREATE_SHORTCUT_CHECKBOX },
     { "createProfileShortcutButton", IDS_PROFILES_CREATE_SHORTCUT_BUTTON },
     { "removeProfileShortcutButton", IDS_PROFILES_REMOVE_SHORTCUT_BUTTON },
@@ -125,12 +117,8 @@ void ManageProfileHandler::GetLocalizedValues(
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
-  RegisterTitle(localized_strings, "manageProfile",
-                using_new_profiles_ui ? IDS_NEW_PROFILES_MANAGE_TITLE :
-                                        IDS_PROFILES_MANAGE_TITLE);
-  RegisterTitle(localized_strings, "createProfile",
-                using_new_profiles_ui ? IDS_NEW_PROFILES_CREATE_TITLE :
-                                        IDS_PROFILES_CREATE_TITLE);
+  RegisterTitle(localized_strings, "manageProfile", IDS_PROFILES_MANAGE_TITLE);
+  RegisterTitle(localized_strings, "createProfile", IDS_PROFILES_CREATE_TITLE);
 
   localized_strings->SetBoolean("profileShortcutsEnabled",
                                 ProfileShortcutManager::IsFeatureEnabled());
@@ -381,6 +369,8 @@ void ManageProfileHandler::SetProfileIconAndName(const base::ListValue* args) {
   if (!args->GetString(2, &new_profile_name))
     return;
 
+  base::TrimWhitespace(new_profile_name, base::TRIM_ALL, &new_profile_name);
+  CHECK(!new_profile_name.empty());
   profiles::UpdateProfileName(profile, new_profile_name);
 }
 

@@ -15,13 +15,13 @@ class DictionaryValue;
 
 namespace printing {
 
-class Metafile;
+class MetafilePlayer;
 class PrintDialogGtkInterface;
 
 // PrintingContext with optional native UI for print dialog and pdf_paper_size.
 class PRINTING_EXPORT PrintingContextLinux : public PrintingContext {
  public:
-  explicit PrintingContextLinux(const std::string& app_locale);
+  explicit PrintingContextLinux(Delegate* delegate);
   virtual ~PrintingContextLinux();
 
   // Sets the function that creates the print dialog.
@@ -34,17 +34,17 @@ class PRINTING_EXPORT PrintingContextLinux : public PrintingContext {
       gfx::Size (*get_pdf_paper_size)(PrintingContextLinux* context));
 
   // Prints the document contained in |metafile|.
-  void PrintDocument(const Metafile* metafile);
+  void PrintDocument(const MetafilePlayer& metafile);
 
   // PrintingContext implementation.
   virtual void AskUserForSettings(
-      gfx::NativeView parent_view,
       int max_pages,
       bool has_selection,
       const PrintSettingsCallback& callback) OVERRIDE;
   virtual gfx::Size GetPdfPaperSizeDeviceUnits() OVERRIDE;
   virtual Result UseDefaultSettings() OVERRIDE;
-  virtual Result UpdatePrinterSettings(bool external_preview) OVERRIDE;
+  virtual Result UpdatePrinterSettings(bool external_preview,
+                                       bool show_system_dialog) OVERRIDE;
   virtual Result InitWithSettings(const PrintSettings& settings) OVERRIDE;
   virtual Result NewDocument(const base::string16& document_name) OVERRIDE;
   virtual Result NewPage() OVERRIDE;

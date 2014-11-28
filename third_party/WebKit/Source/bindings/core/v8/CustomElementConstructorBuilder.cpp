@@ -37,17 +37,17 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8Document.h"
+#include "bindings/core/v8/V8HTMLElement.h"
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8PerContextData.h"
+#include "bindings/core/v8/V8SVGElement.h"
 #include "core/HTMLNames.h"
 #include "core/SVGNames.h"
-#include "core/V8HTMLElementWrapperFactory.h" // FIXME: should be bindings/core/v8
-#include "core/V8SVGElementWrapperFactory.h" // FIXME: should be bindings/core/v8
 #include "core/dom/Document.h"
-#include "core/dom/custom/CustomElementCallbackDispatcher.h"
 #include "core/dom/custom/CustomElementDefinition.h"
 #include "core/dom/custom/CustomElementDescriptor.h"
 #include "core/dom/custom/CustomElementException.h"
+#include "core/dom/custom/CustomElementProcessingStack.h"
 #include "wtf/Assertions.h"
 
 namespace blink {
@@ -57,7 +57,6 @@ static void constructCustomElement(const v8::FunctionCallbackInfo<v8::Value>&);
 CustomElementConstructorBuilder::CustomElementConstructorBuilder(ScriptState* scriptState, const Dictionary* options)
     : m_scriptState(scriptState)
     , m_options(options)
-    , m_wrapperType(0)
 {
     ASSERT(m_scriptState->context() == m_scriptState->isolate()->GetCurrentContext());
 }
@@ -95,7 +94,7 @@ bool CustomElementConstructorBuilder::validateOptions(const AtomicString& type, 
     }
 
     AtomicString extends;
-    bool extendsProvidedAndNonNull = DictionaryHelper::get(*m_options, "extends", extends);
+    bool extendsProvidedAndNonNull = DictionaryHelper::get(*m_options, "extends", extends) && extends != "null";
 
     if (tryCatch.HasCaught()) {
         tryCatch.ReThrow();
@@ -139,17 +138,9 @@ bool CustomElementConstructorBuilder::validateOptions(const AtomicString& type, 
         localName = type;
     }
 
-    if (!extendsProvidedAndNonNull)
-        m_wrapperType = &V8HTMLElement::wrapperTypeInfo;
-    else if (namespaceURI == HTMLNames::xhtmlNamespaceURI)
-        m_wrapperType = findWrapperTypeForHTMLTagName(localName);
-    else
-        m_wrapperType = findWrapperTypeForSVGTagName(localName);
-
     ASSERT(!tryCatch.HasCaught());
-    ASSERT(m_wrapperType);
     tagName = QualifiedName(nullAtom, localName, namespaceURI);
-    return m_wrapperType;
+    return true;
 }
 
 PassRefPtr<CustomElementLifecycleCallbacks> CustomElementConstructorBuilder::createCallbacks()
@@ -248,7 +239,7 @@ bool CustomElementConstructorBuilder::didRegisterDefinition(CustomElementDefinit
 {
     ASSERT(!m_constructor.IsEmpty());
 
-    return m_callbacks->setBinding(definition, CustomElementBinding::create(m_scriptState->isolate(), m_prototype, m_wrapperType));
+    return m_callbacks->setBinding(definition, CustomElementBinding::create(m_scriptState->isolate(), m_prototype));
 }
 
 ScriptValue CustomElementConstructorBuilder::bindingsReturnValue() const
@@ -286,14 +277,14 @@ static void constructCustomElement(const v8::FunctionCallbackInfo<v8::Value>& in
         return;
     }
 
-    Document* document = V8Document::toNative(V8HiddenValue::getHiddenValue(info.GetIsolate(), info.Callee(), V8HiddenValue::customElementDocument(isolate)).As<v8::Object>());
+    Document* document = V8Document::toImpl(V8HiddenValue::getHiddenValue(info.GetIsolate(), info.Callee(), V8HiddenValue::customElementDocument(isolate)).As<v8::Object>());
     TOSTRING_VOID(V8StringResource<>, namespaceURI, V8HiddenValue::getHiddenValue(isolate, info.Callee(), V8HiddenValue::customElementNamespaceURI(isolate)));
     TOSTRING_VOID(V8StringResource<>, tagName, V8HiddenValue::getHiddenValue(isolate, info.Callee(), V8HiddenValue::customElementTagName(isolate)));
     v8::Handle<v8::Value> maybeType = V8HiddenValue::getHiddenValue(info.GetIsolate(), info.Callee(), V8HiddenValue::customElementType(isolate));
     TOSTRING_VOID(V8StringResource<>, type, maybeType);
 
     ExceptionState exceptionState(ExceptionState::ConstructionContext, "CustomElement", info.Holder(), info.GetIsolate());
-    CustomElementCallbackDispatcher::CallbackDeliveryScope deliveryScope;
+    CustomElementProcessingStack::CallbackDeliveryScope deliveryScope;
     RefPtrWillBeRawPtr<Element> element = document->createElementNS(namespaceURI, tagName, maybeType->IsNull() ? nullAtom : type, exceptionState);
     if (exceptionState.throwIfNeeded())
         return;

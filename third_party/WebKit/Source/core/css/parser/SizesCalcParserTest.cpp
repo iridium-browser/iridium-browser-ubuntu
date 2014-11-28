@@ -8,7 +8,7 @@
 #include "core/MediaTypeNames.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/MediaValuesCached.h"
-#include "core/css/StylePropertySet.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/css/parser/MediaQueryTokenizer.h"
 
 #include <gtest/gtest.h>
@@ -34,9 +34,7 @@ static void verifyCSSCalc(String text, double value, bool valid, unsigned fontSi
 {
     CSSLengthArray lengthArray;
     initLengthArray(lengthArray);
-    RefPtrWillBeRawPtr<MutableStylePropertySet> propertySet = MutableStylePropertySet::create();
-    propertySet->setProperty(CSSPropertyLeft, text);
-    RefPtrWillBeRawPtr<CSSValue> cssValue = propertySet->getPropertyCSSValue(CSSPropertyLeft);
+    RefPtrWillBeRawPtr<CSSValue> cssValue = CSSParser::parseSingleValue(CSSPropertyLeft, text);
     CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(cssValue.get());
     if (primitiveValue)
         primitiveValue->accumulateLengthArray(lengthArray);
@@ -110,7 +108,7 @@ TEST(SizesCalcParserTest, Basic)
     data.devicePixelRatio = 2.0;
     data.colorBitsPerComponent = 24;
     data.monochromeBitsPerComponent = 0;
-    data.pointer = MediaValues::MousePointer;
+    data.primaryPointerType = PointerTypeFine;
     data.defaultFontSize = 16;
     data.threeDEnabled = true;
     data.mediaType = MediaTypeNames::screen;

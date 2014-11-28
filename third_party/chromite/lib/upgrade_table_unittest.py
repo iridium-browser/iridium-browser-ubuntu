@@ -5,6 +5,8 @@
 
 """Unit tests for the upgrade_table module."""
 
+from __future__ import print_function
+
 import os
 import sys
 
@@ -13,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 
 from chromite.lib import cros_test_lib
 from chromite.lib import upgrade_table as utable
+
 
 # pylint: disable=W0212,R0904
 class UpgradeTableTest(cros_test_lib.TestCase):

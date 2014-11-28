@@ -40,13 +40,13 @@
 
 namespace blink {
 
-class GCObservation : public RefCountedWillBeGarbageCollectedFinalized<GCObservation>, public ScriptWrappable {
+class GCObservation FINAL : public GarbageCollectedFinalized<GCObservation>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<GCObservation> create(v8::Handle<v8::Value> observedValue)
+    static GCObservation* create(v8::Handle<v8::Value> observedValue)
     {
-        return adoptRefWillBeNoop(new GCObservation(observedValue));
+        return new GCObservation(observedValue);
     }
-    ~GCObservation() { }
 
     // Caution: It is only feasible to determine whether an object was
     // "near death"; it may have been kept alive through a weak
@@ -64,6 +64,6 @@ private:
     bool m_collected;
 };
 
-}
+} // namespace blink
 
 #endif // GCObservation_h

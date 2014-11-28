@@ -28,7 +28,6 @@
 namespace blink {
 
 class RenderLayer;
-class CompositedLayerMapping;
 class ScrollableArea;
 
 enum LayerType {
@@ -66,6 +65,10 @@ public:
     ContainerNode* node() const { return toContainerNode(RenderObject::node()); }
 
     virtual void invalidateTreeIfNeeded(const PaintInvalidationState&) OVERRIDE;
+
+    // Indicate that the contents of this renderer need to be repainted. Only has an effect if compositing is being used,
+    void setBackingNeedsPaintInvalidationInRect(const LayoutRect&) const; // r is in the coordinate space of this render object
+
 protected:
     void createLayer(LayerType);
 
@@ -73,7 +76,6 @@ protected:
 
     virtual void addLayerHitTestRects(LayerHitTestRects&, const RenderLayer*, const LayoutPoint&, const LayoutRect&) const OVERRIDE;
 
-    virtual InvalidationReason invalidatePaintIfNeeded(const PaintInvalidationState&, const RenderLayerModelObject& newPaintInvalidationContainer);
 private:
     virtual bool isLayerModelObject() const OVERRIDE FINAL { return true; }
 

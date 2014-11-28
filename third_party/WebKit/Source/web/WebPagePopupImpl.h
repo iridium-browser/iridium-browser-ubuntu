@@ -63,6 +63,8 @@ public:
     void closePopup();
     WebWidgetClient* widgetClient() const { return m_widgetClient; }
     bool hasSamePopupClient(WebPagePopupImpl* other) { return other && m_popupClient == other->m_popupClient; }
+    virtual void compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback*) OVERRIDE;
+    virtual WebPoint positionRelativeToOwner() OVERRIDE;
 
 private:
     // WebWidget functions
@@ -82,6 +84,9 @@ private:
     virtual bool handleKeyEvent(const WebKeyboardEvent&) OVERRIDE;
     virtual bool handleCharEvent(const WebKeyboardEvent&) OVERRIDE;
     virtual bool handleGestureEvent(const WebGestureEvent&) OVERRIDE;
+
+    // PagePopup function
+    virtual AXObject* rootAXObject() OVERRIDE;
 
     explicit WebPagePopupImpl(WebWidgetClient*);
     bool initializePage();

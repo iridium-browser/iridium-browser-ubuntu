@@ -16,6 +16,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
@@ -26,8 +28,6 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 
 using chromeos::input_method::ModifierKey;
 using content::WebUIMessageHandler;
@@ -63,25 +63,25 @@ struct I18nContentToMessage {
   { "keyboardOverlayTitle", IDS_KEYBOARD_OVERLAY_TITLE },
   { "keyboardOverlayInstructions", IDS_KEYBOARD_OVERLAY_INSTRUCTIONS },
   { "keyboardOverlayInstructionsHide", IDS_KEYBOARD_OVERLAY_INSTRUCTIONS_HIDE },
-  { "keyboardOverlayActivateLastLauncherItem",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_LAUNCHER_ITEM },
+  { "keyboardOverlayActivateLastShelfItem",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_SHELF_ITEM },
   { "keyboardOverlayActivateLastTab", IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_TAB },
-  { "keyboardOverlayActivateLauncherItem1",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_1 },
-  { "keyboardOverlayActivateLauncherItem2",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_2 },
-  { "keyboardOverlayActivateLauncherItem3",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_3 },
-  { "keyboardOverlayActivateLauncherItem4",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_4 },
-  { "keyboardOverlayActivateLauncherItem5",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_5 },
-  { "keyboardOverlayActivateLauncherItem6",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_6 },
-  { "keyboardOverlayActivateLauncherItem7",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_7 },
-  { "keyboardOverlayActivateLauncherItem8",
-    IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_8 },
+  { "keyboardOverlayActivateShelfItem1",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_1 },
+  { "keyboardOverlayActivateShelfItem2",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_2 },
+  { "keyboardOverlayActivateShelfItem3",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_3 },
+  { "keyboardOverlayActivateShelfItem4",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_4 },
+  { "keyboardOverlayActivateShelfItem5",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_5 },
+  { "keyboardOverlayActivateShelfItem6",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_6 },
+  { "keyboardOverlayActivateShelfItem7",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_7 },
+  { "keyboardOverlayActivateShelfItem8",
+    IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_8 },
   { "keyboardOverlayActivateNextTab", IDS_KEYBOARD_OVERLAY_ACTIVATE_NEXT_TAB },
   { "keyboardOverlayActivatePreviousTab",
     IDS_KEYBOARD_OVERLAY_ACTIVATE_PREVIOUS_TAB },
@@ -138,7 +138,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayFocusAddressBarInSearchMode",
     IDS_KEYBOARD_OVERLAY_FOCUS_ADDRESS_BAR_IN_SEARCH_MODE },
   { "keyboardOverlayFocusBookmarks", IDS_KEYBOARD_OVERLAY_FOCUS_BOOKMARKS },
-  { "keyboardOverlayFocusLauncher", IDS_KEYBOARD_OVERLAY_FOCUS_LAUNCHER },
+  { "keyboardOverlayFocusShelf", IDS_KEYBOARD_OVERLAY_FOCUS_SHELF },
   { "keyboardOverlayFocusNextPane", IDS_KEYBOARD_OVERLAY_FOCUS_NEXT_PANE },
   { "keyboardOverlayFocusPreviousPane",
     IDS_KEYBOARD_OVERLAY_FOCUS_PREVIOUS_PANE },
@@ -329,7 +329,7 @@ void KeyboardOverlayHandler::GetInputMethodId(const base::ListValue* args) {
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
   const chromeos::input_method::InputMethodDescriptor& descriptor =
-      manager->GetCurrentInputMethod();
+      manager->GetActiveIMEState()->GetCurrentInputMethod();
   base::StringValue param(descriptor.id());
   web_ui()->CallJavascriptFunction("initKeyboardOverlayId", param);
 }
@@ -363,7 +363,7 @@ void KeyboardOverlayHandler::OpenLearnMorePage(const base::ListValue* args) {
       content::OpenURLParams(GURL(kLearnMoreURL),
                              content::Referrer(),
                              NEW_FOREGROUND_TAB,
-                             content::PAGE_TRANSITION_LINK,
+                             ui::PAGE_TRANSITION_LINK,
                              false));
 }
 

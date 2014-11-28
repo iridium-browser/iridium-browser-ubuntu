@@ -7,8 +7,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "storage/common/database/database_connections.h"
 #include "third_party/WebKit/public/platform/WebDatabaseObserver.h"
-#include "webkit/common/database/database_connections.h"
 
 namespace content {
 
@@ -67,7 +67,7 @@ class WebDatabaseObserverImpl : public blink::WebDatabaseObserver {
                          int error);
 
   scoped_refptr<IPC::SyncMessageFilter> sender_;
-  scoped_refptr<webkit_database::DatabaseConnectionsWrapper> open_connections_;
+  scoped_refptr<storage::DatabaseConnectionsWrapper> open_connections_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseObserverImpl);
 };

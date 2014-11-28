@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 2.8.8)
 
 project (BoringSSL)
 
@@ -26,6 +26,8 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86")
 	set(ARCH "x86")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i386")
+	set(ARCH "x86")
+elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i686")
 	set(ARCH "x86")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm")
 	set(ARCH "arm")

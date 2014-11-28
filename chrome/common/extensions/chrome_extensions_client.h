@@ -26,6 +26,7 @@ class ChromeExtensionsClient : public ExtensionsClient {
 
   virtual const PermissionMessageProvider& GetPermissionMessageProvider() const
       OVERRIDE;
+  virtual const std::string GetProductName() OVERRIDE;
   virtual scoped_ptr<FeatureProvider> CreateFeatureProvider(
       const std::string& name) const OVERRIDE;
   virtual scoped_ptr<JSONFeatureProviderSource> CreateFeatureProviderSource(
@@ -47,6 +48,9 @@ class ChromeExtensionsClient : public ExtensionsClient {
       OVERRIDE;
   virtual void RegisterAPISchemaResources(ExtensionAPI* api) const OVERRIDE;
   virtual bool ShouldSuppressFatalErrors() const OVERRIDE;
+  virtual std::string GetWebstoreBaseURL() const OVERRIDE;
+  virtual std::string GetWebstoreUpdateURL() const OVERRIDE;
+  virtual bool IsBlacklistUpdateURL(const GURL& url) const OVERRIDE;
 
   // Get the LazyInstance for ChromeExtensionsClient.
   static ChromeExtensionsClient* GetInstance();

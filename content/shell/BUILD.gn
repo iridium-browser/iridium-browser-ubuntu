@@ -4,8 +4,8 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
-import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
+import("//tools/grit/grit_rule.gni")
 if (is_android) {
   import("//build/config/android/config.gni")
 }
@@ -20,6 +20,7 @@ declare_args() {
 }
 
 static_library("content_shell_lib") {
+  testonly = true
   sources = [
     "android/shell_jni_registrar.cc",
     "android/shell_jni_registrar.h",
@@ -27,8 +28,8 @@ static_library("content_shell_lib") {
     "android/shell_manager.h",
     "app/paths_mac.h",
     "app/paths_mac.mm",
-    "app/shell_breakpad_client.cc",
-    "app/shell_breakpad_client.h",
+    "app/shell_crash_reporter_client.cc",
+    "app/shell_crash_reporter_client.h",
     "app/shell_main_delegate.cc",
     "app/shell_main_delegate.h",
     "app/shell_main_delegate_mac.h",
@@ -38,6 +39,8 @@ static_library("content_shell_lib") {
     "app/webkit_test_platform_support_linux.cc",
     "app/webkit_test_platform_support_mac.mm",
     "app/webkit_test_platform_support_win.cc",
+    "browser/ipc_echo_message_filter.cc",
+    "browser/ipc_echo_message_filter.h",
     "browser/notify_done_forwarder.cc",
     "browser/notify_done_forwarder.h",
     "browser/shell_android.cc",
@@ -115,6 +118,8 @@ static_library("content_shell_lib") {
     "geolocation/shell_access_token_store.h",
     "renderer/gc_controller.cc",
     "renderer/gc_controller.h",
+    "renderer/ipc_echo.cc",
+    "renderer/ipc_echo.h",
     "renderer/leak_detector.cc",
     "renderer/leak_detector.h",
     "renderer/shell_content_renderer_client.cc",
@@ -125,13 +130,6 @@ static_library("content_shell_lib") {
     "renderer/shell_render_process_observer.h",
     "renderer/shell_render_view_observer.cc",
     "renderer/shell_render_view_observer.h",
-    "renderer/test_runner/TestPlugin.cpp",
-    "renderer/test_runner/TestPlugin.h",
-    "renderer/test_runner/WebTask.cpp",
-    "renderer/test_runner/WebTask.h",
-    "renderer/test_runner/WebTestDelegate.h",
-    "renderer/test_runner/WebTestInterfaces.cpp",
-    "renderer/test_runner/WebTestInterfaces.h",
     "renderer/test_runner/accessibility_controller.cc",
     "renderer/test_runner/accessibility_controller.h",
     "renderer/test_runner/event_sender.cc",
@@ -142,6 +140,8 @@ static_library("content_shell_lib") {
     "renderer/test_runner/mock_color_chooser.h",
     "renderer/test_runner/mock_constraints.cc",
     "renderer/test_runner/mock_constraints.h",
+    "renderer/test_runner/mock_credential_manager_client.cc",
+    "renderer/test_runner/mock_credential_manager_client.h",
     "renderer/test_runner/mock_grammar_check.cc",
     "renderer/test_runner/mock_grammar_check.h",
     "renderer/test_runner/mock_screen_orientation_client.cc",
@@ -178,6 +178,8 @@ static_library("content_shell_lib") {
     "renderer/test_runner/test_common.h",
     "renderer/test_runner/test_interfaces.cc",
     "renderer/test_runner/test_interfaces.h",
+    "renderer/test_runner/test_plugin.cc",
+    "renderer/test_runner/test_plugin.h",
     "renderer/test_runner/test_runner.cc",
     "renderer/test_runner/test_runner.h",
     "renderer/test_runner/text_input_controller.cc",
@@ -187,6 +189,11 @@ static_library("content_shell_lib") {
     "renderer/test_runner/web_frame_test_proxy.h",
     "renderer/test_runner/web_permissions.cc",
     "renderer/test_runner/web_permissions.h",
+    "renderer/test_runner/web_task.cc",
+    "renderer/test_runner/web_task.h",
+    "renderer/test_runner/web_test_delegate.h",
+    "renderer/test_runner/web_test_interfaces.cc",
+    "renderer/test_runner/web_test_interfaces.h",
     "renderer/test_runner/web_test_proxy.cc",
     "renderer/test_runner/web_test_proxy.h",
     "renderer/test_runner/web_test_runner.h",
@@ -196,6 +203,15 @@ static_library("content_shell_lib") {
 
   defines = [ "CONTENT_SHELL_VERSION=\"$content_shell_version\"" ]
 
+  public_deps = [
+    # This exposes all public content APIs.
+    "//content/public/app:both",
+    "//content/public/browser",
+    "//content/public/common",
+    "//content/public/plugin",
+    "//content/public/renderer",
+    "//content/public/utility",
+  ]
   deps = [
     ":resources",
     "//base",
@@ -203,17 +219,12 @@ static_library("content_shell_lib") {
     "//base/allocator",
     "//base/third_party/dynamic_annotations",
     "//cc",
-    "//components/breakpad/app",
+    "//components/crash/app",
+    "//components/web_cache/renderer",
     "//content:resources",
-    "//content/app:both",
+    "//content/app/resources",
     "//content/app/strings",
     "//content/gpu",
-    "//content/ppapi_plugin",
-    "//content/public/browser",
-    "//content/public/common",
-    "//content/public/plugin",
-    "//content/public/renderer",
-    "//content/public/utility",
     "//content/test:layouttest_support",
     "//gin",
     "//gpu",
@@ -222,6 +233,7 @@ static_library("content_shell_lib") {
     "//net",
     "//net:net_resources",
     "//skia",
+    "//storage/browser",
     "//third_party/WebKit/public:blink",
     "//third_party/WebKit/public:resources",
     "//third_party/WebKit/public:test_support",
@@ -234,10 +246,11 @@ static_library("content_shell_lib") {
     "//ui/gl",
     "//url",
     "//v8",
-    "//webkit/browser:storage",
-    "//webkit/glue/resources",
     #'copy_test_netscape_plugin',  TODO(GYP)
   ]
+  if (enable_plugins) {
+    deps += [ "//content/ppapi_plugin" ]
+  }
 
   if (is_win) {
     #'LinkIncremental': '<(msvs_large_module_debug_link_mode)',  TODO(GYP)
@@ -257,12 +270,12 @@ static_library("content_shell_lib") {
   }
 
   if (is_android) {
-    #deps += [ 'content_shell_jni_headers' ]  TODO(GYP)
-    #deps -= [ 'copy_test_netscape_plugin' ]  TODO(GYP)
+    deps += [ "//content/shell/android:content_shell_jni_headers" ]
+    #deps -= [ "copy_test_netscape_plugin" ]  TODO(GYP)
   }
 
   if (is_posix && !is_mac && (!is_android || !is_android_webview_build)) {
-    deps += [ "//components/breakpad/browser" ]
+    deps += [ "//components/crash/browser" ]
   }
 
   if (use_aura) {
@@ -285,6 +298,11 @@ static_library("content_shell_lib") {
     } else {
       sources += [ "browser/shell_aura.cc" ]
     }
+  } else {
+    sources -= [
+      "browser/shell_platform_data_aura.cc",
+      "browser/shell_platform_data_aura.h",
+    ]
   }
 
   # The test plugin relies on X11.
@@ -312,7 +330,7 @@ static_library("content_shell_lib") {
 }
 
 grit("content_shell_resources_grit") {
-  visibility = ":*"
+  visibility = [ ":*" ]
   source = "shell_resources.grd"
   outputs = [
     "grit/shell_resources.h",
@@ -325,21 +343,20 @@ copy("copy_shell_resources") {
   sources = [ "$target_gen_dir/shell_resources.pak" ]
   outputs = [ "$root_out_dir/shell_resources.pak" ]
 
-  deps = [ ":content_shell_resources_grit" ]
-  forward_dependent_configs_from = [ ":content_shell_resources_grit" ]
+  public_deps = [ ":content_shell_resources_grit" ]
 }
 
 # Font copies.
 if (!is_mac) {
   copy("copy_ahem") {
-    visibility = ":*"
+    visibility = [ ":*" ]
     sources = [ "renderer/test_runner/resources/fonts/AHEM____.TTF" ]
     outputs = [ "$root_out_dir/AHEM____.TTF" ]
   }
 }
 if (use_x11) {
   copy("copy_x11_fonts") {
-    visibility = ":*"
+    visibility = [ ":*" ]
     sources = [
       "renderer/test_runner/resources/fonts/fonts.conf",
       "//third_party/gardiner_mod/GardinerModBug.ttf",
@@ -350,7 +367,7 @@ if (use_x11) {
 }
 if (is_android) {
   copy("copy_android_fonts") {
-    visibility = ":*"
+    visibility = [ ":*" ]
     sources = [
       "renderer/test_runner/resources/fonts/android_main_fonts.xml",
       "renderer/test_runner/resources/fonts/android_fallback_fonts.xml",
@@ -360,10 +377,10 @@ if (is_android) {
 }
 
 group("resources") {
-  deps = [
+  public_deps = [
     ":copy_shell_resources",
   ]
-  forward_dependent_configs_from = [ ":copy_shell_resources" ]
+  deps = []
 
   if (is_mac) {
     # TODO(GYP) Mac bundle resources.
@@ -390,6 +407,7 @@ group("resources") {
 repack("pak") {
   sources = [
     "$root_gen_dir/blink/public/resources/blink_resources.pak",
+    "$root_gen_dir/content/app/resources/content_resources_100_percent.pak",
     "$root_gen_dir/content/app/strings/content_strings_en-US.pak",
     "$root_gen_dir/content/browser/tracing/tracing_resources.pak",
     "$root_gen_dir/content/content_resources.pak",
@@ -399,31 +417,30 @@ repack("pak") {
     "$root_gen_dir/ui/resources/webui_resources.pak",
     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
     "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
-    "$root_gen_dir/webkit/webkit_resources_100_percent.pak",
   ]
 
   deps = [
     ":resources",
     "//content:resources",
+    "//content/app/resources",
     "//content/app/strings",
     "//content/browser/tracing:resources",
     "//net:net_resources",
     "//third_party/WebKit/public:resources",
     "//ui/resources",
     "//ui/strings",
-    "//webkit/glue/resources",
   ]
 
-  if (is_android) {
-    output = "$root_out_dir/content_shell/assets/content_shell.pak"
-  } else {
-    sources += [ "$root_gen_dir/webkit/devtools_resources.pak" ]
-    deps += [ "//content/browser/devtools:resources" ]
-    output = "$root_out_dir/content_shell.pak"
-  }
+  sources += [ "$root_gen_dir/webkit/devtools_resources.pak" ]
+  deps += [ "//content/browser/devtools:resources" ]
+  output = "$root_out_dir/content_shell.pak"
 }
 
+# TODO(GYP): Figure out what this should be on android
+if (!is_android) {
+
 executable("content_shell") {
+  testonly = true
   # TODO(GYP) mac resource bundle stuff for this target.
   # TODO(GYP) Windows content shell settings:
   #  - Manifest.
@@ -438,7 +455,6 @@ executable("content_shell") {
     ":content_shell_lib",
     ":pak",
     "//base/allocator",
-    "//third_party/mesa:osmesa",
   ]
 
   if (is_win) {
@@ -453,11 +469,13 @@ executable("content_shell") {
     # TODO(GYP) lots of stuff from GYP file here.
   }
 
-  if (!is_android || !is_android_webview_build) {
+  if (is_android && !is_android_webview_build) {
     # Some tests rely on this tool. It might be nicer if these tests relied on
     # image diff rather than having content shell depend on it.
     datadeps = [
       "//tools/imagediff($host_toolchain)",
     ]
   }
+}
+
 }

@@ -16,8 +16,6 @@
 
 package com.google.ipc.invalidation.util;
 
-import com.google.common.base.Objects;
-
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
@@ -65,10 +63,13 @@ public class TypedUtil {
   }
 
   /**
-   * A wrapper around {@link Objects#equal(Object, Object)} that ensures the objects
-   * have the same type.
+   * Typed equals operator (useful to ensure at compile time that the expected types are being
+   * compared). Returns {@code true} if both arguments are {@code null}, if they reference the same
+   * object, or if {@code o1.equals(o2)}.
    */
   public static <T> boolean equals(T o1, T o2) {
-    return Objects.equal(o1, o2);
+    // Not using java.util.Objects, which is not supported by earlier version of Android, and not
+    // using com.google.common.base.Objects since we're avoiding a Guava dependency for client code.
+    return (o1 == o2) || ((o1 != null) && o1.equals(o2));
   }
 }

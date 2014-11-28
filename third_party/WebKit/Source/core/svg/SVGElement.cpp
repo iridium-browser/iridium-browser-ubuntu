@@ -31,7 +31,7 @@
 #include "core/XLinkNames.h"
 #include "core/XMLNames.h"
 #include "core/css/CSSCursorImageValue.h"
-#include "core/css/parser/BisonCSSParser.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
@@ -61,12 +61,9 @@ SVGElement::SVGElement(const QualifiedName& tagName, Document& document, Constru
 #if ENABLE(ASSERT)
     , m_inRelativeLengthClientsInvalidation(false)
 #endif
-    // |m_isContextElement| must be initialized before |m_className|, as SVGAnimatedString tear-off c-tor currently set this to true.
-    , m_isContextElement(false)
     , m_SVGRareData(nullptr)
     , m_className(SVGAnimatedString::create(this, HTMLNames::classAttr, SVGString::create()))
 {
-    ScriptWrappable::init(this);
     addToPropertyMap(m_className);
     setHasCustomStyleCallbacks();
 }
@@ -759,32 +756,23 @@ bool SVGElement::addEventListener(const AtomicString& eventType, PassRefPtr<Even
     return true;
 }
 
-bool SVGElement::removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+bool SVGElement::removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener> prpListener, bool useCapture)
 {
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> > instances;
-    collectInstancesForSVGElement(this, instances);
-    if (instances.isEmpty())
-        return Node::removeEventListener(eventType, listener.get(), useCapture);
-
-    // EventTarget::removeEventListener creates a PassRefPtr around the given EventListener
-    // object when creating a temporary RegisteredEventListener object used to look up the
-    // event listener in a cache. If we want to be able to call removeEventListener() multiple
-    // times on different nodes, we have to delay its immediate destruction, which would happen
-    // after the first call below.
-    // XXX is that true?
-    RefPtr<EventListener> protector(listener);
+    RefPtr<EventListener> listener = prpListener;
 
     // Remove event listener from regular DOM element
-    if (!Node::removeEventListener(eventType, listener.get(), useCapture))
+    if (!Node::removeEventListener(eventType, listener, useCapture))
         return false;
 
     // Remove event listener from all shadow tree DOM element instances
+    WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> > instances;
+    collectInstancesForSVGElement(this, instances);
     const WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >::const_iterator end = instances.end();
     for (WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >::const_iterator it = instances.begin(); it != end; ++it) {
         SVGElement* shadowTreeElement = *it;
         ASSERT(shadowTreeElement);
 
-        shadowTreeElement->Node::removeEventListener(eventType, listener.get(), useCapture);
+        shadowTreeElement->Node::removeEventListener(eventType, listener, useCapture);
     }
 
     return true;
@@ -1192,4 +1180,4 @@ const AtomicString& SVGElement::eventParameterName()
     return evtString;
 }
 
-}
+} // namespace blink

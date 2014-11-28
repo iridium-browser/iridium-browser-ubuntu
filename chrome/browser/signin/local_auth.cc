@@ -94,6 +94,14 @@ bool DecodePasswordHashRecord(const std::string& encoded,
   return OSCrypt::DecryptString(unbase64, decoded);
 }
 
+size_t GetProfileInfoIndexOfProfile(const Profile* profile) {
+  DCHECK(profile);
+
+  ProfileInfoCache& info =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  return info.GetIndexOfProfileWithPath(profile->GetPath());
+}
+
 }  // namespace
 
 namespace chrome {
@@ -107,6 +115,10 @@ void RegisterLocalAuthPrefs(user_prefs::PrefRegistrySyncable* registry) {
 
 void SetLocalAuthCredentials(size_t info_index,
                              const std::string& password) {
+  if (info_index == std::string::npos) {
+    NOTREACHED();
+    return;
+  }
   DCHECK(password.length());
 
   // Salt should be random data, as long as the hash length, and different with
@@ -134,20 +146,16 @@ void SetLocalAuthCredentials(size_t info_index,
 
 void SetLocalAuthCredentials(const Profile* profile,
                              const std::string& password) {
-  DCHECK(profile);
-
-  ProfileInfoCache& info =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  size_t info_index = info.GetIndexOfProfileWithPath(profile->GetPath());
-  if (info_index == std::string::npos) {
-    NOTREACHED();
-    return;
-  }
-  SetLocalAuthCredentials(info_index, password);
+  SetLocalAuthCredentials(GetProfileInfoIndexOfProfile(profile), password);
 }
 
 bool ValidateLocalAuthCredentials(size_t info_index,
                                   const std::string& password) {
+  if (info_index == std::string::npos) {
+    NOTREACHED();
+    return false;
+  }
+
   std::string record;
   char encoding;
 
@@ -186,16 +194,8 @@ bool ValidateLocalAuthCredentials(size_t info_index,
 
 bool ValidateLocalAuthCredentials(const Profile* profile,
                                   const std::string& password) {
-  DCHECK(profile);
-
-  ProfileInfoCache& info =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  size_t info_index = info.GetIndexOfProfileWithPath(profile->GetPath());
-  if (info_index == std::string::npos) {
-    NOTREACHED();  // This should never happen but fail safely if it does.
-    return false;
-  }
-  return ValidateLocalAuthCredentials(info_index, password);
+  return ValidateLocalAuthCredentials(GetProfileInfoIndexOfProfile(profile),
+                                      password);
 }
 
 }  // namespace chrome

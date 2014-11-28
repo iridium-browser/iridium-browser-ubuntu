@@ -115,35 +115,35 @@ installClass("PrivateScriptTest", function(PrivateScriptTestPrototype) {
     });
 
     Object.defineProperty(PrivateScriptTestPrototype, "nodeAttributeThrowsIndexSizeError", {
-        get: function() { throw new DOMExceptionInPrivateScript("IndexSizeError", "getter threw error"); },
-        set: function(value) { throw new DOMExceptionInPrivateScript("IndexSizeError", "setter threw error"); }
+        get: function() { throwException(PrivateScriptDOMException.IndexSizeError, "getter threw error"); },
+        set: function(value) { throwException(PrivateScriptDOMException.IndexSizeError, "setter threw error"); }
     });
 
     PrivateScriptTestPrototype.voidMethodThrowsDOMSyntaxError = function() {
-        throw new DOMExceptionInPrivateScript("SyntaxError", "method threw error");
+        throwException(PrivateScriptDOMException.SyntaxError, "method threw error");
     }
 
     PrivateScriptTestPrototype.voidMethodThrowsError = function() {
-        throw new Error("method threw Error");
+        throwException(PrivateScriptJSError.Error, "method threw Error");
     }
 
     PrivateScriptTestPrototype.voidMethodThrowsTypeError = function() {
-        throw new TypeError("method threw TypeError");
+        throwException(PrivateScriptJSError.TypeError, "method threw TypeError");
     }
 
     PrivateScriptTestPrototype.voidMethodThrowsRangeError = function() {
-        throw new RangeError("method threw RangeError");
+        throwException(PrivateScriptJSError.RangeError, "method threw RangeError");
     }
 
     PrivateScriptTestPrototype.voidMethodThrowsSyntaxError = function() {
-        throw new SyntaxError("method threw SyntaxError");
+        throwException(PrivateScriptJSError.SyntaxError, "method threw SyntaxError");
     }
 
     PrivateScriptTestPrototype.voidMethodThrowsReferenceError = function() {
-        throw new ReferenceError("method threw ReferenceError");
+        throwException(PrivateScriptJSError.ReferenceError, "method threw ReferenceError");
     }
 
-    PrivateScriptTestPrototype.voidMethodWithStackOverflow = function() {
+    PrivateScriptTestPrototype.voidMethodThrowsStackOverflowError = function() {
         function f() { f(); }
         f();
     }
@@ -165,4 +165,11 @@ installClass("PrivateScriptTest", function(PrivateScriptTestPrototype) {
         get: function() { return this.m_stringAttributeImplementedInCPPForPrivateScriptOnly; },
         set: function(value) { this.m_stringAttributeImplementedInCPPForPrivateScriptOnly = value; }
     });
+
+    PrivateScriptTestPrototype.dispatchDocumentOnload = function(document) {
+        var event = new Event("load", { bubbles: true, cancelable: true });
+        event.valueInPrivateScript = "this should not be visible in user's script";
+        document.dispatchEvent(event);
+    }
+
 });

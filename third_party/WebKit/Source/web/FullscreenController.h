@@ -43,19 +43,19 @@ class Element;
 class LocalFrame;
 class WebViewImpl;
 
-class FullscreenController {
+class FullscreenController FINAL : public NoBaseWillBeGarbageCollected<FullscreenController> {
 public:
-    static PassOwnPtr<FullscreenController> create(WebViewImpl*);
+    static PassOwnPtrWillBeRawPtr<FullscreenController> create(WebViewImpl*);
 
-    void willEnterFullScreen();
     void didEnterFullScreen();
-    void willExitFullScreen();
     void didExitFullScreen();
 
     void enterFullScreenForElement(Element*);
     void exitFullScreenForElement(Element*);
 
     bool isFullscreen() { return m_fullScreenFrame; }
+
+    void trace(Visitor*);
 
 protected:
     explicit FullscreenController(WebViewImpl*);
@@ -68,10 +68,10 @@ private:
     FloatPoint m_exitFullscreenPinchViewportOffset;
 
     // If set, the WebView is transitioning to fullscreen for this element.
-    RefPtrWillBePersistent<Element> m_provisionalFullScreenElement;
+    RefPtrWillBeMember<Element> m_provisionalFullScreenElement;
 
     // If set, the WebView is in fullscreen mode for an element in this frame.
-    RefPtr<LocalFrame> m_fullScreenFrame;
+    RefPtrWillBeMember<LocalFrame> m_fullScreenFrame;
 
     bool m_isCancelingFullScreen;
 };
@@ -79,4 +79,3 @@ private:
 } // namespace blink
 
 #endif
-

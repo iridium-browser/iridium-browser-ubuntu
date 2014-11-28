@@ -11,7 +11,7 @@ cr.define('options', function() {
    * ManageProfileOverlay class
    * Encapsulated handling of the 'Manage profile...' overlay page.
    * @constructor
-   * @class
+   * @extends {cr.ui.pageManager.Page}
    */
   function ManageProfileOverlay() {
     Page.call(this, 'manageProfile',
@@ -211,7 +211,7 @@ cr.define('options', function() {
      * the user will use to choose their profile icon.
      * @param {string} mode A label that specifies the type of dialog box which
      *     is currently being viewed (i.e. 'create' or 'manage').
-     * @param {Array.<string>} iconURLs An array of icon URLs.
+     * @param {!Array.<string>} iconURLs An array of icon URLs.
      * @param {Array.<string>} names An array of default names
      *     corresponding to the icons.
      * @private
@@ -352,12 +352,31 @@ cr.define('options', function() {
     },
 
     /**
+     * @param {Object} supervisedUser
+     * @param {boolean} nameIsUnique
+     */
+    getImportHandler_: function(supervisedUser, nameIsUnique) {
+      return function() {
+        if (supervisedUser.needAvatar || !nameIsUnique) {
+          PageManager.showPageByName('supervisedUserImport');
+        } else {
+          this.hideErrorBubble_('create');
+          CreateProfileOverlay.updateCreateInProgress(true);
+          chrome.send('createProfile',
+              [supervisedUser.name, supervisedUser.iconURL, false, true,
+                   supervisedUser.id]);
+        }
+      }.bind(this);
+    },
+
+    /**
      * Callback which receives the list of existing supervised users. Checks if
      * the currently entered name is the name of an already existing supervised
      * user. If yes, the user is prompted to import the existing supervised
      * user, and the create button is disabled.
      * If the received list is empty, hides the "import" link.
-     * @param {Array.<Object>} The list of existing supervised users.
+     * @param {Array.<Object>} supervisedUsers The list of existing supervised
+     *     users.
      * @private
      */
     receiveExistingSupervisedUsers_: function(supervisedUsers) {
@@ -385,22 +404,8 @@ cr.define('options', function() {
               break;
             }
           }
-          var self = this;
-          function getImportHandler(supervisedUser, nameIsUnique) {
-            return function() {
-              if (supervisedUser.needAvatar || !nameIsUnique) {
-                PageManager.showPageByName('supervisedUserImport');
-              } else {
-                self.hideErrorBubble_('create');
-                CreateProfileOverlay.updateCreateInProgress(true);
-                chrome.send('createProfile',
-                    [supervisedUser.name, supervisedUser.iconURL, false, true,
-                         supervisedUser.id]);
-              }
-            }
-          };
           $('supervised-user-import-existing').onclick =
-              getImportHandler(supervisedUsers[i], nameIsUnique);
+              this.getImportHandler_(supervisedUsers[i], nameIsUnique);
           $('create-profile-ok').disabled = true;
           return;
         }
@@ -455,6 +460,9 @@ cr.define('options', function() {
       if (name != this.profileInfo_.name)
         options.SupervisedUserListData.resetPromise();
     },
+
+    /** @private */
+    updateSignedInStatus_: assertNotReached,
 
     /**
      * Called when the user clicks "OK" or hits enter. Creates the profile
@@ -592,7 +600,7 @@ cr.define('options', function() {
   };
 
   // Forward public APIs to private implementations.
-  [
+  cr.makePublic(ManageProfileOverlay, [
     'receiveDefaultProfileIconsAndNames',
     'receiveNewProfileDefaults',
     'receiveExistingProfileNames',
@@ -603,12 +611,7 @@ cr.define('options', function() {
     'showDeleteDialog',
     'showDisconnectManagedProfileDialog',
     'showCreateDialog',
-  ].forEach(function(name) {
-    ManageProfileOverlay[name] = function() {
-      var instance = ManageProfileOverlay.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
-    };
-  });
+  ]);
 
   function CreateProfileOverlay() {
     Page.call(this, 'createProfile',
@@ -848,7 +851,7 @@ cr.define('options', function() {
   };
 
   // Forward public APIs to private implementations.
-  [
+  cr.makePublic(CreateProfileOverlay, [
     'cancelCreateProfile',
     'onError',
     'onSuccess',
@@ -856,12 +859,7 @@ cr.define('options', function() {
     'updateCreateInProgress',
     'updateSignedInStatus',
     'updateSupervisedUsersAllowed',
-  ].forEach(function(name) {
-    CreateProfileOverlay[name] = function() {
-      var instance = CreateProfileOverlay.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
-    };
-  });
+  ]);
 
   // Export
   return {

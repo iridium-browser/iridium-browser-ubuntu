@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
 #include "chrome/browser/drive/drive_service_interface.h"
@@ -124,8 +124,9 @@ struct DriveUploader::UploadFileInfo {
   DISALLOW_COPY_AND_ASSIGN(UploadFileInfo);
 };
 
-DriveUploader::DriveUploader(DriveServiceInterface* drive_service,
-                             base::TaskRunner* blocking_task_runner)
+DriveUploader::DriveUploader(
+    DriveServiceInterface* drive_service,
+    const scoped_refptr<base::TaskRunner>& blocking_task_runner)
     : drive_service_(drive_service),
       blocking_task_runner_(blocking_task_runner),
       weak_ptr_factory_(this) {

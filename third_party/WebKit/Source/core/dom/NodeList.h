@@ -32,6 +32,7 @@ namespace blink {
 class Node;
 
 class NodeList : public RefCountedWillBeGarbageCollectedFinalized<NodeList>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~NodeList() { }
 
@@ -48,10 +49,7 @@ public:
     virtual void trace(Visitor*) { }
 
 protected:
-    NodeList()
-    {
-        ScriptWrappable::init(this);
-    }
+    NodeList() { }
 };
 
 } // namespace blink

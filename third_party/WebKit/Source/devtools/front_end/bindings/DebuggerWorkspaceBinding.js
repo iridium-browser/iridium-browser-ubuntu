@@ -21,6 +21,7 @@ WebInspector.DebuggerWorkspaceBinding = function(targetManager, workspace, netwo
     targetManager.addModelListener(WebInspector.DebuggerModel, WebInspector.DebuggerModel.Events.GlobalObjectCleared, this._globalObjectCleared, this);
     targetManager.addModelListener(WebInspector.DebuggerModel, WebInspector.DebuggerModel.Events.DebuggerResumed, this._debuggerResumed, this);
     workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeRemoved, this._uiSourceCodeRemoved, this);
+    workspace.addEventListener(WebInspector.Workspace.Events.ProjectRemoved, this._projectRemoved, this);
 }
 
 WebInspector.DebuggerWorkspaceBinding.prototype = {
@@ -29,7 +30,7 @@ WebInspector.DebuggerWorkspaceBinding.prototype = {
      */
     targetAdded: function(target)
     {
-        this._targetToData.put(target, new WebInspector.DebuggerWorkspaceBinding.TargetData(target, this));
+        this._targetToData.set(target, new WebInspector.DebuggerWorkspaceBinding.TargetData(target, this));
     },
 
     /**
@@ -37,7 +38,9 @@ WebInspector.DebuggerWorkspaceBinding.prototype = {
      */
     targetRemoved: function(target)
     {
-        this._targetToData.remove(target)._dispose();
+        var targetData = this._targetToData.get(target);
+        targetData._dispose();
+        this._targetToData.remove(target);
     },
 
     /**
@@ -49,6 +52,20 @@ WebInspector.DebuggerWorkspaceBinding.prototype = {
         var targetDatas = this._targetToData.values();
         for (var i = 0; i < targetDatas.length; ++i)
             targetDatas[i]._uiSourceCodeRemoved(uiSourceCode);
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _projectRemoved: function(event)
+    {
+        var project = /** @type {!WebInspector.Project} */ (event.data);
+        var targetDatas = this._targetToData.values();
+        var uiSourceCodes = project.uiSourceCodes();
+        for (var i = 0; i < targetDatas.length; ++i) {
+            for (var j = 0; j < uiSourceCodes.length; ++j)
+                targetDatas[i]._uiSourceCodeRemoved(uiSourceCodes[j]);
+        }
     },
 
     /**
@@ -229,7 +246,7 @@ WebInspector.DebuggerWorkspaceBinding.prototype = {
         var info = scriptDataMap.get(script.scriptId);
         if (!info) {
             info = new WebInspector.DebuggerWorkspaceBinding.ScriptInfo(script);
-            scriptDataMap.put(script.scriptId, info);
+            scriptDataMap.set(script.scriptId, info);
         }
         return info;
     },
@@ -341,7 +358,7 @@ WebInspector.DebuggerWorkspaceBinding.TargetData.prototype = {
             return;
 
         if (sourceMapping)
-            this._uiSourceCodeToSourceMapping.put(uiSourceCode, sourceMapping);
+            this._uiSourceCodeToSourceMapping.set(uiSourceCode, sourceMapping);
         else
             this._uiSourceCodeToSourceMapping.remove(uiSourceCode);
 

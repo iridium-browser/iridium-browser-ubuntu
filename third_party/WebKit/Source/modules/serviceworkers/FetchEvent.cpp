@@ -16,12 +16,12 @@ PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create()
     return adoptRefWillBeNoop(new FetchEvent());
 }
 
-PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create(PassRefPtr<RespondWithObserver> observer, PassRefPtrWillBeRawPtr<Request> request)
+PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create(RespondWithObserver* observer, Request* request)
 {
     return adoptRefWillBeNoop(new FetchEvent(observer, request));
 }
 
-PassRefPtrWillBeRawPtr<Request> FetchEvent::request() const
+Request* FetchEvent::request() const
 {
     return m_request;
 }
@@ -31,9 +31,9 @@ bool FetchEvent::isReload() const
     return m_isReload;
 }
 
-void FetchEvent::respondWith(ScriptState* scriptState, const ScriptValue& value)
+void FetchEvent::respondWith(ScriptState* scriptState, const ScriptValue& value, ExceptionState& exceptionState)
 {
-    m_observer->respondWith(scriptState, value);
+    m_observer->respondWith(scriptState, value, exceptionState);
 }
 
 const AtomicString& FetchEvent::interfaceName() const
@@ -49,21 +49,20 @@ void FetchEvent::setIsReload(bool isReload)
 FetchEvent::FetchEvent()
     : m_isReload(false)
 {
-    ScriptWrappable::init(this);
 }
 
-FetchEvent::FetchEvent(PassRefPtr<RespondWithObserver> observer, PassRefPtrWillBeRawPtr<Request> request)
+FetchEvent::FetchEvent(RespondWithObserver* observer, Request* request)
     : Event(EventTypeNames::fetch, /*canBubble=*/false, /*cancelable=*/true)
     , m_observer(observer)
     , m_request(request)
     , m_isReload(false)
 {
-    ScriptWrappable::init(this);
 }
 
 void FetchEvent::trace(Visitor* visitor)
 {
     visitor->trace(m_request);
+    visitor->trace(m_observer);
     Event::trace(visitor);
 }
 

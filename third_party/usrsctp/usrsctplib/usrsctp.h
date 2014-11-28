@@ -983,7 +983,7 @@ usrsctp_dumppacket(void *, size_t, int);
 void
 usrsctp_freedumpbuffer(char *);
 
-#define USRSCTP_SYSCTL_DECL(__field)           \
+#define USRSCTP_SYSCTL_DECL(__field)                \
 void usrsctp_sysctl_set_ ## __field(uint32_t value);\
 uint32_t usrsctp_sysctl_get_ ## __field(void);
 
@@ -992,6 +992,12 @@ USRSCTP_SYSCTL_DECL(sctp_recvspace)
 USRSCTP_SYSCTL_DECL(sctp_auto_asconf)
 USRSCTP_SYSCTL_DECL(sctp_multiple_asconfs)
 USRSCTP_SYSCTL_DECL(sctp_ecn_enable)
+USRSCTP_SYSCTL_DECL(sctp_pr_enable)
+USRSCTP_SYSCTL_DECL(sctp_auth_enable)
+USRSCTP_SYSCTL_DECL(sctp_asconf_enable)
+USRSCTP_SYSCTL_DECL(sctp_reconfig_enable)
+USRSCTP_SYSCTL_DECL(sctp_nrsack_enable)
+USRSCTP_SYSCTL_DECL(sctp_pktdrop_enable)
 USRSCTP_SYSCTL_DECL(sctp_strict_sacks)
 #if !defined(SCTP_WITH_NO_CSUM)
 USRSCTP_SYSCTL_DECL(sctp_no_csum_on_loopback)
@@ -1024,10 +1030,7 @@ USRSCTP_SYSCTL_DECL(sctp_nr_incoming_streams_default)
 USRSCTP_SYSCTL_DECL(sctp_nr_outgoing_streams_default)
 USRSCTP_SYSCTL_DECL(sctp_cmt_on_off)
 USRSCTP_SYSCTL_DECL(sctp_cmt_use_dac)
-USRSCTP_SYSCTL_DECL(sctp_nr_sack_on_off)
 USRSCTP_SYSCTL_DECL(sctp_use_cwnd_based_maxburst)
-USRSCTP_SYSCTL_DECL(sctp_asconf_auth_nochk)
-USRSCTP_SYSCTL_DECL(sctp_auth_disable)
 USRSCTP_SYSCTL_DECL(sctp_nat_friendly)
 USRSCTP_SYSCTL_DECL(sctp_L2_abc_variable)
 USRSCTP_SYSCTL_DECL(sctp_mbuf_threshold_count)

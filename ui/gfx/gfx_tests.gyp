@@ -15,12 +15,9 @@
       'common_sources' : [
         'font_unittest.cc',
         'image/image_family_unittest.cc',
+        'image/image_ios_unittest.mm',
         'image/image_skia_unittest.cc',
         'image/image_unittest.cc',
-        'image/image_unittest_util.cc',
-        'image/image_unittest_util.h',
-        'image/image_unittest_util_ios.mm',
-        'image/image_unittest_util_mac.mm',
         'screen_unittest.cc',
         'test/run_all_unittests.cc',
         'text_elider_unittest.cc',
@@ -90,10 +87,6 @@
         }, {  # OS != "ios"
           'sources': ['<@(_all_sources)'],
         }],
-        ['OS == "win"', {
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
-        }],
         ['OS != "mac" and OS != "ios"', {
           'sources': [
             'transform_unittest.cc',
@@ -145,6 +138,35 @@
           'sources!': [
             'screen_unittest.cc',
           ],
+        }],
+        ['OS == "win"', {
+          'sources': [
+            'color_profile_win_unittest.cc',
+            'font_fallback_win_unittest.cc',
+            'icon_util_unittest.cc',
+            'icon_util_unittests.rc',
+            'platform_font_win_unittest.cc',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'DelayLoadDLLs': [
+                'd2d1.dll',
+                'd3d10_1.dll',
+              ],
+              'AdditionalDependencies': [
+                'd2d1.lib',
+                'd3d10_1.lib',
+              ],
+            },
+          },
+          'link_settings': {
+            'libraries': [
+              '-limm32.lib',
+              '-loleacc.lib',
+            ],
+          },
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],
       ],
     }

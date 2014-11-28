@@ -33,11 +33,12 @@
 #include "net/server/http_server.h"
 #include "net/server/http_server_request_info.h"
 #include "net/server/http_server_response_info.h"
-#include "net/socket/tcp_listen_socket.h"
+#include "net/socket/tcp_server_socket.h"
 
 namespace {
 
 const char* kLocalHostAddress = "127.0.0.1";
+const int kBufferSize = 100 * 1024 * 1024;  // 100 MB
 
 typedef base::Callback<
     void(const net::HttpServerRequestInfo&, const HttpResponseSenderFunc&)>
@@ -55,13 +56,19 @@ class HttpServer : public net::HttpServer::Delegate {
     std::string binding_ip = kLocalHostAddress;
     if (allow_remote)
       binding_ip = "0.0.0.0";
-    server_ = new net::HttpServer(
-        net::TCPListenSocketFactory(binding_ip, port), this);
+    scoped_ptr<net::ServerSocket> server_socket(
+        new net::TCPServerSocket(NULL, net::NetLog::Source()));
+    server_socket->ListenWithAddressAndPort(binding_ip, port, 1);
+    server_.reset(new net::HttpServer(server_socket.Pass(), this));
     net::IPEndPoint address;
     return server_->GetLocalAddress(&address) == net::OK;
   }
 
   // Overridden from net::HttpServer::Delegate:
+  virtual void OnConnect(int connection_id) OVERRIDE {
+    server_->SetSendBufferSize(connection_id, kBufferSize);
+    server_->SetReceiveBufferSize(connection_id, kBufferSize);
+  }
   virtual void OnHttpRequest(int connection_id,
                              const net::HttpServerRequestInfo& info) OVERRIDE {
     handle_request_func_.Run(
@@ -85,11 +92,12 @@ class HttpServer : public net::HttpServer::Delegate {
     // the connection to close (e.g., python 2.7 urllib).
     response->AddHeader("Connection", "close");
     server_->SendResponse(connection_id, *response);
-    server_->Close(connection_id);
+    // Don't need to call server_->Close(), since SendResponse() will handle
+    // this for us.
   }
 
   HttpRequestHandlerFunc handle_request_func_;
-  scoped_refptr<net::HttpServer> server_;
+  scoped_ptr<net::HttpServer> server_;
   base::WeakPtrFactory<HttpServer> weak_factory_;  // Should be last.
 };
 

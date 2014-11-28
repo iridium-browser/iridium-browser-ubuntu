@@ -44,15 +44,17 @@ class QuicServerSessionVisitor {
 
 class QuicServerSession : public QuicSession {
  public:
-  // Takes ownership of connection_packet_writer
   QuicServerSession(const QuicConfig& config,
                     QuicConnection* connection,
-                    QuicPerConnectionPacketWriter* connection_packet_writer,
                     QuicServerSessionVisitor* visitor);
 
   // Override the base class to notify the owner of the connection close.
   virtual void OnConnectionClosed(QuicErrorCode error, bool from_peer) OVERRIDE;
   virtual void OnWriteBlocked() OVERRIDE;
+
+  // Sends a server config update to the client, containing new bandwidth
+  // estimate.
+  virtual void OnCongestionWindowChange(QuicTime now) OVERRIDE;
 
   virtual ~QuicServerSession();
 
@@ -64,6 +66,10 @@ class QuicServerSession : public QuicSession {
 
   // Override base class to process FEC config received from client.
   virtual void OnConfigNegotiated() OVERRIDE;
+
+  void set_serving_region(string serving_region) {
+    serving_region_ = serving_region;
+  }
 
  protected:
   // QuicSession methods:
@@ -83,8 +89,17 @@ class QuicServerSession : public QuicSession {
   friend class test::QuicServerSessionPeer;
 
   scoped_ptr<QuicCryptoServerStream> crypto_stream_;
-  scoped_ptr<QuicPerConnectionPacketWriter> connection_packet_writer_;
   QuicServerSessionVisitor* visitor_;
+
+  // The most recent bandwidth estimate sent to the client.
+  QuicBandwidth bandwidth_estimate_sent_to_client_;
+
+  // Text describing server location. Sent to the client as part of the bandwith
+  // estimate in the source-address token. Optional, can be left empty.
+  string serving_region_;
+
+  // Time at which we send the last SCUP to the client.
+  QuicTime last_server_config_update_time_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicServerSession);
 };

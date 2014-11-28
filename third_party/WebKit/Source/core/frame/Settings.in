@@ -92,10 +92,7 @@ xssAuditorEnabled initial=false
 unsafePluginPastingEnabled initial=true
 treatIPAddressAsDomain initial=false
 
-acceleratedCompositingForFixedPositionEnabled initial=false, invalidate=AcceleratedCompositing
-acceleratedCompositingForOverflowScrollEnabled initial=false, invalidate=AcceleratedCompositing
-acceleratedCompositingForFixedRootBackgroundEnabled initial=false
-compositedScrollingForFramesEnabled initial=false, invalidate=AcceleratedCompositing
+preferCompositingToLCDTextEnabled initial=false, invalidate=AcceleratedCompositing
 
 # 3D canvas (WebGL) support.
 webGLEnabled initial=false
@@ -120,6 +117,11 @@ mediaControlsOverlayPlayButtonEnabled initial=false
 mediaPlaybackRequiresUserGesture initial=false
 
 scrollAnimatorEnabled initial=true
+
+# Used to disable threaded, compositor scrolling for testing purposes.
+# crbug.com/410974 tracks removal once alternative solutions for selective
+# main thread scrolling are supported.
+threadedScrollingEnabled initial=true, invalidate=Style
 
 # Used in layout tests for gesture tap highlights. Makes the highlights square
 # (rather than rounded) to make it possible to reftest the results.
@@ -246,11 +248,6 @@ viewportMetaEnabled initial=false
 
 dnsPrefetchingEnabled initial=false, invalidate=DNSPrefetching
 
-
-# FIXME: This is a temporary flag and should be removed once
-# accelerated overflow scroll is ready (crbug.com/254111).
-compositorDrivenAcceleratedScrollingEnabled initial=false, invalidate=AcceleratedCompositing
-
 # FIXME: This is a temporary flag and should be removed
 # when squashing is ready. (crbug.com/261605)
 layerSquashingEnabled initial=false
@@ -272,7 +269,7 @@ deviceScaleAdjustment type=double, initial=1.0, invalidate=TextAutosizing
 # The spec ( https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/Beacon/Overview.html )
 # does not proscribe an upper limit, but allows for it -- the underlying
 # API will return 'false' in that case.
-maxBeaconTransmission type=int, initial=16384
+maxBeaconTransmission type=int, initial=65536
 
 # This value is set to false if the platform does not support fullscreen.
 # When set to false all the requests to enter fullscreen will return an error
@@ -291,3 +288,17 @@ disallowFullscreenForNonMediaElements initial=false
 # V8 supports different types of caching. Used by V8 bindings.
 v8CacheOptions type=V8CacheOptions, initial=V8CacheOptionsOff
 
+v8ScriptStreamingEnabled initial=false
+
+# These values are bit fields for the properties of available pointing devices
+# and may take on multiple values (e.g. laptop with touchpad and touchscreen
+# has pointerType coarse *and* fine).
+availablePointerTypes type=int, initial=PointerTypeNone, invalidate=MediaQuery
+availableHoverTypes type=int, initial=HoverTypeNone, invalidate=MediaQuery
+
+# These values specify properties of the user's primary pointing device only.
+primaryPointerType type=PointerType, initial=PointerTypeNone, invalidate=MediaQuery
+primaryHoverType type=HoverType, initial=HoverTypeNone, invalidate=MediaQuery
+
+accessibilityEnabled initial=false
+inlineTextBoxAccessibilityEnabled initial=false

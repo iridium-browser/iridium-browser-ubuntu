@@ -11,6 +11,7 @@
 #include "base/files/file.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/shared_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "ppapi/c/private/ppb_nacl_private.h"
@@ -29,8 +30,12 @@ class TrustedPluginChannel;
 // nexe.
 class NexeLoadManager {
  public:
-  explicit NexeLoadManager(PP_Instance instance);
   ~NexeLoadManager();
+
+  static void Create(PP_Instance instance);
+  // Non-owning pointer.
+  static NexeLoadManager* Get(PP_Instance instance);
+  static void Delete(PP_Instance instance);
 
   void NexeFileDidOpen(int32_t pp_error,
                        const base::File& file,
@@ -53,7 +58,7 @@ class NexeLoadManager {
                        const std::string& error_message,
                        const std::string& console_message);
   void ReportLoadAbort();
-  void NexeDidCrash(const char* crash_log);
+  void NexeDidCrash();
 
   // TODO(dmichael): Everything below this comment should eventually be made
   // private, when ppb_nacl_private_impl.cc is no longer using them directly.
@@ -112,8 +117,14 @@ class NexeLoadManager {
 
   const std::string& program_url() const { return program_url_; }
 
+  void set_crash_info_shmem_handle(base::SharedMemoryHandle h) {
+    crash_info_shmem_handle_ = h;
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(NexeLoadManager);
+
+  explicit NexeLoadManager(PP_Instance instance);
 
   void ReportDeadNexe();
 
@@ -170,6 +181,8 @@ class NexeLoadManager {
   std::string mime_type_;
 
   base::Time pnacl_start_time_;
+
+  base::SharedMemoryHandle crash_info_shmem_handle_;
 
   scoped_ptr<TrustedPluginChannel> trusted_plugin_channel_;
   scoped_ptr<ManifestServiceChannel> manifest_service_channel_;

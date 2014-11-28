@@ -8,6 +8,7 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -309,7 +310,8 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
   // lock screen, login screen, etc.) so that its on-screen keyboard page
   // won't open new windows/pages. See crbug.com/395621.
   std::string GetCurrentScreenType() {
-    switch (chromeos::input_method::InputMethodManager::Get()->GetState()) {
+    switch (chromeos::input_method::InputMethodManager::Get()
+                ->GetUISessionState()) {
       case chromeos::input_method::InputMethodManager::STATE_LOGIN_SCREEN:
         return "login";
       case chromeos::input_method::InputMethodManager::STATE_LOCK_SCREEN:
@@ -339,6 +341,7 @@ InputImeEventRouter::GetInstance() {
 }
 
 bool InputImeEventRouter::RegisterImeExtension(
+    Profile* profile,
     const std::string& extension_id,
     const std::vector<extensions::InputComponentInfo>& input_components) {
   VLOG(1) << "RegisterImeExtension: " << extension_id;
@@ -387,7 +390,9 @@ bool InputImeEventRouter::RegisterImeExtension(
   chromeos::InputMethodEngine* engine = new chromeos::InputMethodEngine();
   engine->Initialize(observer.Pass(), extension_id.c_str());
   engine_map_[extension_id] = engine;
-  manager->AddInputMethodExtension(extension_id, descriptors, engine);
+  chromeos::UserSessionManager::GetInstance()
+      ->GetDefaultIMEState(profile)
+      ->AddInputMethodExtension(extension_id, descriptors, engine);
 
   return true;
 }
@@ -397,6 +402,7 @@ void InputImeEventRouter::UnregisterAllImes(const std::string& extension_id) {
       engine_map_.find(extension_id);
   if (it != engine_map_.end()) {
     chromeos::input_method::InputMethodManager::Get()
+        ->GetActiveIMEState()
         ->RemoveInputMethodExtension(extension_id);
     delete it->second;
     engine_map_.erase(it);
@@ -822,8 +828,10 @@ void InputImeAPI::OnExtensionLoaded(content::BrowserContext* browser_context,
   const std::vector<InputComponentInfo>* input_components =
       extensions::InputComponents::GetInputComponents(extension);
   if (input_components)
-    input_ime_event_router()->RegisterImeExtension(extension->id(),
-                                                   *input_components);
+    input_ime_event_router()->RegisterImeExtension(
+        Profile::FromBrowserContext(browser_context),
+        extension->id(),
+        *input_components);
 }
 
 void InputImeAPI::OnExtensionUnloaded(content::BrowserContext* browser_context,

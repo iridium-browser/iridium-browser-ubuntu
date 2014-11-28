@@ -20,6 +20,7 @@
 #include "config.h"
 #include "core/rendering/InlineBox.h"
 
+#include "core/paint/BlockPainter.h"
 #include "core/rendering/InlineFlowBox.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderBlockFlow.h"
@@ -193,14 +194,7 @@ void InlineBox::adjustPosition(float dx, float dy)
 
 void InlineBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit /* lineTop */, LayoutUnit /*lineBottom*/)
 {
-    if (!paintInfo.shouldPaintWithinRoot(&renderer()) || (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection))
-        return;
-
-    LayoutPoint childPoint = paintOffset;
-    if (parent()->renderer().style()->isFlippedBlocksWritingMode()) // Faster than calling containingBlock().
-        childPoint = renderer().containingBlock()->flipForWritingModeForChild(&toRenderBox(renderer()), childPoint);
-
-    RenderBlock::paintAsInlineBlock(&renderer(), paintInfo, childPoint);
+    BlockPainter::paintInlineBox(*this, paintInfo, paintOffset);
 }
 
 bool InlineBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit /* lineTop */, LayoutUnit /*lineBottom*/)
@@ -282,7 +276,7 @@ InlineBox* InlineBox::prevLeafChildIgnoringLineBreak() const
     return leaf;
 }
 
-RenderObject::SelectionState InlineBox::selectionState()
+RenderObject::SelectionState InlineBox::selectionState() const
 {
     return renderer().selectionState();
 }

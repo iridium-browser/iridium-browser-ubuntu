@@ -29,6 +29,7 @@
 
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/text/AtomicString.h"
@@ -37,18 +38,28 @@ namespace blink {
 
 class Event;
 class EventTarget;
+class XMLHttpRequestProgressEvent;
 
-enum ProgressEventAction {
-    DoNotFlushProgressEvent,
-    FlushDeferredProgressEvent,
-    FlushProgressEvent
-};
-
-// This implements the XHR2 progress event dispatching: "dispatch a progress event called progress
-// about every 50ms or for every byte received, whichever is least frequent".
+// This class implements the XHR2 ProgressEvent dispatching:
+//   "dispatch a progress event named progress about every 50ms or for every
+//   byte received, whichever is least frequent".
+//
+// readystatechange events also go through this class since ProgressEvents and
+// readystatechange events affect each other.
+//
+// In the comments for this class:
+// - "progress" event means an event named "progress"
+// - ProgressEvent means an event using the ProgressEvent interface defined in
+//   the spec.
 class XMLHttpRequestProgressEventThrottle FINAL : public TimerBase {
     DISALLOW_ALLOCATION();
 public:
+    enum DeferredEventAction {
+        Ignore,
+        Clear,
+        Flush,
+    };
+
     explicit XMLHttpRequestProgressEventThrottle(EventTarget*);
     virtual ~XMLHttpRequestProgressEventThrottle();
 
@@ -61,7 +72,9 @@ public:
     // m_lengthComputable, m_loaded and m_total. They'll be used on next
     // fired() call.
     void dispatchProgressEvent(const AtomicString&, bool lengthComputable, unsigned long long loaded, unsigned long long total);
-    void dispatchReadyStateChangeEvent(PassRefPtrWillBeRawPtr<Event>, ProgressEventAction = DoNotFlushProgressEvent);
+    // Dispatches the given event after operation about the "progress" event
+    // depending on the value of the ProgressEventAction argument.
+    void dispatchReadyStateChangeEvent(PassRefPtrWillBeRawPtr<Event>, DeferredEventAction);
 
     void suspend();
     void resume();
@@ -69,17 +82,14 @@ public:
     void trace(Visitor*);
 
 private:
+    // The main purpose of this class is to throttle the "progress"
+    // ProgressEvent dispatching. This class represents such a deferred
+    // "progress" ProgressEvent.
+    class DeferredEvent;
     static const double minimumProgressEventDispatchingIntervalInSeconds;
 
-    // Dispatches an event. If suspended, just queues the given event.
-    void dispatchEvent(PassRefPtrWillBeRawPtr<Event>);
-
     virtual void fired() OVERRIDE;
-    void dispatchDeferredEvents(Timer<XMLHttpRequestProgressEventThrottle>*);
-    bool flushDeferredProgressEvent();
-    void deliverProgressEvent();
-
-    bool hasEventToDispatch() const;
+    void dispatchDeferredEvent();
 
     // Non-Oilpan, keep a weak pointer to our XMLHttpRequest object as it is
     // the one holding us. With Oilpan, a simple strong Member can be used -
@@ -87,14 +97,9 @@ private:
     // with the XMLHttpRequest object.
     RawPtrWillBeMember<EventTarget> m_target;
 
-    bool m_lengthComputable;
-    unsigned long long m_loaded;
-    unsigned long long m_total;
-
-    bool m_deferEvents;
-    RefPtrWillBeMember<Event> m_deferredProgressEvent;
-    WillBeHeapVector<RefPtrWillBeMember<Event> > m_deferredEvents;
-    Timer<XMLHttpRequestProgressEventThrottle> m_dispatchDeferredEventsTimer;
+    // A slot for the deferred "progress" ProgressEvent. When multiple events
+    // arrive, only the last one is stored and others are discarded.
+    const OwnPtr<DeferredEvent> m_deferred;
 };
 
 } // namespace blink

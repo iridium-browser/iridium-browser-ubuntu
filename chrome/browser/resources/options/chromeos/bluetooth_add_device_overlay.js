@@ -9,6 +9,7 @@ cr.define('options', function() {
   /**
    * Encapsulated handling of the Bluetooth options page.
    * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function BluetoothOptions() {
     Page.call(this, 'bluetooth',
@@ -23,7 +24,7 @@ cr.define('options', function() {
 
     /**
      * The list of available (unpaired) bluetooth devices.
-     * @type {DeletableItemList}
+     * @type {options.DeletableItemList}
      * @private
      */
     deviceList_: null,
@@ -78,8 +79,10 @@ cr.define('options', function() {
      * @private
      */
     createDeviceList_: function() {
-      this.deviceList_ = $('bluetooth-unpaired-devices-list');
-      options.system.bluetooth.BluetoothDeviceList.decorate(this.deviceList_);
+      var deviceList = $('bluetooth-unpaired-devices-list');
+      options.system.bluetooth.BluetoothDeviceList.decorate(deviceList);
+      this.deviceList_ = assertInstanceof(deviceList,
+                                          options.DeletableItemList);
     }
   };
 

@@ -191,7 +191,7 @@ def CheckZipPath(name):
     raise Exception('Absolute zip path: %s' % name)
 
 
-def ExtractAll(zip_path, path=None, no_clobber=True):
+def ExtractAll(zip_path, path=None, no_clobber=True, pattern=None):
   if path is None:
     path = os.getcwd()
   elif not os.path.exists(path):
@@ -201,6 +201,9 @@ def ExtractAll(zip_path, path=None, no_clobber=True):
     for name in z.namelist():
       if name.endswith('/'):
         continue
+      if pattern is not None:
+        if not fnmatch.fnmatch(name, pattern):
+          continue
       CheckZipPath(name)
       if no_clobber:
         output_path = os.path.join(path, name)
@@ -227,6 +230,22 @@ def ZipDir(output, base_dir):
         archive_path = os.path.relpath(path, base_dir)
         CheckZipPath(archive_path)
         outfile.write(path, archive_path)
+
+
+def MergeZips(output, inputs, exclude_patterns=None):
+  def Allow(name):
+    if exclude_patterns is not None:
+      for p in exclude_patterns:
+        if fnmatch.fnmatch(name, p):
+          return False
+    return True
+
+  with zipfile.ZipFile(output, 'w') as out_zip:
+    for in_file in inputs:
+      with zipfile.ZipFile(in_file, 'r') as in_zip:
+        for name in in_zip.namelist():
+          if Allow(name):
+            out_zip.writestr(name, in_zip.read(name))
 
 
 def PrintWarning(message):

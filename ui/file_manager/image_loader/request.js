@@ -253,7 +253,7 @@ AuthorizedXHR.prototype.load = function(url, onSuccess, onFailure) {
   // Fetches the access token and makes an authorized call. If refresh is true,
   // then forces refreshing the access token.
   var requestTokenAndCall = function(refresh, onInnerSuccess, onInnerFailure) {
-    chrome.fileBrowserPrivate.requestAccessToken(refresh, function(token) {
+    chrome.fileManagerPrivate.requestAccessToken(refresh, function(token) {
       if (this.aborted_)
         return;
       if (!token) {
@@ -371,9 +371,8 @@ Request.prototype.sendImage_ = function(imageChanged) {
  * @private
  */
 Request.prototype.sendImageData_ = function(data) {
-  this.sendResponse_({status: 'success',
-                      data: data,
-                      taskId: this.request_.taskId});
+  this.sendResponse_(
+      {status: 'success', data: data, taskId: this.request_.taskId});
 };
 
 /**
@@ -407,8 +406,8 @@ Request.prototype.onImageLoad_ = function(callback) {
  * @private
  */
 Request.prototype.onImageError_ = function(callback) {
-  this.sendResponse_({status: 'error',
-                      taskId: this.request_.taskId});
+  this.sendResponse_(
+      {status: 'error', taskId: this.request_.taskId});
   this.cleanup_();
   this.downloadCallback_();
 };

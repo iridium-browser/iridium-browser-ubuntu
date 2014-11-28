@@ -15,7 +15,6 @@ group("resources") {
 }
 
 grit("ui_resources_grd") {
-  visibility = ":resources"
   source = "ui_resources.grd"
   outputs = [
     "grit/ui_resources.h",
@@ -27,8 +26,8 @@ grit("ui_resources_grd") {
 }
 
 grit("ui_unscaled_resources_grd") {
-  visibility = ":resources"
   source = "ui_unscaled_resources.grd"
+  use_qualified_include = true
   outputs = [
     "grit/ui_unscaled_resources.h",
     "ui_unscaled_resources.rc",
@@ -36,7 +35,6 @@ grit("ui_unscaled_resources_grd") {
 }
 
 grit("webui_resources_grd") {
-  visibility = ":resources"
   source = "../webui/resources/webui_resources.grd"
   outputs = [
     "grit/webui_resources.h",
@@ -54,16 +52,14 @@ if (!is_mac) {
   }
 }
 
-# On iOS the output needs to additionally be copied to another location, so
-# we have this intermediate step.
+# On iOS and Mac the string resources need to go into a locale subfolder, which
+# introduces an extra dependency.
 #
 # GYP version: ui/resources/ui_resources.gyp:ui_test_pak
 #              (copy_ui_test_pak action)
-if (is_ios) {
-  copy("ui_test_pak") {
-    sources = [ "$root_out_dir/ui_test.pak" ]
-    outputs = [ "$root_out_dir/ui/en.lproj/locale.pak" ]
-    deps = [ ":repack_ui_test_pak" ]
+if (is_ios || is_mac) {
+  group("ui_test_pak") {
+    deps = [ ":repack_ui_test_pak", ":repack_ui_test_mac_locale_pack" ]
   }
 } else {
   group("ui_test_pak") {
@@ -74,9 +70,9 @@ if (is_ios) {
 # GYP version: ui/resources/ui_resources.gyp:ui_test_pak
 repack("repack_ui_test_pak") {
   # Depend on ui_test_pak instead of this one.
-  visibility = ":ui_test_pak"
+  visibility = [ ":ui_test_pak" ]
 
-  sources = [ 
+  sources = [
     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
     "$root_gen_dir/ui/resources/webui_resources.pak",
     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
@@ -95,3 +91,21 @@ repack("repack_ui_test_pak") {
   }
 }
 
+# Repack just the strings for the framework locales on Mac and iOS. This
+# emulates repack_locales.py, but just for en-US. Note ui_test.pak is not simply
+# copied, because it causes leaks from allocations within system libraries when
+# trying to load non-string resources. http://crbug.com/413034.
+repack("repack_ui_test_mac_locale_pack") {
+  visibility = [ ":ui_test_pak" ]
+
+  sources = [
+    "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
+    "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
+  ]
+
+  output = "$root_out_dir/ui/en.lproj/locale.pak"
+
+  deps = [
+    "//ui/strings",
+  ]
+}

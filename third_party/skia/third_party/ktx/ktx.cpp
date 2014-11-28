@@ -135,7 +135,7 @@ bool SkKTXFile::KeyValue::writeKeyAndValueForKTX(SkWStream* strm) {
 }
 
 uint32_t SkKTXFile::readInt(const uint8_t** buf, size_t* bytesLeft) const {
-    SkASSERT(NULL != buf && NULL != bytesLeft);
+    SkASSERT(buf && bytesLeft);
 
     uint32_t result;
 
@@ -254,6 +254,11 @@ bool SkKTXFile::readKTXFile(const uint8_t* data, size_t dataLen) {
 
         // We don't support cube maps
         if (fHeader.fNumberOfFaces > 1) {
+            return false;
+        }
+
+        // We don't support width and/or height <= 0
+        if (fHeader.fPixelWidth <= 0 || fHeader.fPixelHeight <= 0) {
             return false;
         }
     }

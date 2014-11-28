@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/environment.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/nix/xdg_util.h"
 #include "base/process/launch.h"
 #include "base/strings/string_util.h"
@@ -52,7 +52,7 @@ void ShowLinuxProxyConfigUrl(int render_process_id, int render_view_id) {
     LOG(ERROR) << "Could not find " << name << " network settings in $PATH";
   OpenURLParams params(
       GURL(kLinuxProxyConfigUrl), Referrer(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false);
+      ui::PAGE_TRANSITION_LINK, false);
 
   WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_id, render_view_id);

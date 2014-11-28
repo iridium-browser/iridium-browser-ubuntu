@@ -31,6 +31,7 @@
 /**
  * @constructor
  * @extends {WebInspector.PanelWithSidebarTree}
+ * @implements {WebInspector.TargetManager.Observer}
  */
 WebInspector.ResourcesPanel = function(database)
 {
@@ -63,7 +64,7 @@ WebInspector.ResourcesPanel = function(database)
     this.applicationCacheListTreeElement = new WebInspector.StorageCategoryTreeElement(this, WebInspector.UIString("Application Cache"), "ApplicationCache", ["application-cache-storage-tree-item"]);
     this.sidebarTree.appendChild(this.applicationCacheListTreeElement);
 
-    if (WebInspector.experimentsSettings.fileSystemInspection.isEnabled()) {
+    if (Runtime.experiments.isEnabled("fileSystemInspection")) {
         this.fileSystemListTreeElement = new WebInspector.FileSystemListTreeElement(this);
         this.sidebarTree.appendChild(this.fileSystemListTreeElement);
     }
@@ -105,18 +106,48 @@ WebInspector.ResourcesPanel = function(database)
     }
     WebInspector.GoToLineDialog.install(this, sourceFrameGetter.bind(this));
 
-    if (WebInspector.resourceTreeModel.cachedResourcesLoaded())
-        this._cachedResourcesLoaded();
-
-    WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.Load, this._loadEventFired, this);
-    WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, this._cachedResourcesLoaded, this);
-    WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.WillLoadCachedResources, this._resetWithFrames, this);
-
-    WebInspector.databaseModel.databases().forEach(this._addDatabase.bind(this));
-    WebInspector.databaseModel.addEventListener(WebInspector.DatabaseModel.Events.DatabaseAdded, this._databaseAdded, this);
+    WebInspector.targetManager.observeTargets(this);
 }
 
 WebInspector.ResourcesPanel.prototype = {
+    /**
+     * @param {!WebInspector.Target} target
+     */
+    targetAdded: function(target)
+    {
+        if (this._target)
+            return;
+
+        if (target.resourceTreeModel.cachedResourcesLoaded())
+            this._cachedResourcesLoaded();
+
+        target.databaseModel.databases().forEach(this._addDatabase.bind(this));
+
+        target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.Load, this._loadEventFired, this);
+        target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, this._cachedResourcesLoaded, this);
+        target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.WillLoadCachedResources, this._resetWithFrames, this);
+        target.databaseModel.addEventListener(WebInspector.DatabaseModel.Events.DatabaseAdded, this._databaseAdded, this);
+
+        this._target = target;
+    },
+
+    /**
+     * @param {!WebInspector.Target} target
+     */
+    targetRemoved: function(target)
+    {
+        if (target !== this._target)
+            return;
+        delete this._target;
+
+        target.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.Load, this._loadEventFired, this);
+        target.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, this._cachedResourcesLoaded, this);
+        target.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.WillLoadCachedResources, this._resetWithFrames, this);
+        target.databaseModel.removeEventListener(WebInspector.DatabaseModel.Events.DatabaseAdded, this._databaseAdded, this);
+
+        this._resetWithFrames();
+    },
+
     /**
      * @return {boolean}
      */
@@ -139,7 +170,7 @@ WebInspector.ResourcesPanel.prototype = {
             this._populateDOMStorageTree();
             this._populateApplicationCacheTree(target);
             this.indexedDBListTreeElement._initialize();
-            if (WebInspector.experimentsSettings.fileSystemInspection.isEnabled())
+            if (Runtime.experiments.isEnabled("fileSystemInspection"))
                 this.fileSystemListTreeElement._initialize();
             this._initDefaultSelection();
             this._initialized = true;
@@ -316,7 +347,7 @@ WebInspector.ResourcesPanel.prototype = {
     _addDatabase: function(database)
     {
         var databaseTreeElement = new WebInspector.DatabaseTreeElement(this, database);
-        this._databaseTreeElements.put(database, databaseTreeElement);
+        this._databaseTreeElements.set(database, databaseTreeElement);
         this.databasesListTreeElement.appendChild(databaseTreeElement);
     },
 
@@ -352,7 +383,7 @@ WebInspector.ResourcesPanel.prototype = {
         console.assert(!this._domStorageTreeElements.get(domStorage));
 
         var domStorageTreeElement = new WebInspector.DOMStorageTreeElement(this, domStorage, (domStorage.isLocalStorage ? "local-storage" : "session-storage"));
-        this._domStorageTreeElements.put(domStorage, domStorageTreeElement);
+        this._domStorageTreeElements.set(domStorage, domStorageTreeElement);
         if (domStorage.isLocalStorage)
             this.localStorageListTreeElement.appendChild(domStorageTreeElement);
         else
@@ -478,7 +509,7 @@ WebInspector.ResourcesPanel.prototype = {
             var tableViews = this._databaseTableViews.get(database);
             if (!tableViews) {
                 tableViews = /** @type {!Object.<string, !WebInspector.DatabaseTableView>} */ ({});
-                this._databaseTableViews.put(database, tableViews);
+                this._databaseTableViews.set(database, tableViews);
             }
             view = tableViews[tableName];
             if (!view) {
@@ -489,7 +520,7 @@ WebInspector.ResourcesPanel.prototype = {
             view = this._databaseQueryViews.get(database);
             if (!view) {
                 view = new WebInspector.DatabaseQueryView(database);
-                this._databaseQueryViews.put(database, view);
+                this._databaseQueryViews.set(database, view);
                 view.addEventListener(WebInspector.DatabaseQueryView.Events.SchemaUpdated, this._updateDatabaseTables, this);
             }
         }
@@ -517,7 +548,7 @@ WebInspector.ResourcesPanel.prototype = {
         view = this._domStorageViews.get(domStorage);
         if (!view) {
             view = new WebInspector.DOMStorageItemsView(domStorage);
-            this._domStorageViews.put(domStorage, view);
+            this._domStorageViews.set(domStorage, view);
         }
 
         this._innerShowView(view);
@@ -1371,7 +1402,18 @@ WebInspector.IndexedDBTreeElement = function(storagePanel)
 WebInspector.IndexedDBTreeElement.prototype = {
     _initialize: function()
     {
-        this._createIndexedDBModel();
+        WebInspector.targetManager.addModelListener(WebInspector.IndexedDBModel, WebInspector.IndexedDBModel.EventTypes.DatabaseAdded, this._indexedDBAdded, this);
+        WebInspector.targetManager.addModelListener(WebInspector.IndexedDBModel, WebInspector.IndexedDBModel.EventTypes.DatabaseRemoved, this._indexedDBRemoved, this);
+        WebInspector.targetManager.addModelListener(WebInspector.IndexedDBModel, WebInspector.IndexedDBModel.EventTypes.DatabaseLoaded, this._indexedDBLoaded, this);
+        /** @type {!Array.<!WebInspector.IDBDatabaseTreeElement>} */
+        this._idbDatabaseTreeElements = [];
+
+        var targets = WebInspector.targetManager.targets();
+        for (var i = 0; i < targets.length; ++i) {
+            var databases = targets[i].indexedDBModel.databases();
+            for (var j = 0; j < databases.length; ++j)
+                this._addIndexedDB(targets[i].indexedDBModel, databases[j]);
+        }
     },
 
     onattach: function()
@@ -1387,23 +1429,11 @@ WebInspector.IndexedDBTreeElement.prototype = {
         contextMenu.show();
     },
 
-    _createIndexedDBModel: function()
-    {
-        this._indexedDBModel = new WebInspector.IndexedDBModel(this.target());
-        this._idbDatabaseTreeElements = [];
-        this._indexedDBModel.addEventListener(WebInspector.IndexedDBModel.EventTypes.DatabaseAdded, this._indexedDBAdded, this);
-        this._indexedDBModel.addEventListener(WebInspector.IndexedDBModel.EventTypes.DatabaseRemoved, this._indexedDBRemoved, this);
-        this._indexedDBModel.addEventListener(WebInspector.IndexedDBModel.EventTypes.DatabaseLoaded, this._indexedDBLoaded, this);
-    },
-
     refreshIndexedDB: function()
     {
-        if (!this._indexedDBModel) {
-            this._createIndexedDBModel();
-            return;
-        }
-
-        this._indexedDBModel.refreshDatabaseNames();
+        var targets = WebInspector.targetManager.targets();
+        for (var i = 0; i < targets.length; ++i)
+            targets[i].indexedDBModel.refreshDatabaseNames();
     },
 
     /**
@@ -1412,12 +1442,20 @@ WebInspector.IndexedDBTreeElement.prototype = {
     _indexedDBAdded: function(event)
     {
         var databaseId = /** @type {!WebInspector.IndexedDBModel.DatabaseId} */ (event.data);
+        var model = /** @type {!WebInspector.IndexedDBModel} */ (event.target);
+        this._addIndexedDB(model, databaseId);
+    },
 
-        var idbDatabaseTreeElement = new WebInspector.IDBDatabaseTreeElement(this._storagePanel, this._indexedDBModel, databaseId);
+    /**
+     * @param {!WebInspector.IndexedDBModel} model
+     * @param {!WebInspector.IndexedDBModel.DatabaseId} databaseId
+     */
+    _addIndexedDB: function(model, databaseId)
+    {
+        var idbDatabaseTreeElement = new WebInspector.IDBDatabaseTreeElement(this._storagePanel, model, databaseId);
         this._idbDatabaseTreeElements.push(idbDatabaseTreeElement);
         this.appendChild(idbDatabaseTreeElement);
-
-        this._indexedDBModel.refreshDatabase(databaseId);
+        model.refreshDatabase(databaseId);
     },
 
     /**
@@ -1426,8 +1464,9 @@ WebInspector.IndexedDBTreeElement.prototype = {
     _indexedDBRemoved: function(event)
     {
         var databaseId = /** @type {!WebInspector.IndexedDBModel.DatabaseId} */ (event.data);
+        var model = /** @type {!WebInspector.IndexedDBModel} */ (event.target);
 
-        var idbDatabaseTreeElement = this._idbDatabaseTreeElement(databaseId)
+        var idbDatabaseTreeElement = this._idbDatabaseTreeElement(model, databaseId)
         if (!idbDatabaseTreeElement)
             return;
 
@@ -1442,8 +1481,9 @@ WebInspector.IndexedDBTreeElement.prototype = {
     _indexedDBLoaded: function(event)
     {
         var database = /** @type {!WebInspector.IndexedDBModel.Database} */ (event.data);
+        var model = /** @type {!WebInspector.IndexedDBModel} */ (event.target);
 
-        var idbDatabaseTreeElement = this._idbDatabaseTreeElement(database.databaseId)
+        var idbDatabaseTreeElement = this._idbDatabaseTreeElement(model, database.databaseId)
         if (!idbDatabaseTreeElement)
             return;
 
@@ -1452,13 +1492,14 @@ WebInspector.IndexedDBTreeElement.prototype = {
 
     /**
      * @param {!WebInspector.IndexedDBModel.DatabaseId} databaseId
+     * @param {!WebInspector.IndexedDBModel} model
      * @return {?WebInspector.IDBDatabaseTreeElement}
      */
-    _idbDatabaseTreeElement: function(databaseId)
+    _idbDatabaseTreeElement: function(model, databaseId)
     {
         var index = -1;
         for (var i = 0; i < this._idbDatabaseTreeElements.length; ++i) {
-            if (this._idbDatabaseTreeElements[i]._databaseId.equals(databaseId)) {
+            if (this._idbDatabaseTreeElements[i]._databaseId.equals(databaseId) && this._idbDatabaseTreeElements[i]._model === model) {
                 index = i;
                 break;
             }

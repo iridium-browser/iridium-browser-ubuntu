@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// MSVC++ requires this to be set before any other includes to get M_PI.
+#define _USE_MATH_DEFINES
+
 #include "ui/events/gestures/motion_event_aura.h"
+
+#include <cmath>
 
 #include "base/logging.h"
 #include "ui/events/gestures/gesture_configuration.h"
@@ -18,11 +23,13 @@ MotionEventAura::MotionEventAura(
     const base::TimeTicks& last_touch_time,
     Action cached_action,
     int cached_action_index,
-    const PointData (&active_touches)[GestureSequence::kMaxGesturePoints])
+    int flags,
+    const PointData (&active_touches)[MotionEvent::MAX_TOUCH_POINT_COUNT])
     : pointer_count_(pointer_count),
       last_touch_time_(last_touch_time),
       cached_action_(cached_action),
-      cached_action_index_(cached_action_index) {
+      cached_action_index_(cached_action_index),
+      flags_(flags) {
   DCHECK(pointer_count_);
   for (size_t i = 0; i < pointer_count; ++i)
     active_touches_[i] = active_touches[i];
@@ -41,11 +48,33 @@ MotionEventAura::PointData MotionEventAura::GetPointDataFromTouchEvent(
   point_data.pressure = touch.force();
   point_data.source_device_id = touch.source_device_id();
 
-  // TODO(tdresser): at some point we should start using both radii if they are
-  // available, but for now we use the max.
-  point_data.major_radius = std::max(touch.radius_x(), touch.radius_y());
-  if (!point_data.major_radius)
-    point_data.major_radius = GestureConfiguration::default_radius();
+  float radius_x = touch.radius_x();
+  float radius_y = touch.radius_y();
+  float rotation_angle_rad = touch.rotation_angle() * M_PI / 180.f;
+  DCHECK_GE(radius_x, 0) << "Unexpected x-radius < 0";
+  DCHECK_GE(radius_y, 0) << "Unexpected y-radius < 0";
+  DCHECK(0 <= rotation_angle_rad && rotation_angle_rad <= M_PI_2)
+      << "Unexpected touch rotation angle";
+
+  if (radius_x > radius_y) {
+    // The case radius_x == radius_y is omitted from here on purpose: for
+    // circles, we want to pass the angle (which could be any value in such
+    // cases but always seem to be set to zero) unchanged.
+    point_data.touch_major = 2.f * radius_x;
+    point_data.touch_minor = 2.f * radius_y;
+    point_data.orientation = rotation_angle_rad - M_PI_2;
+  } else {
+    point_data.touch_major = 2.f * radius_y;
+    point_data.touch_minor = 2.f * radius_x;
+    point_data.orientation = rotation_angle_rad;
+  }
+
+  if (!point_data.touch_major) {
+    point_data.touch_major = 2.f * GestureConfiguration::default_radius();
+    point_data.touch_minor = 2.f * GestureConfiguration::default_radius();
+    point_data.orientation = 0;
+  }
+
   return point_data;
 }
 
@@ -70,6 +99,7 @@ void MotionEventAura::OnTouch(const TouchEvent& touch) {
   }
 
   UpdateCachedAction(touch);
+  flags_ = touch.flags();
   last_touch_time_ = touch.time_stamp() + base::TimeTicks();
 }
 
@@ -118,7 +148,17 @@ float MotionEventAura::GetRawY(size_t pointer_index) const {
 
 float MotionEventAura::GetTouchMajor(size_t pointer_index) const {
   DCHECK_LT(pointer_index, pointer_count_);
-  return active_touches_[pointer_index].major_radius * 2;
+  return active_touches_[pointer_index].touch_major;
+}
+
+float MotionEventAura::GetTouchMinor(size_t pointer_index) const {
+  DCHECK_LE(pointer_index, pointer_count_);
+  return active_touches_[pointer_index].touch_minor;
+}
+
+float MotionEventAura::GetOrientation(size_t pointer_index) const {
+  DCHECK_LE(pointer_index, pointer_count_);
+  return active_touches_[pointer_index].orientation;
 }
 
 float MotionEventAura::GetPressure(size_t pointer_index) const {
@@ -137,6 +177,10 @@ int MotionEventAura::GetButtonState() const {
   return 0;
 }
 
+int MotionEventAura::GetFlags() const {
+  return flags_;
+}
+
 base::TimeTicks MotionEventAura::GetEventTime() const {
   return last_touch_time_;
 }
@@ -146,11 +190,12 @@ scoped_ptr<MotionEvent> MotionEventAura::Clone() const {
                                                      last_touch_time_,
                                                      cached_action_,
                                                      cached_action_index_,
+                                                     flags_,
                                                      active_touches_));
 }
 scoped_ptr<MotionEvent> MotionEventAura::Cancel() const {
   return scoped_ptr<MotionEvent>(new MotionEventAura(
-      pointer_count_, last_touch_time_, ACTION_CANCEL, -1, active_touches_));
+      pointer_count_, last_touch_time_, ACTION_CANCEL, -1, 0, active_touches_));
 }
 
 void MotionEventAura::CleanupRemovedTouchPoints(const TouchEvent& event) {
@@ -172,7 +217,9 @@ MotionEventAura::PointData::PointData()
       touch_id(0),
       pressure(0),
       source_device_id(0),
-      major_radius(0) {
+      touch_major(0),
+      touch_minor(0),
+      orientation(0) {
 }
 
 int MotionEventAura::GetSourceDeviceId(size_t pointer_index) const {
@@ -181,7 +228,7 @@ int MotionEventAura::GetSourceDeviceId(size_t pointer_index) const {
 }
 
 void MotionEventAura::AddTouch(const TouchEvent& touch) {
-  if (pointer_count_ == static_cast<size_t>(GestureSequence::kMaxGesturePoints))
+  if (pointer_count_ == MotionEvent::MAX_TOUCH_POINT_COUNT)
     return;
 
   active_touches_[pointer_count_] = GetPointDataFromTouchEvent(touch);

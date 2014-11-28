@@ -43,6 +43,7 @@ def unique_task_to_name(name, dimensions, isolated_hash, now):
 
 
 def capture(cmd):
+  assert all(isinstance(i, str) for i in cmd), cmd
   start = time.time()
   p = subprocess.Popen(
       [sys.executable] + cmd, cwd=ROOT_DIR, stdout=subprocess.PIPE)
@@ -183,7 +184,7 @@ class OptionParser(tools.OptionParserWithLogging):
     if not options.swarming:
       self.error('--swarming is required.')
     auth.process_auth_options(self, options)
-    isolateserver.process_isolate_server_options(self.server_group, options)
+    isolateserver.process_isolate_server_options(self, options)
     options.dimensions = dict(options.dimensions)
     return options, args
 

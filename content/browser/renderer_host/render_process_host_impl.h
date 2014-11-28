@@ -25,11 +25,6 @@
 #include "mojo/public/cpp/bindings/interface_ptr.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
-#if defined(OS_MACOSX)
-#include <IOSurface/IOSurfaceAPI.h>
-#include "base/mac/scoped_cftyperef.h"
-#endif
-
 namespace base {
 class CommandLine;
 class MessageLoop;
@@ -37,11 +32,15 @@ class MessageLoop;
 
 namespace gfx {
 class Size;
-struct GpuMemoryBufferHandle;
+}
+
+namespace IPC {
+class ChannelMojoHost;
 }
 
 namespace content {
 class AudioRendererHost;
+class BrowserCdmManager;
 class BrowserDemuxerAndroid;
 class GpuMessageFilter;
 class MessagePortMessageFilter;
@@ -233,8 +232,14 @@ class CONTENT_EXPORT RenderProcessHostImpl
   }
 #endif
 
+#if defined(ENABLE_BROWSER_CDMS)
+  const scoped_refptr<BrowserCdmManager>& browser_cdm_manager() {
+    return browser_cdm_manager_;
+  }
+#endif
+
   MessagePortMessageFilter* message_port_message_filter() const {
-    return message_port_message_filter_;
+    return message_port_message_filter_.get();
   }
 
   void set_is_isolated_guest_for_testing(bool is_isolated_guest) {
@@ -258,6 +263,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // A proxy for our IPC::Channel that lives on the IO thread (see
   // browser_process.h)
   scoped_ptr<IPC::ChannelProxy> channel_;
+
+  // A host object ChannelMojo needs. The lifetime is bound to
+  // the RenderProcessHostImpl, not the channel.
+  scoped_ptr<IPC::ChannelMojoHost> channel_mojo_host_;
 
   // True if fast shutdown has been performed on this RPH.
   bool fast_shutdown_started_;
@@ -324,17 +333,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
                                  IPC::PlatformFileForTransit file_for_transit);
   void SendDisableAecDumpToRenderer();
 #endif
-
-  // GpuMemoryBuffer allocation handler.
-  void OnAllocateGpuMemoryBuffer(uint32 width,
-                                 uint32 height,
-                                 uint32 internalformat,
-                                 uint32 usage,
-                                 IPC::Message* reply);
-  void GpuMemoryBufferAllocated(IPC::Message* reply,
-                                const gfx::GpuMemoryBufferHandle& handle);
-  void OnDeletedGpuMemoryBuffer(gfx::GpuMemoryBufferType type,
-                                const gfx::GpuMemoryBufferId& id);
 
   scoped_ptr<MojoApplicationHost> mojo_application_host_;
   bool mojo_activation_required_;
@@ -437,6 +435,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
   scoped_refptr<BrowserDemuxerAndroid> browser_demuxer_android_;
 #endif
 
+#if defined(ENABLE_BROWSER_CDMS)
+  scoped_refptr<BrowserCdmManager> browser_cdm_manager_;
+#endif
+
 #if defined(ENABLE_WEBRTC)
   base::Callback<void(const std::string&)> webrtc_log_message_callback_;
 
@@ -454,10 +456,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   base::TimeTicks survive_for_worker_start_time_;
 
   base::WeakPtrFactory<RenderProcessHostImpl> weak_factory_;
-
-#if defined(OS_MACOSX)
-  base::ScopedCFTypeRef<IOSurfaceRef> last_io_surface_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(RenderProcessHostImpl);
 };

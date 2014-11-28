@@ -9,6 +9,14 @@
 
 #include "athena/athena_export.h"
 
+namespace aura {
+class Window;
+}
+
+namespace content {
+class WebContents;
+}
+
 namespace athena {
 
 class ActivityViewModel;
@@ -34,6 +42,8 @@ class ATHENA_EXPORT Activity {
     ACTIVITY_VISIBLE,
     // The activity does not have gpu compositing layers, will not be visible
     // and will be treated as a background priority task.
+    // By transitioning from VISIBLE to INVISIBLE, a screen shot of the current
+    // web content will be taken and replaces the "active content".
     ACTIVITY_INVISIBLE,
     // The activity should surrender additional resources. This has only an
     // effect when the activity is in a loaded state (Visible, Active, Hidden).
@@ -56,7 +66,11 @@ class ATHENA_EXPORT Activity {
     ACTIVITY_MEDIA_STATE_AUDIO_PLAYING  // Audible audio is playing in activity.
   };
 
-  virtual ~Activity();
+  // Shows and activates an activity.
+  static void Show(Activity* activity);
+
+  // Deletes an activity.
+  static void Delete(Activity* activity);
 
   // The Activity retains ownership of the returned view-model.
   virtual ActivityViewModel* GetActivityViewModel() = 0;
@@ -72,6 +86,19 @@ class ATHENA_EXPORT Activity {
 
   // Returns the current media state.
   virtual ActivityMediaState GetMediaState() = 0;
+
+  // Returns the window for the activity. This can be used to determine the
+  // stacking order of this activity against others.
+  // TODO(oshima): Consider returning base::Window window instead,
+  // which has Show/ShowInactive and other control methods.
+  virtual aura::Window* GetWindow() = 0;
+
+  // Returns the web contents used to draw the content of the activity.
+  // This may return NULL if the web content is not available.
+  virtual content::WebContents* GetWebContents() = 0;
+
+ protected:
+  virtual ~Activity() {}
 };
 
 }  // namespace athena

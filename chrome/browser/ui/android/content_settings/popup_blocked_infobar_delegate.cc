@@ -9,10 +9,10 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
-#include "chrome/common/content_settings.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/infobars/core/infobar.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -62,13 +62,8 @@ PopupBlockedInfoBarDelegate::PopupBlockedInfoBarDelegate(
     HostContentSettingsMap* map)
     : ConfirmInfoBarDelegate(), num_popups_(num_popups), url_(url), map_(map) {
   content_settings::SettingInfo setting_info;
-  scoped_ptr<base::Value> setting(
-      map->GetWebsiteSetting(
-          url,
-          url,
-          CONTENT_SETTINGS_TYPE_POPUPS,
-          std::string(),
-          &setting_info));
+  scoped_ptr<base::Value> setting = map->GetWebsiteSetting(
+      url, url, CONTENT_SETTINGS_TYPE_POPUPS, std::string(), &setting_info);
   can_show_popups_ =
       setting_info.source != content_settings::SETTING_SOURCE_POLICY;
 }
@@ -111,4 +106,3 @@ bool PopupBlockedInfoBarDelegate::Accept() {
 
   return true;
 }
-

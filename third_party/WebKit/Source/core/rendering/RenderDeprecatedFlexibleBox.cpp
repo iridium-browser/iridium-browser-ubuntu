@@ -252,7 +252,7 @@ void RenderDeprecatedFlexibleBox::layoutBlock(bool relayoutChildren)
         return;
 
     {
-        // LayoutState needs this deliberate scope to pop before repaint
+        // LayoutState needs this deliberate scope to pop before paint invalidation.
         LayoutState state(*this, locationOffset());
 
         LayoutSize previousSize = size();
@@ -283,8 +283,6 @@ void RenderDeprecatedFlexibleBox::layoutBlock(bool relayoutChildren)
             relayoutChildren = true;
 
         layoutPositionedObjects(relayoutChildren || isDocumentElement());
-
-        computeRegionRangeForBlock(flowThreadContainingBlock());
 
         computeOverflow(oldClientAfterEdge);
     }
@@ -1003,7 +1001,7 @@ LayoutUnit RenderDeprecatedFlexibleBox::allowedChildFlex(RenderBox* child, bool 
             // FIXME: For now just handle fixed values.
             LayoutUnit maxWidth = LayoutUnit::max();
             LayoutUnit width = contentWidthForChild(child);
-            if (!child->style()->maxWidth().isUndefined() && child->style()->maxWidth().isFixed())
+            if (child->style()->maxWidth().isFixed())
                 maxWidth = child->style()->maxWidth().value();
             else if (child->style()->maxWidth().type() == Intrinsic)
                 maxWidth = child->maxPreferredLogicalWidth();
@@ -1016,7 +1014,7 @@ LayoutUnit RenderDeprecatedFlexibleBox::allowedChildFlex(RenderBox* child, bool 
             // FIXME: For now just handle fixed values.
             LayoutUnit maxHeight = LayoutUnit::max();
             LayoutUnit height = contentHeightForChild(child);
-            if (!child->style()->maxHeight().isUndefined() && child->style()->maxHeight().isFixed())
+            if (child->style()->maxHeight().isFixed())
                 maxHeight = child->style()->maxHeight().value();
             if (maxHeight == LayoutUnit::max())
                 return maxHeight;
@@ -1058,9 +1056,17 @@ const char* RenderDeprecatedFlexibleBox::renderName() const
         return "RenderDeprecatedFlexibleBox (floating)";
     if (isOutOfFlowPositioned())
         return "RenderDeprecatedFlexibleBox (positioned)";
-    // FIXME: Temporary hack while the new generated content system is being implemented.
-    if (isPseudoElement())
-        return "RenderDeprecatedFlexibleBox (generated)";
+    // FIXME: Cleanup isPseudoElement duplication with other renderName methods.
+    // crbug.com/415653
+    if (isPseudoElement()) {
+        if (style()->styleType() == BEFORE)
+            return "RenderDeprecatedFlexibleBox (pseudo:before)";
+        if (style()->styleType() == AFTER)
+            return "RenderDeprecatedFlexibleBox (pseudo:after)";
+        if (style()->styleType() == BACKDROP)
+            return "RenderDeprecatedFlexibleBox (pseudo:backdrop)";
+        ASSERT_NOT_REACHED();
+    }
     if (isAnonymous())
         return "RenderDeprecatedFlexibleBox (generated)";
     if (isRelPositioned())

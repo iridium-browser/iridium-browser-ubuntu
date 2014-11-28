@@ -57,20 +57,8 @@ void FuseFs::Destroy() {
     fuse_ops_->destroy(fuse_user_data_);
 }
 
-Error FuseFs::Access(const Path& path, int a_mode) {
-  if (!fuse_ops_->access) {
-    LOG_TRACE("fuse_ops_->access is NULL.");
-    return ENOSYS;
-  }
-
-  int result = fuse_ops_->access(path.Join().c_str(), a_mode);
-  if (result < 0)
-    return -result;
-
-  return 0;
-}
-
-Error FuseFs::Open(const Path& path, int open_flags, ScopedNode* out_node) {
+Error FuseFs::OpenWithMode(const Path& path, int open_flags, mode_t mode,
+                           ScopedNode* out_node) {
   std::string path_str = path.Join();
   const char* path_cstr = path_str.c_str();
   int result = 0;
@@ -82,7 +70,6 @@ Error FuseFs::Open(const Path& path, int open_flags, ScopedNode* out_node) {
   if (open_flags & (O_CREAT | O_EXCL)) {
     // According to the FUSE docs, open() is not called when O_CREAT or O_EXCL
     // is passed.
-    mode_t mode = S_IRALL | S_IWALL;
     if (fuse_ops_->create) {
       result = fuse_ops_->create(path_cstr, mode, &fi);
       if (result < 0)
@@ -114,6 +101,8 @@ Error FuseFs::Open(const Path& path, int open_flags, ScopedNode* out_node) {
         *out_node = node;
         return 0;
       }
+      // Get mode.
+      mode = statbuf.st_mode & ~S_IFMT;
     }
 
     // Existing file.
@@ -142,6 +131,7 @@ Error FuseFs::Open(const Path& path, int open_flags, ScopedNode* out_node) {
   Error error = node->Init(open_flags);
   if (error)
     return error;
+  node->SetMode(mode);
 
   *out_node = node;
   return 0;
@@ -257,6 +247,34 @@ Error FuseFsNode::GetStat(struct stat* stat) {
   return 0;
 }
 
+Error FuseFsNode::Futimens(const struct timespec times[2]) {
+  int result;
+  if (!fuse_ops_->utimens) {
+    LOG_TRACE("fuse_ops_->utimens is NULL.");
+    return ENOSYS;
+  }
+
+  result = fuse_ops_->utimens(path_.c_str(), times);
+  if (result < 0)
+    return -result;
+
+  return result;
+}
+
+Error FuseFsNode::Fchmod(mode_t mode) {
+  int result;
+  if (!fuse_ops_->chmod) {
+    LOG_TRACE("fuse_ops_->chmod is NULL.");
+    return ENOSYS;
+  }
+
+  result = fuse_ops_->chmod(path_.c_str(), mode);
+  if (result < 0)
+    return -result;
+
+  return result;
+}
+
 Error FuseFsNode::VIoctl(int request, va_list args) {
   LOG_ERROR("Ioctl not implemented for fusefs.");
   return ENOSYS;
@@ -341,13 +359,11 @@ Error FileFuseFsNode::Read(const HandleAttr& attr,
   if (result < 0)
     return -result;
 
-  // Fuse docs say that a read() call will always completely fill the buffer
-  // (padding with zeroes) unless the direct_io filesystem flag is set.
   // TODO(binji): support the direct_io flag
   if (static_cast<size_t>(result) < count)
     memset(&cbuf[result], 0, count - result);
 
-  *out_bytes = count;
+  *out_bytes = result;
   return 0;
 }
 
@@ -365,9 +381,6 @@ Error FileFuseFsNode::Write(const HandleAttr& attr,
   if (result < 0)
     return -result;
 
-  // Fuse docs say that a write() call will always write the entire buffer
-  // unless the direct_io filesystem flag is set.
-  // TODO(binji): What should we do if the user breaks this contract? Warn?
   // TODO(binji): support the direct_io flag
   *out_bytes = result;
   return 0;

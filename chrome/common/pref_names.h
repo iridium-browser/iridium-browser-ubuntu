@@ -126,7 +126,6 @@ extern const char kWebKitLoadsImagesAutomatically[];
 extern const char kWebKitPluginsEnabled[];
 extern const char kWebKitDomPasteEnabled[];
 extern const char kWebKitShrinksStandaloneImagesToFit[];
-extern const char kWebKitInspectorSettings[];
 extern const char kWebKitUsesUniversalDetector[];
 extern const char kWebKitTextAreasAreResizable[];
 extern const char kWebKitJavaEnabled[];
@@ -140,8 +139,6 @@ extern const char kWebKitPasswordEchoEnabled[];
 #endif
 extern const char kSafeBrowsingEnabled[];
 extern const char kSafeBrowsingExtendedReportingEnabled[];
-extern const char kSafeBrowsingDownloadFeedbackEnabled[];
-extern const char kSafeBrowsingReportingEnabled[];
 extern const char kSafeBrowsingProceedAnywayDisabled[];
 extern const char kSafeBrowsingIncidentReportSent[];
 extern const char kSafeBrowsingIncidentsSent[];
@@ -229,6 +226,7 @@ extern const char kUseSharedProxies[];
 extern const char kDisplayPowerState[];
 extern const char kDisplayProperties[];
 extern const char kSecondaryDisplays[];
+extern const char kDisplayRotationLock[];
 extern const char kSessionUserActivitySeen[];
 extern const char kSessionStartTime[];
 extern const char kSessionLengthLimit[];
@@ -324,10 +322,10 @@ extern const char kShowUpdatePromotionInfoBar[];
 #endif
 extern const char kUseCustomChromeFrame[];
 extern const char kDefaultContentSettings[];
+extern const char kOverrideContentSettings[];
 extern const char kContentSettingsClearOnExitMigrated[];
 extern const char kContentSettingsVersion[];
 extern const char kContentSettingsPatternPairs[];
-extern const char kContentSettingsDefaultWhitelistVersion[];
 extern const char kContentSettingsPluginWhitelist[];
 extern const char kBlockThirdPartyCookies[];
 extern const char kClearSiteDataOnExit[];
@@ -349,11 +347,12 @@ extern const char kEnableHyperlinkAuditing[];
 extern const char kEnableReferrers[];
 extern const char kEnableDoNotTrack[];
 
+extern const char kImportAutofillFormData[];
 extern const char kImportBookmarks[];
 extern const char kImportHistory[];
 extern const char kImportHomepage[];
-extern const char kImportSearchEngine[];
 extern const char kImportSavedPasswords[];
+extern const char kImportSearchEngine[];
 
 extern const char kProfileAvatarIndex[];
 extern const char kProfileUsingDefaultName[];
@@ -376,6 +375,8 @@ extern const char kDefaultSupervisedUserFilteringBehavior[];
 
 extern const char kSupervisedUserCreationAllowed[];
 extern const char kSupervisedUsers[];
+
+extern const char kProfileResetPromptMementoInProfilePrefs[];
 
 extern const char kMessageCenterDisabledExtensionIds[];
 extern const char kMessageCenterDisabledSystemComponentIds[];
@@ -405,6 +406,7 @@ extern const char kCertRevocationCheckingEnabled[];
 extern const char kCertRevocationCheckingRequiredLocalAnchors[];
 extern const char kSSLVersionMin[];
 extern const char kSSLVersionMax[];
+extern const char kSSLVersionFallbackMin[];
 extern const char kCipherSuiteBlacklist[];
 extern const char kDisableSSLRecordSplitting[];
 
@@ -439,6 +441,7 @@ extern const char kProfilesLastActive[];
 extern const char kProfilesNumCreated[];
 extern const char kProfileInfoCache[];
 extern const char kProfileCreatedByVersion[];
+extern const char kProfileResetPromptMementosInLocalState[];
 
 extern const char kStabilityPageLoadCount[];
 extern const char kStabilityRendererCrashCount[];
@@ -471,8 +474,7 @@ extern const char kBrowserSuppressDefaultBrowserPrompt[];
 extern const char kBrowserWindowPlacement[];
 extern const char kBrowserWindowPlacementPopup[];
 extern const char kTaskManagerWindowPlacement[];
-extern const char kKeywordEditorWindowPlacement[];
-extern const char kPreferencesWindowPlacement[];
+extern const char kAppWindowPlacement[];
 extern const char kMemoryCacheSize[];
 
 extern const char kDownloadDefaultDirectory[];
@@ -683,7 +685,7 @@ extern const char kUsedPolicyCertificates[];
 extern const char kServerBackedDeviceState[];
 extern const char kCustomizationDefaultWallpaperURL[];
 extern const char kLogoutStartedLast[];
-extern const char kConsumerManagementEnrollmentState[];
+extern const char kConsumerManagementEnrollmentStage[];
 #endif
 
 extern const char kClearPluginLSODataEnabled[];
@@ -732,7 +734,6 @@ extern const char kHardwareAccelerationModePrevious[];
 extern const char kDevicePolicyRefreshRate[];
 
 extern const char kFactoryResetRequested[];
-extern const char kRollbackRequested[];
 
 extern const char kMessageCenterShowedFirstRunBalloon[];
 extern const char kMessageCenterShowIcon[];
@@ -761,16 +762,6 @@ extern const char kShowLogoutButtonInTray[];
 extern const char kMaxSeparationForGestureTouchesInPixels[];
 extern const char kSemiLongPressTimeInSeconds[];
 extern const char kTabScrubActivationDelayInMS[];
-extern const char kFlingAccelerationCurveCoefficient0[];
-extern const char kFlingAccelerationCurveCoefficient1[];
-extern const char kFlingAccelerationCurveCoefficient2[];
-extern const char kFlingAccelerationCurveCoefficient3[];
-extern const char kFlingCurveTouchpadAlpha[];
-extern const char kFlingCurveTouchpadBeta[];
-extern const char kFlingCurveTouchpadGamma[];
-extern const char kFlingCurveTouchscreenAlpha[];
-extern const char kFlingCurveTouchscreenBeta[];
-extern const char kFlingCurveTouchscreenGamma[];
 extern const char kFlingMaxCancelToDownTimeInMs[];
 extern const char kFlingMaxTapGapTimeInMs[];
 extern const char kOverscrollHorizontalThresholdComplete[];
@@ -824,6 +815,9 @@ extern const char kPartnerBookmarkMappings[];
 
 extern const char kQuickCheckEnabled[];
 extern const char kBrowserGuestModeEnabled[];
+extern const char kBrowserAddPersonEnabled[];
+
+extern const char kEasyUnlockHardlockState[];
 
 }  // namespace prefs
 

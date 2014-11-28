@@ -54,6 +54,7 @@ class Parser {
   scoped_ptr<ParseNode> Group(Token token);
   scoped_ptr<ParseNode> Not(Token token);
   scoped_ptr<ParseNode> List(Token token);
+  scoped_ptr<ParseNode> BlockComment(Token token);
 
   // |InfixFunc|s used in parsing expressions.
   scoped_ptr<ParseNode> BinaryOperator(scoped_ptr<ParseNode> left, Token token);
@@ -65,13 +66,22 @@ class Parser {
 
   // Helper to parse a comma separated list, optionally allowing trailing
   // commas (allowed in [] lists, not in function calls).
-  scoped_ptr<ListNode> ParseList(Token::Type stop_before,
+  scoped_ptr<ListNode> ParseList(Token start_token,
+                                 Token::Type stop_before,
                                  bool allow_trailing_comma);
 
   scoped_ptr<ParseNode> ParseFile();
   scoped_ptr<ParseNode> ParseStatement();
   scoped_ptr<BlockNode> ParseBlock();
   scoped_ptr<ParseNode> ParseCondition();
+
+  // Generates a pre- and post-order traversal of the tree.
+  void TraverseOrder(const ParseNode* root,
+                     std::vector<const ParseNode*>* pre,
+                     std::vector<const ParseNode*>* post);
+
+  // Attach comments to nearby syntax.
+  void AssignComments(ParseNode* file);
 
   bool IsAssignment(const ParseNode* node) const;
   bool IsStatementBreak(Token::Type token_type) const;
@@ -90,7 +100,9 @@ class Parser {
   bool at_end() const { return cur_ >= tokens_.size(); }
   bool has_error() const { return err_->has_error(); }
 
-  const std::vector<Token>& tokens_;
+  std::vector<Token> tokens_;
+  std::vector<Token> line_comment_tokens_;
+  std::vector<Token> suffix_comment_tokens_;
 
   static ParserHelper expressions_[Token::NUM_TYPES];
 

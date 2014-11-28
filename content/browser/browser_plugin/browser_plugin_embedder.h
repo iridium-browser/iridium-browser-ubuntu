@@ -67,30 +67,25 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   // operation, if there's any.
   void SystemDragEnded();
 
+  // Used to handle special keyboard events.
+  bool HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+
  private:
   explicit BrowserPluginEmbedder(WebContentsImpl* web_contents);
 
   BrowserPluginGuestManager* GetBrowserPluginGuestManager() const;
 
+  void ClearGuestDragStateIfApplicable();
+
   bool DidSendScreenRectsCallback(WebContents* guest_web_contents);
 
   bool SetZoomLevelCallback(double level, WebContents* guest_web_contents);
 
-  bool UnlockMouseIfNecessaryCallback(const NativeWebKeyboardEvent& event,
-                                      WebContents* guest);
-
-  // Called by the content embedder when a guest exists with the provided
-  // |instance_id|.
-  void OnGuestCallback(int instance_id,
-                       const BrowserPluginHostMsg_Attach_Params& params,
-                       const base::DictionaryValue* extra_params,
-                       WebContents* guest_web_contents);
+  bool UnlockMouseIfNecessaryCallback(bool* mouse_unlocked, WebContents* guest);
 
   // Message handlers.
-
   void OnAttach(int instance_id,
-                const BrowserPluginHostMsg_Attach_Params& params,
-                const base::DictionaryValue& extra_params);
+                const BrowserPluginHostMsg_Attach_Params& params);
   void OnPluginAtPositionResponse(int instance_id,
                                   int request_id,
                                   const gfx::Point& position);
@@ -105,6 +100,9 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   // Pointer to the guest that started the drag, used to forward necessary drag
   // status messages to the correct guest.
   base::WeakPtr<BrowserPluginGuest> guest_started_drag_;
+
+  // Keeps track of "dragend" state.
+  bool guest_drag_ending_;
 
   base::WeakPtrFactory<BrowserPluginEmbedder> weak_ptr_factory_;
 

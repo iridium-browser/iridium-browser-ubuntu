@@ -9,9 +9,12 @@
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/application/application_impl.h"
+#include "mojo/services/html_viewer/webclipboard_impl.h"
 #include "mojo/services/html_viewer/webcookiejar_impl.h"
+#include "mojo/services/html_viewer/websockethandle_impl.h"
 #include "mojo/services/html_viewer/webthread_impl.h"
 #include "mojo/services/html_viewer/weburlloader_impl.h"
 #include "net/base/data_url.h"
@@ -58,6 +61,10 @@ BlinkPlatformImpl::BlinkPlatformImpl(ApplicationImpl* app)
   CookieStorePtr cookie_store;
   network_service_->GetCookieStore(Get(&cookie_store));
   cookie_jar_.reset(new WebCookieJarImpl(cookie_store.Pass()));
+
+  ClipboardPtr clipboard;
+  app->ConnectToService("mojo:mojo_clipboard", &clipboard);
+  clipboard_.reset(new WebClipboardImpl(clipboard.Pass()));
 }
 
 BlinkPlatformImpl::~BlinkPlatformImpl() {
@@ -65,6 +72,10 @@ BlinkPlatformImpl::~BlinkPlatformImpl() {
 
 blink::WebCookieJar* BlinkPlatformImpl::cookieJar() {
   return cookie_jar_.get();
+}
+
+blink::WebClipboard* BlinkPlatformImpl::clipboard() {
+  return clipboard_.get();
 }
 
 blink::WebMimeRegistry* BlinkPlatformImpl::mimeRegistry() {
@@ -136,6 +147,14 @@ void BlinkPlatformImpl::callOnMainThread(
   main_loop_->PostTask(FROM_HERE, base::Bind(func, context));
 }
 
+bool BlinkPlatformImpl::isThreadedCompositingEnabled() {
+  return true;
+}
+
+blink::WebCompositorSupport* BlinkPlatformImpl::compositorSupport() {
+  return &compositor_support_;
+}
+
 blink::WebScrollbarBehavior* BlinkPlatformImpl::scrollbarBehavior() {
   return &scrollbar_behavior_;
 }
@@ -148,6 +167,10 @@ const unsigned char* BlinkPlatformImpl::getTraceCategoryEnabledFlag(
 
 blink::WebURLLoader* BlinkPlatformImpl::createURLLoader() {
   return new WebURLLoaderImpl(network_service_.get());
+}
+
+blink::WebSocketHandle* BlinkPlatformImpl::createWebSocketHandle() {
+  return new WebSocketHandleImpl(network_service_.get());
 }
 
 blink::WebString BlinkPlatformImpl::userAgent() {
@@ -197,6 +220,10 @@ blink::WebThread* BlinkPlatformImpl::currentThread() {
   thread = new WebThreadImplForMessageLoop(message_loop.get());
   current_thread_slot_.Set(thread);
   return thread;
+}
+
+void BlinkPlatformImpl::yieldCurrentThread() {
+  base::PlatformThread::YieldCurrentThread();
 }
 
 blink::WebWaitableEvent* BlinkPlatformImpl::createWaitableEvent() {

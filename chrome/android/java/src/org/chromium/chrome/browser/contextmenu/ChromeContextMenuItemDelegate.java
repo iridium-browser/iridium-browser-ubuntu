@@ -6,7 +6,7 @@ package org.chromium.chrome.browser.contextmenu;
 
 import org.chromium.chrome.browser.Tab;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content_public.Referrer;
+import org.chromium.content_public.common.Referrer;
 
 /**
  * A delegate responsible for taking actions based on context menu selections.
@@ -31,10 +31,11 @@ public interface ChromeContextMenuItemDelegate {
 
     /**
      * Called when the context menu is trying to start a download.
+     * @param url Url of the download item.
      * @param isLink Whether or not the download is a link (as opposed to an image/video).
      * @return       Whether or not a download should actually be started.
      */
-    boolean startDownload(boolean isLink);
+    boolean startDownload(String url, boolean isLink);
 
     /**
      * Called when the {@code url} should be opened in a new tab with the same incognito state as

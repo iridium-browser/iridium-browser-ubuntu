@@ -39,10 +39,7 @@ namespace blink {
 
 LayerRectList::LayerRectList()
 {
-    ScriptWrappable::init(this);
 }
-
-DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(LayerRectList)
 
 unsigned LayerRectList::length() const
 {

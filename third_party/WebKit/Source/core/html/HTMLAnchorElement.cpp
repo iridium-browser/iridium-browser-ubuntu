@@ -63,8 +63,8 @@ HTMLAnchorElement::HTMLAnchorElement(const QualifiedName& tagName, Document& doc
     : HTMLElement(tagName, document)
     , m_linkRelations(0)
     , m_cachedVisitedLinkHash(0)
+    , m_wasFocusedByMouse(false)
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<HTMLAnchorElement> HTMLAnchorElement::create(Document& document)
@@ -84,12 +84,22 @@ bool HTMLAnchorElement::supportsFocus() const
     return isLink() || HTMLElement::supportsFocus();
 }
 
+bool HTMLAnchorElement::shouldHaveFocusAppearance() const
+{
+    return !m_wasFocusedByMouse || HTMLElement::supportsFocus();
+}
+
+void HTMLAnchorElement::dispatchFocusEvent(Element* oldFocusedElement, FocusType type)
+{
+    if (type != FocusTypePage)
+        m_wasFocusedByMouse = type == FocusTypeMouse;
+    HTMLElement::dispatchFocusEvent(oldFocusedElement, type);
+}
+
 bool HTMLAnchorElement::isMouseFocusable() const
 {
-    // Links are focusable by default, but only allow links with tabindex or contenteditable to be mouse focusable.
-    // https://bugs.webkit.org/show_bug.cgi?id=26856
     if (isLink())
-        return HTMLElement::supportsFocus();
+        return supportsFocus();
 
     return HTMLElement::isMouseFocusable();
 }
@@ -182,13 +192,16 @@ void HTMLAnchorElement::parseAttribute(const QualifiedName& name, const AtomicSt
     if (name == hrefAttr) {
         bool wasLink = isLink();
         setIsLink(!value.isNull());
-        if (wasLink != isLink()) {
-            didAffectSelector(AffectedSelectorLink | AffectedSelectorVisited | AffectedSelectorEnabled);
-            if (wasLink && treeScope().adjustedFocusedElement() == this) {
-                // We might want to call blur(), but it's dangerous to dispatch
-                // events here.
-                document().setNeedsFocusedElementCheck();
-            }
+        if (wasLink || isLink()) {
+            pseudoStateChanged(CSSSelector::PseudoLink);
+            pseudoStateChanged(CSSSelector::PseudoVisited);
+            if (wasLink != isLink())
+                pseudoStateChanged(CSSSelector::PseudoEnabled);
+        }
+        if (wasLink && !isLink() && treeScope().adjustedFocusedElement() == this) {
+            // We might want to call blur(), but it's dangerous to dispatch
+            // events here.
+            document().setNeedsFocusedElementCheck();
         }
         if (isLink()) {
             String parsedURL = stripLeadingAndTrailingHTMLSpaces(value);

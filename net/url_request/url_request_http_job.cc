@@ -64,7 +64,7 @@ class URLRequestHttpJob::HttpFilterContext : public FilterContext {
   virtual base::Time GetRequestTime() const OVERRIDE;
   virtual bool IsCachedContent() const OVERRIDE;
   virtual bool IsDownload() const OVERRIDE;
-  virtual bool IsSdchResponse() const OVERRIDE;
+  virtual bool SdchResponseExpected() const OVERRIDE;
   virtual int64 GetByteReadCount() const OVERRIDE;
   virtual int GetResponseCode() const OVERRIDE;
   virtual const URLRequestContext* GetURLRequestContext() const OVERRIDE;
@@ -124,7 +124,7 @@ void URLRequestHttpJob::HttpFilterContext::ResetSdchResponseToFalse() {
   job_->sdch_dictionary_advertised_ = false;
 }
 
-bool URLRequestHttpJob::HttpFilterContext::IsSdchResponse() const {
+bool URLRequestHttpJob::HttpFilterContext::SdchResponseExpected() const {
   return job_->sdch_dictionary_advertised_;
 }
 
@@ -447,7 +447,8 @@ void URLRequestHttpJob::StartTransactionInternal() {
                      base::Unretained(this)));
 
       if (!throttling_entry_.get() ||
-          !throttling_entry_->ShouldRejectRequest(*request_)) {
+          !throttling_entry_->ShouldRejectRequest(*request_,
+                                                  network_delegate())) {
         rv = transaction_->Start(
             &request_info_, start_callback_, request_->net_log());
         start_time_ = base::TimeTicks::Now();
@@ -520,11 +521,11 @@ void URLRequestHttpJob::AddExtraHeaders() {
     if (!advertise_sdch) {
       // Tell the server what compression formats we support (other than SDCH).
       request_info_.extra_headers.SetHeader(
-          HttpRequestHeaders::kAcceptEncoding, "gzip,deflate");
+          HttpRequestHeaders::kAcceptEncoding, "gzip, deflate");
     } else {
       // Include SDCH in acceptable list.
       request_info_.extra_headers.SetHeader(
-          HttpRequestHeaders::kAcceptEncoding, "gzip,deflate,sdch");
+          HttpRequestHeaders::kAcceptEncoding, "gzip, deflate, sdch");
       if (!avail_dictionaries.empty()) {
         request_info_.extra_headers.SetHeader(
             kAvailDictionaryHeader,
@@ -806,11 +807,9 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
       context->fraudulent_certificate_reporter();
     if (reporter != NULL) {
       const SSLInfo& ssl_info = transaction_->GetResponseInfo()->ssl_info;
-      bool sni_available = SSLConfigService::IsSNIAvailable(
-          context->ssl_config_service());
       const std::string& host = request_->url().host();
 
-      reporter->SendReport(host, ssl_info, sni_available);
+      reporter->SendReport(host, ssl_info);
     }
   }
 
@@ -861,10 +860,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
       const URLRequestContext* context = request_->context();
       TransportSecurityState* state = context->transport_security_state();
       const bool fatal =
-          state &&
-          state->ShouldSSLErrorsBeFatal(
-              request_info_.url.host(),
-              SSLConfigService::IsSNIAvailable(context->ssl_config_service()));
+          state && state->ShouldSSLErrorsBeFatal(request_info_.url.host());
       NotifySSLCertificateError(
           transaction_->GetResponseInfo()->ssl_info, fatal);
     }
@@ -1023,7 +1019,7 @@ Filter* URLRequestHttpJob::SetupFilter() const {
     encoding_types.push_back(Filter::ConvertEncodingToType(encoding_type));
   }
 
-  if (filter_context_->IsSdchResponse()) {
+  if (filter_context_->SdchResponseExpected()) {
     // We are wary of proxies that discard or damage SDCH encoding.  If a server
     // explicitly states that this is not SDCH content, then we can correct our
     // assumption that this is an SDCH response, and avoid the need to recover
@@ -1305,7 +1301,7 @@ void URLRequestHttpJob::DoneReadingRedirectResponse() {
     } else {
       // Otherwise, |override_response_headers_| must be non-NULL and contain
       // bogus headers indicating a redirect.
-      DCHECK(override_response_headers_);
+      DCHECK(override_response_headers_.get());
       DCHECK(override_response_headers_->IsRedirect(NULL));
       transaction_->StopCaching();
     }

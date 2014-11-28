@@ -11,7 +11,7 @@
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/browser/chromeos/file_system_provider/request_value.h"
-#include "webkit/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/async_file_util.h"
 
 namespace base {
 class FilePath;
@@ -32,7 +32,7 @@ class CreateFile : public Operation {
   CreateFile(extensions::EventRouter* event_router,
              const ProvidedFileSystemInfo& file_system_info,
              const base::FilePath& file_path,
-             const fileapi::AsyncFileUtil::StatusCallback& callback);
+             const storage::AsyncFileUtil::StatusCallback& callback);
   virtual ~CreateFile();
 
   // Operation overrides.
@@ -46,7 +46,7 @@ class CreateFile : public Operation {
 
  private:
   base::FilePath file_path_;
-  const fileapi::AsyncFileUtil::StatusCallback callback_;
+  const storage::AsyncFileUtil::StatusCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateFile);
 };

@@ -6,6 +6,7 @@
 #define UI_EVENTS_GESTURE_DETECTION_UI_GESTURE_PROVIDER_H_
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_vector.h"
 #include "ui/events/event.h"
 #include "ui/events/events_export.h"
 #include "ui/events/gesture_detection/filtered_gesture_provider.h"
@@ -46,7 +47,6 @@ class EVENTS_EXPORT GestureProviderAura : public GestureProviderClient {
   MotionEventAura pointer_state_;
   FilteredGestureProvider filtered_gesture_provider_;
 
-  int last_touch_event_flags_;
   ui::LatencyInfo last_touch_event_latency_info_;
   bool handling_event_;
   ScopedVector<GestureEvent> pending_gestures_;

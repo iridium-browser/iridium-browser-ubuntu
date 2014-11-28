@@ -41,6 +41,7 @@
 #include "core/css/MediaList.h"
 #include "core/css/MediaQuery.h"
 #include "core/css/MediaValuesDynamic.h"
+#include "core/css/PointerProperties.h"
 #include "core/css/resolver/MediaQueryResult.h"
 #include "core/dom/NodeRenderStyle.h"
 #include "core/frame/FrameHost.h"
@@ -117,6 +118,26 @@ static bool applyRestrictor(MediaQuery::Restrictor r, bool value)
     return r == MediaQuery::Not ? !value : value;
 }
 
+bool MediaQueryEvaluator::eval(const MediaQuery* query, MediaQueryResultList* viewportDependentMediaQueryResults) const
+{
+    if (!mediaTypeMatch(query->mediaType()))
+        return applyRestrictor(query->restrictor(), false);
+
+    const ExpressionHeapVector& expressions = query->expressions();
+    // Iterate through expressions, stop if any of them eval to false (AND semantics).
+    size_t i = 0;
+    for (; i < expressions.size(); ++i) {
+        bool exprResult = eval(expressions.at(i).get());
+        if (viewportDependentMediaQueryResults && expressions.at(i)->isViewportDependent())
+            viewportDependentMediaQueryResults->append(adoptRefWillBeNoop(new MediaQueryResult(*expressions.at(i), exprResult)));
+        if (!exprResult)
+            break;
+    }
+
+    // Assume true if we are at the end of the list, otherwise assume false.
+    return applyRestrictor(query->restrictor(), expressions.size() == i);
+}
+
 bool MediaQueryEvaluator::eval(const MediaQuerySet* querySet, MediaQueryResultList* viewportDependentMediaQueryResults) const
 {
     if (!querySet)
@@ -128,27 +149,8 @@ bool MediaQueryEvaluator::eval(const MediaQuerySet* querySet, MediaQueryResultLi
 
     // Iterate over queries, stop if any of them eval to true (OR semantics).
     bool result = false;
-    for (size_t i = 0; i < queries.size() && !result; ++i) {
-        MediaQuery* query = queries[i].get();
-
-        if (mediaTypeMatch(query->mediaType())) {
-            const ExpressionHeapVector& expressions = query->expressions();
-            // Iterate through expressions, stop if any of them eval to false (AND semantics).
-            size_t j = 0;
-            for (; j < expressions.size(); ++j) {
-                bool exprResult = eval(expressions.at(j).get());
-                if (viewportDependentMediaQueryResults && expressions.at(j)->isViewportDependent())
-                    viewportDependentMediaQueryResults->append(adoptRefWillBeNoop(new MediaQueryResult(*expressions.at(j), exprResult)));
-                if (!exprResult)
-                    break;
-            }
-
-            // Assume true if we are at the end of the list, otherwise assume false.
-            result = applyRestrictor(query->restrictor(), expressions.size() == j);
-        } else {
-            result = applyRestrictor(query->restrictor(), false);
-        }
-    }
+    for (size_t i = 0; i < queries.size() && !result; ++i)
+        result = eval(queries[i].get(), viewportDependentMediaQueryResults);
 
     return result;
 }
@@ -520,25 +522,18 @@ static bool transform3dMediaFeatureEval(const MediaQueryExpValue& value, MediaFe
 
 static bool hoverMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix, const MediaValues& mediaValues)
 {
-    MediaValues::PointerDeviceType pointer = mediaValues.pointer();
+    HoverType hover = mediaValues.primaryHoverType();
 
-    // If we're on a port that hasn't explicitly opted into providing pointer device information
-    // (or otherwise can't be confident in the pointer hardware available), then behave exactly
-    // as if this feature feature isn't supported.
-    if (pointer == MediaValues::UnknownPointer)
-        return false;
-
-    // FIXME: Remove the old code once we're sure this doesn't break anything significant.
     if (RuntimeEnabledFeatures::hoverMediaQueryKeywordsEnabled()) {
         if (!value.isValid())
-            return pointer != MediaValues::NoPointer;
+            return hover != HoverTypeNone;
 
         if (!value.isID)
             return false;
 
-        return (pointer == MediaValues::NoPointer && value.id == CSSValueNone)
-            || (pointer == MediaValues::TouchPointer && value.id == CSSValueOnDemand)
-            || (pointer == MediaValues::MousePointer && value.id == CSSValueHover);
+        return (hover == HoverTypeNone && value.id == CSSValueNone)
+            || (hover == HoverTypeOnDemand && value.id == CSSValueOnDemand)
+            || (hover == HoverTypeHover && value.id == CSSValueHover);
     } else {
         float number = 1;
         if (value.isValid()) {
@@ -546,31 +541,77 @@ static bool hoverMediaFeatureEval(const MediaQueryExpValue& value, MediaFeatureP
                 return false;
         }
 
-        return (pointer == MediaValues::NoPointer && !number)
-            || (pointer == MediaValues::TouchPointer && !number)
-            || (pointer == MediaValues::MousePointer && number == 1);
+        return (hover == HoverTypeNone && !number)
+            || (hover == HoverTypeOnDemand && !number)
+            || (hover == HoverTypeHover && number == 1);
+    }
+}
+
+static bool anyHoverMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix, const MediaValues& mediaValues)
+{
+    if (!RuntimeEnabledFeatures::anyPointerMediaQueriesEnabled())
+        return false;
+
+    int availableHoverTypes = mediaValues.availableHoverTypes();
+
+    if (!value.isValid())
+        return availableHoverTypes & ~HoverTypeNone;
+
+    if (!value.isID)
+        return false;
+
+    switch (value.id) {
+    case CSSValueNone:
+        return availableHoverTypes & HoverTypeNone;
+    case CSSValueOnDemand:
+        return availableHoverTypes & HoverTypeOnDemand;
+    case CSSValueHover:
+        return availableHoverTypes & HoverTypeHover;
+    default:
+        ASSERT_NOT_REACHED();
+        return false;
     }
 }
 
 static bool pointerMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix, const MediaValues& mediaValues)
 {
-    MediaValues::PointerDeviceType pointer = mediaValues.pointer();
-
-    // If we're on a port that hasn't explicitly opted into providing pointer device information
-    // (or otherwise can't be confident in the pointer hardware available), then behave exactly
-    // as if this feature feature isn't supported.
-    if (pointer == MediaValues::UnknownPointer)
-        return false;
+    PointerType pointer = mediaValues.primaryPointerType();
 
     if (!value.isValid())
-        return pointer != MediaValues::NoPointer;
+        return pointer != PointerTypeNone;
 
     if (!value.isID)
         return false;
 
-    return (pointer == MediaValues::NoPointer && value.id == CSSValueNone)
-        || (pointer == MediaValues::TouchPointer && value.id == CSSValueCoarse)
-        || (pointer == MediaValues::MousePointer && value.id == CSSValueFine);
+    return (pointer == PointerTypeNone && value.id == CSSValueNone)
+        || (pointer == PointerTypeCoarse && value.id == CSSValueCoarse)
+        || (pointer == PointerTypeFine && value.id == CSSValueFine);
+}
+
+static bool anyPointerMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix, const MediaValues& mediaValues)
+{
+    if (!RuntimeEnabledFeatures::anyPointerMediaQueriesEnabled())
+        return false;
+
+    int availablePointers = mediaValues.availablePointerTypes();
+
+    if (!value.isValid())
+        return availablePointers & ~PointerTypeNone;
+
+    if (!value.isID)
+        return false;
+
+    switch (value.id) {
+    case CSSValueCoarse:
+        return availablePointers & PointerTypeCoarse;
+    case CSSValueFine:
+        return availablePointers & PointerTypeFine;
+    case CSSValueNone:
+        return availablePointers & PointerTypeNone;
+    default:
+        ASSERT_NOT_REACHED();
+        return false;
+    }
 }
 
 static bool scanMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix, const MediaValues& mediaValues)

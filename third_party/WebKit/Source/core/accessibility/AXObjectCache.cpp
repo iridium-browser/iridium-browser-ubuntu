@@ -57,6 +57,7 @@
 #include "core/accessibility/AXTableRow.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
@@ -103,9 +104,6 @@ void AXComputedObjectAttributeCache::clear()
 {
     m_idMapping.clear();
 }
-
-bool AXObjectCache::gAccessibilityEnabled = false;
-bool AXObjectCache::gInlineTextBoxAccessibility = false;
 
 AXObjectCache::AXObjectCache(Document& document)
     : m_document(document)
@@ -158,7 +156,7 @@ AXObject* AXObjectCache::focusedImageMapUIElement(HTMLAreaElement* areaElement)
 
 AXObject* AXObjectCache::focusedUIElementForPage(const Page* page)
 {
-    if (!gAccessibilityEnabled)
+    if (!page->settings().accessibilityEnabled())
         return 0;
 
     // Cross-process accessibility is not yet implemented.
@@ -451,7 +449,7 @@ AXObject* AXObjectCache::getOrCreate(AbstractInlineTextBox* inlineTextBox)
 
 AXObject* AXObjectCache::rootObject()
 {
-    if (!gAccessibilityEnabled)
+    if (!accessibilityEnabled())
         return 0;
 
     return getOrCreate(m_document.view());
@@ -864,7 +862,7 @@ void AXObjectCache::handleAttributeChanged(const QualifiedName& attrName, Elemen
     else if (attrName == forAttr && isHTMLLabelElement(*element))
         labelChanged(element);
 
-    if (!attrName.localName().string().startsWith("aria-"))
+    if (!attrName.localName().startsWith("aria-"))
         return;
 
     if (attrName == aria_activedescendantAttr)
@@ -900,7 +898,7 @@ void AXObjectCache::recomputeIsIgnored(RenderObject* renderer)
 
 void AXObjectCache::inlineTextBoxesUpdated(RenderObject* renderer)
 {
-    if (!gInlineTextBoxAccessibility)
+    if (!inlineTextBoxAccessibilityEnabled())
         return;
 
     // Only update if the accessibility object already exists and it's
@@ -911,6 +909,27 @@ void AXObjectCache::inlineTextBoxesUpdated(RenderObject* renderer)
             postNotification(renderer, AXChildrenChanged, true);
         }
     }
+}
+
+Settings* AXObjectCache::settings()
+{
+    return m_document.settings();
+}
+
+bool AXObjectCache::accessibilityEnabled()
+{
+    Settings* settings = this->settings();
+    if (!settings)
+        return false;
+    return settings->accessibilityEnabled();
+}
+
+bool AXObjectCache::inlineTextBoxAccessibilityEnabled()
+{
+    Settings* settings = this->settings();
+    if (!settings)
+        return false;
+    return settings->inlineTextBoxAccessibilityEnabled();
 }
 
 const Element* AXObjectCache::rootAXEditableElement(const Node* node)
@@ -972,7 +991,7 @@ void AXObjectCache::postPlatformNotification(AXObject* obj, AXNotification notif
     if (!obj || !obj->document() || !obj->documentFrameView() || !obj->documentFrameView()->frame().page())
         return;
 
-    ChromeClient& client = obj->documentFrameView()->frame().page()->chrome().client();
+    ChromeClient& client = obj->document()->axObjectCacheOwner().page()->chrome().client();
 
     if (notification == AXActiveDescendantChanged
         && obj->document()->focusedElement()

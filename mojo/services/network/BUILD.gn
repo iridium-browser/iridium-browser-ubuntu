@@ -2,12 +2,31 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-source_set("network") {
+# GYP version: mojo/mojo_services.gypi:mojo_network_service
+shared_library("network") {
+  output_name = "mojo_network_service"
+
+  deps = [
+    ":lib",
+    "//base",
+    "//mojo/application",
+    "//mojo/public/c/system:for_shared_library",
+    "//mojo/public/cpp/bindings:bindings",
+    "//mojo/services/public/cpp/network",
+    "//mojo/services/public/interfaces/network",
+  ]
+
+  sources = [ "main.cc" ]
+}
+
+# GYP version: mojo/mojo_services.gypi:mojo_network_service_lib
+source_set("lib") {
   deps = [
     "//base",
+    "//mojo/application",
     "//mojo/common",
     "//mojo/environment:chromium",
-    "//mojo/public/cpp/application:chromium",
+    "//mojo/services/public/cpp/network",
     "//mojo/services/public/interfaces/network",
     "//net",
     "//url",
@@ -22,5 +41,7 @@ source_set("network") {
     "network_service_impl.h",
     "url_loader_impl.cc",
     "url_loader_impl.h",
+    "web_socket_impl.cc",
+    "web_socket_impl.h",
   ]
 }

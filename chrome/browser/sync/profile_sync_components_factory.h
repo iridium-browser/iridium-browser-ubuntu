@@ -22,7 +22,6 @@ class Profile;
 class ProfileSyncService;
 
 namespace browser_sync {
-class LocalDeviceInfoProvider;
 class SyncBackendHost;
 }  // namespace browser_sync
 
@@ -33,8 +32,9 @@ class DataTypeEncryptionHandler;
 class DataTypeErrorHandler;
 class DataTypeManager;
 class DataTypeManagerObserver;
-class FailedDataTypesHandler;
+class DataTypeStatusTable;
 class GenericChangeProcessor;
+class LocalDeviceInfoProvider;
 class SyncPrefs;
 }  // namespace sync_driver
 
@@ -87,8 +87,7 @@ class ProfileSyncComponentsFactory
       const sync_driver::DataTypeController::TypeMap* controllers,
       const sync_driver::DataTypeEncryptionHandler* encryption_handler,
       browser_sync::SyncBackendHost* backend,
-      sync_driver::DataTypeManagerObserver* observer,
-      sync_driver::FailedDataTypesHandler* failed_data_types_handler) = 0;
+      sync_driver::DataTypeManagerObserver* observer) = 0;
 
   // Creating this in the factory helps us mock it out in testing.
   virtual browser_sync::SyncBackendHost* CreateSyncBackendHost(
@@ -99,7 +98,7 @@ class ProfileSyncComponentsFactory
       const base::FilePath& sync_folder) = 0;
 
   // Creating this in the factory helps us mock it out in testing.
-  virtual scoped_ptr<browser_sync::LocalDeviceInfoProvider>
+  virtual scoped_ptr<sync_driver::LocalDeviceInfoProvider>
       CreateLocalDeviceInfoProvider() = 0;
 
   // Legacy datatypes that need to be converted to the SyncableService API.

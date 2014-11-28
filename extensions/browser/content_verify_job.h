@@ -42,7 +42,9 @@ class ContentVerifyJob : public base::RefCountedThreadSafe<ContentVerifyJob> {
     NO_HASHES_FOR_FILE,
 
     // Some of the content read did not match the expected hash.
-    HASH_MISMATCH
+    HASH_MISMATCH,
+
+    FAILURE_REASON_MAX
   };
   typedef base::Callback<void(FailureReason)> FailureCallback;
 
@@ -76,7 +78,18 @@ class ContentVerifyJob : public base::RefCountedThreadSafe<ContentVerifyJob> {
     virtual FailureReason DoneReading(const std::string& extension_id) = 0;
   };
 
+  class TestObserver {
+   public:
+    virtual void JobStarted(const std::string& extension_id,
+                            const base::FilePath& relative_path) = 0;
+
+    virtual void JobFinished(const std::string& extension_id,
+                             const base::FilePath& relative_path,
+                             bool failed) = 0;
+  };
+
   static void SetDelegateForTests(TestDelegate* delegate);
+  static void SetObserverForTests(TestObserver* observer);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ContentVerifyJob);

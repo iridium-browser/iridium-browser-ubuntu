@@ -82,7 +82,7 @@ public class AndroidLogger implements Logger {
    * This should be a value from the {@link Log} constants.
    */
   private static int minimumLogLevel = 0;
-  
+
   /**
    * The maximum length of an Android logging tag. There's no formal constants but the constraint is
    * mentioned in the Log javadoc
@@ -213,7 +213,7 @@ public class AndroidLogger implements Logger {
 
   /**
    * Add additional constraint on logging. In addition to the normal check of
-   * {@link Log.isLoggable(String, int)} for logging, this also requires a minimum
+   * {@link Log#isLoggable(String, int)} for logging, this also requires a minimum
    * log level of the given value. This should be a value from the {@link Log} constants.
    */
   public static void setMinimumAndroidLogLevel(int logLevel) {

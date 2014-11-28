@@ -31,6 +31,7 @@
 #include "config.h"
 #include "core/inspector/InspectorRuntimeAgent.h"
 
+#include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScriptDebugServer.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/inspector/InjectedScript.h"
@@ -141,13 +142,24 @@ void InspectorRuntimeAgent::getProperties(ErrorString* errorString, const String
 void InspectorRuntimeAgent::releaseObject(ErrorString*, const String& objectId)
 {
     InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
-    if (!injectedScript.isEmpty())
-        injectedScript.releaseObject(objectId);
+    if (injectedScript.isEmpty())
+        return;
+    bool pausingOnNextStatement = m_scriptDebugServer->pausingOnNextStatement();
+    if (pausingOnNextStatement)
+        m_scriptDebugServer->setPauseOnNextStatement(false);
+    injectedScript.releaseObject(objectId);
+    if (pausingOnNextStatement)
+        m_scriptDebugServer->setPauseOnNextStatement(true);
 }
 
 void InspectorRuntimeAgent::releaseObjectGroup(ErrorString*, const String& objectGroup)
 {
+    bool pausingOnNextStatement = m_scriptDebugServer->pausingOnNextStatement();
+    if (pausingOnNextStatement)
+        m_scriptDebugServer->setPauseOnNextStatement(false);
     m_injectedScriptManager->releaseObjectGroup(objectGroup);
+    if (pausingOnNextStatement)
+        m_scriptDebugServer->setPauseOnNextStatement(true);
 }
 
 void InspectorRuntimeAgent::run(ErrorString*)
@@ -200,14 +212,17 @@ void InspectorRuntimeAgent::disable(ErrorString* errorString)
     m_state->setBoolean(InspectorRuntimeAgentState::runtimeEnabled, false);
 }
 
-void InspectorRuntimeAgent::addExecutionContextToFrontend(ScriptState* scriptState, bool isPageContext, const String& name, const String& frameId)
+void InspectorRuntimeAgent::addExecutionContextToFrontend(ScriptState* scriptState, bool isPageContext, const String& origin, const String& frameId)
 {
     int executionContextId = injectedScriptManager()->injectedScriptIdFor(scriptState);
     m_scriptStateToId.set(scriptState, executionContextId);
+    DOMWrapperWorld& world = scriptState->world();
+    String humanReadableName = world.isIsolatedWorld() ? world.isolatedWorldHumanReadableName() : "";
     m_frontend->executionContextCreated(ExecutionContextDescription::create()
         .setId(executionContextId)
         .setIsPageContext(isPageContext)
-        .setName(name)
+        .setName(humanReadableName)
+        .setOrigin(origin)
         .setFrameId(frameId)
         .release());
 }

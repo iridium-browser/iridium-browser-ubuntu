@@ -51,10 +51,6 @@ const char kWindowTypeLongKey[] = "windowType";
 const char kZoomSettingsMode[] = "mode";
 const char kZoomSettingsScope[] = "scope";
 
-const char kFormatValueJpeg[] = "jpeg";
-const char kFormatValuePng[] = "png";
-const char kMimeTypeJpeg[] = "image/jpeg";
-const char kMimeTypePng[] = "image/png";
 const char kShowStateValueNormal[] = "normal";
 const char kShowStateValueMinimized[] = "minimized";
 const char kShowStateValueMaximized[] = "maximized";
@@ -103,10 +99,6 @@ const char kInvalidWindowTypeError[] = "Invalid value for type";
 const char kInvalidWindowStateError[] = "Invalid value for state";
 const char kScreenshotsDisabled[] = "Taking screenshots has been disabled";
 
-const char kNoCodeOrFileToExecuteError[] = "No source code or file specified.";
-const char kMoreThanOneValuesError[] = "Code and file should not be specified "
-    "at the same time in the second argument.";
-const char kLoadFileError[] = "Failed to load file: \"*\". ";
 const char kCannotDetermineLanguageOfUnloadedTab[] =
     "Cannot determine language: tab not loaded";
 

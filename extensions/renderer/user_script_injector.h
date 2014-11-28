@@ -25,7 +25,8 @@ class UserScriptInjector : public ScriptInjector,
                            public UserScriptSet::Observer {
  public:
   UserScriptInjector(const UserScript* user_script,
-                     UserScriptSet* user_script_set);
+                     UserScriptSet* user_script_set,
+                     bool is_declarative);
   virtual ~UserScriptInjector();
 
  private:
@@ -66,10 +67,14 @@ class UserScriptInjector : public ScriptInjector,
   // The id of the associated user script. We cache this because when we update
   // the |script_| associated with this injection, the old referance may be
   // deleted.
-  int64 script_id_;
+  int script_id_;
 
   // The associated extension id, preserved for the same reason as |script_id|.
   std::string extension_id_;
+
+  // Indicates whether or not this script is declarative. This influences which
+  // script permissions are checked before injection.
+  bool is_declarative_;
 
   ScopedObserver<UserScriptSet, UserScriptSet::Observer>
       user_script_set_observer_;

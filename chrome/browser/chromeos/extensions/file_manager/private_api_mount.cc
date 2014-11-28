@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -15,7 +15,7 @@
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/api/file_browser_private.h"
+#include "chrome/common/extensions/api/file_manager_private.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/task_util.h"
@@ -23,7 +23,7 @@
 
 using chromeos::disks::DiskMountManager;
 using content::BrowserThread;
-namespace file_browser_private = extensions::api::file_browser_private;
+namespace file_manager_private = extensions::api::file_manager_private;
 
 namespace extensions {
 
@@ -45,8 +45,8 @@ void EnsureReadableFilePermissionOnBlockingPool(
 
 }  // namespace
 
-bool FileBrowserPrivateAddMountFunction::RunAsync() {
-  using file_browser_private::AddMount::Params;
+bool FileManagerPrivateAddMountFunction::RunAsync() {
+  using file_manager_private::AddMount::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -73,11 +73,13 @@ bool FileBrowserPrivateAddMountFunction::RunAsync() {
     if (!file_system)
       return false;
 
-    file_system->MarkCacheFileAsMounted(
-        drive::util::ExtractDrivePath(path),
-        base::Bind(
-            &FileBrowserPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted,
-            this, path.BaseName()));
+    // Ensure that the cache file exists.
+    const base::FilePath drive_path = drive::util::ExtractDrivePath(path);
+    file_system->GetFile(
+        drive_path,
+        base::Bind(&FileManagerPrivateAddMountFunction::RunAfterGetDriveFile,
+                   this,
+                   drive_path));
   } else {
     file_manager::VolumeManager* volume_manager =
         file_manager::VolumeManager::Get(GetProfile());
@@ -102,7 +104,7 @@ bool FileBrowserPrivateAddMountFunction::RunAsync() {
           base::Bind(&EnsureReadableFilePermissionOnBlockingPool,
                      path,
                      google_apis::CreateRelayCallback(
-                         base::Bind(&FileBrowserPrivateAddMountFunction::
+                         base::Bind(&FileManagerPrivateAddMountFunction::
                                         RunAfterMarkCacheFileAsMounted,
                                     this,
                                     path.BaseName()))));
@@ -114,7 +116,34 @@ bool FileBrowserPrivateAddMountFunction::RunAsync() {
   return true;
 }
 
-void FileBrowserPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
+void FileManagerPrivateAddMountFunction::RunAfterGetDriveFile(
+    const base::FilePath& drive_path,
+    drive::FileError error,
+    const base::FilePath& cache_path,
+    scoped_ptr<drive::ResourceEntry> entry) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (error != drive::FILE_ERROR_OK) {
+    SendResponse(false);
+    return;
+  }
+
+  drive::FileSystemInterface* const file_system =
+      drive::util::GetFileSystemByProfile(GetProfile());
+  if (!file_system) {
+    SendResponse(false);
+    return;
+  }
+
+  file_system->MarkCacheFileAsMounted(
+      drive_path,
+      base::Bind(
+          &FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted,
+          this,
+          drive_path.BaseName()));
+}
+
+void FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
     const base::FilePath& display_name,
     drive::FileError error,
     const base::FilePath& file_path) {
@@ -138,8 +167,8 @@ void FileBrowserPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
       chromeos::MOUNT_TYPE_ARCHIVE);
 }
 
-bool FileBrowserPrivateRemoveMountFunction::RunAsync() {
-  using file_browser_private::RemoveMount::Params;
+bool FileManagerPrivateRemoveMountFunction::RunAsync() {
+  using file_manager_private::RemoveMount::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -194,7 +223,7 @@ bool FileBrowserPrivateRemoveMountFunction::RunAsync() {
   return true;
 }
 
-bool FileBrowserPrivateGetVolumeMetadataListFunction::RunAsync() {
+bool FileManagerPrivateGetVolumeMetadataListFunction::RunAsync() {
   if (args_->GetSize())
     return false;
 
@@ -202,10 +231,10 @@ bool FileBrowserPrivateGetVolumeMetadataListFunction::RunAsync() {
       file_manager::VolumeManager::Get(GetProfile())->GetVolumeInfoList();
 
   std::string log_string;
-  std::vector<linked_ptr<file_browser_private::VolumeMetadata> > result;
+  std::vector<linked_ptr<file_manager_private::VolumeMetadata> > result;
   for (size_t i = 0; i < volume_info_list.size(); ++i) {
-    linked_ptr<file_browser_private::VolumeMetadata> volume_metadata(
-        new file_browser_private::VolumeMetadata);
+    linked_ptr<file_manager_private::VolumeMetadata> volume_metadata(
+        new file_manager_private::VolumeMetadata);
     file_manager::util::VolumeInfoToVolumeMetadata(
         GetProfile(), volume_info_list[i], volume_metadata.get());
     result.push_back(volume_metadata);
@@ -223,7 +252,7 @@ bool FileBrowserPrivateGetVolumeMetadataListFunction::RunAsync() {
   }
 
   results_ =
-      file_browser_private::GetVolumeMetadataList::Results::Create(result);
+      file_manager_private::GetVolumeMetadataList::Results::Create(result);
   SendResponse(true);
   return true;
 }

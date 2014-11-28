@@ -82,7 +82,6 @@ class MEDIA_EXPORT ChunkDemuxerStream : public DemuxerStream {
   // DemuxerStream methods.
   virtual void Read(const ReadCB& read_cb) OVERRIDE;
   virtual Type type() OVERRIDE;
-  virtual void EnableBitstreamConverter() OVERRIDE;
   virtual AudioDecoderConfig audio_decoder_config() OVERRIDE;
   virtual VideoDecoderConfig video_decoder_config() OVERRIDE;
   virtual bool SupportsConfigChanges() OVERRIDE;
@@ -93,8 +92,8 @@ class MEDIA_EXPORT ChunkDemuxerStream : public DemuxerStream {
   TextTrackConfig text_track_config();
 
   // Sets the memory limit, in bytes, on the SourceBufferStream.
-  void set_memory_limit_for_testing(int memory_limit) {
-    stream_->set_memory_limit_for_testing(memory_limit);
+  void set_memory_limit(int memory_limit) {
+    stream_->set_memory_limit(memory_limit);
   }
 
   bool supports_partial_append_window_trimming() const {
@@ -138,6 +137,8 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
     kReachedIdLimit,  // Reached ID limit. We can't handle any more IDs.
   };
 
+  typedef base::Closure InitSegmentReceivedCB;
+
   // |open_cb| Run when Initialize() is called to signal that the demuxer
   //   is ready to receive media data via AppenData().
   // |need_key_cb| Run when the demuxer determines that an encryption key is
@@ -159,10 +160,10 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   virtual void Initialize(DemuxerHost* host,
                           const PipelineStatusCB& cb,
                           bool enable_text_tracks) OVERRIDE;
-  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual void Seek(base::TimeDelta time, const PipelineStatusCB&  cb) OVERRIDE;
-  virtual DemuxerStream* GetStream(DemuxerStream::Type type) OVERRIDE;
   virtual base::Time GetTimelineOffset() const OVERRIDE;
+  virtual DemuxerStream* GetStream(DemuxerStream::Type type) OVERRIDE;
   virtual base::TimeDelta GetStartTime() const OVERRIDE;
   virtual Liveness GetLiveness() const OVERRIDE;
 
@@ -213,10 +214,13 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   // |append_window_start| and |append_window_end| correspond to the MSE spec's
   // similarly named source buffer attributes that are used in coded frame
   // processing.
+  // |init_segment_received_cb| is run for each newly successfully parsed
+  // initialization segment.
   void AppendData(const std::string& id, const uint8* data, size_t length,
                   base::TimeDelta append_window_start,
                   base::TimeDelta append_window_end,
-                  base::TimeDelta* timestamp_offset);
+                  base::TimeDelta* timestamp_offset,
+                  const InitSegmentReceivedCB& init_segment_received_cb);
 
   // Aborts parsing the current segment and reset the parser to a state where
   // it can accept a new segment.
@@ -264,9 +268,10 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
 
   void Shutdown();
 
-  // Sets the memory limit on each stream. |memory_limit| is the
-  // maximum number of bytes each stream is allowed to hold in its buffer.
-  void SetMemoryLimitsForTesting(int memory_limit);
+  // Sets the memory limit on each stream of a specific type.
+  // |memory_limit| is the maximum number of bytes each stream of type |type|
+  // is allowed to hold in its buffer.
+  void SetMemoryLimits(DemuxerStream::Type type, int memory_limit);
 
   // Returns the ranges representing the buffered data in the demuxer.
   // TODO(wolenetz): Remove this method once MediaSourceDelegate no longer

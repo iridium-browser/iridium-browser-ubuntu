@@ -478,7 +478,8 @@ BOOL __stdcall LaunchGoogleChrome() {
         if (process_handle.IsValid()) {
           HANDLE process_token = NULL;
           HANDLE user_token = NULL;
-          if (::OpenProcessToken(process_handle, TOKEN_DUPLICATE | TOKEN_QUERY,
+          if (::OpenProcessToken(process_handle.Get(),
+                                 TOKEN_DUPLICATE | TOKEN_QUERY,
                                  &process_token) &&
               ::DuplicateTokenEx(process_token,
                                  TOKEN_IMPERSONATE | TOKEN_QUERY |
@@ -672,7 +673,7 @@ BOOL __stdcall CanOfferReactivation(const wchar_t* brand_code,
   return TRUE;
 }
 
-BOOL __stdcall ReactivateChrome(wchar_t* brand_code,
+BOOL __stdcall ReactivateChrome(const wchar_t* brand_code,
                                 int shell_mode,
                                 DWORD* error_code) {
   BOOL result = FALSE;

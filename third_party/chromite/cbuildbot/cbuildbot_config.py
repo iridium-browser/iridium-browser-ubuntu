@@ -3,8 +3,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-
 """Configuration options for various cbuildbot builders."""
+
+from __future__ import print_function
 
 # Disable relative import warning from pylint.
 # pylint: disable=W0403
@@ -294,7 +295,12 @@ _settings = dict(
   health_threshold=0,
 
 # health_alert_recipients -- List of email addresses to send health alerts to
-#                            for this builder.
+#                            for this builder. It supports automatic email
+#                            adderss lookup for the following sheriff types:
+#                                'tree': tree sheriffs
+#                                'build': build deputies
+#                                'lab': lab sheriffs
+#                                'chrome': chrome gardeners
   health_alert_recipients=[],
 
 # internal -- Whether this is an internal build config.
@@ -343,10 +349,12 @@ _settings = dict(
 #                      and chromeos_version.sh. See bug chromium-os:14649
   chromeos_official=False,
 
-# usepkg_setup_board -- Use binary packages for setup_board. (emerge --usepkg)
-  usepkg_setup_board=True,
+# usepkg_toolchain -- Use binary packages for building the toolchain.
+#                     (emerge --getbinpkg)
+  usepkg_toolchain=True,
 
-# usepkg_build_packages -- Use binary packages for build_packages.
+# usepkg_build_packages -- Use binary packages for build_packages and
+#                          setup_board.
   usepkg_build_packages=True,
 
 # build_packages_in_background -- If set, run BuildPackages in the background
@@ -584,10 +592,6 @@ _settings = dict(
 #                overlay-<board>/scripts/disk_layout.json for possible values.
   disk_layout=None,
 
-# disk_vm_layout -- layout of image_to_vm.sh resulting image. See
-#                   disk_layout for more info.
-  disk_vm_layout='2gb-rootfs-updatable',
-
 # postsync_patch -- If enabled, run the PatchChanges stage.  Enabled by default.
 #                   Can be overridden by the --nopatch flag.
   postsync_patch=True,
@@ -704,7 +708,7 @@ class HWTestConfig(object):
 
     async_kwargs = kwargs.copy()
     async_kwargs.update(async_dict)
-    async_kwargs['priority'] = constants.HWTEST_DEFAULT_PRIORITY
+    async_kwargs['priority'] = constants.HWTEST_POST_BUILD_PRIORITY
     async_kwargs['retry'] = False
     async_kwargs['async'] = True
 
@@ -952,7 +956,7 @@ full = _config(
   # Full builds are test builds to show that we can build from scratch,
   # so use settings to build from scratch, and archive the results.
 
-  usepkg_setup_board=False,
+  usepkg_toolchain=False,
   usepkg_build_packages=False,
   chrome_sdk=True,
   chroot_replace=True,
@@ -1070,6 +1074,10 @@ brillo_public_full.add_config('gizmo-full',
   boards=['gizmo'],
 )
 
+brillo_public_full.add_config('mipsel-o32-generic-full',
+  boards=['mipsel-o32-generic'],
+)
+
 # This adds Chrome branding.
 official_chrome = _config(
   useflags=[constants.USE_CHROME_INTERNAL],
@@ -1093,9 +1101,7 @@ _cros_sdk = full_prebuilts.add_config('chromiumos-sdk',
 asan = _config(
   chroot_replace=True,
   profile='asan',
-  useflags=['asan'], # see profile for more
   disk_layout='2gb-rootfs',
-  disk_vm_layout='2gb-rootfs-updatable',
   vm_tests=[constants.SMOKE_SUITE_TEST_TYPE],
 )
 
@@ -1136,9 +1142,28 @@ paladin.add_config('amd64-generic-paladin',
   paladin_builder_name='amd64-generic paladin',
 )
 
+paladin.add_config('amd64-generic_freon-paladin',
+  boards=['amd64-generic_freon'],
+  paladin_builder_name='amd64-generic_freon paladin',
+  important=False,
+)
+
 paladin.add_config('x32-generic-paladin',
   boards=['x32-generic'],
   paladin_builder_name='x32-generic paladin',
+  important=False,
+)
+
+paladin.add_config('arm-generic-paladin',
+  non_testable_builder,
+  boards=['arm-generic'],
+  paladin_builder_name='arm-generic paladin',
+  important=False,
+)
+
+paladin.add_config('arm-generic_freon-paladin',
+  boards=['arm-generic_freon'],
+  paladin_builder_name='arm-generic_freon paladin',
   important=False,
 )
 
@@ -1156,9 +1181,9 @@ paladin.add_config('mipsel-o32-generic-paladin',
   boards=['mipsel-o32-generic'],
   important=False,
   paladin_builder_name='mipsel-o32-generic paladin',
-  # TODO(benchan): Re-enable 'usepkg_setup_board' when the pre-built toolchain
+  # TODO(benchan): Re-enable 'usepkg_toolchain' when the pre-built toolchain
   # for MIPS is available (crbug.com/380329).
-  usepkg_setup_board=False,
+  usepkg_toolchain=False,
 )
 
 incremental.add_config('amd64-generic-asan-paladin',
@@ -1263,13 +1288,30 @@ chrome_pfq.add_config('falco-chrome-pfq',
   important=True,
 )
 
+chrome_pfq.add_config('link_freon-chrome-pfq',
+  boards=['link_freon'],
+  hw_tests=[],
+  # This build can't run vm_tests, bug 387507
+  vm_tests=[],
+  important=False,
+  usepkg_toolchain=False,
+  usepkg_build_packages=False,
+)
+
+chrome_pfq.add_config('rush-chrome-pfq',
+  non_testable_builder,
+  boards=['rush'],
+  important=False,
+  usepkg_toolchain=False,
+  usepkg_build_packages=False,
+)
+
 chrome_try = _config(
   build_type=constants.CHROME_PFQ_TYPE,
   chrome_rev=constants.CHROME_REV_TOT,
   use_lkgm=True,
   important=False,
   manifest_version=False,
-  disk_vm_layout='usb',
 )
 
 chromium_info = chromium_pfq.derive(
@@ -1281,7 +1323,6 @@ chromium_info = chromium_pfq.derive(
 
 telemetry_info = telemetry.derive(
   chrome_try,
-  disk_vm_layout='2gb-rootfs-updatable',
 )
 
 chrome_info = chromium_info.derive(
@@ -1375,25 +1416,32 @@ chromium_info_daisy.add_config('daisy-webrtc-chromium-pfq-informational',
 
 _arm_release_boards = frozenset([
   'daisy',
+  'daisy_freon',
   'daisy_skate',
   'daisy_spring',
   'nyan',
   'nyan_big',
   'nyan_blaze',
   'nyan_freon',
+  'nyan_kitty',
   'peach_pi',
   'peach_pit',
   'rush',
+  'veyron_pinky',
 ])
 _arm_full_boards = _arm_release_boards | frozenset([
   'arm-generic',
+  'arm-generic_freon',
   'arm64-generic',
 ])
 
 _x86_release_boards = frozenset([
+  'auron',
   'bayleybay',
   'beltino',
   'butterfly',
+  'candy',
+  'cranky',
   'clapper',
   'enguarde',
   'expresso',
@@ -1405,6 +1453,7 @@ _x86_release_boards = frozenset([
   'lemmings',
   'leon',
   'link',
+  'link_freon',
   'lumpy',
   'mccloud',
   'monroe',
@@ -1432,6 +1481,7 @@ _x86_release_boards = frozenset([
 ])
 _x86_full_boards = _x86_release_boards | frozenset([
   'amd64-generic',
+  'amd64-generic_freon',
   'gizmo',
   'x32-generic',
   'x86-generic',
@@ -1557,8 +1607,9 @@ internal_pfq = internal.derive(official_chrome, pfq,
 
 # Because branch directories may be shared amongst builders on multiple
 # branches, they must delete the chroot every time they run.
+# They also potentially need to build [new] Chrome.
 internal_pfq_branch = internal_pfq.derive(branch=True, chroot_replace=True,
-                                          trybot_list=False)
+                                          trybot_list=False, sync_chrome=True)
 
 internal_paladin = internal.derive(official_chrome, paladin,
   manifest=constants.OFFICIAL_MANIFEST,
@@ -1597,6 +1648,7 @@ pre_cq = internal_paladin.derive(
   build_packages_in_background=True,
   pre_cq=True,
   archive=False,
+  chrome_sdk=False,
   debug_symbols=False,
   prebuilts=False,
   cpe_export=False,
@@ -1611,19 +1663,36 @@ compile_only_pre_cq = pre_cq.derive(
   unittests=False,
 )
 
+# The Pre-CQ tests 6 platforms. Because we test so many platforms in parallel,
+# it is important to delay the launch of some builds in order to conserve RAM.
+# We build rambi and daisy in parallel first. When daisy finishes BuildPackages,
+# the remaining boards start BuildPackages. Because Rambi runs VMTest and this
+# takes a long time, the remaining boards still finish well before Rambi
+# finishes.
 # TODO(davidjames): Add peach_pit, nyan, and beaglebone to pre-cq.
 _config.add_group(constants.PRE_CQ_BUILDER_NAME,
-  # amd64 w/kernel 3.10.
+  # amd64 w/kernel 3.10. This builder runs VMTest so it's going to be
+  # the slowest one.
   pre_cq.add_config('rambi-pre-cq', boards=['rambi']),
+
   # daisy w/kernel 3.8.
   pre_cq.add_config('daisy_spring-pre-cq', non_testable_builder,
                     boards=['daisy_spring']),
 
+  # samus w/kernel 3.14. We set build_packages_in_background=False here, so
+  # that subsequent boards (lumpy, parrot, duck) don't get launched until
+  # after samus finishes BuildPackages.
+  compile_only_pre_cq.add_config('samus-pre-cq', boards=['samus'],
+                                 build_packages_in_background=False),
+
   # lumpy w/kernel 3.8.
-  compile_only_pre_cq.add_config('lumpy-pre-cq', non_testable_builder,
-                                 boards=['lumpy']),
+  compile_only_pre_cq.add_config('lumpy-pre-cq', boards=['lumpy']),
+
   # amd64 w/kernel 3.4.
   compile_only_pre_cq.add_config('parrot-pre-cq', boards=['parrot']),
+
+  # brillo config.
+  pre_cq.add_config('duck-pre-cq', brillo, boards=['duck']),
 )
 
 internal_paladin.add_config('pre-cq-launcher',
@@ -1634,7 +1703,8 @@ internal_paladin.add_config('pre-cq-launcher',
   manifest_version=False,
   # Every Pre-CQ launch failure should send out an alert.
   health_threshold=1,
-  health_alert_recipients=['chromeos-build-alerts@google.com'],
+  health_alert_recipients=['chromeos-build-alerts@google.com',
+                           'tree', 'build'],
 )
 
 internal_paladin.add_config(constants.BRANCH_UTIL_CONFIG,
@@ -1657,10 +1727,13 @@ internal_incremental = internal.derive(
   description='Incremental Builds (internal)',
 )
 
-internal_pfq_branch.add_config('x86-alex-pre-flight-branch',
+internal_pfq_branch.add_config('lumpy-pre-flight-branch',
   master=True,
   push_overlays=constants.BOTH_OVERLAYS,
-  boards=['x86-alex'],
+  boards=['lumpy'],
+  afdo_generate=True,
+  afdo_update_ebuild=True,
+  hw_tests=[AFDORecordTest()],
 )
 
 # A test-ap image is just a test image with a special profile enabled.
@@ -1691,7 +1764,8 @@ internal_paladin.add_config('master-paladin',
   # configuration in the board_config.py code.
   paladin_builder_name='CQ master',
   health_threshold=3,
-  health_alert_recipients=['chromeos-build-alerts@google.com'],
+  health_alert_recipients=['chromeos-build-alerts@google.com',
+                           'tree', 'build', 'lab'],
   sanity_check_slaves=['link-tot-paladin'],
   trybot_list=False,
 )
@@ -1735,10 +1809,28 @@ internal_paladin.add_config('beltino-paladin',
 )
 
 # x86 full compile
+internal_paladin.add_config('auron-paladin',
+  boards=['auron'],
+  paladin_builder_name='auron paladin',
+  important=False,
+)
+
 internal_paladin.add_config('butterfly-paladin',
   full_paladin,
   boards=['butterfly'],
   paladin_builder_name='butterfly paladin',
+)
+
+internal_paladin.add_config('candy-paladin',
+  boards=['candy'],
+  paladin_builder_name='candy paladin',
+  important=False,
+)
+
+internal_paladin.add_config('cranky-paladin',
+  boards=['cranky'],
+  paladin_builder_name='cranky paladin',
+  important=False,
 )
 
 internal_paladin.add_config('clapper-paladin',
@@ -1905,7 +1997,12 @@ internal_paladin.add_config('x86-zgb-paladin',
 
 internal_paladin.add_config('link_freon-paladin',
   boards=['link_freon'],
+  hw_tests=[],
+  # This build can't run vm_tests, bug 387507
+  vm_tests=[],
+  important=False,
   paladin_builder_name='link_freon paladin',
+  usepkg_build_packages=False,
 )
 
 internal_paladin.add_config('stumpy_moblab-paladin',
@@ -1924,8 +2021,13 @@ internal_notest_paladin.add_config('daisy-paladin',
   hw_tests=HWTestConfig.DefaultListCQ(),
 )
 
+internal_notest_paladin.add_config('daisy_freon-paladin',
+  boards=['daisy_freon'],
+  important=False,
+  paladin_builder_name='daisy_freon paladin',
+)
+
 internal_notest_paladin.add_config('daisy_spring-paladin',
-  full_paladin,
   boards=['daisy_spring'],
   paladin_builder_name='daisy_spring paladin',
   hw_tests=HWTestConfig.DefaultListCQ(),
@@ -1938,13 +2040,14 @@ internal_notest_paladin.add_config('peach_pit-paladin',
 )
 
 internal_notest_paladin.add_config('nyan-paladin',
+  full_paladin,
   boards=['nyan'],
   paladin_builder_name='nyan paladin',
 )
 
 internal_notest_paladin.add_config('rush-paladin',
   boards=['rush'],
-  usepkg_setup_board=False,
+  usepkg_toolchain=False,
   paladin_builder_name='rush paladin',
   important=False,
 )
@@ -1953,6 +2056,12 @@ internal_notest_paladin.add_config('storm-paladin',
   brillo_non_testable,
   boards=['storm'],
   paladin_builder_name='storm paladin',
+)
+
+internal_notest_paladin.add_config('veyron_pinky-paladin',
+  boards=['veyron_pinky'],
+  paladin_builder_name='veyron_pinky paladin',
+  important=False,
 )
 
 internal_notest_paladin.add_config('nyan_freon-paladin',
@@ -2030,6 +2139,7 @@ _release = full.derive(official, internal,
   build_type=constants.CANARY_TYPE,
   useflags=official['useflags'] + ['-cros-debug', '-highdpi'],
   build_tests=True,
+  afdo_use=True,
   manifest=constants.OFFICIAL_MANIFEST,
   manifest_version=True,
   images=['base', 'test', 'factory_install'],
@@ -2043,7 +2153,6 @@ _release = full.derive(official, internal,
   git_sync=False,
   vm_tests=[constants.SMOKE_SUITE_TEST_TYPE, constants.DEV_MODE_TEST_TYPE,
             constants.CROS_VM_TEST_TYPE],
-  disk_vm_layout='usb',
   hw_tests=HWTestConfig.DefaultListCanary(),
   paygen=True,
   signer_tests=True,
@@ -2074,7 +2183,9 @@ _release.add_config('master-release',
   master=True,
   sync_chrome=False,
   chrome_sdk=False,
-  health_alert_recipients=['chromeos-build-alerts@google.com'],
+  health_alert_recipients=['chromeos-build-alerts@google.com',
+                           'tree', 'build', 'lab'],
+  afdo_use=False,
 )
 
 ### Release config groups.
@@ -2082,7 +2193,6 @@ _release.add_config('master-release',
 _config.add_group('x86-alex-release-group',
   _release.add_config('x86-alex-release',
     boards=['x86-alex'],
-    critical_for_chrome=True,
   ),
   _grouped_variant_release.add_config('x86-alex_he-release',
     boards=['x86-alex_he'],
@@ -2107,11 +2217,10 @@ _config.add_group('x86-zgb-release-group',
 _config.add_group('parrot-release-group',
   _release.add_config('parrot-release',
     boards=['parrot'],
-    afdo_use=True,
+    critical_for_chrome=True,
   ),
   _grouped_variant_release.add_config('parrot_ivb-release',
     boards=['parrot_ivb'],
-    afdo_use=True,
   )
 )
 
@@ -2141,6 +2250,7 @@ def _AddAFDOConfigs():
         base,
         boards=(board,),
         afdo_generate_min=True,
+        afdo_use=False,
         afdo_update_ebuild=True,
     )
     use_config = _config(
@@ -2198,15 +2308,19 @@ _release.add_config('link_freon-release',
   hw_tests=[],
   # This build can't run vm_tests, bug 387507
   vm_tests=[],
-  # This build doesn't release yet.
-  paygen=False,
+  paygen=True,
+  paygen_skip_testing=True,
   important=True,
 )
 
 _release.add_config('lumpy-release',
   boards=['lumpy'],
   critical_for_chrome=True,
-  afdo_use=True,
+)
+
+_release.add_config('quawks-release',
+  boards=['quawks'],
+  useflags=_release['useflags'] + ['highdpi'],
 )
 
 _release.add_config('samus-release',
@@ -2214,24 +2328,10 @@ _release.add_config('samus-release',
   important=True,
 )
 
-# Add specific release configs for these sandybrige/ivybridge boards to
-# enable AFDO. We should remove these once AFDO is enabled everywhere.
-# parrot is added in parrot-release-group above.
-_release.add_config('stumpy-release',
-  boards=['stumpy'],
-  afdo_use=True,
+_release.add_config('swanky-release',
+  boards=['swanky'],
+  useflags=_release['useflags'] + ['highdpi'],
 )
-
-_release.add_config('butterfly-release',
-  boards=['butterfly'],
-  afdo_use=True,
-)
-
-_release.add_config('stout-release',
-  boards=['stout'],
-  afdo_use=True,
-)
-
 
 ### Arm release configs.
 
@@ -2240,6 +2340,26 @@ _arm_release = _release.derive(non_testable_builder)
 _arm_release.add_config('daisy-release',
   boards=['daisy'],
   critical_for_chrome=True,
+)
+
+_arm_release.add_config('peach_pi-release',
+  boards=['peach_pi'],
+  useflags=_release['useflags'] + ['highdpi'],
+)
+
+_arm_release.add_config('nyan-release',
+  boards=['nyan'],
+  useflags=_release['useflags'] + ['highdpi'],
+)
+
+_arm_release.add_config('nyan_big-release',
+  boards=['nyan_big'],
+  useflags=_release['useflags'] + ['highdpi'],
+)
+
+_arm_release.add_config('nyan_blaze-release',
+  boards=['nyan_blaze'],
+  useflags=_release['useflags'] + ['highdpi'],
 )
 
 # Now generate generic release configs if we haven't created anything more
@@ -2280,6 +2400,7 @@ _AddReleaseConfigs()
 
 _brillo_release = _release.derive(brillo,
   dev_installer_prebuilts=False,
+  afdo_use=False,
 )
 
 _brillo_release.add_config('duck-release',
@@ -2345,6 +2466,7 @@ _release.add_config('mipsel-o32-generic-release',
   brillo_non_testable,
   boards=['mipsel-o32-generic'],
   paygen_skip_delta_payloads=True,
+  afdo_use=False,
 )
 
 _release.add_config('stumpy_moblab-release',
@@ -2355,13 +2477,18 @@ _release.add_config('stumpy_moblab-release',
   # TODO: re-enable paygen testing when crbug.com/386473 is fixed.
   paygen_skip_testing=True,
   important=True,
+  afdo_use=False,
+  hw_tests=[HWTestConfig(constants.HWTEST_BVT_SUITE, blocking=True,
+                         warn_only=True, num=1),
+            HWTestConfig(constants.HWTEST_AU_SUITE, blocking=True,
+                         warn_only=True, num=1)],
 )
 
 _release.add_config('rush-release',
   non_testable_builder,
   boards=['rush'],
   hw_tests=[],
-  usepkg_setup_board=False,
+  usepkg_toolchain=False,
   # This build doesn't generate signed images, so don't try to release them.
   paygen=False,
   signer_tests=False,
@@ -2409,12 +2536,12 @@ _AddGroupConfig('sandybridge', 'lumpy', (
     'butterfly',
     'parrot',
     'stumpy',
-), afdo_use=True)
+))
 
 # ivybridge chipset boards
 _AddGroupConfig('ivybridge', 'stout', (), (
     'parrot_ivb',
-), afdo_use=True)
+))
 
 # slippy-based haswell boards
 # TODO(davidjames): Combine slippy and beltino into haswell canary, once we've
@@ -2458,7 +2585,10 @@ _AddGroupConfig('rambi-b', 'glimmer', (
 _AddGroupConfig('rambi-c', 'squawks', (
     'swanky',
     'winky',
+    'candy',
 ))
+
+_AddGroupConfig('rambi-d', 'cranky', ())
 
 # daisy-based boards
 _AddGroupConfig('daisy', 'daisy', (
@@ -2475,6 +2605,7 @@ _AddGroupConfig('peach', 'peach_pit', (
 _AddGroupConfig('nyan', 'nyan', (
     'nyan_big',
     'nyan_blaze',
+    'nyan_kitty',
 ))
 
 # Factory and Firmware releases much inherit from these classes.  Modifications
@@ -2490,13 +2621,14 @@ _factory_release = _release.derive(
   chrome_sdk=False,
   description='Factory Builds',
   paygen=False,
+  afdo_use=False,
 )
 
 _firmware = _config(
   images=[],
   factory_toolkit=False,
   packages=('virtual/chromeos-firmware',),
-  usepkg_setup_board=True,
+  usepkg_toolchain=True,
   usepkg_build_packages=True,
   sync_chrome=False,
   build_tests=False,
@@ -2516,6 +2648,7 @@ _firmware = _config(
 _firmware_release = _release.derive(_firmware,
   description='Firmware Canary',
   manifest=constants.DEFAULT_MANIFEST,
+  afdo_use=False,
 )
 
 _depthcharge_release = _firmware_release.derive(useflags=['depthcharge'])
@@ -2528,9 +2661,11 @@ _depthcharge_full_internal = full.derive(
 )
 
 _x86_firmware_boards = (
+  'auron',
   'bayleybay',
   'beltino',
   'butterfly',
+  'candy',
   'clapper',
   'enguarde',
   'expresso',
@@ -2560,7 +2695,9 @@ _x86_firmware_boards = (
 )
 
 _x86_depthcharge_firmware_boards = (
+  'auron',
   'bayleybay',
+  'candy',
   'clapper',
   'enguarde',
   'expresso',

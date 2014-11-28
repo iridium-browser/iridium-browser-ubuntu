@@ -15,7 +15,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -80,10 +80,11 @@ void InvalidUsage() {
   std::cout << "\n";
 }
 
-base::string16 GetOption(int string_id, const base::string16& default,
-                   bool secure) {
+base::string16 GetOption(int string_id,
+                         const base::string16& default_option,
+                         bool secure) {
   base::string16 prompt_format = cloud_print::LoadLocalString(string_id);
-  std::vector<base::string16> substitutions(1, default);
+  std::vector<base::string16> substitutions(1, default_option);
   std::cout << ReplaceStringPlaceholders(prompt_format, substitutions, NULL);
   base::string16 tmp;
   if (secure) {
@@ -99,7 +100,7 @@ base::string16 GetOption(int string_id, const base::string16& default,
     std::getline(std::wcin, tmp);
   }
   if (tmp.empty())
-    return default;
+    return default_option;
   return tmp;
 }
 

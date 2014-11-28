@@ -56,8 +56,6 @@ class VerifiedContents {
   bool valid_signature() { return valid_signature_; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(VerifiedContents);
-
   // Returns the base64url-decoded "payload" field from the json at |path|, if
   // the signature was valid (or ignore_invalid_signature was set to true).
   bool GetPayload(const base::FilePath& path,
@@ -97,6 +95,8 @@ class VerifiedContents {
   // webstore reject the cases they can statically detect. See crbug.com/29941
   typedef std::multimap<base::FilePath::StringType, std::string> RootHashes;
   RootHashes root_hashes_;
+
+  DISALLOW_COPY_AND_ASSIGN(VerifiedContents);
 };
 
 }  // namespace extensions

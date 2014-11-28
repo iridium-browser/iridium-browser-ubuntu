@@ -12,11 +12,11 @@ Power usage is also measured.
 
 import time
 
-from metrics import histogram_util
 from metrics import power
 from telemetry.core import util
 from telemetry.page import page_test
 from telemetry.value import histogram
+from telemetry.value import histogram_util
 
 # TODO: Revisit this test once multitab support is finalized.
 
@@ -34,11 +34,13 @@ class TabSwitching(page_test.PageTest):
     options.AppendExtraBrowserArgs([
         '--enable-stats-collection-bindings'
     ])
+    # Enable background networking so we can test its impact on power usage.
+    options.disable_background_networking = False
     power.PowerMetric.CustomizeBrowserOptions(options)
 
-  def WillStartBrowser(self, browser):
+  def WillStartBrowser(self, platform):
     self._first_page_in_pageset = True
-    self._power_metric = power.PowerMetric(browser, TabSwitching.SAMPLE_TIME)
+    self._power_metric = power.PowerMetric(platform, TabSwitching.SAMPLE_TIME)
 
   def TabForPage(self, page, browser):
     if self._first_page_in_pageset:
@@ -94,6 +96,6 @@ class TabSwitching(page_test.PageTest):
         first_histogram)
 
     results.AddSummaryValue(
-        histogram.HistogramValue(None, display_name, '',
+        histogram.HistogramValue(None, display_name, 'ms',
                                  raw_value_json=diff_histogram,
                                  important=False))

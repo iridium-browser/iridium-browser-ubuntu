@@ -8,7 +8,7 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/window/non_client_view.h"
 
-namespace apps {
+namespace extensions {
 class NativeAppWindow;
 }
 
@@ -17,7 +17,7 @@ class GlassAppWindowFrameViewWin : public views::NonClientFrameView {
  public:
   static const char kViewClassName[];
 
-  explicit GlassAppWindowFrameViewWin(apps::NativeAppWindow* window,
+  explicit GlassAppWindowFrameViewWin(extensions::NativeAppWindow* window,
                                       views::Widget* widget);
   virtual ~GlassAppWindowFrameViewWin();
 
@@ -34,6 +34,7 @@ class GlassAppWindowFrameViewWin : public views::NonClientFrameView {
   virtual void ResetWindowControls() OVERRIDE {}
   virtual void UpdateWindowIcon() OVERRIDE {}
   virtual void UpdateWindowTitle() OVERRIDE {}
+  virtual void SizeConstraintsChanged() OVERRIDE {}
 
   // views::View implementation.
   virtual gfx::Size GetPreferredSize() const OVERRIDE;
@@ -41,7 +42,7 @@ class GlassAppWindowFrameViewWin : public views::NonClientFrameView {
   virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual gfx::Size GetMaximumSize() const OVERRIDE;
 
-  apps::NativeAppWindow* window_;
+  extensions::NativeAppWindow* window_;
   views::Widget* widget_;
 
   DISALLOW_COPY_AND_ASSIGN(GlassAppWindowFrameViewWin);

@@ -78,7 +78,8 @@ static VP9_DENOISER_DECISION denoiser_filter(const uint8_t *sig, int sig_stride,
                                              int mc_avg_stride,
                                              uint8_t *avg, int avg_stride,
                                              int increase_denoising,
-                                             BLOCK_SIZE bs) {
+                                             BLOCK_SIZE bs,
+                                             int motion_magnitude) {
   int r, c;
   const uint8_t *sig_start = sig;
   const uint8_t *mc_avg_start = mc_avg;
@@ -86,6 +87,19 @@ static VP9_DENOISER_DECISION denoiser_filter(const uint8_t *sig, int sig_stride,
   int diff, adj, absdiff, delta;
   int adj_val[] = {3, 4, 6};
   int total_adj = 0;
+  int shift_inc = 1;
+
+  // If motion_magnitude is small, making the denoiser more aggressive by
+  // increasing the adjustment for each level. Add another increment for
+  // blocks that are labeled for increase denoising.
+  if (motion_magnitude <= MOTION_MAGNITUDE_THRESHOLD) {
+    if (increase_denoising) {
+      shift_inc = 2;
+    }
+    adj_val[0] += shift_inc;
+    adj_val[1] += shift_inc;
+    adj_val[2] += shift_inc;
+  }
 
   // First attempt to apply a strong temporal denoising filter.
   for (r = 0; r < heights[bs]; ++r) {
@@ -130,7 +144,8 @@ static VP9_DENOISER_DECISION denoiser_filter(const uint8_t *sig, int sig_stride,
   // Otherwise, we try to dampen the filter if the delta is not too high.
   delta = ((abs(total_adj) - total_adj_strong_thresh(bs, increase_denoising))
            >> 8) + 1;
-  if (delta > delta_thresh(bs, increase_denoising)) {
+
+  if (delta >= delta_thresh(bs, increase_denoising)) {
     return COPY_BLOCK;
   }
 
@@ -145,11 +160,17 @@ static VP9_DENOISER_DECISION denoiser_filter(const uint8_t *sig, int sig_stride,
         adj = delta;
       }
       if (diff > 0) {
+        // Diff positive means we made positive adjustment above
+        // (in first try/attempt), so now make negative adjustment to bring
+        // denoised signal down.
         avg[c] = MAX(0, avg[c] - adj);
-        total_adj += adj;
-      } else {
-        avg[c] = MIN(UINT8_MAX, avg[c] + adj);
         total_adj -= adj;
+      } else {
+        // Diff negative means we made negative adjustment above
+        // (in first try/attempt), so now make positive adjustment to bring
+        // denoised signal up.
+        avg[c] = MIN(UINT8_MAX, avg[c] + adj);
+        total_adj += adj;
       }
     }
     sig += sig_stride;
@@ -185,13 +206,14 @@ static VP9_DENOISER_DECISION perform_motion_compensation(VP9_DENOISER *denoiser,
                                                          int increase_denoising,
                                                          int mi_row,
                                                          int mi_col,
-                                                         PICK_MODE_CONTEXT *ctx
+                                                         PICK_MODE_CONTEXT *ctx,
+                                                         int *motion_magnitude
                                                          ) {
   int mv_col, mv_row;
   int sse_diff = ctx->zeromv_sse - ctx->newmv_sse;
   MV_REFERENCE_FRAME frame;
   MACROBLOCKD *filter_mbd = &mb->e_mbd;
-  MB_MODE_INFO *mbmi = &filter_mbd->mi[0]->mbmi;
+  MB_MODE_INFO *mbmi = &filter_mbd->mi[0].src_mi->mbmi;
 
   MB_MODE_INFO saved_mbmi;
   int i, j;
@@ -209,6 +231,8 @@ static VP9_DENOISER_DECISION perform_motion_compensation(VP9_DENOISER *denoiser,
 
   mv_col = ctx->best_sse_mv.as_mv.col;
   mv_row = ctx->best_sse_mv.as_mv.row;
+
+  *motion_magnitude = mv_row * mv_row + mv_col * mv_col;
 
   frame = ctx->best_reference_frame;
 
@@ -297,6 +321,7 @@ static VP9_DENOISER_DECISION perform_motion_compensation(VP9_DENOISER *denoiser,
 void vp9_denoiser_denoise(VP9_DENOISER *denoiser, MACROBLOCK *mb,
                           int mi_row, int mi_col, BLOCK_SIZE bs,
                           PICK_MODE_CONTEXT *ctx) {
+  int motion_magnitude = 0;
   VP9_DENOISER_DECISION decision = FILTER_BLOCK;
   YV12_BUFFER_CONFIG avg = denoiser->running_avg_y[INTRA_FRAME];
   YV12_BUFFER_CONFIG mc_avg = denoiser->mc_running_avg_y;
@@ -307,13 +332,14 @@ void vp9_denoiser_denoise(VP9_DENOISER *denoiser, MACROBLOCK *mb,
 
   decision = perform_motion_compensation(denoiser, mb, bs,
                                          denoiser->increase_denoising,
-                                         mi_row, mi_col, ctx);
+                                         mi_row, mi_col, ctx,
+                                         &motion_magnitude);
 
   if (decision == FILTER_BLOCK) {
     decision = denoiser_filter(src.buf, src.stride,
                                mc_avg_start, mc_avg.y_stride,
                                avg_start, avg.y_stride,
-                               0, bs);
+                               0, bs, motion_magnitude);
   }
 
   if (decision == FILTER_BLOCK) {
@@ -370,8 +396,8 @@ void vp9_denoiser_reset_frame_stats(PICK_MODE_CONTEXT *ctx) {
   ctx->newmv_sse = UINT_MAX;
 }
 
-void vp9_denoiser_update_frame_stats(VP9_DENOISER *denoiser, MB_MODE_INFO *mbmi,
-                                     unsigned int sse, PREDICTION_MODE mode,
+void vp9_denoiser_update_frame_stats(MB_MODE_INFO *mbmi, unsigned int sse,
+                                     PREDICTION_MODE mode,
                                      PICK_MODE_CONTEXT *ctx) {
   // TODO(tkopp): Use both MVs if possible
   if (mbmi->mv[0].as_int == 0 && sse < ctx->zeromv_sse) {
@@ -388,13 +414,21 @@ void vp9_denoiser_update_frame_stats(VP9_DENOISER *denoiser, MB_MODE_INFO *mbmi,
 }
 
 int vp9_denoiser_alloc(VP9_DENOISER *denoiser, int width, int height,
-                       int ssx, int ssy, int border) {
+                       int ssx, int ssy,
+#if CONFIG_VP9_HIGHBITDEPTH
+                       int use_highbitdepth,
+#endif
+                       int border) {
   int i, fail;
   assert(denoiser != NULL);
 
   for (i = 0; i < MAX_REF_FRAMES; ++i) {
     fail = vp9_alloc_frame_buffer(&denoiser->running_avg_y[i], width, height,
-                                  ssx, ssy, border);
+                                  ssx, ssy,
+#if CONFIG_VP9_HIGHBITDEPTH
+                                  use_highbitdepth,
+#endif
+                                  border);
     if (fail) {
       vp9_denoiser_free(denoiser);
       return 1;
@@ -405,7 +439,11 @@ int vp9_denoiser_alloc(VP9_DENOISER *denoiser, int width, int height,
   }
 
   fail = vp9_alloc_frame_buffer(&denoiser->mc_running_avg_y, width, height,
-                                ssx, ssy, border);
+                                ssx, ssy,
+#if CONFIG_VP9_HIGHBITDEPTH
+                                use_highbitdepth,
+#endif
+                                border);
   if (fail) {
     vp9_denoiser_free(denoiser);
     return 1;

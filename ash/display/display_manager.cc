@@ -25,8 +25,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/display_observer.h"
 #include "ui/gfx/font_render_params.h"
@@ -162,7 +160,10 @@ DisplayManager::DisplayManager()
       force_bounds_changed_(false),
       change_display_upon_host_resize_(false),
       second_display_mode_(EXTENDED),
-      mirrored_display_id_(gfx::Display::kInvalidDisplayID) {
+      mirrored_display_id_(gfx::Display::kInvalidDisplayID),
+      registered_internal_display_rotation_lock_(false),
+      registered_internal_display_rotation_(gfx::Display::ROTATE_0) {
+
 #if defined(OS_CHROMEOS)
   // Enable only on the device so that DisplayManagerFontTest passes.
   if (base::SysInfo::IsRunningOnChromeOS())
@@ -435,12 +436,6 @@ void DisplayManager::SetDisplayRotation(int64 display_id,
     display_info_list.push_back(info);
   }
   AddMirrorDisplayInfoIfAny(&display_info_list);
-  if (virtual_keyboard_root_window_enabled() &&
-      display_id == non_desktop_display_.id()) {
-    DisplayInfo info = GetDisplayInfo(display_id);
-    info.set_rotation(rotation);
-    display_info_list.push_back(info);
-  }
   UpdateDisplays(display_info_list);
 }
 
@@ -599,6 +594,16 @@ DisplayMode DisplayManager::GetActiveModeForDisplayId(int64 display_id) const {
   return selected_mode;
 }
 
+void DisplayManager::RegisterDisplayRotationProperties(bool rotation_lock,
+    gfx::Display::Rotation rotation) {
+  if (delegate_)
+    delegate_->PreDisplayConfigurationChange(false);
+  registered_internal_display_rotation_lock_ = rotation_lock;
+  registered_internal_display_rotation_ = rotation;
+  if (delegate_)
+    delegate_->PostDisplayConfigurationChange();
+}
+
 bool DisplayManager::GetSelectedModeForDisplayId(int64 id,
                                                  DisplayMode* mode_out) const {
   std::map<int64, DisplayMode>::const_iterator iter = display_modes_.find(id);
@@ -644,7 +649,7 @@ void DisplayManager::SetColorCalibrationProfile(
 void DisplayManager::OnNativeDisplaysChanged(
     const std::vector<DisplayInfo>& updated_displays) {
   if (updated_displays.empty()) {
-    VLOG(1) << "OnNativeDisplayChanged(0): # of current displays="
+    VLOG(1) << "OnNativeDisplaysChanged(0): # of current displays="
             << displays_.size();
     // If the device is booted without display, or chrome is started
     // without --ash-host-window-bounds on linux desktop, use the
@@ -1068,10 +1073,6 @@ void DisplayManager::ToggleDisplayScaleFactor() {
 
 #if defined(OS_CHROMEOS)
 void DisplayManager::SetSoftwareMirroring(bool enabled) {
-  // TODO(oshima|bshe): Support external display on the system
-  // that has virtual keyboard display.
-  if (second_display_mode_ == VIRTUAL_KEYBOARD)
-    return;
   SetSecondDisplayMode(enabled ? MIRRORING : EXTENDED);
 }
 

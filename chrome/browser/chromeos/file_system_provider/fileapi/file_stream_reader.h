@@ -8,9 +8,10 @@
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "webkit/browser/blob/file_stream_reader.h"
-#include "webkit/browser/fileapi/file_system_url.h"
+#include "storage/browser/blob/file_stream_reader.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -20,7 +21,7 @@ class ProvidedFileSystemInterface;
 
 // Implements a streamed file reader. It is lazily initialized by the first call
 // to Read().
-class FileStreamReader : public webkit_blob::FileStreamReader {
+class FileStreamReader : public storage::FileStreamReader {
  public:
   typedef base::Callback<
       void(base::WeakPtr<ProvidedFileSystemInterface> file_system,
@@ -28,14 +29,14 @@ class FileStreamReader : public webkit_blob::FileStreamReader {
            int file_handle,
            base::File::Error result)> OpenFileCompletedCallback;
 
-  FileStreamReader(fileapi::FileSystemContext* context,
-                   const fileapi::FileSystemURL& url,
+  FileStreamReader(storage::FileSystemContext* context,
+                   const storage::FileSystemURL& url,
                    int64 initial_offset,
                    const base::Time& expected_modification_time);
 
   virtual ~FileStreamReader();
 
-  // webkit_blob::FileStreamReader overrides.
+  // storage::FileStreamReader overrides.
   virtual int Read(net::IOBuffer* buf,
                    int buf_len,
                    const net::CompletionCallback& callback) OVERRIDE;
@@ -43,6 +44,11 @@ class FileStreamReader : public webkit_blob::FileStreamReader {
       const net::Int64CompletionCallback& callback) OVERRIDE;
 
  private:
+  // Helper class for executing operations on the provided file system. All
+  // of its methods must be called on UI thread. Callbacks are called on IO
+  // thread.
+  class OperationRunner;
+
   // State of the file stream reader.
   enum State { NOT_INITIALIZED, INITIALIZING, INITIALIZED, FAILED };
 
@@ -59,15 +65,12 @@ class FileStreamReader : public webkit_blob::FileStreamReader {
   void OnOpenFileCompleted(
       const base::Closure& pending_closure,
       const net::Int64CompletionCallback& error_callback,
-      base::WeakPtr<ProvidedFileSystemInterface> file_system,
-      const base::FilePath& file_path,
-      int file_handle,
       base::File::Error result);
 
   // Called when initialization is completed with either a success or an error.
   void OnInitializeCompleted(const base::Closure& pending_closure,
                              const net::Int64CompletionCallback& error_callback,
-                             const EntryMetadata& metadata,
+                             scoped_ptr<EntryMetadata> metadata,
                              base::File::Error result);
 
   // Called when a file system provider returns chunk of read data. Note, that
@@ -83,7 +86,7 @@ class FileStreamReader : public webkit_blob::FileStreamReader {
   // or an error.
   void OnGetMetadataForGetLengthReceived(
       const net::Int64CompletionCallback& callback,
-      const EntryMetadata& metadata,
+      scoped_ptr<EntryMetadata> metadata,
       base::File::Error result);
 
   // Same as Read(), but called after initializing is completed.
@@ -94,16 +97,12 @@ class FileStreamReader : public webkit_blob::FileStreamReader {
   // Same as GetLength(), but called after initializing is completed.
   void GetLengthAfterInitialized(const net::Int64CompletionCallback& callback);
 
-  fileapi::FileSystemURL url_;
+  storage::FileSystemURL url_;
   int64 current_offset_;
   int64 current_length_;
   base::Time expected_modification_time_;
+  scoped_refptr<OperationRunner> runner_;
   State state_;
-
-  // Set during initialization (in case of a success).
-  base::WeakPtr<ProvidedFileSystemInterface> file_system_;
-  base::FilePath file_path_;
-  int file_handle_;
 
   base::WeakPtrFactory<FileStreamReader> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(FileStreamReader);

@@ -135,6 +135,7 @@ class VIEWS_EXPORT NativeWidgetAura
   virtual ui::NativeTheme* GetNativeTheme() const OVERRIDE;
   virtual void OnRootViewLayout() OVERRIDE;
   virtual bool IsTranslucentWindowOpacitySupported() const OVERRIDE;
+  virtual void OnSizeConstraintsChanged() OVERRIDE;
   virtual void RepostNativeEvent(gfx::NativeEvent native_event) OVERRIDE;
 
   // Overridden from views::InputMethodDelegate:
@@ -208,10 +209,6 @@ class VIEWS_EXPORT NativeWidgetAura
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;
 
-  // The following factory is used for calls to close the NativeWidgetAura
-  // instance.
-  base::WeakPtrFactory<NativeWidgetAura> close_widget_factory_;
-
   // Are we in the destructor?
   bool destroying_;
 
@@ -228,6 +225,10 @@ class VIEWS_EXPORT NativeWidgetAura
 
   scoped_ptr<DropHelper> drop_helper_;
   int last_drop_operation_;
+
+  // The following factory is used for calls to close the NativeWidgetAura
+  // instance.
+  base::WeakPtrFactory<NativeWidgetAura> close_widget_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetAura);
 };

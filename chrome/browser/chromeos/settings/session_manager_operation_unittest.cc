@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/settings/session_manager_operation.h"
 
+#include <string>
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -11,16 +14,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service_factory.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
-#include "chrome/browser/chromeos/settings/mock_owner_key_util.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/ownership/mock_owner_key_util.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_validator.h"
 #include "components/policy/core/common/cloud/policy_builder.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_utils.h"
 #include "crypto/rsa_private_key.h"
 #include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -38,19 +42,20 @@ class SessionManagerOperationTest : public testing::Test {
   SessionManagerOperationTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
         file_thread_(content::BrowserThread::FILE, &message_loop_),
-        owner_key_util_(new MockOwnerKeyUtil()),
-        validated_(false) {}
+        owner_key_util_(new ownership::MockOwnerKeyUtil()),
+        validated_(false) {
+    OwnerSettingsServiceChromeOSFactory::GetInstance()
+        ->SetOwnerKeyUtilForTesting(owner_key_util_);
+  }
 
   virtual void SetUp() OVERRIDE {
     policy_.payload().mutable_pinned_apps()->add_app_id("fake-app");
     policy_.Build();
 
     profile_.reset(new TestingProfile());
-    OwnerSettingsService::SetOwnerKeyUtilForTesting(owner_key_util_);
-    service_ = OwnerSettingsServiceFactory::GetForProfile(profile_.get());
+    service_ =
+        OwnerSettingsServiceChromeOSFactory::GetForProfile(profile_.get());
   }
-
-  void TearDown() { OwnerSettingsService::SetOwnerKeyUtilForTesting(NULL); }
 
   MOCK_METHOD2(OnOperationCompleted,
                void(SessionManagerOperation*, DeviceSettingsService::Status));
@@ -79,10 +84,10 @@ class SessionManagerOperationTest : public testing::Test {
 
   policy::DevicePolicyBuilder policy_;
   DeviceSettingsTestHelper device_settings_test_helper_;
-  scoped_refptr<MockOwnerKeyUtil> owner_key_util_;
+  scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util_;
 
   scoped_ptr<TestingProfile> profile_;
-  OwnerSettingsService* service_;
+  OwnerSettingsServiceChromeOS* service_;
 
   bool validated_;
 
@@ -155,7 +160,7 @@ TEST_F(SessionManagerOperationTest, RestartLoad) {
 
   EXPECT_CALL(*this, OnOperationCompleted(&op, _)).Times(0);
   op.Start(&device_settings_test_helper_, owner_key_util_, NULL);
-  device_settings_test_helper_.FlushLoops();
+  content::RunAllBlockingPoolTasksUntilIdle();
   device_settings_test_helper_.FlushRetrieve();
   EXPECT_TRUE(op.public_key().get());
   EXPECT_TRUE(op.public_key()->is_loaded());
@@ -213,14 +218,14 @@ TEST_F(SessionManagerOperationTest, StoreSettings) {
 
 TEST_F(SessionManagerOperationTest, SignAndStoreSettings) {
   owner_key_util_->SetPrivateKey(policy_.GetSigningKey());
-  service_->OnTPMTokenReady();
+  service_->OnTPMTokenReady(true /* is ready */);
 
   scoped_ptr<em::PolicyData> policy(new em::PolicyData(policy_.policy_data()));
   SignAndStoreSettingsOperation op(
       base::Bind(&SessionManagerOperationTest::OnOperationCompleted,
                  base::Unretained(this)),
       policy.Pass());
-  op.set_delegate(service_->as_weak_ptr());
+  op.set_owner_settings_service(service_->as_weak_ptr());
 
   EXPECT_CALL(*this,
               OnOperationCompleted(

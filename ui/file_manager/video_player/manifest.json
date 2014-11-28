@@ -20,9 +20,10 @@
     "commandLinePrivate",
     "fileSystem",
     "fileBrowserHandler",
-    "fileBrowserPrivate",
+    "fileManagerPrivate",
     "fullscreen",
     "mediaPlayerPrivate",
+    "power",
     "storage",
     "chrome://resources/",
     "chrome://theme/"

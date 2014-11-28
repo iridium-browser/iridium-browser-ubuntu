@@ -11,6 +11,7 @@
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 #include "base/threading/non_thread_safe.h"
@@ -272,20 +273,6 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
    protected:
     virtual ~Delegate() {}
   };
-
-  // TODO(tburkard): we should get rid of this constructor, and have each
-  // creator of a URLRequest specifically list the cookie store to be used.
-  // For now, this constructor will use the cookie store in |context|.
-  URLRequest(const GURL& url,
-             RequestPriority priority,
-             Delegate* delegate,
-             const URLRequestContext* context);
-
-  URLRequest(const GURL& url,
-             RequestPriority priority,
-             Delegate* delegate,
-             const URLRequestContext* context,
-             CookieStore* cookie_store);
 
   // If destroyed after Start() has been called but while IO is pending,
   // then the request will be effectively canceled and the delegate
@@ -679,7 +666,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   void set_received_response_content_length(int64 received_content_length) {
     received_response_content_length_ = received_content_length;
   }
-  int64 received_response_content_length() {
+  int64 received_response_content_length() const {
     return received_response_content_length_;
   }
 
@@ -696,7 +683,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // Allow the URLRequestJob class to set our status too
   void set_status(const URLRequestStatus& value) { status_ = value; }
 
-  CookieStore* cookie_store() const { return cookie_store_; }
+  CookieStore* cookie_store() const { return cookie_store_.get(); }
 
   // Allow the URLRequestJob to redirect this request.  Returns OK if
   // successful, otherwise an error code is returned.
@@ -716,19 +703,22 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
 
  private:
   friend class URLRequestJob;
+  friend class URLRequestContext;
+
+  // URLRequests are always created by calling URLRequestContext::CreateRequest.
+  //
+  // If no cookie store or network delegate are passed in, will use the ones
+  // from the URLRequestContext.
+  URLRequest(const GURL& url,
+             RequestPriority priority,
+             Delegate* delegate,
+             const URLRequestContext* context,
+             CookieStore* cookie_store,
+             NetworkDelegate* network_delegate);
 
   // Registers or unregisters a network interception class.
   static void RegisterRequestInterceptor(Interceptor* interceptor);
   static void UnregisterRequestInterceptor(Interceptor* interceptor);
-
-  // Initializes the URLRequest. Code shared between the two constructors.
-  // TODO(tburkard): This can ultimately be folded into a single constructor
-  // again.
-  void Init(const GURL& url,
-            RequestPriority priotity,
-            Delegate* delegate,
-            const URLRequestContext* context,
-            CookieStore* cookie_store);
 
   // Resumes or blocks a request paused by the NetworkDelegate::OnBeforeRequest
   // handler. If |blocked| is true, the request is blocked and an error page is

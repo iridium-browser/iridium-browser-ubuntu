@@ -34,22 +34,25 @@ class StreamTextureProxyImpl
   virtual ~StreamTextureProxyImpl();
 
   // StreamTextureProxy implementation:
-  virtual void BindToCurrentThread(int32 stream_id) OVERRIDE;
-  virtual void SetClient(cc::VideoFrameProvider::Client* client) OVERRIDE;
+  virtual void BindToLoop(int32 stream_id,
+                          cc::VideoFrameProvider::Client* client,
+                          scoped_refptr<base::MessageLoopProxy> loop) OVERRIDE;
   virtual void Release() OVERRIDE;
 
  private:
+  void BindOnThread(int32 stream_id);
   void OnFrameAvailable();
 
-  scoped_refptr<base::MessageLoopProxy> loop_;
-  base::Lock client_lock_;
+  // Protects access to |client_| and |loop_|.
+  base::Lock lock_;
   cc::VideoFrameProvider::Client* client_;
-  base::Closure callback_;
+  scoped_refptr<base::MessageLoopProxy> loop_;
 
+  // Accessed on the |loop_| thread only.
+  base::Closure callback_;
   scoped_refptr<StreamTextureFactorySynchronousImpl::ContextProvider>
       context_provider_;
   scoped_refptr<gfx::SurfaceTexture> surface_texture_;
-
   float current_matrix_[16];
   bool has_updated_;
 
@@ -58,27 +61,54 @@ class StreamTextureProxyImpl
 
 StreamTextureProxyImpl::StreamTextureProxyImpl(
     StreamTextureFactorySynchronousImpl::ContextProvider* provider)
-    : context_provider_(provider), has_updated_(false) {
+    : client_(NULL), context_provider_(provider), has_updated_(false) {
   std::fill(current_matrix_, current_matrix_ + 16, 0);
 }
 
 StreamTextureProxyImpl::~StreamTextureProxyImpl() {}
 
 void StreamTextureProxyImpl::Release() {
-  SetClient(NULL);
-  if (loop_.get() && !loop_->BelongsToCurrentThread())
-    loop_->DeleteSoon(FROM_HERE, this);
-  else
+  {
+    // Cannot call into |client_| anymore (from any thread) after returning
+    // from here.
+    base::AutoLock lock(lock_);
+    client_ = NULL;
+  }
+  // Release is analogous to the destructor, so there should be no more external
+  // calls to this object in Release. Therefore there is no need to acquire the
+  // lock to access |loop_|.
+  if (!loop_.get() || loop_->BelongsToCurrentThread() ||
+      !loop_->DeleteSoon(FROM_HERE, this)) {
     delete this;
+  }
 }
 
-void StreamTextureProxyImpl::SetClient(cc::VideoFrameProvider::Client* client) {
-  base::AutoLock lock(client_lock_);
-  client_ = client;
+void StreamTextureProxyImpl::BindToLoop(
+    int32 stream_id,
+    cc::VideoFrameProvider::Client* client,
+    scoped_refptr<base::MessageLoopProxy> loop) {
+  DCHECK(loop);
+
+  {
+    base::AutoLock lock(lock_);
+    DCHECK(!loop_ || (loop == loop_));
+    loop_ = loop;
+    client_ = client;
+  }
+
+  if (loop->BelongsToCurrentThread()) {
+    BindOnThread(stream_id);
+    return;
+  }
+  // Unretained is safe here only because the object is deleted on |loop_|
+  // thread.
+  loop->PostTask(FROM_HERE,
+                 base::Bind(&StreamTextureProxyImpl::BindOnThread,
+                            base::Unretained(this),
+                            stream_id));
 }
 
-void StreamTextureProxyImpl::BindToCurrentThread(int stream_id) {
-  loop_ = base::MessageLoopProxy::current();
+void StreamTextureProxyImpl::BindOnThread(int32 stream_id) {
   surface_texture_ = context_provider_->GetSurfaceTexture(stream_id);
   if (!surface_texture_) {
     LOG(ERROR) << "Failed to get SurfaceTexture for stream.";
@@ -101,7 +131,7 @@ void StreamTextureProxyImpl::OnFrameAvailable() {
     if (memcmp(current_matrix_, matrix, sizeof(matrix)) != 0) {
       memcpy(current_matrix_, matrix, sizeof(matrix));
 
-      base::AutoLock lock(client_lock_);
+      base::AutoLock lock(lock_);
       if (client_)
         client_->DidUpdateMatrix(current_matrix_);
     }
@@ -110,7 +140,7 @@ void StreamTextureProxyImpl::OnFrameAvailable() {
   // updateTexImage since after we received the first frame.
   has_updated_ = true;
 
-  base::AutoLock lock(client_lock_);
+  base::AutoLock lock(lock_);
   if (client_)
     client_->DidReceiveFrame();
 }
@@ -130,16 +160,21 @@ StreamTextureFactorySynchronousImpl::StreamTextureFactorySynchronousImpl(
     int frame_id)
     : create_context_provider_callback_(try_create_callback),
       context_provider_(create_context_provider_callback_.Run()),
-      frame_id_(frame_id) {}
+      frame_id_(frame_id),
+      observer_(NULL) {}
 
 StreamTextureFactorySynchronousImpl::~StreamTextureFactorySynchronousImpl() {}
 
 StreamTextureProxy* StreamTextureFactorySynchronousImpl::CreateProxy() {
-  if (!context_provider_)
+  bool had_proxy = !!context_provider_;
+  if (!had_proxy)
     context_provider_ = create_context_provider_callback_.Run();
 
   if (!context_provider_)
     return NULL;
+
+  if (observer_ && !had_proxy)
+    context_provider_->AddObserver(observer_);
   return new StreamTextureProxyImpl(context_provider_);
 }
 
@@ -180,6 +215,22 @@ void StreamTextureFactorySynchronousImpl::SetStreamTextureSize(
 gpu::gles2::GLES2Interface* StreamTextureFactorySynchronousImpl::ContextGL() {
   DCHECK(context_provider_);
   return context_provider_->ContextGL();
+}
+
+void StreamTextureFactorySynchronousImpl::AddObserver(
+    StreamTextureFactoryContextObserver* obs) {
+  DCHECK(!observer_);
+  observer_ = obs;
+  if (context_provider_)
+    context_provider_->AddObserver(obs);
+}
+
+void StreamTextureFactorySynchronousImpl::RemoveObserver(
+    StreamTextureFactoryContextObserver* obs) {
+  DCHECK_EQ(observer_, obs);
+  observer_ = NULL;
+  if (context_provider_)
+    context_provider_->RemoveObserver(obs);
 }
 
 }  // namespace content

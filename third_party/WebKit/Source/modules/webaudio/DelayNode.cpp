@@ -40,7 +40,6 @@ const double maximumAllowedDelayTime = 180;
 DelayNode::DelayNode(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
     : AudioBasicProcessorNode(context, sampleRate)
 {
-    ScriptWrappable::init(this);
     if (maxDelayTime <= 0 || maxDelayTime >= maximumAllowedDelayTime || std::isnan(maxDelayTime)) {
         exceptionState.throwDOMException(
             NotSupportedError,
@@ -49,7 +48,7 @@ DelayNode::DelayNode(AudioContext* context, float sampleRate, double maxDelayTim
             + ", exclusive.");
         return;
     }
-    m_processor = adoptPtrWillBeNoop(new DelayProcessor(context, sampleRate, 1, maxDelayTime));
+    m_processor = new DelayProcessor(context, sampleRate, 1, maxDelayTime);
     setNodeType(NodeTypeDelay);
 }
 

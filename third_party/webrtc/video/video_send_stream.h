@@ -14,6 +14,7 @@
 #include <map>
 #include <vector>
 
+#include "webrtc/call.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/video/encoded_frame_callback_adapter.h"
@@ -45,8 +46,7 @@ class VideoSendStream : public webrtc::VideoSendStream,
                   CpuOveruseObserver* overuse_observer,
                   webrtc::VideoEngine* video_engine,
                   const VideoSendStream::Config& config,
-                  const std::vector<VideoStream> video_streams,
-                  const void* encoder_settings,
+                  const VideoEncoderConfig& encoder_config,
                   const std::map<uint32_t, RtpState>& suspended_ssrcs,
                   int base_channel,
                   int start_bitrate);
@@ -56,8 +56,8 @@ class VideoSendStream : public webrtc::VideoSendStream,
   virtual void Start() OVERRIDE;
   virtual void Stop() OVERRIDE;
 
-  virtual bool ReconfigureVideoEncoder(const std::vector<VideoStream>& streams,
-                                       const void* encoder_settings) OVERRIDE;
+  virtual bool ReconfigureVideoEncoder(
+      const VideoEncoderConfig& config) OVERRIDE;
 
   virtual Stats GetStats() const OVERRIDE;
 
@@ -71,6 +71,8 @@ class VideoSendStream : public webrtc::VideoSendStream,
 
   typedef std::map<uint32_t, RtpState> RtpStateMap;
   RtpStateMap GetRtpStates() const;
+
+  void SignalNetworkState(Call::NetworkState state);
 
  private:
   void ConfigureSsrcs();

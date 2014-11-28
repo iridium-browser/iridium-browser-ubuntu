@@ -17,6 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -29,9 +30,11 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/prerender/prerender_contents.h"
+#include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_handle.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
 #include "chrome/browser/prerender/prerender_link_manager_factory.h"
@@ -61,14 +64,14 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handlers/mime_types_handler.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chrome/test/base/uma_histogram_helper.h"
+#include "components/variations/entropy_provider.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_client_host.h"
-#include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -82,14 +85,15 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "content/test/net/url_request_mock_http_job.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/switches.h"
-#include "grit/generated_resources.h"
+#include "extensions/test/result_catcher.h"
 #include "net/base/escape.h"
 #include "net/cert/x509_certificate.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/ssl/client_cert_store.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_filter.h"
@@ -98,10 +102,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
+using chrome_browser_net::NetworkPredictionOptions;
 using content::BrowserThread;
 using content::DevToolsAgentHost;
-using content::DevToolsClientHost;
-using content::DevToolsManager;
 using content::NavigationController;
 using content::OpenURLParams;
 using content::Referrer;
@@ -111,6 +114,7 @@ using content::RenderWidgetHost;
 using content::TestNavigationObserver;
 using content::WebContents;
 using content::WebContentsObserver;
+using net::NetworkChangeNotifier;
 using task_manager::browsertest_util::WaitForTaskManagerRows;
 
 // Prerender tests work as follows:
@@ -126,6 +130,20 @@ using task_manager::browsertest_util::WaitForTaskManagerRows;
 namespace prerender {
 
 namespace {
+
+class MockNetworkChangeNotifierWIFI : public NetworkChangeNotifier {
+ public:
+  virtual ConnectionType GetCurrentConnectionType() const OVERRIDE {
+    return NetworkChangeNotifier::CONNECTION_WIFI;
+  }
+};
+
+class MockNetworkChangeNotifier4G : public NetworkChangeNotifier {
+ public:
+  virtual ConnectionType GetCurrentConnectionType() const OVERRIDE {
+    return NetworkChangeNotifier::CONNECTION_4G;
+  }
+};
 
 // Constants used in the test HTML files.
 const char* kReadyTitle = "READY";
@@ -746,13 +764,14 @@ class TestSafeBrowsingServiceFactory : public SafeBrowsingServiceFactory {
 };
 #endif
 
-class FakeDevToolsClientHost : public DevToolsClientHost {
+class FakeDevToolsClient : public content::DevToolsAgentHostClient {
  public:
-  FakeDevToolsClientHost() {}
-  virtual ~FakeDevToolsClientHost() {}
-  virtual void InspectedContentsClosing() OVERRIDE {}
-  virtual void DispatchOnInspectorFrontend(const std::string& msg) OVERRIDE {}
-  virtual void ReplacedWithAnotherClient() OVERRIDE {}
+  FakeDevToolsClient() {}
+  virtual ~FakeDevToolsClient() {}
+  virtual void DispatchProtocolMessage(
+      DevToolsAgentHost* agent_host, const std::string& message) OVERRIDE {}
+  virtual void AgentHostClosed(
+      DevToolsAgentHost* agent_host, bool replaced) OVERRIDE {}
 };
 
 class RestorePrerenderMode {
@@ -800,7 +819,12 @@ class HangingFirstRequestInterceptor : public net::URLRequestInterceptor {
       }
       return new HangingURLRequestJob(request, network_delegate);
     }
-    return new content::URLRequestMockHTTPJob(request, network_delegate, file_);
+    return new net::URLRequestMockHTTPJob(
+        request,
+        network_delegate,
+        file_,
+        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
+            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
   }
 
  private:
@@ -822,13 +846,17 @@ void CreateHangingFirstRequestInterceptorOnIO(
 }
 
 // Wrapper over URLRequestMockHTTPJob that exposes extra callbacks.
-class MockHTTPJob : public content::URLRequestMockHTTPJob {
+class MockHTTPJob : public net::URLRequestMockHTTPJob {
  public:
   MockHTTPJob(net::URLRequest* request,
               net::NetworkDelegate* delegate,
               const base::FilePath& file)
-      : content::URLRequestMockHTTPJob(request, delegate, file) {
-  }
+      : net::URLRequestMockHTTPJob(
+            request,
+            delegate,
+            file,
+            BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
+                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)) {}
 
   void set_start_callback(const base::Closure& start_callback) {
     start_callback_ = start_callback;
@@ -837,7 +865,7 @@ class MockHTTPJob : public content::URLRequestMockHTTPJob {
   virtual void Start() OVERRIDE {
     if (!start_callback_.is_null())
       start_callback_.Run();
-    content::URLRequestMockHTTPJob::Start();
+    net::URLRequestMockHTTPJob::Start();
   }
 
  private:
@@ -927,7 +955,8 @@ void CreateMockInterceptorOnIO(const GURL& url, const base::FilePath& file) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
       url,
-      content::URLRequestMockHTTPJob::CreateInterceptorForSingleFile(file));
+      net::URLRequestMockHTTPJob::CreateInterceptorForSingleFile(
+          file, BrowserThread::GetBlockingPool()));
 }
 
 // A ContentBrowserClient that cancels all prerenderers on OpenURL.
@@ -1061,6 +1090,80 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
     command_line->AppendSwitch(switches::kAlwaysAuthorizePlugins);
   }
 
+  void SetPreference(NetworkPredictionOptions value) {
+    browser()->profile()->GetPrefs()->SetInteger(
+        prefs::kNetworkPredictionOptions, value);
+  }
+
+  void CreateTestFieldTrial(const std::string& name,
+                            const std::string& group_name) {
+    base::FieldTrial* trial = base::FieldTrialList::CreateFieldTrial(
+        name, group_name);
+    trial->group();
+  }
+
+  // Verifies, for the current field trial, whether
+  // ShouldDisableLocalPredictorDueToPreferencesAndNetwork produces the desired
+  // output.
+  void TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
+      bool preference_wifi_network_wifi,
+      bool preference_wifi_network_4g,
+      bool preference_always_network_wifi,
+      bool preference_always_network_4g,
+      bool preference_never_network_wifi,
+      bool preference_never_network_4g) {
+    Profile* profile = browser()->profile();
+
+    // Set real NetworkChangeNotifier singleton aside.
+    scoped_ptr<NetworkChangeNotifier::DisableForTest> disable_for_test(
+        new NetworkChangeNotifier::DisableForTest);
+
+    // Set preference to WIFI_ONLY: prefetch when not on cellular.
+    SetPreference(NetworkPredictionOptions::NETWORK_PREDICTION_WIFI_ONLY);
+    {
+      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifierWIFI);
+      EXPECT_EQ(
+          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
+          preference_wifi_network_wifi);
+    }
+    {
+      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifier4G);
+      EXPECT_EQ(
+          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
+          preference_wifi_network_4g);
+    }
+
+    // Set preference to ALWAYS: always prefetch.
+    SetPreference(NetworkPredictionOptions::NETWORK_PREDICTION_ALWAYS);
+    {
+      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifierWIFI);
+      EXPECT_EQ(
+          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
+          preference_always_network_wifi);
+    }
+    {
+      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifier4G);
+      EXPECT_EQ(
+          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
+          preference_always_network_4g);
+    }
+
+    // Set preference to NEVER: never prefetch.
+    SetPreference(NetworkPredictionOptions::NETWORK_PREDICTION_NEVER);
+    {
+      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifierWIFI);
+      EXPECT_EQ(
+          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
+          preference_never_network_wifi);
+    }
+    {
+      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifier4G);
+      EXPECT_EQ(
+          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
+          preference_never_network_4g);
+    }
+  }
+
   virtual void SetUpOnMainThread() OVERRIDE {
     current_browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kPromptForDownload, false);
@@ -1136,7 +1239,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
       bool expect_swap_to_succeed) const {
     NavigateToURLWithParams(
         content::OpenURLParams(dest_url_, Referrer(), disposition,
-                               content::PAGE_TRANSITION_TYPED, false),
+                               ui::PAGE_TRANSITION_TYPED, false),
         expect_swap_to_succeed);
   }
 
@@ -1156,7 +1259,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
                                     bool expect_swap_to_succeed) const {
     NavigateToURLWithParams(
         content::OpenURLParams(dest_url, Referrer(), disposition,
-                               content::PAGE_TRANSITION_TYPED, false),
+                               ui::PAGE_TRANSITION_TYPED, false),
         expect_swap_to_succeed);
   }
 
@@ -1506,6 +1609,8 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
                            js).c_str()));
   }
 
+  const base::HistogramTester& histogram_tester() { return histogram_tester_; }
+
  protected:
   bool autostart_test_server_;
 
@@ -1633,7 +1738,8 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
 
     if (new_web_contents) {
       NewTabNavigationOrSwapObserver observer;
-      render_frame_host->ExecuteJavaScript(base::ASCIIToUTF16(javascript));
+      render_frame_host->
+          ExecuteJavaScriptForTests(base::ASCIIToUTF16(javascript));
       observer.Wait();
     } else {
       NavigationOrSwapObserver observer(current_browser()->tab_strip_model(),
@@ -1656,21 +1762,22 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
   std::string loader_path_;
   std::string loader_query_;
   Browser* explicitly_set_browser_;
+  base::HistogramTester histogram_tester_;
+  scoped_ptr<base::FieldTrialList> field_trial_list_;
 };
 
 // Checks that a page is correctly prerendered in the case of a
 // <link rel=prerender> tag and then loaded into a tab in response to a
 // navigation.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPage) {
-  UMAHistogramHelper histograms;
-
   PrerenderTestURL("files/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
   EXPECT_EQ(1, GetPrerenderDomContentLoadedEventCountForLinkNumber(0));
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
-  histograms.ExpectTotalCount("Prerender.websame_PrerenderNotSwappedInPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.websame_PrerenderNotSwappedInPLT", 1);
 
   ChannelDestructionWatcher channel_close_watcher;
   channel_close_watcher.WatchChannel(
@@ -1678,10 +1785,10 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPage) {
   NavigateToDestURL();
   channel_close_watcher.WaitForChannelClose();
 
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLTMatched", 1);
-  histograms.ExpectTotalCount(
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLTMatched",
+                                      1);
+  histogram_tester().ExpectTotalCount(
       "Prerender.websame_PerceivedPLTMatchedComplete", 1);
 
   ASSERT_TRUE(IsEmptyPrerenderLinkManager());
@@ -1689,21 +1796,20 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPage) {
 
 // Checks that cross-domain prerenders emit the correct histograms.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPageCrossDomain) {
-  UMAHistogramHelper histograms;
-
   PrerenderTestURL(GetCrossDomainTestUrl("files/prerender/prerender_page.html"),
                    FINAL_STATUS_USED, 1);
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
-  histograms.ExpectTotalCount("Prerender.webcross_PrerenderNotSwappedInPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.webcross_PrerenderNotSwappedInPLT", 1);
 
   NavigateToDestURL();
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.webcross_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.webcross_PerceivedPLTMatched", 1);
-  histograms.ExpectTotalCount(
+  histogram_tester().ExpectTotalCount("Prerender.webcross_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.webcross_PerceivedPLTMatched",
+                                      1);
+  histogram_tester().ExpectTotalCount(
       "Prerender.webcross_PerceivedPLTMatchedComplete", 1);
 }
 
@@ -2082,7 +2188,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
                        PrerenderLocationReplaceGWSHistograms) {
   DisableJavascriptCalls();
-  UMAHistogramHelper histograms;
 
   // The loader page should look like Google.
   const std::string kGoogleDotCom("www.google.com");
@@ -2108,14 +2213,15 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   EXPECT_TRUE(DidPrerenderPass(prerender->contents()->prerender_contents()));
   EXPECT_EQ(1, prerender->number_of_loads());
 
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
   // Although there is a client redirect, it is dropped from histograms because
   // it is a Google URL. The target page itself does not load until after the
   // swap.
-  histograms.ExpectTotalCount("Prerender.gws_PrerenderNotSwappedInPLT", 0);
+  histogram_tester().ExpectTotalCount("Prerender.gws_PrerenderNotSwappedInPLT",
+                                      0);
 
   GURL navigate_url = test_server()->GetURL(
       "files/prerender/prerender_location_replace.html?" +
@@ -2128,20 +2234,21 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
       GetActiveWebContents(), 2);
   current_browser()->OpenURL(OpenURLParams(
       navigate_url, Referrer(), CURRENT_TAB,
-      content::PAGE_TRANSITION_TYPED, false));
+      ui::PAGE_TRANSITION_TYPED, false));
   swap_observer.Wait();
 
   EXPECT_TRUE(DidDisplayPass(GetActiveWebContents()));
 
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.gws_PrerenderNotSwappedInPLT", 0);
-  histograms.ExpectTotalCount("Prerender.gws_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.gws_PerceivedPLTMatched", 1);
-  histograms.ExpectTotalCount(
+  histogram_tester().ExpectTotalCount("Prerender.gws_PrerenderNotSwappedInPLT",
+                                      0);
+  histogram_tester().ExpectTotalCount("Prerender.gws_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.gws_PerceivedPLTMatched", 1);
+  histogram_tester().ExpectTotalCount(
       "Prerender.gws_PerceivedPLTMatchedComplete", 1);
 
   // The client redirect does /not/ count as a miss because it's a Google URL.
-  histograms.ExpectTotalCount("Prerender.PerceivedPLTFirstAfterMiss", 0);
+  histogram_tester().ExpectTotalCount("Prerender.PerceivedPLTFirstAfterMiss",
+                                      0);
 }
 
 // Checks that client-issued redirects work with prerendering.
@@ -2620,7 +2727,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderRendererCrash) {
       LoadURL(
           GURL(content::kChromeUICrashURL),
           content::Referrer(),
-          content::PAGE_TRANSITION_TYPED,
+          ui::PAGE_TRANSITION_TYPED,
           std::string());
   prerender->WaitForStop();
 }
@@ -3297,13 +3404,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
       current_browser()->tab_strip_model()->GetActiveWebContents();
   scoped_refptr<DevToolsAgentHost> agent(
       DevToolsAgentHost::GetOrCreateFor(web_contents));
-  DevToolsManager* manager = DevToolsManager::GetInstance();
-  FakeDevToolsClientHost client_host;
-  manager->RegisterDevToolsClientHostFor(agent.get(), &client_host);
+  FakeDevToolsClient client;
+  agent->AttachClient(&client);
   const char* url = "files/prerender/prerender_page.html";
   PrerenderTestURL(url, FINAL_STATUS_DEVTOOLS_ATTACHED, 1);
   NavigateToURLWithDisposition(url, CURRENT_TAB, false);
-  manager->ClientHostClosing(&client_host);
+  agent->DetachClient();
 }
 
 // Validate that the sessionStorage namespace remains the same when swapping
@@ -3347,24 +3453,27 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, ControlGroupRendererInitiated) {
 // account for the MatchComplete case, and it must have a final status of
 // FINAL_STATUS_WOULD_HAVE_BEEN_USED.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MatchCompleteDummy) {
-  UMAHistogramHelper histograms;
+  RestorePrerenderMode restore_prerender_mode;
+  PrerenderManager::SetMode(
+      PrerenderManager::PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP);
 
   std::vector<FinalStatus> expected_final_status_queue;
   expected_final_status_queue.push_back(FINAL_STATUS_INVALID_HTTP_METHOD);
   expected_final_status_queue.push_back(FINAL_STATUS_WOULD_HAVE_BEEN_USED);
   PrerenderTestURL("files/prerender/prerender_xhr_put.html",
                    expected_final_status_queue, 1);
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
-  histograms.ExpectTotalCount("Prerender.websame_PrerenderNotSwappedInPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.websame_PrerenderNotSwappedInPLT", 1);
 
   NavigateToDestURL();
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount(
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLTMatched",
+                                      0);
+  histogram_tester().ExpectTotalCount(
       "Prerender.websame_PerceivedPLTMatchedComplete", 1);
 }
 
@@ -3372,7 +3481,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MatchCompleteDummy) {
 // progress does not also classify the previous navigation as a MatchComplete.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
                        MatchCompleteDummyCancelNavigation) {
-  UMAHistogramHelper histograms;
+  RestorePrerenderMode restore_prerender_mode;
+  PrerenderManager::SetMode(
+      PrerenderManager::PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP);
 
   // Arrange for a URL to hang.
   const GURL kNoCommitUrl("http://never-respond.example.com");
@@ -3390,11 +3501,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   expected_final_status_queue.push_back(FINAL_STATUS_WOULD_HAVE_BEEN_USED);
   PrerenderTestURL("files/prerender/prerender_xhr_put.html",
                    expected_final_status_queue, 1);
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
-  histograms.ExpectTotalCount("Prerender.websame_PrerenderNotSwappedInPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.websame_PrerenderNotSwappedInPLT", 1);
 
   // Open the hanging URL in a new tab. Wait for both the new tab to open and
   // the hanging request to be scheduled.
@@ -3407,13 +3519,14 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   // should forcibly complete the previous navigation and also complete a
   // WOULD_HAVE_BEEN_PRERENDERED navigation.
   NavigateToDestURL();
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 2);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount(
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 2);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLTMatched",
+                                      0);
+  histogram_tester().ExpectTotalCount(
       "Prerender.websame_PerceivedPLTMatchedComplete", 1);
 }
 
@@ -3539,7 +3652,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, WebNavigation) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionTest("webnavigation/prerender")) << message_;
 
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
 
   PrerenderTestURL("files/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
 
@@ -3560,7 +3673,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, TabsApi) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionTest("tabs/on_replaced")) << message_;
 
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
 
   PrerenderTestURL("files/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
 
@@ -3577,6 +3690,10 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, TabsApi) {
 // Test that prerenders abort when navigating to a stream.
 // See chrome/browser/extensions/api/streams_private/streams_private_apitest.cc
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, StreamsTest) {
+  RestorePrerenderMode restore_prerender_mode;
+  PrerenderManager::SetMode(
+      PrerenderManager::PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP);
+
   ASSERT_TRUE(StartSpawnedTestServer());
 
   const extensions::Extension* extension = LoadExtension(
@@ -3594,7 +3711,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, StreamsTest) {
   // navigation had prerender not intercepted it.
   // streams_private/handle_mime_type reports success if it has handled the
   // application/msword type.
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
   NavigateToDestURL();
   EXPECT_TRUE(catcher.GetNextResult());
 }
@@ -3777,6 +3894,10 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 // Checks that canceling a MatchComplete dummy doesn't result in two
 // stop events.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, CancelMatchCompleteDummy) {
+  RestorePrerenderMode restore_prerender_mode;
+  PrerenderManager::SetMode(
+      PrerenderManager::PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP);
+
   std::vector<FinalStatus> expected_final_status_queue;
   expected_final_status_queue.push_back(FINAL_STATUS_JAVASCRIPT_ALERT);
   expected_final_status_queue.push_back(FINAL_STATUS_CANCELLED);
@@ -3796,7 +3917,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, CancelMatchCompleteDummy) {
 // visible. Also test the right histogram events are emitted in this case.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDeferredImage) {
   DisableJavascriptCalls();
-  UMAHistogramHelper histograms;
 
   // The prerender will not completely load until after the swap, so wait for a
   // title change before calling DidPrerenderPass.
@@ -3808,11 +3928,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDeferredImage) {
   EXPECT_EQ(1, GetPrerenderDomContentLoadedEventCountForLinkNumber(0));
   EXPECT_TRUE(DidPrerenderPass(prerender->contents()->prerender_contents()));
   EXPECT_EQ(0, prerender->number_of_loads());
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
-  histograms.ExpectTotalCount("Prerender.websame_PrerenderNotSwappedInPLT", 0);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.websame_PrerenderNotSwappedInPLT", 0);
 
   // Swap.
   NavigationOrSwapObserver swap_observer(current_browser()->tab_strip_model(),
@@ -3828,11 +3949,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDeferredImage) {
   // Now check DidDisplayPass.
   EXPECT_TRUE(DidDisplayPass(GetActiveWebContents()));
 
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.websame_PrerenderNotSwappedInPLT", 0);
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.websame_PerceivedPLTMatched", 1);
-  histograms.ExpectTotalCount(
+  histogram_tester().ExpectTotalCount(
+      "Prerender.websame_PrerenderNotSwappedInPLT", 0);
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.websame_PerceivedPLTMatched",
+                                      1);
+  histogram_tester().ExpectTotalCount(
       "Prerender.websame_PerceivedPLTMatchedComplete", 1);
 }
 
@@ -3890,6 +4012,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 // Checks that deferred redirects in a synchronous XHR abort the
 // prerender.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDeferredSynchronousXHR) {
+  RestorePrerenderMode restore_prerender_mode;
+  PrerenderManager::SetMode(
+      PrerenderManager::PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP);
   PrerenderTestURL("files/prerender/prerender_deferred_sync_xhr.html",
                    FINAL_STATUS_BAD_DEFERRED_REDIRECT, 0);
   NavigateToDestURL();
@@ -3901,7 +4026,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderExtraHeadersNoSwap) {
                    FINAL_STATUS_APP_TERMINATING, 1);
 
   content::OpenURLParams params(dest_url(), Referrer(), CURRENT_TAB,
-                                content::PAGE_TRANSITION_TYPED, false);
+                                ui::PAGE_TRANSITION_TYPED, false);
   params.extra_headers = "X-Custom-Header: 42\r\n";
   NavigateToURLWithParams(params, false);
 }
@@ -3915,7 +4040,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 
   std::string post_data = "DATA";
   content::OpenURLParams params(dest_url(), Referrer(), CURRENT_TAB,
-                                content::PAGE_TRANSITION_TYPED, false);
+                                ui::PAGE_TRANSITION_TYPED, false);
   params.uses_post = true;
   params.browser_initiated_post_data =
       base::RefCountedString::TakeString(&post_data);
@@ -4052,7 +4177,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderReplaceCurrentEntry) {
   PrerenderTestURL("files/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
 
   content::OpenURLParams params(dest_url(), Referrer(), CURRENT_TAB,
-                                content::PAGE_TRANSITION_TYPED, false);
+                                ui::PAGE_TRANSITION_TYPED, false);
   params.should_replace_current_entry = true;
   NavigateToURLWithParams(params, false);
 
@@ -4101,9 +4226,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDoublePendingSwap) {
       current_browser()->tab_strip_model(),
       GetActiveWebContents(), 2);
   current_browser()->OpenURL(OpenURLParams(
-      url1, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+      url1, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
   current_browser()->OpenURL(OpenURLParams(
-      url2, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+      url2, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
   swap_observer.Wait();
 
   // The WebContents should be on url2. There may be 2 or 3 entries, depending
@@ -4145,7 +4270,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
           &GetActiveWebContents()->GetController()));
   current_browser()->OpenURL(OpenURLParams(
       dest_url(), Referrer(), CURRENT_TAB,
-      content::PAGE_TRANSITION_TYPED, false));
+      ui::PAGE_TRANSITION_TYPED, false));
   page_load_observer.Wait();
 
   // Navigate somewhere else. This should succeed and abort the pending swap.
@@ -4153,7 +4278,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   current_browser()->OpenURL(OpenURLParams(GURL(url::kAboutBlankURL),
                                            Referrer(),
                                            CURRENT_TAB,
-                                           content::PAGE_TRANSITION_TYPED,
+                                           ui::PAGE_TRANSITION_TYPED,
                                            false));
   nav_observer.Wait();
 }
@@ -4177,14 +4302,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPing) {
 }
 
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPPLTNormalNavigation) {
-  UMAHistogramHelper histograms;
-
   GURL url = test_server()->GetURL("files/prerender/prerender_page.html");
   ui_test_utils::NavigateToURL(current_browser(), url);
-  histograms.Fetch();
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
-  histograms.ExpectTotalCount("Prerender.none_PerceivedPLTMatchedComplete", 0);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLT", 1);
+  histogram_tester().ExpectTotalCount("Prerender.none_PerceivedPLTMatched", 0);
+  histogram_tester().ExpectTotalCount(
+      "Prerender.none_PerceivedPLTMatchedComplete", 0);
 }
 
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
@@ -4423,6 +4546,68 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxBrowserTest,
   // Prerender should be running, but abandoned.
   EXPECT_TRUE(
       GetAutocompleteActionPredictor()->IsPrerenderAbandonedForTesting());
+}
+
+// Prefetch should be allowed depending on preference and network type.
+// This test is for the bsae case: no Finch overrides should never disable.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       LocalPredictorDisableWorksBaseCase) {
+  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
+      false /*preference_wifi_network_wifi*/,
+      false /*preference_wifi_network_4g*/,
+      false /*preference_always_network_wifi*/,
+      false /*preference_always_network_4g*/,
+      false /*preference_never_network_wifi*/,
+      false /*preference_never_network_4g*/);
+}
+
+// Prefetch should be allowed depending on preference and network type.
+// LocalPredictorOnCellularOnly should disable all wifi cases.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       LocalPredictorDisableWorksCellularOnly) {
+  CreateTestFieldTrial("PrerenderLocalPredictorSpec",
+                       "LocalPredictorOnCellularOnly=Enabled");
+  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
+      true /*preference_wifi_network_wifi*/,
+      false /*preference_wifi_network_4g*/,
+      true /*preference_always_network_wifi*/,
+      false /*preference_always_network_4g*/,
+      true /*preference_never_network_wifi*/,
+      false /*preference_never_network_4g*/);
+}
+
+// Prefetch should be allowed depending on preference and network type.
+// LocalPredictorNetworkPredictionEnabledOnly should disable whenever
+// network predictions will not be exercised.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       LocalPredictorDisableWorksNetworkPredictionEnableOnly) {
+  CreateTestFieldTrial("PrerenderLocalPredictorSpec",
+                       "LocalPredictorNetworkPredictionEnabledOnly=Enabled");
+  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
+      false /*preference_wifi_network_wifi*/,
+      true /*preference_wifi_network_4g*/,
+      false /*preference_always_network_wifi*/,
+      false /*preference_always_network_4g*/,
+      true /*preference_never_network_wifi*/,
+      true /*preference_never_network_4g*/);
+}
+
+// Prefetch should be allowed depending on preference and network type.
+// If LocalPredictorNetworkPredictionEnabledOnly and
+// LocalPredictorOnCellularOnly are both selected, we must disable whenever
+// network predictions are not exercised, or when we are on wifi.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       LocalPredictorDisableWorksBothOptions) {
+  CreateTestFieldTrial("PrerenderLocalPredictorSpec",
+                       "LocalPredictorOnCellularOnly=Enabled:"
+                       "LocalPredictorNetworkPredictionEnabledOnly=Enabled");
+  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
+      true /*preference_wifi_network_wifi*/,
+      true /*preference_wifi_network_4g*/,
+      true /*preference_always_network_wifi*/,
+      false /*preference_always_network_4g*/,
+      true /*preference_never_network_wifi*/,
+      true /*preference_never_network_4g*/);
 }
 
 }  // namespace prerender

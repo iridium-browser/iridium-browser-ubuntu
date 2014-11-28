@@ -615,6 +615,16 @@ int OpenSSLStreamAdapter::BeginSSL() {
   SSL_set_mode(ssl_, SSL_MODE_ENABLE_PARTIAL_WRITE |
                SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
+  // Specify an ECDH group for ECDHE ciphers, otherwise they cannot be
+  // negotiated when acting as the server. Use NIST's P-256 which is commonly
+  // supported.
+  EC_KEY* ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+  if (ecdh == NULL)
+    return -1;
+  SSL_set_options(ssl_, SSL_OP_SINGLE_ECDH_USE);
+  SSL_set_tmp_ecdh(ssl_, ecdh);
+  EC_KEY_free(ecdh);
+
   // Do the connect
   return ContinueSSL();
 }
@@ -685,6 +695,12 @@ void OpenSSLStreamAdapter::Cleanup() {
   }
 
   if (ssl_) {
+    int ret = SSL_shutdown(ssl_);
+    if (ret < 0) {
+      LOG(LS_WARNING) << "SSL_shutdown failed, error = "
+                      << SSL_get_error(ssl_, ret);
+    }
+
     SSL_free(ssl_);
     ssl_ = NULL;
   }
@@ -733,8 +749,15 @@ SSL_CTX* OpenSSLStreamAdapter::SetupSSLContext() {
   SSL_CTX_set_info_callback(ctx, OpenSSLAdapter::SSLInfoCallback);
 #endif
 
-  SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER |SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-                     SSLVerifyCallback);
+  int mode = SSL_VERIFY_PEER;
+  if (client_auth_enabled()) {
+    // Require a certificate from the client.
+    // Note: Normally this is always true in production, but it may be disabled
+    // for testing purposes (e.g. SSLAdapter unit tests).
+    mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+  }
+
+  SSL_CTX_set_verify(ctx, mode, SSLVerifyCallback);
   SSL_CTX_set_verify_depth(ctx, 4);
   SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
 

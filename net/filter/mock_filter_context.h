@@ -36,6 +36,11 @@ class MockFilterContext : public FilterContext {
     return context_.get();
   }
 
+  // After a URLRequest's destructor is called, some interfaces may become
+  // unstable.  This method is used to signal that state, so we can tag use
+  // of those interfaces as coding errors.
+  void NukeUnstableInterfaces();
+
   virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
 
   // What URL was used to access this data?
@@ -56,7 +61,7 @@ class MockFilterContext : public FilterContext {
   virtual bool IsDownload() const OVERRIDE;
 
   // Was this data flagged as a response to a request with an SDCH dictionary?
-  virtual bool IsSdchResponse() const OVERRIDE;
+  virtual bool SdchResponseExpected() const OVERRIDE;
 
   // How many bytes were fed to filter(s) so far?
   virtual int64 GetByteReadCount() const OVERRIDE;
@@ -77,6 +82,7 @@ class MockFilterContext : public FilterContext {
   bool is_cached_content_;
   bool is_download_;
   bool is_sdch_response_;
+  bool ok_to_call_get_url_;
   int response_code_;
   scoped_ptr<URLRequestContext> context_;
 

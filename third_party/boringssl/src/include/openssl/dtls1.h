@@ -53,32 +53,21 @@
  *
  * This product includes cryptographic software written by Eric Young
  * (eay@cryptsoft.com).  This product includes software written by Tim
- * Hudson (tjh@cryptsoft.com).
- *
- */
+ * Hudson (tjh@cryptsoft.com). */
 
 #ifndef HEADER_DTLS1_H
 #define HEADER_DTLS1_H
 
+#include <openssl/base.h>
 #include <openssl/buf.h>
 #include <openssl/pqueue.h>
-#if defined(OPENSSL_WINDOWS)
-/* Including winsock.h pollutes the namespace too much with defines for
- * X509_NAME etc. */
-typedef struct timeval {
-	long tv_sec;
-	long tv_usec;
-} timeval;
-#else
-#include <sys/time.h>
-#endif
 
 #ifdef  __cplusplus
 extern "C" {
 #endif
 
+
 #define DTLS1_VERSION			0xFEFF
-#define DTLS1_BAD_VER			0x0100
 #define DTLS1_2_VERSION			0xFEFD
 /* Special value for method supporting multiple versions */
 #define DTLS_ANY_VERSION		0x1FFFF
@@ -107,6 +96,19 @@ extern "C" {
 #endif
 
 #ifndef OPENSSL_NO_SSL_INTERN
+
+
+#if defined(OPENSSL_WINDOWS)
+/* Because of Windows header issues, we can't get the normal declaration of
+ * timeval. */
+typedef struct OPENSSL_timeval_st {
+	long tv_sec;
+	long tv_usec;
+} OPENSSL_timeval;
+#else
+#include <sys/time.h>
+typedef struct timeval OPENSSL_timeval;
+#endif
 
 typedef struct dtls1_bitmap_st
 	{
@@ -169,9 +171,12 @@ typedef struct hm_fragment_st
 
 typedef struct dtls1_state_st
 	{
+	/* send_cookie is true if we are resending the ClientHello
+	 * with a cookie from a HelloVerifyRequest. */
 	unsigned int send_cookie;
-	unsigned char cookie[DTLS1_COOKIE_LENGTH];
-	unsigned int cookie_len;
+
+	uint8_t cookie[DTLS1_COOKIE_LENGTH];
+	size_t cookie_len;
 
 	/* 
 	 * The current data and handshake epoch.  This is initially
@@ -223,8 +228,10 @@ typedef struct dtls1_state_st
 
 	struct dtls1_timeout_st timeout;
 
-	/* Indicates when the last handshake msg or heartbeat sent will timeout */
-	struct timeval next_timeout;
+	/* Indicates when the last handshake msg or heartbeat sent will
+	 * timeout. Because of header issues on Windows, this cannot actually
+	 * be a struct timeval. */
+	OPENSSL_timeval next_timeout;
 
 	/* Timeout duration */
 	unsigned short timeout_duration;

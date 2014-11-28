@@ -11,7 +11,8 @@ namespace extensions {
 
 class TestExtensionRegistryObserver::Waiter {
  public:
-  Waiter(const std::string& extension_id) : observed_(false), runner_(NULL) {}
+  explicit Waiter(const std::string& extension_id)
+      : observed_(false), runner_(NULL) {}
 
   void Wait() {
     if (observed_)
@@ -24,7 +25,7 @@ class TestExtensionRegistryObserver::Waiter {
   void OnObserved() {
     observed_ = true;
 
-    if (runner_) {
+    if (runner_.get()) {
       runner_->Quit();
       runner_ = NULL;
     }

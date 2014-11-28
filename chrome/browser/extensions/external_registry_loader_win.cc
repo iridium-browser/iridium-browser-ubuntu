@@ -5,19 +5,20 @@
 #include "chrome/browser/extensions/external_registry_loader_win.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "extensions/common/extension.h"
 
 using content::BrowserThread;
 
@@ -41,6 +42,11 @@ const wchar_t kRegistryExtensionUpdateUrl[] = L"update_url";
 bool CanOpenFileForReading(const base::FilePath& path) {
   base::ScopedFILE file_handle(base::OpenFile(path, "rb"));
   return file_handle.get() != NULL;
+}
+
+std::string MakePrefName(const std::string& extension_id,
+                         const std::string& pref_name) {
+  return base::StringPrintf("%s.%s", extension_id.c_str(), pref_name.c_str());
 }
 
 }  // namespace
@@ -91,7 +97,7 @@ void ExternalRegistryLoader::LoadOnFileThread() {
 
     std::string id = base::UTF16ToASCII(*it);
     base::StringToLowerASCII(&id);
-    if (!Extension::IdIsValid(id)) {
+    if (!crx_file::id_util::IdIsValid(id)) {
       LOG(ERROR) << "Invalid id value " << id
                  << " for key " << key_path << ".";
       continue;
@@ -100,7 +106,7 @@ void ExternalRegistryLoader::LoadOnFileThread() {
     base::string16 extension_dist_id;
     if (key.ReadValue(kRegistryExtensionInstallParam, &extension_dist_id) ==
         ERROR_SUCCESS) {
-      prefs->SetString(id + "." + ExternalProviderImpl::kInstallParam,
+      prefs->SetString(MakePrefName(id, ExternalProviderImpl::kInstallParam),
                        base::UTF16ToASCII(extension_dist_id));
     }
 
@@ -110,7 +116,7 @@ void ExternalRegistryLoader::LoadOnFileThread() {
     if (key.ReadValue(kRegistryExtensionUpdateUrl, &extension_update_url)
         == ERROR_SUCCESS) {
       prefs->SetString(
-          id + "." + ExternalProviderImpl::kExternalUpdateUrl,
+          MakePrefName(id, ExternalProviderImpl::kExternalUpdateUrl),
           base::UTF16ToASCII(extension_update_url));
       continue;
     }
@@ -164,16 +170,19 @@ void ExternalRegistryLoader::LoadOnFileThread() {
     }
 
     prefs->SetString(
-        id + "." + ExternalProviderImpl::kExternalVersion,
+        MakePrefName(id, ExternalProviderImpl::kExternalVersion),
         base::UTF16ToASCII(extension_version));
     prefs->SetString(
-        id + "." + ExternalProviderImpl::kExternalCrx,
+        MakePrefName(id, ExternalProviderImpl::kExternalCrx),
         extension_path_str);
+    prefs->SetBoolean(
+        MakePrefName(id, ExternalProviderImpl::kMayBeUntrusted),
+        true);
   }
 
   prefs_.reset(prefs.release());
-  HISTOGRAM_TIMES("Extensions.ExternalRegistryLoaderWin",
-                  base::TimeTicks::Now() - start_time);
+  LOCAL_HISTOGRAM_TIMES("Extensions.ExternalRegistryLoaderWin",
+                        base::TimeTicks::Now() - start_time);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ExternalRegistryLoader::LoadFinished, this));

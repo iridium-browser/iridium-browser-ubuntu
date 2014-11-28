@@ -6,11 +6,11 @@ package org.chromium.sync.internal_api.pub.base;
 
 import android.util.Log;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
 import com.google.protos.ipc.invalidation.Types;
 
 import org.chromium.base.FieldTrialList;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryLoader;
 
 import java.util.Collection;
@@ -73,7 +73,12 @@ public enum ModelType {
     /**
      * A favicon tracking object.
      */
-    FAVICON_TRACKING("FAVICON_TRACKING");
+    FAVICON_TRACKING("FAVICON_TRACKING"),
+    /**
+     * A supervised user setting object. The old name "managed user" is used for backwards
+     * compatibility.
+     */
+    MANAGED_USER_SETTING("MANAGED_USER_SETTING");
 
     /** Special type representing all possible types. */
     public static final String ALL_TYPES_TYPE = "ALL_TYPES";
@@ -85,6 +90,7 @@ public enum ModelType {
     private final boolean mNonInvalidationType;
 
     ModelType(String modelType, boolean nonInvalidationType) {
+        assert nonInvalidationType || name().equals(modelType);
         mModelType = modelType;
         mNonInvalidationType = nonInvalidationType;
     }
@@ -111,8 +117,7 @@ public enum ModelType {
      */
     @VisibleForTesting
     public ObjectId toObjectId() {
-        return ObjectId.newInstance(Types.ObjectSource.Type.CHROME_SYNC.getNumber(),
-                mModelType.getBytes());
+        return ObjectId.newInstance(Types.ObjectSource.CHROME_SYNC, mModelType.getBytes());
     }
 
     public static ModelType fromObjectId(ObjectId objectId) {
@@ -165,21 +170,33 @@ public enum ModelType {
      * This strips out any {@link ModelType} that is not an invalidation type.
      */
     public static Set<ObjectId> modelTypesToObjectIds(Set<ModelType> modelTypes) {
-        Set<ObjectId> objectIds = new HashSet<ObjectId>(modelTypes.size());
-        for (ModelType modelType : modelTypes) {
-            if (!modelType.isNonInvalidationType()) {
-                objectIds.add(modelType.toObjectId());
-            }
+        Set<ModelType> filteredModelTypes = filterOutNonInvalidationTypes(modelTypes);
+        Set<ObjectId> objectIds = new HashSet<ObjectId>(filteredModelTypes.size());
+        for (ModelType modelType : filteredModelTypes) {
+            objectIds.add(modelType.toObjectId());
         }
         return objectIds;
     }
 
     /** Converts a set of {@link ModelType} to a set of string names. */
-    public static Set<String> modelTypesToSyncTypes(Set<ModelType> modelTypes) {
+    public static Set<String> modelTypesToSyncTypesForTest(Set<ModelType> modelTypes) {
         Set<String> objectIds = new HashSet<String>(modelTypes.size());
         for (ModelType modelType : modelTypes) {
             objectIds.add(modelType.toString());
         }
         return objectIds;
     }
+
+    /** Filters out non-invalidation types from a set of {@link ModelType}. */
+    @VisibleForTesting
+    public static Set<ModelType> filterOutNonInvalidationTypes(Set<ModelType> modelTypes) {
+        Set<ModelType> filteredTypes = new HashSet<ModelType>(modelTypes.size());
+        for (ModelType modelType : modelTypes) {
+            if (!modelType.isNonInvalidationType()) {
+                filteredTypes.add(modelType);
+            }
+        }
+        return filteredTypes;
+    }
+
 }

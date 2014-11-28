@@ -102,6 +102,59 @@ bool GetProperty(XID window, const std::string& property_name, long max_length,
                             property);
 }
 
+bool SupportsEWMH() {
+  static bool supports_ewmh = false;
+  static bool supports_ewmh_cached = false;
+  if (!supports_ewmh_cached) {
+    supports_ewmh_cached = true;
+
+    int wm_window = 0u;
+    if (!GetIntProperty(GetX11RootWindow(),
+                        "_NET_SUPPORTING_WM_CHECK",
+                        &wm_window)) {
+      supports_ewmh = false;
+      return false;
+    }
+
+    // It's possible that a window manager started earlier in this X session
+    // left a stale _NET_SUPPORTING_WM_CHECK property when it was replaced by a
+    // non-EWMH window manager, so we trap errors in the following requests to
+    // avoid crashes (issue 23860).
+
+    // EWMH requires the supporting-WM window to also have a
+    // _NET_SUPPORTING_WM_CHECK property pointing to itself (to avoid a stale
+    // property referencing an ID that's been recycled for another window), so
+    // we check that too.
+    gfx::X11ErrorTracker err_tracker;
+    int wm_window_property = 0;
+    bool result = GetIntProperty(
+        wm_window, "_NET_SUPPORTING_WM_CHECK", &wm_window_property);
+    supports_ewmh = !err_tracker.FoundNewError() &&
+                    result &&
+                    wm_window_property == wm_window;
+  }
+
+  return supports_ewmh;
+}
+
+bool GetWindowManagerName(std::string* wm_name) {
+  DCHECK(wm_name);
+  if (!SupportsEWMH())
+    return false;
+
+  int wm_window = 0;
+  if (!GetIntProperty(GetX11RootWindow(),
+                      "_NET_SUPPORTING_WM_CHECK",
+                      &wm_window)) {
+    return false;
+  }
+
+  gfx::X11ErrorTracker err_tracker;
+  bool result = GetStringProperty(
+      static_cast<XID>(wm_window), "_NET_WM_NAME", wm_name);
+  return !err_tracker.FoundNewError() && result;
+}
+
 // A process wide singleton that manages the usage of X cursors.
 class XCursorCache {
  public:
@@ -962,23 +1015,34 @@ void SetWindowRole(XDisplay* display, XID window, const std::string& role) {
 }
 
 bool GetCustomFramePrefDefault() {
-  // Ideally, we'd use the custom frame by default and just fall back on using
-  // system decorations for the few (?) tiling window managers where the custom
-  // frame doesn't make sense (e.g. awesome, ion3, ratpoison, xmonad, etc.) or
-  // other WMs where it has issues (e.g. Fluxbox -- see issue 19130).  The EWMH
-  // _NET_SUPPORTING_WM property makes it easy to look up a name for the current
-  // WM, but at least some of the WMs in the latter group don't set it.
-  // Instead, we default to using system decorations for all WMs and
-  // special-case the ones where the custom frame should be used.
-  ui::WindowManagerName wm_type = GuessWindowManager();
-  return (wm_type == WM_BLACKBOX ||
-          wm_type == WM_COMPIZ ||
-          wm_type == WM_ENLIGHTENMENT ||
-          wm_type == WM_METACITY ||
-          wm_type == WM_MUFFIN ||
-          wm_type == WM_MUTTER ||
-          wm_type == WM_OPENBOX ||
-          wm_type == WM_XFWM4);
+  // If the window manager doesn't support enough of EWMH to tell us its name,
+  // assume that it doesn't want custom frames. For example, _NET_WM_MOVERESIZE
+  // is needed for frame-drag-initiated window movement.
+  std::string wm_name;
+  if (!GetWindowManagerName(&wm_name))
+    return false;
+
+  // Also disable custom frames for (at-least-partially-)EWMH-supporting tiling
+  // window managers.
+  ui::WindowManagerName wm = GuessWindowManager();
+  if (wm == WM_AWESOME ||
+      wm == WM_I3 ||
+      wm == WM_ION3 ||
+      wm == WM_MATCHBOX ||
+      wm == WM_NOTION ||
+      wm == WM_QTILE ||
+      wm == WM_RATPOISON ||
+      wm == WM_STUMPWM)
+    return false;
+
+  // Handle a few more window managers that don't get along well with custom
+  // frames.
+  if (wm == WM_ICE_WM ||
+      wm == WM_KWIN)
+    return false;
+
+  // For everything else, use custom frames.
+  return true;
 }
 
 bool GetWindowDesktop(XID window, int* desktop) {
@@ -1155,68 +1219,57 @@ bool CopyAreaToCanvas(XID drawable,
   return true;
 }
 
-bool GetWindowManagerName(std::string* wm_name) {
-  DCHECK(wm_name);
-  int wm_window = 0;
-  if (!GetIntProperty(GetX11RootWindow(),
-                      "_NET_SUPPORTING_WM_CHECK",
-                      &wm_window)) {
-    return false;
-  }
-
-  // It's possible that a window manager started earlier in this X session left
-  // a stale _NET_SUPPORTING_WM_CHECK property when it was replaced by a
-  // non-EWMH window manager, so we trap errors in the following requests to
-  // avoid crashes (issue 23860).
-
-  // EWMH requires the supporting-WM window to also have a
-  // _NET_SUPPORTING_WM_CHECK property pointing to itself (to avoid a stale
-  // property referencing an ID that's been recycled for another window), so we
-  // check that too.
-  gfx::X11ErrorTracker err_tracker;
-  int wm_window_property = 0;
-  bool result = GetIntProperty(
-      wm_window, "_NET_SUPPORTING_WM_CHECK", &wm_window_property);
-  if (err_tracker.FoundNewError() || !result ||
-      wm_window_property != wm_window) {
-    return false;
-  }
-
-  result = GetStringProperty(
-      static_cast<XID>(wm_window), "_NET_WM_NAME", wm_name);
-  return !err_tracker.FoundNewError() && result;
-}
-
 WindowManagerName GuessWindowManager() {
   std::string name;
   if (GetWindowManagerName(&name)) {
     // These names are taken from the WMs' source code.
+    if (name == "awesome")
+      return WM_AWESOME;
     if (name == "Blackbox")
       return WM_BLACKBOX;
-    if (name == "chromeos-wm")
-      return WM_CHROME_OS;
     if (name == "Compiz" || name == "compiz")
       return WM_COMPIZ;
-    if (name == "e16")
+    if (name == "e16" || name == "Enlightenment")
       return WM_ENLIGHTENMENT;
+    if (name == "i3")
+      return WM_I3;
     if (StartsWithASCII(name, "IceWM", true))
       return WM_ICE_WM;
+    if (name == "ion3")
+      return WM_ION3;
     if (name == "KWin")
       return WM_KWIN;
+    if (name == "matchbox")
+      return WM_MATCHBOX;
     if (name == "Metacity")
       return WM_METACITY;
     if (name == "Mutter (Muffin)")
       return WM_MUFFIN;
     if (name == "GNOME Shell")
-      return WM_MUTTER; // GNOME Shell uses Mutter
+      return WM_MUTTER;  // GNOME Shell uses Mutter
     if (name == "Mutter")
       return WM_MUTTER;
+    if (name == "notion")
+      return WM_NOTION;
     if (name == "Openbox")
       return WM_OPENBOX;
+    if (name == "qtile")
+      return WM_QTILE;
+    if (name == "ratpoison")
+      return WM_RATPOISON;
+    if (name == "stumpwm")
+      return WM_STUMPWM;
     if (name == "Xfwm4")
       return WM_XFWM4;
   }
   return WM_UNKNOWN;
+}
+
+std::string GuessWindowManagerName() {
+  std::string name;
+  if (GetWindowManagerName(&name))
+    return name;
+  return "Unknown";
 }
 
 void SetDefaultX11ErrorHandlers() {
@@ -1257,6 +1310,9 @@ bool IsX11WindowFullScreen(XID window) {
 }
 
 bool WmSupportsHint(XAtom atom) {
+  if (!SupportsEWMH())
+    return false;
+
   std::vector<XAtom> supported_atoms;
   if (!GetAtomArrayProperty(GetX11RootWindow(),
                             "_NET_SUPPORTED",

@@ -15,8 +15,8 @@
 
 #include <deque>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
@@ -53,7 +53,7 @@ class PlatformChannelPairPosixTest : public testing::Test {
 
   virtual void TearDown() OVERRIDE {
     // Restore the |SIGPIPE| handler.
-    ASSERT_EQ(0, sigaction(SIGPIPE, &old_action_, NULL));
+    ASSERT_EQ(0, sigaction(SIGPIPE, &old_action_, nullptr));
   }
 
  private:

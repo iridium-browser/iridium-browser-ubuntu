@@ -249,6 +249,10 @@ OpusAudioDecoder::OpusAudioDecoder(
       opus_decoder_(NULL),
       start_input_timestamp_(kNoTimestamp()) {}
 
+std::string OpusAudioDecoder::GetDisplayName() const {
+  return "OpusAudioDecoder";
+}
+
 void OpusAudioDecoder::Initialize(const AudioDecoderConfig& config,
                                   const PipelineStatusCB& status_cb,
                                   const OutputCB& output_cb) {
@@ -298,7 +302,7 @@ void OpusAudioDecoder::DecodeBuffer(
     const DecodeCB& decode_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!decode_cb.is_null());
-  DCHECK(input);
+  DCHECK(input.get());
 
   // Libopus does not buffer output. Decoding is complete when an end of stream
   // input buffer is received.
@@ -330,7 +334,7 @@ void OpusAudioDecoder::DecodeBuffer(
     return;
   }
 
-  if (output_buffer) {
+  if (output_buffer.get()) {
     output_cb_.Run(output_buffer);
   }
 

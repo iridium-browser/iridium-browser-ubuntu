@@ -94,10 +94,10 @@ void PpFrameWriter::GetCurrentSupportedFormats(
 }
 
 void PpFrameWriter::StartSourceImpl(
-    const media::VideoCaptureParams& params,
+    const media::VideoCaptureFormat& format,
     const VideoCaptureDeliverFrameCB& frame_callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!delegate_);
+  DCHECK(!delegate_.get());
   DVLOG(3) << "PpFrameWriter::StartSourceImpl()";
   delegate_ = new FrameWriterDelegate(io_message_loop(), frame_callback);
   OnStartDone(MEDIA_DEVICE_OK);

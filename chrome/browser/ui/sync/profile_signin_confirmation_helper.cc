@@ -14,9 +14,9 @@
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/history/core/browser/history_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/native_theme/native_theme.h"
@@ -26,6 +26,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #endif
@@ -37,7 +38,7 @@ const int kHistoryEntriesBeforeNewProfilePrompt = 10;
 // Determines whether a profile has any typed URLs in its history.
 class HasTypedURLsTask : public history::HistoryDBTask {
  public:
-  HasTypedURLsTask(const base::Callback<void(bool)>& cb)
+  explicit HasTypedURLsTask(const base::Callback<void(bool)>& cb)
       : has_typed_urls_(false), cb_(cb) {
   }
 
@@ -188,10 +189,19 @@ SkColor GetSigninConfirmationPromptBarColor(SkAlpha alpha) {
 }
 
 bool HasBeenShutdown(Profile* profile) {
+#if defined(OS_IOS)
+  // This check is not useful on iOS: the browser can be shut down without
+  // explicit user action (for example, in response to memory pressure), and
+  // this should be invisible to the user. The desktop assumption that the
+  // profile going through a restart indicates something about user intention
+  // does not hold. We rely on the other profile dirtiness checks.
+  return false;
+#else
   bool has_been_shutdown = !profile->IsNewProfile();
   if (has_been_shutdown)
     DVLOG(1) << "ProfileSigninConfirmationHelper: profile is not new";
   return has_been_shutdown;
+#endif
 }
 
 bool HasSyncedExtensions(Profile* profile) {
@@ -207,7 +217,7 @@ bool HasSyncedExtensions(Profile* profile) {
       // page, but since it's installed by default we don't want to
       // consider it when determining if the profile is dirty.
       if (extensions::sync_helper::IsSyncable(iter->get()) &&
-          (*iter)->id() != extension_misc::kWebStoreAppId &&
+          (*iter)->id() != extensions::kWebStoreAppId &&
           (*iter)->id() != extension_misc::kChromeAppId) {
         DVLOG(1) << "ProfileSigninConfirmationHelper: "
                  << "profile contains a synced extension: " << (*iter)->id();

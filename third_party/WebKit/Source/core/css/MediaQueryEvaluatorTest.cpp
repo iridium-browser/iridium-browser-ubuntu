@@ -93,7 +93,8 @@ TEST(MediaQueryEvaluatorTest, Cached)
     data.devicePixelRatio = 2.0;
     data.colorBitsPerComponent = 24;
     data.monochromeBitsPerComponent = 0;
-    data.pointer = MediaValues::MousePointer;
+    data.primaryPointerType = PointerTypeFine;
+    data.primaryHoverType = HoverTypeHover;
     data.defaultFontSize = 16;
     data.threeDEnabled = true;
     data.mediaType = MediaTypeNames::screen;
@@ -124,11 +125,13 @@ TEST(MediaQueryEvaluatorTest, Dynamic)
 TEST(MediaQueryEvaluatorTest, DynamicNoView)
 {
     OwnPtr<DummyPageHolder> pageHolder = DummyPageHolder::create(IntSize(500, 500));
+    RefPtr<FrameView> view = pageHolder->frame().view();
     pageHolder->frame().setView(nullptr);
     MediaQueryEvaluator mediaQueryEvaluator(&pageHolder->frame());
     RefPtrWillBeRawPtr<MediaQuerySet> querySet = MediaQuerySet::create("foobar");
     bool output = false;
     ASSERT_EQ(output, mediaQueryEvaluator.eval(querySet.get()));
+    pageHolder->frame().setView(view);
 }
 
 } // namespace

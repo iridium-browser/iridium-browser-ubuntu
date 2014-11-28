@@ -7,9 +7,9 @@
 #include "content/browser/renderer_host/input/motion_event_web.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/common/input/web_touch_event_traits.h"
+#include "content/grit/content_resources.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "grit/content_resources.h"
 #include "third_party/WebKit/public/platform/WebCursorInfo.h"
 #include "ui/events/gesture_detection/gesture_config_helper.h"
 #include "ui/gfx/image/image.h"
@@ -47,7 +47,6 @@ TouchEmulator::TouchEmulator(TouchEmulatorClient* client)
     : client_(client),
       gesture_provider_(GetGestureProviderConfig(), this),
       enabled_(false),
-      allow_pinch_(false),
       emulated_stream_active_sequence_count_(0),
       native_stream_active_sequence_count_(0) {
   DCHECK(client_);
@@ -92,12 +91,11 @@ void TouchEmulator::ResetState() {
   pinch_gesture_active_ = false;
 }
 
-void TouchEmulator::Enable(bool allow_pinch) {
+void TouchEmulator::Enable() {
   if (!enabled_) {
     enabled_ = true;
     ResetState();
   }
-  allow_pinch_ = allow_pinch;
   UpdateCursor();
 }
 
@@ -328,7 +326,8 @@ void TouchEmulator::CancelTouch() {
       WebInputEvent::TouchCancel,
       (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF(),
       &touch_event_);
-  if (gesture_provider_.OnTouchEvent(MotionEventWeb(touch_event_)))
+  if (gesture_provider_.GetCurrentDownEvent() &&
+      gesture_provider_.OnTouchEvent(MotionEventWeb(touch_event_)))
     ForwardTouchEventToClient();
 }
 
@@ -436,7 +435,7 @@ bool TouchEmulator::FillTouchEventAndPoint(const WebMouseEvent& mouse_event) {
 }
 
 bool TouchEmulator::InPinchGestureMode() const {
-  return shift_pressed_ && allow_pinch_;
+  return shift_pressed_;
 }
 
 }  // namespace content

@@ -27,10 +27,13 @@ class MotionEventWeb : public ui::MotionEvent {
   virtual float GetRawX(size_t pointer_index) const OVERRIDE;
   virtual float GetRawY(size_t pointer_index) const OVERRIDE;
   virtual float GetTouchMajor(size_t pointer_index) const OVERRIDE;
+  virtual float GetTouchMinor(size_t pointer_index) const OVERRIDE;
+  virtual float GetOrientation(size_t pointer_index) const OVERRIDE;
   virtual float GetPressure(size_t pointer_index) const OVERRIDE;
   virtual base::TimeTicks GetEventTime() const OVERRIDE;
   virtual ToolType GetToolType(size_t pointer_index) const OVERRIDE;
   virtual int GetButtonState() const OVERRIDE;
+  virtual int GetFlags() const OVERRIDE;
   virtual scoped_ptr<MotionEvent> Clone() const OVERRIDE;
   virtual scoped_ptr<MotionEvent> Cancel() const OVERRIDE;
 

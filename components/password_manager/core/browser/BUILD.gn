@@ -52,6 +52,11 @@ static_library("browser") {
     "password_store_sync.h",
     "psl_matching_helper.cc",
     "psl_matching_helper.h",
+    "webdata/logins_table.cc",
+    "webdata/logins_table.h",
+    "webdata/logins_table_win.cc",
+    "webdata/password_web_data_service_win.cc",
+    "webdata/password_web_data_service_win.h",
   ]
 
   deps = [
@@ -74,7 +79,7 @@ static_library("browser") {
     cflags = [ "/wd4267" ]
   }
 
-  direct_dependent_configs = [ ":password_manager_config" ]
+  public_configs = [ ":password_manager_config" ]
 
   # Sync (not supported in Android WebView).
   if (!is_android || !is_android_webview_build) {
@@ -86,7 +91,8 @@ static_library("browser") {
   }
 }
 
-static_library("test_support") {
+source_set("test_support") {
+  testonly = true
   sources = [
     "mock_password_store.cc",
     "mock_password_store.h",
@@ -100,6 +106,9 @@ static_library("test_support") {
     "test_password_store.h",
   ]
 
+  public_deps = [
+    ":browser",
+  ]
   deps = [
     "//base",
     "//components/autofill/core/common",

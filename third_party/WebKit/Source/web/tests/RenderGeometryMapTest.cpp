@@ -34,6 +34,7 @@
 #include "core/dom/Document.h"
 #include "core/rendering/RenderBox.h"
 #include "core/rendering/RenderLayer.h"
+#include "core/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebFrameClient.h"
@@ -41,10 +42,8 @@
 #include "web/tests/FloatPointTestHelpers.h"
 #include "web/tests/FloatQuadTestHelpers.h"
 #include "web/tests/FrameTestHelpers.h"
-#include "web/tests/URLTestHelpers.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
 using namespace blink;
 
 class MockWebFrameClient : public WebFrameClient {

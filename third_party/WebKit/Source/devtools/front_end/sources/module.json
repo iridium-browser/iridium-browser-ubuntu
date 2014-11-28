@@ -199,7 +199,7 @@
         "StyleSheetOutlineDialog.js",
         "TabbedEditorContainer.js",
         "WatchExpressionsSidebarPane.js",
-        "WorkersSidebarPane.js",
+        "ThreadsSidebarPane.js",
         "ScriptFormatterEditorAction.js",
         "InplaceFormatterEditorAction.js",
         "ScriptFormatter.js",
@@ -208,5 +208,8 @@
         "FileBasedSearchResultsPane.js",
         "SourcesSearchScope.js",
         "SourcesPanel.js"
+    ],
+    "skip_compilation": [
+        "jsdifflib.js"
     ]
 }

@@ -18,7 +18,7 @@ package com.google.ipc.invalidation.external.client;
 
 import com.google.ipc.invalidation.ticl.InvalidationClientCore;
 import com.google.ipc.invalidation.ticl.InvalidationClientImpl;
-import com.google.protos.ipc.invalidation.ClientProtocol.ClientConfigP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ClientConfigP;
 
 import java.util.Random;
 
@@ -37,9 +37,9 @@ public class InvalidationClientFactory {
    */
   public static InvalidationClient createClient(SystemResources resources,
       InvalidationClientConfig clientConfig, InvalidationListener listener) {
-    ClientConfigP internalConfig = InvalidationClientCore.createConfig()
-        .setAllowSuppression(clientConfig.allowSuppression)
-        .build();
+    ClientConfigP.Builder internalConfigBuilder = InvalidationClientCore.createConfig().toBuilder();
+    internalConfigBuilder.allowSuppression = clientConfig.allowSuppression;
+    ClientConfigP internalConfig = internalConfigBuilder.build();
     Random random = new Random(resources.getInternalScheduler().getCurrentTimeMs());
     return new InvalidationClientImpl(resources, random, clientConfig.clientType,
         clientConfig.clientName, internalConfig, clientConfig.applicationName, listener);

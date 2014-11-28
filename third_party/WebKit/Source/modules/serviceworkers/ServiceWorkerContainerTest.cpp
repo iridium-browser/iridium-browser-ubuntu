@@ -40,9 +40,9 @@ public:
 
     // The returned ScriptFunction can outlive the StubScriptFunction,
     // but it should not be called after the StubScriptFunction dies.
-    PassOwnPtr<ScriptFunction> function(v8::Isolate* isolate)
+    v8::Handle<v8::Function> function(ScriptState* scriptState)
     {
-        return adoptPtr(new ScriptFunctionImpl(isolate, *this));
+        return ScriptFunctionImpl::createFunction(scriptState, *this);
     }
 
     size_t callCount() { return m_callCount; }
@@ -54,8 +54,15 @@ private:
 
     class ScriptFunctionImpl : public ScriptFunction {
     public:
-        ScriptFunctionImpl(v8::Isolate* isolate, StubScriptFunction& owner)
-            : ScriptFunction(isolate)
+        static v8::Handle<v8::Function> createFunction(ScriptState* scriptState, StubScriptFunction& owner)
+        {
+            ScriptFunctionImpl* self = new ScriptFunctionImpl(scriptState, owner);
+            return self->bindToV8Function();
+        }
+
+    private:
+        ScriptFunctionImpl(ScriptState* scriptState, StubScriptFunction& owner)
+            : ScriptFunction(scriptState)
             , m_owner(owner)
         {
         }
@@ -67,7 +74,6 @@ private:
             return ScriptValue();
         }
 
-    private:
         StubScriptFunction& m_owner;
     };
 };
@@ -80,10 +86,10 @@ public:
 
 // Runs microtasks and expects |promise| to be rejected. Calls
 // |valueTest| with the value passed to |reject|, if any.
-void expectRejected(ScriptPromise& promise, const ScriptValueTest& valueTest)
+void expectRejected(ScriptState* scriptState, ScriptPromise& promise, const ScriptValueTest& valueTest)
 {
     StubScriptFunction resolved, rejected;
-    promise.then(resolved.function(promise.isolate()), rejected.function(promise.isolate()));
+    promise.then(resolved.function(scriptState), rejected.function(scriptState));
     promise.isolate()->RunMicrotasks();
     EXPECT_EQ(0ul, resolved.callCount());
     EXPECT_EQ(1ul, rejected.callCount());
@@ -106,7 +112,7 @@ public:
 
     virtual void operator()(ScriptValue value) const OVERRIDE
     {
-        DOMException* exception = V8DOMException::toNativeWithTypeCheck(value.isolate(), value.v8Value());
+        DOMException* exception = V8DOMException::toImplWithTypeCheck(value.isolate(), value.v8Value());
         EXPECT_TRUE(exception) << "the value should be a DOMException";
         if (!exception)
             return;
@@ -128,12 +134,6 @@ public:
     virtual void registerServiceWorker(const WebURL& pattern, const WebURL& scriptURL, WebServiceWorkerRegistrationCallbacks* callbacks) OVERRIDE
     {
         ADD_FAILURE() << "the provider should not be called to register a Service Worker";
-        delete callbacks;
-    }
-
-    virtual void unregisterServiceWorker(const WebURL& pattern, WebServiceWorkerRegistrationCallbacks* callbacks) OVERRIDE
-    {
-        ADD_FAILURE() << "the provider should not be called to unregister a Service Worker";
         delete callbacks;
     }
 };
@@ -175,26 +175,24 @@ protected:
         // the provider.
         provide(adoptPtr(new NotReachedWebServiceWorkerProvider()));
 
-        RefPtrWillBeRawPtr<ServiceWorkerContainer> container = ServiceWorkerContainer::create(executionContext());
+        ServiceWorkerContainer* container = ServiceWorkerContainer::create(executionContext());
         ScriptState::Scope scriptScope(scriptState());
-        Dictionary options = Dictionary::createEmpty(isolate());
-        EXPECT_TRUE(options.set("scope", scope));
-        ScriptPromise promise = container->registerServiceWorker(scriptState(), scriptURL, options);
-        expectRejected(promise, valueTest);
+        RegistrationOptionList* options = RegistrationOptionList::create();
+        options->setScope(scope);
+        ScriptPromise promise = container->registerServiceWorker(scriptState(), scriptURL, *options);
+        expectRejected(scriptState(), promise, valueTest);
 
         container->willBeDetachedFromFrame();
     }
 
-    void testUnregisterRejected(const String& scope, const ScriptValueTest& valueTest)
+    void testGetRegistrationRejected(const String& documentURL, const ScriptValueTest& valueTest)
     {
         provide(adoptPtr(new NotReachedWebServiceWorkerProvider()));
 
-        RefPtrWillBeRawPtr<ServiceWorkerContainer> container = ServiceWorkerContainer::create(executionContext());
+        ServiceWorkerContainer* container = ServiceWorkerContainer::create(executionContext());
         ScriptState::Scope scriptScope(scriptState());
-        Dictionary options = Dictionary::createEmpty(isolate());
-        EXPECT_TRUE(options.set("scope", scope));
-        ScriptPromise promise = container->unregisterServiceWorker(scriptState(), scope);
-        expectRejected(promise, valueTest);
+        ScriptPromise promise = container->getRegistration(scriptState(), documentURL);
+        expectRejected(scriptState(), promise, valueTest);
 
         container->willBeDetachedFromFrame();
     }
@@ -230,27 +228,27 @@ TEST_F(ServiceWorkerContainerTest, Register_CrossOriginScopeIsRejected)
         ExpectDOMException("SecurityError", "The scope must match the current origin."));
 }
 
-TEST_F(ServiceWorkerContainerTest, Unregister_NonSecureOriginIsRejected)
+TEST_F(ServiceWorkerContainerTest, GetRegistration_NonSecureOriginIsRejected)
 {
-    setPageURL("http://www.example.com");
-    testUnregisterRejected(
-        "*",
+    setPageURL("http://www.example.com/");
+    testGetRegistrationRejected(
+        "http://www.example.com/",
         ExpectDOMException("NotSupportedError", "Only secure origins are allowed. http://goo.gl/lq4gCo"));
 }
 
-TEST_F(ServiceWorkerContainerTest, Unregister_CrossOriginScopeIsRejected)
+TEST_F(ServiceWorkerContainerTest, GetRegistration_CrossOriginURLIsRejected)
 {
-    setPageURL("https://www.example.com");
-    testUnregisterRejected(
-        "https://example.com/", // Differs by host
-        ExpectDOMException("SecurityError", "The scope must match the current origin."));
+    setPageURL("https://www.example.com/");
+    testGetRegistrationRejected(
+        "https://foo.example.com/", // Differs by host
+        ExpectDOMException("SecurityError", "The documentURL must match the current origin."));
 }
 
 class StubWebServiceWorkerProvider {
 public:
     StubWebServiceWorkerProvider()
         : m_registerCallCount(0)
-        , m_unregisterCallCount(0)
+        , m_getRegistrationCallCount(0)
     {
     }
 
@@ -266,8 +264,8 @@ public:
     size_t registerCallCount() { return m_registerCallCount; }
     const WebURL& registerScope() { return m_registerScope; }
     const WebURL& registerScriptURL() { return m_registerScriptURL; }
-    size_t unregisterCallCount() { return m_unregisterCallCount; }
-    const WebURL& unregisterScope() { return m_unregisterScope; }
+    size_t getRegistrationCallCount() { return m_getRegistrationCallCount; }
+    const WebURL& getRegistrationURL() { return m_getRegistrationURL; }
 
 private:
     class WebServiceWorkerProviderImpl : public WebServiceWorkerProvider {
@@ -284,27 +282,28 @@ private:
             m_owner.m_registerCallCount++;
             m_owner.m_registerScope = pattern;
             m_owner.m_registerScriptURL = scriptURL;
-            m_callbacksToDelete.append(adoptPtr(callbacks));
+            m_registrationCallbacksToDelete.append(adoptPtr(callbacks));
         }
 
-        virtual void unregisterServiceWorker(const WebURL& pattern, WebServiceWorkerRegistrationCallbacks* callbacks) OVERRIDE
+        virtual void getRegistration(const WebURL& documentURL, WebServiceWorkerGetRegistrationCallbacks* callbacks) OVERRIDE
         {
-            m_owner.m_unregisterCallCount++;
-            m_owner.m_unregisterScope = pattern;
-            m_callbacksToDelete.append(adoptPtr(callbacks));
+            m_owner.m_getRegistrationCallCount++;
+            m_owner.m_getRegistrationURL = documentURL;
+            m_getRegistrationCallbacksToDelete.append(adoptPtr(callbacks));
         }
 
     private:
         StubWebServiceWorkerProvider& m_owner;
-        Vector<OwnPtr<WebServiceWorkerRegistrationCallbacks> > m_callbacksToDelete;
+        Vector<OwnPtr<WebServiceWorkerRegistrationCallbacks> > m_registrationCallbacksToDelete;
+        Vector<OwnPtr<WebServiceWorkerGetRegistrationCallbacks> > m_getRegistrationCallbacksToDelete;
     };
 
 private:
     size_t m_registerCallCount;
     WebURL m_registerScope;
     WebURL m_registerScriptURL;
-    size_t m_unregisterCallCount;
-    WebURL m_unregisterScope;
+    size_t m_getRegistrationCallCount;
+    WebURL m_getRegistrationURL;
 };
 
 TEST_F(ServiceWorkerContainerTest, RegisterUnregister_NonHttpsSecureOriginDelegatesToProvider)
@@ -314,27 +313,37 @@ TEST_F(ServiceWorkerContainerTest, RegisterUnregister_NonHttpsSecureOriginDelega
     StubWebServiceWorkerProvider stubProvider;
     provide(stubProvider.provider());
 
-    RefPtrWillBeRawPtr<ServiceWorkerContainer> container = ServiceWorkerContainer::create(executionContext());
+    ServiceWorkerContainer* container = ServiceWorkerContainer::create(executionContext());
 
     // register
     {
         ScriptState::Scope scriptScope(scriptState());
-        Dictionary options = Dictionary::createEmpty(isolate());
-        EXPECT_TRUE(options.set("scope", "y/"));
-        container->registerServiceWorker(scriptState(), "/z/worker.js", options);
+        RegistrationOptionList* options = RegistrationOptionList::create();
+        options->setScope("y/");
+        container->registerServiceWorker(scriptState(), "/z/worker.js", *options);
 
         EXPECT_EQ(1ul, stubProvider.registerCallCount());
         EXPECT_EQ(WebURL(KURL(KURL(), "http://localhost/x/y/")), stubProvider.registerScope());
         EXPECT_EQ(WebURL(KURL(KURL(), "http://localhost/z/worker.js")), stubProvider.registerScriptURL());
     }
 
-    // unregister
+    container->willBeDetachedFromFrame();
+}
+
+TEST_F(ServiceWorkerContainerTest, GetRegistration_OmittedDocumentURLDefaultsToPageURL)
+{
+    setPageURL("http://localhost/x/index.html");
+
+    StubWebServiceWorkerProvider stubProvider;
+    provide(stubProvider.provider());
+
+    ServiceWorkerContainer* container = ServiceWorkerContainer::create(executionContext());
+
     {
         ScriptState::Scope scriptScope(scriptState());
-        container->unregisterServiceWorker(scriptState(), "y/");
-
-        EXPECT_EQ(1ul, stubProvider.unregisterCallCount());
-        EXPECT_EQ(WebURL(KURL(KURL(), "http://localhost/x/y/")), stubProvider.unregisterScope());
+        container->getRegistration(scriptState(), "");
+        EXPECT_EQ(1ul, stubProvider.getRegistrationCallCount());
+        EXPECT_EQ(WebURL(KURL(KURL(), "http://localhost/x/index.html")), stubProvider.getRegistrationURL());
     }
 
     container->willBeDetachedFromFrame();

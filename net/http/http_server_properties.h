@@ -113,9 +113,24 @@ struct NET_EXPORT AlternateProtocolInfo {
   double probability;
 };
 
+struct NET_EXPORT SupportsQuic {
+  SupportsQuic() : used_quic(false) {}
+  SupportsQuic(bool used_quic, const std::string& address)
+      : used_quic(used_quic),
+        address(address) {}
+
+  bool Equals(const SupportsQuic& other) const {
+    return used_quic == other.used_quic && address == other.address;
+  }
+
+  bool used_quic;
+  std::string address;
+};
+
 typedef base::MRUCache<
     HostPortPair, AlternateProtocolInfo> AlternateProtocolMap;
 typedef base::MRUCache<HostPortPair, SettingsMap> SpdySettingsMap;
+typedef std::map<HostPortPair, SupportsQuic> SupportsQuicMap;
 
 extern const char kAlternateProtocolHeader[];
 
@@ -181,6 +196,11 @@ class NET_EXPORT HttpServerProperties {
   virtual void SetAlternateProtocolExperiment(
       AlternateProtocolExperiment experiment) = 0;
 
+  // Sets the threshold to be used when evaluating Alternate-Protocol
+  // advertisments. Only advertisements with a with a probability
+  // greater than |threshold| will be honored. |threshold| must be
+  // between 0 and 1 inclusive. Hence, a threshold of 0 implies that
+  // all advertisements will be honored.
   virtual void SetAlternateProtocolProbabilityThreshold(
       double threshold) = 0;
 
@@ -207,6 +227,16 @@ class NET_EXPORT HttpServerProperties {
 
   // Returns all persistent SPDY settings.
   virtual const SpdySettingsMap& spdy_settings_map() const = 0;
+
+  // TODO(rtenneti): Make SupportsQuic a global (instead of per host_port_pair).
+  virtual SupportsQuic GetSupportsQuic(
+      const HostPortPair& host_port_pair) const = 0;
+
+  virtual void SetSupportsQuic(const HostPortPair& host_port_pair,
+                               bool used_quic,
+                               const std::string& address) = 0;
+
+  virtual const SupportsQuicMap& supports_quic_map() const = 0;
 
   virtual void SetServerNetworkStats(const HostPortPair& host_port_pair,
                                      NetworkStats stats) = 0;

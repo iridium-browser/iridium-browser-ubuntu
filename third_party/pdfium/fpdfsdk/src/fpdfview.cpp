@@ -5,6 +5,7 @@
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "../include/fsdk_define.h"
+#include "../include/fsdk_mgr.h"
 #include "../include/fpdfview.h"
 #include "../include/fsdk_rendercontext.h"
 #include "../include/fpdf_progressive.h"
@@ -13,34 +14,8 @@
 
 CPDF_CustomAccess::CPDF_CustomAccess(FPDF_FILEACCESS* pFileAccess)
 {
-	m_FileAccess = *pFileAccess;
-	m_BufferOffset = (FX_DWORD)-1;
-}
-
-FX_BOOL CPDF_CustomAccess::GetByte(FX_DWORD pos, FX_BYTE& ch)
-{
-	if (pos >= m_FileAccess.m_FileLen) return FALSE;
-	if (m_BufferOffset == (FX_DWORD)-1 || pos < m_BufferOffset || pos >= m_BufferOffset + 512) {
-		// Need to read from file access
-		m_BufferOffset = pos;
-		int size = 512;
-		if (pos + 512 > m_FileAccess.m_FileLen)
-			size = m_FileAccess.m_FileLen - pos;
-		if (!m_FileAccess.m_GetBlock(m_FileAccess.m_Param, m_BufferOffset, m_Buffer, size))
-			return FALSE;
-	}
-	ch = m_Buffer[pos - m_BufferOffset];
-	return TRUE;
-}
-
-FX_BOOL CPDF_CustomAccess::GetBlock(FX_DWORD pos, FX_LPBYTE pBuf, FX_DWORD size)
-{
-    FX_SAFE_DWORD newPos = size;
-    newPos += pos;
-    if (!newPos.IsValid() || newPos.ValueOrDie() > m_FileAccess.m_FileLen) {
-        return FALSE;
-    }
-    return m_FileAccess.m_GetBlock(m_FileAccess.m_Param, pos, pBuf, size);
+	if (pFileAccess)
+		m_FileAccess = *pFileAccess;
 }
 
 FX_BOOL CPDF_CustomAccess::ReadBlock(void* buffer, FX_FILESIZE offset, size_t size)
@@ -366,6 +341,17 @@ DLLEXPORT unsigned long STDCALL FPDF_GetDocPermissions(FPDF_DOCUMENT document)
 	return pDict->GetInteger("P");
 }
 
+DLLEXPORT int STDCALL FPDF_GetSecurityHandlerRevision(FPDF_DOCUMENT document)
+{
+    if (document == NULL) return -1;
+    CPDF_Document*pDoc = (CPDF_Document*)document;
+    CPDF_Parser* pParser = (CPDF_Parser*)pDoc->GetParser();
+    CPDF_Dictionary* pDict = pParser->GetEncryptDict();
+    if (pDict == NULL) return -1;
+
+    return pDict->GetInteger("R");
+}
+
 DLLEXPORT int STDCALL FPDF_GetPageCount(FPDF_DOCUMENT document)
 {
 	if (document == NULL) return 0;
@@ -606,6 +592,11 @@ DLLEXPORT void STDCALL FPDF_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page,
 DLLEXPORT void STDCALL FPDF_ClosePage(FPDF_PAGE page)
 {
 	if (!page) return;
+        CPDFSDK_PageView* pPageView = (CPDFSDK_PageView*)(((CPDF_Page*)page))->GetPrivateData((FX_LPVOID)page);
+        if (pPageView && pPageView->IsLocked()) {
+            pPageView->TakeOverPage();
+            return;
+        }
 	delete (CPDF_Page*)page;
 
 }

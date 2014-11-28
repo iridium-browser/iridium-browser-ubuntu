@@ -31,35 +31,10 @@
 
 using namespace blink;
 
-const double SMILTime::unresolvedValue = DBL_MAX;
-// Just a big value smaller than DBL_MAX. Our times are relative to 0, we don't really need the full range.
-const double SMILTime::indefiniteValue = FLT_MAX;
-
-SMILTime blink::operator+(const SMILTime& a, const SMILTime& b)
-{
-    if (a.isUnresolved() || b.isUnresolved())
-        return SMILTime::unresolved();
-    if (a.isIndefinite() || b.isIndefinite())
-        return SMILTime::indefinite();
-    return a.value() + b.value();
-}
-
-SMILTime blink::operator-(const SMILTime& a, const SMILTime& b)
-{
-    if (a.isUnresolved() || b.isUnresolved())
-        return SMILTime::unresolved();
-    if (a.isIndefinite() || b.isIndefinite())
-        return SMILTime::indefinite();
-    return a.value() - b.value();
-}
-
 SMILTime blink::operator*(const SMILTime& a,  const SMILTime& b)
 {
-    if (a.isUnresolved() || b.isUnresolved())
-        return SMILTime::unresolved();
-    if (!a.value() || !b.value())
+    // Equal operators have to be used instead of negation here to make NaN work as well.
+    if (a.value() == 0 || b.value() == 0)
         return SMILTime(0);
-    if (a.isIndefinite() || b.isIndefinite())
-        return SMILTime::indefinite();
     return a.value() * b.value();
 }

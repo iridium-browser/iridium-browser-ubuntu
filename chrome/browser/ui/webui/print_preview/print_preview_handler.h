@@ -79,9 +79,11 @@ class PrintPreviewHandler
   // Called when print preview failed.
   void OnPrintPreviewFailed();
 
+#if !defined(DISABLE_BASIC_PRINTING)
   // Called when the user press ctrl+shift+p to display the native system
   // dialog.
   void ShowSystemDialog();
+#endif  // !DISABLE_BASIC_PRINTING
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
   // PrivetLocalPrinterLister::Delegate implementation.
@@ -149,9 +151,11 @@ class PrintPreviewHandler
   // Gets the printer capabilities. First element of |args| is the printer name.
   void HandleGetPrinterCapabilities(const base::ListValue* args);
 
+#if !defined(DISABLE_BASIC_PRINTING)
   // Asks the initiator renderer to show the native print system dialog. |args|
   // is unused.
   void HandleShowSystemDialog(const base::ListValue* args);
+#endif  // !DISABLE_BASIC_PRINTING
 
   // Callback for the signin dialog to call once signin is complete.
   void OnSigninComplete();
@@ -256,6 +260,8 @@ class PrintPreviewHandler
 #endif
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
+  void StartPrivetLister(const scoped_refptr<
+      local_discovery::ServiceDiscoverySharedClient>& client);
   void OnPrivetCapabilities(const base::DictionaryValue* capabilities);
   void PrivetCapabilitiesUpdateClient(
       scoped_ptr<local_discovery::PrivetHTTPClient> http_client);
@@ -333,11 +339,11 @@ class PrintPreviewHandler
       privet_local_print_operation_;
 #endif
 
-  base::WeakPtrFactory<PrintPreviewHandler> weak_factory_;
-
   // Notifies tests that want to know if the PDF has been saved. This doesn't
   // notify the test if it was a successful save, only that it was attempted.
   base::Closure pdf_file_saved_closure_;
+
+  base::WeakPtrFactory<PrintPreviewHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewHandler);
 };

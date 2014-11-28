@@ -23,7 +23,6 @@ class MockContentLayerClient : public ContentLayerClient {
   virtual void PaintContents(
       SkCanvas* canvas,
       const gfx::Rect& clip,
-      gfx::RectF* opaque,
       ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE {}
   virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
   virtual bool FillsBoundsCompletely() const OVERRIDE {
@@ -36,7 +35,8 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
   scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
   layer->SetBounds(gfx::Size(10, 10));
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  FakeLayerTreeHostClient host_client(FakeLayerTreeHostClient::DIRECT_3D);
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create(&host_client);
   host->SetRootLayer(layer);
   layer->SetIsDrawable(true);
   layer->SavePaintProperties();
@@ -89,12 +89,14 @@ TEST(PictureLayerTest, RecordingModes) {
   scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
 
   LayerTreeSettings settings;
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create(settings);
+  FakeLayerTreeHostClient host_client(FakeLayerTreeHostClient::DIRECT_3D);
+  scoped_ptr<FakeLayerTreeHost> host =
+      FakeLayerTreeHost::Create(&host_client, settings);
   host->SetRootLayer(layer);
   EXPECT_EQ(Picture::RECORD_NORMALLY, layer->RecordingMode());
 
   settings.recording_mode = LayerTreeSettings::RecordWithSkRecord;
-  host = FakeLayerTreeHost::Create(settings);
+  host = FakeLayerTreeHost::Create(&host_client, settings);
   host->SetRootLayer(layer);
   EXPECT_EQ(Picture::RECORD_WITH_SKRECORD, layer->RecordingMode());
 }

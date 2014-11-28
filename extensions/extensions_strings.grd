@@ -187,6 +187,12 @@
       <message name="IDS_EXTENSION_LOAD_ICON_FAILED" desc="">
         Could not load extension icon '<ph name="ICON">$1<ex>icon.png</ex></ph>'.
       </message>
+      <message name="IDS_EXTENSION_LOAD_LAUNCHER_PAGE_FAILED" desc="">
+        Could not load launcher page '<ph name="PAGE">$1<ex>index.html</ex></ph>'.
+      </message>
+      <message name="IDS_EXTENSION_LOAD_OPTIONS_PAGE_FAILED" desc="">
+        Could not load options page '<ph name="OPTIONS_PAGE">$1<ex>page.html</ex></ph>'.
+      </message>
       <message name="IDS_EXTENSION_LOCALES_NO_DEFAULT_LOCALE_SPECIFIED" desc="">
         Localization used, but default_locale wasn't specified in the manifest.
       </message>
@@ -196,7 +202,18 @@
       <message name="IDS_EXTENSION_MANIFEST_INVALID" desc="">
         Manifest file is invalid.
       </message>
-      
+      <message name="IDS_LOAD_STATE_PARAMETER_EXTENSION" desc="Parameter to IDS_LOAD_STATE_WAITING_FOR_DELEGATE when we are waiting for an extension. The variable is the extension name.">
+        extension <ph name="EXTENSION_NAME">$1<ex>Adblock</ex></ph>
+      </message>
+
+      <!-- Bluetooth access permissions. Please keep alphabetized. -->
+      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH" desc="Permission string for general access to the Bluetooth API.">
+        Access information about Bluetooth devices paired with your system and discover nearby Bluetooth devices.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_DEVICES" desc="Permission string for implementing Bluetooth profiles.">
+        Send messages to and receive messages from Bluetooth devices.
+      </message>
+
       <!-- Host access permissions. Please keep alphabetized. -->
       <message name="IDS_EXTENSION_PROMPT_WARNING_1_HOST" desc="Permission string for access to data on one website.">
         Read and change your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>
@@ -218,6 +235,17 @@
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_HOST_LIST_ENTRY" desc="Single entry in a list of websites.">
         - <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>
+      </message>
+
+      <!-- Media capture permissions. Please keep alphabetized. -->
+      <message name="IDS_EXTENSION_PROMPT_WARNING_AUDIO_CAPTURE" desc="Permission string for access to audio capture devices.">
+        Use your microphone
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_VIDEO_CAPTURE" desc="Permission string for access to video capture devices.">
+        Use your camera
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_AUDIO_AND_VIDEO_CAPTURE" desc="Permission string for access to both audio and video capture devices.">
+        Use your microphone and camera
       </message>
 
       <!-- Media galleries strings. Please keep alphabetized. -->
@@ -263,7 +291,7 @@
       <message name="IDS_EXTENSION_PROMPT_WARNING_SOCKET_SPECIFIC_HOSTS" desc="Permission string for access to multiple specific computers on the local network or internet.">
         Exchange data with the computers named: <ph name="HOSTNAMES">$1<ex>foo.example.com bar.example.com</ex></ph>
       </message>
-      
+
       <!-- Device API strings. Please keep alphabetized. -->
       <message name="IDS_EXTENSION_PROMPT_WARNING_HID" desc="Permission string for access to HID devices.">
         Access your input devices
@@ -282,6 +310,50 @@
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_MISSING_VENDOR" desc="Permission string for access to a specific USB device when a vendor name cannot be established for a USB device.">
         Access the USB device
+      </message>
+      <message name="IDS_EXTENSION_TASK_MANAGER_APPVIEW_TAG_PREFIX" desc="The prefix for a guest page loaded in an appview tag in the Task Manager">
+        Appview: <ph name="APPVIEW_TAG_NAME">$1<ex>Google Hangouts</ex></ph>
+      </message>
+      <message name="IDS_EXTENSION_TASK_MANAGER_EXTENSIONOPTIONS_TAG_PREFIX" desc="The prefix for a guest page loaded in an extensionoptions tag in the Task Manager">
+        Options: <ph name="EXTENSIONOPTIONS_TAG_NAME">$1<ex>Google Hangouts</ex></ph>
+      </message>
+      <message name="IDS_EXTENSION_TASK_MANAGER_MIMEHANDLERVIEW_TAG_PREFIX" desc="The prefix for a guest page loaded in a mime handler view page in the task manager">
+        Mimehandler: <ph name="MIMEHANDLERVIEW_TAG_NAME">$1<ex>My mime handler view</ex></ph>
+      </message>
+      <message name="IDS_EXTENSION_TASK_MANAGER_WEBVIEW_TAG_PREFIX" desc="The prefix for a guest page loaded in a webview tag in the Task Manager">
+        Webview: <ph name="WEBVIEW_TAG_NAME">$1<ex>Google</ex></ph>
+      </message>
+
+      <!-- Global error messages for extensions. Please keep alphabetized. -->
+      <message name="IDS_EXTENSION_WARNINGS_NETWORK_DELAY" desc="Warning message indicating that an extension caused excessive network delays for web requests">
+        This extension is slowing down <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. You should disable it to restore <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>'s performance.
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_NETWORK_CONFLICT" desc="Warning message which indicates that two or more extensions tried to modify a network request in a conflicting way and the modification of this extension was ignored">
+        This extension failed to modify a network request because the modification conflicted with another extension.
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_REDIRECT_CONFLICT" desc="Warning message indicating that two extensions tried to redirect to different destinations">
+        This extension failed to redirect a network request to <ph name="ATTEMPTED_REDIRECT_DESTINATION">$1<ex>http://www.google.com</ex></ph> because another extension (<ph name="EXTENSION_NAME">$2<ex>My Cool Extension</ex></ph>) redirected it to <ph name="ACTUAL_REDIRECT_DESTINATION">$3<ex>https://www.google.com</ex></ph>.
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_REQUEST_HEADER_CONFLICT" desc="Warning message which indicates that two or more extensions tried to modify a network request in a conflicting way and the modification of this extension was ignored">
+        This extension failed to modify the request header "<ph name="HEADER_NAME">$1<ex>User-Agent</ex></ph>" of a network request because the modification conflicted with another extension (<ph name="EXTENSION_NAME">$2<ex>My Cool Extension</ex></ph>).
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_RESPONSE_HEADER_CONFLICT" desc="Warning message which indicates that two or more extensions tried to modify a network request in a conflicting way and the modification of this extension was ignored">
+        This extension failed to modify the response header "<ph name="HEADER_NAME">$1<ex>User-Agents</ex></ph>" of a network request because the modification conflicted with another extension (<ph name="EXTENSION_NAME">$2<ex>My Cool Extension</ex></ph>).
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_CREDENTIALS_CONFLICT" desc="Warning message which indicates that two or more extensions tried to modify a network request in a conflicting way and the modification of this extension was ignored">
+        This extension failed to provide credentials to a network request because another extension (<ph name="EXTENSION_NAME">$1<ex>My Cool Extension</ex></ph>) provided different credentials.
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_DOWNLOAD_FILENAME_CONFLICT" desc="Warning message which indicates that two or more extensions tried to determine the filename of a downloaded file in a conflicting way and the modification of this extension was ignored">
+        This extension failed to name the download "<ph name="ATTEMPTED_FILENAME">$1<ex>apple.png</ex></ph>" because another extension (<ph name="EXTENSION_NAME">$2<ex>My Cool Extension</ex></ph>) determined a different filename "<ph name="ACTUAL_FILENAME">$3<ex>banana.png</ex></ph>".
+      </message>
+      <message name="IDS_EXTENSION_WARNING_RELOAD_TOO_FREQUENT" desc="Warning message which indates that an extension got stuck in a reload loop.">
+        This extension reloaded itself too frequently.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_U2F_DEVICES" desc="Warning message which indicates that an extension has access to Universal 2nd Factor devices.">
+        Access your Universal 2nd Factor devices
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_WEB_CONNECTABLE" desc="Permission string for allowing websites to connect to extensions.">
+        Communicate with cooperating websites
       </message>
 
     </messages>

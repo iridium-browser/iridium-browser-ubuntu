@@ -174,7 +174,7 @@ void Layer::Add(Layer* child) {
 void Layer::Remove(Layer* child) {
   // Current bounds are used to calculate offsets when layers are reparented.
   // Stop (and complete) an ongoing animation to update the bounds immediately.
-  LayerAnimator* child_animator = child->animator_;
+  LayerAnimator* child_animator = child->animator_.get();
   if (child_animator)
     child_animator->StopAnimatingProperty(ui::LayerAnimationElement::BOUNDS);
   LayerAnimatorCollection* collection = GetLayerAnimatorCollection();
@@ -530,7 +530,7 @@ void Layer::SetTextureMailbox(
   DCHECK(!solid_color_layer_.get());
   DCHECK(mailbox.IsValid());
   DCHECK(release_callback);
-  if (!texture_layer_) {
+  if (!texture_layer_.get()) {
     scoped_refptr<cc::TextureLayer> new_layer =
         cc::TextureLayer::CreateForMailbox(this);
     new_layer->SetFlipped(true);
@@ -598,8 +598,7 @@ void Layer::SetShowPaintedContent() {
   RecomputeDrawsContentAndUVRect();
 }
 
-void Layer::UpdateNinePatchLayerBitmap(const SkBitmap& bitmap,
-                                       const gfx::Rect& aperture) {
+void Layer::UpdateNinePatchLayerBitmap(const SkBitmap& bitmap) {
   DCHECK(type_ == LAYER_NINE_PATCH && nine_patch_layer_.get());
   SkBitmap bitmap_copy;
   if (bitmap.isImmutable()) {
@@ -610,6 +609,10 @@ void Layer::UpdateNinePatchLayerBitmap(const SkBitmap& bitmap,
     bitmap_copy.setImmutable();
   }
   nine_patch_layer_->SetBitmap(bitmap_copy);
+}
+
+void Layer::UpdateNinePatchLayerAperture(const gfx::Rect& aperture) {
+  DCHECK(type_ == LAYER_NINE_PATCH && nine_patch_layer_.get());
   nine_patch_layer_->SetAperture(aperture);
 }
 
@@ -659,10 +662,14 @@ void Layer::SendDamagedRects() {
 }
 
 void Layer::CompleteAllAnimations() {
-  std::vector<scoped_refptr<LayerAnimator> > animators;
+  typedef std::vector<scoped_refptr<LayerAnimator> > LayerAnimatorVector;
+  LayerAnimatorVector animators;
   CollectAnimators(&animators);
-  std::for_each(animators.begin(), animators.end(),
-                std::mem_fun(&LayerAnimator::StopAnimating));
+  for (LayerAnimatorVector::const_iterator it = animators.begin();
+       it != animators.end();
+       ++it) {
+    (*it)->StopAnimating();
+  }
 }
 
 void Layer::SuppressPaint() {
@@ -690,13 +697,19 @@ void Layer::OnDeviceScaleFactorChanged(float device_scale_factor) {
     layer_mask_->OnDeviceScaleFactorChanged(device_scale_factor);
 }
 
+void Layer::OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) {
+  DCHECK(delegated_renderer_layer_.get() || surface_layer_.get());
+  if (!delegate_)
+    return;
+  delegate_->OnDelegatedFrameDamage(damage_rect_in_dip);
+}
+
 void Layer::RequestCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request) {
   cc_layer_->RequestCopyOfOutput(request.Pass());
 }
 
 void Layer::PaintContents(SkCanvas* sk_canvas,
                           const gfx::Rect& clip,
-                          gfx::RectF* opaque,
                           ContentLayerClient::GraphicsContextStatus gc_status) {
   TRACE_EVENT0("ui", "Layer::PaintContents");
   scoped_ptr<gfx::Canvas> canvas(gfx::Canvas::CreateCanvasWithoutScaling(
@@ -1031,7 +1044,7 @@ void Layer::RemoveAnimatorsInTreeFromCollection(
 }
 
 bool Layer::IsAnimating() const {
-  return animator_ && animator_->is_animating();
+  return animator_.get() && animator_->is_animating();
 }
 
 }  // namespace ui

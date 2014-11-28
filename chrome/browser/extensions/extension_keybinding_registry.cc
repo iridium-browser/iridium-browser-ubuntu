@@ -17,6 +17,10 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_constants.h"
 
+namespace {
+const char kOnCommandEventName[] = "commands.onCommand";
+}  // namespace
+
 namespace extensions {
 
 ExtensionKeybindingRegistry::ExtensionKeybindingRegistry(
@@ -115,7 +119,7 @@ void ExtensionKeybindingRegistry::CommandExecuted(
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(new base::StringValue(command));
 
-  scoped_ptr<Event> event(new Event("commands.onCommand", args.Pass()));
+  scoped_ptr<Event> event(new Event(kOnCommandEventName, args.Pass()));
   event->restrict_to_browser_context = browser_context_;
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
   EventRouter::Get(browser_context_)
@@ -237,6 +241,10 @@ bool ExtensionKeybindingRegistry::ExecuteCommands(
   bool executed = false;
   for (TargetList::const_iterator it = targets->second.begin();
        it != targets->second.end(); it++) {
+    if (!extensions::EventRouter::Get(browser_context_)
+        ->ExtensionHasEventListener(it->first, kOnCommandEventName))
+      continue;
+
     if (extension_id.empty() || it->first == extension_id) {
       CommandExecuted(it->first, it->second);
       executed = true;

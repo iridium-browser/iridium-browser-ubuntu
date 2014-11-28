@@ -34,7 +34,6 @@
 #include "core/frame/DOMWindowBase64.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
-#include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerEventQueue.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
@@ -48,139 +47,131 @@
 
 namespace blink {
 
-    class Blob;
-    class ExceptionState;
-    class ScheduledAction;
-    class WorkerClients;
-    class WorkerConsole;
-    class WorkerInspectorController;
-    class WorkerLocation;
-    class WorkerNavigator;
-    class WorkerThread;
+class Blob;
+class ConsoleMessage;
+class ConsoleMessageStorage;
+class ExceptionState;
+class ScheduledAction;
+class WorkerClients;
+class WorkerConsole;
+class WorkerInspectorController;
+class WorkerLocation;
+class WorkerNavigator;
+class WorkerThread;
 
-    class WorkerGlobalScope : public RefCountedWillBeRefCountedGarbageCollected<WorkerGlobalScope>, public SecurityContext, public ExecutionContext, public ExecutionContextClient, public WillBeHeapSupplementable<WorkerGlobalScope>, public EventTargetWithInlineData, public DOMWindowBase64 {
-        WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScope);
-        REFCOUNTED_EVENT_TARGET(WorkerGlobalScope);
-    public:
-        virtual ~WorkerGlobalScope();
+class WorkerGlobalScope : public RefCountedWillBeGarbageCollectedFinalized<WorkerGlobalScope>, public SecurityContext, public ExecutionContext, public WillBeHeapSupplementable<WorkerGlobalScope>, public EventTargetWithInlineData, public DOMWindowBase64 {
+    DEFINE_WRAPPERTYPEINFO();
+    REFCOUNTED_EVENT_TARGET(WorkerGlobalScope);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScope);
+public:
+    virtual ~WorkerGlobalScope();
 
-        virtual bool isWorkerGlobalScope() const OVERRIDE FINAL { return true; }
-        virtual bool isSharedWorkerGlobalScope() const OVERRIDE { return false; }
-        virtual bool isDedicatedWorkerGlobalScope() const OVERRIDE { return false; }
-        virtual bool isServiceWorkerGlobalScope() const OVERRIDE { return false; }
+    virtual bool isWorkerGlobalScope() const OVERRIDE FINAL { return true; }
 
-        virtual ExecutionContext* executionContext() const OVERRIDE FINAL;
+    virtual ExecutionContext* executionContext() const OVERRIDE FINAL;
 
-        virtual void countFeature(UseCounter::Feature) const;
-        virtual void countDeprecation(UseCounter::Feature) const;
+    virtual void countFeature(UseCounter::Feature) const;
+    virtual void countDeprecation(UseCounter::Feature) const;
 
-        const KURL& url() const { return m_url; }
-        KURL completeURL(const String&) const;
+    const KURL& url() const { return m_url; }
+    KURL completeURL(const String&) const;
 
-        virtual String userAgent(const KURL&) const OVERRIDE FINAL;
-        virtual void disableEval(const String& errorMessage) OVERRIDE FINAL;
+    virtual String userAgent(const KURL&) const OVERRIDE FINAL;
+    virtual void disableEval(const String& errorMessage) OVERRIDE FINAL;
 
-        WorkerScriptController* script() { return m_script.get(); }
-        void clearScript() { m_script.clear(); }
-        void clearInspector();
+    WorkerScriptController* script() { return m_script.get(); }
+    void clearScript() { m_script.clear(); }
+    void clearInspector();
 
-        // FIXME: We can remove this interface when we remove openDatabaseSync.
-        class TerminationObserver {
-        public:
-            virtual ~TerminationObserver() { }
-            // The function is probably called in the main thread.
-            virtual void wasRequestedToTerminate() = 0;
-        };
-        void registerTerminationObserver(TerminationObserver*);
-        void unregisterTerminationObserver(TerminationObserver*);
-        void wasRequestedToTerminate();
+    void dispose();
 
-        void dispose();
+    WorkerThread* thread() const { return m_thread; }
 
-        WorkerThread* thread() const { return m_thread; }
+    virtual void postTask(PassOwnPtr<ExecutionContextTask>) OVERRIDE FINAL; // Executes the task on context's thread asynchronously.
 
-        virtual void postTask(PassOwnPtr<ExecutionContextTask>) OVERRIDE FINAL; // Executes the task on context's thread asynchronously.
+    // WorkerGlobalScope
+    WorkerGlobalScope* self() { return this; }
+    WorkerConsole* console();
+    WorkerLocation* location() const;
+    void close();
 
-        // WorkerGlobalScope
-        WorkerGlobalScope* self() { return this; }
-        WorkerConsole* console();
-        WorkerLocation* location() const;
-        void close();
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
 
-        DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
+    // WorkerUtils
+    virtual void importScripts(const Vector<String>& urls, ExceptionState&);
+    WorkerNavigator* navigator() const;
 
-        // WorkerUtils
-        virtual void importScripts(const Vector<String>& urls, ExceptionState&);
-        WorkerNavigator* navigator() const;
+    // ExecutionContextClient
+    virtual WorkerEventQueue* eventQueue() const OVERRIDE FINAL;
+    virtual SecurityContext& securityContext() OVERRIDE FINAL { return *this; }
 
-        // ExecutionContextClient
-        virtual WorkerEventQueue* eventQueue() const OVERRIDE FINAL;
-        virtual SecurityContext& securityContext() OVERRIDE FINAL { return *this; }
+    virtual bool isContextThread() const OVERRIDE FINAL;
+    virtual bool isJSExecutionForbidden() const OVERRIDE FINAL;
 
-        virtual bool isContextThread() const OVERRIDE FINAL;
-        virtual bool isJSExecutionForbidden() const OVERRIDE FINAL;
+    virtual double timerAlignmentInterval() const OVERRIDE FINAL;
 
-        virtual double timerAlignmentInterval() const OVERRIDE FINAL;
+    WorkerInspectorController* workerInspectorController() { return m_workerInspectorController.get(); }
 
-        WorkerInspectorController* workerInspectorController() { return m_workerInspectorController.get(); }
+    bool isClosing() { return m_closing; }
 
-        bool isClosing() { return m_closing; }
+    virtual void stopFetch() { }
 
-        virtual void stopFetch() { }
+    bool idleNotification();
 
-        bool idleNotification();
+    double timeOrigin() const { return m_timeOrigin; }
 
-        double timeOrigin() const { return m_timeOrigin; }
+    WorkerClients* clients() { return m_workerClients.get(); }
 
-        WorkerClients* clients() { return m_workerClients.get(); }
+    using SecurityContext::securityOrigin;
+    using SecurityContext::contentSecurityPolicy;
 
-        using SecurityContext::securityOrigin;
-        using SecurityContext::contentSecurityPolicy;
+    virtual void addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE FINAL;
+    ConsoleMessageStorage* messageStorage();
 
-        virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) OVERRIDE;
 
-    protected:
-        WorkerGlobalScope(const KURL&, const String& userAgent, WorkerThread*, double timeOrigin, PassOwnPtrWillBeRawPtr<WorkerClients>);
-        void applyContentSecurityPolicyFromString(const String& contentSecurityPolicy, ContentSecurityPolicyHeaderType);
+protected:
+    WorkerGlobalScope(const KURL&, const String& userAgent, WorkerThread*, double timeOrigin, PassOwnPtrWillBeRawPtr<WorkerClients>);
+    void applyContentSecurityPolicyFromString(const String& contentSecurityPolicy, ContentSecurityPolicyHeaderType);
 
-        virtual void logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE;
-        void addMessageToWorkerConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>);
+    virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE;
+    void addMessageToWorkerConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>);
 
-    private:
+private:
 #if !ENABLE(OILPAN)
-        virtual void refExecutionContext() OVERRIDE FINAL { ref(); }
-        virtual void derefExecutionContext() OVERRIDE FINAL { deref(); }
+    virtual void refExecutionContext() OVERRIDE FINAL { ref(); }
+    virtual void derefExecutionContext() OVERRIDE FINAL { deref(); }
 #endif
 
-        virtual const KURL& virtualURL() const OVERRIDE FINAL;
-        virtual KURL virtualCompleteURL(const String&) const OVERRIDE FINAL;
+    virtual const KURL& virtualURL() const OVERRIDE FINAL;
+    virtual KURL virtualCompleteURL(const String&) const OVERRIDE FINAL;
 
-        virtual void reportBlockedScriptExecutionToInspector(const String& directiveText) OVERRIDE FINAL;
-        virtual void addMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE FINAL;
+    virtual void reportBlockedScriptExecutionToInspector(const String& directiveText) OVERRIDE FINAL;
 
-        virtual EventTarget* errorEventTarget() OVERRIDE FINAL;
-        virtual void didUpdateSecurityOrigin() OVERRIDE FINAL { }
+    virtual EventTarget* errorEventTarget() OVERRIDE FINAL;
+    virtual void didUpdateSecurityOrigin() OVERRIDE FINAL { }
 
-        KURL m_url;
-        String m_userAgent;
+    KURL m_url;
+    String m_userAgent;
 
-        mutable RefPtrWillBeMember<WorkerConsole> m_console;
-        mutable RefPtrWillBeMember<WorkerLocation> m_location;
-        mutable RefPtrWillBeMember<WorkerNavigator> m_navigator;
+    mutable RefPtrWillBeMember<WorkerConsole> m_console;
+    mutable RefPtrWillBeMember<WorkerLocation> m_location;
+    mutable RefPtrWillBeMember<WorkerNavigator> m_navigator;
 
-        OwnPtr<WorkerScriptController> m_script;
-        WorkerThread* m_thread;
+    OwnPtr<WorkerScriptController> m_script;
+    WorkerThread* m_thread;
 
-        RefPtrWillBeMember<WorkerInspectorController> m_workerInspectorController;
-        bool m_closing;
+    RefPtrWillBeMember<WorkerInspectorController> m_workerInspectorController;
+    bool m_closing;
 
-        OwnPtrWillBeMember<WorkerEventQueue> m_eventQueue;
+    OwnPtrWillBeMember<WorkerEventQueue> m_eventQueue;
 
-        OwnPtrWillBeMember<WorkerClients> m_workerClients;
+    OwnPtrWillBeMember<WorkerClients> m_workerClients;
 
-        double m_timeOrigin;
-        TerminationObserver* m_terminationObserver;
-    };
+    double m_timeOrigin;
+
+    OwnPtrWillBeMember<ConsoleMessageStorage> m_messageStorage;
+};
 
 DEFINE_TYPE_CASTS(WorkerGlobalScope, ExecutionContext, context, context->isWorkerGlobalScope(), context.isWorkerGlobalScope());
 

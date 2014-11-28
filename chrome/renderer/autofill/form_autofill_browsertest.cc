@@ -258,11 +258,6 @@ class FormAutofillTest : public ChromeRenderViewTest {
     EXPECT_EQ(field_case.should_be_autofilled, element.isAutofilled());
   }
 
-  static void FillFormForAllFieldsWrapper(const FormData& form,
-                                       const WebInputElement& element) {
-    FillFormForAllElements(form, element.form());
-  }
-
   static void FillFormIncludingNonFocusableElementsWrapper(
       const FormData& form,
       const WebFormControlElement& element) {
@@ -3199,14 +3194,12 @@ TEST_F(FormAutofillTest, ClearFormWithNodeContainingSelectOne) {
   WebInputElement lastname =
       web_frame->document().getElementById("lastname").to<WebInputElement>();
   lastname.setAutofilled(true);
-  WebInputElement state =
-      web_frame->document().getElementById("state").to<WebInputElement>();
-  state.setAutofilled(true);
 
-  // Set the value of the select-one.
-  WebSelectElement select_element =
+  // Set the value and auto-filled attribute of the state element.
+  WebSelectElement state =
       web_frame->document().getElementById("state").to<WebSelectElement>();
-  select_element.setValue(WebString::fromUTF8("AK"));
+  state.setValue(WebString::fromUTF8("AK"));
+  state.setAutofilled(true);
 
   // Clear the form.
   EXPECT_TRUE(form_cache.ClearFormWithElement(firstname));

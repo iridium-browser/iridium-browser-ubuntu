@@ -68,6 +68,7 @@ class MockVisitor : public SpdyFramerVisitorInterface {
                               StringPiece protocol_id,
                               StringPiece host,
                               StringPiece origin));
+  MOCK_METHOD2(OnUnknownFrame, bool(SpdyStreamId stream_id, int frame_type));
 };
 
 class QuicHeadersStreamTest : public ::testing::TestWithParam<bool> {
@@ -325,7 +326,7 @@ TEST_P(QuicHeadersStreamTest, ProcessSpdyWindowUpdateFrame) {
 }
 
 TEST_P(QuicHeadersStreamTest, NoConnectionLevelFlowControl) {
-  if (connection_->version() <= QUIC_VERSION_20) {
+  if (connection_->version() < QUIC_VERSION_21) {
     EXPECT_FALSE(headers_stream_->flow_controller()->IsEnabled());
   } else {
     EXPECT_TRUE(headers_stream_->flow_controller()->IsEnabled());

@@ -146,7 +146,7 @@ static bool hasDoubleValue(CSSPrimitiveValue::UnitType type)
 static String buildCSSText(const String& expression)
 {
     StringBuilder result;
-    result.append("calc");
+    result.appendLiteral("calc");
     bool expressionHasSingleTerm = expression[0] != '(';
     if (expressionHasSingleTerm)
         result.append('(');
@@ -753,7 +753,7 @@ PassRefPtrWillBeRawPtr<CSSCalcValue> CSSCalcValue::create(CSSParserString name, 
     CSSCalcExpressionNodeParser parser;
     RefPtrWillBeRawPtr<CSSCalcExpressionNode> expression = nullptr;
 
-    if (equalIgnoringCase(name, "calc(") || equalIgnoringCase(name, "-webkit-calc("))
+    if (equalIgnoringCase(name, "calc") || equalIgnoringCase(name, "-webkit-calc"))
         expression = parser.parseCalc(parserValueList);
     // FIXME calc (http://webkit.org/b/16662) Add parsing for min and max here
 

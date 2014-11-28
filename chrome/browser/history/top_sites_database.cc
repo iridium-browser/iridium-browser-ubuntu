@@ -4,13 +4,13 @@
 
 #include "chrome/browser/history/top_sites_database.h"
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "sql/connection.h"
 #include "sql/recovery.h"
@@ -90,8 +90,11 @@ std::string GetRedirects(const history::MostVisitedURL& url) {
 void SetRedirects(const std::string& redirects, history::MostVisitedURL* url) {
   std::vector<std::string> redirects_vector;
   base::SplitStringAlongWhitespace(redirects, &redirects_vector);
-  for (size_t i = 0; i < redirects_vector.size(); ++i)
-    url->redirects.push_back(GURL(redirects_vector[i]));
+  for (size_t i = 0; i < redirects_vector.size(); ++i) {
+    GURL redirects_url(redirects_vector[i]);
+    if (redirects_url.is_valid())
+      url->redirects.push_back(redirects_url);
+  }
 }
 
 // Track various failure (and success) cases in recovery code.

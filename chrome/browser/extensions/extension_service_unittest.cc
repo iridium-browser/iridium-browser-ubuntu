@@ -10,8 +10,8 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
@@ -37,6 +37,7 @@
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_error_ui.h"
+#include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/extensions/extension_notification_observer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
@@ -72,7 +73,9 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/scoped_browser_locale.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
@@ -89,7 +92,6 @@
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/management_policy.h"
-#include "extensions/browser/pref_names.h"
 #include "extensions/browser/test_management_policy.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/constants.h"
@@ -112,6 +114,9 @@
 #include "net/cookies/cookie_options.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "storage/browser/database/database_tracker.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/common/database/database_identifier.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/string_ordinal.h"
 #include "sync/api/sync_data.h"
@@ -124,9 +129,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #include "url/gurl.h"
-#include "webkit/browser/database/database_tracker.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/common/database/database_identifier.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
@@ -893,7 +895,7 @@ class ExtensionServiceTest : public extensions::ExtensionServiceTestBase,
     // Verify uninstalled state.
     size_t new_pref_key_count = GetPrefKeyCount();
     if (new_pref_key_count == pref_key_count) {
-      ValidateIntegerPref(id, "location",
+      ValidateIntegerPref(id, "state",
                           Extension::EXTERNAL_EXTENSION_UNINSTALLED);
     } else {
       EXPECT_EQ(new_pref_key_count, pref_key_count - 1);
@@ -1086,6 +1088,13 @@ class ExtensionServiceTest : public extensions::ExtensionServiceTestBase,
         profile(), ExtensionPrefs::Get(browser_context()), service()));
   }
 
+  void InitializeEmptyExtensionServiceWithTestingPrefs() {
+    ExtensionServiceTestBase::ExtensionServiceInitParams params =
+        CreateDefaultInitParams();
+    params.pref_file = base::FilePath();
+    InitializeExtensionService(params);
+  }
+
   extensions::ManagementPolicy* GetManagementPolicy() {
     return ExtensionSystem::Get(browser_context())->management_policy();
   }
@@ -1095,6 +1104,8 @@ class ExtensionServiceTest : public extensions::ExtensionServiceTestBase,
   }
 
  protected:
+  typedef extensions::ExtensionManagementPrefUpdater<TestingPrefServiceSyncable>
+      ManagementPrefUpdater;
   scoped_ptr<ExtensionSyncService> extension_sync_service_;
   extensions::ExtensionList loaded_;
   std::string unloaded_id_;
@@ -1123,7 +1134,7 @@ class ExtensionServiceTest : public extensions::ExtensionServiceTestBase,
 
     content::WindowedNotificationObserver observer(
         extensions::NOTIFICATION_CRX_INSTALLER_DONE,
-        content::Source<extensions::CrxInstaller>(installer));
+        content::Source<extensions::CrxInstaller>(installer.get()));
 
     installer->InstallCrx(crx_path);
 
@@ -1554,7 +1565,7 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
 
   // Uninstall it and check that its killbit gets set.
   UninstallExtension(good_crx, false);
-  ValidateIntegerPref(good_crx, "location",
+  ValidateIntegerPref(good_crx, "state",
                       Extension::EXTERNAL_EXTENSION_UNINSTALLED);
 
   // Try to re-install it externally. This should fail because of the killbit.
@@ -1566,7 +1577,7 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
                                           false);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(NULL == service()->GetExtensionById(good_crx, false));
-  ValidateIntegerPref(good_crx, "location",
+  ValidateIntegerPref(good_crx, "state",
                       Extension::EXTERNAL_EXTENSION_UNINSTALLED);
 
   version = Version("1.0.0.1");
@@ -1580,7 +1591,7 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
                                           false);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(NULL == service()->GetExtensionById(good_crx, false));
-  ValidateIntegerPref(good_crx, "location",
+  ValidateIntegerPref(good_crx, "state",
                       Extension::EXTERNAL_EXTENSION_UNINSTALLED);
 
   // Try adding the same extension from an external update URL.
@@ -2444,9 +2455,9 @@ TEST_F(ExtensionServiceTest, EnsureCWSOrdinalsInitialized) {
 
   AppSorting* sorting = ExtensionPrefs::Get(profile())->app_sorting();
   EXPECT_TRUE(
-      sorting->GetPageOrdinal(extension_misc::kWebStoreAppId).IsValid());
+      sorting->GetPageOrdinal(extensions::kWebStoreAppId).IsValid());
   EXPECT_TRUE(
-      sorting->GetAppLaunchOrdinal(extension_misc::kWebStoreAppId).IsValid());
+      sorting->GetAppLaunchOrdinal(extensions::kWebStoreAppId).IsValid());
 }
 
 TEST_F(ExtensionServiceTest, InstallAppsWithUnlimitedStorage) {
@@ -3273,7 +3284,7 @@ TEST_F(ExtensionServiceTest, UnloadBlacklistedExtensionPolicy) {
   extensions::TestBlacklist test_blacklist;
 
   // A profile with no extensions installed.
-  InitializeEmptyExtensionService();
+  InitializeEmptyExtensionServiceWithTestingPrefs();
   test_blacklist.Attach(service()->blacklist_);
 
   base::FilePath path = data_dir().AppendASCII("good.crx");
@@ -3283,10 +3294,10 @@ TEST_F(ExtensionServiceTest, UnloadBlacklistedExtensionPolicy) {
   UpdateExtension(good_crx, path, FAILED_SILENTLY);
   EXPECT_EQ(1u, registry()->enabled_extensions().size());
 
-  base::ListValue whitelist;
-  PrefService* prefs = ExtensionPrefs::Get(profile())->pref_service();
-  whitelist.Append(new base::StringValue(good_crx));
-  prefs->Set(extensions::pref_names::kInstallAllowList, whitelist);
+  {
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
+    pref.SetIndividualExtensionInstallationAllowed(good_crx, true);
+  }
 
   test_blacklist.SetBlacklistState(
       good_crx, extensions::BLACKLISTED_MALWARE, true);
@@ -3574,14 +3585,12 @@ TEST_F(ExtensionServiceTest, ReloadBlacklistedExtension) {
 
 // Will not install extension blacklisted by policy.
 TEST_F(ExtensionServiceTest, BlacklistedByPolicyWillNotInstall) {
-  InitializeEmptyExtensionService();
+  InitializeEmptyExtensionServiceWithTestingPrefs();
 
   // Blacklist everything.
   {
-    ListPrefUpdate update(profile()->GetPrefs(),
-                          extensions::pref_names::kInstallDenyList);
-    base::ListValue* blacklist = update.Get();
-    blacklist->Append(new base::StringValue("*"));
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
+    pref.SetBlacklistedByDefault(true);
   }
 
   // Blacklist prevents us from installing good_crx.
@@ -3591,10 +3600,8 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyWillNotInstall) {
 
   // Now whitelist this particular extension.
   {
-    ListPrefUpdate update(profile()->GetPrefs(),
-                          extensions::pref_names::kInstallAllowList);
-    base::ListValue* whitelist = update.Get();
-    whitelist->Append(new base::StringValue(good_crx));
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
+    pref.SetIndividualExtensionInstallationAllowed(good_crx, true);
   }
 
   // Ensure we can now install good_crx.
@@ -3604,21 +3611,17 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyWillNotInstall) {
 
 // Extension blacklisted by policy get unloaded after installing.
 TEST_F(ExtensionServiceTest, BlacklistedByPolicyRemovedIfRunning) {
-  InitializeEmptyExtensionService();
+  InitializeEmptyExtensionServiceWithTestingPrefs();
 
   // Install good_crx.
   base::FilePath path = data_dir().AppendASCII("good.crx");
   InstallCRX(path, INSTALL_NEW);
   EXPECT_EQ(1u, registry()->enabled_extensions().size());
 
-  { // Scope for pref update notification.
-    PrefService* prefs = profile()->GetPrefs();
-    ListPrefUpdate update(prefs, extensions::pref_names::kInstallDenyList);
-    base::ListValue* blacklist = update.Get();
-    ASSERT_TRUE(blacklist != NULL);
-
+  {
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
     // Blacklist this extension.
-    blacklist->Append(new base::StringValue(good_crx));
+    pref.SetIndividualExtensionInstallationAllowed(good_crx, false);
   }
 
   // Extension should not be running now.
@@ -3628,14 +3631,12 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyRemovedIfRunning) {
 
 // Tests that component extensions are not blacklisted by policy.
 TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
-  InitializeEmptyExtensionService();
+  InitializeEmptyExtensionServiceWithTestingPrefs();
 
   // Blacklist everything.
   {
-    ListPrefUpdate update(profile()->GetPrefs(),
-                          extensions::pref_names::kInstallDenyList);
-    base::ListValue* blacklist = update.Get();
-    blacklist->Append(new base::StringValue("*"));
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
+    pref.SetBlacklistedByDefault(true);
   }
 
   // Install a component extension.
@@ -3661,10 +3662,8 @@ TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
 
   // Extension should not be uninstalled on blacklist changes.
   {
-    ListPrefUpdate update(profile()->GetPrefs(),
-                          extensions::pref_names::kInstallDenyList);
-    base::ListValue* blacklist = update.Get();
-    blacklist->Append(new base::StringValue(good0));
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
+    pref.SetIndividualExtensionInstallationAllowed(good0, false);
   }
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(1u, registry()->enabled_extensions().size());
@@ -3673,20 +3672,15 @@ TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
 
 // Tests that policy-installed extensions are not blacklisted by policy.
 TEST_F(ExtensionServiceTest, PolicyInstalledExtensionsWhitelisted) {
-  InitializeEmptyExtensionService();
+  InitializeEmptyExtensionServiceWithTestingPrefs();
 
   {
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
     // Blacklist everything.
-    ListPrefUpdate blacklist_update(profile()->GetPrefs(),
-                                    extensions::pref_names::kInstallDenyList);
-    base::ListValue* blacklist = blacklist_update.Get();
-    blacklist->AppendString("*");
-
+    pref.SetBlacklistedByDefault(true);
     // Mark good.crx for force-installation.
-    DictionaryPrefUpdate forcelist_update(
-        profile()->GetPrefs(), extensions::pref_names::kInstallForceList);
-    extensions::ExternalPolicyLoader::AddExtension(
-        forcelist_update.Get(), good_crx, "http://example.com/update_url");
+    pref.SetIndividualExtensionAutoInstalled(
+        good_crx, "http://example.com/update_url", true);
   }
 
   // Have policy force-install an extension.
@@ -3710,10 +3704,8 @@ TEST_F(ExtensionServiceTest, PolicyInstalledExtensionsWhitelisted) {
 
   // Blacklist update should not uninstall the extension.
   {
-    ListPrefUpdate update(profile()->GetPrefs(),
-                          extensions::pref_names::kInstallDenyList);
-    base::ListValue* blacklist = update.Get();
-    blacklist->Append(new base::StringValue(good0));
+    ManagementPrefUpdater pref(profile_->GetTestingPrefService());
+    pref.SetIndividualExtensionInstallationAllowed(good0, false);
   }
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(1u, registry()->enabled_extensions().size());
@@ -4298,7 +4290,7 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
   const Extension* extension = InstallCRX(path, INSTALL_NEW);
   ASSERT_TRUE(extension);
   GURL ext_url(extension->url());
-  std::string origin_id = webkit_database::GetIdentifierFromOrigin(ext_url);
+  std::string origin_id = storage::GetIdentifierFromOrigin(ext_url);
 
   // Set a cookie for the extension.
   net::CookieMonster* cookie_monster = profile()
@@ -4323,7 +4315,7 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
   EXPECT_EQ(1U, callback.list_.size());
 
   // Open a database.
-  webkit_database::DatabaseTracker* db_tracker =
+  storage::DatabaseTracker* db_tracker =
       BrowserContext::GetDefaultStoragePartition(profile())
           ->GetDatabaseTracker();
   base::string16 db_name = base::UTF8ToUTF16("db");
@@ -4331,7 +4323,7 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
   int64 size;
   db_tracker->DatabaseOpened(origin_id, db_name, description, 1, &size);
   db_tracker->DatabaseClosed(origin_id, db_name);
-  std::vector<webkit_database::OriginInfo> origins;
+  std::vector<storage::OriginInfo> origins;
   db_tracker->GetAllOriginsInfo(&origins);
   EXPECT_EQ(1U, origins.size());
   EXPECT_EQ(origin_id, origins[0].GetOriginIdentifier());
@@ -4406,7 +4398,7 @@ TEST_F(ExtensionServiceTest, ClearAppData) {
       extensions::AppLaunchInfo::GetFullLaunchURL(extension).GetOrigin());
   EXPECT_TRUE(profile()->GetExtensionSpecialStoragePolicy()->IsStorageUnlimited(
       origin1));
-  std::string origin_id = webkit_database::GetIdentifierFromOrigin(origin1);
+  std::string origin_id = storage::GetIdentifierFromOrigin(origin1);
 
   // Install app2 from the same origin with unlimited storage.
   extension = PackAndInstallCRX(data_dir().AppendASCII("app2"), INSTALL_NEW);
@@ -4446,7 +4438,7 @@ TEST_F(ExtensionServiceTest, ClearAppData) {
   EXPECT_EQ(1U, callback.list_.size());
 
   // Open a database.
-  webkit_database::DatabaseTracker* db_tracker =
+  storage::DatabaseTracker* db_tracker =
       BrowserContext::GetDefaultStoragePartition(profile())
           ->GetDatabaseTracker();
   base::string16 db_name = base::UTF8ToUTF16("db");
@@ -4454,7 +4446,7 @@ TEST_F(ExtensionServiceTest, ClearAppData) {
   int64 size;
   db_tracker->DatabaseOpened(origin_id, db_name, description, 1, &size);
   db_tracker->DatabaseClosed(origin_id, db_name);
-  std::vector<webkit_database::OriginInfo> origins;
+  std::vector<storage::OriginInfo> origins;
   db_tracker->GetAllOriginsInfo(&origins);
   EXPECT_EQ(1U, origins.size());
   EXPECT_EQ(origin_id, origins[0].GetOriginIdentifier());
@@ -4576,7 +4568,7 @@ TEST_F(ExtensionServiceTest, GenerateID) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0u, GetErrors().size());
   ASSERT_EQ(1u, loaded_.size());
-  ASSERT_TRUE(Extension::IdIsValid(loaded_[0]->id()));
+  ASSERT_TRUE(crx_file::id_util::IdIsValid(loaded_[0]->id()));
   EXPECT_EQ(loaded_[0]->location(), Manifest::UNPACKED);
 
   ValidatePrefKeyCount(1);

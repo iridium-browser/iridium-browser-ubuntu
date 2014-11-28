@@ -49,8 +49,6 @@ public:
     RenderTableSection* section() const { return toRenderTableSection(parent()); }
     RenderTable* table() const { return toRenderTable(parent()->parent()); }
 
-    void paintOutlineForRowIfNeeded(PaintInfo&, const LayoutPoint&);
-
     static RenderTableRow* createAnonymous(Document*);
     static RenderTableRow* createAnonymousWithParentRenderer(const RenderObject*);
     virtual RenderBox* createAnonymousBoxWithSameTypeAs(const RenderObject* parent) const OVERRIDE
@@ -70,6 +68,7 @@ public:
     unsigned rowIndex() const
     {
         ASSERT(rowIndexWasSet());
+        ASSERT(!section() || !section()->needsCellRecalc()); // index may be bogus if cells need recalc.
         return m_rowIndex;
     }
 

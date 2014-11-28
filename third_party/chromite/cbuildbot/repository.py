@@ -4,6 +4,8 @@
 
 """Repository module to handle different types of repositories."""
 
+from __future__ import print_function
+
 import constants
 import logging
 import os
@@ -124,7 +126,7 @@ def ClearBuildRoot(buildroot, preserve_paths=()):
 
 
 class RepoRepository(object):
-  """ A Class that encapsulates a repo repository.
+  """A Class that encapsulates a repo repository.
 
   Args:
     repo_url: gitserver URL to fetch repo manifest from.

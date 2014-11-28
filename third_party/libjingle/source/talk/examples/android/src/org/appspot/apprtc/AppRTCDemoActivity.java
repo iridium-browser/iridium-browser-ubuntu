@@ -77,7 +77,6 @@ import java.util.regex.Pattern;
 public class AppRTCDemoActivity extends Activity
     implements AppRTCClient.IceServersObserver {
   private static final String TAG = "AppRTCDemoActivity";
-  private static boolean factoryStaticInitialized;
   private PeerConnectionFactory factory;
   private VideoSource videoSource;
   private boolean videoSourceStopped;
@@ -132,13 +131,6 @@ public class AppRTCDemoActivity extends Activity
     hudView.setTextSize(TypedValue.COMPLEX_UNIT_PT, 5);
     hudView.setVisibility(View.INVISIBLE);
     addContentView(hudView, hudLayout);
-
-    if (!factoryStaticInitialized) {
-      abortUnless(PeerConnectionFactory.initializeAndroidGlobals(
-          this, true, true),
-        "Failed to initializeAndroidGlobals");
-      factoryStaticInitialized = true;
-    }
 
     AudioManager audioManager =
         ((AudioManager) getSystemService(AUDIO_SERVICE));
@@ -200,17 +192,47 @@ public class AppRTCDemoActivity extends Activity
   private void updateHUD(StatsReport[] reports) {
     StringBuilder builder = new StringBuilder();
     for (StatsReport report : reports) {
-      if (!report.id.equals("bweforvideo")) {
+      // bweforvideo to show statistics for video Bandwidth Estimation,
+      // which is global per-session.
+      if (report.id.equals("bweforvideo")) {
+        for (StatsReport.Value value : report.values) {
+          String name = value.name.replace("goog", "")
+              .replace("Available", "").replace("Bandwidth", "")
+              .replace("Bitrate", "").replace("Enc", "");
+
+          builder.append(name).append("=").append(value.value)
+              .append(" ");
+        }
+        builder.append("\n");
+      } else if (report.type.equals("googCandidatePair")) {
+        String activeConnectionStats = getActiveConnectionStats(report);
+        if (activeConnectionStats == null) {
+          continue;
+        }
+        builder.append(activeConnectionStats);
+      } else {
         continue;
-      }
-      for (StatsReport.Value value : report.values) {
-        String name = value.name.replace("goog", "").replace("Available", "")
-            .replace("Bandwidth", "").replace("Bitrate", "").replace("Enc", "");
-        builder.append(name).append("=").append(value.value).append(" ");
       }
       builder.append("\n");
     }
     hudView.setText(builder.toString() + hudView.getText());
+  }
+
+  // Return the active connection stats else return null
+  private String getActiveConnectionStats(StatsReport report) {
+    StringBuilder activeConnectionbuilder = new StringBuilder();
+    // googCandidatePair to show information about the active
+    // connection.
+    for (StatsReport.Value value : report.values) {
+      if (value.name.equals("googActiveConnection")
+          && value.value.equals("false")) {
+        return null;
+      }
+      String name = value.name.replace("goog", "");
+      activeConnectionbuilder.append(name).append("=")
+          .append(value.value).append("\n");
+    }
+    return activeConnectionbuilder.toString();
   }
 
   @Override
@@ -252,6 +274,9 @@ public class AppRTCDemoActivity extends Activity
 
   @Override
   public void onIceServers(List<PeerConnection.IceServer> iceServers) {
+    abortUnless(PeerConnectionFactory.initializeAndroidGlobals(
+      this, true, true, VideoRendererGui.getEGLContext()),
+        "Failed to initializeAndroidGlobals");
     factory = new PeerConnectionFactory();
 
     MediaConstraints pcConstraints = appRtcClient.pcConstraints();

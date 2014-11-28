@@ -25,6 +25,7 @@
 #include "nacl_io/kernel_wrap_real.h"
 #include "nacl_io/log.h"
 #include "nacl_io/osmman.h"
+#include "nacl_io/ostime.h"
 
 namespace {
 
@@ -41,8 +42,11 @@ void stat_to_nacl_stat(const struct stat* buf, nacl_abi_stat* nacl_buf) {
   nacl_buf->nacl_abi_st_blksize = buf->st_blksize;
   nacl_buf->nacl_abi_st_blocks = buf->st_blocks;
   nacl_buf->nacl_abi_st_atime = buf->st_atime;
+  nacl_buf->nacl_abi_st_atimensec = buf->st_atimensec;
   nacl_buf->nacl_abi_st_mtime = buf->st_mtime;
+  nacl_buf->nacl_abi_st_mtimensec = buf->st_mtimensec;
   nacl_buf->nacl_abi_st_ctime = buf->st_ctime;
+  nacl_buf->nacl_abi_st_ctimensec = buf->st_ctimensec;
 }
 
 void nacl_stat_to_stat(const nacl_abi_stat* nacl_buf, struct stat* buf) {
@@ -58,8 +62,11 @@ void nacl_stat_to_stat(const nacl_abi_stat* nacl_buf, struct stat* buf) {
   buf->st_blksize = nacl_buf->nacl_abi_st_blksize;
   buf->st_blocks = nacl_buf->nacl_abi_st_blocks;
   buf->st_atime = nacl_buf->nacl_abi_st_atime;
+  buf->st_atimensec = nacl_buf->nacl_abi_st_atimensec;
   buf->st_mtime = nacl_buf->nacl_abi_st_mtime;
+  buf->st_mtimensec = nacl_buf->nacl_abi_st_mtimensec;
   buf->st_ctime = nacl_buf->nacl_abi_st_ctime;
+  buf->st_ctimensec = nacl_buf->nacl_abi_st_ctimensec;
 }
 
 }  // namespace
@@ -159,6 +166,7 @@ EXTERN_C_BEGIN
   OP(socketpair);                        \
   OP(shutdown);                          \
                                          \
+  OP(chmod);                             \
   OP(access);                            \
   OP(unlink);                            \
   OP(fchdir);                            \
@@ -166,6 +174,7 @@ EXTERN_C_BEGIN
   OP(fsync);                             \
   OP(fdatasync);                         \
   OP(lstat);                             \
+  OP(link);                              \
   OP(readlink);                          \
   OP(utimes);
 
@@ -270,8 +279,8 @@ int WRAP(munmap)(void* addr, size_t length) {
   return REAL(munmap)(addr, length);
 }
 
-int WRAP(open)(const char* pathname, int oflag, mode_t cmode, int* newfd) {
-  *newfd = ki_open(pathname, oflag);
+int WRAP(open)(const char* pathname, int oflag, mode_t mode, int* newfd) {
+  *newfd = ki_open(pathname, oflag, mode);
   RTN_ERRNO_IF(*newfd < 0);
   return 0;
 }
@@ -335,6 +344,10 @@ int WRAP(lstat)(const char* pathname, struct nacl_abi_stat* nacl_buf) {
   return 0;
 }
 
+int WRAP(link)(const char* pathname, const char* newpath) {
+  ERRNO_RTN(ki_link(pathname, newpath));
+}
+
 int WRAP(readlink)(const char* pathname,
                    char* buf,
                    size_t count,
@@ -347,6 +360,10 @@ int WRAP(readlink)(const char* pathname,
 
 int WRAP(utimes)(const char *filename, const struct timeval *times) {
   ERRNO_RTN(ki_utimes(filename, times));
+}
+
+int WRAP(chmod)(const char* pathname, mode_t mode) {
+  ERRNO_RTN(ki_chmod(pathname, mode));
 }
 
 int WRAP(access)(const char* pathname, int amode) {
@@ -507,9 +524,12 @@ static void assign_real_pointers() {
   }
 }
 
-#define CHECK_REAL(func) \
-  if (!REAL(func))       \
-    assign_real_pointers();
+#define CHECK_REAL(func)    \
+  if (!REAL(func)) {        \
+    assign_real_pointers(); \
+    if (!REAL(func))        \
+      return ENOSYS;        \
+  }
 
 // "real" functions, i.e. the unwrapped original functions.
 
@@ -519,7 +539,8 @@ int _real_close(int fd) {
 }
 
 void _real_exit(int status) {
-  CHECK_REAL(exit);
+  if (!REAL(exit))
+    assign_real_pointers();
   REAL(exit)(status);
 }
 
@@ -591,9 +612,9 @@ int _real_munmap(void* addr, size_t length) {
   return REAL(munmap)(addr, length);
 }
 
-int _real_open(const char* pathname, int oflag, mode_t cmode, int* newfd) {
+int _real_open(const char* pathname, int oflag, mode_t mode, int* newfd) {
   CHECK_REAL(open);
-  return REAL(open)(pathname, oflag, cmode, newfd);
+  return REAL(open)(pathname, oflag, mode, newfd);
 }
 
 int _real_open_resource(const char* file, int* fd) {
@@ -614,6 +635,11 @@ int _real_rmdir(const char* pathname) {
 int _real_write(int fd, const void* buf, size_t count, size_t* nwrote) {
   CHECK_REAL(write);
   return REAL(write)(fd, buf, count, nwrote);
+}
+
+int _real_getcwd(char* pathname, size_t len) {
+  CHECK_REAL(getcwd);
+  return REAL(getcwd)(pathname, len);
 }
 
 static bool s_wrapped = false;

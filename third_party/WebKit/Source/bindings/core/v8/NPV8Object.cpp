@@ -48,11 +48,21 @@
 
 using namespace blink;
 
+namespace {
+
+WrapperPersistentNode* createPersistentHandle(ScriptWrappableBase* internalPointer)
+{
+    ASSERT_NOT_REACHED();
+    return 0;
+}
+
+} // namespace
+
 namespace blink {
 
 const WrapperTypeInfo* npObjectTypeInfo()
 {
-    static const WrapperTypeInfo typeInfo = { gin::kEmbedderBlink, 0, 0, 0, 0, 0, 0, 0, WrapperTypeObjectPrototype, RefCountedObject };
+    static const WrapperTypeInfo typeInfo = { gin::kEmbedderBlink, 0, 0, 0, createPersistentHandle, 0, 0, 0, 0, 0, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
     return &typeInfo;
 }
 
@@ -112,7 +122,7 @@ static v8::Local<v8::String> npIdentifierToV8Identifier(NPIdentifier name, v8::I
 
 NPObject* v8ObjectToNPObject(v8::Handle<v8::Object> object)
 {
-    return reinterpret_cast<NPObject*>(toInternalPointer(object));
+    return reinterpret_cast<NPObject*>(toScriptWrappableBase(object));
 }
 
 bool isWrappedNPObject(v8::Handle<v8::Object> object)
@@ -177,7 +187,7 @@ V8NPObject* npObjectToV8NPObject(NPObject* npObject)
     return v8NpObject;
 }
 
-ScriptWrappableBase* npObjectToInternalPointer(NPObject* npObject)
+ScriptWrappableBase* npObjectToScriptWrappableBase(NPObject* npObject)
 {
     return reinterpret_cast<ScriptWrappableBase*>(npObject);
 }

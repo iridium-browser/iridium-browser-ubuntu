@@ -8,6 +8,7 @@
 #include "base/memory/ref_counted.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_image.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_surface_osmesa.h"
@@ -29,6 +30,9 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
         ozone_surface_(ozone_surface.Pass()),
         widget_(widget) {}
 
+  virtual bool Initialize() OVERRIDE {
+    return Initialize(ozone_surface_->CreateVSyncProvider());
+  }
   virtual bool Resize(const gfx::Size& size) OVERRIDE {
     if (!ozone_surface_->ResizeNativeWindow(size)) {
       if (!ReinitializeNativeSurface() ||
@@ -44,8 +48,18 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
 
     return ozone_surface_->OnSwapBuffers();
   }
+  virtual bool ScheduleOverlayPlane(int z_order,
+                                    OverlayTransform transform,
+                                    GLImage* image,
+                                    const Rect& bounds_rect,
+                                    const RectF& crop_rect) OVERRIDE {
+    return image->ScheduleOverlayPlane(
+        widget_, z_order, transform, bounds_rect, crop_rect);
+  }
 
  private:
+  using NativeViewGLSurfaceEGL::Initialize;
+
   virtual ~GLSurfaceOzoneEGL() {
     Destroy();  // EGL surface must be destroyed before SurfaceOzone
   }
@@ -70,9 +84,7 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
     }
 
     window_ = ozone_surface_->GetNativeWindow();
-    scoped_ptr<VSyncProvider> vsync_provider =
-        ozone_surface_->CreateVSyncProvider();
-    if (!Initialize(vsync_provider.Pass())) {
+    if (!Initialize()) {
       LOG(ERROR) << "Failed to initialize.";
       return false;
     }
@@ -80,12 +92,71 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
     return true;
   }
 
-
   // The native surface. Deleting this is allowed to free the EGLNativeWindow.
   scoped_ptr<ui::SurfaceOzoneEGL> ozone_surface_;
   AcceleratedWidget widget_;
 
   DISALLOW_COPY_AND_ASSIGN(GLSurfaceOzoneEGL);
+};
+
+class GL_EXPORT GLSurfaceOzoneSurfaceless : public SurfacelessEGL {
+ public:
+  GLSurfaceOzoneSurfaceless(scoped_ptr<ui::SurfaceOzoneEGL> ozone_surface,
+                            AcceleratedWidget widget)
+      : SurfacelessEGL(gfx::Size()),
+        ozone_surface_(ozone_surface.Pass()),
+        widget_(widget) {}
+
+  virtual bool Initialize() OVERRIDE {
+    if (!SurfacelessEGL::Initialize())
+      return false;
+    vsync_provider_ = ozone_surface_->CreateVSyncProvider();
+    if (!vsync_provider_)
+      return false;
+    return true;
+  }
+  virtual bool Resize(const gfx::Size& size) OVERRIDE {
+    if (!ozone_surface_->ResizeNativeWindow(size))
+      return false;
+
+    return SurfacelessEGL::Resize(size);
+  }
+  virtual bool SwapBuffers() OVERRIDE {
+    // TODO: this should be replaced by a fence when supported by the driver.
+    glFinish();
+    return ozone_surface_->OnSwapBuffers();
+  }
+  virtual bool ScheduleOverlayPlane(int z_order,
+                                    OverlayTransform transform,
+                                    GLImage* image,
+                                    const Rect& bounds_rect,
+                                    const RectF& crop_rect) OVERRIDE {
+    return image->ScheduleOverlayPlane(
+        widget_, z_order, transform, bounds_rect, crop_rect);
+  }
+  virtual bool IsOffscreen() OVERRIDE { return false; }
+  virtual VSyncProvider* GetVSyncProvider() OVERRIDE {
+    return vsync_provider_.get();
+  }
+  virtual bool SupportsPostSubBuffer() OVERRIDE { return true; }
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE {
+    // The actual sub buffer handling is handled at higher layers.
+    SwapBuffers();
+    return true;
+  }
+  virtual bool IsSurfaceless() const OVERRIDE { return true; }
+
+ private:
+  virtual ~GLSurfaceOzoneSurfaceless() {
+    Destroy();  // EGL surface must be destroyed before SurfaceOzone
+  }
+
+  // The native surface. Deleting this is allowed to free the EGLNativeWindow.
+  scoped_ptr<ui::SurfaceOzoneEGL> ozone_surface_;
+  AcceleratedWidget widget_;
+  scoped_ptr<VSyncProvider> vsync_provider_;
+
+  DISALLOW_COPY_AND_ASSIGN(GLSurfaceOzoneSurfaceless);
 };
 
 }  // namespace
@@ -119,17 +190,26 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
   }
   DCHECK(GetGLImplementation() == kGLImplementationEGLGLES2);
   if (window != kNullAcceleratedWidget) {
-    scoped_ptr<ui::SurfaceOzoneEGL> surface_ozone =
-        ui::SurfaceFactoryOzone::GetInstance()->CreateEGLSurfaceForWidget(
-            window);
-    if (!surface_ozone)
-      return NULL;
+    scoped_refptr<GLSurface> surface;
+    if (GLSurfaceEGL::IsEGLSurfacelessContextSupported() &&
+        ui::SurfaceFactoryOzone::GetInstance()
+            ->CanShowPrimaryPlaneAsOverlay()) {
+      scoped_ptr<ui::SurfaceOzoneEGL> surface_ozone =
+          ui::SurfaceFactoryOzone::GetInstance()
+              ->CreateSurfacelessEGLSurfaceForWidget(window);
+      if (!surface_ozone)
+        return NULL;
+      surface = new GLSurfaceOzoneSurfaceless(surface_ozone.Pass(), window);
+    } else {
+      scoped_ptr<ui::SurfaceOzoneEGL> surface_ozone =
+          ui::SurfaceFactoryOzone::GetInstance()->CreateEGLSurfaceForWidget(
+              window);
+      if (!surface_ozone)
+        return NULL;
 
-    scoped_ptr<VSyncProvider> vsync_provider =
-        surface_ozone->CreateVSyncProvider();
-    scoped_refptr<GLSurfaceOzoneEGL> surface =
-        new GLSurfaceOzoneEGL(surface_ozone.Pass(), window);
-    if (!surface->Initialize(vsync_provider.Pass()))
+      surface = new GLSurfaceOzoneEGL(surface_ozone.Pass(), window);
+    }
+    if (!surface->Initialize())
       return NULL;
     return surface;
   } else {
@@ -145,7 +225,8 @@ scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
     const gfx::Size& size) {
   switch (GetGLImplementation()) {
     case kGLImplementationOSMesaGL: {
-      scoped_refptr<GLSurface> surface(new GLSurfaceOSMesa(1, size));
+      scoped_refptr<GLSurface> surface(
+          new GLSurfaceOSMesa(OSMesaSurfaceFormatBGRA, size));
       if (!surface->Initialize())
         return NULL;
 

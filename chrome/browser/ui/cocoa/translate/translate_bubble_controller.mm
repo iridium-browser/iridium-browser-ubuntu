@@ -8,14 +8,15 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/bubble_combobox.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/translate/language_combobox_model.h"
 #include "chrome/browser/ui/translate/translate_bubble_model_impl.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
 #include "content/public/browser/browser_context.h"
-#include "grit/generated_resources.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
 #import "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -577,25 +578,13 @@ const CGFloat kContentWidth = kWindowWidth - 2 * kFramePadding;
                           action:(SEL)action
                           toView:(NSView*)view {
   base::scoped_nsobject<NSPopUpButton> button(
-      [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]);
-  [button setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
-  [button setBordered:YES];
-  [[button cell] setControlSize:NSSmallControlSize];
+      [[BubbleCombobox alloc] initWithFrame:NSZeroRect
+                                  pullsDown:NO
+                                      model:model]);
   [button setTarget:self];
   [button setAction:action];
-
-  for (int i = 0; i < model->GetItemCount(); ++i) {
-    if (model->IsItemSeparatorAt(i))
-      [[button menu] addItem:[NSMenuItem separatorItem]];
-    else
-      [button addItemWithTitle:base::SysUTF16ToNSString(model->GetItemAt(i))];
-  }
-  [button selectItemAtIndex:model->GetDefaultIndex()];
-
   [button sizeToFit];
-
   [view addSubview:button.get()];
-
   return button.get();
 }
 

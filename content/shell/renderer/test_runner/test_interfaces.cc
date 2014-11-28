@@ -26,7 +26,6 @@ namespace content {
 TestInterfaces::TestInterfaces()
     : accessibility_controller_(new AccessibilityController()),
       event_sender_(new EventSender(this)),
-      gamepad_controller_(new GamepadController()),
       text_input_controller_(new TextInputController()),
       test_runner_(new TestRunner(this)),
       delegate_(0) {
@@ -50,7 +49,7 @@ TestInterfaces::~TestInterfaces() {
 
   accessibility_controller_->SetDelegate(0);
   event_sender_->SetDelegate(0);
-  gamepad_controller_->SetDelegate(0);
+  // gamepad_controller_ ignores SetDelegate(0)
   // text_input_controller_ doesn't depend on WebTestDelegate.
   test_runner_->SetDelegate(0);
 }
@@ -68,7 +67,7 @@ void TestInterfaces::SetWebView(blink::WebView* web_view,
 void TestInterfaces::SetDelegate(WebTestDelegate* delegate) {
   accessibility_controller_->SetDelegate(delegate);
   event_sender_->SetDelegate(delegate);
-  gamepad_controller_->SetDelegate(delegate);
+  gamepad_controller_ = GamepadController::Create(delegate);
   // text_input_controller_ doesn't depend on WebTestDelegate.
   test_runner_->SetDelegate(delegate);
   delegate_ = delegate;
@@ -77,7 +76,8 @@ void TestInterfaces::SetDelegate(WebTestDelegate* delegate) {
 void TestInterfaces::BindTo(blink::WebFrame* frame) {
   accessibility_controller_->Install(frame);
   event_sender_->Install(frame);
-  gamepad_controller_->Install(frame);
+  if (gamepad_controller_)
+    gamepad_controller_->Install(frame);
   text_input_controller_->Install(frame);
   test_runner_->Install(frame);
 }
@@ -85,7 +85,8 @@ void TestInterfaces::BindTo(blink::WebFrame* frame) {
 void TestInterfaces::ResetTestHelperControllers() {
   accessibility_controller_->Reset();
   event_sender_->Reset();
-  gamepad_controller_->Reset();
+  if (gamepad_controller_)
+    gamepad_controller_->Reset();
   // text_input_controller_ doesn't have any state to reset.
   blink::WebCache::clear();
 }
@@ -111,7 +112,7 @@ void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
   }
   if (spec.find("/inspector/") != std::string::npos ||
       spec.find("/inspector-enabled/") != std::string::npos)
-    test_runner_->clearDevToolsLocalStorage();
+    test_runner_->ClearDevToolsLocalStorage();
   if (spec.find("/inspector/") != std::string::npos) {
     // Subfolder name determines default panel to open.
     std::string settings = "";
@@ -121,7 +122,7 @@ void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
       settings = base::StringPrintf("{\"lastActivePanel\":\"\\\"%s\\\"\"}",
                                     test_path.substr(0, slash_index).c_str());
     }
-    test_runner_->showDevTools(settings, std::string());
+    test_runner_->ShowDevTools(settings, std::string());
   }
   if (spec.find("/viewsource/") != std::string::npos) {
     test_runner_->setShouldEnableViewSource(true);

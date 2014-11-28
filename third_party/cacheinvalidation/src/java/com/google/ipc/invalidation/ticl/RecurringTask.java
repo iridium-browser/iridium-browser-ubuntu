@@ -16,16 +16,17 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.SystemResources.Scheduler;
+import com.google.ipc.invalidation.ticl.proto.Client.ExponentialBackoffState;
+import com.google.ipc.invalidation.ticl.proto.JavaClient.RecurringTaskState;
 import com.google.ipc.invalidation.util.ExponentialBackoffDelayGenerator;
 import com.google.ipc.invalidation.util.InternalBase;
 import com.google.ipc.invalidation.util.Marshallable;
 import com.google.ipc.invalidation.util.NamedRunnable;
+import com.google.ipc.invalidation.util.Preconditions;
 import com.google.ipc.invalidation.util.Smearer;
 import com.google.ipc.invalidation.util.TextBuilder;
-import com.google.protos.ipc.invalidation.JavaClient.RecurringTaskState;
 
 
 /**
@@ -239,14 +240,9 @@ public abstract class RecurringTask extends InternalBase
 
   @Override
   public RecurringTaskState marshal() {
-    RecurringTaskState.Builder builder = RecurringTaskState.newBuilder()
-        .setInitialDelayMs(initialDelayMs)
-        .setScheduled(isScheduled)
-        .setTimeoutDelayMs(timeoutDelayMs);
-    if (delayGenerator != null) {
-      builder.setBackoffState(delayGenerator.marshal());
-    }
-    return builder.build();
+    ExponentialBackoffState backoffState =
+        (delayGenerator == null) ? null : delayGenerator.marshal();
+    return RecurringTaskState.create(initialDelayMs, timeoutDelayMs, isScheduled, backoffState);
   }
 
   @Override

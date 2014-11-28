@@ -140,9 +140,9 @@ KURL DOMFileSystemBase::createFileSystemURL(const String& fullPath) const
     if (type() == FileSystemTypeExternal) {
         // For external filesystem originString could be different from what we have in m_filesystemRootURL.
         StringBuilder result;
-        result.append("filesystem:");
+        result.appendLiteral("filesystem:");
         result.append(securityOrigin()->toString());
-        result.append("/");
+        result.append('/');
         result.append(externalPathPrefix);
         result.append(m_filesystemRootURL.path());
         // Remove the extra leading slash.
@@ -208,7 +208,7 @@ PassRefPtrWillBeRawPtr<File> DOMFileSystemBase::createFile(const FileMetadata& m
     return File::createForFileSystemFile(fileSystemURL, metadata);
 }
 
-void DOMFileSystemBase::getMetadata(const EntryBase* entry, PassOwnPtr<MetadataCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::getMetadata(const EntryBase* entry, MetadataCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -249,7 +249,7 @@ static bool verifyAndGetDestinationPathForCopyOrMove(const EntryBase* source, En
     return true;
 }
 
-void DOMFileSystemBase::move(const EntryBase* source, EntryBase* parent, const String& newName, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::move(const EntryBase* source, EntryBase* parent, const String& newName, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -268,7 +268,7 @@ void DOMFileSystemBase::move(const EntryBase* source, EntryBase* parent, const S
     fileSystem()->move(createFileSystemURL(source), parent->filesystem()->createFileSystemURL(destinationPath), callbacks.release());
 }
 
-void DOMFileSystemBase::copy(const EntryBase* source, EntryBase* parent, const String& newName, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::copy(const EntryBase* source, EntryBase* parent, const String& newName, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -287,7 +287,7 @@ void DOMFileSystemBase::copy(const EntryBase* source, EntryBase* parent, const S
     fileSystem()->copy(createFileSystemURL(source), parent->filesystem()->createFileSystemURL(destinationPath), callbacks.release());
 }
 
-void DOMFileSystemBase::remove(const EntryBase* entry, PassOwnPtr<VoidCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::remove(const EntryBase* entry, VoidCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -307,7 +307,7 @@ void DOMFileSystemBase::remove(const EntryBase* entry, PassOwnPtr<VoidCallback> 
     fileSystem()->remove(createFileSystemURL(entry), callbacks.release());
 }
 
-void DOMFileSystemBase::removeRecursively(const EntryBase* entry, PassOwnPtr<VoidCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::removeRecursively(const EntryBase* entry, VoidCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -327,7 +327,7 @@ void DOMFileSystemBase::removeRecursively(const EntryBase* entry, PassOwnPtr<Voi
     fileSystem()->removeRecursively(createFileSystemURL(entry), callbacks.release());
 }
 
-void DOMFileSystemBase::getParent(const EntryBase* entry, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback)
+void DOMFileSystemBase::getParent(const EntryBase* entry, EntryCallback* successCallback, ErrorCallback* errorCallback)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -340,7 +340,7 @@ void DOMFileSystemBase::getParent(const EntryBase* entry, PassOwnPtr<EntryCallba
     fileSystem()->directoryExists(createFileSystemURL(path), EntryCallbacks::create(successCallback, errorCallback, m_context, this, path, true));
 }
 
-void DOMFileSystemBase::getFile(const EntryBase* entry, const String& path, const FileSystemFlags& flags, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::getFile(const EntryBase* entry, const String& path, const FileSystemFlags& flags, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -362,7 +362,7 @@ void DOMFileSystemBase::getFile(const EntryBase* entry, const String& path, cons
         fileSystem()->fileExists(createFileSystemURL(absolutePath), callbacks.release());
 }
 
-void DOMFileSystemBase::getDirectory(const EntryBase* entry, const String& path, const FileSystemFlags& flags, PassOwnPtr<EntryCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::getDirectory(const EntryBase* entry, const String& path, const FileSystemFlags& flags, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
@@ -384,7 +384,7 @@ void DOMFileSystemBase::getDirectory(const EntryBase* entry, const String& path,
         fileSystem()->directoryExists(createFileSystemURL(absolutePath), callbacks.release());
 }
 
-int DOMFileSystemBase::readDirectory(DirectoryReaderBase* reader, const String& path, PassOwnPtr<EntriesCallback> successCallback, PassOwnPtr<ErrorCallback> errorCallback, SynchronousType synchronousType)
+int DOMFileSystemBase::readDirectory(DirectoryReaderBase* reader, const String& path, EntriesCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
         reportError(errorCallback, FileError::create(FileError::ABORT_ERR));

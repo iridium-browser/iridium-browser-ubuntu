@@ -18,6 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
+#include "base/threading/thread_restrictions.h"
 #include "device/hid/hid_connection_linux.h"
 #include "device/hid/hid_device_info.h"
 #include "device/hid/hid_report_descriptor.h"
@@ -41,9 +42,10 @@ const char kHIDUnique[] = "HID_UNIQ";
 }  // namespace
 
 HidServiceLinux::HidServiceLinux(
-    scoped_refptr<base::MessageLoopProxy> ui_message_loop)
-    : ui_message_loop_(ui_message_loop),
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
+    : ui_task_runner_(ui_task_runner),
       weak_factory_(this) {
+  base::ThreadRestrictions::AssertIOAllowed();
   DeviceMonitorLinux* monitor = DeviceMonitorLinux::GetInstance();
   monitor->AddObserver(this);
   monitor->Enumerate(
@@ -132,7 +134,7 @@ void HidServiceLinux::OnDeviceAdded(udev_device* device) {
     if (!client) {
       return;
     }
-    ui_message_loop_->PostTask(
+    ui_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&chromeos::PermissionBrokerClient::RequestPathAccess,
                    base::Unretained(client),

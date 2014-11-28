@@ -11,7 +11,9 @@
 #include "base/callback.h"
 #include "net/ssl/channel_id_store.h"
 
-class Profile;
+namespace net {
+class URLRequestContextGetter;
+}
 
 // BrowsingDataChannelIDHelper is an interface for classes dealing with
 // aggregating and deleting browsing data stored in the channel ID store.
@@ -22,8 +24,9 @@ class BrowsingDataChannelIDHelper
     : public base::RefCountedThreadSafe<BrowsingDataChannelIDHelper> {
  public:
   // Create a BrowsingDataChannelIDHelper instance for the given
-  // |profile|.
-  static BrowsingDataChannelIDHelper* Create(Profile* profile);
+  // |request_context|.
+  static BrowsingDataChannelIDHelper* Create(
+      net::URLRequestContextGetter* request_context);
 
   typedef base::Callback<
       void(const net::ChannelIDStore::ChannelIDList&)>
@@ -49,11 +52,6 @@ class CannedBrowsingDataChannelIDHelper
     : public BrowsingDataChannelIDHelper {
  public:
   CannedBrowsingDataChannelIDHelper();
-
-  // Return a copy of the ChannelID helper. Only one consumer can use the
-  // StartFetching method at a time, so we need to create a copy of the helper
-  // every time we instantiate a cookies tree model for it.
-  CannedBrowsingDataChannelIDHelper* Clone();
 
   // Add an ChannelID to the set of canned channel IDs that is
   // returned by this helper.

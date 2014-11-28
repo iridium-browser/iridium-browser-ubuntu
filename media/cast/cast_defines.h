@@ -27,9 +27,11 @@ const uint32 kStartFrameId = UINT32_C(0xffffffff);
 // This is an important system-wide constant.  This limits how much history the
 // implementation must retain in order to process the acknowledgements of past
 // frames.
-const int kMaxUnackedFrames = 60;
+// This value is carefully choosen such that it fits in the 8-bits range for
+// frame IDs. It is also less than half of the full 8-bits range such that we
+// can handle wrap around and compare two frame IDs.
+const int kMaxUnackedFrames = 120;
 
-const int kStartRttMs = 20;
 const int64 kCastMessageUpdateIntervalMs = 33;
 const int64 kNackRepeatIntervalMs = 30;
 
@@ -44,8 +46,7 @@ enum CastInitializationStatus {
   STATUS_UNSUPPORTED_VIDEO_CODEC,
   STATUS_INVALID_AUDIO_CONFIGURATION,
   STATUS_INVALID_VIDEO_CONFIGURATION,
-  STATUS_GPU_ACCELERATION_NOT_SUPPORTED,
-  STATUS_GPU_ACCELERATION_ERROR,
+  STATUS_HW_VIDEO_ENCODER_NOT_SUPPORTED,
 };
 
 enum DefaultSettings {
@@ -190,6 +191,11 @@ inline base::TimeTicks ConvertNtpToTimeTicks(uint32 ntp_seconds,
 inline base::TimeDelta RtpDeltaToTimeDelta(int64 rtp_delta, int rtp_timebase) {
   DCHECK_GT(rtp_timebase, 0);
   return rtp_delta * base::TimeDelta::FromSeconds(1) / rtp_timebase;
+}
+
+inline int64 TimeDeltaToRtpDelta(base::TimeDelta delta, int rtp_timebase) {
+  DCHECK_GT(rtp_timebase, 0);
+  return delta * rtp_timebase / base::TimeDelta::FromSeconds(1);
 }
 
 }  // namespace cast

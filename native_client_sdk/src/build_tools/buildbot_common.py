@@ -71,6 +71,9 @@ def GetWindowsEnvironment():
       return self.env[key]
 
     def __getitem__(self, key):
+      # The nacl side script now needs gyp_vars to return a list.
+      if key == 'gyp_vars':
+        return []
       return self.env[key]
 
     def SetEnv(self, key, value):
@@ -96,7 +99,7 @@ def GetWindowsEnvironment():
   # KEY1=VALUE1\r\n
   # KEY2=VALUE2\r\n
   # ...
-  return dict(line.split('=') for line in stdout.split('\r\n')[:-1])
+  return dict(line.split('=', 1) for line in stdout.split('\r\n')[:-1])
 
 
 def BuildStep(name):

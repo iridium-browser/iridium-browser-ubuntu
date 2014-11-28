@@ -6,7 +6,7 @@
 #define CONTENT_SHELL_RENDERER_TEST_RUNNER_MOCK_WEB_USER_MEDIA_CLIENT_H_
 
 #include "base/macros.h"
-#include "content/shell/renderer/test_runner/WebTask.h"
+#include "content/shell/renderer/test_runner/web_task.h"
 #include "third_party/WebKit/public/web/WebUserMediaClient.h"
 
 namespace content {
@@ -18,13 +18,11 @@ class MockWebUserMediaClient : public blink::WebUserMediaClient {
   explicit MockWebUserMediaClient(WebTestDelegate* delegate);
   virtual ~MockWebUserMediaClient() {}
 
-  virtual void requestUserMedia(const blink::WebUserMediaRequest&) OVERRIDE;
-  virtual void cancelUserMediaRequest(
-      const blink::WebUserMediaRequest&) OVERRIDE;
-  virtual void requestMediaDevices(
-      const blink::WebMediaDevicesRequest&) OVERRIDE;
-  virtual void cancelMediaDevicesRequest(
-      const blink::WebMediaDevicesRequest&) OVERRIDE;
+  virtual void requestUserMedia(const blink::WebUserMediaRequest&);
+  virtual void cancelUserMediaRequest(const blink::WebUserMediaRequest&);
+  virtual void requestMediaDevices(const blink::WebMediaDevicesRequest&);
+  virtual void cancelMediaDevicesRequest(const blink::WebMediaDevicesRequest&);
+  virtual void requestSources(const blink::WebMediaStreamTrackSourcesRequest&);
 
   // Task related methods
   WebTaskList* mutable_task_list() { return &task_list_; }

@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "chrome/browser/history/history_types.h"
+#include "components/history/core/browser/history_types.h"
 
 namespace sql {
 class Connection;
@@ -100,7 +100,7 @@ class VisitDatabase {
   bool GetVisitsInRangeForTransition(base::Time begin_time,
                                      base::Time end_time,
                                      int max_results,
-                                     content::PageTransition transition,
+                                     ui::PageTransition transition,
                                      VisitVector* visits);
 
   // Fills all visits in the given time range into the given vector that should

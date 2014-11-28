@@ -41,7 +41,14 @@ struct timeval;
 extern void IRT_pre_irtcall_hook(void);
 extern void IRT_post_irtcall_hook(void);
 
-#define NACL_GC_WRAP_SYSCALL(_expr) \
+#if defined(__GLIBC__)
+/*
+ * GC instrumentation is not supported when using nacl-glibc with direct
+ * NaCl syscalls.
+ */
+# define NACL_GC_WRAP_SYSCALL(_expr) (_expr)
+#else
+# define NACL_GC_WRAP_SYSCALL(_expr) \
   ({                                \
     __typeof__(_expr) __sysret;     \
     IRT_pre_irtcall_hook();        \
@@ -49,6 +56,7 @@ extern void IRT_post_irtcall_hook(void);
     IRT_post_irtcall_hook();       \
     __sysret;                       \
   })
+#endif
 
 /* ============================================================ */
 /* files */
@@ -168,7 +176,7 @@ typedef int (*TYPE_nacl_sem_post) (int sem);
 
 typedef int (*TYPE_nacl_getdents) (int desc, void *dirp, size_t count);
 
-typedef int (*TYPE_nacl_gettimeofday) (struct timeval *tv, void *tz);
+typedef int (*TYPE_nacl_gettimeofday) (struct timeval *tv);
 
 typedef int (*TYPE_nacl_sched_yield) (void);
 
@@ -257,6 +265,8 @@ typedef int (*TYPE_nacl_futex_wait_abs) (volatile int *addr, int value,
                                          const struct timespec *abstime);
 
 typedef int (*TYPE_nacl_futex_wake) (volatile int *addr, int nwake);
+
+typedef int (*TYPE_nacl_get_random_bytes) (void *buf, size_t buf_size);
 
 #if defined(__cplusplus)
 }

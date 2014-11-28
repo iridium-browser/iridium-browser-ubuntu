@@ -3,9 +3,10 @@
   "Name": "Test Network",
   "Cellular": {
     "APN": {
-      "Name": "test-apn",
+      "AccessPointName": "test-apn",
       "Username": "test-username",
       "Password": "test-password"
-    }
+    },
+    "AutoConnect": true
   }
 }

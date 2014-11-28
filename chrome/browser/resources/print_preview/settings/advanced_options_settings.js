@@ -7,13 +7,21 @@ cr.define('print_preview', function() {
 
   /**
    * Print options section to control printer advanced options.
+   * @param {!print_preview.ticket_item.VendorItems} ticketItem Ticket item to
+   *     check settings availability.
    * @param {!print_preview.DestinationStore} destinationStore Used to determine
    *     the selected destination.
    * @constructor
-   * @extends {print_preview.Component}
+   * @extends {print_preview.SettingsSection}
    */
-  function AdvancedOptionsSettings(destinationStore) {
-    print_preview.Component.call(this);
+  function AdvancedOptionsSettings(ticketItem, destinationStore) {
+    print_preview.SettingsSection.call(this);
+
+    /**
+     * Ticket item to check settings availability.
+     * @private {!print_preview.ticket_items.VendorItems}
+     */
+    this.ticketItem_ = ticketItem;
 
     /**
      * Used to determine the selected destination.
@@ -31,18 +39,26 @@ cr.define('print_preview', function() {
   };
 
   AdvancedOptionsSettings.prototype = {
-    __proto__: print_preview.Component.prototype,
+    __proto__: print_preview.SettingsSection.prototype,
 
-    /** @param {boolean} Whether the component is enabled. */
+    /** @override */
+    isAvailable: function() {
+      return this.ticketItem_.isCapabilityAvailable();
+    },
+
+    /** @override */
+    hasCollapsibleContent: function() {
+      return this.isAvailable();
+    },
+
+    /** @param {boolean} isEnabled Whether the component is enabled. */
     set isEnabled(isEnabled) {
       this.getButton_().disabled = !isEnabled;
     },
 
     /** @override */
     enterDocument: function() {
-      print_preview.Component.prototype.enterDocument.call(this);
-
-      fadeOutOption(this.getElement(), true);
+      print_preview.SettingsSection.prototype.enterDocument.call(this);
 
       this.tracker.add(
           this.getButton_(), 'click', function() {
@@ -52,12 +68,12 @@ cr.define('print_preview', function() {
       this.tracker.add(
           this.destinationStore_,
           print_preview.DestinationStore.EventType.DESTINATION_SELECT,
-          this.onDestinationSelect_.bind(this));
+          this.onDestinationChanged_.bind(this));
       this.tracker.add(
           this.destinationStore_,
           print_preview.DestinationStore.EventType.
               SELECTED_DESTINATION_CAPABILITIES_READY,
-          this.onDestinationSelect_.bind(this));
+          this.onDestinationChanged_.bind(this));
     },
 
     /**
@@ -72,18 +88,8 @@ cr.define('print_preview', function() {
      * Called when the destination selection has changed. Updates UI elements.
      * @private
      */
-    onDestinationSelect_: function() {
-      var destination = this.destinationStore_.selectedDestination;
-      var vendorCapabilities =
-          destination &&
-          destination.capabilities &&
-          destination.capabilities.printer &&
-          destination.capabilities.printer.vendor_capability;
-      if (false && vendorCapabilities) {
-        fadeInOption(this.getElement());
-      } else {
-        fadeOutOption(this.getElement());
-      }
+    onDestinationChanged_: function() {
+      this.updateUiStateInternal();
     }
   };
 

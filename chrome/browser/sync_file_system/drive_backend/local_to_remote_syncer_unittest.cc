@@ -40,8 +40,7 @@ namespace drive_backend {
 
 namespace {
 
-fileapi::FileSystemURL URL(const GURL& origin,
-                           const std::string& path) {
+storage::FileSystemURL URL(const GURL& origin, const std::string& path) {
   return CreateSyncableFileSystemURL(
       origin, base::FilePath::FromUTF8Unsafe(path));
 }
@@ -122,10 +121,8 @@ class LocalToRemoteSyncerTest : public testing::Test {
 
   void RegisterApp(const std::string& app_id,
                    const std::string& app_root_folder_id) {
-    SyncStatusCode status = SYNC_STATUS_FAILED;
-    context_->GetMetadataDatabase()->RegisterApp(
-        app_id, app_root_folder_id, CreateResultReceiver(&status));
-    base::RunLoop().RunUntilIdle();
+    SyncStatusCode status = context_->GetMetadataDatabase()->RegisterApp(
+        app_id, app_root_folder_id);
     EXPECT_EQ(SYNC_STATUS_OK, status);
   }
 
@@ -167,7 +164,7 @@ class LocalToRemoteSyncerTest : public testing::Test {
   }
 
   SyncStatusCode RunLocalToRemoteSyncer(FileChange file_change,
-                           const fileapi::FileSystemURL& url) {
+                                        const storage::FileSystemURL& url) {
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
     base::FilePath local_path = base::FilePath::FromUTF8Unsafe("dummy");
     scoped_ptr<LocalToRemoteSyncer> syncer(new LocalToRemoteSyncer(
@@ -210,7 +207,7 @@ class LocalToRemoteSyncerTest : public testing::Test {
       status = RunRemoteToLocalSyncer();
     } while (status == SYNC_STATUS_OK ||
              status == SYNC_STATUS_RETRY ||
-             GetMetadataDatabase()->PromoteLowerPriorityTrackersToNormal());
+             GetMetadataDatabase()->PromoteDemotedTrackers());
     EXPECT_EQ(SYNC_STATUS_NO_CHANGE_TO_SYNC, status);
     return status;
   }

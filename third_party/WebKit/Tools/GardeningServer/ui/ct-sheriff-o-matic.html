@@ -4,12 +4,17 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<script src="../bower_components/sugar/release/sugar-full.development.js"></script>
+<link rel="import" href="../lib/sugar.html">
 <script src="../scripts/results.js"></script>
 
 <link rel="import" href="../bower_components/core-animated-pages/core-animated-pages.html">
 <link rel="import" href="../bower_components/core-animated-pages/transitions/slide-from-right.html">
+<link rel="import" href="../lib/ct-scheduled-updater.html">
+<link rel="import" href="../model/ct-commit-log.html">
+<link rel="import" href="../model/ct-failures.html">
+<link rel="import" href="../model/ct-tree-list.html">
 <link rel="import" href="ct-results-panel.html">
+<link rel="import" href="ct-tree-select.html">
 <link rel="import" href="ct-unexpected-failures.html">
 
 <polymer-element name="ct-sheriff-o-matic">
@@ -27,9 +32,11 @@ found in the LICENSE file.
         color: white;
         cursor: default;
         display: flex;
+        flex-wrap: wrap;
         justify-content: space-between;
         font-size: 1.1em;
         padding: 0 5px;
+        white-space: nowrap;
       }
       header a, header span {
         color: white;
@@ -39,6 +46,7 @@ found in the LICENSE file.
       }
       #right-toolbar {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
       }
       ct-last-updated {
@@ -46,6 +54,9 @@ found in the LICENSE file.
       }
       core-animated-pages {
         flex: 1;
+      }
+      core-animated-pages > * {
+        overflow: auto;
       }
     </style>
 
@@ -55,46 +66,110 @@ found in the LICENSE file.
           <img src="../favicon.ico"> <span>Sheriff-o-matic</span>
         </template>
         <template if="{{ selected == 1 }}">
-          <a on-click="{{ onBack }}">
+          <a on-click="{{ onBack }}" href="">
             &lt;&lt; Go back
           </a>
         </template>
       </div>
       <div id="right-toolbar">
-        <ct-last-updated date="{{ lastUpdateDate }}"></ct-last-updated>
-        <!-- FIXME: Use a proper polymer component with data binding. -->
-        <select id="tree" on-change="{{ _updateTree }}">
-          <option value="blink">Blink</option>
-          <option value="chromium">Chromium</option>
-        </select>
+        <ct-last-updated date="{{ failures.lastUpdateDate }}"></ct-last-updated>
+        <ct-tree-select tree="{{ tree }}" treeList="{{ treeList }}"></ct-tree-select>
       </div>
     </header>
 
     <core-animated-pages selected="{{ selected }}" transitions="slide-from-right">
-      <ct-unexpected-failures tree="{{ tree }}" lastUpdateDate="{{ lastUpdateDate }}" on-ct-examine-failures="{{ onExamine }}"></ct-unexpected-failures>
-      <ct-results-panel failures="{{ currentFailures }}" tree="{{ tree }}"></ct-results-panel>
+      <ct-unexpected-failures id="unexpected" tree="{{ tree }}" commitLog="{{ commitLog }}" failures="{{ failures }}" on-ct-examine-failures="{{ onExamine }}"></ct-unexpected-failures>
+      <ct-results-panel group="{{ examinedFailureGroup }}"></ct-results-panel>
     </core-animated-pages>
   </template>
   <script>
-    Polymer({
-      // FIXME: Make chromium the default.
-      // That requires updating the select to the right value.
-      tree: 'blink',
-      selected: 0,
-      currentFailures: [],
+    var kUpdateFrequency = 1000 * 30;
 
-      _updateTree: function() {
-        this.tree = this.$.tree.selectedOptions[0].value;
+    Polymer({
+      tree: '',
+      treeList: null,
+      selected: 0,
+      examinedFailureGroup: null,
+      _pendingFailureGroupKey: '',
+
+      updateFromHistoryState: function(state) {
+        this._pendingFailureGroupKey = state.examinedFailureGroupKey;
+        if ('selected' in state)
+          this.selected = state.selected;
       },
 
-      onBack: function() {
-        this.selected = 0;
+      onPopState: function(e) {
+        this.updateFromHistoryState(e.state);
+      },
+
+      onBack: function(event) {
+        if (event.button == 0) {
+          window.history.back();
+          event.preventDefault();
+        }
       },
 
       onExamine: function(event) {
-        this.currentFailures = event.detail.failures;
+        window.history.pushState({
+          examinedFailureGroupKey: event.detail.key,
+          selected: 1,
+        });
+
+
+        this.examinedFailureGroup = event.detail;
         this.selected = 1;
       },
+
+      created: function() {
+        this.treeList = new CTTreeList();
+        this.tree = this.treeList.defaultValue();
+        this.commitLog = new CTCommitLog();
+        this.failures = new CTFailures(this.commitLog);
+        this._updater = new CTScheduledUpdater(this.update.bind(this), kUpdateFrequency);
+
+        // History API handling:
+        // If we have a current state, we should make sure the view is shown
+        // accordingly.
+        // Otherwise, we should inject a state using replaceState() so we can
+        // handle history navigation cleanly.
+        // Either way, the object will react to popstate events.
+        if (window.history.state) {
+          // Will be a no-op if the current state is already being used.
+          this.updateFromHistoryState(window.history.state);
+        } else {
+          window.history.replaceState({
+            selected: 0,
+          });
+        }
+
+        window.addEventListener('popstate', this.onPopState.bind(this));
+      },
+
+      ready: function() {
+        this.update();
+      },
+
+      update: function() {
+        if (this._promise)
+          return;
+        this._promise = Promise.all(
+          [this.commitLog.update(),
+           this.failures.update()]).then(this._updateCompleted.bind(this));
+      },
+
+      _updateCompleted: function() {
+        this._promise = null;
+        this.$.unexpected.update();
+        if (!this.failures.failures)
+          return;
+        if (!this._pendingFailureGroupKey)
+          return;
+        this.examinedFailureGroup = this.failures.failures[this.tree].find(function(group) {
+          return group.key == this._pendingFailureGroupKey;
+        }.bind(this));
+        this._pendingFailureGroupKey = '';
+      },
+
     });
   </script>
 </polymer-element>

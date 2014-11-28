@@ -253,14 +253,14 @@ DesktopNativeWidgetAura::DesktopNativeWidgetAura(
     internal::NativeWidgetDelegate* delegate)
     : desktop_window_tree_host_(NULL),
       ownership_(Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET),
-      close_widget_factory_(this),
       content_window_container_(NULL),
       content_window_(new aura::Window(this)),
       native_widget_delegate_(delegate),
       last_drop_operation_(ui::DragDropTypes::DRAG_NONE),
       restore_focus_on_activate_(false),
       cursor_(gfx::kNullCursor),
-      widget_type_(Widget::InitParams::TYPE_WINDOW) {
+      widget_type_(Widget::InitParams::TYPE_WINDOW),
+      close_widget_factory_(this) {
   aura::client::SetFocusChangeObserver(content_window_, this);
   aura::client::SetActivationChangeObserver(content_window_, this);
 }
@@ -532,10 +532,7 @@ void DesktopNativeWidgetAura::InitNativeWidget(
   shadow_controller_.reset(new wm::ShadowController(
       aura::client::GetActivationClient(host_->window())));
 
-  content_window_->SetProperty(aura::client::kCanMaximizeKey,
-                               GetWidget()->widget_delegate()->CanMaximize());
-  content_window_->SetProperty(aura::client::kCanResizeKey,
-                               GetWidget()->widget_delegate()->CanResize());
+  OnSizeConstraintsChanged();
 
   window_reorderer_.reset(new WindowReorderer(content_window_,
       GetWidget()->GetRootView()));
@@ -936,6 +933,14 @@ bool DesktopNativeWidgetAura::IsTranslucentWindowOpacitySupported() const {
       desktop_window_tree_host_->IsTranslucentWindowOpacitySupported();
 }
 
+void DesktopNativeWidgetAura::OnSizeConstraintsChanged() {
+  content_window_->SetProperty(aura::client::kCanMaximizeKey,
+                               GetWidget()->widget_delegate()->CanMaximize());
+  content_window_->SetProperty(aura::client::kCanResizeKey,
+                               GetWidget()->widget_delegate()->CanResize());
+  desktop_window_tree_host_->SizeConstraintsChanged();
+}
+
 void DesktopNativeWidgetAura::RepostNativeEvent(gfx::NativeEvent native_event) {
   OnEvent(native_event);
 }
@@ -1140,7 +1145,8 @@ void DesktopNativeWidgetAura::OnDragExited() {
 
 int DesktopNativeWidgetAura::OnPerformDrop(const ui::DropTargetEvent& event) {
   DCHECK(drop_helper_.get() != NULL);
-  Activate();
+  if (ShouldActivate())
+    Activate();
   return drop_helper_->OnDrop(event.data(), event.location(),
       last_drop_operation_);
 }

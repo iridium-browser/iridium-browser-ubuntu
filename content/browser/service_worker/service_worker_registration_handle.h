@@ -33,6 +33,10 @@ class ServiceWorkerRegistrationHandle
       ServiceWorkerRegistration* registration);
   virtual ~ServiceWorkerRegistrationHandle();
 
+  ServiceWorkerRegistrationObjectInfo GetObjectInfo();
+  ServiceWorkerObjectInfo CreateServiceWorkerHandleAndPass(
+      ServiceWorkerVersion* version);
+
   bool HasNoRefCount() const { return ref_count_ <= 0; }
   void IncrementRefCount();
   void DecrementRefCount();
@@ -50,6 +54,8 @@ class ServiceWorkerRegistrationHandle
       const ServiceWorkerRegistrationInfo& info) OVERRIDE;
   virtual void OnRegistrationFailed(
       ServiceWorkerRegistration* registration) OVERRIDE;
+  virtual void OnUpdateFound(
+      ServiceWorkerRegistration* registration) OVERRIDE;
 
   // Sets the corresponding version field to the given version or if the given
   // version is NULL, clears the field.
@@ -60,9 +66,6 @@ class ServiceWorkerRegistrationHandle
 
   // Clears all version fields.
   void ClearVersionAttributes();
-
-  ServiceWorkerObjectInfo CreateServiceWorkerHandleAndPass(
-      ServiceWorkerVersion* version);
 
   base::WeakPtr<ServiceWorkerContextCore> context_;
   ServiceWorkerDispatcherHost* dispatcher_host_;

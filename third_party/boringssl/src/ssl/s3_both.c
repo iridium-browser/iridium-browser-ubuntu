@@ -118,8 +118,10 @@
 #include <openssl/buf.h>
 #include <openssl/evp.h>
 #include <openssl/mem.h>
+#include <openssl/md5.h>
 #include <openssl/obj.h>
 #include <openssl/rand.h>
+#include <openssl/sha.h>
 #include <openssl/x509.h>
 
 #include "ssl_locl.h"
@@ -166,6 +168,14 @@ int ssl3_send_finished(SSL *s, int a, int b, const char *sender, int slen)
 		memcpy(p, s->s3->tmp.finish_md, i);
 		l=i;
 
+                /* Log the master secret, if logging is enabled. */
+                if (!ssl_ctx_log_master_secret(s->ctx,
+				s->s3->client_random, SSL3_RANDOM_SIZE,
+				s->session->master_key, s->session->master_key_length))
+			{
+			return 0;
+			}
+
                 /* Copy the finished so we can use it for
                    renegotiation checks */
                 if(s->type == SSL_ST_CONNECT)
@@ -183,12 +193,6 @@ int ssl3_send_finished(SSL *s, int a, int b, const char *sender, int slen)
                         s->s3->previous_server_finished_len=i;
                         }
 
-#ifdef OPENSSL_SYS_WIN16
-		/* MSVC 1.5 does not clear the top bytes of the word unless
-		 * I do this.
-		 */
-		l&=0xffff;
-#endif
 		ssl_set_handshake_header(s, SSL3_MT_FINISHED, l);
 		s->state=b;
 		}
@@ -197,7 +201,6 @@ int ssl3_send_finished(SSL *s, int a, int b, const char *sender, int slen)
 	return ssl_do_write(s);
 	}
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
 /* ssl3_take_mac calculates the Finished MAC for the handshakes messages seen to far. */
 static void ssl3_take_mac(SSL *s)
 	{
@@ -222,7 +225,6 @@ static void ssl3_take_mac(SSL *s)
 	s->s3->tmp.peer_finish_md_len = s->method->ssl3_enc->final_finish_mac(s,
 		sender,slen,s->s3->tmp.peer_finish_md);
 	}
-#endif
 
 int ssl3_get_finished(SSL *s, int a, int b)
 	{
@@ -230,20 +232,19 @@ int ssl3_get_finished(SSL *s, int a, int b)
 	long n;
 	unsigned char *p;
 
-#ifdef OPENSSL_NO_NEXTPROTONEG
-	/* the mac has already been generated when we received the
-	 * change cipher spec message and is in s->s3->tmp.peer_finish_md
-	 */ 
-#endif
-
 	n=s->method->ssl_get_message(s,
 		a,
 		b,
 		SSL3_MT_FINISHED,
 		64, /* should actually be 36+4 :-) */
+		SSL_GET_MESSAGE_DONT_HASH_MESSAGE,
 		&ok);
 
 	if (!ok) return((int)n);
+
+	/* Snapshot the finished hash before incorporating the new message. */
+	ssl3_take_mac(s);
+	ssl3_hash_current_message(s);
 
 	/* If this occurs, we have missed a message.
 	 * TODO(davidben): Is this check now redundant with
@@ -343,7 +344,7 @@ unsigned long ssl3_output_cert_chain(SSL *s, CERT_PKEY *cpk)
  * The first four bytes (msg_type and length) are read in state 'st1',
  * the body is read in state 'stn'.
  */
-long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
+long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int hash_message, int *ok)
 	{
 	unsigned char *p;
 	unsigned long l;
@@ -352,6 +353,10 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 
 	if (s->s3->tmp.reuse_message)
 		{
+		/* A SSL_GET_MESSAGE_DONT_HASH_MESSAGE call cannot be combined
+		 * with reuse_message; the SSL_GET_MESSAGE_DONT_HASH_MESSAGE
+		 * would have to have been applied to the previous call. */
+		assert(hash_message != SSL_GET_MESSAGE_DONT_HASH_MESSAGE);
 		s->s3->tmp.reuse_message=0;
 		if ((mt >= 0) && (s->s3->tmp.message_type != mt))
 			{
@@ -467,16 +472,9 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 		n -= i;
 		}
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
-	/* If receiving Finished, record MAC of prior handshake messages for
-	 * Finished verification. */
-	if (*s->init_buf->data == SSL3_MT_FINISHED)
-		ssl3_take_mac(s);
-#endif
-
 	/* Feed this message into MAC computation. */
-	if (*((unsigned char*) s->init_buf->data) != SSL3_MT_ENCRYPTED_EXTENSIONS)
-		ssl3_finish_mac(s, (unsigned char *)s->init_buf->data, s->init_num + 4);
+	if (hash_message != SSL_GET_MESSAGE_DONT_HASH_MESSAGE)
+		ssl3_hash_current_message(s);
 	if (s->msg_callback)
 		s->msg_callback(0, s->version, SSL3_RT_HANDSHAKE, s->init_buf->data, (size_t)s->init_num + 4, s, s->msg_callback_arg);
 	*ok=1;
@@ -486,6 +484,73 @@ f_err:
 err:
 	*ok=0;
 	return(-1);
+	}
+
+void ssl3_hash_current_message(SSL *s)
+	{
+	/* The handshake header (different size between DTLS and TLS) is included in the hash. */
+	size_t header_len = s->init_msg - (uint8_t *)s->init_buf->data;
+	ssl3_finish_mac(s, (uint8_t *)s->init_buf->data, s->init_num + header_len);
+	}
+
+/* ssl3_cert_verify_hash is documented as needing EVP_MAX_MD_SIZE because that
+ * is sufficient pre-TLS1.2 as well. */
+OPENSSL_COMPILE_ASSERT(EVP_MAX_MD_SIZE > MD5_DIGEST_LENGTH + SHA_DIGEST_LENGTH,
+	combined_tls_hash_fits_in_max);
+
+int ssl3_cert_verify_hash(SSL *s, uint8_t *out, size_t *out_len, const EVP_MD **out_md, EVP_PKEY *pkey)
+	{
+	/* For TLS v1.2 send signature algorithm and signature using
+	 * agreed digest and cached handshake records. Otherwise, use
+	 * SHA1 or MD5 + SHA1 depending on key type.  */
+	if (SSL_USE_SIGALGS(s))
+		{
+		const uint8_t *hdata;
+		size_t hdatalen;
+		EVP_MD_CTX mctx;
+		unsigned len;
+
+		if (!BIO_mem_contents(s->s3->handshake_buffer, &hdata, &hdatalen))
+			{
+			OPENSSL_PUT_ERROR(SSL, ssl3_cert_verify_hash, ERR_R_INTERNAL_ERROR);
+			return 0;
+			}
+		EVP_MD_CTX_init(&mctx);
+		if (!EVP_DigestInit_ex(&mctx, *out_md, NULL)
+			|| !EVP_DigestUpdate(&mctx, hdata, hdatalen)
+			|| !EVP_DigestFinal(&mctx, out, &len))
+			{
+			OPENSSL_PUT_ERROR(SSL, ssl3_cert_verify_hash, ERR_R_EVP_LIB);
+			EVP_MD_CTX_cleanup(&mctx);
+			return 0;
+			}
+		*out_len = len;
+		}
+	else if (pkey->type == EVP_PKEY_RSA)
+		{
+		if (s->method->ssl3_enc->cert_verify_mac(s, NID_md5, out) == 0 ||
+			s->method->ssl3_enc->cert_verify_mac(s,
+				NID_sha1, out + MD5_DIGEST_LENGTH) == 0)
+			return 0;
+		*out_len = MD5_DIGEST_LENGTH + SHA_DIGEST_LENGTH;
+		/* Using a NULL signature MD makes EVP_PKEY_sign perform
+		 * a raw RSA signature, rather than wrapping in a
+		 * DigestInfo. */
+		*out_md = NULL;
+		}
+	else if (pkey->type == EVP_PKEY_EC)
+		{
+		if (s->method->ssl3_enc->cert_verify_mac(s, NID_sha1, out) == 0)
+			return 0;
+		*out_len = SHA_DIGEST_LENGTH;
+		*out_md = EVP_sha1();
+		}
+	else
+		{
+		OPENSSL_PUT_ERROR(SSL, ssl3_cert_verify_hash, ERR_R_INTERNAL_ERROR);
+		return 0;
+		}
+	return 1;
 	}
 
 int ssl_cert_type(X509 *x, EVP_PKEY *pkey)
@@ -504,27 +569,10 @@ int ssl_cert_type(X509 *x, EVP_PKEY *pkey)
 		{
 		ret=SSL_PKEY_RSA_ENC;
 		}
-	else if (i == EVP_PKEY_DSA)
-		{
-		ret=SSL_PKEY_DSA_SIGN;
-		}
-#ifndef OPENSSL_NO_EC
 	else if (i == EVP_PKEY_EC)
 		{
 		ret = SSL_PKEY_ECC;
 		}	
-#endif
-	else if (x && (i == EVP_PKEY_DH || i == EVP_PKEY_DHX))
-		{
-		/* For DH two cases: DH certificate signed with RSA and
-		 * DH certificate signed with DSA.
-		 */
-		i = X509_certificate_type(x, pk);
-		if (i & EVP_PKS_RSA)
-			ret = SSL_PKEY_DH_RSA;
-		else if (i & EVP_PKS_DSA)
-			ret = SSL_PKEY_DH_DSA;
-		}
 		
 err:
 	if(!pkey) EVP_PKEY_free(pk);
@@ -596,7 +644,7 @@ int ssl3_setup_read_buffer(SSL *s)
 	unsigned char *p;
 	size_t len,align=0,headerlen;
 	
-	if (SSL_version(s) == DTLS1_VERSION || SSL_version(s) == DTLS1_BAD_VER)
+	if (SSL_IS_DTLS(s))
 		headerlen = DTLS1_RT_HEADER_LENGTH;
 	else
 		headerlen = SSL3_RT_HEADER_LENGTH;
@@ -634,7 +682,7 @@ int ssl3_setup_write_buffer(SSL *s)
 	unsigned char *p;
 	size_t len,align=0,headerlen;
 
-	if (SSL_version(s) == DTLS1_VERSION || SSL_version(s) == DTLS1_BAD_VER)
+	if (SSL_IS_DTLS(s))
 		headerlen = DTLS1_RT_HEADER_LENGTH + 1;
 	else
 		headerlen = SSL3_RT_HEADER_LENGTH;
@@ -648,8 +696,9 @@ int ssl3_setup_write_buffer(SSL *s)
 		len = s->max_send_fragment
 			+ SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD
 			+ headerlen + align;
-		if (!(s->options & SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS))
-			len += headerlen + align
+		/* Account for 1/n-1 record splitting. */
+		if (s->mode & SSL_MODE_CBC_RECORD_SPLITTING)
+			len += headerlen + align + 1
 				+ SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD;
 
 		if ((p=OPENSSL_malloc(len)) == NULL)

@@ -32,8 +32,6 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "platform/geometry/FloatPoint3D.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -43,11 +41,12 @@ class PannerNode;
 
 // AudioListener maintains the state of the listener in the audio scene as defined in the OpenAL specification.
 
-class AudioListener : public RefCountedWillBeGarbageCollectedFinalized<AudioListener>, public ScriptWrappable {
+class AudioListener : public GarbageCollectedFinalized<AudioListener>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<AudioListener> create()
+    static AudioListener* create()
     {
-        return adoptRefWillBeNoop(new AudioListener());
+        return new AudioListener();
     }
     virtual ~AudioListener();
 
@@ -109,9 +108,9 @@ private:
     mutable Mutex m_listenerLock;
     // List for pannerNodes in context. This is updated only in the main thread,
     // and can be referred in audio thread.
-    WillBeHeapVector<RawPtrWillBeMember<PannerNode> > m_panners;
+    HeapVector<Member<PannerNode> > m_panners;
     // HRTF DB loader for panner node.
-    RefPtr<HRTFDatabaseLoader> m_hrtfDatabaseLoader;
+    Member<HRTFDatabaseLoader> m_hrtfDatabaseLoader;
 };
 
 } // namespace blink

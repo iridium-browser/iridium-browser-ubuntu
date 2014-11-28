@@ -6,68 +6,43 @@
  */
 
 #include "GrDrawState.h"
+
+#include "GrOptDrawState.h"
 #include "GrPaint.h"
-#include "GrDrawTargetCaps.h"
 
 //////////////////////////////////////////////////////////////////////////////s
 
-bool GrDrawState::State::HaveCompatibleState(const State& a, const State& b,
-                                             bool explicitLocalCoords) {
-    if (a.fColorStages.count() != b.fColorStages.count() ||
-        a.fCoverageStages.count() != b.fCoverageStages.count() ||
-        a.fSrcBlend != b.fSrcBlend ||
-        a.fDstBlend != b.fDstBlend) {
-        return false;
+GrOptDrawState* GrDrawState::createOptState(const GrDrawTargetCaps& caps) const {
+    if (NULL == fCachedOptState || caps.getUniqueID() != fCachedCapsID) {
+        GrBlendCoeff srcCoeff;
+        GrBlendCoeff dstCoeff;
+        BlendOptFlags blendFlags = this->getBlendOpts(false, &srcCoeff, &dstCoeff);
+        fCachedOptState = SkNEW_ARGS(GrOptDrawState, (*this, blendFlags, srcCoeff, dstCoeff, caps));
+        fCachedCapsID = caps.getUniqueID();
+    } else {
+#ifdef SK_DEBUG
+        GrBlendCoeff srcCoeff;
+        GrBlendCoeff dstCoeff;
+        BlendOptFlags blendFlags = this->getBlendOpts(false, &srcCoeff, &dstCoeff);
+        SkASSERT(GrOptDrawState(*this, blendFlags, srcCoeff, dstCoeff, caps) == *fCachedOptState);
+#endif
     }
-    for (int i = 0; i < a.fColorStages.count(); i++) {
-        if (!GrEffectStage::AreCompatible(a.fColorStages[i], b.fColorStages[i],
-                                          explicitLocalCoords)) {
-            return false;
-        }
-    }
-    for (int i = 0; i < a.fCoverageStages.count(); i++) {
-        if (!GrEffectStage::AreCompatible(a.fCoverageStages[i], b.fCoverageStages[i],
-                                          explicitLocalCoords)) {
-            return false;
-        }
-    }
-    return true;
+    fCachedOptState->ref();
+    return fCachedOptState;
 }
+
 //////////////////////////////////////////////////////////////////////////////s
+
 GrDrawState::CombinedState GrDrawState::CombineIfPossible(
     const GrDrawState& a, const GrDrawState& b, const GrDrawTargetCaps& caps) {
 
-    bool usingVertexColors = a.hasColorVertexAttribute();
-    if (!usingVertexColors && a.fColor != b.fColor) {
+    if (!a.isEqual(b)) {
         return kIncompatible_CombinedState;
     }
 
-    if (a.fRenderTarget.get() != b.fRenderTarget.get() ||
-        !a.fViewMatrix.cheapEqualTo(b.fViewMatrix) ||
-        a.fBlendConstant != b.fBlendConstant ||
-        a.fFlagBits != b.fFlagBits ||
-        a.fVACount != b.fVACount ||
-        memcmp(a.fVAPtr, b.fVAPtr, a.fVACount * sizeof(GrVertexAttrib)) ||
-        a.fStencilSettings != b.fStencilSettings ||
-        a.fDrawFace != b.fDrawFace) {
-        return kIncompatible_CombinedState;
-    }
-
-    bool usingVertexCoverage = a.hasCoverageVertexAttribute();
-    if (!usingVertexCoverage && a.fCoverage != b.fCoverage) {
-        return kIncompatible_CombinedState;
-    }
-
-    bool explicitLocalCoords = a.hasLocalCoordAttribute();
-
-    SkASSERT(0 == memcmp(a.fFixedFunctionVertexAttribIndices,
-                            b.fFixedFunctionVertexAttribIndices,
-                            sizeof(a.fFixedFunctionVertexAttribIndices)));
-    if (!State::HaveCompatibleState(a.fState, b.fState, explicitLocalCoords)) {
-        return kIncompatible_CombinedState;
-    }
-
-    if (usingVertexColors) {
+    // If the general draw states are equal (from check above) we know hasColorVertexAttribute()
+    // is equivalent for both a and b
+    if (a.hasColorVertexAttribute()) {
         // If one is opaque and the other is not then the combined state is not opaque. Moreover,
         // if the opaqueness affects the ability to get color/coverage blending correct then we
         // don't combine the draw states.
@@ -97,38 +72,52 @@ GrDrawState::CombinedState GrDrawState::CombineIfPossible(
 
 //////////////////////////////////////////////////////////////////////////////s
 
-GrDrawState::GrDrawState(const GrDrawState& state, const SkMatrix& preConcatMatrix) {
+GrDrawState::GrDrawState(const GrDrawState& state, const SkMatrix& preConcatMatrix)
+    : fCachedOptState(NULL) {
     SkDEBUGCODE(fBlockEffectRemovalCnt = 0;)
     *this = state;
     if (!preConcatMatrix.isIdentity()) {
+        if (this->hasGeometryProcessor()) {
+            fGeometryProcessor->localCoordChange(preConcatMatrix);
+        }
         for (int i = 0; i < this->numColorStages(); ++i) {
-            fState.fColorStages[i].localCoordChange(preConcatMatrix);
+            fColorStages[i].localCoordChange(preConcatMatrix);
         }
         for (int i = 0; i < this->numCoverageStages(); ++i) {
-            fState.fCoverageStages[i].localCoordChange(preConcatMatrix);
+            fCoverageStages[i].localCoordChange(preConcatMatrix);
         }
-        this->invalidateBlendOptFlags();
+        this->invalidateOptState();
     }
 }
 
 GrDrawState& GrDrawState::operator=(const GrDrawState& that) {
     SkASSERT(0 == fBlockEffectRemovalCnt || 0 == this->numTotalStages());
-    this->setRenderTarget(that.fRenderTarget.get());
+    SkASSERT(!that.fRenderTarget.ownsPendingIO());
+    SkASSERT(!this->fRenderTarget.ownsPendingIO());
+    this->setRenderTarget(that.getRenderTarget());
     fColor = that.fColor;
     fViewMatrix = that.fViewMatrix;
+    fSrcBlend = that.fSrcBlend;
+    fDstBlend = that.fDstBlend;
     fBlendConstant = that.fBlendConstant;
     fFlagBits = that.fFlagBits;
     fVACount = that.fVACount;
     fVAPtr = that.fVAPtr;
+    fVAStride = that.fVAStride;
     fStencilSettings = that.fStencilSettings;
     fCoverage = that.fCoverage;
     fDrawFace = that.fDrawFace;
-    fOptSrcBlend = that.fOptSrcBlend;
-    fOptDstBlend = that.fOptDstBlend;
-    fBlendOptFlags = that.fBlendOptFlags;
+    if (that.hasGeometryProcessor()) {
+        fGeometryProcessor.reset(SkNEW_ARGS(GrGeometryStage, (*that.fGeometryProcessor.get())));
+    } else {
+        fGeometryProcessor.reset(NULL);
+    }
+    fColorStages = that.fColorStages;
+    fCoverageStages = that.fCoverageStages;
 
-    fState = that.fState;
     fHints = that.fHints;
+
+    SkRefCnt_SafeAssign(fCachedOptState, that.fCachedOptState);
 
     memcpy(fFixedFunctionVertexAttribIndices,
             that.fFixedFunctionVertexAttribIndices,
@@ -138,9 +127,13 @@ GrDrawState& GrDrawState::operator=(const GrDrawState& that) {
 
 void GrDrawState::onReset(const SkMatrix* initialViewMatrix) {
     SkASSERT(0 == fBlockEffectRemovalCnt || 0 == this->numTotalStages());
-    fState.reset();
+    SkASSERT(!fRenderTarget.ownsPendingIO());
 
-    fRenderTarget.reset(NULL);
+    fGeometryProcessor.reset(NULL);
+    fColorStages.reset();
+    fCoverageStages.reset();
+
+    fRenderTarget.reset();
 
     this->setDefaultVertexAttribs();
 
@@ -150,15 +143,17 @@ void GrDrawState::onReset(const SkMatrix* initialViewMatrix) {
     } else {
         fViewMatrix = *initialViewMatrix;
     }
+    fSrcBlend = kOne_GrBlendCoeff;
+    fDstBlend = kZero_GrBlendCoeff;
     fBlendConstant = 0x0;
     fFlagBits = 0x0;
     fStencilSettings.setDisabled();
-    fCoverage = 0xffffffff;
+    fCoverage = 0xff;
     fDrawFace = kBoth_DrawFace;
 
     fHints = 0;
 
-    this->invalidateBlendOptFlags();
+    this->invalidateOptState();
 }
 
 bool GrDrawState::setIdentityViewMatrix()  {
@@ -168,13 +163,17 @@ bool GrDrawState::setIdentityViewMatrix()  {
             // sad trombone sound
             return false;
         }
+        if (this->hasGeometryProcessor()) {
+            fGeometryProcessor->localCoordChange(invVM);
+        }
         for (int s = 0; s < this->numColorStages(); ++s) {
-            fState.fColorStages[s].localCoordChange(invVM);
+            fColorStages[s].localCoordChange(invVM);
         }
         for (int s = 0; s < this->numCoverageStages(); ++s) {
-            fState.fCoverageStages[s].localCoordChange(invVM);
+            fCoverageStages[s].localCoordChange(invVM);
         }
     }
+    this->invalidateOptState();
     fViewMatrix.reset();
     return true;
 }
@@ -182,14 +181,16 @@ bool GrDrawState::setIdentityViewMatrix()  {
 void GrDrawState::setFromPaint(const GrPaint& paint, const SkMatrix& vm, GrRenderTarget* rt) {
     SkASSERT(0 == fBlockEffectRemovalCnt || 0 == this->numTotalStages());
 
-    fState.reset();
+    fGeometryProcessor.reset(NULL);
+    fColorStages.reset();
+    fCoverageStages.reset();
 
     for (int i = 0; i < paint.numColorStages(); ++i) {
-        fState.fColorStages.push_back(paint.getColorStage(i));
+        fColorStages.push_back(paint.getColorStage(i));
     }
 
     for (int i = 0; i < paint.numCoverageStages(); ++i) {
-        fState.fCoverageStages.push_back(paint.getCoverageStage(i));
+        fCoverageStages.push_back(paint.getCoverageStage(i));
     }
 
     this->setRenderTarget(rt);
@@ -212,43 +213,39 @@ void GrDrawState::setFromPaint(const GrPaint& paint, const SkMatrix& vm, GrRende
 
     this->setBlendFunc(paint.getSrcBlendCoeff(), paint.getDstBlendCoeff());
     this->setCoverage(paint.getCoverage());
-    this->invalidateBlendOptFlags();
+    this->invalidateOptState();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static size_t vertex_size(const GrVertexAttrib* attribs, int count) {
+static void validate_vertex_attribs(const GrVertexAttrib* attribs, int count, size_t stride) {
     // this works as long as we're 4 byte-aligned
 #ifdef SK_DEBUG
     uint32_t overlapCheck = 0;
-#endif
-    SkASSERT(count <= GrDrawState::kMaxVertexAttribCnt);
-    size_t size = 0;
+    SkASSERT(count <= GrRODrawState::kMaxVertexAttribCnt);
     for (int index = 0; index < count; ++index) {
         size_t attribSize = GrVertexAttribTypeSize(attribs[index].fType);
-        size += attribSize;
-#ifdef SK_DEBUG
+        size_t attribOffset = attribs[index].fOffset;
+        SkASSERT(attribOffset + attribSize <= stride);
         size_t dwordCount = attribSize >> 2;
         uint32_t mask = (1 << dwordCount)-1;
-        size_t offsetShift = attribs[index].fOffset >> 2;
+        size_t offsetShift = attribOffset >> 2;
         SkASSERT(!(overlapCheck & (mask << offsetShift)));
         overlapCheck |= (mask << offsetShift);
-#endif
     }
-    return size;
-}
-
-size_t GrDrawState::getVertexSize() const {
-    return vertex_size(fVAPtr, fVACount);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void GrDrawState::setVertexAttribs(const GrVertexAttrib* attribs, int count) {
+void GrDrawState::internalSetVertexAttribs(const GrVertexAttrib* attribs, int count,
+                                           size_t stride) {
     SkASSERT(count <= kMaxVertexAttribCnt);
 
     fVAPtr = attribs;
     fVACount = count;
+    fVAStride = stride;
+    validate_vertex_attribs(fVAPtr, fVACount, fVAStride);
 
     // Set all the indices to -1
     memset(fFixedFunctionVertexAttribIndices,
@@ -273,7 +270,7 @@ void GrDrawState::setVertexAttribs(const GrVertexAttrib* attribs, int count) {
         overlapCheck |= (mask << offsetShift);
 #endif
     }
-    this->invalidateBlendOptFlags();
+    this->invalidateOptState();
     // Positions must be specified.
     SkASSERT(-1 != fFixedFunctionVertexAttribIndices[kPosition_GrVertexAttribBinding]);
 }
@@ -286,72 +283,14 @@ void GrDrawState::setDefaultVertexAttribs() {
 
     fVAPtr = &kPositionAttrib;
     fVACount = 1;
+    fVAStride = GrVertexAttribTypeSize(kVec2f_GrVertexAttribType);
 
     // set all the fixed function indices to -1 except position.
     memset(fFixedFunctionVertexAttribIndices,
            0xff,
            sizeof(fFixedFunctionVertexAttribIndices));
     fFixedFunctionVertexAttribIndices[kPosition_GrVertexAttribBinding] = 0;
-    this->invalidateBlendOptFlags();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool GrDrawState::validateVertexAttribs() const {
-    // check consistency of effects and attributes
-    GrSLType slTypes[kMaxVertexAttribCnt];
-    for (int i = 0; i < kMaxVertexAttribCnt; ++i) {
-        slTypes[i] = static_cast<GrSLType>(-1);
-    }
-    int totalStages = this->numTotalStages();
-    for (int s = 0; s < totalStages; ++s) {
-        int covIdx = s - this->numColorStages();
-        const GrEffectStage& stage = covIdx < 0 ? this->getColorStage(s) :
-                                                  this->getCoverageStage(covIdx);
-        const GrEffect* effect = stage.getEffect();
-        SkASSERT(NULL != effect);
-        // make sure that any attribute indices have the correct binding type, that the attrib
-        // type and effect's shader lang type are compatible, and that attributes shared by
-        // multiple effects use the same shader lang type.
-        const int* attributeIndices = stage.getVertexAttribIndices();
-        int numAttributes = stage.getVertexAttribIndexCount();
-        for (int i = 0; i < numAttributes; ++i) {
-            int attribIndex = attributeIndices[i];
-            if (attribIndex >= fVACount ||
-                kEffect_GrVertexAttribBinding != fVAPtr[attribIndex].fBinding) {
-                return false;
-            }
-
-            GrSLType effectSLType = effect->vertexAttribType(i);
-            GrVertexAttribType attribType = fVAPtr[attribIndex].fType;
-            int slVecCount = GrSLTypeVectorCount(effectSLType);
-            int attribVecCount = GrVertexAttribTypeVectorCount(attribType);
-            if (slVecCount != attribVecCount ||
-                (static_cast<GrSLType>(-1) != slTypes[attribIndex] &&
-                    slTypes[attribIndex] != effectSLType)) {
-                return false;
-            }
-            slTypes[attribIndex] = effectSLType;
-        }
-    }
-
-    return true;
-}
-
-bool GrDrawState::willEffectReadDstColor() const {
-    if (!this->isColorWriteDisabled()) {
-        for (int s = 0; s < this->numColorStages(); ++s) {
-            if (this->getColorStage(s).getEffect()->willReadDstColor()) {
-                return true;
-            }
-        }
-    }
-    for (int s = 0; s < this->numCoverageStages(); ++s) {
-        if (this->getCoverageStage(s).getEffect()->willReadDstColor()) {
-            return true;
-        }
-    }
-    return false;
+    this->invalidateOptState();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -365,248 +304,54 @@ bool GrDrawState::couldApplyCoverage(const GrDrawTargetCaps& caps) const {
     // or c) the src, dst blend coeffs are 1,0 and we will read Dst Color
     GrBlendCoeff srcCoeff;
     GrBlendCoeff dstCoeff;
-    GrDrawState::BlendOptFlags flag = this->getBlendOpts(true, &srcCoeff, &dstCoeff);
-    return GrDrawState::kNone_BlendOpt != flag ||
+    BlendOptFlags flag = this->getBlendOpts(true, &srcCoeff, &dstCoeff);
+    return GrRODrawState::kNone_BlendOpt != flag ||
            (this->willEffectReadDstColor() &&
             kOne_GrBlendCoeff == srcCoeff && kZero_GrBlendCoeff == dstCoeff);
 }
 
-bool GrDrawState::srcAlphaWillBeOne() const {
-    uint32_t validComponentFlags;
-    GrColor color;
-    // Check if per-vertex or constant color may have partial alpha
-    if (this->hasColorVertexAttribute()) {
-        if (fHints & kVertexColorsAreOpaque_Hint) {
-            validComponentFlags = kA_GrColorComponentFlag;
-            color = 0xFF << GrColor_SHIFT_A;            
-        } else {
-            validComponentFlags = 0;
-            color = 0; // not strictly necessary but we get false alarms from tools about uninit.
-        }
-    } else {
-        validComponentFlags = kRGBA_GrColorComponentFlags;
-        color = this->getColor();
-    }
-
-    // Run through the color stages
-    for (int s = 0; s < this->numColorStages(); ++s) {
-        const GrEffect* effect = this->getColorStage(s).getEffect();
-        effect->getConstantColorComponents(&color, &validComponentFlags);
-    }
-
-    // Check whether coverage is treated as color. If so we run through the coverage computation.
-    if (this->isCoverageDrawing()) {
-        GrColor coverageColor = this->getCoverageColor();
-        GrColor oldColor = color;
-        color = 0;
-        for (int c = 0; c < 4; ++c) {
-            if (validComponentFlags & (1 << c)) {
-                U8CPU a = (oldColor >> (c * 8)) & 0xff;
-                U8CPU b = (coverageColor >> (c * 8)) & 0xff;
-                color |= (SkMulDiv255Round(a, b) << (c * 8));
-            }
-        }
-        for (int s = 0; s < this->numCoverageStages(); ++s) {
-            const GrEffect* effect = this->getCoverageStage(s).getEffect();
-            effect->getConstantColorComponents(&color, &validComponentFlags);
-        }
-    }
-    return (kA_GrColorComponentFlag & validComponentFlags) && 0xff == GrColorUnpackA(color);
-}
-
-bool GrDrawState::hasSolidCoverage() const {
-    // If we're drawing coverage directly then coverage is effectively treated as color.
-    if (this->isCoverageDrawing()) {
-        return true;
-    }
-
-    GrColor coverage;
-    uint32_t validComponentFlags;
-    // Initialize to an unknown starting coverage if per-vertex coverage is specified.
-    if (this->hasCoverageVertexAttribute()) {
-        validComponentFlags = 0;
-    } else {
-        coverage = fCoverage;
-        validComponentFlags = kRGBA_GrColorComponentFlags;
-    }
-
-    // Run through the coverage stages and see if the coverage will be all ones at the end.
-    for (int s = 0; s < this->numCoverageStages(); ++s) {
-        const GrEffect* effect = this->getCoverageStage(s).getEffect();
-        effect->getConstantColorComponents(&coverage, &validComponentFlags);
-    }
-    return (kRGBA_GrColorComponentFlags == validComponentFlags) && (0xffffffff == coverage);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-// Some blend modes allow folding a fractional coverage value into the color's alpha channel, while
-// others will blend incorrectly.
-bool GrDrawState::canTweakAlphaForCoverage() const {
-    /*
-     The fractional coverage is f.
-     The src and dst coeffs are Cs and Cd.
-     The dst and src colors are S and D.
-     We want the blend to compute: f*Cs*S + (f*Cd + (1-f))D. By tweaking the source color's alpha
-     we're replacing S with S'=fS. It's obvious that that first term will always be ok. The second
-     term can be rearranged as [1-(1-Cd)f]D. By substituting in the various possibilities for Cd we
-     find that only 1, ISA, and ISC produce the correct destination when applied to S' and D.
-     Also, if we're directly rendering coverage (isCoverageDrawing) then coverage is treated as
-     color by definition.
-     */
-    return kOne_GrBlendCoeff == fState.fDstBlend ||
-           kISA_GrBlendCoeff == fState.fDstBlend ||
-           kISC_GrBlendCoeff == fState.fDstBlend ||
-           this->isCoverageDrawing();
-}
-
-GrDrawState::BlendOptFlags GrDrawState::getBlendOpts(bool forceCoverage,
-                                                     GrBlendCoeff* srcCoeff,
-                                                     GrBlendCoeff* dstCoeff) const {
-    GrBlendCoeff bogusSrcCoeff, bogusDstCoeff;
-    if (NULL == srcCoeff) {
-        srcCoeff = &bogusSrcCoeff;
-    }
-    if (NULL == dstCoeff) {
-        dstCoeff = &bogusDstCoeff;
-    }
-
-    if (forceCoverage) {
-        return this->calcBlendOpts(true, srcCoeff, dstCoeff);
-    }
-
-    if (0 == (fBlendOptFlags & kInvalid_BlendOptFlag)) {
-        *srcCoeff = fOptSrcBlend;
-        *dstCoeff = fOptDstBlend;
-        return fBlendOptFlags;
-    }
-
-    fBlendOptFlags = this->calcBlendOpts(forceCoverage, srcCoeff, dstCoeff);
-    fOptSrcBlend = *srcCoeff;
-    fOptDstBlend = *dstCoeff;
-
-    return fBlendOptFlags;
-}
-
-GrDrawState::BlendOptFlags GrDrawState::calcBlendOpts(bool forceCoverage,
-                                                      GrBlendCoeff* srcCoeff,
-                                                      GrBlendCoeff* dstCoeff) const {
-    *srcCoeff = this->getSrcBlendCoeff();
-    *dstCoeff = this->getDstBlendCoeff();
-
-    if (this->isColorWriteDisabled()) {
-        *srcCoeff = kZero_GrBlendCoeff;
-        *dstCoeff = kOne_GrBlendCoeff;
-    }
-
-    bool srcAIsOne = this->srcAlphaWillBeOne();
-    bool dstCoeffIsOne = kOne_GrBlendCoeff == *dstCoeff ||
-                         (kSA_GrBlendCoeff == *dstCoeff && srcAIsOne);
-    bool dstCoeffIsZero = kZero_GrBlendCoeff == *dstCoeff ||
-                         (kISA_GrBlendCoeff == *dstCoeff && srcAIsOne);
-
-    // When coeffs are (0,1) there is no reason to draw at all, unless
-    // stenciling is enabled. Having color writes disabled is effectively
-    // (0,1).
-    if ((kZero_GrBlendCoeff == *srcCoeff && dstCoeffIsOne)) {
-        if (this->getStencil().doesWrite()) {
-            return kEmitCoverage_BlendOptFlag;
-        } else {
-            return kSkipDraw_BlendOptFlag;
-        }
-    }
-
-    bool hasCoverage = forceCoverage || !this->hasSolidCoverage();
-
-    // if we don't have coverage we can check whether the dst
-    // has to read at all. If not, we'll disable blending.
-    if (!hasCoverage) {
-        if (dstCoeffIsZero) {
-            if (kOne_GrBlendCoeff == *srcCoeff) {
-                // if there is no coverage and coeffs are (1,0) then we
-                // won't need to read the dst at all, it gets replaced by src
-                *dstCoeff = kZero_GrBlendCoeff;
-                return kNone_BlendOpt;
-            } else if (kZero_GrBlendCoeff == *srcCoeff) {
-                // if the op is "clear" then we don't need to emit a color
-                // or blend, just write transparent black into the dst.
-                *srcCoeff = kOne_GrBlendCoeff;
-                *dstCoeff = kZero_GrBlendCoeff;
-                return kEmitTransBlack_BlendOptFlag;
-            }
-        }
-    } else if (this->isCoverageDrawing()) {
-        // we have coverage but we aren't distinguishing it from alpha by request.
-        return kCoverageAsAlpha_BlendOptFlag;
-    } else {
-        // check whether coverage can be safely rolled into alpha
-        // of if we can skip color computation and just emit coverage
-        if (this->canTweakAlphaForCoverage()) {
-            return kCoverageAsAlpha_BlendOptFlag;
-        }
-        if (dstCoeffIsZero) {
-            if (kZero_GrBlendCoeff == *srcCoeff) {
-                // the source color is not included in the blend
-                // the dst coeff is effectively zero so blend works out to:
-                // (c)(0)D + (1-c)D = (1-c)D.
-                *dstCoeff = kISA_GrBlendCoeff;
-                return  kEmitCoverage_BlendOptFlag;
-            } else if (srcAIsOne) {
-                // the dst coeff is effectively zero so blend works out to:
-                // cS + (c)(0)D + (1-c)D = cS + (1-c)D.
-                // If Sa is 1 then we can replace Sa with c
-                // and set dst coeff to 1-Sa.
-                *dstCoeff = kISA_GrBlendCoeff;
-                return  kCoverageAsAlpha_BlendOptFlag;
-            }
-        } else if (dstCoeffIsOne) {
-            // the dst coeff is effectively one so blend works out to:
-            // cS + (c)(1)D + (1-c)D = cS + D.
-            *dstCoeff = kOne_GrBlendCoeff;
-            return  kCoverageAsAlpha_BlendOptFlag;
-        }
-    }
-
-    return kNone_BlendOpt;
-}
-
-bool GrDrawState::canIgnoreColorAttribute() const {
-    if (fBlendOptFlags & kInvalid_BlendOptFlag) {
-        this->getBlendOpts();
-    }
-    return SkToBool(fBlendOptFlags & (GrDrawState::kEmitTransBlack_BlendOptFlag |
-                                      GrDrawState::kEmitCoverage_BlendOptFlag));
-}
-
 //////////////////////////////////////////////////////////////////////////////
 
-GrDrawState::AutoVertexAttribRestore::AutoVertexAttribRestore(
-    GrDrawState* drawState) {
-    SkASSERT(NULL != drawState);
+GrDrawState::AutoVertexAttribRestore::AutoVertexAttribRestore(GrDrawState* drawState) {
+    SkASSERT(drawState);
     fDrawState = drawState;
     fVAPtr = drawState->fVAPtr;
     fVACount = drawState->fVACount;
+    fVAStride = drawState->fVAStride;
     fDrawState->setDefaultVertexAttribs();
 }
 
 //////////////////////////////////////////////////////////////////////////////s
 
 void GrDrawState::AutoRestoreEffects::set(GrDrawState* ds) {
-    if (NULL != fDrawState) {
+    if (fDrawState) {
+        // See the big comment on the class definition about GPs.
+        if (SK_InvalidUniqueID == fOriginalGPID) {
+            fDrawState->fGeometryProcessor.reset(NULL);
+        } else {
+            SkASSERT(fDrawState->getGeometryProcessor()->getProcessor()->getUniqueID() ==
+                     fOriginalGPID);
+            fOriginalGPID = SK_InvalidUniqueID;
+        }
+
         int m = fDrawState->numColorStages() - fColorEffectCnt;
         SkASSERT(m >= 0);
-        fDrawState->fState.fColorStages.pop_back_n(m);
+        fDrawState->fColorStages.pop_back_n(m);
 
         int n = fDrawState->numCoverageStages() - fCoverageEffectCnt;
         SkASSERT(n >= 0);
-        fDrawState->fState.fCoverageStages.pop_back_n(n);
+        fDrawState->fCoverageStages.pop_back_n(n);
         if (m + n > 0) {
-            fDrawState->invalidateBlendOptFlags();
+            fDrawState->invalidateOptState();
         }
         SkDEBUGCODE(--fDrawState->fBlockEffectRemovalCnt;)
     }
     fDrawState = ds;
     if (NULL != ds) {
+        SkASSERT(SK_InvalidUniqueID == fOriginalGPID);
+        if (NULL != ds->getGeometryProcessor()) {
+            fOriginalGPID = ds->getGeometryProcessor()->getProcessor()->getUniqueID();
+        }
         fColorEffectCnt = ds->numColorStages();
         fCoverageEffectCnt = ds->numCoverageStages();
         SkDEBUGCODE(++ds->fBlockEffectRemovalCnt;)
@@ -616,7 +361,7 @@ void GrDrawState::AutoRestoreEffects::set(GrDrawState* ds) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void GrDrawState::AutoViewMatrixRestore::restore() {
-    if (NULL != fDrawState) {
+    if (fDrawState) {
         SkDEBUGCODE(--fDrawState->fBlockEffectRemovalCnt;)
         fDrawState->fViewMatrix = fViewMatrix;
         SkASSERT(fDrawState->numColorStages() >= fNumColorStages);
@@ -624,12 +369,17 @@ void GrDrawState::AutoViewMatrixRestore::restore() {
         SkASSERT(fDrawState->numCoverageStages() >= numCoverageStages);
 
         int i = 0;
+        if (fHasGeometryProcessor) {
+            SkASSERT(fDrawState->hasGeometryProcessor());
+            fDrawState->fGeometryProcessor->restoreCoordChange(fSavedCoordChanges[i++]);
+        }
         for (int s = 0; s < fNumColorStages; ++s, ++i) {
-            fDrawState->fState.fColorStages[s].restoreCoordChange(fSavedCoordChanges[i]);
+            fDrawState->fColorStages[s].restoreCoordChange(fSavedCoordChanges[i]);
         }
         for (int s = 0; s < numCoverageStages; ++s, ++i) {
-            fDrawState->fState.fCoverageStages[s].restoreCoordChange(fSavedCoordChanges[i]);
+            fDrawState->fCoverageStages[s].restoreCoordChange(fSavedCoordChanges[i]);
         }
+        fDrawState->invalidateOptState();
         fDrawState = NULL;
     }
 }
@@ -649,6 +399,7 @@ void GrDrawState::AutoViewMatrixRestore::set(GrDrawState* drawState,
 
     this->doEffectCoordChanges(preconcatMatrix);
     SkDEBUGCODE(++fDrawState->fBlockEffectRemovalCnt;)
+    drawState->invalidateOptState();
 }
 
 bool GrDrawState::AutoViewMatrixRestore::setIdentity(GrDrawState* drawState) {
@@ -662,10 +413,12 @@ bool GrDrawState::AutoViewMatrixRestore::setIdentity(GrDrawState* drawState) {
         return true;
     }
 
+    drawState->invalidateOptState();
     fViewMatrix = drawState->getViewMatrix();
     if (0 == drawState->numTotalStages()) {
         drawState->fViewMatrix.reset();
         fDrawState = drawState;
+        fHasGeometryProcessor = false;
         fNumColorStages = 0;
         fSavedCoordChanges.reset(0);
         SkDEBUGCODE(++fDrawState->fBlockEffectRemovalCnt;)
@@ -687,15 +440,36 @@ void GrDrawState::AutoViewMatrixRestore::doEffectCoordChanges(const SkMatrix& co
     fSavedCoordChanges.reset(fDrawState->numTotalStages());
     int i = 0;
 
+    fHasGeometryProcessor = false;
+    if (fDrawState->hasGeometryProcessor()) {
+        fDrawState->fGeometryProcessor->saveCoordChange(&fSavedCoordChanges[i++]);
+        fDrawState->fGeometryProcessor->localCoordChange(coordChangeMatrix);
+        fHasGeometryProcessor = true;
+    }
+
     fNumColorStages = fDrawState->numColorStages();
     for (int s = 0; s < fNumColorStages; ++s, ++i) {
         fDrawState->getColorStage(s).saveCoordChange(&fSavedCoordChanges[i]);
-        fDrawState->fState.fColorStages[s].localCoordChange(coordChangeMatrix);
+        fDrawState->fColorStages[s].localCoordChange(coordChangeMatrix);
     }
 
     int numCoverageStages = fDrawState->numCoverageStages();
     for (int s = 0; s < numCoverageStages; ++s, ++i) {
         fDrawState->getCoverageStage(s).saveCoordChange(&fSavedCoordChanges[i]);
-        fDrawState->fState.fCoverageStages[s].localCoordChange(coordChangeMatrix);
+        fDrawState->fCoverageStages[s].localCoordChange(coordChangeMatrix);
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+void GrDrawState::invalidateOptState() const {
+    SkSafeSetNull(fCachedOptState);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+GrDrawState::~GrDrawState() {
+    SkSafeUnref(fCachedOptState);
+    SkASSERT(0 == fBlockEffectRemovalCnt);
+}
+

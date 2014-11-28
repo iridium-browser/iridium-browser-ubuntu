@@ -24,6 +24,9 @@
  * Google Author(s): Behdad Esfahbod, Roozbeh Pournader
  */
 
+#include "hb-private.hh"
+
+#include "hb-ot.h"
 
 #include "hb-font-private.hh"
 
@@ -31,9 +34,6 @@
 #include "hb-ot-hhea-table.hh"
 #include "hb-ot-hmtx-table.hh"
 
-#include "hb-ot.h"
-
-#include "hb-private.hh"
 
 
 struct hb_ot_font_t
@@ -81,12 +81,15 @@ _hb_ot_font_create (hb_font_t *font)
   const OT::CmapSubtable *subtable_uvs = NULL;
 
   /* 32-bit subtables. */
+  if (!subtable) subtable = cmap->find_subtable (3, 10);
   if (!subtable) subtable = cmap->find_subtable (0, 6);
   if (!subtable) subtable = cmap->find_subtable (0, 4);
-  if (!subtable) subtable = cmap->find_subtable (3, 10);
   /* 16-bit subtables. */
-  if (!subtable) subtable = cmap->find_subtable (0, 3);
   if (!subtable) subtable = cmap->find_subtable (3, 1);
+  if (!subtable) subtable = cmap->find_subtable (0, 3);
+  if (!subtable) subtable = cmap->find_subtable (0, 2);
+  if (!subtable) subtable = cmap->find_subtable (0, 1);
+  if (!subtable) subtable = cmap->find_subtable (0, 0);
   /* Meh. */
   if (!subtable) subtable = &OT::Null(OT::CmapSubtable);
 

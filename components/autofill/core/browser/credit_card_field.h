@@ -20,6 +20,7 @@ class AutofillScanner;
 
 class CreditCardField : public FormField {
  public:
+  virtual ~CreditCardField();
   static FormField* Parse(AutofillScanner* scanner);
 
  protected:
@@ -31,33 +32,39 @@ class CreditCardField : public FormField {
 
   CreditCardField();
 
-  const AutofillField* cardholder_;  // Optional.
+  // For the combined expiration field we return |exp_year_type_|; otherwise if
+  // |expiration_year_| is having year with |max_length| of 2-digits we return
+  // |CREDIT_CARD_EXP_2_DIGIT_YEAR|; otherwise |CREDIT_CARD_EXP_4_DIGIT_YEAR|.
+  ServerFieldType GetExpirationYearType() const;
+
+  AutofillField* cardholder_;  // Optional.
 
   // Occasionally pages have separate fields for the cardholder's first and
-  // last names; for such pages cardholder_ holds the first name field and
+  // last names; for such pages |cardholder_| holds the first name field and
   // we store the last name field here.
-  // (We could store an embedded NameField object here, but we don't do so
+  // (We could store an embedded |NameField| object here, but we don't do so
   // because the text patterns for matching a cardholder name are different
   // than for ordinary names, and because cardholder names never have titles,
   // middle names or suffixes.)
-  const AutofillField* cardholder_last_;
+  AutofillField* cardholder_last_;
 
   // TODO(jhawkins): Parse the select control.
-  const AutofillField* type_;  // Optional.
-  const AutofillField* number_;  // Required.
+  AutofillField* type_;                  // Optional.
+  std::vector<AutofillField*> numbers_;  // Required.
 
   // The 3-digit card verification number; we don't currently fill this.
-  const AutofillField* verification_;
+  AutofillField* verification_;
 
   // Either |expiration_date_| or both |expiration_month_| and
   // |expiration_year_| are required.
-  const AutofillField* expiration_month_;
-  const AutofillField* expiration_year_;
-  const AutofillField* expiration_date_;
+  AutofillField* expiration_month_;
+  AutofillField* expiration_year_;
+  AutofillField* expiration_date_;
 
-  // True if the year is detected to be a 2-digit year; otherwise, we assume
-  // a 4-digit year.
-  bool is_two_digit_year_;
+  // For combined expiration field having year as 2-digits we store here
+  // |CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR|; otherwise we store
+  // |CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR|.
+  ServerFieldType exp_year_type_;
 
   DISALLOW_COPY_AND_ASSIGN(CreditCardField);
 };

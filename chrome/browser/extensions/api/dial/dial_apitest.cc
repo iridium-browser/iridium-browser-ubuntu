@@ -8,8 +8,9 @@
 #include "chrome/browser/extensions/api/dial/dial_registry.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "extensions/common/switches.h"
+#include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/result_catcher.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "url/gurl.h"
 
@@ -52,8 +53,7 @@ IN_PROC_BROWSER_TEST_F(DialAPITest, MAYBE_DeviceListEvents) {
   ASSERT_TRUE(api.get());
   extensions::DialRegistry::DeviceList devices;
 
-
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
 
   DialDeviceData device1;
   device1.set_device_id("1");
@@ -82,16 +82,21 @@ IN_PROC_BROWSER_TEST_F(DialAPITest, MAYBE_DeviceListEvents) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// Test discoverNow fails if there are no listeners. When there are no listeners
-// the DIAL API will not be active.
 IN_PROC_BROWSER_TEST_F(DialAPITest, Discovery) {
   ASSERT_TRUE(RunExtensionSubtest("dial/experimental", "discovery.html"));
 }
 
+// discoverNow does not do discovery when there are no listeners; in that case
+// the DIAL service will not be active.
+IN_PROC_BROWSER_TEST_F(DialAPITest, DiscoveryNoListeners) {
+  ASSERT_TRUE(RunExtensionSubtest("dial/experimental",
+                                  "discovery_no_listeners.html"));
+}
+
 // Make sure this API is only accessible to whitelisted extensions.
 IN_PROC_BROWSER_TEST_F(DialAPITest, NonWhitelistedExtension) {
-  ResultCatcher catcher;
-  catcher.RestrictToProfile(browser()->profile());
+  extensions::ResultCatcher catcher;
+  catcher.RestrictToBrowserContext(browser()->profile());
 
   ExtensionTestMessageListener listener("ready", true);
   const extensions::Extension* extension = LoadExtensionWithFlags(

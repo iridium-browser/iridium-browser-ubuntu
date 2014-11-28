@@ -23,15 +23,17 @@ class WebMediaPlayerClient;
 
 namespace media {
 class MediaLog;
+class WebMediaPlayerDelegate;
 }
 
+namespace cc_blink {
+class WebLayerImpl;
+}
 
 namespace content {
 class MediaStreamAudioRenderer;
 class MediaStreamRendererFactory;
 class VideoFrameProvider;
-class WebLayerImpl;
-class WebMediaPlayerDelegate;
 
 // WebMediaPlayerMS delegates calls from WebCore::MediaPlayerPrivate to
 // Chrome's media player when "src" is from media stream.
@@ -56,7 +58,7 @@ class WebMediaPlayerMS
   // a MediaStreamClient which provides VideoFrameProvider.
   WebMediaPlayerMS(blink::WebFrame* frame,
                    blink::WebMediaPlayerClient* client,
-                   base::WeakPtr<WebMediaPlayerDelegate> delegate,
+                   base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
                    media::MediaLog* media_log,
                    scoped_ptr<MediaStreamRendererFactory> factory);
   virtual ~WebMediaPlayerMS();
@@ -153,7 +155,7 @@ class WebMediaPlayerMS
 
   blink::WebMediaPlayerClient* client_;
 
-  base::WeakPtr<WebMediaPlayerDelegate> delegate_;
+  base::WeakPtr<media::WebMediaPlayerDelegate> delegate_;
 
   // Specify content:: to disambiguate from cc::.
   scoped_refptr<content::VideoFrameProvider> video_frame_provider_;
@@ -173,7 +175,7 @@ class WebMediaPlayerMS
   base::Lock current_frame_lock_;
   bool pending_repaint_;
 
-  scoped_ptr<WebLayerImpl> video_weblayer_;
+  scoped_ptr<cc_blink::WebLayerImpl> video_weblayer_;
 
   // A pointer back to the compositor to inform it about state changes. This is
   // not NULL while the compositor is actively using this webmediaplayer.

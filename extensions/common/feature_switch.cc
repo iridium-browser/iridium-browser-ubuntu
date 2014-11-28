@@ -43,7 +43,11 @@ class CommonSwitches {
                                FeatureSwitch::DEFAULT_DISABLED),
         embedded_extension_options(
             switches::kEmbeddedExtensionOptions,
-            FeatureSwitch::DEFAULT_DISABLED) {}
+            FeatureSwitch::DEFAULT_DISABLED),
+        app_view(switches::kAppView,
+                 FeatureSwitch::DEFAULT_DISABLED),
+        mime_handler_view(switches::kMimeHandlerView,
+                          FeatureSwitch::DEFAULT_DISABLED) {}
 
   // Enables extensions to be easily installed from sites other than the web
   // store.
@@ -60,6 +64,8 @@ class CommonSwitches {
   FeatureSwitch extension_action_redesign;
   FeatureSwitch scripts_require_action;
   FeatureSwitch embedded_extension_options;
+  FeatureSwitch app_view;
+  FeatureSwitch mime_handler_view;
 };
 
 base::LazyInstance<CommonSwitches> g_common_switches =
@@ -90,6 +96,12 @@ FeatureSwitch* FeatureSwitch::scripts_require_action() {
 }
 FeatureSwitch* FeatureSwitch::embedded_extension_options() {
   return &g_common_switches.Get().embedded_extension_options;
+}
+FeatureSwitch* FeatureSwitch::app_view() {
+  return &g_common_switches.Get().app_view;
+}
+FeatureSwitch* FeatureSwitch::mime_handler_view() {
+  return &g_common_switches.Get().mime_handler_view;
 }
 
 FeatureSwitch::ScopedOverride::ScopedOverride(FeatureSwitch* feature,

@@ -6,19 +6,23 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 
 component("message_center") {
-  defines = [ "MESSAGE_CENTER_IMPLEMENTATION" ]
-
   deps = [
     "//base",
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
     "//skia",
+    "//ui/accessibility",
     "//ui/base",
+    "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/native_theme",
     "//ui/resources",
     "//ui/strings",
+    "//url",
   ]
+
+  defines = [ "MESSAGE_CENTER_IMPLEMENTATION" ]
 
   if (enable_notifications) {
     sources = [
@@ -54,6 +58,8 @@ component("message_center") {
       "message_center_tray.h",
       "message_center_tray_delegate.h",
       "message_center_types.h",
+      "message_center_switches.h",
+      "message_center_switches.cc",
       "notification.cc",
       "notification.h",
       "notification_blocker.cc",
@@ -72,7 +78,9 @@ component("message_center") {
       deps += [ "//ui/aura" ]
     }
 
-    if (toolkit_views) {
+    # On Mac, toolkit-views builds still use the Cocoa UI. Keep this in sync
+    # with message_center_unittests below.
+    if (toolkit_views && !is_mac) {
       sources += [
         "views/bounded_label.cc",
         "views/bounded_label.h",
@@ -143,6 +151,7 @@ component("message_center") {
 }
 
 static_library("test_support") {
+  testonly = true
   sources = [
     "fake_message_center.h",
     "fake_message_center.cc",
@@ -152,8 +161,11 @@ static_library("test_support") {
     "fake_notifier_settings_provider.cc",
   ]
 
-  deps = [
+  public_deps = [
     ":message_center",
+  ]
+
+  deps = [
     "//base",
     "//base/test:test_support",
     "//skia",
@@ -176,8 +188,10 @@ test("message_center_unittests") {
     "//skia",
     "//testing/gtest",
     "//ui/base",
+    "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/gl",
     "//ui/resources",
     "//ui/resources:ui_test_pak",
     "//url",
@@ -202,7 +216,7 @@ test("message_center_unittests") {
       deps += [ "//ui/gfx:test_support" ]
     }
 
-    if (toolkit_views) {
+    if (toolkit_views && !is_mac) {
       sources += [
         "views/bounded_label_unittest.cc",
         "views/message_center_view_unittest.cc",

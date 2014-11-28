@@ -171,17 +171,35 @@ TEST_F(RenderTextTest, ApplyColorAndStyle) {
   expected_italic.push_back(std::pair<size_t, bool>(7, true));
   EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
 
-  // Truncating the text should trim any corresponding breaks.
+  // Changing the text should clear any breaks except for the first one.
   render_text->SetText(ASCIIToUTF16("0123456"));
-  expected_italic.resize(4);
+  expected_italic.resize(1);
   EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
-  render_text->SetText(ASCIIToUTF16("01234"));
-  expected_italic.resize(3);
-  EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
-
-  // Appending text should extend the terminal styles without changing breaks.
+  render_text->ApplyStyle(ITALIC, false, Range(2, 4));
   render_text->SetText(ASCIIToUTF16("012345678"));
   EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
+  render_text->ApplyStyle(ITALIC, false, Range(0, 1));
+  render_text->SetText(ASCIIToUTF16("0123456"));
+  expected_italic.begin()->second = false;
+  EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
+  render_text->ApplyStyle(ITALIC, true, Range(2, 4));
+  render_text->SetText(ASCIIToUTF16("012345678"));
+  EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
+
+  // TODO(tmoniuszko): Enable when RenderTextMac::IsValidCursorIndex is
+  //                   implemented.
+#if !defined(OS_MACOSX)
+  // Styles shouldn't be changed mid-grapheme.
+  render_text->SetText(WideToUTF16(
+      L"0" L"\x0915\x093f" L"1" L"\x0915\x093f" L"2"));
+  render_text->ApplyStyle(UNDERLINE, true, Range(2, 5));
+  std::vector<std::pair<size_t, bool> > expected_underline;
+  expected_underline.push_back(std::pair<size_t, bool>(0, false));
+  expected_underline.push_back(std::pair<size_t, bool>(1, true));
+  expected_underline.push_back(std::pair<size_t, bool>(6, false));
+  EXPECT_TRUE(render_text->styles()[UNDERLINE].EqualsForTesting(
+      expected_underline));
+#endif  // OS_MACOSX
 }
 
 #if defined(OS_LINUX) && !defined(USE_OZONE)
@@ -1614,7 +1632,6 @@ TEST_F(RenderTextTest, SetDisplayOffset) {
   }
 }
 
-// TODO(ckocagil): Enable for RenderTextHarfBuzz. http://crbug.com/396776
 TEST_F(RenderTextTest, SameFontForParentheses) {
   struct {
     const base::char16 left_char;
@@ -1654,7 +1671,7 @@ TEST_F(RenderTextTest, SameFontForParentheses) {
     { WideToUTF16(L"Hello World(\x05e0\x05b8)Hello World") },
   };
 
-  scoped_ptr<RenderText> render_text(RenderText::CreateNativeInstance());
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
     base::string16 text = cases[i].text;
     const size_t start_paren_char_index = text.find('(');

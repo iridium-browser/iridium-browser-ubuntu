@@ -32,13 +32,9 @@
 
 namespace blink {
 
-class CSSRule;
 class CSSStyleDeclaration;
-class Element;
 class ImmutableStylePropertySet;
-class KURL;
 class MutableStylePropertySet;
-class StylePropertyShorthand;
 class StyleSheetContents;
 
 class StylePropertySet : public RefCountedWillBeGarbageCollectedFinalized<StylePropertySet> {
@@ -205,7 +201,6 @@ public:
 
     // These do not. FIXME: This is too messy, we can do better.
     bool setProperty(CSSPropertyID, CSSValueID identifier, bool important = false);
-    bool setProperty(CSSPropertyID, CSSPropertyID identifier, bool important = false);
     void appendPrefixingVariantProperty(const CSSProperty&);
     void setPrefixingVariantProperty(const CSSProperty&);
     void setProperty(const CSSProperty&, CSSProperty* slot = 0);

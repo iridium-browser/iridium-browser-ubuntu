@@ -32,16 +32,18 @@
 #ifndef HTMLDataListElement_h
 #define HTMLDataListElement_h
 
-#include "core/html/HTMLCollection.h"
 #include "core/html/HTMLElement.h"
 
 namespace blink {
 
+class HTMLDataListOptionsCollection;
+
 class HTMLDataListElement FINAL : public HTMLElement {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLDataListElement> create(Document&);
 
-    PassRefPtrWillBeRawPtr<HTMLCollection> options();
+    PassRefPtrWillBeRawPtr<HTMLDataListOptionsCollection> options();
 
     void optionElementChildrenChanged();
 

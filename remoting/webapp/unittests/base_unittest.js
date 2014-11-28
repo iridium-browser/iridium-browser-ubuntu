@@ -75,6 +75,12 @@ test('urljoin(url, opt_param) should urlencode |opt_param|',
         '&escapist=%3A%2F%3F%23%5B%5D%40%24%26%2B%2C%3B%3D');
 });
 
+test('escapeHTML(str) should escape special characters', function() {
+  QUnit.equal(
+    base.escapeHTML('<script>alert("hello")</script>'),
+    '&lt;script&gt;alert("hello")&lt;/script&gt;');
+});
+
 QUnit.asyncTest('Promise.sleep(delay) should fulfill the promise after |delay|',
   function() {
     var isCalled = false;
@@ -109,6 +115,38 @@ QUnit.asyncTest('Promise.negate should fulfill iff the promise does not.',
     window.requestAnimationFrame(function(){
       QUnit.start();
     });
+});
+
+module('base.Deferred');
+
+QUnit.asyncTest('resolve() should fulfill the underlying promise.', function() {
+  function async() {
+    var deferred = new base.Deferred();
+    deferred.resolve('bar');
+    return deferred.promise();
+  }
+
+  async().then(function(value){
+    QUnit.equal(value, 'bar');
+    QUnit.start();
+  }, function() {
+    QUnit.ok(false, 'The reject handler should not be invoked.');
+  });
+});
+
+QUnit.asyncTest('reject() should fail the underlying promise.', function() {
+  function async() {
+    var deferred = new base.Deferred();
+    deferred.reject('bar');
+    return deferred.promise();
+  }
+
+  async().then(function(){
+    QUnit.ok(false, 'The then handler should not be invoked.');
+  }, function(value) {
+    QUnit.equal(value, 'bar');
+    QUnit.start();
+  });
 });
 
 
@@ -198,6 +236,47 @@ test('removeEventListener() should work even if the listener ' +
 
     source.raiseEvent('foo');
     sinon.assert.calledOnce(sink.listener);
+});
+
+test('encodeUtf8() can encode UTF8 strings', function() {
+  function toJsArray(arrayBuffer) {
+    var result = [];
+    var array = new Uint8Array(arrayBuffer);
+    for (var i = 0; i < array.length; ++i) {
+      result.push(array[i]);
+    }
+    return result;
+  }
+
+  // ASCII.
+  QUnit.deepEqual(toJsArray(base.encodeUtf8("ABC")), [0x41, 0x42, 0x43]);
+
+  // Some arbitrary characters from the basic Unicode plane.
+  QUnit.deepEqual(
+      toJsArray(base.encodeUtf8("挂Ѓф")),
+      [/* 挂 */ 0xE6, 0x8C, 0x82, /* Ѓ */ 0xD0, 0x83, /* ф */ 0xD1, 0x84]);
+
+  // Unicode surrogate pair for U+1F603.
+  QUnit.deepEqual(toJsArray(base.encodeUtf8("😃")),
+                  [0xF0, 0x9F, 0x98, 0x83]);
+});
+
+test('decodeUtf8() can decode UTF8 strings', function() {
+  // ASCII.
+  QUnit.equal(base.decodeUtf8(new Uint8Array([0x41, 0x42, 0x43]).buffer),
+              "ABC");
+
+  // Some arbitrary characters from the basic Unicode plane.
+  QUnit.equal(
+      base.decodeUtf8(
+          new Uint8Array([/* 挂 */ 0xE6, 0x8C, 0x82,
+                          /* Ѓ */ 0xD0, 0x83,
+                          /* ф */ 0xD1, 0x84]).buffer),
+      "挂Ѓф");
+
+  // Unicode surrogate pair for U+1F603.
+  QUnit.equal(base.decodeUtf8(new Uint8Array([0xF0, 0x9F, 0x98, 0x83]).buffer),
+              "😃");
 });
 
 })();

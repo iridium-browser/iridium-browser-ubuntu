@@ -92,29 +92,13 @@ static ThreadState::Interruptor* s_isolateInterruptor = 0;
 // Doing so may cause hard to reproduce crashes.
 static bool s_webKitInitialized = false;
 
-static bool generateEntropy(unsigned char* buffer, size_t length)
-{
-    if (Platform::current()) {
-        Platform::current()->cryptographicallyRandomValues(buffer, length);
-        return true;
-    }
-    return false;
-}
-
 void initialize(Platform* platform)
 {
     initializeWithoutV8(platform);
 
-    v8::V8::InitializePlatform(gin::V8Platform::Get());
-    v8::Isolate* isolate = v8::Isolate::New();
-    isolate->Enter();
-    V8Initializer::initializeMainThreadIfNeeded(isolate);
-    v8::V8::SetEntropySource(&generateEntropy);
-    v8::V8::SetArrayBufferAllocator(v8ArrayBufferAllocator());
-    v8::V8::Initialize();
-    V8PerIsolateData::ensureInitialized(isolate);
+    V8Initializer::initializeMainThreadIfNeeded();
 
-    s_isolateInterruptor = new V8IsolateInterruptor(v8::Isolate::GetCurrent());
+    s_isolateInterruptor = new V8IsolateInterruptor(V8PerIsolateData::mainThreadIsolate());
     ThreadState::current()->addInterruptor(s_isolateInterruptor);
 
     // currentThread will always be non-null in production, but can be null in Chromium unit tests.
@@ -197,8 +181,9 @@ void shutdown()
 {
     // currentThread will always be non-null in production, but can be null in Chromium unit tests.
     if (Platform::current()->currentThread()) {
-        ASSERT(s_endOfTaskRunner);
-        Platform::current()->currentThread()->removeTaskObserver(s_endOfTaskRunner);
+        // We don't need to (cannot) remove s_endOfTaskRunner from the current
+        // message loop, because the message loop is already destructed before
+        // the shutdown() is called.
         delete s_endOfTaskRunner;
         s_endOfTaskRunner = 0;
     }
@@ -218,14 +203,14 @@ void shutdown()
         s_messageLoopInterruptor = 0;
     }
 
+    v8::Isolate* isolate = V8PerIsolateData::mainThreadIsolate();
+    V8PerIsolateData::willBeDestroyed(isolate);
+
     // Detach the main thread before starting the shutdown sequence
     // so that the main thread won't get involved in a GC during the shutdown.
     ThreadState::detachMainThread();
 
-    v8::Isolate* isolate = V8PerIsolateData::mainThreadIsolate();
-    V8PerIsolateData::dispose(isolate);
-    isolate->Exit();
-    isolate->Dispose();
+    V8PerIsolateData::destroy(isolate);
 
     shutdownWithoutV8();
 }

@@ -37,6 +37,7 @@ class HTMLTableRowsCollection;
 class HTMLTableSectionElement;
 
 class HTMLTableElement FINAL : public HTMLElement {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     DECLARE_NODE_FACTORY(HTMLTableElement);
 
@@ -56,7 +57,6 @@ public:
     PassRefPtrWillBeRawPtr<HTMLElement> createTBody();
     PassRefPtrWillBeRawPtr<HTMLElement> createCaption();
     void deleteCaption();
-    PassRefPtrWillBeRawPtr<HTMLElement> insertRow(ExceptionState&);
     PassRefPtrWillBeRawPtr<HTMLElement> insertRow(int index, ExceptionState&);
     void deleteRow(int index, ExceptionState&);
 
@@ -105,6 +105,6 @@ private:
     RefPtrWillBeMember<StylePropertySet> m_sharedCellStyle;
 };
 
-} //namespace
+} // namespace blink
 
-#endif
+#endif // HTMLTableElement_h

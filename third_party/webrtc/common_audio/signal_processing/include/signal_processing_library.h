@@ -36,19 +36,6 @@
 #define WEBRTC_SPL_ABS_W32(a) \
     (((int32_t)a >= 0) ? ((int32_t)a) : -((int32_t)a))
 
-#ifdef WEBRTC_ARCH_LITTLE_ENDIAN
-#define WEBRTC_SPL_GET_BYTE(a, nr)  (((int8_t *)a)[nr])
-#define WEBRTC_SPL_SET_BYTE(d_ptr, val, index) \
-    (((int8_t *)d_ptr)[index] = (val))
-#else
-#define WEBRTC_SPL_GET_BYTE(a, nr) \
-    ((((int16_t *)a)[nr >> 1]) >> (((nr + 1) & 0x1) * 8) & 0x00ff)
-#define WEBRTC_SPL_SET_BYTE(d_ptr, val, index) \
-    ((int16_t *)d_ptr)[index >> 1] = \
-    ((((int16_t *)d_ptr)[index >> 1]) \
-    & (0x00ff << (8 * ((index) & 0x1)))) | (val << (8 * ((index + 1) & 0x1)))
-#endif
-
 #define WEBRTC_SPL_MUL(a, b) \
     ((int32_t) ((int32_t)(a) * (int32_t)(b)))
 #define WEBRTC_SPL_UMUL(a, b) \
@@ -57,14 +44,8 @@
     ((uint32_t) (uint16_t)(a) * (uint16_t)(b))
 #define WEBRTC_SPL_UMUL_32_16(a, b) \
     ((uint32_t) ((uint32_t)(a) * (uint16_t)(b)))
-#define WEBRTC_SPL_UMUL_32_16_RSFT16(a, b) \
-    ((uint32_t) ((uint32_t)(a) * (uint16_t)(b)) >> 16)
 #define WEBRTC_SPL_MUL_16_U16(a, b) \
     ((int32_t)(int16_t)(a) * (uint16_t)(b))
-#define WEBRTC_SPL_DIV(a, b) \
-    ((int32_t) ((int32_t)(a) / (int32_t)(b)))
-#define WEBRTC_SPL_UDIV(a, b) \
-    ((uint32_t) ((uint32_t)(a) / (uint32_t)(b)))
 
 #ifndef WEBRTC_ARCH_ARM_V7
 // For ARMv7 platforms, these are inline functions in spl_inl_armv7.h
@@ -99,11 +80,7 @@
 #define WEBRTC_SPL_SCALEDIFF32(A, B, C) \
     (C + (B >> 16) * A + (((uint32_t)(0x0000FFFF & B) * A) >> 16))
 
-#define WEBRTC_SPL_ADD_SAT_W32(a, b)    WebRtcSpl_AddSatW32(a, b)
 #define WEBRTC_SPL_SAT(a, b, c)         (b > a ? a : b < c ? c : b)
-#define WEBRTC_SPL_MUL_32_16(a, b)      ((a) * (b))
-
-#define WEBRTC_SPL_ADD_SAT_W16(a, b)    WebRtcSpl_AddSatW16(a, b)
 
 // Shifting with negative numbers allowed
 // Positive means left shift
@@ -127,13 +104,8 @@
 extern "C" {
 #endif
 
-#define WEBRTC_SPL_MEMCPY_W8(v1, v2, length) \
-  memcpy(v1, v2, (length) * sizeof(char))
 #define WEBRTC_SPL_MEMCPY_W16(v1, v2, length) \
   memcpy(v1, v2, (length) * sizeof(int16_t))
-
-#define WEBRTC_SPL_MEMMOVE_W16(v1, v2, length) \
-  memmove(v1, v2, (length) * sizeof(int16_t))
 
 // inline functions:
 #include "webrtc/common_audio/signal_processing/include/spl_inl.h"
@@ -151,9 +123,9 @@ void WebRtcSpl_Init();
 // Get SPL Version
 int16_t WebRtcSpl_get_version(char* version, int16_t length_in_bytes);
 
-int WebRtcSpl_GetScalingSquare(int16_t* in_vector,
-                               int in_vector_length,
-                               int times);
+int16_t WebRtcSpl_GetScalingSquare(int16_t* in_vector,
+                                   int in_vector_length,
+                                   int times);
 
 // Copy and set operations. Implementation in copy_set_operations.c.
 // Descriptions at bottom of file.
@@ -166,18 +138,14 @@ void WebRtcSpl_MemSetW32(int32_t* vector,
 void WebRtcSpl_MemCpyReversedOrder(int16_t* out_vector,
                                    int16_t* in_vector,
                                    int vector_length);
-int16_t WebRtcSpl_CopyFromEndW16(const int16_t* in_vector,
-                                 int16_t in_vector_length,
-                                 int16_t samples,
-                                 int16_t* out_vector);
-int16_t WebRtcSpl_ZerosArrayW16(int16_t* vector,
-                                int16_t vector_length);
-int16_t WebRtcSpl_ZerosArrayW32(int32_t* vector,
-                                int16_t vector_length);
-int16_t WebRtcSpl_OnesArrayW16(int16_t* vector,
-                               int16_t vector_length);
-int16_t WebRtcSpl_OnesArrayW32(int32_t* vector,
-                               int16_t vector_length);
+void WebRtcSpl_CopyFromEndW16(const int16_t* in_vector,
+                              int in_vector_length,
+                              int samples,
+                              int16_t* out_vector);
+void WebRtcSpl_ZerosArrayW16(int16_t* vector,
+                             int vector_length);
+void WebRtcSpl_ZerosArrayW32(int32_t* vector,
+                             int vector_length);
 // End: Copy and set operations.
 
 
@@ -959,10 +927,10 @@ void WebRtcSpl_ResetResample8khzTo48khz(WebRtcSpl_State8khzTo48khz* state);
  *
  ******************************************************************/
 
-void WebRtcSpl_DownsampleBy2(const int16_t* in, int16_t len,
+void WebRtcSpl_DownsampleBy2(const int16_t* in, int len,
                              int16_t* out, int32_t* filtState);
 
-void WebRtcSpl_UpsampleBy2(const int16_t* in, int16_t len,
+void WebRtcSpl_UpsampleBy2(const int16_t* in, int len,
                            int16_t* out, int32_t* filtState);
 
 /************************************************************
@@ -1138,8 +1106,6 @@ void WebRtcSpl_SynthesisQMF(const int16_t* low_band,
 // Output:
 //      - out_vector        : Vector with the requested samples
 //
-// Return value             : Number of copied samples in |out_vector|
-//
 
 //
 // WebRtcSpl_ZerosArrayW16(...)
@@ -1153,24 +1119,6 @@ void WebRtcSpl_SynthesisQMF(const int16_t* low_band,
 //
 // Output:
 //      - vector        : Vector containing all zeros
-//
-// Return value         : Number of samples in vector
-//
-
-//
-// WebRtcSpl_OnesArrayW16(...)
-// WebRtcSpl_OnesArrayW32(...)
-//
-// Inserts the value "one" in all positions of a w16 and a w32 vector
-// respectively.
-//
-// Input:
-//      - vector_length : Number of samples in vector
-//
-// Output:
-//      - vector        : Vector containing all ones
-//
-// Return value         : Number of samples in vector
 //
 
 //

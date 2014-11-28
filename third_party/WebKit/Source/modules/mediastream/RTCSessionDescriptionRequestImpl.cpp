@@ -41,14 +41,14 @@
 
 namespace blink {
 
-PassRefPtr<RTCSessionDescriptionRequestImpl> RTCSessionDescriptionRequestImpl::create(ExecutionContext* context, RTCPeerConnection* requester, PassOwnPtr<RTCSessionDescriptionCallback> successCallback, PassOwnPtr<RTCErrorCallback> errorCallback)
+RTCSessionDescriptionRequestImpl* RTCSessionDescriptionRequestImpl::create(ExecutionContext* context, RTCPeerConnection* requester, RTCSessionDescriptionCallback* successCallback, RTCErrorCallback* errorCallback)
 {
-    RefPtr<RTCSessionDescriptionRequestImpl> request = adoptRef(new RTCSessionDescriptionRequestImpl(context, requester, successCallback, errorCallback));
+    RTCSessionDescriptionRequestImpl* request = new RTCSessionDescriptionRequestImpl(context, requester, successCallback, errorCallback);
     request->suspendIfNeeded();
-    return request.release();
+    return request;
 }
 
-RTCSessionDescriptionRequestImpl::RTCSessionDescriptionRequestImpl(ExecutionContext* context, RTCPeerConnection* requester, PassOwnPtr<RTCSessionDescriptionCallback> successCallback, PassOwnPtr<RTCErrorCallback> errorCallback)
+RTCSessionDescriptionRequestImpl::RTCSessionDescriptionRequestImpl(ExecutionContext* context, RTCPeerConnection* requester, RTCSessionDescriptionCallback* successCallback, RTCErrorCallback* errorCallback)
     : ActiveDOMObject(context)
     , m_successCallback(successCallback)
     , m_errorCallback(errorCallback)
@@ -88,6 +88,14 @@ void RTCSessionDescriptionRequestImpl::clear()
     m_successCallback.clear();
     m_errorCallback.clear();
     m_requester.clear();
+}
+
+void RTCSessionDescriptionRequestImpl::trace(Visitor* visitor)
+{
+    visitor->trace(m_successCallback);
+    visitor->trace(m_errorCallback);
+    visitor->trace(m_requester);
+    RTCSessionDescriptionRequest::trace(visitor);
 }
 
 } // namespace blink

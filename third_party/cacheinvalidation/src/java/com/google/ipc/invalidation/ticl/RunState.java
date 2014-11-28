@@ -16,19 +16,17 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.common.base.Preconditions;
+import com.google.ipc.invalidation.ticl.proto.Client.RunStateP;
 import com.google.ipc.invalidation.util.Marshallable;
-import com.google.protos.ipc.invalidation.Client.RunStateP;
 
 /**
  * An abstraction that keeps track of whether the caller is started or stopped and only allows
  * the following transitions NOT_STARTED -> STARTED -> STOPPED. This class is thread-safe.
  *
- *
  */
 public class RunState implements Marshallable<RunStateP> {
-  /** Current run state. */
-  private RunStateP.State currentState;
+  /** Current run state ({@link RunStateP}). */
+  private Integer currentState;
   private Object lock = new Object();
 
   /** Constructs a new instance in the {@code NOT_STARTED} state. */
@@ -48,8 +46,9 @@ public class RunState implements Marshallable<RunStateP> {
    */
   public void start() {
     synchronized (lock) {
-      Preconditions.checkState(currentState == RunStateP.State.NOT_STARTED,
-          "Cannot start: %s", currentState);
+      if (currentState != RunStateP.State.NOT_STARTED) {
+        throw new IllegalStateException("Cannot start: " + currentState);
+      }
       currentState = RunStateP.State.STARTED;
     }
   }
@@ -61,8 +60,9 @@ public class RunState implements Marshallable<RunStateP> {
    */
   public void stop() {
     synchronized (lock) {
-      Preconditions.checkState(currentState == RunStateP.State.STARTED,
-          "Cannot stop: %s", currentState);
+      if (currentState != RunStateP.State.STARTED) {
+        throw new IllegalStateException("Cannot stop: " + currentState);
+      }
       currentState = RunStateP.State.STOPPED;
     }
   }
@@ -85,7 +85,7 @@ public class RunState implements Marshallable<RunStateP> {
 
   @Override
   public RunStateP marshal() {
-    return RunStateP.newBuilder().setState(currentState).build();
+    return RunStateP.create(currentState);
   }
 
   @Override

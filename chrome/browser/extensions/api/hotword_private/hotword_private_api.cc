@@ -17,6 +17,10 @@
 
 namespace extensions {
 
+namespace hotword_private_constants {
+const char kHotwordServiceUnavailable[] = "Hotword Service is unavailable.";
+}  // hotword_private_constants
+
 namespace OnEnabledChanged =
     api::hotword_private::OnEnabledChanged;
 
@@ -30,6 +34,10 @@ HotwordPrivateEventService::HotwordPrivateEventService(
   pref_change_registrar_.Init(profile_->GetPrefs());
   pref_change_registrar_.Add(
       prefs::kHotwordSearchEnabled,
+      base::Bind(&HotwordPrivateEventService::OnEnabledChanged,
+                 base::Unretained(this)));
+  pref_change_registrar_.Add(
+      prefs::kHotwordAlwaysOnSearchEnabled,
       base::Bind(&HotwordPrivateEventService::OnEnabledChanged,
                  base::Unretained(this)));
 }
@@ -53,7 +61,8 @@ const char* HotwordPrivateEventService::service_name() {
 
 void HotwordPrivateEventService::OnEnabledChanged(
     const std::string& pref_name) {
-  DCHECK_EQ(pref_name, std::string(prefs::kHotwordSearchEnabled));
+  DCHECK(pref_name == std::string(prefs::kHotwordSearchEnabled) ||
+         pref_name == std::string(prefs::kHotwordAlwaysOnSearchEnabled));
   SignalEvent(OnEnabledChanged::kEventName);
 }
 
@@ -85,12 +94,25 @@ bool HotwordPrivateSetEnabledFunction::RunSync() {
 }
 
 bool HotwordPrivateSetAudioLoggingEnabledFunction::RunSync() {
-  scoped_ptr<api::hotword_private::SetEnabled::Params> params(
-      api::hotword_private::SetEnabled::Params::Create(*args_));
+  scoped_ptr<api::hotword_private::SetAudioLoggingEnabled::Params> params(
+      api::hotword_private::SetAudioLoggingEnabled::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  // TODO(kcarattini): Sync the chrome pref with the account-level
+  // Audio History setting.
+  PrefService* prefs = GetProfile()->GetPrefs();
+  prefs->SetBoolean(prefs::kHotwordAudioLoggingEnabled, params->state);
+  return true;
+}
+
+bool HotwordPrivateSetHotwordAlwaysOnSearchEnabledFunction::RunSync() {
+  scoped_ptr<api::hotword_private::SetHotwordAlwaysOnSearchEnabled::Params>
+      params(api::hotword_private::SetHotwordAlwaysOnSearchEnabled::Params::
+      Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   PrefService* prefs = GetProfile()->GetPrefs();
-  prefs->SetBoolean(prefs::kHotwordAudioLoggingEnabled, params->state);
+  prefs->SetBoolean(prefs::kHotwordAlwaysOnSearchEnabled, params->state);
   return true;
 }
 
@@ -107,6 +129,8 @@ bool HotwordPrivateGetStatusFunction::RunSync() {
   PrefService* prefs = GetProfile()->GetPrefs();
   result.enabled_set = prefs->HasPrefPath(prefs::kHotwordSearchEnabled);
   result.enabled = prefs->GetBoolean(prefs::kHotwordSearchEnabled);
+  result.always_on_enabled =
+      prefs->GetBoolean(prefs::kHotwordAlwaysOnSearchEnabled);
   result.audio_logging_enabled = false;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   result.experimental_hotword_enabled = command_line->HasSwitch(
@@ -135,6 +159,23 @@ bool HotwordPrivateNotifyHotwordRecognitionFunction::RunSync() {
       HotwordServiceFactory::GetForProfile(GetProfile());
   if (hotword_service && hotword_service->client())
     hotword_service->client()->OnHotwordRecognized();
+  return true;
+}
+
+bool HotwordPrivateGetLaunchStateFunction::RunSync() {
+  api::hotword_private::LaunchState result;
+
+  HotwordService* hotword_service =
+      HotwordServiceFactory::GetForProfile(GetProfile());
+  if (!hotword_service) {
+    error_ = hotword_private_constants::kHotwordServiceUnavailable;
+    return false;
+  } else {
+    result.launch_mode =
+        hotword_service->GetHotwordAudioVerificationLaunchMode();
+  }
+
+  SetResult(result.ToValue().release());
   return true;
 }
 

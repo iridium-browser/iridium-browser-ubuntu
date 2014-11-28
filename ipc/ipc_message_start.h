@@ -106,6 +106,11 @@ enum IPCMessageStart {
   OzoneGpuMsgStart,
   ChromeUtilityExtensionsMsgStart,
   PlatformNotificationMsgStart,
+  CredentialManagerMsgStart,
+  PDFMsgStart,
+  WebCacheMsgStart,
+  ManifestManagerMsgStart,
+  ExtensionUtilityMsgStart,
   LastIPCMsgStart  // Must come last.
 };
 

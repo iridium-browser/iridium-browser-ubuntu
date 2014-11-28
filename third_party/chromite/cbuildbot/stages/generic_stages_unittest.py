@@ -5,6 +5,8 @@
 
 """Unittests for generic stages."""
 
+from __future__ import print_function
+
 import contextlib
 import copy
 import mox
@@ -18,7 +20,6 @@ from chromite.cbuildbot import cbuildbot_config as config
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import cbuildbot_run
-from chromite.cbuildbot import portage_utilities
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
@@ -26,6 +27,7 @@ from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import partial_mock
+from chromite.lib import portage_util
 from chromite.scripts import cbuildbot
 
 # TODO(build): Finish test wrapper (http://crosbug.com/37517).
@@ -34,7 +36,7 @@ import mock
 
 
 DEFAULT_BUILD_NUMBER = 1234321
-
+DEFAULT_BUILD_ID = 31337
 
 # The inheritence order ensures the patchers are stopped before
 # cleaning up the temporary directories.
@@ -69,7 +71,7 @@ class StageTest(cros_test_lib.MockOutputTestCase,
     self._run = None
 
   def _Prepare(self, bot_id=None, extra_config=None, cmd_args=None,
-               extra_cmd_args=None):
+               extra_cmd_args=None, build_id=DEFAULT_BUILD_ID):
     """Prepare a BuilderRun at self._run for this test.
 
     This method must allow being called more than once.  Subclasses can
@@ -93,6 +95,7 @@ class StageTest(cros_test_lib.MockOutputTestCase,
         is a good way to adjust an options value for your test.
         Example: ['branch-name', 'some-branch-name'] will effectively cause
         self._run.options.branch_name to be set to 'some-branch-name'.
+      build_id: mock build id
     """
     # Use cbuildbot parser to create options object and populate default values.
     parser = cbuildbot._CreateParser()
@@ -127,6 +130,7 @@ class StageTest(cros_test_lib.MockOutputTestCase,
       build_config.update(extra_config)
     if options.remote_trybot:
       build_config = config.OverrideConfigForTrybot(build_config, options)
+    options.managed_chrome = build_config['sync_chrome']
 
     self._boards = build_config['boards']
     self._current_board = self._boards[0] if self._boards else None
@@ -137,10 +141,13 @@ class StageTest(cros_test_lib.MockOutputTestCase,
     # Construct a real BuilderRun using options and build_config.
     self._run = cbuildbot_run.BuilderRun(options, build_config, self._manager)
 
+    if build_id is not None:
+      self._run.attrs.metadata.UpdateWithDict({'build_id': build_id})
+
     if self.RELEASE_TAG is not None:
       self._run.attrs.release_tag = self.RELEASE_TAG
 
-    portage_utilities._OVERLAY_LIST_CMD = '/bin/true'
+    portage_util._OVERLAY_LIST_CMD = '/bin/true'
 
   def tearDown(self):
     # Mimic exiting with statement for self._manager.

@@ -14,8 +14,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
-#include "chrome/browser/autocomplete/keyword_provider.h"
-#include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -24,6 +22,8 @@
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_provider_listener.h"
+#include "components/omnibox/keyword_provider.h"
+#include "components/omnibox/search_provider.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
@@ -382,7 +382,7 @@ void AutocompleteProviderTest::RunKeywordTest(const base::string16& input,
     match.relevance = 1000;  // Arbitrary non-zero value.
     match.allowed_to_be_default_match = true;
     match.fill_into_edit = match_data[i].fill_into_edit;
-    match.transition = content::PAGE_TRANSITION_KEYWORD;
+    match.transition = ui::PAGE_TRANSITION_KEYWORD;
     match.keyword = match_data[i].keyword;
     matches.push_back(match);
   }

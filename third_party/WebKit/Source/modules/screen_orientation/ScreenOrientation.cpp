@@ -93,7 +93,7 @@ ScreenOrientation* ScreenOrientation::create(LocalFrame* frame)
     // FIXME: ideally, we would like to provide the ScreenOrientationController
     // the case where it is not defined but for the moment, it is eagerly
     // created when the LocalFrame is created so we shouldn't be in that
-    // situtaion.
+    // situation.
     // In order to create the ScreenOrientationController lazily, we would need
     // to be able to access WebFrameClient from modules/.
 
@@ -106,7 +106,6 @@ ScreenOrientation::ScreenOrientation(LocalFrame* frame)
     , m_type(WebScreenOrientationUndefined)
     , m_angle(0)
 {
-    ScriptWrappable::init(this);
 }
 
 ScreenOrientation::~ScreenOrientation()
@@ -187,6 +186,7 @@ ScreenOrientationController* ScreenOrientation::controller()
 void ScreenOrientation::trace(Visitor* visitor)
 {
     EventTargetWithInlineData::trace(visitor);
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

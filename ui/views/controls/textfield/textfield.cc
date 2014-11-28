@@ -7,7 +7,6 @@
 #include <string>
 
 #include "base/debug/trace_event.h"
-#include "grit/ui_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/cursor/cursor.h"
@@ -22,6 +21,7 @@
 #include "ui/gfx/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/focusable_border.h"
 #include "ui/views/controls/label.h"
@@ -238,6 +238,7 @@ int GetViewsCommand(const ui::TextEditCommandAuraLinux& command, bool rtl) {
 
 // static
 const char Textfield::kViewClassName[] = "Textfield";
+const int Textfield::kTextPadding = 3;
 
 // static
 size_t Textfield::GetCaretBlinkMs() {
@@ -550,6 +551,12 @@ bool Textfield::HasTextBeingDragged() {
 ////////////////////////////////////////////////////////////////////////////////
 // Textfield, View overrides:
 
+gfx::Insets Textfield::GetInsets() const {
+  gfx::Insets insets = View::GetInsets();
+  insets += gfx::Insets(kTextPadding, kTextPadding, kTextPadding, kTextPadding);
+  return insets;
+}
+
 int Textfield::GetBaseline() const {
   return GetInsets().top() + GetRenderText()->GetBaseline();
 }
@@ -609,7 +616,6 @@ bool Textfield::OnMousePressed(const ui::MouseEvent& event) {
         OnBeforeUserAction();
         ClearSelection();
         ui::ScopedClipboardWriter(
-            ui::Clipboard::GetForCurrentThread(),
             ui::CLIPBOARD_TYPE_SELECTION).WriteText(base::string16());
         OnAfterUserAction();
       } else if (!read_only()) {
@@ -919,8 +925,25 @@ void Textfield::GetAccessibleState(ui::AXViewState* state) {
 }
 
 void Textfield::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  GetRenderText()->SetDisplayRect(GetContentsBounds());
+  // Textfield insets include a reasonable amount of whitespace on all sides of
+  // the default font list. Fallback fonts with larger heights may paint over
+  // the vertical whitespace as needed. Alternate solutions involve undesirable
+  // behavior like changing the default font size, shrinking some fallback fonts
+  // beyond their legibility, or enlarging controls dynamically with content.
+  gfx::Rect bounds = GetContentsBounds();
+  // GetContentsBounds() does not actually use the local GetInsets() override.
+  bounds.Inset(gfx::Insets(0, kTextPadding, 0, kTextPadding));
+  GetRenderText()->SetDisplayRect(bounds);
   OnCaretBoundsChanged();
+}
+
+bool Textfield::GetNeedsNotificationWhenVisibleBoundsChange() const {
+  return true;
+}
+
+void Textfield::OnVisibleBoundsChanged() {
+  if (touch_selection_controller_)
+    touch_selection_controller_->SelectionChanged();
 }
 
 void Textfield::OnEnabledChanged() {
@@ -1767,7 +1790,6 @@ void Textfield::UpdateSelectionClipboard() const {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   if (performing_user_action_ && HasSelection()) {
     ui::ScopedClipboardWriter(
-        ui::Clipboard::GetForCurrentThread(),
         ui::CLIPBOARD_TYPE_SELECTION).WriteText(GetSelectedText());
     if (controller_)
       controller_->OnAfterCutOrCopy(ui::CLIPBOARD_TYPE_SELECTION);

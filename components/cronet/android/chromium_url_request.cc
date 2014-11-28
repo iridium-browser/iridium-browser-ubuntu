@@ -45,10 +45,8 @@ void SetPostContentType(JNIEnv* env,
   request->SetMethod(method_post);
 
   std::string content_type_header("Content-Type");
-
-  const char* content_type_utf8 = env->GetStringUTFChars(content_type, NULL);
-  std::string content_type_string(content_type_utf8);
-  env->ReleaseStringUTFChars(content_type, content_type_utf8);
+  std::string content_type_string(
+      base::android::ConvertJavaStringToUTF8(env, content_type));
 
   request->AddHeader(content_type_header, content_type_string);
 }
@@ -120,13 +118,9 @@ static jlong CreateRequestAdapter(JNIEnv* env,
       reinterpret_cast<URLRequestContextAdapter*>(urlRequestContextAdapter);
   DCHECK(context != NULL);
 
-  const char* url_utf8 = env->GetStringUTFChars(url_string, NULL);
+  GURL url(base::android::ConvertJavaStringToUTF8(env, url_string));
 
-  VLOG(1) << "New chromium network request. URL:" << url_utf8;
-
-  GURL url(url_utf8);
-
-  env->ReleaseStringUTFChars(url_string, url_utf8);
+  VLOG(1) << "New chromium network request: " << url.possibly_invalid_spec();
 
   URLRequestAdapter* adapter =
       new URLRequestAdapter(context,
@@ -197,6 +191,32 @@ static void SetUploadChannel(JNIEnv* env,
   SetPostContentType(env, request, content_type);
 
   request->SetUploadChannel(env, content_length);
+}
+
+static void EnableChunkedUpload(JNIEnv* env,
+                               jobject object,
+                               jlong urlRequestAdapter,
+                               jstring content_type) {
+  URLRequestAdapter* request =
+      reinterpret_cast<URLRequestAdapter*>(urlRequestAdapter);
+  SetPostContentType(env, request, content_type);
+
+  request->EnableChunkedUpload();
+}
+
+static void AppendChunk(JNIEnv* env,
+                        jobject object,
+                        jlong urlRequestAdapter,
+                        jobject chunk_byte_buffer,
+                        jint chunk_size,
+                        jboolean is_last_chunk) {
+  URLRequestAdapter* request =
+      reinterpret_cast<URLRequestAdapter*>(urlRequestAdapter);
+  DCHECK(chunk_byte_buffer != NULL);
+
+  void* chunk = env->GetDirectBufferAddress(chunk_byte_buffer);
+  request->AppendChunk(
+      reinterpret_cast<const char*>(chunk), chunk_size, is_last_chunk);
 }
 
 /* synchronized */
@@ -365,6 +385,18 @@ static void GetAllHeaders(JNIEnv* env,
       ConvertUTF8ToJavaString(env, headers->GetStatusLine());
   Java_ChromiumUrlRequest_onAppendResponseHeader(
       env, object, headersMap, NULL, status_line.Release());
+}
+
+static jstring GetNegotiatedProtocol(JNIEnv* env,
+                                     jobject object,
+                                     jlong urlRequestAdapter) {
+  URLRequestAdapter* request =
+      reinterpret_cast<URLRequestAdapter*>(urlRequestAdapter);
+  if (request == NULL)
+    return ConvertUTF8ToJavaString(env, "").Release();
+
+  std::string negotiated_protocol = request->GetNegotiatedProtocol();
+  return ConvertUTF8ToJavaString(env, negotiated_protocol.c_str()).Release();
 }
 
 }  // namespace cronet

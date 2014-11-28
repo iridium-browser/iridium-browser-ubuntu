@@ -4,12 +4,10 @@
 
 #include "chrome/browser/ui/views/apps/chrome_native_app_window_views_win.h"
 
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
 #include "apps/ui/views/app_window_frame_view.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -27,6 +25,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/common/extension.h"
 #include "ui/aura/remote_window_tree_host_win.h"
@@ -36,7 +36,7 @@
 #include "ui/views/win/hwnd_util.h"
 
 ChromeNativeAppWindowViewsWin::ChromeNativeAppWindowViewsWin()
-    : weak_ptr_factory_(this), glass_frame_view_(NULL) {
+    : glass_frame_view_(NULL), weak_ptr_factory_(this) {
 }
 
 void ChromeNativeAppWindowViewsWin::ActivateParentDesktopIfNecessary() {
@@ -80,8 +80,8 @@ void ChromeNativeAppWindowViewsWin::OnBeforeWidgetInit(
   std::string extension_id = app_window()->extension_id();
   // If an app has any existing windows, ensure new ones are created on the
   // same desktop.
-  apps::AppWindow* any_existing_window =
-      apps::AppWindowRegistry::Get(browser_context)
+  extensions::AppWindow* any_existing_window =
+      extensions::AppWindowRegistry::Get(browser_context)
           ->GetCurrentAppWindowForApp(extension_id);
   chrome::HostDesktopType desktop_type;
   if (any_existing_window) {
@@ -105,8 +105,13 @@ void ChromeNativeAppWindowViewsWin::OnBeforeWidgetInit(
 }
 
 void ChromeNativeAppWindowViewsWin::InitializeDefaultWindow(
-    const apps::AppWindow::CreateParams& create_params) {
+    const extensions::AppWindow::CreateParams& create_params) {
   ChromeNativeAppWindowViews::InitializeDefaultWindow(create_params);
+
+  // Remaining initialization is for Windows shell integration, which doesn't
+  // apply to app windows in Ash.
+  if (IsRunningInAsh())
+    return;
 
   const extensions::Extension* extension = app_window()->GetExtension();
   if (!extension)
@@ -122,10 +127,9 @@ void ChromeNativeAppWindowViewsWin::InitializeDefaultWindow(
       ShellIntegration::GetAppModelIdForProfile(app_name_wide,
                                                 profile->GetPath());
   ui::win::SetAppIdForWindow(app_model_id_, hwnd);
-
   web_app::UpdateRelaunchDetailsForApp(profile, extension, hwnd);
 
-  if (!create_params.alpha_enabled && !IsRunningInAsh())
+  if (!create_params.alpha_enabled)
     EnsureCaptionStyleSet();
   UpdateShelfMenu();
 }
@@ -151,7 +155,7 @@ void ChromeNativeAppWindowViewsWin::Activate() {
 }
 
 void ChromeNativeAppWindowViewsWin::UpdateShelfMenu() {
-  if (!JumpListUpdater::IsEnabled())
+  if (!JumpListUpdater::IsEnabled() || IsRunningInAsh())
     return;
 
   // Currently the only option is related to ephemeral apps, so avoid updating
@@ -170,6 +174,8 @@ void ChromeNativeAppWindowViewsWin::UpdateShelfMenu() {
   if (!PathService::Get(base::FILE_EXE, &chrome_path))
     return;
 
+  DCHECK(!app_model_id_.empty());
+
   JumpListUpdater jumplist_updater(app_model_id_);
   if (!jumplist_updater.BeginUpdate())
     return;
@@ -183,8 +189,8 @@ void ChromeNativeAppWindowViewsWin::UpdateShelfMenu() {
                    icon_resources::kInstallPackagedAppIndex);
     ShellIntegration::AppendProfileArgs(
         app_window()->browser_context()->GetPath(), link->GetCommandLine());
-    link->GetCommandLine()->AppendSwitchASCII(switches::kInstallFromWebstore,
-                                              extension->id());
+    link->GetCommandLine()->AppendSwitchASCII(
+        switches::kInstallEphemeralAppFromWebstore, extension->id());
 
     ShellLinkItemList items;
     items.push_back(link);

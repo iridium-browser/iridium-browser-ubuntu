@@ -17,7 +17,6 @@
 #include "chrome/common/print_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "printing/print_destination_interface.h"
 
 using content::BrowserThread;
 
@@ -47,11 +46,12 @@ PrintViewManager::~PrintViewManager() {
   DCHECK_EQ(NOT_PREVIEWING, print_preview_state_);
 }
 
+#if !defined(DISABLE_BASIC_PRINTING)
 bool PrintViewManager::PrintForSystemDialogNow() {
   return PrintNowInternal(new PrintMsg_PrintForSystemDialog(routing_id()));
 }
 
-bool PrintViewManager::AdvancedPrintNow() {
+bool PrintViewManager::BasicPrint() {
   PrintPreviewDialogController* dialog_controller =
       PrintPreviewDialogController::GetInstance();
   if (!dialog_controller)
@@ -69,17 +69,7 @@ bool PrintViewManager::AdvancedPrintNow() {
     return PrintNow();
   }
 }
-
-bool PrintViewManager::PrintToDestination() {
-  // TODO(mad): Remove this once we can send user metrics from the metro driver.
-  // crbug.com/142330
-  UMA_HISTOGRAM_ENUMERATION("Metro.Print", 0, 2);
-  // TODO(mad): Use a passed in destination interface instead.
-  g_browser_process->print_job_manager()->queue()->SetDestination(
-      printing::CreatePrintDestination());
-  return PrintNowInternal(new PrintMsg_PrintPages(routing_id()));
-}
-
+#endif  // !DISABLE_BASIC_PRINTING
 bool PrintViewManager::PrintPreviewNow(bool selection_only) {
   // Users can send print commands all they want and it is beyond
   // PrintViewManager's control. Just ignore the extra commands.

@@ -253,7 +253,7 @@ void WASAPIAudioInputStream::SetVolume(double volume) {
 }
 
 double WASAPIAudioInputStream::GetVolume() {
-  DLOG_IF(ERROR, !opened_) << "Open() has not been called successfully";
+  DCHECK(opened_) << "Open() has not been called successfully";
   if (!opened_)
     return 0.0;
 
@@ -263,6 +263,20 @@ double WASAPIAudioInputStream::GetVolume() {
   DLOG_IF(WARNING, FAILED(hr)) << "Failed to get input master volume.";
 
   return static_cast<double>(level);
+}
+
+bool WASAPIAudioInputStream::IsMuted() {
+  DCHECK(opened_) << "Open() has not been called successfully";
+  DCHECK(CalledOnValidThread());
+  if (!opened_)
+    return false;
+
+  // Retrieves the current muting state for the audio session.
+  BOOL is_muted = FALSE;
+  HRESULT hr = simple_audio_volume_->GetMute(&is_muted);
+  DLOG_IF(WARNING, FAILED(hr)) << "Failed to get input master volume.";
+
+  return is_muted != FALSE;
 }
 
 // static
@@ -282,7 +296,7 @@ AudioParameters WASAPIAudioInputStream::GetInputStreamParameters(
   // Use 10ms frame size as default.
   int frames_per_buffer = sample_rate / 100;
   return AudioParameters(
-      AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout, 0, sample_rate,
+      AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout, sample_rate,
       16, frames_per_buffer, effects);
 }
 
@@ -365,7 +379,8 @@ void WASAPIAudioInputStream::Run() {
   bool recording = true;
   bool error = false;
   double volume = GetVolume();
-  HANDLE wait_array[2] = {stop_capture_event_, audio_samples_ready_event_};
+  HANDLE wait_array[2] =
+      { stop_capture_event_.Get(), audio_samples_ready_event_.Get() };
 
   while (recording && !error) {
     HRESULT hr = S_FALSE;

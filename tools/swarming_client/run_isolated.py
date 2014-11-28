@@ -38,6 +38,7 @@ from utils import tools
 from utils import zip_package
 
 import auth
+import isolated_format
 import isolateserver
 
 
@@ -79,6 +80,7 @@ def get_as_zip_package(executable=True):
   assert BASE_DIR
   package = zip_package.ZipPackage(root=BASE_DIR)
   package.add_python_file(THIS_FILE_PATH, '__main__.py' if executable else None)
+  package.add_python_file(os.path.join(BASE_DIR, 'isolated_format.py'))
   package.add_python_file(os.path.join(BASE_DIR, 'isolateserver.py'))
   package.add_python_file(os.path.join(BASE_DIR, 'auth.py'))
   package.add_directory(os.path.join(BASE_DIR, 'third_party'))
@@ -113,9 +115,9 @@ def link_file(outfile, infile, action):
   if action not in (HARDLINK, HARDLINK_WITH_FALLBACK, SYMLINK, COPY):
     raise ValueError('Unknown mapping action %s' % action)
   if not os.path.isfile(infile):
-    raise isolateserver.MappingError('%s is missing' % infile)
+    raise isolated_format.MappingError('%s is missing' % infile)
   if os.path.isfile(outfile):
-    raise isolateserver.MappingError(
+    raise isolated_format.MappingError(
         '%s already exist; insize:%d; outsize:%d' %
         (outfile, os.stat(infile).st_size, os.stat(outfile).st_size))
 
@@ -129,7 +131,7 @@ def link_file(outfile, infile, action):
       hardlink(infile, outfile)
     except OSError as e:
       if action == HARDLINK:
-        raise isolateserver.MappingError(
+        raise isolated_format.MappingError(
             'Failed to hardlink %s to %s: %s' % (infile, outfile, e))
       # Probably a different file system.
       logging.warning(
@@ -570,7 +572,7 @@ class DiskCache(isolateserver.LocalCache):
         previous.remove(filename)
         continue
       # An untracked file.
-      if not isolateserver.is_valid_hash(filename, self.hash_algo):
+      if not isolated_format.is_valid_hash(filename, self.hash_algo):
         logging.warning('Removing unknown file %s from cache', filename)
         try_remove(self._path(filename))
         continue
@@ -722,7 +724,7 @@ def process_command(command, out_dir):
   return filtered
 
 
-def run_tha_test(isolated_hash, storage, cache, extra_args):
+def run_tha_test(isolated_hash, storage, cache, leak_temp_dir, extra_args):
   """Downloads the dependencies in the cache, hardlinks them into a temporary
   directory and runs the executable from there.
 
@@ -739,6 +741,8 @@ def run_tha_test(isolated_hash, storage, cache, extra_args):
     cache: an isolateserver.LocalCache to keep from retrieving the same objects
            constantly by caching the objects retrieved. Can be on-disk or
            in-memory.
+    leak_temp_dir: if true, the temporary directory will be deliberately leaked
+                   for later examination.
     extra_args: optional arguments to add to the command stated in the .isolate
                 file.
   """
@@ -747,25 +751,21 @@ def run_tha_test(isolated_hash, storage, cache, extra_args):
   result = 0
   try:
     try:
-      settings = isolateserver.fetch_isolated(
+      bundle = isolateserver.fetch_isolated(
           isolated_hash=isolated_hash,
           storage=storage,
           cache=cache,
           outdir=run_dir,
           require_command=True)
-    except isolateserver.ConfigError:
+    except isolated_format.IsolatedError:
       on_error.report(None)
       return 1
 
-    change_tree_read_only(run_dir, settings.read_only)
-    cwd = os.path.normpath(os.path.join(run_dir, settings.relative_cwd))
-    command = settings.command + extra_args
+    change_tree_read_only(run_dir, bundle.read_only)
+    cwd = os.path.normpath(os.path.join(run_dir, bundle.relative_cwd))
+    command = bundle.command + extra_args
 
-    # subprocess.call doesn't consider 'cwd' when searching for executable.
-    # Yet isolate can specify command relative to 'cwd'. Convert it to absolute
-    # path if necessary.
-    if not os.path.isabs(command[0]):
-      command[0] = os.path.abspath(os.path.join(cwd, command[0]))
+    file_path.ensure_command_has_abs_path(command, cwd)
     command = process_command(command, out_dir)
     logging.info('Running %s, cwd=%s' % (command, cwd))
 
@@ -789,16 +789,21 @@ def run_tha_test(isolated_hash, storage, cache, extra_args):
 
   finally:
     try:
-      try:
-        if not rmtree(run_dir):
-          print >> sys.stderr, (
-              'Failed to delete the temporary directory, forcibly failing the\n'
-              'task because of it. No zombie process can outlive a successful\n'
-              'task run and still be marked as successful. Fix your stuff.')
-          result = result or 1
-      except OSError:
-        logging.warning('Leaking %s', run_dir)
-        result = 1
+      if leak_temp_dir:
+        logging.warning('Deliberately leaking %s for later examination',
+                        run_dir)
+      else:
+        try:
+          if not rmtree(run_dir):
+            print >> sys.stderr, (
+                'Failed to delete the temporary directory, forcibly failing\n'
+                'the task because of it. No zombie process can outlive a\n'
+                'successful task run and still be marked as successful.\n'
+                'Fix your stuff.')
+            result = result or 1
+        except OSError:
+          logging.warning('Leaking %s', run_dir)
+          result = 1
 
       # HACK(vadimsh): On Windows rmtree(run_dir) call above has
       # a synchronization effect: it finishes only when all task child processes
@@ -881,10 +886,18 @@ def main(args):
            'default=%default')
   parser.add_option_group(cache_group)
 
+  debug_group = optparse.OptionGroup(parser, 'Debugging')
+  debug_group.add_option(
+      '--leak-temp-dir',
+      action='store_true',
+      help='Deliberately leak isolate\'s temp dir for later examination '
+          '[default: %default]')
+  parser.add_option_group(debug_group)
+
   auth.add_auth_options(parser)
   options, args = parser.parse_args(args)
   auth.process_auth_options(parser, options)
-  isolateserver.process_isolate_server_options(data_group, options)
+  isolateserver.process_isolate_server_options(parser, options)
 
   if bool(options.isolated) == bool(options.hash):
     logging.debug('One and only one of --isolated or --hash is required.')
@@ -896,7 +909,7 @@ def main(args):
 
   # |options.cache| path may not exist until DiskCache() instance is created.
   cache = DiskCache(
-      options.cache, policies, isolateserver.get_hash_algo(options.namespace))
+      options.cache, policies, isolated_format.get_hash_algo(options.namespace))
 
   remote = options.isolate_server or options.indir
   if file_path.is_url(remote):
@@ -906,7 +919,8 @@ def main(args):
     # Hashing schemes used by |storage| and |cache| MUST match.
     assert storage.hash_algo == cache.hash_algo
     return run_tha_test(
-        options.isolated or options.hash, storage, cache, args)
+        options.isolated or options.hash, storage, cache,
+        options.leak_temp_dir, args)
 
 
 if __name__ == '__main__':

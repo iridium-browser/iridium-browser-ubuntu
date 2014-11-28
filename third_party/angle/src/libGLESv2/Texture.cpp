@@ -1,4 +1,3 @@
-#include "precompiled.h"
 //
 // Copyright (c) 2002-2014 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -10,22 +9,47 @@
 // functionality. [OpenGL ES 2.0.24] section 3.7 page 63.
 
 #include "libGLESv2/Texture.h"
-
 #include "libGLESv2/main.h"
-#include "common/mathutil.h"
-#include "common/utilities.h"
+#include "libGLESv2/Context.h"
 #include "libGLESv2/formatutils.h"
+#include "libGLESv2/ImageIndex.h"
 #include "libGLESv2/Renderbuffer.h"
 #include "libGLESv2/renderer/Image.h"
 #include "libGLESv2/renderer/d3d/TextureStorage.h"
+
 #include "libEGL/Surface.h"
-#include "libGLESv2/renderer/RenderTarget.h"
+
+#include "common/mathutil.h"
+#include "common/utilities.h"
 
 namespace gl
 {
 
-Texture::Texture(GLuint id, GLenum target)
+bool IsMipmapFiltered(const gl::SamplerState &samplerState)
+{
+    switch (samplerState.minFilter)
+    {
+      case GL_NEAREST:
+      case GL_LINEAR:
+        return false;
+      case GL_NEAREST_MIPMAP_NEAREST:
+      case GL_LINEAR_MIPMAP_NEAREST:
+      case GL_NEAREST_MIPMAP_LINEAR:
+      case GL_LINEAR_MIPMAP_LINEAR:
+        return true;
+      default: UNREACHABLE();
+        return false;
+    }
+}
+
+bool IsPointSampled(const gl::SamplerState &samplerState)
+{
+    return (samplerState.magFilter == GL_NEAREST && (samplerState.minFilter == GL_NEAREST || samplerState.minFilter == GL_NEAREST_MIPMAP_NEAREST));
+}
+
+Texture::Texture(rx::TextureImpl *impl, GLuint id, GLenum target)
     : RefCountObject(id),
+      mTexture(impl),
       mUsage(GL_NONE),
       mImmutable(false),
       mTarget(target)
@@ -34,6 +58,7 @@ Texture::Texture(GLuint id, GLenum target)
 
 Texture::~Texture()
 {
+    SafeDelete(mTexture);
 }
 
 GLenum Texture::getTarget() const
@@ -52,7 +77,7 @@ void Texture::getSamplerStateWithNativeOffset(SamplerState *sampler)
     *sampler = mSamplerState;
 
     // Offset the effective base level by the texture storage's top level
-    rx::TextureStorageInterface *texture = getNativeTexture();
+    rx::TextureStorage *texture = getNativeTexture();
     int topLevel = texture ? texture->getTopLevel() : 0;
     sampler->baseLevel = topLevel + mSamplerState.baseLevel;
 }
@@ -89,13 +114,31 @@ GLenum Texture::getBaseLevelInternalFormat() const
     return (baseImage ? baseImage->getInternalFormat() : GL_NONE);
 }
 
-// Tests for texture sampling completeness
-bool Texture::isSamplerComplete(const SamplerState &samplerState) const
+GLsizei Texture::getWidth(const ImageIndex &index) const
 {
-    return getImplementation()->isSamplerComplete(samplerState);
+    rx::Image *image = mTexture->getImage(index);
+    return image->getWidth();
 }
 
-rx::TextureStorageInterface *Texture::getNativeTexture()
+GLsizei Texture::getHeight(const ImageIndex &index) const
+{
+    rx::Image *image = mTexture->getImage(index);
+    return image->getHeight();
+}
+
+GLenum Texture::getInternalFormat(const ImageIndex &index) const
+{
+    rx::Image *image = mTexture->getImage(index);
+    return image->getInternalFormat();
+}
+
+GLenum Texture::getActualFormat(const ImageIndex &index) const
+{
+    rx::Image *image = mTexture->getImage(index);
+    return image->getActualFormat();
+}
+
+rx::TextureStorage *Texture::getNativeTexture()
 {
     return getImplementation()->getNativeTexture();
 }
@@ -112,7 +155,7 @@ void Texture::copySubImage(GLenum target, GLint level, GLint xoffset, GLint yoff
 
 unsigned int Texture::getTextureSerial()
 {
-    rx::TextureStorageInterface *texture = getNativeTexture();
+    rx::TextureStorage *texture = getNativeTexture();
     return texture ? texture->getTextureSerial() : 0;
 }
 
@@ -123,7 +166,7 @@ bool Texture::isImmutable() const
 
 int Texture::immutableLevelCount()
 {
-    return (mImmutable ? getNativeTexture()->getStorageInstance()->getLevelCount() : 0);
+    return (mImmutable ? getNativeTexture()->getLevelCount() : 0);
 }
 
 int Texture::mipLevels() const
@@ -136,17 +179,14 @@ const rx::Image *Texture::getBaseLevelImage() const
     return (getImplementation()->getLayerCount(0) > 0 ? getImplementation()->getImage(0, 0) : NULL);
 }
 
-Texture2D::Texture2D(rx::Texture2DImpl *impl, GLuint id)
-    : Texture(id, GL_TEXTURE_2D),
-      mTexture(impl)
+Texture2D::Texture2D(rx::TextureImpl *impl, GLuint id)
+    : Texture(impl, id, GL_TEXTURE_2D)
 {
     mSurface = NULL;
 }
 
 Texture2D::~Texture2D()
 {
-    SafeDelete(mTexture);
-
     if (mSurface)
     {
         mSurface->setBoundTexture(NULL);
@@ -245,6 +285,70 @@ void Texture2D::storage(GLsizei levels, GLenum internalformat, GLsizei width, GL
     mTexture->storage(GL_TEXTURE_2D, levels, internalformat, width, height, 1);
 }
 
+// Tests for 2D texture sampling completeness. [OpenGL ES 2.0.24] section 3.8.2 page 85.
+bool Texture2D::isSamplerComplete(const SamplerState &samplerState, const TextureCapsMap &textureCaps, const Extensions &extensions, int clientVersion) const
+{
+    GLsizei width = getBaseLevelWidth();
+    GLsizei height = getBaseLevelHeight();
+
+    if (width <= 0 || height <= 0)
+    {
+        return false;
+    }
+
+    if (!textureCaps.get(getInternalFormat(0)).filterable && !IsPointSampled(samplerState))
+    {
+        return false;
+    }
+
+    bool npotSupport = extensions.textureNPOT;
+
+    if (!npotSupport)
+    {
+        if ((samplerState.wrapS != GL_CLAMP_TO_EDGE && !gl::isPow2(width)) ||
+            (samplerState.wrapT != GL_CLAMP_TO_EDGE && !gl::isPow2(height)))
+        {
+            return false;
+        }
+    }
+
+    if (IsMipmapFiltered(samplerState))
+    {
+        if (!npotSupport)
+        {
+            if (!gl::isPow2(width) || !gl::isPow2(height))
+            {
+                return false;
+            }
+        }
+
+        if (!isMipmapComplete())
+        {
+            return false;
+        }
+    }
+
+    // OpenGLES 3.0.2 spec section 3.8.13 states that a texture is not mipmap complete if:
+    // The internalformat specified for the texture arrays is a sized internal depth or
+    // depth and stencil format (see table 3.13), the value of TEXTURE_COMPARE_-
+    // MODE is NONE, and either the magnification filter is not NEAREST or the mini-
+    // fication filter is neither NEAREST nor NEAREST_MIPMAP_NEAREST.
+    const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(getInternalFormat(0));
+    if (formatInfo.depthBits > 0 && clientVersion > 2)
+    {
+        if (samplerState.compareMode == GL_NONE)
+        {
+            if ((samplerState.minFilter != GL_NEAREST && samplerState.minFilter != GL_NEAREST_MIPMAP_NEAREST) ||
+                samplerState.magFilter != GL_NEAREST)
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 bool Texture2D::isCompressed(GLint level) const
 {
     return GetInternalFormatInfo(getInternalFormat(level)).compressed;
@@ -262,30 +366,73 @@ void Texture2D::generateMipmaps()
     mTexture->generateMipmaps();
 }
 
-unsigned int Texture2D::getRenderTargetSerial(GLint level)
+// Tests for 2D texture (mipmap) completeness. [OpenGL ES 2.0.24] section 3.7.10 page 81.
+bool Texture2D::isMipmapComplete() const
 {
-    return mTexture->getRenderTargetSerial(level, 0);
+    int levelCount = mipLevels();
+
+    for (int level = 0; level < levelCount; level++)
+    {
+        if (!isLevelComplete(level))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
-rx::RenderTarget *Texture2D::getRenderTarget(GLint level)
+bool Texture2D::isLevelComplete(int level) const
 {
-    return mTexture->getRenderTarget(level, 0);
+    if (isImmutable())
+    {
+        return true;
+    }
+
+    const rx::Image *baseImage = getBaseLevelImage();
+
+    GLsizei width = baseImage->getWidth();
+    GLsizei height = baseImage->getHeight();
+
+    if (width <= 0 || height <= 0)
+    {
+        return false;
+    }
+
+    // The base image level is complete if the width and height are positive
+    if (level == 0)
+    {
+        return true;
+    }
+
+    ASSERT(level >= 1 && level < IMPLEMENTATION_MAX_TEXTURE_LEVELS && mTexture->getImage(level, 0) != NULL);
+    rx::Image *image = mTexture->getImage(level, 0);
+
+    if (image->getInternalFormat() != baseImage->getInternalFormat())
+    {
+        return false;
+    }
+
+    if (image->getWidth() != std::max(1, width >> level))
+    {
+        return false;
+    }
+
+    if (image->getHeight() != std::max(1, height >> level))
+    {
+        return false;
+    }
+
+    return true;
 }
 
-rx::RenderTarget *Texture2D::getDepthStencil(GLint level)
-{
-    return mTexture->getDepthStencil(level, 0);
-}
-
-TextureCubeMap::TextureCubeMap(rx::TextureCubeImpl *impl, GLuint id)
-    : Texture(id, GL_TEXTURE_CUBE_MAP),
-      mTexture(impl)
+TextureCubeMap::TextureCubeMap(rx::TextureImpl *impl, GLuint id)
+    : Texture(impl, id, GL_TEXTURE_CUBE_MAP)
 {
 }
 
 TextureCubeMap::~TextureCubeMap()
 {
-    SafeDelete(mTexture);
 }
 
 GLsizei TextureCubeMap::getWidth(GLenum target, GLint level) const
@@ -368,7 +515,28 @@ void TextureCubeMap::subImageCompressed(GLenum target, GLint level, GLint xoffse
 // Tests for cube texture completeness. [OpenGL ES 2.0.24] section 3.7.10 page 81.
 bool TextureCubeMap::isCubeComplete() const
 {
-    return mTexture->isCubeComplete();
+    int    baseWidth  = getBaseLevelWidth();
+    int    baseHeight = getBaseLevelHeight();
+    GLenum baseFormat = getBaseLevelInternalFormat();
+
+    if (baseWidth <= 0 || baseWidth != baseHeight)
+    {
+        return false;
+    }
+
+    for (int faceIndex = 1; faceIndex < 6; faceIndex++)
+    {
+        const rx::Image *faceBaseImage = mTexture->getImage(0, faceIndex);
+
+        if (faceBaseImage->getWidth()          != baseWidth  ||
+            faceBaseImage->getHeight()         != baseHeight ||
+            faceBaseImage->getInternalFormat() != baseFormat )
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool TextureCubeMap::isCompressed(GLenum target, GLint level) const
@@ -393,9 +561,42 @@ void TextureCubeMap::storage(GLsizei levels, GLenum internalformat, GLsizei size
     mTexture->storage(GL_TEXTURE_CUBE_MAP, levels, internalformat, size, size, 1);
 }
 
-unsigned int TextureCubeMap::getRenderTargetSerial(GLenum target, GLint level)
+// Tests for texture sampling completeness
+bool TextureCubeMap::isSamplerComplete(const SamplerState &samplerState, const TextureCapsMap &textureCaps, const Extensions &extensions, int clientVersion) const
 {
-    return mTexture->getRenderTargetSerial(level, targetToLayerIndex(target));
+    int size = getBaseLevelWidth();
+
+    bool mipmapping = IsMipmapFiltered(samplerState);
+
+    if (!textureCaps.get(getInternalFormat(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0)).filterable && !IsPointSampled(samplerState))
+    {
+        return false;
+    }
+
+    if (!gl::isPow2(size) && !extensions.textureNPOT)
+    {
+        if (samplerState.wrapS != GL_CLAMP_TO_EDGE || samplerState.wrapT != GL_CLAMP_TO_EDGE || mipmapping)
+        {
+            return false;
+        }
+    }
+
+    if (!mipmapping)
+    {
+        if (!isCubeComplete())
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if (!isMipmapComplete())   // Also tests for isCubeComplete()
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 int TextureCubeMap::targetToLayerIndex(GLenum target)
@@ -420,25 +621,82 @@ GLenum TextureCubeMap::layerIndexToTarget(GLint layer)
     return GL_TEXTURE_CUBE_MAP_POSITIVE_X + layer;
 }
 
-rx::RenderTarget *TextureCubeMap::getRenderTarget(GLenum target, GLint level)
+bool TextureCubeMap::isMipmapComplete() const
 {
-    return mTexture->getRenderTarget(level, targetToLayerIndex(target));
+    if (isImmutable())
+    {
+        return true;
+    }
+
+    if (!isCubeComplete())
+    {
+        return false;
+    }
+
+    int levelCount = mipLevels();
+
+    for (int face = 0; face < 6; face++)
+    {
+        for (int level = 1; level < levelCount; level++)
+        {
+            if (!isFaceLevelComplete(face, level))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
-rx::RenderTarget *TextureCubeMap::getDepthStencil(GLenum target, GLint level)
+bool TextureCubeMap::isFaceLevelComplete(int faceIndex, int level) const
 {
-    return mTexture->getDepthStencil(level, targetToLayerIndex(target));
+    ASSERT(level >= 0 && faceIndex < 6 && level < IMPLEMENTATION_MAX_TEXTURE_LEVELS && mTexture->getImage(level, faceIndex) != NULL);
+
+    if (isImmutable())
+    {
+        return true;
+    }
+
+    int baseSize = getBaseLevelWidth();
+
+    if (baseSize <= 0)
+    {
+        return false;
+    }
+
+    // "isCubeComplete" checks for base level completeness and we must call that
+    // to determine if any face at level 0 is complete. We omit that check here
+    // to avoid re-checking cube-completeness for every face at level 0.
+    if (level == 0)
+    {
+        return true;
+    }
+
+    // Check that non-zero levels are consistent with the base level.
+    const rx::Image *faceLevelImage = mTexture->getImage(level, faceIndex);
+
+    if (faceLevelImage->getInternalFormat() != getBaseLevelInternalFormat())
+    {
+        return false;
+    }
+
+    if (faceLevelImage->getWidth() != std::max(1, baseSize >> level))
+    {
+        return false;
+    }
+
+    return true;
 }
 
-Texture3D::Texture3D(rx::Texture3DImpl *impl, GLuint id)
-    : Texture(id, GL_TEXTURE_3D),
-      mTexture(impl)
+
+Texture3D::Texture3D(rx::TextureImpl *impl, GLuint id)
+    : Texture(impl, id, GL_TEXTURE_3D)
 {
 }
 
 Texture3D::~Texture3D()
 {
-    SafeDelete(mTexture);
 }
 
 GLsizei Texture3D::getWidth(GLint level) const
@@ -503,31 +761,100 @@ void Texture3D::storage(GLsizei levels, GLenum internalformat, GLsizei width, GL
     mTexture->storage(GL_TEXTURE_3D, levels, internalformat, width, height, depth);
 }
 
-unsigned int Texture3D::getRenderTargetSerial(GLint level, GLint layer)
+bool Texture3D::isSamplerComplete(const SamplerState &samplerState, const TextureCapsMap &textureCaps, const Extensions &extensions, int clientVersion) const
 {
-    return mTexture->getRenderTargetSerial(level, layer);
+    GLsizei width = getBaseLevelWidth();
+    GLsizei height = getBaseLevelHeight();
+    GLsizei depth = getBaseLevelDepth();
+
+    if (width <= 0 || height <= 0 || depth <= 0)
+    {
+        return false;
+    }
+
+    if (!textureCaps.get(getInternalFormat(0)).filterable && !IsPointSampled(samplerState))
+    {
+        return false;
+    }
+
+    if (IsMipmapFiltered(samplerState) && !isMipmapComplete())
+    {
+        return false;
+    }
+
+    return true;
 }
 
-
-rx::RenderTarget *Texture3D::getRenderTarget(GLint level, GLint layer)
+bool Texture3D::isMipmapComplete() const
 {
-    return mTexture->getRenderTarget(level, layer);
+    int levelCount = mipLevels();
+
+    for (int level = 0; level < levelCount; level++)
+    {
+        if (!isLevelComplete(level))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
-rx::RenderTarget *Texture3D::getDepthStencil(GLint level, GLint layer)
+bool Texture3D::isLevelComplete(int level) const
 {
-    return mTexture->getDepthStencil(level, layer);
+    ASSERT(level >= 0 && level < IMPLEMENTATION_MAX_TEXTURE_LEVELS && mTexture->getImage(level, 0) != NULL);
+
+    if (isImmutable())
+    {
+        return true;
+    }
+
+    GLsizei width = getBaseLevelWidth();
+    GLsizei height = getBaseLevelHeight();
+    GLsizei depth = getBaseLevelDepth();
+
+    if (width <= 0 || height <= 0 || depth <= 0)
+    {
+        return false;
+    }
+
+    if (level == 0)
+    {
+        return true;
+    }
+
+    rx::Image *levelImage = mTexture->getImage(level, 0);
+
+    if (levelImage->getInternalFormat() != getBaseLevelInternalFormat())
+    {
+        return false;
+    }
+
+    if (levelImage->getWidth() != std::max(1, width >> level))
+    {
+        return false;
+    }
+
+    if (levelImage->getHeight() != std::max(1, height >> level))
+    {
+        return false;
+    }
+
+    if (levelImage->getDepth() != std::max(1, depth >> level))
+    {
+        return false;
+    }
+
+    return true;
 }
 
-Texture2DArray::Texture2DArray(rx::Texture2DArrayImpl *impl, GLuint id)
-    : Texture(id, GL_TEXTURE_2D_ARRAY),
-      mTexture(impl)
+Texture2DArray::Texture2DArray(rx::TextureImpl *impl, GLuint id)
+    : Texture(impl, id, GL_TEXTURE_2D_ARRAY)
 {
 }
 
 Texture2DArray::~Texture2DArray()
 {
-    SafeDelete(mTexture);
 }
 
 GLsizei Texture2DArray::getWidth(GLint level) const
@@ -592,19 +919,89 @@ void Texture2DArray::storage(GLsizei levels, GLenum internalformat, GLsizei widt
     mTexture->storage(GL_TEXTURE_2D_ARRAY, levels, internalformat, width, height, depth);
 }
 
-unsigned int Texture2DArray::getRenderTargetSerial(GLint level, GLint layer)
+bool Texture2DArray::isSamplerComplete(const SamplerState &samplerState, const TextureCapsMap &textureCaps, const Extensions &extensions, int clientVersion) const
 {
-    return mTexture->getRenderTargetSerial(level, layer);
+    GLsizei width = getBaseLevelWidth();
+    GLsizei height = getBaseLevelHeight();
+    GLsizei depth = getLayers(0);
+
+    if (width <= 0 || height <= 0 || depth <= 0)
+    {
+        return false;
+    }
+
+    if (!textureCaps.get(getBaseLevelInternalFormat()).filterable && !IsPointSampled(samplerState))
+    {
+        return false;
+    }
+
+    if (IsMipmapFiltered(samplerState) && !isMipmapComplete())
+    {
+        return false;
+    }
+
+    return true;
 }
 
-rx::RenderTarget *Texture2DArray::getRenderTarget(GLint level, GLint layer)
+bool Texture2DArray::isMipmapComplete() const
 {
-    return mTexture->getRenderTarget(level, layer);
+    int levelCount = mipLevels();
+
+    for (int level = 1; level < levelCount; level++)
+    {
+        if (!isLevelComplete(level))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
-rx::RenderTarget *Texture2DArray::getDepthStencil(GLint level, GLint layer)
+bool Texture2DArray::isLevelComplete(int level) const
 {
-    return mTexture->getDepthStencil(level, layer);
+    ASSERT(level >= 0 && level < IMPLEMENTATION_MAX_TEXTURE_LEVELS);
+
+    if (isImmutable())
+    {
+        return true;
+    }
+
+    GLsizei width = getBaseLevelWidth();
+    GLsizei height = getBaseLevelHeight();
+    GLsizei layers = getLayers(0);
+
+    if (width <= 0 || height <= 0 || layers <= 0)
+    {
+        return false;
+    }
+
+    if (level == 0)
+    {
+        return true;
+    }
+
+    if (getInternalFormat(level) != getInternalFormat(0))
+    {
+        return false;
+    }
+
+    if (getWidth(level) != std::max(1, width >> level))
+    {
+        return false;
+    }
+
+    if (getHeight(level) != std::max(1, height >> level))
+    {
+        return false;
+    }
+
+    if (getLayers(level) != layers)
+    {
+        return false;
+    }
+
+    return true;
 }
 
 }

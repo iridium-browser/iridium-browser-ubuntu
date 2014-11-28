@@ -13,8 +13,8 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
@@ -122,18 +122,17 @@ void ZygoteHostImpl::Init(const std::string& sandbox_cmd) {
   // Should this list be obtained from browser_render_process_host.cc?
   static const char* kForwardSwitches[] = {
     switches::kAllowSandboxDebugging,
-    switches::kLoggingLevel,
-    switches::kEnableLogging,  // Support, e.g., --enable-logging=stderr.
-    switches::kV,
-    switches::kVModule,
-    switches::kRegisterPepperPlugins,
     switches::kDisableSeccompFilterSandbox,
-
+    switches::kEnableLogging,  // Support, e.g., --enable-logging=stderr.
     // Zygote process needs to know what resources to have loaded when it
     // becomes a renderer process.
     switches::kForceDeviceScaleFactor,
-
+    switches::kLoggingLevel,
     switches::kNoSandbox,
+    switches::kPpapiInProcess,
+    switches::kRegisterPepperPlugins,
+    switches::kV,
+    switches::kVModule,
   };
   cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
                             arraysize(kForwardSwitches));

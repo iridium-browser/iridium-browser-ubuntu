@@ -29,7 +29,6 @@
 #define DatabaseContext_h
 
 #include "core/dom/ActiveDOMObject.h"
-#include "core/workers/WorkerGlobalScope.h"
 #include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/ThreadSafeRefCounted.h"
@@ -37,7 +36,6 @@
 namespace blink {
 
 class Database;
-class DatabaseBackendBase;
 class DatabaseContext;
 class TaskSynchronizer;
 class DatabaseThread;
@@ -46,8 +44,7 @@ class SecurityOrigin;
 
 class DatabaseContext FINAL
     : public ThreadSafeRefCountedWillBeGarbageCollectedFinalized<DatabaseContext>
-    , public ActiveDOMObject
-    , private WorkerGlobalScope::TerminationObserver {
+    , public ActiveDOMObject {
 public:
     friend class DatabaseManager;
 
@@ -62,10 +59,9 @@ public:
 
     DatabaseContext* backend();
     DatabaseThread* databaseThread();
+    bool databaseThreadAvailable();
 
     void setHasOpenDatabases() { m_hasOpenDatabases = true; }
-    void didOpenDatabase(DatabaseBackendBase&);
-    void didCloseDatabase(DatabaseBackendBase&);
     // Blocks the caller thread until cleanup tasks are completed.
     void stopDatabases();
 
@@ -77,25 +73,7 @@ public:
 private:
     explicit DatabaseContext(ExecutionContext*);
 
-    virtual void wasRequestedToTerminate() OVERRIDE;
-    void stopSyncDatabases();
-
     RefPtrWillBeMember<DatabaseThread> m_databaseThread;
-#if ENABLE(OILPAN)
-    class DatabaseCloser {
-    public:
-        explicit DatabaseCloser(DatabaseBackendBase& database) : m_database(database) { }
-        ~DatabaseCloser();
-
-    private:
-        DatabaseBackendBase& m_database;
-    };
-    HeapHashMap<WeakMember<DatabaseBackendBase>, OwnPtr<DatabaseCloser> > m_openSyncDatabases;
-#else
-    // The contents of m_openSyncDatabases are raw pointers. It's safe because
-    // DatabaseBackendSync is always closed before destruction.
-    HashSet<DatabaseBackendBase*> m_openSyncDatabases;
-#endif
     bool m_hasOpenDatabases; // This never changes back to false, even after the database thread is closed.
     bool m_hasRequestedTermination;
 };

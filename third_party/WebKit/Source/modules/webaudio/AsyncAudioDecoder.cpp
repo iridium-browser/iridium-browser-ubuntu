@@ -49,7 +49,7 @@ AsyncAudioDecoder::~AsyncAudioDecoder()
 {
 }
 
-void AsyncAudioDecoder::decodeAsync(ArrayBuffer* audioData, float sampleRate, PassOwnPtr<AudioBufferCallback> successCallback, PassOwnPtr<AudioBufferCallback> errorCallback)
+void AsyncAudioDecoder::decodeAsync(ArrayBuffer* audioData, float sampleRate, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback)
 {
     ASSERT(isMainThread());
     ASSERT(audioData);
@@ -60,7 +60,7 @@ void AsyncAudioDecoder::decodeAsync(ArrayBuffer* audioData, float sampleRate, Pa
     RefPtr<ArrayBuffer> audioDataRef(audioData);
 
     // The leak references to successCallback and errorCallback are picked up on notifyComplete.
-    m_thread->postTask(new Task(WTF::bind(&AsyncAudioDecoder::decode, audioDataRef.release().leakRef(), sampleRate, successCallback.leakPtr(), errorCallback.leakPtr())));
+    m_thread->postTask(new Task(WTF::bind(&AsyncAudioDecoder::decode, audioDataRef.release().leakRef(), sampleRate, successCallback, errorCallback)));
 }
 
 void AsyncAudioDecoder::decode(ArrayBuffer* audioData, float sampleRate, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback)
@@ -76,15 +76,13 @@ void AsyncAudioDecoder::notifyComplete(ArrayBuffer* audioData, AudioBufferCallba
 {
     // Adopt references, so everything gets correctly dereffed.
     RefPtr<ArrayBuffer> audioDataRef = adoptRef(audioData);
-    OwnPtr<AudioBufferCallback> successCallbackPtr = adoptPtr(successCallback);
-    OwnPtr<AudioBufferCallback> errorCallbackPtr = adoptPtr(errorCallback);
     RefPtr<AudioBus> audioBusRef = adoptRef(audioBus);
 
-    RefPtrWillBeRawPtr<AudioBuffer> audioBuffer = AudioBuffer::createFromAudioBus(audioBus);
-    if (audioBuffer.get() && successCallback)
-        successCallback->handleEvent(audioBuffer.get());
+    AudioBuffer* audioBuffer = AudioBuffer::createFromAudioBus(audioBus);
+    if (audioBuffer && successCallback)
+        successCallback->handleEvent(audioBuffer);
     else if (errorCallback)
-        errorCallback->handleEvent(audioBuffer.get());
+        errorCallback->handleEvent(audioBuffer);
 }
 
 } // namespace blink

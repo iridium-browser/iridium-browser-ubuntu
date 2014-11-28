@@ -13,7 +13,7 @@
 #include "src/deoptimizer.h"
 #include "src/full-codegen.h"
 #include "src/runtime.h"
-#include "src/stub-cache.h"
+
 
 namespace v8 {
 namespace internal {
@@ -824,8 +824,8 @@ void Builtins::Generate_JSConstructEntryTrampoline(MacroAssembler* masm) {
 }
 
 
-void Builtins::Generate_CompileUnoptimized(MacroAssembler* masm) {
-  CallRuntimePassFunction(masm, Runtime::kCompileUnoptimized);
+void Builtins::Generate_CompileLazy(MacroAssembler* masm) {
+  CallRuntimePassFunction(masm, Runtime::kCompileLazy);
   GenerateTailCallToReturnedCode(masm);
 }
 

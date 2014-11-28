@@ -31,19 +31,24 @@
 #ifndef MixedContentChecker_h
 #define MixedContentChecker_h
 
+#include "platform/heap/Handle.h"
+#include "public/platform/WebURLRequest.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class LocalFrame;
 class FrameLoaderClient;
+class LocalFrame;
 class KURL;
 class SecurityOrigin;
 
-class MixedContentChecker {
+class MixedContentChecker FINAL {
     WTF_MAKE_NONCOPYABLE(MixedContentChecker);
+    DISALLOW_ALLOCATION();
 public:
-    MixedContentChecker(LocalFrame*);
+    explicit MixedContentChecker(LocalFrame*);
+
+    static bool shouldBlockFetch(LocalFrame*, const ResourceRequest&, const KURL&);
 
     bool canDisplayInsecureContent(SecurityOrigin* securityOrigin, const KURL& url) const
     {
@@ -60,6 +65,10 @@ public:
     bool canFrameInsecureContent(SecurityOrigin*, const KURL&) const;
     static bool isMixedContent(SecurityOrigin*, const KURL&);
 
+    static void checkMixedPrivatePublic(LocalFrame*, const AtomicString& resourceIPAddress);
+
+    void trace(Visitor*);
+
 private:
     enum MixedContentType {
         Display,
@@ -67,6 +76,17 @@ private:
         WebSocket,
         Submission
     };
+
+    enum ContextType {
+        ContextTypeBlockable,
+        ContextTypeOptionallyBlockable,
+        ContextTypeShouldBeBlockable,
+        ContextTypeBlockableUnlessLax
+    };
+
+    static ContextType contextTypeFromContext(WebURLRequest::RequestContext);
+    static const char* typeNameFromContext(WebURLRequest::RequestContext);
+    static void logToConsole(LocalFrame*, const KURL&, WebURLRequest::RequestContext, bool allowed);
 
     // FIXME: This should probably have a separate client from FrameLoader.
     FrameLoaderClient* client() const;
@@ -77,7 +97,7 @@ private:
 
     void logWarning(bool allowed, const KURL& i, const MixedContentType) const;
 
-    LocalFrame* m_frame;
+    RawPtrWillBeMember<LocalFrame> m_frame;
 };
 
 } // namespace blink

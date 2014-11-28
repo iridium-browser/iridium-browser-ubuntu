@@ -1,9 +1,10 @@
-#!/usr/bin/python
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Support generic spreadsheet-like table information."""
+
+from __future__ import print_function
 
 import inspect
 import re
@@ -394,7 +395,7 @@ class Table(object):
                                       merge_rule=merge_rule)
           except ValueError:
             msg = "Failed to merge '%s' value in row %r" % (col, id_values)
-            print >> sys.stderr, msg
+            print(msg, file=sys.stderr)
             raise
 
           if val != row[col]:

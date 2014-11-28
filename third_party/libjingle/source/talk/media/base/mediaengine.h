@@ -91,8 +91,6 @@ class MediaEngineInterface {
   virtual AudioOptions GetAudioOptions() const = 0;
   // Sets global audio options. "options" are from AudioOptions, above.
   virtual bool SetAudioOptions(const AudioOptions& options) = 0;
-  // Sets global video options. "options" are from VideoOptions, above.
-  virtual bool SetVideoOptions(const VideoOptions& options) = 0;
   // Sets the value used by the echo canceller to offset delay values obtained
   // from the OS.
   virtual bool SetAudioDelayOffset(int offset) = 0;
@@ -124,7 +122,6 @@ class MediaEngineInterface {
   // when a VoiceMediaChannel starts sending.
   virtual bool SetLocalMonitor(bool enable) = 0;
   // Installs a callback for raw frames from the local camera.
-  virtual bool SetLocalRenderer(VideoRenderer* renderer) = 0;
 
   virtual const std::vector<AudioCodec>& audio_codecs() = 0;
   virtual const std::vector<RtpHeaderExtension>&
@@ -214,9 +211,6 @@ class CompositeMediaEngine : public MediaEngineInterface {
   virtual bool SetAudioOptions(const AudioOptions& options) {
     return voice_.SetOptions(options);
   }
-  virtual bool SetVideoOptions(const VideoOptions& options) {
-    return video_.SetOptions(options);
-  }
   virtual bool SetAudioDelayOffset(int offset) {
     return voice_.SetDelayOffset(offset);
   }
@@ -245,10 +239,6 @@ class CompositeMediaEngine : public MediaEngineInterface {
   virtual bool SetLocalMonitor(bool enable) {
     return voice_.SetLocalMonitor(enable);
   }
-  virtual bool SetLocalRenderer(VideoRenderer* renderer) {
-    return video_.SetLocalRenderer(renderer);
-  }
-
   virtual const std::vector<AudioCodec>& audio_codecs() {
     return voice_.codecs();
   }
@@ -361,7 +351,6 @@ class NullVideoEngine {
   bool SetDefaultEncoderConfig(const VideoEncoderConfig& config) {
     return true;
   }
-  bool SetLocalRenderer(VideoRenderer* renderer) { return true; }
   const std::vector<VideoCodec>& codecs() { return codecs_; }
   const std::vector<RtpHeaderExtension>& rtp_header_extensions() {
     return rtp_header_extensions_;

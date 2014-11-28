@@ -15,12 +15,12 @@
  */
 package com.google.ipc.invalidation.util;
 
-import com.google.common.base.Preconditions;
-import com.google.protobuf.ByteString;
+import com.google.ipc.invalidation.util.LazyString.LazyStringReceiver;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.Arrays;
+import java.util.Locale;
 
 
 /**
@@ -33,6 +33,32 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
 
   public static final Bytes EMPTY_BYTES = new Bytes(new byte[0]);
   private static final Charset UTF_8 = Charset.forName("UTF-8");
+
+  /**
+   * Interface accessing byte elements from {@code T}, which may be (for instance)
+   * {@link com.google.protobuf.ByteString ByteString} or {@code byte[]}.
+   */
+  interface BytesAccessor<T> {
+    int size(T bytes);
+    byte get(T bytes, int index);
+  }
+
+  private static final BytesAccessor<byte[]> BYTE_ARRAY_ACCESSOR = new BytesAccessor<byte[]>() {
+    @Override public int size(byte[] bytes) {
+      return bytes == null ? 0 : bytes.length;
+    }
+
+    @Override public byte get(byte[] bytes, int index) {
+      return bytes[index];
+    }
+  };
+
+  private static final LazyStringReceiver<byte[]> BYTE_ARRAY_RECEIVER =
+      new LazyStringReceiver<byte[]>() {
+    @Override public void appendToBuilder(TextBuilder builder, byte[] element) {
+      toCompactString(builder, element);
+    }
+  };
 
   /**
    * Three arrays that store the representation of each character from 0 to 255.
@@ -58,7 +84,7 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     // Initialize the array with the Octal string values so that we do not have
     // to do String.format for every byte during runtime.
     for (int i = 0; i < CHAR_OCTAL_STRINGS1.length; i++) {
-      String value = String.format("\\%03o", i);
+      String value = String.format(Locale.ROOT, "\\%03o", i);
       CHAR_OCTAL_STRINGS1[i] = value.charAt(1);
       CHAR_OCTAL_STRINGS2[i] = value.charAt(2);
       CHAR_OCTAL_STRINGS3[i] = value.charAt(3);
@@ -95,10 +121,6 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     bytes[0] = b;
   }
 
-  public Bytes(ByteString byteString) {
-    this(byteString.toByteArray());
-  }
-
   /** Creates a Bytes object from the given string encoded as a UTF-8 byte array. */
   public static Bytes fromUtf8Encoding(String s) {
     return new Bytes(s.getBytes(UTF_8));
@@ -127,18 +149,12 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     return bytes;
   }
 
-  /** Converts this to a byte string. */
-  public ByteString toByteString() {
-    return ByteString.copyFrom(getByteArray());
-  }
-
   /**
-   * Returns a new {@code Bytes} containing the given subrange of bytes [{@code
-   * from}, {@code to}).
+   * Returns a new {@code Bytes} containing the given subrange of bytes [{@code from}, {@code to}).
    */
   public Bytes subsequence(int from, int to) {
-    // Identical semantics to Arrays.copyOfRange() but implemented manually
-    // so runs on Froyo (JDK 1.5).
+    // Identical semantics to Arrays.copyOfRange() but implemented manually so runs on
+    // Froyo (JDK 1.5).
     int newLength = to - from;
     if (newLength < 0) {
       throw new IllegalArgumentException(from + " > " + to);
@@ -148,8 +164,7 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     return new Bytes(copy);
   }
 
-  @Override
-  public boolean equals(final Object o) {
+  @Override public boolean equals(final Object o) {
     if (o == this) {
       return true;
     }
@@ -162,8 +177,7 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     return Arrays.equals(bytes, other.bytes);
   }
 
-  @Override
-  public int hashCode() {
+  @Override public int hashCode() {
     int h = hash;
 
     // If the hash has been not computed, go through each byte and compute it.
@@ -220,16 +234,27 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     return true;
   }
 
-  @Override
-  public int compareTo(Bytes other) {
+  @Override public int compareTo(Bytes other) {
     return compare(bytes, other.bytes);
   }
 
+  public static Bytes fromByteArray(byte[] bytes) {
+    return (bytes == null) ? null : new Bytes(bytes);
+  }
+
   /**
-   * Same specs as Bytes.compareTo except for the byte[] type. Null arrays are ordered before
+   * Same specs as {@link #compareTo} except for the byte[] type. Null arrays are ordered before
    * non-null arrays.
    */
   public static int compare(byte[] first, byte[] second) {
+    return compare(BYTE_ARRAY_ACCESSOR, first, second);
+  }
+
+  /**
+   * Performs lexicographic comparison of two byte sequences. Null sequences are ordered before
+   * non-null sequences.
+   */
+  static <T> int compare(BytesAccessor<T> accessor, T first, T second) {
     // Order null arrays before non-null arrays.
     if (first == null) {
       return (second == null) ? 0 : -1;
@@ -238,11 +263,12 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
       return 1;
     }
 
-    int minLength = Math.min(first.length, second.length);
+    int minLength = Math.min(accessor.size(first), accessor.size(second));
     for (int i = 0; i < minLength; i++) {
-      if (first[i] != second[i]) {
-        int firstByte = first[i] & 0xff;
-        int secondByte = second[i] & 0xff;
+
+      if (accessor.get(first, i) != accessor.get(second, i)) {
+        int firstByte = accessor.get(first, i) & 0xff;
+        int secondByte = accessor.get(second, i) & 0xff;
         return firstByte - secondByte;
       }
     }
@@ -250,69 +276,52 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     // * If the arrays are of equal length, they must be identical (else we would have
     //   returned the correct value above
     // * If they are not of equal length, the one with the longer length is greater.
-    return first.length - second.length;
-  }
-
-  /** Compares lexicographic order of {@code first} and {@code second}. */
-  public static int compare(ByteString first, ByteString second) {
-    Preconditions.checkNotNull(first);
-    Preconditions.checkNotNull(second);
-
-    // Note: size() is O(1) on ByteString.
-    for (int i = 0; i < first.size(); ++i) {
-      if (i == second.size()) {
-        // 'first' is longer than 'second' (logically, think of 'second' as padded with special
-        // 'blank' symbols that are smaller than any other symbol per the usual lexicographic
-        // ordering convention.)
-        return +1;
-      }
-      byte firstByte = first.byteAt(i);
-      byte secondByte = second.byteAt(i);
-      if (firstByte != secondByte) {
-        return (firstByte & 0xff) - (secondByte & 0xff);
-      }
-    }
-    // We ran through both strings and found no differences. If 'second' is longer than 'first',
-    // then we return -1. Otherwise, it implies that both strings have been consumed and no
-    // differences discovered in which case we return 0.
-    return (second.size() > first.size()) ? -1 : 0;
+    return accessor.size(first) - accessor.size(second);
   }
 
   /**
-   * Renders the bytes as a string in standard bigtable ascii / octal mix
-   * compatible with bt and returns it. Borrowed from Bigtable's
-   * Util.keyToString().
-   */
-  public static String toString(ByteString bytes) {
-    return toString(bytes.toByteArray());
-  }
-
-  /**
-   * Renders the bytes as a string in standard bigtable ascii / octal mix
-   * compatible with bt and returns it. Borrowed from Bigtable's
-   * Util.keyToString().
+   * Renders the bytes as a string in standard bigtable ascii / octal mix compatible with bt and
+   * returns it.
    */
   public static String toString(byte[] bytes) {
     return toCompactString(new TextBuilder(), bytes).toString();
   }
 
   /**
-   * Renders the bytes as a string in standard bigtable ascii / octal mix
-   * compatible with bt and adds it to builder. Borrowed from Bigtable's
-   * Util.keyToString().
+   * Renders the bytes as a string in standard bigtable ascii / octal mix compatible with bt and
+   * adds it to builder.
    */
-  @Override
-  public void toCompactString(TextBuilder builder) {
+  @Override public void toCompactString(TextBuilder builder) {
     toCompactString(builder, bytes);
   }
 
   /**
-   * Renders the bytes as a string in standard bigtable ascii / octal mix
-   * compatible with bt and adds it to builder. Borrowed from Bigtable's
-   * Util.keyToString(). Returns {@code builder}.
+   * Renders the bytes as a string in standard bigtable ascii / octal mix compatible with bt and
+   * adds it to builder. Returns {@code builder}.
    */
   public static TextBuilder toCompactString(TextBuilder builder, byte[] bytes) {
-    for (byte c : bytes) {
+    return toCompactString(BYTE_ARRAY_ACCESSOR, builder, bytes);
+  }
+
+  /**
+   * Returns an object that lazily formats {@code bytes} when {@link Object#toString()} is called.
+   */
+  public static Object toLazyCompactString(byte[] bytes) {
+    if (bytes == null || bytes.length == 0) {
+      return "";
+    }
+    return LazyString.toLazyCompactString(bytes, BYTE_ARRAY_RECEIVER);
+  }
+
+  /**
+   * Renders the bytes as a string in standard bigtable ascii / octal mix compatible with bt and
+   * adds it to builder. Borrowed from Bigtable's {@code Util$keyToString()}.
+   * Returns {@code builder}.
+   */
+  static <T> TextBuilder toCompactString(BytesAccessor<T> accessor, TextBuilder builder,
+      T bytes) {
+    for (int i = 0; i < accessor.size(bytes); i++) {
+      byte c = accessor.get(bytes, i);
       switch(c) {
         case '\n': builder.append('\\'); builder.append('n'); break;
         case '\r': builder.append('\\'); builder.append('r'); break;

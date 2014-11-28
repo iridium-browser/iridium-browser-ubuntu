@@ -87,8 +87,6 @@ public:
 //   errors.
 // - If you added an onfoo attribute, use DEFINE_ATTRIBUTE_EVENT_LISTENER(foo)
 //   in your class declaration.
-// - Call ScriptWrappable::init(this) in your constructor, unless you are already
-//   doing so.
 // - Override EventTarget::interfaceName() and executionContext(). The former
 //   will typically return EventTargetNames::YourClassName. The latter will
 //   return ActiveDOMObject::executionContext (if you are an ActiveDOMObject)
@@ -98,6 +96,7 @@ public:
 // Optionally, add a FooEvent.idl class, but that's outside the scope of this
 // comment (and much more straightforward).
 class EventTarget : public WillBeGarbageCollectedMixin, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
 #if !ENABLE(OILPAN)
     void ref() { refEventTarget(); }
@@ -268,6 +267,6 @@ private: \
 // Use this macro if your EventTarget subclass is also a subclass of WTF::RefCounted.
 // A ref-counted class that uses a different method of refcounting should use DEFINE_EVENT_TARGET_REFCOUNTING directly.
 // Both of these macros are meant to be placed just before the "public:" section of the class declaration.
-#define REFCOUNTED_EVENT_TARGET(className) DEFINE_EVENT_TARGET_REFCOUNTING(RefCountedWillBeRefCountedGarbageCollected<className>)
+#define REFCOUNTED_EVENT_TARGET(className) DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCounted<className>)
 
 #endif // EventTarget_h

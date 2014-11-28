@@ -17,9 +17,11 @@
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
@@ -48,7 +50,7 @@
 #include "content/public/browser/web_contents.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/transport_security_state.h"
-#include "webkit/browser/database/database_tracker.h"
+#include "storage/browser/database/database_tracker.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/media/protected_media_identifier_permission_context.h"
@@ -70,7 +72,7 @@
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/browser/extensions/api/web_request/web_request_api.h"
+#include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/common/extension.h"
@@ -85,13 +87,13 @@ namespace {
 
 void NotifyOTRProfileCreatedOnIOThread(void* original_profile,
                                        void* otr_profile) {
-  ExtensionWebRequestEventRouter::GetInstance()->OnOTRProfileCreated(
+  ExtensionWebRequestEventRouter::GetInstance()->OnOTRBrowserContextCreated(
       original_profile, otr_profile);
 }
 
 void NotifyOTRProfileDestroyedOnIOThread(void* original_profile,
                                          void* otr_profile) {
-  ExtensionWebRequestEventRouter::GetInstance()->OnOTRProfileDestroyed(
+  ExtensionWebRequestEventRouter::GetInstance()->OnOTRBrowserContextDestroyed(
       original_profile, otr_profile);
 }
 
@@ -159,6 +161,10 @@ void OffTheRecordProfileImpl::Init() {
       BrowserThread::IO, FROM_HERE,
       base::Bind(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
 #endif
+
+  // The DomDistillerViewerSource is not a normal WebUI so it must be registered
+  // as a URLDataSource early.
+  RegisterDomDistillerViewerSource(this);
 }
 
 OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
@@ -194,9 +200,9 @@ void OffTheRecordProfileImpl::InitIoData() {
 }
 
 void OffTheRecordProfileImpl::InitHostZoomMap() {
-  HostZoomMap* host_zoom_map = HostZoomMap::GetForBrowserContext(this);
+  HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
   HostZoomMap* parent_host_zoom_map =
-      HostZoomMap::GetForBrowserContext(profile_);
+      HostZoomMap::GetDefaultForBrowserContext(profile_);
   host_zoom_map->CopyFrom(parent_host_zoom_map);
   // Observe parent's HZM change for propagating change of parent's
   // change to this HZM.
@@ -357,8 +363,10 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
 #if defined(ENABLE_EXTENSIONS)
     ExtensionService* extension_service =
         extensions::ExtensionSystem::Get(this)->extension_service();
-    if (extension_service)
-      host_content_settings_map_->RegisterExtensionService(extension_service);
+    if (extension_service) {
+      extension_service->RegisterContentSettings(
+          host_content_settings_map_.get());
+    }
 #endif
   }
   return host_content_settings_map_.get();
@@ -372,7 +380,7 @@ content::BrowserPluginGuestManager* OffTheRecordProfileImpl::GetGuestManager() {
 #endif
 }
 
-quota::SpecialStoragePolicy*
+storage::SpecialStoragePolicy*
 OffTheRecordProfileImpl::GetSpecialStoragePolicy() {
   return GetExtensionSpecialStoragePolicy();
 }
@@ -492,8 +500,7 @@ class GuestSessionProfile : public OffTheRecordProfileImpl {
   virtual void InitChromeOSPreferences() OVERRIDE {
     chromeos_preferences_.reset(new chromeos::Preferences());
     chromeos_preferences_->Init(
-        static_cast<PrefServiceSyncable*>(GetPrefs()),
-        user_manager::UserManager::Get()->GetActiveUser());
+        this, user_manager::UserManager::Get()->GetActiveUser());
   }
 
  private:
@@ -516,7 +523,7 @@ Profile* Profile::CreateOffTheRecordProfile() {
 
 void OffTheRecordProfileImpl::OnZoomLevelChanged(
     const HostZoomMap::ZoomLevelChange& change) {
-  HostZoomMap* host_zoom_map = HostZoomMap::GetForBrowserContext(this);
+  HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
   switch (change.mode) {
     case HostZoomMap::ZOOM_CHANGED_TEMPORARY_ZOOM:
        return;

@@ -30,7 +30,7 @@
 class Profile;
 class ProfileSyncServiceBase;
 
-namespace fileapi {
+namespace storage {
 class FileSystemContext;
 }
 
@@ -56,19 +56,17 @@ class SyncFileSystemService
   // KeyedService implementation.
   virtual void Shutdown() OVERRIDE;
 
-  void InitializeForApp(
-      fileapi::FileSystemContext* file_system_context,
-      const GURL& app_origin,
-      const SyncStatusCallback& callback);
+  void InitializeForApp(storage::FileSystemContext* file_system_context,
+                        const GURL& app_origin,
+                        const SyncStatusCallback& callback);
 
   void GetExtensionStatusMap(const ExtensionStatusMapCallback& callback);
   void DumpFiles(const GURL& origin, const DumpFilesCallback& callback);
   void DumpDatabase(const DumpFilesCallback& callback);
 
   // Returns the file |url|'s sync status.
-  void GetFileSyncStatus(
-      const fileapi::FileSystemURL& url,
-      const SyncFileStatusCallback& callback);
+  void GetFileSyncStatus(const storage::FileSystemURL& url,
+                         const SyncFileStatusCallback& callback);
 
   void AddSyncEventObserver(SyncEventObserver* observer);
   void RemoveSyncEventObserver(SyncEventObserver* observer);
@@ -80,11 +78,17 @@ class SyncFileSystemService
   virtual SyncServiceState GetSyncServiceState() OVERRIDE;
   virtual SyncFileSystemService* GetSyncService() OVERRIDE;
 
+  void OnPromotionCompleted(int* num_running_jobs);
+  void CheckIfIdle();
+
   TaskLogger* task_logger() { return &task_logger_; }
+
+  void CallOnIdleForTesting(const base::Closure& callback);
 
  private:
   friend class SyncFileSystemServiceFactory;
   friend class SyncFileSystemServiceTest;
+  friend class SyncFileSystemTest;
   friend struct base::DefaultDeleter<SyncFileSystemService>;
   friend class LocalSyncRunner;
   friend class RemoteSyncRunner;
@@ -112,17 +116,10 @@ class SyncFileSystemService
 
   void DidDumpDatabase(const DumpFilesCallback& callback,
                        scoped_ptr<base::ListValue> list);
-  void DidDumpV2Database(const DumpFilesCallback& callback,
-                         scoped_ptr<base::ListValue> v1list,
-                         scoped_ptr<base::ListValue> v2list);
 
   void DidGetExtensionStatusMap(
       const ExtensionStatusMapCallback& callback,
       scoped_ptr<RemoteFileSyncService::OriginStatusMap> status_map);
-  void DidGetV2ExtensionStatusMap(
-      const ExtensionStatusMapCallback& callback,
-      scoped_ptr<RemoteFileSyncService::OriginStatusMap> status_map_v1,
-      scoped_ptr<RemoteFileSyncService::OriginStatusMap> status_map_v2);
 
   // Overrides sync_enabled_ setting. This should be called only by tests.
   void SetSyncEnabledForTesting(bool enabled);
@@ -155,11 +152,10 @@ class SyncFileSystemService
   virtual void OnStateChanged() OVERRIDE;
 
   // SyncFileStatusObserver implementation.
-  virtual void OnFileStatusChanged(
-      const fileapi::FileSystemURL& url,
-      SyncFileStatus sync_status,
-      SyncAction action_taken,
-      SyncDirection direction) OVERRIDE;
+  virtual void OnFileStatusChanged(const storage::FileSystemURL& url,
+                                   SyncFileStatus sync_status,
+                                   SyncAction action_taken,
+                                   SyncDirection direction) OVERRIDE;
 
   // Check the profile's sync preference settings and call
   // remote_file_service_->SetSyncEnabled() to update the status.
@@ -179,11 +175,6 @@ class SyncFileSystemService
   scoped_ptr<LocalFileSyncService> local_service_;
   scoped_ptr<RemoteFileSyncService> remote_service_;
 
-  // Holds v2 RemoteFileSyncService, gets created lazily
-  // in case we need to run multiple remote services depending on origin/app.
-  // (crbug.com/324215)
-  scoped_ptr<RemoteFileSyncService> v2_remote_service_;
-
   // Holds all SyncProcessRunners.
   ScopedVector<SyncProcessRunner> local_sync_runners_;
   ScopedVector<SyncProcessRunner> remote_sync_runners_;
@@ -193,6 +184,9 @@ class SyncFileSystemService
 
   TaskLogger task_logger_;
   ObserverList<SyncEventObserver> observers_;
+
+  bool promoting_demoted_changes_;
+  base::Closure idle_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncFileSystemService);
 };

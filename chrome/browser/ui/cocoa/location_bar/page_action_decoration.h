@@ -20,6 +20,10 @@ namespace content {
 class WebContents;
 }
 
+namespace extensions {
+class Extension;
+}
+
 // PageActionDecoration is used to display the icon for a given Page
 // Action and notify the extension when the icon is clicked.
 
@@ -57,15 +61,20 @@ class PageActionDecoration : public ImageDecoration,
   virtual NSMenu* GetMenu() OVERRIDE;
   virtual NSPoint GetBubblePointInFrame(NSRect frame) OVERRIDE;
 
-  // Activate the page action in its default frame.
-  void ActivatePageAction();
+  // Activates the page action in its default frame, and, if |grant_active_tab|
+  // is true, grants active tab permission to the extension. Returns true if
+  // a popup was shown.
+  bool ActivatePageAction(bool grant_active_tab);
 
  private:
   // Activate the page action in the given |frame|.
-  bool ActivatePageAction(NSRect frame);
+  bool ActivatePageAction(NSRect frame, bool grant_active_tab);
 
   // Show the popup in the frame, with the given URL.
   void ShowPopup(const NSRect& frame, const GURL& popup_url);
+
+  // Returns the extension associated with the page action.
+  const extensions::Extension* GetExtension();
 
   // Overridden from NotificationObserver:
   virtual void Observe(int type,
@@ -82,7 +91,6 @@ class PageActionDecoration : public ImageDecoration,
   // owned by us, it resides in the extension of this particular
   // profile.
   ExtensionAction* page_action_;
-
 
   // The object that will be used to get the page action icon for us.
   // It may load the icon asynchronously (in which case the initial icon

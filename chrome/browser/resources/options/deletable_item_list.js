@@ -9,6 +9,8 @@ cr.define('options', function() {
   /**
    * Creates a deletable list item, which has a button that will trigger a call
    * to deleteItemAtIndex(index) in the list.
+   * @constructor
+   * @extends {cr.ui.ListItem}
    */
   var DeletableItem = cr.ui.define('li');
 
@@ -42,10 +44,12 @@ cr.define('options', function() {
 
       this.classList.add('deletable-item');
 
-      this.contentElement_ = this.ownerDocument.createElement('div');
+      this.contentElement_ = /** @type {HTMLElement} */(
+          this.ownerDocument.createElement('div'));
       this.appendChild(this.contentElement_);
 
-      this.closeButtonElement_ = this.ownerDocument.createElement('button');
+      this.closeButtonElement_ = /** @type {HTMLElement} */(
+          this.ownerDocument.createElement('button'));
       this.closeButtonElement_.className =
           'raw-button row-delete-button custom-appearance';
       this.closeButtonElement_.addEventListener('mousedown',
@@ -54,6 +58,7 @@ cr.define('options', function() {
                                                 this.handleMouseDownUpOnClose_);
       this.closeButtonElement_.addEventListener('focus',
                                                 this.handleFocus_.bind(this));
+      this.closeButtonElement_.tabIndex = -1;
       this.closeButtonElement_.title =
           loadTimeData.getString('deletableItemDeleteButtonTitle');
       this.appendChild(this.closeButtonElement_);
@@ -120,6 +125,10 @@ cr.define('options', function() {
     },
   };
 
+  /**
+   * @constructor
+   * @extends {cr.ui.List}
+   */
   var DeletableItemList = cr.ui.define('list');
 
   DeletableItemList.prototype = {
@@ -128,22 +137,23 @@ cr.define('options', function() {
     /** @override */
     decorate: function() {
       List.prototype.decorate.call(this);
-      this.addEventListener('click', this.handleClick_);
+      this.addEventListener('click', this.handleClick);
       this.addEventListener('keydown', this.handleKeyDown_);
     },
 
     /**
      * Callback for onclick events.
      * @param {Event} e The click event object.
-     * @private
+     * @override
      */
-    handleClick_: function(e) {
+    handleClick: function(e) {
       if (this.disabled)
         return;
 
       var target = e.target;
       if (target.classList.contains('row-delete-button')) {
-        var listItem = this.getListItemAncestor(target);
+        var listItem = this.getListItemAncestor(
+            /** @type {HTMLElement} */(target));
         var idx = this.getIndexOfListItem(listItem);
         this.deleteItemAtIndex(idx);
       }

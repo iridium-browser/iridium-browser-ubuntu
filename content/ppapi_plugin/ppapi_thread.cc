@@ -9,7 +9,7 @@
 #include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/debug/crash_logging.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
@@ -107,7 +107,7 @@ PpapiThread::PpapiThread(const CommandLine& command_line, bool is_broker)
           base::RandInt(0, std::numeric_limits<PP_Module>::max())),
       next_plugin_dispatcher_id_(1) {
   ppapi::proxy::PluginGlobals* globals = ppapi::proxy::PluginGlobals::Get();
-  globals->set_plugin_proxy_delegate(this);
+  globals->SetPluginProxyDelegate(this);
   globals->set_command_line(
       command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
 
@@ -125,7 +125,9 @@ PpapiThread::~PpapiThread() {
 }
 
 void PpapiThread::Shutdown() {
-  ppapi::proxy::PluginGlobals::Get()->set_plugin_proxy_delegate(NULL);
+  ChildThread::Shutdown();
+
+  ppapi::proxy::PluginGlobals::Get()->ResetPluginProxyDelegate();
   if (plugin_entry_points_.shutdown_module)
     plugin_entry_points_.shutdown_module();
   webkit_platform_support_->Shutdown();
@@ -179,7 +181,7 @@ IPC::PlatformFileForTransit PpapiThread::ShareHandleWithRemote(
 #if defined(OS_WIN)
   if (peer_handle_.IsValid()) {
     DCHECK(is_broker_);
-    return IPC::GetFileHandleForProcess(handle, peer_handle_,
+    return IPC::GetFileHandleForProcess(handle, peer_handle_.Get(),
                                         should_close_source);
   }
 #endif

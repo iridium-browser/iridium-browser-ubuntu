@@ -9,10 +9,13 @@
 #include "cc/output/delegated_frame_data.h"
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/render_pass.h"
+#include "cc/quads/render_pass_draw_quad.h"
 #include "cc/quads/shared_quad_state.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
+#include "cc/quads/tile_draw_quad.h"
+#include "cc/quads/yuv_video_draw_quad.h"
 #include "mojo/services/public/cpp/geometry/geometry_type_converters.h"
 
 namespace mojo {
@@ -34,11 +37,19 @@ ASSERT_ENUM_VALUES_EQUAL(TEXTURE_CONTENT);
 ASSERT_ENUM_VALUES_EQUAL(TILED_CONTENT);
 ASSERT_ENUM_VALUES_EQUAL(YUV_VIDEO_CONTENT);
 
+COMPILE_ASSERT(
+    cc::YUVVideoDrawQuad::REC_601 ==
+        static_cast<cc::YUVVideoDrawQuad::ColorSpace>(YUV_COLOR_SPACE_REC_601),
+    rec_601_enum_matches);
+COMPILE_ASSERT(cc::YUVVideoDrawQuad::REC_601_JPEG ==
+                   static_cast<cc::YUVVideoDrawQuad::ColorSpace>(
+                       YUV_COLOR_SPACE_REC_601_JPEG),
+               rec_601_jpeg_enum_matches);
+
 namespace {
 
-cc::SharedQuadState* ConvertToSharedQuadState(
-    const SharedQuadStatePtr& input,
-    cc::RenderPass* render_pass) {
+cc::SharedQuadState* ConvertSharedQuadState(const SharedQuadStatePtr& input,
+                                            cc::RenderPass* render_pass) {
   cc::SharedQuadState* state = render_pass->CreateAndAppendSharedQuadState();
   state->SetAll(input->content_to_target_transform.To<gfx::Transform>(),
                 input->content_bounds.To<gfx::Size>(),
@@ -51,10 +62,31 @@ cc::SharedQuadState* ConvertToSharedQuadState(
   return state;
 }
 
-bool ConvertToDrawQuad(const QuadPtr& input,
-                       cc::SharedQuadState* sqs,
-                       cc::RenderPass* render_pass) {
+bool ConvertDrawQuad(const QuadPtr& input,
+                     cc::SharedQuadState* sqs,
+                     cc::RenderPass* render_pass) {
   switch (input->material) {
+    case MATERIAL_RENDER_PASS: {
+      cc::RenderPassDrawQuad* render_pass_quad =
+          render_pass->CreateAndAppendDrawQuad<cc::RenderPassDrawQuad>();
+      RenderPassQuadState* render_pass_quad_state =
+          input->render_pass_quad_state.get();
+      gfx::PointF filter_scale_as_point =
+          render_pass_quad_state->filters_scale.To<gfx::PointF>();
+      render_pass_quad->SetAll(
+          sqs,
+          input->rect.To<gfx::Rect>(),
+          input->opaque_rect.To<gfx::Rect>(),
+          input->visible_rect.To<gfx::Rect>(),
+          input->needs_blending,
+          render_pass_quad_state->render_pass_id.To<cc::RenderPassId>(),
+          render_pass_quad_state->mask_resource_id,
+          render_pass_quad_state->mask_uv_rect.To<gfx::RectF>(),
+          cc::FilterOperations(),  // TODO(jamesr): filters
+          gfx::Vector2dF(filter_scale_as_point.x(), filter_scale_as_point.y()),
+          cc::FilterOperations());  // TODO(jamesr): background_filters
+      break;
+    }
     case MATERIAL_SOLID_COLOR: {
       if (input->solid_color_quad_state.is_null())
         return false;
@@ -108,6 +140,43 @@ bool ConvertToDrawQuad(const QuadPtr& input,
           texture_quad_state->flipped);
       break;
     }
+    case MATERIAL_TILED_CONTENT: {
+      TileQuadStatePtr& tile_state = input->tile_quad_state;
+      if (tile_state.is_null())
+        return false;
+      cc::TileDrawQuad* tile_quad =
+          render_pass->CreateAndAppendDrawQuad<cc::TileDrawQuad>();
+      tile_quad->SetAll(sqs,
+                        input->rect.To<gfx::Rect>(),
+                        input->opaque_rect.To<gfx::Rect>(),
+                        input->visible_rect.To<gfx::Rect>(),
+                        input->needs_blending,
+                        tile_state->resource_id,
+                        tile_state->tex_coord_rect.To<gfx::RectF>(),
+                        tile_state->texture_size.To<gfx::Size>(),
+                        tile_state->swizzle_contents);
+      break;
+    }
+    case MATERIAL_YUV_VIDEO_CONTENT: {
+      YUVVideoQuadStatePtr& yuv_state = input->yuv_video_quad_state;
+      if (yuv_state.is_null())
+        return false;
+      cc::YUVVideoDrawQuad* yuv_quad =
+          render_pass->CreateAndAppendDrawQuad<cc::YUVVideoDrawQuad>();
+      yuv_quad->SetAll(sqs,
+                       input->rect.To<gfx::Rect>(),
+                       input->opaque_rect.To<gfx::Rect>(),
+                       input->visible_rect.To<gfx::Rect>(),
+                       input->needs_blending,
+                       yuv_state->tex_coord_rect.To<gfx::RectF>(),
+                       yuv_state->y_plane_resource_id,
+                       yuv_state->u_plane_resource_id,
+                       yuv_state->v_plane_resource_id,
+                       yuv_state->a_plane_resource_id,
+                       static_cast<cc::YUVVideoDrawQuad::ColorSpace>(
+                           yuv_state->color_space));
+      break;
+    }
     default:
       NOTREACHED() << "Unsupported material " << input->material;
       return false;
@@ -118,8 +187,7 @@ bool ConvertToDrawQuad(const QuadPtr& input,
 }  // namespace
 
 // static
-SurfaceIdPtr
-TypeConverter<SurfaceIdPtr, cc::SurfaceId>::ConvertFrom(
+SurfaceIdPtr TypeConverter<SurfaceIdPtr, cc::SurfaceId>::Convert(
     const cc::SurfaceId& input) {
   SurfaceIdPtr id(SurfaceId::New());
   id->id = input.id;
@@ -127,27 +195,40 @@ TypeConverter<SurfaceIdPtr, cc::SurfaceId>::ConvertFrom(
 }
 
 // static
-cc::SurfaceId TypeConverter<SurfaceIdPtr, cc::SurfaceId>::ConvertTo(
+cc::SurfaceId TypeConverter<cc::SurfaceId, SurfaceIdPtr>::Convert(
     const SurfaceIdPtr& input) {
   return cc::SurfaceId(input->id);
 }
 
 // static
-ColorPtr TypeConverter<ColorPtr, SkColor>::ConvertFrom(
-    const SkColor& input) {
+ColorPtr TypeConverter<ColorPtr, SkColor>::Convert(const SkColor& input) {
   ColorPtr color(Color::New());
   color->rgba = input;
   return color.Pass();
 }
 
 // static
-SkColor TypeConverter<ColorPtr, SkColor>::ConvertTo(
-    const ColorPtr& input) {
+SkColor TypeConverter<SkColor, ColorPtr>::Convert(const ColorPtr& input) {
   return input->rgba;
 }
 
 // static
-QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::ConvertFrom(
+RenderPassIdPtr TypeConverter<RenderPassIdPtr, cc::RenderPassId>::Convert(
+    const cc::RenderPassId& input) {
+  RenderPassIdPtr pass_id(RenderPassId::New());
+  pass_id->layer_id = input.layer_id;
+  pass_id->index = input.index;
+  return pass_id.Pass();
+}
+
+// static
+cc::RenderPassId TypeConverter<cc::RenderPassId, RenderPassIdPtr>::Convert(
+    const RenderPassIdPtr& input) {
+  return cc::RenderPassId(input->layer_id, input->index);
+}
+
+// static
+QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::Convert(
     const cc::DrawQuad& input) {
   QuadPtr quad = Quad::New();
   quad->material = static_cast<Material>(input.material);
@@ -160,6 +241,21 @@ QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::ConvertFrom(
   // state list.
   quad->shared_quad_state_index = -1;
   switch (input.material) {
+    case cc::DrawQuad::RENDER_PASS: {
+      const cc::RenderPassDrawQuad* render_pass_quad =
+          cc::RenderPassDrawQuad::MaterialCast(&input);
+      RenderPassQuadStatePtr pass_state = RenderPassQuadState::New();
+      pass_state->render_pass_id =
+          RenderPassId::From(render_pass_quad->render_pass_id);
+      pass_state->mask_resource_id = render_pass_quad->mask_resource_id;
+      pass_state->mask_uv_rect = RectF::From(render_pass_quad->mask_uv_rect);
+      // TODO(jamesr): pass_state->filters
+      pass_state->filters_scale = PointF::From(
+          gfx::PointAtOffsetFromOrigin(render_pass_quad->filters_scale));
+      // TODO(jamesr): pass_state->background_filters
+      quad->render_pass_quad_state = pass_state.Pass();
+      break;
+    }
     case cc::DrawQuad::SOLID_COLOR: {
       const cc::SolidColorDrawQuad* color_quad =
           cc::SolidColorDrawQuad::MaterialCast(&input);
@@ -183,7 +279,6 @@ QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::ConvertFrom(
       const cc::TextureDrawQuad* texture_quad =
           cc::TextureDrawQuad::MaterialCast(&input);
       TextureQuadStatePtr texture_state = TextureQuadState::New();
-      texture_state = TextureQuadState::New();
       texture_state->resource_id = texture_quad->resource_id;
       texture_state->premultiplied_alpha = texture_quad->premultiplied_alpha;
       texture_state->uv_top_left = PointF::From(texture_quad->uv_top_left);
@@ -200,6 +295,32 @@ QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::ConvertFrom(
       quad->texture_quad_state = texture_state.Pass();
       break;
     }
+    case cc::DrawQuad::TILED_CONTENT: {
+      const cc::TileDrawQuad* tile_quad =
+          cc::TileDrawQuad::MaterialCast(&input);
+      TileQuadStatePtr tile_state = TileQuadState::New();
+      tile_state->tex_coord_rect = RectF::From(tile_quad->tex_coord_rect);
+      tile_state->texture_size = Size::From(tile_quad->texture_size);
+      tile_state->swizzle_contents = tile_quad->swizzle_contents;
+      tile_state->resource_id = tile_quad->resource_id;
+      quad->tile_quad_state = tile_state.Pass();
+      break;
+    }
+    case cc::DrawQuad::YUV_VIDEO_CONTENT: {
+      const cc::YUVVideoDrawQuad* yuv_quad =
+          cc::YUVVideoDrawQuad::MaterialCast(&input);
+      YUVVideoQuadStatePtr yuv_state = YUVVideoQuadState::New();
+      yuv_state->tex_coord_rect = RectF::From(yuv_quad->tex_coord_rect);
+      yuv_state->y_plane_resource_id = yuv_quad->y_plane_resource_id;
+      yuv_state->u_plane_resource_id = yuv_quad->u_plane_resource_id;
+      yuv_state->v_plane_resource_id = yuv_quad->v_plane_resource_id;
+      yuv_state->a_plane_resource_id = yuv_quad->a_plane_resource_id;
+      yuv_state->color_space =
+          static_cast<YUVColorSpace>(yuv_quad->color_space);
+      quad->yuv_video_quad_state = yuv_state.Pass();
+      break;
+    }
+
     default:
       NOTREACHED() << "Unsupported material " << input.material;
   }
@@ -208,7 +329,7 @@ QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::ConvertFrom(
 
 // static
 SharedQuadStatePtr
-TypeConverter<SharedQuadStatePtr, cc::SharedQuadState>::ConvertFrom(
+TypeConverter<SharedQuadStatePtr, cc::SharedQuadState>::Convert(
     const cc::SharedQuadState& input) {
   SharedQuadStatePtr state = SharedQuadState::New();
   state->content_to_target_transform =
@@ -224,7 +345,7 @@ TypeConverter<SharedQuadStatePtr, cc::SharedQuadState>::ConvertFrom(
 }
 
 // static
-PassPtr TypeConverter<PassPtr, cc::RenderPass>::ConvertFrom(
+PassPtr TypeConverter<PassPtr, cc::RenderPass>::Convert(
     const cc::RenderPass& input) {
   PassPtr pass = Pass::New();
   pass->id = input.id.index;
@@ -238,16 +359,20 @@ PassPtr TypeConverter<PassPtr, cc::RenderPass>::ConvertFrom(
       input.shared_quad_state_list.size());
   int sqs_i = -1;
   const cc::SharedQuadState* last_sqs = NULL;
-  for (size_t i = 0; i < quads.size(); ++i) {
-    const cc::DrawQuad& quad = *input.quad_list[i];
+  size_t i = 0;
+  for (cc::QuadList::ConstIterator iter = input.quad_list.begin();
+       iter != input.quad_list.end();
+       ++iter) {
+    const cc::DrawQuad& quad = *iter;
     quads[i] = Quad::From(quad);
     if (quad.shared_quad_state != last_sqs) {
       sqs_i++;
       shared_quad_state[sqs_i] =
-          SharedQuadState::From(*input.shared_quad_state_list[i]);
+          SharedQuadState::From(*input.shared_quad_state_list[sqs_i]);
       last_sqs = quad.shared_quad_state;
     }
     quads[i]->shared_quad_state_index = sqs_i;
+    ++i;
   }
   // We should copy all shared quad states.
   DCHECK_EQ(static_cast<size_t>(sqs_i + 1), shared_quad_state.size());
@@ -257,9 +382,13 @@ PassPtr TypeConverter<PassPtr, cc::RenderPass>::ConvertFrom(
 }
 
 // static
-scoped_ptr<cc::RenderPass> ConvertTo(const PassPtr& input) {
+scoped_ptr<cc::RenderPass>
+TypeConverter<scoped_ptr<cc::RenderPass>, PassPtr>::Convert(
+    const PassPtr& input) {
+  // TODO(weiliangc): RenderPass will have a constructor that takes in preset
+  // size of quad list and shared quad state list size in upcoming CL.
   scoped_ptr<cc::RenderPass> pass = cc::RenderPass::Create();
-  pass->SetAll(cc::RenderPass::Id(1, input->id),
+  pass->SetAll(cc::RenderPassId(1, input->id),
                input->output_rect.To<gfx::Rect>(),
                input->damage_rect.To<gfx::Rect>(),
                input->transform_to_root_target.To<gfx::Transform>(),
@@ -267,12 +396,11 @@ scoped_ptr<cc::RenderPass> ConvertTo(const PassPtr& input) {
   cc::SharedQuadStateList& sqs_list = pass->shared_quad_state_list;
   sqs_list.reserve(input->shared_quad_states.size());
   for (size_t i = 0; i < input->shared_quad_states.size(); ++i) {
-    ConvertToSharedQuadState(input->shared_quad_states[i], pass.get());
+    ConvertSharedQuadState(input->shared_quad_states[i], pass.get());
   }
-  pass->quad_list.reserve(input->quads.size());
   for (size_t i = 0; i < input->quads.size(); ++i) {
     QuadPtr quad = input->quads[i].Pass();
-    if (!ConvertToDrawQuad(
+    if (!ConvertDrawQuad(
             quad, sqs_list[quad->shared_quad_state_index], pass.get()))
       return scoped_ptr<cc::RenderPass>();
   }
@@ -280,7 +408,7 @@ scoped_ptr<cc::RenderPass> ConvertTo(const PassPtr& input) {
 }
 
 // static
-MailboxPtr TypeConverter<MailboxPtr, gpu::Mailbox>::ConvertFrom(
+MailboxPtr TypeConverter<MailboxPtr, gpu::Mailbox>::Convert(
     const gpu::Mailbox& input) {
   Array<int8_t> name(64);
   for (int i = 0; i < 64; ++i) {
@@ -292,7 +420,7 @@ MailboxPtr TypeConverter<MailboxPtr, gpu::Mailbox>::ConvertFrom(
 }
 
 // static
-gpu::Mailbox TypeConverter<MailboxPtr, gpu::Mailbox>::ConvertTo(
+gpu::Mailbox TypeConverter<gpu::Mailbox, MailboxPtr>::Convert(
     const MailboxPtr& input) {
   gpu::Mailbox mailbox;
   if (!input->name.is_null())
@@ -301,8 +429,7 @@ gpu::Mailbox TypeConverter<MailboxPtr, gpu::Mailbox>::ConvertTo(
 }
 
 // static
-MailboxHolderPtr
-TypeConverter<MailboxHolderPtr, gpu::MailboxHolder>::ConvertFrom(
+MailboxHolderPtr TypeConverter<MailboxHolderPtr, gpu::MailboxHolder>::Convert(
     const gpu::MailboxHolder& input) {
   MailboxHolderPtr holder(MailboxHolder::New());
   holder->mailbox = Mailbox::From<gpu::Mailbox>(input.mailbox);
@@ -312,8 +439,7 @@ TypeConverter<MailboxHolderPtr, gpu::MailboxHolder>::ConvertFrom(
 }
 
 // static
-gpu::MailboxHolder
-TypeConverter<MailboxHolderPtr, gpu::MailboxHolder>::ConvertTo(
+gpu::MailboxHolder TypeConverter<gpu::MailboxHolder, MailboxHolderPtr>::Convert(
     const MailboxHolderPtr& input) {
   gpu::MailboxHolder holder;
   holder.mailbox = input->mailbox.To<gpu::Mailbox>();
@@ -323,10 +449,9 @@ TypeConverter<MailboxHolderPtr, gpu::MailboxHolder>::ConvertTo(
 }
 
 // static
-TransferableResourcePtr TypeConverter<
-    TransferableResourcePtr,
-    cc::TransferableResource>::ConvertFrom(const cc::TransferableResource&
-                                               input) {
+TransferableResourcePtr
+TypeConverter<TransferableResourcePtr, cc::TransferableResource>::Convert(
+    const cc::TransferableResource& input) {
   TransferableResourcePtr transferable = TransferableResource::New();
   transferable->id = input.id;
   transferable->format = static_cast<ResourceFormat>(input.format);
@@ -340,8 +465,8 @@ TransferableResourcePtr TypeConverter<
 
 // static
 cc::TransferableResource
-TypeConverter<TransferableResourcePtr, cc::TransferableResource>::
-    ConvertTo(const TransferableResourcePtr& input) {
+TypeConverter<cc::TransferableResource, TransferableResourcePtr>::Convert(
+    const TransferableResourcePtr& input) {
   cc::TransferableResource transferable;
   transferable.id = input->id;
   transferable.format = static_cast<cc::ResourceFormat>(input->format);
@@ -354,10 +479,10 @@ TypeConverter<TransferableResourcePtr, cc::TransferableResource>::
 }
 
 // static
-Array<TransferableResourcePtr>
-TypeConverter<Array<TransferableResourcePtr>,
-              cc::TransferableResourceArray>::
-    ConvertFrom(const cc::TransferableResourceArray& input) {
+Array<TransferableResourcePtr> TypeConverter<
+    Array<TransferableResourcePtr>,
+    cc::TransferableResourceArray>::Convert(const cc::TransferableResourceArray&
+                                                input) {
   Array<TransferableResourcePtr> resources(input.size());
   for (size_t i = 0; i < input.size(); ++i) {
     resources[i] = TransferableResource::From(input[i]);
@@ -367,9 +492,8 @@ TypeConverter<Array<TransferableResourcePtr>,
 
 // static
 cc::TransferableResourceArray
-TypeConverter<Array<TransferableResourcePtr>,
-              cc::TransferableResourceArray>::
-    ConvertTo(const Array<TransferableResourcePtr>& input) {
+TypeConverter<cc::TransferableResourceArray, Array<TransferableResourcePtr> >::
+    Convert(const Array<TransferableResourcePtr>& input) {
   cc::TransferableResourceArray resources(input.size());
   for (size_t i = 0; i < input.size(); ++i) {
     resources[i] = input[i].To<cc::TransferableResource>();
@@ -379,7 +503,7 @@ TypeConverter<Array<TransferableResourcePtr>,
 
 // static
 ReturnedResourcePtr
-TypeConverter<ReturnedResourcePtr, cc::ReturnedResource>::ConvertFrom(
+TypeConverter<ReturnedResourcePtr, cc::ReturnedResource>::Convert(
     const cc::ReturnedResource& input) {
   ReturnedResourcePtr returned = ReturnedResource::New();
   returned->id = input.id;
@@ -391,7 +515,7 @@ TypeConverter<ReturnedResourcePtr, cc::ReturnedResource>::ConvertFrom(
 
 // static
 cc::ReturnedResource
-TypeConverter<ReturnedResourcePtr, cc::ReturnedResource>::ConvertTo(
+TypeConverter<cc::ReturnedResource, ReturnedResourcePtr>::Convert(
     const ReturnedResourcePtr& input) {
   cc::ReturnedResource returned;
   returned.id = input->id;
@@ -402,10 +526,9 @@ TypeConverter<ReturnedResourcePtr, cc::ReturnedResource>::ConvertTo(
 }
 
 // static
-Array<ReturnedResourcePtr> TypeConverter<
-    Array<ReturnedResourcePtr>,
-    cc::ReturnedResourceArray>::ConvertFrom(const cc::ReturnedResourceArray&
-                                                input) {
+Array<ReturnedResourcePtr>
+TypeConverter<Array<ReturnedResourcePtr>, cc::ReturnedResourceArray>::Convert(
+    const cc::ReturnedResourceArray& input) {
   Array<ReturnedResourcePtr> resources(input.size());
   for (size_t i = 0; i < input.size(); ++i) {
     resources[i] = ReturnedResource::From(input[i]);
@@ -414,7 +537,7 @@ Array<ReturnedResourcePtr> TypeConverter<
 }
 
 // static
-FramePtr TypeConverter<FramePtr, cc::CompositorFrame>::ConvertFrom(
+FramePtr TypeConverter<FramePtr, cc::CompositorFrame>::Convert(
     const cc::CompositorFrame& input) {
   FramePtr frame = Frame::New();
   DCHECK(input.delegated_frame_data);
@@ -430,14 +553,17 @@ FramePtr TypeConverter<FramePtr, cc::CompositorFrame>::ConvertFrom(
 }
 
 // static
-scoped_ptr<cc::CompositorFrame> ConvertTo(const FramePtr& input) {
+scoped_ptr<cc::CompositorFrame>
+TypeConverter<scoped_ptr<cc::CompositorFrame>, FramePtr>::Convert(
+    const FramePtr& input) {
   scoped_ptr<cc::DelegatedFrameData> frame_data(new cc::DelegatedFrameData);
   frame_data->device_scale_factor = 1.f;
   frame_data->resource_list =
       input->resources.To<cc::TransferableResourceArray>();
   frame_data->render_pass_list.reserve(input->passes.size());
   for (size_t i = 0; i < input->passes.size(); ++i) {
-    scoped_ptr<cc::RenderPass> pass = ConvertTo(input->passes[i]);
+    scoped_ptr<cc::RenderPass> pass =
+        input->passes[i].To<scoped_ptr<cc::RenderPass> >();
     if (!pass)
       return scoped_ptr<cc::CompositorFrame>();
     frame_data->render_pass_list.push_back(pass.Pass());

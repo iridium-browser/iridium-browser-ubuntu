@@ -20,18 +20,30 @@ class GraphicsLayer;
 class KURL;
 class LayoutRect;
 class LocalFrame;
-class RenderObject;
 class RenderImage;
+class RenderLayer;
+class RenderObject;
 class ResourceRequest;
 class ResourceResponse;
 class ScriptSourceCode;
 class ScriptCallStack;
+class WorkerThread;
 class XMLHttpRequest;
 
 class InspectorLayoutEvent {
 public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> beginData(FrameView*);
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> endData(RenderObject* rootForThisLayout);
+};
+
+class InspectorLayoutInvalidationTrackingEvent {
+public:
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderObject*);
+};
+
+class InspectorPaintInvalidationTrackingEvent {
+public:
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderObject* renderer, const RenderObject* paintContainer);
 };
 
 class InspectorSendRequestEvent {
@@ -99,6 +111,24 @@ public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(ExecutionContext*, XMLHttpRequest*);
 };
 
+class InspectorLayerInvalidationTrackingEvent {
+public:
+    static const char SquashingLayerGeometryWasUpdated[];
+    static const char AddedToSquashingLayer[];
+    static const char RemovedFromSquashingLayer[];
+    static const char ReflectionLayerChanged[];
+    static const char NewCompositedLayer[];
+    static const char AncestorRequiresNewLayer[];
+
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderLayer*, const char* reason);
+};
+#define TRACE_LAYER_INVALIDATION(LAYER, REASON) \
+    TRACE_EVENT_INSTANT1( \
+        TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
+        "LayerInvalidationTracking", \
+        "data", \
+        InspectorLayerInvalidationTrackingEvent::data((LAYER), (REASON)))
+
 class InspectorPaintEvent {
 public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(RenderObject*, const LayoutRect& clipRect, const GraphicsLayer*);
@@ -147,6 +177,11 @@ public:
 class InspectorTimeStampEvent {
 public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(ExecutionContext*, const String& message);
+};
+
+class InspectorTracingSessionIdForWorkerEvent {
+public:
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const String& sessionId, WorkerThread*);
 };
 
 } // namespace blink

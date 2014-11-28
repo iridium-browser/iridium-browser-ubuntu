@@ -9,7 +9,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
-#include "base/test/statistics_delta_reader.h"
+#include "base/test/histogram_tester.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_log_unittest.h"
@@ -1576,7 +1576,9 @@ TEST_P(SpdySessionTest, SendInitialDataOnNewSession) {
                             initial_max_concurrent_streams);
   scoped_ptr<SpdyFrame> server_settings_frame(
       spdy_util_.ConstructSpdySettings(server_settings));
-  writes.push_back(CreateMockWrite(*server_settings_frame));
+  if (GetParam() <= kProtoSPDY31) {
+    writes.push_back(CreateMockWrite(*server_settings_frame));
+  }
 
   session_deps_.stream_initial_recv_window_size = kInitialRecvWindowSize;
 
@@ -1792,25 +1794,26 @@ TEST_P(SpdySessionTest, SynCompressionHistograms) {
   EXPECT_TRUE(spdy_stream->HasUrlFromHeaders());
 
   // Write request headers & capture resulting histogram update.
-  base::StatisticsDeltaReader statistics_delta_reader;
-  data.RunFor(1);
-  scoped_ptr<base::HistogramSamples> samples(
-    statistics_delta_reader.GetHistogramSamplesSinceCreation(
-        "Net.SpdySynStreamCompressionPercentage"));
+  base::HistogramTester histogram_tester;
 
+  data.RunFor(1);
   // Regression test of compression performance under the request fixture.
   switch (spdy_util_.spdy_version()) {
     case SPDY2:
-      EXPECT_EQ(samples->GetCount(0), 1);
+      histogram_tester.ExpectBucketCount(
+          "Net.SpdySynStreamCompressionPercentage", 0, 1);
       break;
     case SPDY3:
-      EXPECT_EQ(samples->GetCount(30), 1);
+      histogram_tester.ExpectBucketCount(
+          "Net.SpdySynStreamCompressionPercentage", 30, 1);
       break;
     case SPDY4:
-      EXPECT_EQ(samples->GetCount(82), 1);
+      histogram_tester.ExpectBucketCount(
+          "Net.SpdySynStreamCompressionPercentage", 82, 1);
       break;
     case SPDY5:
-      EXPECT_EQ(samples->GetCount(82), 1);
+      histogram_tester.ExpectBucketCount(
+          "Net.SpdySynStreamCompressionPercentage", 82, 1);
       break;
     default:
       NOTREACHED();
@@ -2401,7 +2404,7 @@ TEST_P(SpdySessionTest, VerifyDomainAuthentication) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
 
   SSLSocketDataProvider ssl(SYNCHRONOUS, OK);
   ssl.cert = test_cert;
@@ -2443,7 +2446,7 @@ TEST_P(SpdySessionTest, ConnectionPooledWithTlsChannelId) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "spdy_pooling.pem"));
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert.get());
 
   SSLSocketDataProvider ssl(SYNCHRONOUS, OK);
   ssl.channel_id_sent = true;
@@ -3136,8 +3139,9 @@ TEST_P(SpdySessionTest, CloseOneIdleConnection) {
   TestCompletionCallback callback2;
   HostPortPair host_port2("2.com", 80);
   scoped_refptr<TransportSocketParams> params2(
-      new TransportSocketParams(host_port2, false, false,
-                                OnHostResolutionCallback()));
+      new TransportSocketParams(
+          host_port2, false, false, OnHostResolutionCallback(),
+          TransportSocketParams::COMBINE_CONNECT_AND_WRITE_DEFAULT));
   scoped_ptr<ClientSocketHandle> connection2(new ClientSocketHandle);
   EXPECT_EQ(ERR_IO_PENDING,
             connection2->Init(host_port2.ToString(), params2, DEFAULT_PRIORITY,
@@ -3215,8 +3219,9 @@ TEST_P(SpdySessionTest, CloseOneIdleConnectionWithAlias) {
   TestCompletionCallback callback3;
   HostPortPair host_port3("3.com", 80);
   scoped_refptr<TransportSocketParams> params3(
-      new TransportSocketParams(host_port3, false, false,
-                                OnHostResolutionCallback()));
+      new TransportSocketParams(
+          host_port3, false, false, OnHostResolutionCallback(),
+          TransportSocketParams::COMBINE_CONNECT_AND_WRITE_DEFAULT));
   scoped_ptr<ClientSocketHandle> connection3(new ClientSocketHandle);
   EXPECT_EQ(ERR_IO_PENDING,
             connection3->Init(host_port3.ToString(), params3, DEFAULT_PRIORITY,
@@ -3304,8 +3309,9 @@ TEST_P(SpdySessionTest, CloseSessionOnIdleWhenPoolStalled) {
   TestCompletionCallback callback2;
   HostPortPair host_port2("2.com", 80);
   scoped_refptr<TransportSocketParams> params2(
-      new TransportSocketParams(host_port2, false, false,
-                                OnHostResolutionCallback()));
+      new TransportSocketParams(
+          host_port2, false, false, OnHostResolutionCallback(),
+          TransportSocketParams::COMBINE_CONNECT_AND_WRITE_DEFAULT));
   scoped_ptr<ClientSocketHandle> connection2(new ClientSocketHandle);
   EXPECT_EQ(ERR_IO_PENDING,
             connection2->Init(host_port2.ToString(), params2, DEFAULT_PRIORITY,
@@ -4950,6 +4956,36 @@ TEST_P(SpdySessionTest, CancelReservedStreamOnHeadersReceived) {
 
   // Read EOF.
   data.RunFor(2);
+}
+
+TEST_P(SpdySessionTest, RejectInvalidUnknownFrames) {
+  session_deps_.host_resolver->set_synchronous_mode(true);
+
+  MockRead reads[] = {
+      MockRead(SYNCHRONOUS, ERR_IO_PENDING)  // Stall forever.
+  };
+
+  StaticSocketDataProvider data(reads, arraysize(reads), NULL, 0);
+
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  data.set_connect_data(connect_data);
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  CreateNetworkSession();
+  base::WeakPtr<SpdySession> session =
+      CreateInsecureSpdySession(http_session_, key_, BoundNetLog());
+
+  session->stream_hi_water_mark_ = 5;
+  // Low client (odd) ids are fine.
+  EXPECT_TRUE(session->OnUnknownFrame(3, 0));
+  // Client id exceeding watermark.
+  EXPECT_FALSE(session->OnUnknownFrame(9, 0));
+
+  session->last_accepted_push_stream_id_ = 6;
+  // Low server (even) ids are fine.
+  EXPECT_TRUE(session->OnUnknownFrame(2, 0));
+  // Server id exceeding last accepted id.
+  EXPECT_FALSE(session->OnUnknownFrame(8, 0));
 }
 
 TEST(MapFramerErrorToProtocolError, MapsValues) {

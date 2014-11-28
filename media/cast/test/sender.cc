@@ -75,7 +75,7 @@ media::cast::AudioSenderConfig GetAudioSenderConfig() {
   audio_config.rtp_payload_type = 127;
   // TODO(miu): The default in cast_defines.h is 100.  Should this be 100, and
   // should receiver.cc's config also be 100?
-  audio_config.target_playout_delay = base::TimeDelta::FromMilliseconds(300);
+  audio_config.max_playout_delay = base::TimeDelta::FromMilliseconds(300);
   return audio_config;
 }
 
@@ -109,7 +109,7 @@ media::cast::VideoSenderConfig GetVideoSenderConfig() {
   video_config.rtp_payload_type = 96;
   // TODO(miu): The default in cast_defines.h is 100.  Should this be 100, and
   // should receiver.cc's config also be 100?
-  video_config.target_playout_delay = base::TimeDelta::FromMilliseconds(300);
+  video_config.max_playout_delay = base::TimeDelta::FromMilliseconds(300);
   return video_config;
 }
 
@@ -322,6 +322,7 @@ int main(int argc, char** argv) {
           NULL,  // net log.
           cast_environment->Clock(),
           remote_endpoint,
+          make_scoped_ptr(new base::DictionaryValue),  // options
           base::Bind(&UpdateCastTransportStatus),
           base::Bind(&LogRawEvents, cast_environment),
           base::TimeDelta::FromSeconds(1),
@@ -355,7 +356,7 @@ int main(int argc, char** argv) {
 
   // Subscribers for stats.
   scoped_ptr<media::cast::ReceiverTimeOffsetEstimatorImpl> offset_estimator(
-      new media::cast::ReceiverTimeOffsetEstimatorImpl);
+      new media::cast::ReceiverTimeOffsetEstimatorImpl());
   cast_environment->Logging()->AddRawEventSubscriber(offset_estimator.get());
   scoped_ptr<media::cast::StatsEventSubscriber> video_stats_subscriber(
       new media::cast::StatsEventSubscriber(media::cast::VIDEO_EVENT,

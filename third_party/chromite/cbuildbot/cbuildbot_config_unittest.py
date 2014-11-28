@@ -1,10 +1,11 @@
 #!/usr/bin/python
-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Unittests for config.  Needs to be run inside of chroot for mox."""
+
+from __future__ import print_function
 
 import mock
 import os
@@ -517,6 +518,25 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
                       config['packages'],
                       '%s does not build chromeos-initramfs, which is required '
                       'for creating the recovery image' % build_name)
+
+  def testChildConfigsNotImportantInReleaseGroup(self):
+    """Verify that configs in an important group are not important."""
+    msg = ('Child config %s for %s should not be important because %s is '
+           'already important')
+    for build_name, config in cbuildbot_config.config.iteritems():
+      if build_name.endswith('-release-group') and config['important']:
+        for child_config in config.child_configs:
+          self.assertFalse(child_config.important,
+                           msg % (child_config.name, build_name, build_name))
+
+  def testFullCQBuilderDoNotRunHWTest(self):
+    """Full CQ configs should not run HWTest."""
+    msg = ('%s should not be a full builder and run HWTest for '
+           'performance reasons')
+    for build_name, config in cbuildbot_config.config.iteritems():
+      if config.build_type == constants.PALADIN_TYPE:
+        self.assertFalse(config.chrome_binhost_only and config.hw_tests,
+                         msg % build_name)
 
 
 class FindFullTest(cros_test_lib.TestCase):

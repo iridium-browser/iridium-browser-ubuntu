@@ -13,10 +13,10 @@
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/test/test_renderer_host.h"
 #include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/layout.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/gfx/vector2d_f.h"
 
 // This file provides a testing framework for mocking out the RenderProcessHost
@@ -27,7 +27,6 @@
 // To use, derive your test base class from RenderViewHostImplTestHarness.
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
-struct ViewHostMsg_TextInputState_Params;
 
 namespace gfx {
 class Rect;
@@ -44,7 +43,7 @@ class TestWebContents;
 void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         int page_id,
                         const GURL& url,
-                        PageTransition transition_type);
+                        ui::PageTransition transition_type);
 
 // TestRenderViewHostView ------------------------------------------------------
 
@@ -60,6 +59,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE {}
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE {}
+  virtual gfx::Vector2dF GetLastScrollOffset() const OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
@@ -98,8 +98,9 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void Blur() OVERRIDE {}
   virtual void SetIsLoading(bool is_loading) OVERRIDE {}
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE {}
-  virtual void TextInputStateChanged(
-      const ViewHostMsg_TextInputState_Params& params) OVERRIDE {}
+  virtual void TextInputTypeChanged(ui::TextInputType type,
+                                    ui::TextInputMode input_mode,
+                                    bool can_compose_inline) OVERRIDE {}
   virtual void ImeCancelComposition() OVERRIDE {}
 #if defined(OS_MACOSX) || defined(USE_AURA)
   virtual void ImeCompositionRangeChanged(
@@ -112,11 +113,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void SetTooltipText(const base::string16& tooltip_text) OVERRIDE {}
   virtual void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE {}
-  virtual void ScrollOffsetChanged() OVERRIDE {}
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      const base::Callback<void(bool, const SkBitmap&)>& callback,
+      CopyFromCompositingSurfaceCallback& callback,
       const SkColorType color_type) OVERRIDE;
   virtual void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
@@ -137,10 +137,13 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 #if defined(OS_MACOSX)
   virtual bool PostProcessEventForPluginIme(
       const NativeWebKeyboardEvent& event) OVERRIDE;
-#elif defined(OS_ANDROID)
+#endif
+#if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS) || defined(USE_AURA)
   virtual void ShowDisambiguationPopup(
-      const gfx::Rect& target_rect,
+      const gfx::Rect& rect_pixels,
       const SkBitmap& zoomed_bitmap) OVERRIDE {}
+#endif
+#if defined(OS_ANDROID)
   virtual void LockCompositingSurface() OVERRIDE {}
   virtual void UnlockCompositingSurface() OVERRIDE {}
 #endif
@@ -233,8 +236,10 @@ class TestRenderViewHost
   // TestRenderFrameHost should be used.
   virtual void SendNavigate(int page_id, const GURL& url) OVERRIDE;
   virtual void SendFailedNavigate(int page_id, const GURL& url) OVERRIDE;
-  virtual void SendNavigateWithTransition(int page_id, const GURL& url,
-                                          PageTransition transition) OVERRIDE;
+  virtual void SendNavigateWithTransition(
+      int page_id,
+      const GURL& url,
+      ui::PageTransition transition) OVERRIDE;
 
   // Calls OnNavigate on the RenderViewHost with the given information,
   // including a custom original request URL.  Sets the rest of the
@@ -250,7 +255,7 @@ class TestRenderViewHost
       FrameHostMsg_DidCommitProvisionalLoad_Params* params);
 
   void TestOnUpdateStateWithFile(
-      int process_id, const base::FilePath& file_path);
+      int page_id, const base::FilePath& file_path);
 
   void TestOnStartDragging(const DropData& drop_data);
 
@@ -315,7 +320,7 @@ class TestRenderViewHost
 
   void SendNavigateWithTransitionAndResponseCode(int page_id,
                                                  const GURL& url,
-                                                 PageTransition transition,
+                                                 ui::PageTransition transition,
                                                  int response_code);
 
   // Calls OnNavigate on the RenderViewHost with the given information.
@@ -324,7 +329,7 @@ class TestRenderViewHost
   void SendNavigateWithParameters(
       int page_id,
       const GURL& url,
-      PageTransition transition,
+      ui::PageTransition transition,
       const GURL& original_request_url,
       int response_code,
       const base::FilePath* file_path_for_history_item);

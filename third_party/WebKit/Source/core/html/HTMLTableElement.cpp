@@ -60,7 +60,6 @@ inline HTMLTableElement::HTMLTableElement(Document& document)
     , m_rulesAttr(UnsetRules)
     , m_padding(1)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(HTMLTableElement)
@@ -166,12 +165,6 @@ void HTMLTableElement::deleteCaption()
 HTMLTableSectionElement* HTMLTableElement::lastBody() const
 {
     return toHTMLTableSectionElement(Traversal<HTMLElement>::lastChild(*this, HasHTMLTagName(tbodyTag)));
-}
-
-PassRefPtrWillBeRawPtr<HTMLElement> HTMLTableElement::insertRow(ExceptionState& exceptionState)
-{
-    // The default 'index' argument value is -1.
-    return insertRow(-1, exceptionState);
 }
 
 PassRefPtrWillBeRawPtr<HTMLElement> HTMLTableElement::insertRow(int index, ExceptionState& exceptionState)

@@ -199,10 +199,10 @@ class TestWebUI : public content::WebUI {
     return temp_string_;
   }
   virtual void OverrideTitle(const base::string16& title) OVERRIDE {}
-  virtual content::PageTransition GetLinkTransitionType() const OVERRIDE {
-    return content::PAGE_TRANSITION_LINK;
+  virtual ui::PageTransition GetLinkTransitionType() const OVERRIDE {
+    return ui::PAGE_TRANSITION_LINK;
   }
-  virtual void SetLinkTransitionType(content::PageTransition type) OVERRIDE {}
+  virtual void SetLinkTransitionType(ui::PageTransition type) OVERRIDE {}
   virtual int GetBindings() const OVERRIDE {
     return 0;
   }
@@ -320,6 +320,8 @@ class SyncSetupHandlerTest : public testing::Test {
         WillRepeatedly(Return(GetAllTypes()));
     EXPECT_CALL(*mock_pss_, GetActiveDataTypes()).
         WillRepeatedly(Return(GetAllTypes()));
+    EXPECT_CALL(*mock_pss_, EncryptEverythingAllowed()).
+        WillRepeatedly(Return(true));
     EXPECT_CALL(*mock_pss_, EncryptEverythingEnabled()).
         WillRepeatedly(Return(false));
   }
@@ -526,6 +528,7 @@ TEST_F(SyncSetupHandlerTest,
   CheckBool(dictionary, "passphraseFailed", false);
   CheckBool(dictionary, "showSyncEverythingPage", false);
   CheckBool(dictionary, "syncAllDataTypes", true);
+  CheckBool(dictionary, "encryptAllDataAllowed", true);
   CheckBool(dictionary, "encryptAllData", false);
   CheckBool(dictionary, "usePassphrase", false);
 }
@@ -684,6 +687,8 @@ TEST_F(SyncSetupHandlerTest, TurnOnEncryptAll) {
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
       .WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, EncryptEverythingAllowed())
+      .WillRepeatedly(Return(true));
   SetupInitializedProfileSyncService();
   EXPECT_CALL(*mock_pss_, EnableEncryptEverything());
   EXPECT_CALL(*mock_pss_, OnUserChoseDatatypes(true, _));
@@ -1058,3 +1063,46 @@ TEST_F(SyncSetupHandlerTest, ShowSetupEncryptAll) {
   ASSERT_TRUE(data.arg2->GetAsDictionary(&dictionary));
   CheckBool(dictionary, "encryptAllData", true);
 }
+
+TEST_F(SyncSetupHandlerTest, ShowSetupEncryptAllDisallowed) {
+  EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
+      .WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, IsUsingSecondaryPassphrase())
+      .WillRepeatedly(Return(false));
+  SetupInitializedProfileSyncService();
+  SetDefaultExpectationsForConfigPage();
+  EXPECT_CALL(*mock_pss_, EncryptEverythingAllowed()).
+      WillRepeatedly(Return(false));
+
+  // This should display the sync setup dialog (not login).
+  handler_->OpenSyncSetup();
+
+  ExpectConfig();
+  const TestWebUI::CallData& data = web_ui_.call_data()[0];
+  base::DictionaryValue* dictionary;
+  ASSERT_TRUE(data.arg2->GetAsDictionary(&dictionary));
+  CheckBool(dictionary, "encryptAllData", false);
+  CheckBool(dictionary, "encryptAllDataAllowed", false);
+}
+
+TEST_F(SyncSetupHandlerTest, TurnOnEncryptAllDisallowed) {
+  std::string args = GetConfiguration(
+      NULL, SYNC_ALL_DATA, GetAllTypes(), std::string(), ENCRYPT_ALL_DATA);
+  base::ListValue list_args;
+  list_args.Append(new base::StringValue(args));
+  EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
+      .WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
+      .WillRepeatedly(Return(false));
+  SetupInitializedProfileSyncService();
+  EXPECT_CALL(*mock_pss_, EncryptEverythingAllowed()).
+      WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, EnableEncryptEverything()).Times(0);
+  EXPECT_CALL(*mock_pss_, OnUserChoseDatatypes(true, _));
+  handler_->HandleConfigure(&list_args);
+
+  // Ensure that we navigated to the "done" state since we don't need a
+  // passphrase.
+  ExpectDone();
+}
+

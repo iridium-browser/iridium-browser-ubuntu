@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
@@ -34,11 +34,11 @@
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/mac/app_mode_common.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/manifest_handlers/file_handler_info.h"
 #include "grit/chrome_unscaled_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "net/base/url_util.h"
 #import "ui/app_list/cocoa/app_list_view_controller.h"
 #import "ui/app_list/cocoa/app_list_window_controller.h"
@@ -392,9 +392,9 @@ void AppListServiceMac::CreateForProfile(Profile* requested_profile) {
   if (!window_controller_)
     window_controller_.reset([[AppListWindowController alloc] init]);
 
-  scoped_ptr<app_list::AppListViewDelegate> delegate(
-      new AppListViewDelegate(profile_, GetControllerDelegate()));
-  [[window_controller_ appListViewController] setDelegate:delegate.Pass()];
+  [[window_controller_ appListViewController] setDelegate:nil];
+  [[window_controller_ appListViewController]
+      setDelegate:GetViewDelegate(profile_)];
 }
 
 void AppListServiceMac::ShowForProfile(Profile* requested_profile) {
@@ -450,6 +450,16 @@ void AppListServiceMac::EnableAppList(Profile* initial_profile,
 void AppListServiceMac::CreateShortcut() {
   CreateAppListShim(GetProfilePath(
       g_browser_process->profile_manager()->user_data_dir()));
+}
+
+void AppListServiceMac::DestroyAppList() {
+  // Due to reference counting, Mac can't guarantee that the widget is deleted,
+  // but mac supports a visible app list with a NULL profile, so there's also no
+  // need to tear it down completely.
+  DismissAppList();
+  [[window_controller_ appListViewController] setDelegate:NULL];
+
+  profile_ = NULL;
 }
 
 NSWindow* AppListServiceMac::GetAppListWindow() {

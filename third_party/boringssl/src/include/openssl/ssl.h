@@ -188,42 +188,21 @@ extern "C" {
 
 /* These are used to specify which ciphers to use and not to use */
 
-#define SSL_TXT_EXP40		"EXPORT40"
-#define SSL_TXT_EXP56		"EXPORT56"
-#define SSL_TXT_LOW		"LOW"
 #define SSL_TXT_MEDIUM		"MEDIUM"
 #define SSL_TXT_HIGH		"HIGH"
 #define SSL_TXT_FIPS		"FIPS"
 
-#define SSL_TXT_kFZA		"kFZA" /* unused! */
-#define	SSL_TXT_aFZA		"aFZA" /* unused! */
-#define SSL_TXT_eFZA		"eFZA" /* unused! */
-#define SSL_TXT_FZA		"FZA"  /* unused! */
-
 #define	SSL_TXT_aNULL		"aNULL"
-#define	SSL_TXT_eNULL		"eNULL"
-#define	SSL_TXT_NULL		"NULL"
 
 #define SSL_TXT_kRSA		"kRSA"
-#define SSL_TXT_kDHr		"kDHr" 
-#define SSL_TXT_kDHd		"kDHd"
-#define SSL_TXT_kDH 		"kDH"
 #define SSL_TXT_kEDH		"kEDH"
-#define SSL_TXT_kECDHr		"kECDHr"
-#define SSL_TXT_kECDHe		"kECDHe"
-#define SSL_TXT_kECDH		"kECDH"
 #define SSL_TXT_kEECDH		"kEECDH"
 #define SSL_TXT_kPSK            "kPSK"
-#define SSL_TXT_kSRP		"kSRP"
 
 #define	SSL_TXT_aRSA		"aRSA"
-#define	SSL_TXT_aDSS		"aDSS"
-#define	SSL_TXT_aDH		"aDH"
-#define	SSL_TXT_aECDH		"aECDH"
 #define SSL_TXT_aECDSA		"aECDSA"
 #define SSL_TXT_aPSK            "aPSK"
 
-#define	SSL_TXT_DSS		"DSS"
 #define SSL_TXT_DH		"DH"
 #define SSL_TXT_EDH		"EDH" /* same as "kEDH:-ADH" */
 #define SSL_TXT_ADH		"ADH"
@@ -233,21 +212,13 @@ extern "C" {
 #define SSL_TXT_AECDH		"AECDH"
 #define SSL_TXT_ECDSA		"ECDSA"
 #define SSL_TXT_PSK             "PSK"
-#define SSL_TXT_SRP		"SRP"
 
-#define SSL_TXT_DES		"DES"
 #define SSL_TXT_3DES		"3DES"
 #define SSL_TXT_RC4		"RC4"
-#define SSL_TXT_RC2		"RC2"
-#define SSL_TXT_IDEA		"IDEA"
-#define SSL_TXT_SEED		"SEED"
 #define SSL_TXT_AES128		"AES128"
 #define SSL_TXT_AES256		"AES256"
 #define SSL_TXT_AES		"AES"
 #define SSL_TXT_AES_GCM		"AESGCM"
-#define SSL_TXT_CAMELLIA128	"CAMELLIA128"
-#define SSL_TXT_CAMELLIA256	"CAMELLIA256"
-#define SSL_TXT_CAMELLIA	"CAMELLIA"
 #define SSL_TXT_CHACHA20	"CHACHA20"
 
 #define SSL_TXT_MD5		"MD5"
@@ -256,14 +227,10 @@ extern "C" {
 #define SSL_TXT_SHA256		"SHA256"
 #define SSL_TXT_SHA384		"SHA384"
 
-#define SSL_TXT_SSLV2		"SSLv2"
 #define SSL_TXT_SSLV3		"SSLv3"
 #define SSL_TXT_TLSV1		"TLSv1"
 #define SSL_TXT_TLSV1_1		"TLSv1.1"
 #define SSL_TXT_TLSV1_2		"TLSv1.2"
-
-#define SSL_TXT_EXP		"EXP"
-#define SSL_TXT_EXPORT		"EXPORT"
 
 #define SSL_TXT_ALL		"ALL"
 
@@ -281,7 +248,6 @@ extern "C" {
  * DEFAULT gets, as only selection is being done and no sorting as needed
  * for DEFAULT.
  */
-#define SSL_TXT_CMPALL		"COMPLEMENTOFALL"
 #define SSL_TXT_CMPDEF		"COMPLEMENTOFDEFAULT"
 
 /* The following cipher list is used by default.
@@ -333,7 +299,7 @@ typedef struct srtp_protection_profile_st
 DECLARE_STACK_OF(SRTP_PROTECTION_PROFILE)
 
 typedef int (*tls_session_ticket_ext_cb_fn)(SSL *s, const unsigned char *data, int len, void *arg);
-typedef int (*tls_session_secret_cb_fn)(SSL *s, void *secret, int *secret_len, STACK_OF(SSL_CIPHER) *peer_ciphers, SSL_CIPHER **cipher, void *arg);
+typedef int (*tls_session_secret_cb_fn)(SSL *s, void *secret, int *secret_len, STACK_OF(SSL_CIPHER) *peer_ciphers, const SSL_CIPHER **cipher, void *arg);
 
 #ifndef OPENSSL_NO_SSL_INTERN
 
@@ -376,7 +342,7 @@ struct ssl_method_st
 	int (*ssl_renegotiate)(SSL *s);
 	int (*ssl_renegotiate_check)(SSL *s);
 	long (*ssl_get_message)(SSL *s, int st1, int stn, int mt, long
-		max, int *ok);
+		max, int hash_message, int *ok);
 	int (*ssl_read_bytes)(SSL *s, int type, unsigned char *buf, int len, 
 		int peek);
 	int (*ssl_write_bytes)(SSL *s, int type, const void *buf_, int len);
@@ -387,7 +353,6 @@ struct ssl_method_st
 	int (*num_ciphers)(void);
 	const SSL_CIPHER *(*get_cipher)(unsigned ncipher);
 	const struct ssl_method_st *(*get_ssl_method)(int version);
-	long (*get_timeout)(void);
 	struct ssl3_enc_method *ssl3_enc; /* Extra SSLv3/TLS stuff */
 	int (*ssl_version)(void);
 	long (*ssl_callback_ctrl)(SSL *s, int cb_id, void (*fp)(void));
@@ -415,6 +380,9 @@ struct ssl_method_st
  *	Compression_meth [11]   EXPLICIT OCTET STRING, -- optional compression method
  *	SRP_username [ 12 ] EXPLICIT OCTET STRING -- optional SRP username
  *	Peer SHA256 [13]        EXPLICIT OCTET STRING, -- optional SHA256 hash of Peer certifiate
+ *	original handshake hash [14] EXPLICIT OCTET STRING, -- optional original handshake hash
+ *	tlsext_signed_cert_timestamp_list [15] EXPLICIT OCTET STRING, -- optional signed cert timestamp list extension
+ *	ocsp_response [16] EXPLICIT OCTET STRING, -- optional saved OCSP response from the server
  *	}
  * Look in ssl/ssl_asn1.c for more details
  * I'm using EXPLICIT tags so I can read the damn things using asn1parse :-).
@@ -474,16 +442,22 @@ struct ssl_session_st
 	 * efficient and to implement a maximum cache size. */
 	struct ssl_session_st *prev,*next;
 	char *tlsext_hostname;
-#ifndef OPENSSL_NO_EC
 	size_t tlsext_ecpointformatlist_length;
 	unsigned char *tlsext_ecpointformatlist; /* peer's list */
 	size_t tlsext_ellipticcurvelist_length;
 	uint16_t *tlsext_ellipticcurvelist; /* peer's list */
-#endif /* OPENSSL_NO_EC */
 	/* RFC4507 info */
 	uint8_t *tlsext_tick;	/* Session ticket */
 	size_t tlsext_ticklen;		/* Session ticket length */
 	uint32_t tlsext_tick_lifetime_hint;	/* Session lifetime hint in seconds */
+
+	size_t tlsext_signed_cert_timestamp_list_length;
+	uint8_t *tlsext_signed_cert_timestamp_list; /* Server's list. */
+
+	/* The OCSP response that came with the session. */
+	size_t ocsp_response_length;
+	uint8_t *ocsp_response;
+
 	char peer_sha256_valid;		/* Non-zero if peer_sha256 is valid */
 	unsigned char peer_sha256[SHA256_DIGEST_LENGTH];  /* SHA256 of peer certificate */
 
@@ -497,33 +471,21 @@ struct ssl_session_st
 
 #endif
 
-#define SSL_OP_MICROSOFT_SESS_ID_BUG			0x00000001L
-#define SSL_OP_NETSCAPE_CHALLENGE_BUG			0x00000002L
-/* Allow initial connection to servers that don't support RI */
+/* SSL_OP_LEGACY_SERVER_CONNECT allows initial connection to servers
+ * that don't support RI */
 #define SSL_OP_LEGACY_SERVER_CONNECT			0x00000004L
-#define SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG		0x00000010L
+
+/* SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER allows for record sizes
+ * SSL3_RT_MAX_EXTRA bytes above the maximum record size. */
 #define SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER		0x00000020L
-#define SSL_OP_SAFARI_ECDHE_ECDSA_BUG			0x00000040L
+
+/* SSL_OP_TLS_D5_BUG accepts an RSAClientKeyExchange in TLS encoded as
+ * SSL3, without a length prefix. */
 #define SSL_OP_TLS_D5_BUG				0x00000100L
-#define SSL_OP_TLS_BLOCK_PADDING_BUG			0x00000200L
 
-/* Hasn't done anything since OpenSSL 0.9.7h, retained for compatibility */
-#define SSL_OP_MSIE_SSLV2_RSA_PADDING			0x0
-
-/* SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS is vestigial. Previously it disabled the
- * insertion of empty records in CBC mode, but the empty records were commonly
- * misinterpreted as EOF by other TLS stacks and so this was disabled by
- * SSL_OP_ALL.
- *
- * This has been replaced by 1/n-1 record splitting, which is enabled by
- * SSL_MODE_CBC_RECORD_SPLITTING in SSL_set_mode. This involves sending a
- * one-byte record rather than an empty record and has much better
- * compatibility. */
-#define SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS              0x00000800L /* added in 0.9.6e */
-
-/* SSL_OP_ALL: various bug workarounds that should be rather harmless.
- *             This used to be 0x000FFFFFL before 0.9.7. */
-#define SSL_OP_ALL					0x80000BFFL
+/* SSL_OP_ALL enables the above bug workarounds that should be rather
+ * harmless. */
+#define SSL_OP_ALL					0x00000BFFL
 
 /* DTLS options */
 #define SSL_OP_NO_QUERY_MTU                 0x00001000L
@@ -531,8 +493,6 @@ struct ssl_session_st
 #define SSL_OP_COOKIE_EXCHANGE              0x00002000L
 /* Don't use RFC4507 ticket extension */
 #define SSL_OP_NO_TICKET	            0x00004000L
-/* Use Cisco's "speshul" version of DTLS_BAD_VER (as client)  */
-#define SSL_OP_CISCO_ANYCONNECT		    0x00008000L
 
 /* As server, disallow session resumption on renegotiation */
 #define SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION	0x00010000L
@@ -547,10 +507,7 @@ struct ssl_session_st
 /* Set to always use the tmp_rsa key when doing RSA operations,
  * even when this violates protocol specs */
 #define SSL_OP_CIPHER_SERVER_PREFERENCE			0x00400000L
-/* If set, a server will allow a client to issue a SSLv3.0 version number
- * as latest version supported in the premaster secret, even when TLSv1.0
- * (version 3.1) was announced in the client hello. Normally this is
- * forbidden to prevent version rollback attacks. */
+/* SSL_OP_TLS_ROLLBACK_BUG does nothing. */
 #define SSL_OP_TLS_ROLLBACK_BUG				0x00800000L
 
 #define SSL_OP_NO_SSLv2					0x01000000L
@@ -565,13 +522,13 @@ struct ssl_session_st
 #define SSL_OP_NO_SSL_MASK (SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|\
 	SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1|SSL_OP_NO_TLSv1_2)
 
-/* These next two were never actually used for anything since SSLeay
- * zap so we have some more flags.
- */
-/* The next flag deliberately changes the ciphertest, this is a check
- * for the PKCS#1 attack */
-#define SSL_OP_PKCS1_CHECK_1				0x0
-#define SSL_OP_PKCS1_CHECK_2				0x0
+/* The following flags do nothing and are included only to make it easier to
+ * compile code with BoringSSL. */
+#define SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS		0
+#define SSL_OP_MICROSOFT_SESS_ID_BUG			0
+#define SSL_OP_NETSCAPE_CHALLENGE_BUG			0
+#define SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG		0
+#define SSL_OP_TLS_BLOCK_PADDING_BUG			0
 
 /* Allow SSL_write(..., n) to return r with 0 < r < n (i.e. report success
  * when just a single record has been written): */
@@ -606,13 +563,6 @@ struct ssl_session_st
  * enforcing certifcate chain algorithms. When this is set we enforce them.
  */
 #define SSL_CERT_FLAG_TLS_STRICT		0x00000001L
-
-/* Suite B modes, takes same values as certificate verify flags */
-#define SSL_CERT_FLAG_SUITEB_128_LOS_ONLY	0x10000
-/* Suite B 192 bit only mode */
-#define SSL_CERT_FLAG_SUITEB_192_LOS		0x20000
-/* Suite B 128 bit mode allowing 192 bit algorithms */
-#define SSL_CERT_FLAG_SUITEB_128_LOS		0x30000
 
 /* Perform all sorts of protocol violations for testing purposes */
 #define SSL_CERT_FLAG_BROKEN_PROTOCOL		0x10000000
@@ -674,6 +624,11 @@ struct ssl_session_st
  * attacks. */
 #define SSL_MODE_CBC_RECORD_SPLITTING 0x00000100L
 
+/* SSL_MODE_NO_SESSION_CREATION will cause any attempts to create a session to
+ * fail with SSL_R_SESSION_MAY_NOT_BE_CREATED. This can be used to enforce that
+ * session resumption is used for a given SSL*. */
+#define SSL_MODE_NO_SESSION_CREATION 0x00000200L
+
 /* Note: SSL[_CTX]_set_{options,mode} use |= op on the previous value,
  * they cannot be used to clear bits. */
 
@@ -722,17 +677,23 @@ OPENSSL_EXPORT void SSL_set_msg_callback(SSL *ssl, void (*cb)(int write_p, int v
 #define SSL_CTX_set_msg_callback_arg(ctx, arg) SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
 #define SSL_set_msg_callback_arg(ssl, arg) SSL_ctrl((ssl), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
 
+/* SSL_CTX_set_keylog_bio sets configures all SSL objects attached to |ctx| to
+ * log session material to |keylog_bio|. This is intended for debugging use with
+ * tools like Wireshark. |ctx| takes ownership of |keylog_bio|.
+ *
+ * The format is described in
+ * https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format. */
+OPENSSL_EXPORT void SSL_CTX_set_keylog_bio(SSL_CTX *ctx, BIO *keylog_bio);
+
 
 struct ssl_aead_ctx_st;
 typedef struct ssl_aead_ctx_st SSL_AEAD_CTX;
 
-#if defined(OPENSSL_SYS_MSDOS) && !defined(OPENSSL_SYS_WIN32)
-#define SSL_MAX_CERT_LIST_DEFAULT 1024*30 /* 30k max cert list :-) */
-#else
-#define SSL_MAX_CERT_LIST_DEFAULT 1024*100 /* 100k max cert list :-) */
-#endif
+#define SSL_MAX_CERT_LIST_DEFAULT 1024*100 /* 100k max cert list */
 
 #define SSL_SESSION_CACHE_MAX_SIZE_DEFAULT	(1024*20)
+
+#define SSL_DEFAULT_SESSION_TIMEOUT (2 * 60 * 60)
 
 /* This callback type is used inside SSL_CTX, SSL, and in the functions that set
  * them. It is used to override the generation of SSL/TLS session IDs in a
@@ -822,7 +783,7 @@ DECLARE_LHASH_OF(SSL_SESSION);
 struct ssl_cipher_preference_list_st
 	{
 	STACK_OF(SSL_CIPHER) *ciphers;
-	unsigned char *in_group_flags;
+	uint8_t *in_group_flags;
 	};
 
 struct ssl_ctx_st
@@ -911,19 +872,13 @@ struct ssl_ctx_st
 	/* get channel id callback */
 	void (*channel_id_cb)(SSL *ssl, EVP_PKEY **pkey);
 
-    /* cookie generate callback */
-    int (*app_gen_cookie_cb)(SSL *ssl, unsigned char *cookie, 
-        unsigned int *cookie_len);
+	/* cookie generate callback */
+	int (*app_gen_cookie_cb)(SSL *ssl, uint8_t *cookie, size_t *cookie_len);
 
-    /* verify cookie callback */
-    int (*app_verify_cookie_cb)(SSL *ssl, unsigned char *cookie, 
-        unsigned int cookie_len);
+	/* verify cookie callback */
+	int (*app_verify_cookie_cb)(SSL *ssl, const uint8_t *cookie, size_t cookie_len);
 
 	CRYPTO_EX_DATA ex_data;
-
-	const EVP_MD *rsa_md5;/* For SSLv2 - name is 'ssl2-md5' */
-	const EVP_MD *md5;	/* For SSLv3/TLSv1 'ssl3-md5' */
-	const EVP_MD *sha1;   /* For SSLv3/TLSv1 'ssl3->sha1' */
 
 	STACK_OF(X509) *extra_certs;
 
@@ -979,12 +934,6 @@ struct ssl_ctx_st
 	 */
 	unsigned int max_send_fragment;
 
-#ifndef OPENSSL_ENGINE
-	/* Engine to pass requests for client certs to
-	 */
-	ENGINE *client_cert_engine;
-#endif
-
 	/* TLS extensions servername callback */
 	int (*tlsext_servername_callback)(SSL*, int *, void *);
 	void *tlsext_servername_arg;
@@ -1016,7 +965,6 @@ struct ssl_ctx_st
 	 * memory and session space. Only effective on the server side. */
 	char retain_only_sha256_of_client_certs;
 
-# ifndef OPENSSL_NO_NEXTPROTONEG
 	/* Next protocol negotiation information */
 	/* (for experimental NPN extension). */
 
@@ -1033,7 +981,6 @@ struct ssl_ctx_st
 				    unsigned int inlen,
 				    void *arg);
 	void *next_proto_select_cb_arg;
-# endif
 
 	/* ALPN information
 	 * (we are in the process of transitioning from NPN to ALPN.) */
@@ -1061,13 +1008,11 @@ struct ssl_ctx_st
 
         /* SRTP profiles we are willing to do from RFC 5764 */
 	STACK_OF(SRTP_PROTECTION_PROFILE) *srtp_profiles;
-# ifndef OPENSSL_NO_EC
 	/* EC extension values inherited by SSL structure */
 	size_t tlsext_ecpointformatlist_length;
 	uint8_t *tlsext_ecpointformatlist;
 	size_t tlsext_ellipticcurvelist_length;
 	uint16_t *tlsext_ellipticcurvelist;
-# endif /* OPENSSL_NO_EC */
 
 	/* If true, a client will advertise the Channel ID extension and a
 	 * server will echo it. */
@@ -1079,6 +1024,16 @@ struct ssl_ctx_st
 	/* The client's Channel ID private key. */
 	EVP_PKEY *tlsext_channel_id_private;
 
+	/* If true, a client will request certificate timestamps. */
+	char signed_cert_timestamps_enabled;
+
+	/* If true, a client will request a stapled OCSP response. */
+	char ocsp_stapling_enabled;
+
+	/* If not NULL, session key material will be logged to this BIO for
+	 * debugging purposes. The format matches NSS's and is readable by
+	 * Wireshark. */
+	BIO *keylog_bio;
 	};
 
 #endif
@@ -1141,12 +1096,46 @@ OPENSSL_EXPORT void SSL_CTX_set_client_cert_cb(SSL_CTX *ctx, int (*client_cert_c
 OPENSSL_EXPORT int (*SSL_CTX_get_client_cert_cb(SSL_CTX *ctx))(SSL *ssl, X509 **x509, EVP_PKEY **pkey);
 OPENSSL_EXPORT void SSL_CTX_set_channel_id_cb(SSL_CTX *ctx, void (*channel_id_cb)(SSL *ssl, EVP_PKEY **pkey));
 OPENSSL_EXPORT void (*SSL_CTX_get_channel_id_cb(SSL_CTX *ctx))(SSL *ssl, EVP_PKEY **pkey);
-#ifndef OPENSSL_NO_ENGINE
-OPENSSL_EXPORT int SSL_CTX_set_client_cert_engine(SSL_CTX *ctx, ENGINE *e);
-#endif
-OPENSSL_EXPORT void SSL_CTX_set_cookie_generate_cb(SSL_CTX *ctx, int (*app_gen_cookie_cb)(SSL *ssl, unsigned char *cookie, unsigned int *cookie_len));
-OPENSSL_EXPORT void SSL_CTX_set_cookie_verify_cb(SSL_CTX *ctx, int (*app_verify_cookie_cb)(SSL *ssl, unsigned char *cookie, unsigned int cookie_len));
-#ifndef OPENSSL_NO_NEXTPROTONEG
+OPENSSL_EXPORT void SSL_CTX_set_cookie_generate_cb(SSL_CTX *ctx, int (*app_gen_cookie_cb)(SSL *ssl, uint8_t *cookie, size_t *cookie_len));
+OPENSSL_EXPORT void SSL_CTX_set_cookie_verify_cb(SSL_CTX *ctx, int (*app_verify_cookie_cb)(SSL *ssl, const uint8_t *cookie, size_t cookie_len));
+
+
+/* SSL_enable_signed_cert_timestamps causes |ssl| (which must be the client
+ * end of a connection) to request SCTs from the server.
+ * See https://tools.ietf.org/html/rfc6962.
+ * Returns 1 on success. */
+OPENSSL_EXPORT int SSL_enable_signed_cert_timestamps(SSL *ssl);
+
+/* SSL_CTX_enable_signed_cert_timestamps enables SCT requests on all
+ * client SSL objects created from |ctx|. */
+OPENSSL_EXPORT void SSL_CTX_enable_signed_cert_timestamps(SSL_CTX *ctx);
+
+/* SSL_enable_signed_cert_timestamps causes |ssl| (which must be the client end
+ * of a connection) to request a stapled OCSP response from the server. Returns
+ * 1 on success. */
+OPENSSL_EXPORT int SSL_enable_ocsp_stapling(SSL *ssl);
+
+/* SSL_CTX_enable_ocsp_stapling enables OCSP stapling on all client SSL objects
+ * created from |ctx|. */
+OPENSSL_EXPORT void SSL_CTX_enable_ocsp_stapling(SSL_CTX *ctx);
+
+/* SSL_get0_signed_cert_timestamp_list sets |*out| and |*out_len| to point to
+ * |*out_len| bytes of SCT information from the server. This is only valid if
+ * |ssl| is a client. The SCT information is a SignedCertificateTimestampList
+ * (including the two leading length bytes).
+ * See https://tools.ietf.org/html/rfc6962#section-3.3
+ * If no SCT was received then |*out_len| will be zero on return.
+ *
+ * WARNING: the returned data is not guaranteed to be well formed. */
+OPENSSL_EXPORT void SSL_get0_signed_cert_timestamp_list(const SSL *ssl, uint8_t **out, size_t *out_len);
+
+/* SSL_get0_ocsp_response sets |*out| and |*out_len| to point to |*out_len|
+ * bytes of an OCSP response from the server. This is the DER encoding of an
+ * OCSPResponse type as defined in RFC 2560.
+ *
+ * WARNING: the returned data is not guaranteed to be well formed. */
+OPENSSL_EXPORT void SSL_get0_ocsp_response(const SSL *ssl, uint8_t **out, size_t *out_len);
+
 OPENSSL_EXPORT void SSL_CTX_set_next_protos_advertised_cb(SSL_CTX *s,
 					   int (*cb) (SSL *ssl,
 						      const unsigned char **out,
@@ -1160,7 +1149,6 @@ OPENSSL_EXPORT void SSL_CTX_set_next_proto_select_cb(SSL_CTX *s,
 				      void *arg);
 OPENSSL_EXPORT void SSL_get0_next_proto_negotiated(const SSL *s,
 				    const uint8_t **data, unsigned *len);
-#endif
 
 OPENSSL_EXPORT int SSL_select_next_proto(unsigned char **out, unsigned char *outlen,
 			  const unsigned char *in, unsigned int inlen,
@@ -1352,9 +1340,6 @@ struct ssl_st
 
 	void (*info_callback)(const SSL *ssl,int type,int val); /* optional informational callback */
 
-	int error;		/* error bytes to be written */
-	int error_code;		/* actual code */
-
 	/* PSK identity hint is stored here only to enable setting a hint on an SSL object before an
 	 * SSL_SESSION is associated with it. Once an SSL_SESSION is associated with this SSL object,
 	 * the psk_identity_hint from the session takes precedence over this one. */
@@ -1391,31 +1376,15 @@ struct ssl_st
 					void *arg);
 	void *tlsext_debug_arg;
 	char *tlsext_hostname;
-	int servername_done;   /* no further mod of servername 
-	                          0 : call the servername extension callback.
-	                          1 : prepare 2, allow last ack just after in server callback.
-	                          2 : don't call servername callback, no ack in server hello
-	                       */
-	/* certificate status request info */
-	/* Status type or -1 if no status type */
-	int tlsext_status_type;
-	/* Expect OCSP CertificateStatus message */
-	int tlsext_status_expected;
-	/* OCSP status request only */
-	STACK_OF(OCSP_RESPID) *tlsext_ocsp_ids;
-	X509_EXTENSIONS *tlsext_ocsp_exts;
-	/* OCSP response received or to be sent */
-	uint8_t *tlsext_ocsp_resp;
-	int tlsext_ocsp_resplen;
-
+	/* should_ack_sni is true if the SNI extension should be acked. This is
+	 * only used by a server. */
+	char should_ack_sni;
 	/* RFC4507 session ticket expected to be received or sent */
 	int tlsext_ticket_expected;
-#ifndef OPENSSL_NO_EC
 	size_t tlsext_ecpointformatlist_length;
 	uint8_t *tlsext_ecpointformatlist; /* our list */
 	size_t tlsext_ellipticcurvelist_length;
 	uint16_t *tlsext_ellipticcurvelist; /* our list */
-#endif /* OPENSSL_NO_EC */
 
 	/* TLS Session Ticket extension override */
 	TLS_SESSION_TICKET_EXT *tlsext_session_ticket;
@@ -1430,7 +1399,6 @@ struct ssl_st
 
 	SSL_CTX * initial_ctx; /* initial ctx, used to store sessions */
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
 	/* Next protocol negotiation. For the client, this is the protocol that
 	 * we sent in NextProtocol and is set when handling ServerHello
 	 * extensions.
@@ -1440,9 +1408,6 @@ struct ssl_st
 	 * before the Finished message. */
 	uint8_t *next_proto_negotiated;
 	size_t next_proto_negotiated_len;
-#endif
-
-#define session_ctx initial_ctx
 
 	STACK_OF(SRTP_PROTECTION_PROFILE) *srtp_profiles;  /* What we'll do */
 	SRTP_PROTECTION_PROFILE *srtp_profile;            /* What's been chosen */
@@ -1453,6 +1418,14 @@ struct ssl_st
 	char tlsext_channel_id_enabled;
 	/* The client's Channel ID private key. */
 	EVP_PKEY *tlsext_channel_id_private;
+
+	/* Enable signed certificate time stamps. Currently client only. */
+	char signed_cert_timestamps_enabled;
+
+	/* Enable OCSP stapling. Currently client only.
+	 * TODO(davidben): Add a server-side implementation when it becomes
+	 * necesary. */
+	char ocsp_stapling_enabled;
 
 	/* For a client, this contains the list of supported protocols in wire
 	 * format. */
@@ -1530,7 +1503,7 @@ extern "C" {
 #define SSL_in_before(a)		(SSL_state(a)&SSL_ST_BEFORE)
 #define SSL_in_connect_init(a)		(SSL_state(a)&SSL_ST_CONNECT)
 #define SSL_in_accept_init(a)		(SSL_state(a)&SSL_ST_ACCEPT)
-int SSL_cutthrough_complete(const SSL *s);
+OPENSSL_EXPORT int SSL_cutthrough_complete(const SSL *s);
 
 /* The following 2 states are kept in ssl->rstate when reads fail,
  * you should not need these */
@@ -1693,13 +1666,6 @@ DECLARE_PEM_rw(SSL_SESSION, SSL_SESSION)
 #define SSL_CTRL_SET_TLSEXT_TICKET_KEYS		59
 #define SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB	63
 #define SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB_ARG	64
-#define SSL_CTRL_SET_TLSEXT_STATUS_REQ_TYPE	65
-#define SSL_CTRL_GET_TLSEXT_STATUS_REQ_EXTS	66
-#define SSL_CTRL_SET_TLSEXT_STATUS_REQ_EXTS	67
-#define SSL_CTRL_GET_TLSEXT_STATUS_REQ_IDS	68
-#define SSL_CTRL_SET_TLSEXT_STATUS_REQ_IDS	69
-#define SSL_CTRL_GET_TLSEXT_STATUS_REQ_OCSP_RESP	70
-#define SSL_CTRL_SET_TLSEXT_STATUS_REQ_OCSP_RESP	71
 
 #define SSL_CTRL_SET_TLSEXT_TICKET_KEY_CB	72
 
@@ -1952,6 +1918,9 @@ OPENSSL_EXPORT const SSL_CIPHER *SSL_get_current_cipher(const SSL *s);
 OPENSSL_EXPORT int	SSL_CIPHER_get_bits(const SSL_CIPHER *c,int *alg_bits);
 OPENSSL_EXPORT const char *	SSL_CIPHER_get_version(const SSL_CIPHER *c);
 OPENSSL_EXPORT const char *	SSL_CIPHER_get_name(const SSL_CIPHER *c);
+/* SSL_CIPHER_get_kx_name returns a string that describes the key-exchange
+ * method used by |c|. For example, "ECDHE-ECDSA". */
+OPENSSL_EXPORT const char *	SSL_CIPHER_get_kx_name(const SSL_CIPHER *cipher);
 OPENSSL_EXPORT unsigned long 	SSL_CIPHER_get_id(const SSL_CIPHER *c);
 
 OPENSSL_EXPORT int	SSL_get_fd(const SSL *s);
@@ -2091,7 +2060,12 @@ OPENSSL_EXPORT long	SSL_CTX_ctrl(SSL_CTX *ctx,int cmd, long larg, void *parg);
 OPENSSL_EXPORT long	SSL_CTX_callback_ctrl(SSL_CTX *, int, void (*)(void));
 
 OPENSSL_EXPORT int	SSL_get_error(const SSL *s,int ret_code);
+/* SSL_get_version returns a string describing the TLS version used by |s|. For
+ * example, "TLSv1.2" or "SSLv3". */
 OPENSSL_EXPORT const char *SSL_get_version(const SSL *s);
+/* SSL_SESSION_get_version returns a string describing the TLS version used by
+ * |sess|. For example, "TLSv1.2" or "SSLv3". */
+OPENSSL_EXPORT const char *SSL_SESSION_get_version(const SSL_SESSION *sess);
 
 OPENSSL_EXPORT int SSL_CIPHER_is_AES(const SSL_CIPHER *c);
 OPENSSL_EXPORT int SSL_CIPHER_has_MD5_HMAC(const SSL_CIPHER *c);
@@ -2251,22 +2225,18 @@ OPENSSL_EXPORT void SSL_CTX_set_tmp_rsa_callback(SSL_CTX *ctx,
 OPENSSL_EXPORT void SSL_set_tmp_rsa_callback(SSL *ssl,
 				  RSA *(*cb)(SSL *ssl,int is_export,
 					     int keylength));
-#ifndef OPENSSL_NO_DH
 OPENSSL_EXPORT void SSL_CTX_set_tmp_dh_callback(SSL_CTX *ctx,
 				 DH *(*dh)(SSL *ssl,int is_export,
 					   int keylength));
 OPENSSL_EXPORT void SSL_set_tmp_dh_callback(SSL *ssl,
 				 DH *(*dh)(SSL *ssl,int is_export,
 					   int keylength));
-#endif
-#ifndef OPENSSL_NO_ECDH
 OPENSSL_EXPORT void SSL_CTX_set_tmp_ecdh_callback(SSL_CTX *ctx,
 				 EC_KEY *(*ecdh)(SSL *ssl,int is_export,
 					   int keylength));
 OPENSSL_EXPORT void SSL_set_tmp_ecdh_callback(SSL *ssl,
 				 EC_KEY *(*ecdh)(SSL *ssl,int is_export,
 					   int keylength));
-#endif
 
 OPENSSL_EXPORT const void *SSL_get_current_compression(SSL *s);
 OPENSSL_EXPORT const void *SSL_get_current_expansion(SSL *s);
@@ -2406,7 +2376,7 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_F_tls1_setup_key_block 183
 #define SSL_F_SSL_set_fd 184
 #define SSL_F_SSL_check_private_key 185
-#define SSL_F_ssl3_send_client_verify 186
+#define SSL_F_ssl3_send_cert_verify 186
 #define SSL_F_ssl3_write_pending 187
 #define SSL_F_ssl_cert_inst 188
 #define SSL_F_ssl3_change_cipher_state 189
@@ -2433,7 +2403,7 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_F_SSL_SESSION_new 210
 #define SSL_F_check_suiteb_cipher_list 211
 #define SSL_F_ssl_scan_clienthello_tlsext 212
-#define SSL_F_ssl3_client_hello 213
+#define SSL_F_ssl3_send_client_hello 213
 #define SSL_F_SSL_use_RSAPrivateKey_ASN1 214
 #define SSL_F_ssl3_ctrl 215
 #define SSL_F_ssl3_setup_write_buffer 216
@@ -2503,6 +2473,10 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_F_tls1_aead_ctx_init 280
 #define SSL_F_tls1_check_duplicate_extensions 281
 #define SSL_F_ssl3_expect_change_cipher_spec 282
+#define SSL_F_ssl23_get_v2_client_hello 283
+#define SSL_F_ssl3_cert_verify_hash 284
+#define SSL_F_ssl_ctx_log_rsa_client_key_exchange 285
+#define SSL_F_ssl_ctx_log_master_secret 286
 #define SSL_R_UNABLE_TO_FIND_ECDH_PARAMETERS 100
 #define SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC 101
 #define SSL_R_INVALID_NULL_CMD_NAME 102
@@ -2815,6 +2789,8 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_R_DECODE_ERROR 439
 #define SSL_R_UNPROCESSED_HANDSHAKE_DATA 440
 #define SSL_R_HANDSHAKE_RECORD_BEFORE_CCS 441
+#define SSL_R_SESSION_MAY_NOT_BE_CREATED 442
+#define SSL_R_SSLV3_ALERT_CLOSE_NOTIFY 1000
 #define SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE 1010
 #define SSL_R_SSLV3_ALERT_BAD_RECORD_MAC 1020
 #define SSL_R_TLSV1_ALERT_DECRYPTION_FAILED 1021
@@ -2836,6 +2812,7 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_R_TLSV1_ALERT_PROTOCOL_VERSION 1070
 #define SSL_R_TLSV1_ALERT_INSUFFICIENT_SECURITY 1071
 #define SSL_R_TLSV1_ALERT_INTERNAL_ERROR 1080
+#define SSL_R_TLSV1_ALERT_INAPPROPRIATE_FALLBACK 1086
 #define SSL_R_TLSV1_ALERT_USER_CANCELLED 1090
 #define SSL_R_TLSV1_ALERT_NO_RENEGOTIATION 1100
 #define SSL_R_TLSV1_UNSUPPORTED_EXTENSION 1110

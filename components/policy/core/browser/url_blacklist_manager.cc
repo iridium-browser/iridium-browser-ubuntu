@@ -20,6 +20,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
+#include "url/url_constants.h"
 #include "url/url_parse.h"
 
 using url_matcher::URLMatcher;
@@ -34,7 +35,22 @@ namespace policy {
 
 namespace {
 
-const char kFileScheme[] = "file";
+// List of schemes of URLs that should not be blocked by the "*" wildcard in
+// the blacklist. Note that URLs with these schemes can still be blocked with
+// a more specific filter e.g. "chrome-extension://*".
+// The schemes are hardcoded here to avoid dependencies on //extensions and
+// //chrome.
+const char* kBypassBlacklistWildcardForSchemes[] = {
+  // For internal extension URLs e.g. the Bookmark Manager and the File
+  // Manager on Chrome OS.
+  "chrome-extension",
+
+  // NTP on Android.
+  "chrome-native",
+
+  // NTP on other platforms.
+  "chrome-search",
+};
 
 // Maximum filters per policy. Filters over this index are ignored.
 const size_t kMaxFiltersPerPolicy = 1000;
@@ -98,11 +114,27 @@ void ProcessQueryToConditions(
   }
 }
 
+bool BypassBlacklistWildcardForURL(const GURL& url) {
+  const std::string& scheme = url.scheme();
+  for (size_t i = 0; i < arraysize(kBypassBlacklistWildcardForSchemes); ++i) {
+    if (scheme == kBypassBlacklistWildcardForSchemes[i])
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 struct URLBlacklist::FilterComponents {
   FilterComponents() : port(0), match_subdomains(true), allow(true) {}
   ~FilterComponents() {}
+
+  // Returns true if |this| represents the "*" filter in the blacklist.
+  bool IsBlacklistWildcard() const {
+    return !allow && host.empty() && scheme.empty() && path.empty() &&
+           query.empty() && port == 0 && number_of_key_value_pairs == 0 &&
+           match_subdomains;
+  }
 
   std::string scheme;
   std::string host;
@@ -185,6 +217,12 @@ bool URLBlacklist::IsURLBlocked(const GURL& url) const {
   if (!max)
     return false;
 
+  // Some of the internal Chrome URLs are not affected by the "*" in the
+  // blacklist. Note that the "*" is the lowest priority filter possible, so
+  // any higher priority filter will be applied first.
+  if (max->IsBlacklistWildcard() && BypassBlacklistWildcardForURL(url))
+    return false;
+
   return !max->allow;
 }
 
@@ -203,12 +241,12 @@ bool URLBlacklist::FilterToComponents(SegmentURLCallback segment_url,
                                       std::string* query) {
   url::Parsed parsed;
 
-  if (segment_url(filter, &parsed) == kFileScheme) {
+  if (segment_url(filter, &parsed) == url::kFileScheme) {
     base::FilePath file_path;
     if (!net::FileURLToFilePath(GURL(filter), &file_path))
       return false;
 
-    *scheme = kFileScheme;
+    *scheme = url::kFileScheme;
     host->clear();
     *match_subdomains = true;
     *port = 0;
@@ -329,6 +367,10 @@ scoped_refptr<URLMatcherConditionSet> URLBlacklist::CreateConditionSet(
 // static
 bool URLBlacklist::FilterTakesPrecedence(const FilterComponents& lhs,
                                          const FilterComponents& rhs) {
+  // The "*" wildcard is the lowest priority filter.
+  if (rhs.IsBlacklistWildcard())
+    return true;
+
   if (lhs.match_subdomains && !rhs.match_subdomains)
     return false;
   if (!lhs.match_subdomains && rhs.match_subdomains)
@@ -359,15 +401,15 @@ URLBlacklistManager::URLBlacklistManager(
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
     URLBlacklist::SegmentURLCallback segment_url,
     OverrideBlacklistCallback override_blacklist)
-    : ui_weak_ptr_factory_(this),
-      pref_service_(pref_service),
+    : pref_service_(pref_service),
       background_task_runner_(background_task_runner),
       io_task_runner_(io_task_runner),
       segment_url_(segment_url),
       override_blacklist_(override_blacklist),
-      io_weak_ptr_factory_(this),
       ui_task_runner_(base::MessageLoopProxy::current()),
-      blacklist_(new URLBlacklist(segment_url)) {
+      blacklist_(new URLBlacklist(segment_url)),
+      ui_weak_ptr_factory_(this),
+      io_weak_ptr_factory_(this) {
   pref_change_registrar_.Init(pref_service_);
   base::Closure callback = base::Bind(&URLBlacklistManager::ScheduleUpdate,
                                       base::Unretained(this));
@@ -427,7 +469,7 @@ void URLBlacklistManager::UpdateOnIO(scoped_ptr<base::ListValue> block,
   // The URLBlacklist is built on a worker thread. Once it's ready, it is passed
   // to the URLBlacklistManager on IO.
   base::PostTaskAndReplyWithResult(
-      background_task_runner_,
+      background_task_runner_.get(),
       FROM_HERE,
       base::Bind(&BuildBlacklist,
                  base::Passed(&block),

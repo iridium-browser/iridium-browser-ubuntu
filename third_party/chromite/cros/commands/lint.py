@@ -18,6 +18,8 @@ Then pylint will import the register function and call it.  So we can have
 as many/few checkers as we want in this one module.
 """
 
+from __future__ import print_function
+
 import os
 
 from pylint.checkers import BaseChecker
@@ -124,12 +126,17 @@ class DocStringChecker(BaseChecker):
 
   def _check_whitespace(self, node, lines):
     """Verify whitespace is sane"""
+    # Make sure first line doesn't have leading whitespace.
+    if lines[0].lstrip() != lines[0]:
+      margs = {'offset': 0, 'line': lines[0]}
+      self.add_message('C9004', node=node, line=node.fromlineno, args=margs)
+
     # Verify no trailing whitespace.
     # We skip the last line since it's supposed to be pure whitespace.
     #
     # Also check for multiple blank lines in a row.
     last_blank = False
-    for l, i in zip(lines[:-1], xrange(len(lines))):
+    for i, l in enumerate(lines[:-1]):
       margs = {'offset': i, 'line': l}
 
       if l.rstrip() != l:
@@ -140,11 +147,9 @@ class DocStringChecker(BaseChecker):
         self.add_message('C9013', node=node, line=node.fromlineno, args=margs)
       last_blank = curr_blank
 
-    # Now specially handle the last line.  Note: if there's just one line,
-    # then we can check leading & trailing whitespace.
+    # Now specially handle the last line.
     l = lines[-1]
-    if ((len(lines) == 1 and l.strip() != l) or
-        (l.strip() != '' and l.rstrip() != l)):
+    if l.strip() != '' and l.rstrip() != l:
       margs = {'offset': len(lines), 'line': l}
       self.add_message('C9003', node=node, line=node.fromlineno, args=margs)
 
@@ -172,7 +177,7 @@ class DocStringChecker(BaseChecker):
     )
 
     last = lines[0].strip()
-    for line, i in zip(lines[1:], xrange(len(lines))):
+    for i, line in enumerate(lines[1:]):
       margs = {'offset': i + 1, 'line': line}
       l = line.strip()
 

@@ -538,7 +538,9 @@ class KeyMobileSitesPageSet(page_set_module.PageSet):
       ('http://www.baidu.com/s?wd=barack+obama&rsv_bp=0&rsv_spt=3&rsv_sug3=9&'
        'rsv_sug=0&rsv_sug4=3824&rsv_sug1=3&inputT=4920'),
       # Why: Top search engine
-      'http://www.bing.com/search?q=sloths'
+      'http://www.bing.com/search?q=sloths',
+      # Why: Good example of poor initial scrolling
+      'http://ftw.usatoday.com/2014/05/spelling-bee-rules-shenanigans'
     ]
 
     for url in urls_list:

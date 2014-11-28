@@ -94,7 +94,7 @@ cr.define('help', function() {
 
     /**
      * Returns the list of all radio buttons responsible for channel selection.
-     * @return {Array.<HTMLInputElement>} Array of radio buttons
+     * @return {NodeList} Array of radio buttons
      * @private
      */
     getAllChannelOptions_: function() {
@@ -103,7 +103,7 @@ cr.define('help', function() {
 
     /**
      * Returns value of the selected option.
-     * @return {string} Selected channel name or null, if neither
+     * @return {?string} Selected channel name or null, if neither
      *     option is selected.
      * @private
      */
@@ -195,7 +195,6 @@ cr.define('help', function() {
      */
     updateIsEnterpriseManaged_: function(isEnterpriseManaged) {
       this.isEnterpriseManaged_ = isEnterpriseManaged;
-      help.HelpPage.updateChannelChangePageContainerVisibility();
     },
 
     /**
@@ -209,7 +208,6 @@ cr.define('help', function() {
         return;
       this.currentChannel_ = channel;
       this.selectOption_(channel);
-      help.HelpPage.updateChannelChangePageContainerVisibility();
     },
 
     /**
@@ -223,7 +221,6 @@ cr.define('help', function() {
       if (this.channelList_.indexOf(channel) < 0)
         return;
       this.targetChannel_ = channel;
-      help.HelpPage.updateChannelChangePageContainerVisibility();
     },
 
     /**

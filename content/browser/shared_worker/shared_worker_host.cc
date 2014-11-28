@@ -31,6 +31,20 @@ void WorkerCrashCallback(int render_process_unique_id, int render_frame_id) {
     host->delegate()->WorkerCrashed(host);
 }
 
+void NotifyWorkerReadyForInspection(int worker_process_id,
+                                    int worker_route_id) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(BrowserThread::UI,
+                            FROM_HERE,
+                            base::Bind(NotifyWorkerReadyForInspection,
+                                       worker_process_id,
+                                       worker_route_id));
+    return;
+  }
+  EmbeddedWorkerDevToolsManager::GetInstance()->WorkerReadyForInspection(
+      worker_process_id, worker_route_id);
+}
+
 void NotifyWorkerContextStarted(int worker_process_id, int worker_route_id) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
@@ -63,13 +77,13 @@ SharedWorkerHost::SharedWorkerHost(SharedWorkerInstance* instance,
                                    int worker_route_id)
     : instance_(instance),
       worker_document_set_(new WorkerDocumentSet()),
-      weak_factory_(this),
       container_render_filter_(filter),
       worker_process_id_(filter->render_process_id()),
       worker_route_id_(worker_route_id),
       load_failed_(false),
       closed_(false),
-      creation_time_(base::TimeTicks::Now()) {
+      creation_time_(base::TimeTicks::Now()),
+      weak_factory_(this) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 }
 
@@ -173,6 +187,10 @@ void SharedWorkerHost::WorkerContextDestroyed() {
     return;
   instance_.reset();
   worker_document_set_ = NULL;
+}
+
+void SharedWorkerHost::WorkerReadyForInspection() {
+  NotifyWorkerReadyForInspection(worker_process_id_, worker_route_id_);
 }
 
 void SharedWorkerHost::WorkerScriptLoaded() {

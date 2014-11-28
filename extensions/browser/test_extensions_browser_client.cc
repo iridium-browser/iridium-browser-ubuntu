@@ -17,7 +17,8 @@ TestExtensionsBrowserClient::TestExtensionsBrowserClient(
     BrowserContext* main_context)
     : main_context_(main_context),
       incognito_context_(NULL),
-      process_manager_delegate_(NULL) {
+      process_manager_delegate_(NULL),
+      extension_system_factory_(NULL) {
   DCHECK(main_context_);
   DCHECK(!main_context_->IsOffTheRecord());
 }
@@ -83,11 +84,6 @@ bool TestExtensionsBrowserClient::IsExtensionIncognitoEnabled(
 bool TestExtensionsBrowserClient::CanExtensionCrossIncognito(
     const extensions::Extension* extension,
     content::BrowserContext* context) const {
-  return false;
-}
-
-bool TestExtensionsBrowserClient::IsWebViewRequest(
-    net::URLRequest* request) const {
   return false;
 }
 
@@ -164,6 +160,11 @@ TestExtensionsBrowserClient::CreateRuntimeAPIDelegate(
 ComponentExtensionResourceManager*
 TestExtensionsBrowserClient::GetComponentExtensionResourceManager() {
   return NULL;
+}
+
+void TestExtensionsBrowserClient::BroadcastEventToRenderers(
+    const std::string& event_name,
+    scoped_ptr<base::ListValue> args) {
 }
 
 net::NetLog* TestExtensionsBrowserClient::GetNetLog() {

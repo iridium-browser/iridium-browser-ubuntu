@@ -81,6 +81,7 @@
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
+#include "platform/graphics/gpu/AcceleratedImageBufferSurface.h"
 #include "platform/graphics/gpu/DrawingBuffer.h"
 #include "public/platform/Platform.h"
 
@@ -124,13 +125,11 @@ void WebGLRenderingContextBase::forciblyLoseOldestContext(const String& reason)
     // Must make sure that the context is not deleted until the call stack unwinds.
     RefPtrWillBeRawPtr<WebGLRenderingContextBase> protect(candidate);
 
-    activeContexts().remove(candidateID);
-
     candidate->printWarningToConsole(reason);
     InspectorInstrumentation::didFireWebGLWarning(candidate->canvas());
 
     // This will call deactivateContext once the context has actually been lost.
-    candidate->forceLostContext(WebGLRenderingContextBase::SyntheticLostContext);
+    candidate->forceLostContext(WebGLRenderingContextBase::SyntheticLostContext, WebGLRenderingContextBase::WhenAvailable);
 }
 
 size_t WebGLRenderingContextBase::oldestContextIndex()
@@ -139,12 +138,12 @@ size_t WebGLRenderingContextBase::oldestContextIndex()
         return maxGLActiveContexts;
 
     WebGLRenderingContextBase* candidate = activeContexts().first();
-    blink::WebGraphicsContext3D* candidateWGC3D = candidate->isContextLost() ? 0 : candidate->webContext();
+    ASSERT(!candidate->isContextLost());
     size_t candidateID = 0;
     for (size_t ii = 1; ii < activeContexts().size(); ++ii) {
         WebGLRenderingContextBase* context = activeContexts()[ii];
-        blink::WebGraphicsContext3D* contextWGC3D = context->isContextLost() ? 0 : context->webContext();
-        if (contextWGC3D && candidateWGC3D && contextWGC3D->lastFlushID() < candidateWGC3D->lastFlushID()) {
+        ASSERT(!context->isContextLost());
+        if (context->webContext()->lastFlushID() < candidate->webContext()->lastFlushID()) {
             candidate = context;
             candidateID = ii;
         }
@@ -175,27 +174,35 @@ void WebGLRenderingContextBase::activateContext(WebGLRenderingContextBase* conte
         removedContexts++;
     }
 
+    ASSERT(!context->isContextLost());
     if (!activeContexts().contains(context))
         activeContexts().append(context);
 }
 
-void WebGLRenderingContextBase::deactivateContext(WebGLRenderingContextBase* context, bool addToEvictedList)
+void WebGLRenderingContextBase::deactivateContext(WebGLRenderingContextBase* context)
 {
     size_t position = activeContexts().find(context);
     if (position != WTF::kNotFound)
         activeContexts().remove(position);
+}
 
-    if (addToEvictedList && !forciblyEvictedContexts().contains(context))
+void WebGLRenderingContextBase::addToEvictedList(WebGLRenderingContextBase* context)
+{
+    if (!forciblyEvictedContexts().contains(context))
         forciblyEvictedContexts().append(context);
 }
 
-void WebGLRenderingContextBase::willDestroyContext(WebGLRenderingContextBase* context)
+void WebGLRenderingContextBase::removeFromEvictedList(WebGLRenderingContextBase* context)
 {
     size_t position = forciblyEvictedContexts().find(context);
     if (position != WTF::kNotFound)
         forciblyEvictedContexts().remove(position);
+}
 
-    deactivateContext(context, false);
+void WebGLRenderingContextBase::willDestroyContext(WebGLRenderingContextBase* context)
+{
+    removeFromEvictedList(context);
+    deactivateContext(context);
 
     // Try to re-enable the oldest inactive contexts.
     while(activeContexts().size() < maxGLActiveContexts && forciblyEvictedContexts().size()) {
@@ -211,7 +218,6 @@ void WebGLRenderingContextBase::willDestroyContext(WebGLRenderingContextBase* co
         if (!desiredSize.isEmpty()) {
             forciblyEvictedContexts().remove(0);
             evictedContext->forceRestoreContext();
-            activeContexts().append(evictedContext);
         }
         break;
     }
@@ -501,7 +507,7 @@ public:
 
     virtual ~WebGLRenderingContextLostCallback() { }
 
-    virtual void onContextLost() { m_context->forceLostContext(WebGLRenderingContextBase::RealLostContext); }
+    virtual void onContextLost() { m_context->forceLostContext(WebGLRenderingContextBase::RealLostContext, WebGLRenderingContextBase::Auto); }
 
     void trace(Visitor* visitor)
     {
@@ -547,12 +553,12 @@ private:
 WebGLRenderingContextBase::WebGLRenderingContextBase(HTMLCanvasElement* passedCanvas, PassOwnPtr<blink::WebGraphicsContext3D> context, WebGLContextAttributes* requestedAttributes)
     : CanvasRenderingContext(passedCanvas)
     , ActiveDOMObject(&passedCanvas->document())
+    , m_contextLostMode(NotLostContext)
+    , m_autoRecoveryMethod(Manual)
     , m_dispatchContextLostEventTimer(this, &WebGLRenderingContextBase::dispatchContextLostEvent)
     , m_restoreAllowed(false)
     , m_restoreTimer(this, &WebGLRenderingContextBase::maybeRestoreContext)
     , m_generatedImageCache(4)
-    , m_contextLost(false)
-    , m_contextLostMode(SyntheticLostContext)
     , m_requestedAttributes(requestedAttributes->clone())
     , m_synthesizedErrorsToConsole(true)
     , m_numGLErrorsToConsoleAllowed(maxGLErrorsAllowedToConsole)
@@ -760,8 +766,6 @@ WebGLRenderingContextBase::~WebGLRenderingContextBase()
 
 void WebGLRenderingContextBase::destroyContext()
 {
-    m_contextLost = true;
-
     if (!drawingBuffer())
         return;
 
@@ -879,6 +883,12 @@ void WebGLRenderingContextBase::markLayerComposited()
         drawingBuffer()->markLayerComposited();
 }
 
+void WebGLRenderingContextBase::setIsHidden(bool hidden)
+{
+    if (drawingBuffer())
+        drawingBuffer()->setIsHidden(hidden);
+}
+
 void WebGLRenderingContextBase::paintRenderingResultsToCanvas()
 {
     if (isContextLost()) {
@@ -909,7 +919,7 @@ void WebGLRenderingContextBase::paintRenderingResultsToCanvas()
     ScopedTexture2DRestorer restorer(this);
 
     drawingBuffer()->commit();
-    if (!(canvas()->buffer())->copyRenderingResultsFromDrawingBuffer(drawingBuffer(), m_savingImage)) {
+    if (!canvas()->buffer()->copyRenderingResultsFromDrawingBuffer(drawingBuffer(), m_savingImage)) {
         canvas()->ensureUnacceleratedImageBuffer();
         if (canvas()->hasImageBuffer())
             drawingBuffer()->paintRenderingResultsToCanvas(canvas()->buffer());
@@ -2711,7 +2721,7 @@ WebGLGetInfo WebGLRenderingContextBase::getUniform(WebGLProgram* program, const 
             nameBuilder.append(info.name);
             if (info.size > 1 && index >= 1) {
                 nameBuilder.append('[');
-                nameBuilder.append(String::number(index));
+                nameBuilder.appendNumber(index);
                 nameBuilder.append(']');
             }
             // Now need to look this up by name again to find its location
@@ -2930,7 +2940,7 @@ GLboolean WebGLRenderingContextBase::isBuffer(WebGLBuffer* buffer)
 
 bool WebGLRenderingContextBase::isContextLost() const
 {
-    return m_contextLost;
+    return m_contextLostMode != NotLostContext;
 }
 
 GLboolean WebGLRenderingContextBase::isEnabled(GLenum cap)
@@ -3556,7 +3566,6 @@ PassRefPtr<Image> WebGLRenderingContextBase::videoFrameToImage(HTMLVideoElement*
         return nullptr;
     }
     IntRect destRect(0, 0, size.width(), size.height());
-    // FIXME: Turn this into a GPU-GPU texture copy instead of CPU readback.
     video->paintCurrentFrameInContext(buf->context(), destRect);
     return buf->copyImage(backingStoreCopy);
 }
@@ -3575,6 +3584,26 @@ void WebGLRenderingContextBase::texImage2D(GLenum target, GLint level, GLenum in
         if (video->copyVideoTextureToPlatformTexture(webContext(), texture->object(), level, internalformat, type, m_unpackPremultiplyAlpha, m_unpackFlipY)) {
             texture->setLevelInfo(target, level, internalformat, video->videoWidth(), video->videoHeight(), type);
             return;
+        }
+    }
+
+    // Try using an accelerated image buffer, this allows YUV conversion to be done on the GPU.
+    OwnPtr<ImageBufferSurface> surface = adoptPtr(new AcceleratedImageBufferSurface(IntSize(video->videoWidth(), video->videoHeight())));
+    if (surface->isValid()) {
+        OwnPtr<ImageBuffer> imageBuffer(ImageBuffer::create(surface.release()));
+        if (imageBuffer) {
+            // The video element paints an RGBA frame into our surface here. By using an AcceleratedImageBufferSurface,
+            // we enable the WebMediaPlayer implementation to do any necessary color space conversion on the GPU (though it
+            // may still do a CPU conversion and upload the results).
+            video->paintCurrentFrameInContext(imageBuffer->context(), IntRect(0, 0, video->videoWidth(), video->videoHeight()));
+            imageBuffer->context()->canvas()->flush();
+
+            // This is a straight GPU-GPU copy, any necessary color space conversion was handled in the paintCurrentFrameInContext() call.
+            if (imageBuffer->copyToPlatformTexture(webContext(), texture->object(), internalformat, type,
+                level, m_unpackPremultiplyAlpha, m_unpackFlipY)) {
+                texture->setLevelInfo(target, level, internalformat, video->videoWidth(), video->videoHeight(), type);
+                return;
+            }
         }
     }
 
@@ -4205,23 +4234,24 @@ void WebGLRenderingContextBase::viewport(GLint x, GLint y, GLsizei width, GLsize
     webContext()->viewport(x, y, width, height);
 }
 
-void WebGLRenderingContextBase::forceLostContext(WebGLRenderingContextBase::LostContextMode mode)
+void WebGLRenderingContextBase::forceLostContext(LostContextMode mode, AutoRecoveryMethod autoRecoveryMethod)
 {
     if (isContextLost()) {
         synthesizeGLError(GL_INVALID_OPERATION, "loseContext", "context already lost");
         return;
     }
 
-    m_contextGroup->loseContextGroup(mode);
+    m_contextGroup->loseContextGroup(mode, autoRecoveryMethod);
 }
 
-void WebGLRenderingContextBase::loseContextImpl(WebGLRenderingContextBase::LostContextMode mode)
+void WebGLRenderingContextBase::loseContextImpl(WebGLRenderingContextBase::LostContextMode mode, AutoRecoveryMethod autoRecoveryMethod)
 {
     if (isContextLost())
         return;
 
-    m_contextLost = true;
     m_contextLostMode = mode;
+    ASSERT(m_contextLostMode != NotLostContext);
+    m_autoRecoveryMethod = autoRecoveryMethod;
 
     if (mode == RealLostContext) {
         // Inform the embedder that a lost context was received. In response, the embedder might
@@ -4256,6 +4286,9 @@ void WebGLRenderingContextBase::loseContextImpl(WebGLRenderingContextBase::LostC
     // Don't allow restoration unless the context lost event has both been
     // dispatched and its default behavior prevented.
     m_restoreAllowed = false;
+    deactivateContext(this);
+    if (m_autoRecoveryMethod == WhenAvailable)
+        addToEvictedList(this);
 
     // Always defer the dispatch of the context lost event, to implement
     // the spec behavior of queueing a task.
@@ -4270,7 +4303,7 @@ void WebGLRenderingContextBase::forceRestoreContext()
     }
 
     if (!m_restoreAllowed) {
-        if (m_contextLostMode == SyntheticLostContext)
+        if (m_contextLostMode == WebGLLoseContextLostContext)
             synthesizeGLError(GL_INVALID_OPERATION, "restoreContext", "context restoration not allowed");
         return;
     }
@@ -4330,8 +4363,8 @@ bool WebGLRenderingContextBase::hasPendingActivity() const
 void WebGLRenderingContextBase::stop()
 {
     if (!isContextLost()) {
-        forceLostContext(SyntheticLostContext);
-        destroyContext();
+        // Never attempt to restore the context because the page is being torn down.
+        forceLostContext(SyntheticLostContext, Manual);
     }
 }
 
@@ -5464,9 +5497,10 @@ void WebGLRenderingContextBase::dispatchContextLostEvent(Timer<WebGLRenderingCon
     RefPtrWillBeRawPtr<WebGLContextEvent> event = WebGLContextEvent::create(EventTypeNames::webglcontextlost, false, true, "");
     canvas()->dispatchEvent(event);
     m_restoreAllowed = event->defaultPrevented();
-    deactivateContext(this, m_contextLostMode != RealLostContext && m_restoreAllowed);
-    if ((m_contextLostMode == RealLostContext || m_contextLostMode == AutoRecoverSyntheticLostContext) && m_restoreAllowed)
-        m_restoreTimer.startOneShot(0, FROM_HERE);
+    if (m_restoreAllowed) {
+        if (m_autoRecoveryMethod == Auto)
+            m_restoreTimer.startOneShot(0, FROM_HERE);
+    }
 }
 
 void WebGLRenderingContextBase::maybeRestoreContext(Timer<WebGLRenderingContextBase>*)
@@ -5504,7 +5538,6 @@ void WebGLRenderingContextBase::maybeRestoreContext(Timer<WebGLRenderingContextB
     blink::WebGraphicsContext3D::Attributes attributes = m_requestedAttributes->attributes(canvas()->document().topDocument().url().string(), settings, version());
     OwnPtr<blink::WebGraphicsContext3D> context = adoptPtr(blink::Platform::current()->createOffscreenGraphicsContext3D(attributes, 0));
     RefPtr<DrawingBuffer> buffer;
-    // Even if a non-null WebGraphicsContext3D is created, until it's made current, it isn't known whether the context is still lost.
     if (context) {
         // Construct a new drawing buffer with the new WebGraphicsContext3D.
         buffer = createDrawingBuffer(context.release());
@@ -5531,7 +5564,10 @@ void WebGLRenderingContextBase::maybeRestoreContext(Timer<WebGLRenderingContextB
 
     drawingBuffer()->bind();
     m_lostContextErrors.clear();
-    m_contextLost = false;
+    m_contextLostMode = NotLostContext;
+    m_autoRecoveryMethod = Manual;
+    m_restoreAllowed = false;
+    removeFromEvictedList(this);
 
     setupFlags();
     initializeNewContext();
@@ -5701,7 +5737,7 @@ void WebGLRenderingContextBase::multisamplingChanged(bool enabled)
 {
     if (m_multisamplingAllowed != enabled) {
         m_multisamplingAllowed = enabled;
-        forceLostContext(WebGLRenderingContextBase::AutoRecoverSyntheticLostContext);
+        forceLostContext(WebGLRenderingContextBase::SyntheticLostContext, WebGLRenderingContextBase::Auto);
     }
 }
 

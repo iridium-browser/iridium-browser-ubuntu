@@ -49,7 +49,7 @@ WebInspector.SettingsScreen = function(onHide)
     this._tabbedPane.element.appendChild(this._createCloseButton());
     this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.General, WebInspector.UIString("General"), new WebInspector.GenericSettingsTab());
     this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.Workspace, WebInspector.UIString("Workspace"), new WebInspector.WorkspaceSettingsTab());
-    if (WebInspector.experimentsSettings.experimentsEnabled)
+    if (Runtime.experiments.supportEnabled())
         this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.Experiments, WebInspector.UIString("Experiments"), new WebInspector.ExperimentsSettingsTab());
     this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.Shortcuts, WebInspector.UIString("Shortcuts"), WebInspector.shortcutsScreen.createShortcutsTabView());
     this._tabbedPane.shrinkableTabs = false;
@@ -244,10 +244,10 @@ WebInspector.GenericSettingsTab.prototype = {
             var descriptor = extension.descriptor();
             var sectionName = descriptor["section"] || "";
             if (!sectionName && descriptor["parentSettingName"]) {
-                childSettingExtensionsByParentName.put(descriptor["parentSettingName"], extension);
+                childSettingExtensionsByParentName.set(descriptor["parentSettingName"], extension);
                 return;
             }
-            extensionsBySectionId.put(sectionName, extension);
+            extensionsBySectionId.set(sectionName, extension);
         });
 
         var sectionIds = extensionsBySectionId.keys();
@@ -285,7 +285,7 @@ WebInspector.GenericSettingsTab.prototype = {
         {
             var descriptor = extension.descriptor();
             var experimentName = descriptor["experiment"];
-            if (experimentName && (!WebInspector.experimentsSettings[experimentName] || !WebInspector.experimentsSettings[experimentName].isEnabled()))
+            if (experimentName && !Runtime.experiments.isEnabled(experimentName))
                 return;
 
             var settingName = descriptor["settingName"];
@@ -561,7 +561,7 @@ WebInspector.ExperimentsSettingsTab = function()
 {
     WebInspector.SettingsTab.call(this, WebInspector.UIString("Experiments"), "experiments-tab-content");
 
-    var experiments = WebInspector.experimentsSettings.experiments;
+    var experiments = Runtime.experiments.allExperiments();
     if (experiments.length) {
         var experimentsSection = this._appendSection();
         experimentsSection.appendChild(this._createExperimentsWarningSubsection());
@@ -719,7 +719,7 @@ WebInspector.SettingsList.prototype = {
         listItemContents.addEventListener("dblclick", this._onDoubleClick.bind(this, itemId), false);
         listItemContents.appendChild(removeItemButton);
 
-        this._listItems.put(itemId || "", listItem);
+        this._listItems.set(itemId || "", listItem);
         if (typeof beforeId !== "undefined")
             this._ids.splice(this._ids.indexOf(beforeId), 0, itemId);
         else
@@ -891,13 +891,34 @@ WebInspector.EditableSettingsList.prototype = {
             var columnId = column.id;
 
             var value = this._valuesProvider(itemId, columnId);
-            var textElement = this._textElements.get(itemId).get(columnId);
-            textElement.textContent = value;
-            textElement.title = value;
+            this._setTextElementContent(itemId, columnId, value);
 
             var editElement = this._editInputElements.get(itemId).get(columnId);
             this._setEditElementValue(editElement, value || "");
         }
+    },
+
+    /**
+     * @param {?string} itemId
+     * @param {string} columnId
+     */
+    _textElementContent: function(itemId, columnId)
+    {
+        if (!itemId)
+            return "";
+        return this._textElements.get(itemId).get(columnId).textContent.replace(/\u200B/g, "");
+    },
+
+    /**
+     * @param {string} itemId
+     * @param {string} columnId
+     * @param {string} text
+     */
+    _setTextElementContent: function(itemId, columnId, text)
+    {
+        var textElement = this._textElements.get(itemId).get(columnId);
+        textElement.textContent = text.replace(/.{4}/g, "$&\u200B");
+        textElement.title = text;
     },
 
     /**
@@ -914,18 +935,17 @@ WebInspector.EditableSettingsList.prototype = {
         }
         var validItemId = itemId;
 
-        if (!this._editInputElements.contains(itemId))
-            this._editInputElements.put(itemId, new StringMap());
-        if (!this._textElements.contains(itemId))
-            this._textElements.put(itemId, new StringMap());
+        if (!this._editInputElements.has(itemId))
+            this._editInputElements.set(itemId, new StringMap());
+        if (!this._textElements.has(itemId))
+            this._textElements.set(itemId, new StringMap());
 
         var value = this._valuesProvider(itemId, columnId);
 
         var textElement = /** @type {!HTMLSpanElement} */ (columnElement.createChild("span", "list-column-text"));
-        textElement.textContent = value;
-        textElement.title = value;
         columnElement.addEventListener("click", rowClicked.bind(this), false);
-        this._textElements.get(itemId).put(columnId, textElement);
+        this._textElements.get(itemId).set(columnId, textElement);
+        this._setTextElementContent(itemId, columnId, value);
 
         this._createEditElement(columnElement, column, itemId, value);
 
@@ -976,9 +996,9 @@ WebInspector.EditableSettingsList.prototype = {
         }
 
         if (itemId === null)
-            this._addInputElements.put(column.id, editElement);
+            this._addInputElements.set(column.id, editElement);
         else
-            this._editInputElements.get(itemId).put(column.id, editElement);
+            this._editInputElements.get(itemId).set(column.id, editElement);
 
         this._setEditElementValue(editElement, value || "");
         columnElement.editElement = editElement;
@@ -1056,7 +1076,7 @@ WebInspector.EditableSettingsList.prototype = {
         var columns = this.columns();
         for (var i = 0; i < columns.length; ++i) {
             var columnId = columns[i];
-            var oldValue = itemId ? this._textElements.get(itemId).get(columnId).textContent : "";
+            var oldValue = this._textElementContent(itemId, columnId);
             var newValue = this._inputElements(itemId).get(columnId).value;
             if (oldValue !== newValue)
                 return true;
@@ -1091,7 +1111,7 @@ WebInspector.EditableSettingsList.prototype = {
             for (var i = 0; i < columns.length; ++i) {
                 var columnId = columns[i];
                 var editElement = this._editInputElements.get(itemId).get(columnId);
-                this._setEditElementValue(editElement, this._textElements.get(itemId).get(columnId).textContent);
+                this._setEditElementValue(editElement, this._textElementContent(itemId, columnId));
                 editElement.classList.remove("editable-item-error");
             }
             return;

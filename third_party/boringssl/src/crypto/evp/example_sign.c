@@ -17,6 +17,7 @@
 #include <stdlib.h>
 
 #include <openssl/bio.h>
+#include <openssl/crypto.h>
 #include <openssl/digest.h>
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
@@ -95,7 +96,7 @@ static const uint8_t kSignature[] = {
 };
 
 
-int example_EVP_DigestSignInit() {
+int example_EVP_DigestSignInit(void) {
   int ret = 0;
   EVP_PKEY *pkey = NULL;
   RSA *rsa = NULL;
@@ -127,9 +128,13 @@ int example_EVP_DigestSignInit() {
     fprintf(stderr, "sig_len mismatch\n");
     goto out;
   }
+
   sig = malloc(sig_len);
-  if (sig == NULL ||
-      EVP_DigestSignFinal(&md_ctx, sig, &sig_len) != 1) {
+  if (sig == NULL) {
+    goto out;
+  }
+  if (EVP_DigestSignFinal(&md_ctx, sig, &sig_len) != 1) {
+    free(sig);
     goto out;
   }
 
@@ -154,7 +159,7 @@ out:
   return ret;
 }
 
-int example_EVP_DigestVerifyInit() {
+int example_EVP_DigestVerifyInit(void) {
   int ret = 0;
   EVP_PKEY *pkey = NULL;
   RSA *rsa = NULL;
@@ -193,7 +198,9 @@ out:
   return ret;
 }
 
-int main() {
+int main(void) {
+  CRYPTO_library_init();
+
   if (!example_EVP_DigestSignInit()) {
     fprintf(stderr, "EVP_DigestSignInit failed\n");
     return 1;

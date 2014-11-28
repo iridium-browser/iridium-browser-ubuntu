@@ -359,6 +359,7 @@ cr.define('uber', function() {
 
     // Trigger a layout after making it visible and before setting
     // the class to 'selected', so that it animates in.
+    /** @suppress {uselessCode} */
     container.offsetTop;
     container.classList.add('selected');
 
@@ -367,6 +368,7 @@ cr.define('uber', function() {
 
     var selectedFrame = getSelectedIframe().querySelector('iframe');
     uber.invokeMethodOnWindow(selectedFrame.contentWindow, 'frameSelected');
+    selectedFrame.contentWindow.focus();
 
     if (historyOption != HISTORY_STATE_OPTION.NONE)
       changePathTo({}, path, historyOption);

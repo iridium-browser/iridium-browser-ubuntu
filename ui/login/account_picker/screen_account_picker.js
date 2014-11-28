@@ -29,6 +29,7 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       'showUserPodCustomIcon',
       'hideUserPodCustomIcon',
       'setAuthType',
+      'setTouchViewState',
       'setPublicSessionDisplayName',
       'setPublicSessionLocales',
       'setPublicSessionKeyboardLayouts',
@@ -113,6 +114,7 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
      * Event handler invoked when the page is shown and ready.
      */
     onShow: function() {
+      chrome.send('getTouchViewState');
       if (!this.firstShown_) return;
       this.firstShown_ = false;
 
@@ -269,12 +271,8 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
      * Shows a custom icon in the user pod of |username|. This function
      * is used by the chrome.screenlockPrivate API.
      * @param {string} username Username of pod to add button
-     * @param {!{resourceUrl: (string | undefined),
-     *           data: ({scale1x: string, scale2x: string} | undefined),
-     *           size: ({width: number, height: number} | undefined),
-     *           animation: ({resourceWidth: number, frameLength: number} |
-     *                       undefined),
-     *           opacity: (number | undefined),
+     * @param {!{id: !string,
+     *           hardlockOnClick: boolean,
      *           tooltip: ({text: string, autoshow: boolean} | undefined)}} icon
      *     The icon parameters.
      */
@@ -301,6 +299,14 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
      */
     setAuthType: function(username, authType, value) {
       $('pod-row').setAuthType(username, authType, value);
+    },
+
+    /**
+     * Sets the state of touch view mode.
+     * @param {boolean} isTouchViewEnabled true if the mode is on.
+     */
+    setTouchViewState: function(isTouchViewEnabled) {
+      $('pod-row').setTouchViewState(isTouchViewEnabled);
     },
 
     /**

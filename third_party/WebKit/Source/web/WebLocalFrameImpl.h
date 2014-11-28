@@ -72,9 +72,7 @@ struct WindowFeatures;
 template <typename T> class WebVector;
 
 // Implementation of WebFrame, note that this is a reference counted object.
-class WebLocalFrameImpl FINAL
-    : public WebLocalFrame
-    , public RefCounted<WebLocalFrameImpl> {
+class WebLocalFrameImpl FINAL : public RefCountedWillBeGarbageCollectedFinalized<WebLocalFrameImpl>, public WebLocalFrame {
 public:
     // WebFrame methods:
     virtual bool isWebLocalFrame() const OVERRIDE;
@@ -114,6 +112,7 @@ public:
         int extensionGroup) OVERRIDE;
     virtual void setIsolatedWorldSecurityOrigin(int worldID, const WebSecurityOrigin&) OVERRIDE;
     virtual void setIsolatedWorldContentSecurityPolicy(int worldID, const WebString&) OVERRIDE;
+    virtual void setIsolatedWorldHumanReadableName(int worldID, const WebString&) OVERRIDE;
     virtual void addMessageToConsole(const WebConsoleMessage&) OVERRIDE;
     virtual void collectGarbage() OVERRIDE;
     virtual bool checkIfRunInsecureContent(const WebURL&) const OVERRIDE;
@@ -138,8 +137,6 @@ public:
     virtual void loadHTMLString(
         const WebData& html, const WebURL& baseURL, const WebURL& unreachableURL,
         bool replace) OVERRIDE;
-    virtual void sendPings(const WebNode& linkNode, const WebURL& destinationURL) OVERRIDE;
-    virtual bool isLoading() const OVERRIDE;
     virtual void stopLoading() OVERRIDE;
     virtual WebDataSource* provisionalDataSource() const OVERRIDE;
     virtual WebDataSource* dataSource() const OVERRIDE;
@@ -177,7 +174,6 @@ public:
     virtual bool setEditableSelectionOffsets(int start, int end) OVERRIDE;
     virtual bool setCompositionFromExistingText(int compositionStart, int compositionEnd, const WebVector<WebCompositionUnderline>& underlines) OVERRIDE;
     virtual void extendSelectionAndDelete(int before, int after) OVERRIDE;
-    virtual void navigateToSandboxedMarkup(const WebData& markup) OVERRIDE;
     virtual void setCaretVisible(bool) OVERRIDE;
     virtual int printBegin(const WebPrintParams&, const WebNode& constrainToNode) OVERRIDE;
     virtual float printPage(int pageToPrint, WebCanvas*) OVERRIDE;
@@ -212,8 +208,6 @@ public:
     virtual int selectNearestFindMatch(const WebFloatPoint&, WebRect* selectionRect) OVERRIDE;
     virtual void setTickmarks(const WebVector<WebRect>&) OVERRIDE;
 
-    virtual void sendOrientationChangeEvent() OVERRIDE;
-
     virtual void dispatchMessageEventWithOriginCheck(
         const WebSecurityOrigin& intendedTargetOrigin,
         const WebDOMEvent&) OVERRIDE;
@@ -228,17 +222,23 @@ public:
     virtual WebString layerTreeAsText(bool showDebugInfo = false) const OVERRIDE;
 
     // WebLocalFrame methods:
+    virtual void sendPings(const WebNode& linkNode, const WebURL& destinationURL) OVERRIDE;
+    virtual bool isLoading() const OVERRIDE;
+    virtual bool isResourceLoadInProgress() const OVERRIDE;
     virtual void addStyleSheetByURL(const WebString& url) OVERRIDE;
+    virtual void navigateToSandboxedMarkup(const WebData& markup) OVERRIDE;
+    virtual void sendOrientationChangeEvent() OVERRIDE;
+    virtual v8::Handle<v8::Value> executeScriptAndReturnValueForTests(
+        const WebScriptSource&) OVERRIDE;
 
     void willDetachParent();
 
     static WebLocalFrameImpl* create(WebFrameClient*);
     virtual ~WebLocalFrameImpl();
 
-    PassRefPtr<LocalFrame> initializeCoreFrame(FrameHost*, FrameOwner*, const AtomicString& name, const AtomicString& fallbackName);
+    PassRefPtrWillBeRawPtr<LocalFrame> initializeCoreFrame(FrameHost*, FrameOwner*, const AtomicString& name, const AtomicString& fallbackName);
 
-    PassRefPtr<LocalFrame> createChildFrame(
-        const FrameLoadRequest&, HTMLFrameOwnerElement*);
+    PassRefPtrWillBeRawPtr<LocalFrame> createChildFrame(const FrameLoadRequest&, HTMLFrameOwnerElement*);
 
     void didChangeContentsSize(const IntSize&);
 
@@ -314,13 +314,15 @@ public:
     // Returns a hit-tested VisiblePosition for the given point
     VisiblePosition visiblePositionForWindowPoint(const WebPoint&);
 
+    void trace(Visitor*);
+
 private:
     friend class FrameLoaderClientImpl;
 
     explicit WebLocalFrameImpl(WebFrameClient*);
 
     // Sets the local core frame and registers destruction observers.
-    void setCoreFrame(PassRefPtr<LocalFrame>);
+    void setCoreFrame(PassRefPtrWillBeRawPtr<LocalFrame>);
 
     void loadJavaScriptURL(const KURL&);
 
@@ -331,7 +333,7 @@ private:
     // The embedder retains a reference to the WebCore LocalFrame while it is active in the DOM. This
     // reference is released when the frame is removed from the DOM or the entire page is closed.
     // FIXME: These will need to change to WebFrame when we introduce WebFrameProxy.
-    RefPtr<LocalFrame> m_frame;
+    RefPtrWillBeMember<LocalFrame> m_frame;
 
     // Indicate whether the current LocalFrame is local or remote. Remote frames are
     // rendered in a different process from their parent frames.
@@ -346,7 +348,7 @@ private:
 
     // Valid between calls to BeginPrint() and EndPrint(). Containts the print
     // information. Is used by PrintPage().
-    OwnPtrWillBePersistent<ChromePrintContext> m_printContext;
+    OwnPtrWillBeMember<ChromePrintContext> m_printContext;
 
     // Stores the additional input events offset and scale when device metrics emulation is enabled.
     IntSize m_inputEventsOffsetForEmulation;
@@ -354,7 +356,18 @@ private:
 
     UserMediaClientImpl m_userMediaClientImpl;
 
-    OwnPtr<GeolocationClientProxy> m_geolocationClientProxy;
+    OwnPtrWillBeMember<GeolocationClientProxy> m_geolocationClientProxy;
+
+#if ENABLE(OILPAN)
+    // Oilpan: to provide the guarantee of having the frame live until
+    // close() is called, an instance keep a self-persistent. It is
+    // cleared upon calling close(). This avoids having to assume that
+    // an embedder's WebFrame references are all discovered via thread
+    // state (stack, registers) should an Oilpan GC strike while we're
+    // in the process of detaching.
+    GC_PLUGIN_IGNORE("340522")
+    Persistent<WebLocalFrameImpl> m_selfKeepAlive;
+#endif
 };
 
 DEFINE_TYPE_CASTS(WebLocalFrameImpl, WebFrame, frame, frame->isWebLocalFrame(), frame.isWebLocalFrame());

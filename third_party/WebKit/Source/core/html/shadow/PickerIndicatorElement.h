@@ -33,8 +33,8 @@
 
 #if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/html/HTMLDivElement.h"
-#include "platform/DateTimeChooser.h"
-#include "platform/DateTimeChooserClient.h"
+#include "core/html/forms/DateTimeChooser.h"
+#include "core/html/forms/DateTimeChooserClient.h"
 
 namespace blink {
 
@@ -52,6 +52,7 @@ public:
         // FIXME: Remove. Deprecated in favor of double version.
         virtual void pickerIndicatorChooseValue(const String&) = 0;
         virtual void pickerIndicatorChooseValue(double) = 0;
+        virtual Element& pickerOwnerElement() const = 0;
         virtual bool setupDateTimeChooserParameters(DateTimeChooserParameters&) = 0;
     };
 
@@ -63,8 +64,10 @@ public:
     void closePopup();
     virtual bool willRespondToMouseClickEvents() OVERRIDE;
     void removePickerIndicatorOwner() { m_pickerIndicatorOwner = nullptr; }
+    AXObject* popupRootAXObject() const;
 
     // DateTimeChooserClient implementation.
+    virtual Element& ownerElement() const OVERRIDE;
     virtual void didChooseValue(const String&) OVERRIDE;
     virtual void didChooseValue(double) OVERRIDE;
     virtual void didEndChooser() OVERRIDE;
@@ -75,6 +78,8 @@ private:
     virtual void defaultEventHandler(Event*) OVERRIDE;
     virtual void detach(const AttachContext& = AttachContext()) OVERRIDE;
     virtual bool isPickerIndicatorElement() const OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void didNotifySubtreeInsertionsToDocument() OVERRIDE;
 
     HTMLInputElement* hostInput();
 

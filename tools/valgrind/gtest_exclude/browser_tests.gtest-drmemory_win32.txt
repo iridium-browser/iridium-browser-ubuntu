@@ -147,12 +147,16 @@ PPAPIT*.U*3
 # Q*
 QU*
 # R*
+# RangeHistoryWebUITest.*
+Ran*
 Red*
 Ref*
 Reg*
 Rem*De*
 Rem*Ad*
 Res*
+# RequestContentScriptAPITest.PermissionMatcherAgreementInjection
+Req*.Per*ion
 # S*
 Sa*
 Sea*Pr*

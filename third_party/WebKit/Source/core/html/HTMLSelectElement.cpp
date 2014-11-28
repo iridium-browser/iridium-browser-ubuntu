@@ -83,7 +83,6 @@ HTMLSelectElement::HTMLSelectElement(Document& document, HTMLFormElement* form)
     , m_shouldRecalcListItems(false)
     , m_suggestedIndex(-1)
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<HTMLSelectElement> HTMLSelectElement::create(Document& document)
@@ -225,7 +224,7 @@ void HTMLSelectElement::add(HTMLElement* element, HTMLElement* before, Exception
 
 void HTMLSelectElement::addBeforeOptionAtIndex(HTMLElement* element, int beforeIndex, ExceptionState& exceptionState)
 {
-    HTMLElement* beforeElement = toHTMLElement(options()->item(beforeIndex));
+    HTMLOptionElement* beforeElement = options()->item(beforeIndex);
     add(element, beforeElement, exceptionState);
 }
 
@@ -338,7 +337,7 @@ void HTMLSelectElement::parseAttribute(const QualifiedName& name, const AtomicSt
             if (Attribute* sizeAttribute = ensureUniqueElementData().attributes().find(sizeAttr))
                 sizeAttribute->setValue(attrSize);
         }
-        size = std::max(size, 1);
+        size = std::max(size, 0);
 
         // Ensure that we've determined selectedness of the items at least once prior to changing the size.
         if (oldSize != size)
@@ -452,7 +451,7 @@ Element* HTMLSelectElement::namedItem(const AtomicString& name)
     return options()->namedItem(name);
 }
 
-Element* HTMLSelectElement::item(unsigned index)
+HTMLOptionElement* HTMLSelectElement::item(unsigned index)
 {
     return options()->item(index);
 }
@@ -462,13 +461,13 @@ void HTMLSelectElement::setOption(unsigned index, HTMLOptionElement* option, Exc
     if (index > maxSelectItems - 1)
         index = maxSelectItems - 1;
     int diff = index - length();
-    RefPtrWillBeRawPtr<HTMLElement> before = nullptr;
+    RefPtrWillBeRawPtr<HTMLOptionElement> before = nullptr;
     // Out of array bounds? First insert empty dummies.
     if (diff > 0) {
         setLength(index, exceptionState);
         // Replace an existing entry?
     } else if (diff < 0) {
-        before = toHTMLElement(options()->item(index+1));
+        before = options()->item(index + 1);
         remove(index);
     }
     // Finally add the new element.
@@ -607,7 +606,7 @@ void HTMLSelectElement::selectAll()
     setActiveSelectionAnchorIndex(nextSelectableListIndex(-1));
     setActiveSelectionEndIndex(previousSelectableListIndex(-1));
 
-    updateListBoxSelection(false);
+    updateListBoxSelection(false, false);
     listBoxOnChange();
     setNeedsValidityCheck();
 }
@@ -650,7 +649,7 @@ void HTMLSelectElement::setActiveSelectionEndIndex(int index)
     setNeedsStyleRecalc(SubtreeStyleChange);
 }
 
-void HTMLSelectElement::updateListBoxSelection(bool deselectOtherOptions)
+void HTMLSelectElement::updateListBoxSelection(bool deselectOtherOptions, bool scroll)
 {
     ASSERT(renderer() && (renderer()->isListBox() || m_multiple));
     ASSERT(!listItems().size() || m_activeSelectionAnchorIndex >= 0);
@@ -673,7 +672,8 @@ void HTMLSelectElement::updateListBoxSelection(bool deselectOtherOptions)
     }
 
     setNeedsValidityCheck();
-    scrollToSelection();
+    if (scroll)
+        scrollToSelection();
     notifyFormStateChanged();
 }
 
@@ -887,11 +887,17 @@ void HTMLSelectElement::scrollTo(int listIndex)
 {
     if (listIndex < 0)
         return;
+    if (usesMenuList())
+        return;
     const WillBeHeapVector<RawPtrWillBeMember<HTMLElement> >& items = listItems();
     int listSize = static_cast<int>(items.size());
     if (listIndex >= listSize)
         return;
-    items[listIndex]->scrollIntoViewIfNeeded(false);
+    document().updateLayoutIgnorePendingStylesheets();
+    if (!renderer() || !renderer()->isListBox())
+        return;
+    LayoutRect bounds = items[listIndex]->boundingBox();
+    toRenderListBox(renderer())->scrollToRect(bounds);
 }
 
 void HTMLSelectElement::optionSelectionStateChanged(HTMLOptionElement* option, bool optionIsSelected)
@@ -914,6 +920,8 @@ void HTMLSelectElement::optionRemoved(const HTMLOptionElement& option)
         m_activeSelectionAnchorIndex--;
     if (listIndex <= m_activeSelectionEndIndex)
         m_activeSelectionEndIndex--;
+    if (listIndex == selectedIndex())
+        setAutofilled(false);
 }
 
 void HTMLSelectElement::selectOption(int optionIndex, SelectOptionFlags flags)
@@ -1039,6 +1047,7 @@ FormControlState HTMLSelectElement::saveFormControlState() const
         if (!option->selected())
             continue;
         state.append(option->value());
+        state.append(String::number(i));
         if (!multiple())
             break;
     }
@@ -1073,21 +1082,34 @@ void HTMLSelectElement::restoreFormControlState(const FormControlState& state)
         toHTMLOptionElement(items[i])->setSelectedState(false);
     }
 
+    // The saved state should have at least one value and an index.
+    ASSERT(state.valueSize() >= 2);
     if (!multiple()) {
-        size_t foundIndex = searchOptionsForValue(state[0], 0, itemsSize);
-        if (foundIndex != kNotFound)
-            toHTMLOptionElement(items[foundIndex])->setSelectedState(true);
+        size_t index = state[1].toUInt();
+        if (index < itemsSize && isHTMLOptionElement(items[index]) && toHTMLOptionElement(items[index])->value() == state[0]) {
+            toHTMLOptionElement(items[index])->setSelectedState(true);
+        } else {
+            size_t foundIndex = searchOptionsForValue(state[0], 0, itemsSize);
+            if (foundIndex != kNotFound)
+                toHTMLOptionElement(items[foundIndex])->setSelectedState(true);
+        }
     } else {
         size_t startIndex = 0;
-        for (size_t i = 0; i < state.valueSize(); ++i) {
+        for (size_t i = 0; i < state.valueSize(); i+= 2) {
             const String& value = state[i];
-            size_t foundIndex = searchOptionsForValue(value, startIndex, itemsSize);
-            if (foundIndex == kNotFound)
-                foundIndex = searchOptionsForValue(value, 0, startIndex);
-            if (foundIndex == kNotFound)
-                continue;
-            toHTMLOptionElement(items[foundIndex])->setSelectedState(true);
-            startIndex = foundIndex + 1;
+            const size_t index = state[i + 1].toUInt();
+            if (index < itemsSize && isHTMLOptionElement(items[index]) && toHTMLOptionElement(items[index])->value() == value) {
+                toHTMLOptionElement(items[index])->setSelectedState(true);
+                startIndex = index + 1;
+            } else {
+                size_t foundIndex = searchOptionsForValue(value, startIndex, itemsSize);
+                if (foundIndex == kNotFound)
+                    foundIndex = searchOptionsForValue(value, 0, startIndex);
+                if (foundIndex == kNotFound)
+                    continue;
+                toHTMLOptionElement(items[foundIndex])->setSelectedState(true);
+                startIndex = foundIndex + 1;
+            }
         }
     }
 
@@ -1690,7 +1712,8 @@ void HTMLSelectElement::finishParsingChildren()
 {
     HTMLFormControlElementWithState::finishParsingChildren();
     updateListItemSelectedStates();
-    scrollToSelection();
+    if (!usesMenuList())
+        scrollToSelection();
 }
 
 bool HTMLSelectElement::anonymousIndexedSetter(unsigned index, PassRefPtrWillBeRawPtr<HTMLOptionElement> value, ExceptionState& exceptionState)

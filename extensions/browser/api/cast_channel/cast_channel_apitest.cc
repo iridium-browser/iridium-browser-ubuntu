@@ -15,6 +15,8 @@
 #include "extensions/browser/api/cast_channel/logger.h"
 #include "extensions/common/api/cast_channel.h"
 #include "extensions/common/switches.h"
+#include "extensions/common/test_util.h"
+#include "extensions/test/result_catcher.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
@@ -70,7 +72,7 @@ class MockCastSocket : public CastSocket {
   explicit MockCastSocket(CastSocket::Delegate* delegate,
                           net::IPEndPoint ip_endpoint,
                           net::NetLog* net_log,
-                          Logger* logger)
+                          const scoped_refptr<Logger>& logger)
       : CastSocket(kTestExtensionId,
                    ip_endpoint,
                    cast_channel::CHANNEL_AUTH_TYPE_SSL,
@@ -247,7 +249,7 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, MAYBE_TestOpenReceiveClose) {
   EXPECT_TRUE(RunExtensionSubtest("cast_channel/api",
                                   "test_open_receive_close.html"));
 
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
   CallOnMessage("some-message");
   CallOnMessage("some-message");
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -269,8 +271,7 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, MAYBE_TestGetLogs) {
 
 // TODO(munjal): Win Dbg has a workaround that makes RunExtensionSubtest
 // always return true without actually running the test. Remove when fixed.
-// Flaky on mac: crbug.com/393969
-#if (defined(OS_WIN) && !defined(NDEBUG)) || defined(OS_MACOSX)
+#if defined(OS_WIN) && !defined(NDEBUG)
 #define MAYBE_TestOpenError DISABLED_TestOpenError
 #else
 #define MAYBE_TestOpenError TestOpenError
@@ -291,13 +292,11 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, MAYBE_TestOpenError) {
 
   EXPECT_TRUE(RunExtensionSubtest("cast_channel/api",
                                   "test_open_error.html"));
-
-  ResultCatcher catcher;
-  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
 IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestOpenInvalidConnectInfo) {
-  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension =
+      extensions::test_util::CreateEmptyExtension();
   scoped_refptr<extensions::CastChannelOpenFunction> cast_channel_open_function;
 
   // Invalid URL
@@ -341,7 +340,8 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestOpenInvalidConnectInfo) {
 }
 
 IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestSendInvalidMessageInfo) {
-  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension(
+      extensions::test_util::CreateEmptyExtension());
   scoped_refptr<extensions::CastChannelSendFunction> cast_channel_send_function;
 
   // Numbers are not supported

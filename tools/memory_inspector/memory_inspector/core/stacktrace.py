@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
+import posixpath
 
 from memory_inspector.core import symbol
 
@@ -37,7 +37,7 @@ class Frame(object):
         address: the absolute (virtual) address of the stack frame in the
                  original process virtual address space.
     """
-    assert(isinstance(address, int))
+    assert(isinstance(address, (long, int)))
     self.address = address
     self.symbol = None
     self.exec_file_rel_path = None
@@ -54,7 +54,7 @@ class Frame(object):
             relative to the target device (e.g., /system/lib/libc.so).
         offset: the offset in the executable.
     """
-    assert(isinstance(offset, int))
+    assert(isinstance(offset, (long, int)))
     self.exec_file_rel_path = exec_file_rel_path
     self.offset = offset
 
@@ -67,7 +67,9 @@ class Frame(object):
   @property
   def exec_file_name(self):
     """Returns the file name (stripped of the path) of the executable."""
-    return os.path.basename(self.exec_file_rel_path)
+    if not self.exec_file_rel_path:
+      return None
+    return posixpath.basename(self.exec_file_rel_path.replace('\\', '/'))
 
   @property
   def raw_address(self):

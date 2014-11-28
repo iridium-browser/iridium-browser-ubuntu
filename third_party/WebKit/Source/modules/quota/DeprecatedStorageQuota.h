@@ -43,6 +43,7 @@ class StorageQuotaCallback;
 class StorageUsageCallback;
 
 class DeprecatedStorageQuota FINAL : public GarbageCollected<DeprecatedStorageQuota>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum Type {
         Temporary,
@@ -54,9 +55,9 @@ public:
         return new DeprecatedStorageQuota(type);
     }
 
-    void queryUsageAndQuota(ExecutionContext*, PassOwnPtr<StorageUsageCallback>, PassOwnPtr<StorageErrorCallback>);
+    void queryUsageAndQuota(ExecutionContext*, StorageUsageCallback*, StorageErrorCallback*);
 
-    void requestQuota(ExecutionContext*, unsigned long long newQuotaInBytes, PassOwnPtr<StorageQuotaCallback>, PassOwnPtr<StorageErrorCallback>);
+    void requestQuota(ExecutionContext*, unsigned long long newQuotaInBytes, StorageQuotaCallback*, StorageErrorCallback*);
 
     void trace(Visitor*) { }
 

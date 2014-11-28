@@ -8,7 +8,7 @@ gypi_values = exec_script("//build/gypi_to_gn.py",
                           "scope",
                           [ "wtf.gypi" ])
 
-visibility = "//third_party/WebKit/*"
+visibility = [ "//third_party/WebKit/*" ]
 
 config("wtf_config") {
   if (is_win) {
@@ -52,21 +52,17 @@ component("wtf") {
 
   defines = [ "WTF_IMPLEMENTATION=1" ]
 
-  direct_dependent_configs = [
+  public_configs = [
     ":wtf_config",
     "//third_party/WebKit/Source:features",
   ]
 
-  deps = [
+  public_deps = [
     "//third_party/icu",
   ]
 
-  forward_dependent_configs_from = [ "//third_party/icu" ]
-
   if (is_win) {
     sources -= [
-      "ThreadIdentifierDataPthreads.cpp",
-      "ThreadIdentifierDataPthreads.h",
       "ThreadingPthreads.cpp",
     ]
 

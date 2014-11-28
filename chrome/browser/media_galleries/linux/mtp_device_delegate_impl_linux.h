@@ -18,7 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
 #include "content/public/browser/browser_thread.h"
-#include "webkit/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/async_file_util.h"
 
 struct SnapshotRequestInfo;
 
@@ -61,7 +61,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   typedef std::map<uint32, MTPFileNode*> FileIdToMTPFileNodeMap;
 
   // Maps file paths to file info.
-  typedef std::map<base::FilePath, fileapi::DirectoryEntry> FileInfoCache;
+  typedef std::map<base::FilePath, storage::DirectoryEntry> FileInfoCache;
 
   // Should only be called by CreateMTPDeviceAsyncDelegate() factory call.
   // Defer the device initializations until the first file operation request.
@@ -85,11 +85,12 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
       const CreateSnapshotFileSuccessCallback& success_callback,
       const ErrorCallback& error_callback) OVERRIDE;
   virtual bool IsStreaming() OVERRIDE;
-  virtual void ReadBytes(
-      const base::FilePath& device_file_path,
-      net::IOBuffer* buf, int64 offset, int buf_len,
-      const ReadBytesSuccessCallback& success_callback,
-      const ErrorCallback& error_callback) OVERRIDE;
+  virtual void ReadBytes(const base::FilePath& device_file_path,
+                         const scoped_refptr<net::IOBuffer>& buf,
+                         int64 offset,
+                         int buf_len,
+                         const ReadBytesSuccessCallback& success_callback,
+                         const ErrorCallback& error_callback) OVERRIDE;
   virtual void CancelPendingTasksAndDeleteDelegate() OVERRIDE;
 
   // The internal methods correspond to the similarly named methods above.
@@ -186,7 +187,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // |has_more| is true if there are more file entries to read.
   void OnDidReadDirectory(uint32 dir_id,
                           const ReadDirectorySuccessCallback& success_callback,
-                          const fileapi::AsyncFileUtil::EntryList& file_list,
+                          const storage::AsyncFileUtil::EntryList& file_list,
                           bool has_more);
 
   // Called when WriteDataIntoSnapshotFile() succeeds.
@@ -216,7 +217,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Called when FillFileCache() succeeds.
   void OnDidFillFileCache(const base::FilePath& path,
-                          const fileapi::AsyncFileUtil::EntryList& file_list,
+                          const storage::AsyncFileUtil::EntryList& file_list,
                           bool has_more);
 
   // Called when FillFileCache() fails.

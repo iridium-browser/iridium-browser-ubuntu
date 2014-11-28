@@ -13,7 +13,6 @@
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/autocomplete/base_search_provider.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
@@ -27,6 +26,7 @@
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_match_type.h"
 #include "components/omnibox/autocomplete_result.h"
+#include "components/omnibox/base_search_provider.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -152,7 +152,7 @@ history::ShortcutsDatabase::Shortcut::MatchCore
       AutocompleteMatch::IsSpecializedSearchType(match.type) ?
           BaseSearchProvider::CreateSearchSuggestion(
               match.search_terms_args->search_terms, match_type,
-              (match.transition == content::PAGE_TRANSITION_KEYWORD),
+              (match.transition == ui::PAGE_TRANSITION_KEYWORD),
               match.GetTemplateURL(service, false),
               UIThreadSearchTermsData(profile)) :
           match;

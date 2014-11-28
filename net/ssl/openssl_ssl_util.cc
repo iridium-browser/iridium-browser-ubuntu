@@ -9,9 +9,11 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/values.h"
 #include "crypto/openssl_util.h"
 #include "net/base/net_errors.h"
 
@@ -54,7 +56,7 @@ unsigned OpenSSLNetErrorLib() {
   return g_openssl_net_error_lib.Get().net_error_lib();
 }
 
-int MapOpenSSLErrorSSL(unsigned long error_code) {
+int MapOpenSSLErrorSSL(uint32_t error_code) {
   DCHECK_EQ(ERR_LIB_SSL, ERR_GET_LIB(error_code));
 
   DVLOG(1) << "OpenSSL SSL error, reason: " << ERR_GET_REASON(error_code)
@@ -62,13 +64,10 @@ int MapOpenSSLErrorSSL(unsigned long error_code) {
   switch (ERR_GET_REASON(error_code)) {
     case SSL_R_READ_TIMEOUT_EXPIRED:
       return ERR_TIMED_OUT;
-    case SSL_R_BAD_RESPONSE_ARGUMENT:
-      return ERR_INVALID_ARGUMENT;
     case SSL_R_UNKNOWN_CERTIFICATE_TYPE:
     case SSL_R_UNKNOWN_CIPHER_TYPE:
     case SSL_R_UNKNOWN_KEY_EXCHANGE_TYPE:
     case SSL_R_UNKNOWN_PKEY_TYPE:
-    case SSL_R_UNKNOWN_REMOTE_ERROR_TYPE:
     case SSL_R_UNKNOWN_SSL_VERSION:
       return ERR_NOT_IMPLEMENTED;
     case SSL_R_UNSUPPORTED_SSL_VERSION:
@@ -86,7 +85,6 @@ int MapOpenSSLErrorSSL(unsigned long error_code) {
     case SSL_R_TLSV1_ALERT_ACCESS_DENIED:
     case SSL_R_TLSV1_ALERT_UNKNOWN_CA:
       return ERR_BAD_SSL_CLIENT_AUTH_CERT;
-    case SSL_R_BAD_DECOMPRESSION:
     case SSL_R_SSLV3_ALERT_DECOMPRESSION_FAILURE:
       return ERR_SSL_DECOMPRESSION_FAILURE_ALERT;
     case SSL_R_SSLV3_ALERT_BAD_RECORD_MAC:
@@ -97,7 +95,7 @@ int MapOpenSSLErrorSSL(unsigned long error_code) {
       return ERR_SSL_UNRECOGNIZED_NAME_ALERT;
     case SSL_R_UNSAFE_LEGACY_RENEGOTIATION_DISABLED:
       return ERR_SSL_UNSAFE_NEGOTIATION;
-    case SSL_R_WRONG_NUMBER_OF_KEY_BITS:
+    case SSL_R_BAD_DH_P_LENGTH:
       return ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY;
     // SSL_R_UNKNOWN_PROTOCOL is reported if premature application data is
     // received (see http://crbug.com/42538), and also if all the protocol
@@ -110,21 +108,14 @@ int MapOpenSSLErrorSSL(unsigned long error_code) {
     case SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC:
     case SSL_R_DH_PUBLIC_VALUE_LENGTH_IS_WRONG:
     case SSL_R_DIGEST_CHECK_FAILED:
-    case SSL_R_DUPLICATE_COMPRESSION_ID:
-    case SSL_R_ECGROUP_TOO_LARGE_FOR_CIPHER:
     case SSL_R_ENCRYPTED_LENGTH_TOO_LONG:
     case SSL_R_ERROR_IN_RECEIVED_CIPHER_LIST:
     case SSL_R_EXCESSIVE_MESSAGE_SIZE:
     case SSL_R_EXTRA_DATA_IN_MESSAGE:
     case SSL_R_GOT_A_FIN_BEFORE_A_CCS:
-    case SSL_R_ILLEGAL_PADDING:
-    case SSL_R_INVALID_CHALLENGE_LENGTH:
     case SSL_R_INVALID_COMMAND:
-    case SSL_R_INVALID_PURPOSE:
     case SSL_R_INVALID_STATUS_RESPONSE:
     case SSL_R_INVALID_TICKET_KEYS_LENGTH:
-    case SSL_R_KEY_ARG_TOO_LONG:
-    case SSL_R_READ_WRONG_PACKET_TYPE:
     // SSL_do_handshake reports this error when the server responds to a
     // ClientHello with a fatal close_notify alert.
     case SSL_AD_REASON_OFFSET + SSL_AD_CLOSE_NOTIFY:
@@ -152,8 +143,26 @@ int MapOpenSSLErrorSSL(unsigned long error_code) {
       return ERR_SSL_INAPPROPRIATE_FALLBACK;
     default:
       LOG(WARNING) << "Unmapped error reason: " << ERR_GET_REASON(error_code);
-      return ERR_FAILED;
+      return ERR_SSL_PROTOCOL_ERROR;
   }
+}
+
+base::Value* NetLogOpenSSLErrorCallback(int net_error,
+                                        int ssl_error,
+                                        const OpenSSLErrorInfo& error_info,
+                                        NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  dict->SetInteger("net_error", net_error);
+  dict->SetInteger("ssl_error", ssl_error);
+  if (error_info.error_code != 0) {
+    dict->SetInteger("error_lib", ERR_GET_LIB(error_info.error_code));
+    dict->SetInteger("error_reason", ERR_GET_REASON(error_info.error_code));
+  }
+  if (error_info.file != NULL)
+    dict->SetString("file", error_info.file);
+  if (error_info.line != 0)
+    dict->SetInteger("line", error_info.line);
+  return dict;
 }
 
 }  // namespace
@@ -171,6 +180,15 @@ void OpenSSLPutNetError(const tracked_objects::Location& location, int err) {
 }
 
 int MapOpenSSLError(int err, const crypto::OpenSSLErrStackTracer& tracer) {
+  OpenSSLErrorInfo error_info;
+  return MapOpenSSLErrorWithDetails(err, tracer, &error_info);
+}
+
+int MapOpenSSLErrorWithDetails(int err,
+                               const crypto::OpenSSLErrStackTracer& tracer,
+                               OpenSSLErrorInfo* out_error_info) {
+  *out_error_info = OpenSSLErrorInfo();
+
   switch (err) {
     case SSL_ERROR_WANT_READ:
     case SSL_ERROR_WANT_WRITE:
@@ -179,26 +197,42 @@ int MapOpenSSLError(int err, const crypto::OpenSSLErrStackTracer& tracer) {
       LOG(ERROR) << "OpenSSL SYSCALL error, earliest error code in "
                     "error queue: " << ERR_peek_error() << ", errno: "
                  << errno;
-      return ERR_SSL_PROTOCOL_ERROR;
+      return ERR_FAILED;
     case SSL_ERROR_SSL:
       // Walk down the error stack to find an SSL or net error.
-      unsigned long error_code;
+      uint32_t error_code;
+      const char* file;
+      int line;
       do {
-        error_code = ERR_get_error();
+        error_code = ERR_get_error_line(&file, &line);
         if (ERR_GET_LIB(error_code) == ERR_LIB_SSL) {
+          out_error_info->error_code = error_code;
+          out_error_info->file = file;
+          out_error_info->line = line;
           return MapOpenSSLErrorSSL(error_code);
         } else if (ERR_GET_LIB(error_code) == OpenSSLNetErrorLib()) {
+          out_error_info->error_code = error_code;
+          out_error_info->file = file;
+          out_error_info->line = line;
           // Net error codes are negative but encoded in OpenSSL as positive
           // numbers.
           return -ERR_GET_REASON(error_code);
         }
       } while (error_code != 0);
-      return ERR_SSL_PROTOCOL_ERROR;
+      return ERR_FAILED;
     default:
       // TODO(joth): Implement full mapping.
       LOG(WARNING) << "Unknown OpenSSL error " << err;
       return ERR_SSL_PROTOCOL_ERROR;
   }
+}
+
+NetLog::ParametersCallback CreateNetLogOpenSSLErrorCallback(
+    int net_error,
+    int ssl_error,
+    const OpenSSLErrorInfo& error_info) {
+  return base::Bind(&NetLogOpenSSLErrorCallback,
+                    net_error, ssl_error, error_info);
 }
 
 }  // namespace net

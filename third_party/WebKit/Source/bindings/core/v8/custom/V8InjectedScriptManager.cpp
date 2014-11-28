@@ -65,21 +65,25 @@ static v8::Local<v8::Object> createInjectedScriptHostV8Wrapper(PassRefPtrWillBeR
 {
     ASSERT(host);
 
-    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(creationContext, &V8InjectedScriptHost::wrapperTypeInfo, V8InjectedScriptHost::toInternalPointer(host.get()), isolate);
+    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(creationContext, &V8InjectedScriptHost::wrapperTypeInfo, host->toScriptWrappableBase(), isolate);
     if (UNLIKELY(wrapper.IsEmpty()))
         return wrapper;
 
     // Create a weak reference to the v8 wrapper of InspectorBackend to deref
     // InspectorBackend when the wrapper is garbage collected.
     InjectedScriptManager::CallbackData* callbackData = injectedScriptManager->createCallbackData(injectedScriptManager);
+#if ENABLE(OILPAN)
+    callbackData->hostPtr = WrapperPersistent<InjectedScriptHost>::create(host.get());
+#else
     callbackData->host = host.get();
+#endif
     callbackData->handle.set(isolate, wrapper);
     callbackData->handle.setWeak(callbackData, &InjectedScriptManager::setWeakCallback);
 
 #if ENABLE(OILPAN)
-    V8DOMWrapper::setNativeInfoWithPersistentHandle(wrapper, &V8InjectedScriptHost::wrapperTypeInfo, V8InjectedScriptHost::toInternalPointer(host), &callbackData->host);
+    V8DOMWrapper::setNativeInfoWithPersistentHandle(wrapper, &V8InjectedScriptHost::wrapperTypeInfo, host->toScriptWrappableBase(), callbackData->hostPtr);
 #else
-    V8DOMWrapper::setNativeInfo(wrapper, &V8InjectedScriptHost::wrapperTypeInfo, V8InjectedScriptHost::toInternalPointer(host.get()));
+    V8DOMWrapper::setNativeInfo(wrapper, &V8InjectedScriptHost::wrapperTypeInfo, host->toScriptWrappableBase());
 #endif
     ASSERT(V8DOMWrapper::isDOMWrapper(wrapper));
     return wrapper;
@@ -122,7 +126,7 @@ bool InjectedScriptManager::canAccessInspectedWindow(ScriptState* scriptState)
     v8::Handle<v8::Object> holder = V8Window::findInstanceInPrototypeChain(global, scriptState->isolate());
     if (holder.IsEmpty())
         return false;
-    LocalFrame* frame = V8Window::toNative(holder)->frame();
+    LocalFrame* frame = V8Window::toImpl(holder)->frame();
 
     return BindingSecurity::shouldAllowAccessToFrame(scriptState->isolate(), frame, DoNotReportSecurityError);
 }

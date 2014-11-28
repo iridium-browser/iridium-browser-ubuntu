@@ -99,6 +99,12 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // this method has no effect. The return value reflects whether the user was
   // prompted with a modal dialog.
   bool AccessAddressBook();
+
+  // The access Address Book prompt was shown for a form.
+  void ShowedAccessAddressBookPrompt();
+
+  // The number of times that the access address book prompt was shown.
+  int AccessAddressBookPromptCount();
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
   // Called from our external delegate so they cannot be private.
@@ -257,9 +263,9 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // Returns a list of values from the stored profiles that match |type| and the
   // value of |field| and returns the labels of the matching profiles. |labels|
   // is filled with the Profile label.
-  void GetProfileSuggestions(FormStructure* form,
+  void GetProfileSuggestions(const FormStructure& form,
                              const FormFieldData& field,
-                             const AutofillType& type,
+                             const AutofillField& autofill_field,
                              std::vector<base::string16>* values,
                              std::vector<base::string16>* labels,
                              std::vector<base::string16>* icons,

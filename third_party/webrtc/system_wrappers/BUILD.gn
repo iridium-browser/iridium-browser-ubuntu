@@ -45,7 +45,6 @@ static_library("system_wrappers") {
     "interface/static_instance.h",
     "interface/stl_util.h",
     "interface/stringize_macros.h",
-    "interface/thread_annotations.h",
     "interface/thread_wrapper.h",
     "interface/tick_util.h",
     "interface/timestamp_extrapolator.h",
@@ -108,12 +107,18 @@ static_library("system_wrappers") {
 
   configs += [ "..:common_config" ]
 
+ if (is_clang) {
+    # Suppress warnings from Chrome's Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
+
   direct_dependent_configs = [
     "..:common_inherited_config",
     ":system_wrappers_inherited_config",
   ]
 
-  if (enable_data_logging) {
+  if (rtc_enable_data_logging) {
     sources += [ "source/data_log.cc" ]
   } else {
     sources += [ "source/data_log_no_op.cc" ]
@@ -187,7 +192,7 @@ static_library("system_wrappers") {
   ]
 
   deps += [
-    "../base:webrtc_base",
+    "../base:rtc_base_approved",
   ]
 }
 
@@ -195,6 +200,13 @@ source_set("field_trial_default") {
   sources = [
     "source/field_trial_default.cc",
   ]
+
+  if (is_clang) {
+    # Suppress warnings from Chrome's Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
+
   deps = [
     ":system_wrappers",
   ]

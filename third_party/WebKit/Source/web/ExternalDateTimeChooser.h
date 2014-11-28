@@ -27,21 +27,18 @@
 #define ExternalDateTimeChooser_h
 
 #if !ENABLE(INPUT_MULTIPLE_FIELDS_UI)
-#include "platform/DateTimeChooser.h"
-
-namespace blink {
-class DateTimeChooserClient;
-}
+#include "core/html/forms/DateTimeChooser.h"
 
 namespace blink {
 
 class ChromeClientImpl;
+class DateTimeChooserClient;
 class WebString;
 class WebViewClient;
 
-class ExternalDateTimeChooser FINAL : public blink::DateTimeChooser {
+class ExternalDateTimeChooser FINAL : public DateTimeChooser {
 public:
-    static PassRefPtr<ExternalDateTimeChooser> create(ChromeClientImpl*, WebViewClient*, blink::DateTimeChooserClient*, const blink::DateTimeChooserParameters&);
+    static PassRefPtr<ExternalDateTimeChooser> create(ChromeClientImpl*, WebViewClient*, DateTimeChooserClient*, const DateTimeChooserParameters&);
     virtual ~ExternalDateTimeChooser();
 
     // The following functions are for DateTimeChooserCompletion.
@@ -50,13 +47,14 @@ public:
     void didCancelChooser();
 
 private:
-    ExternalDateTimeChooser(blink::DateTimeChooserClient*);
-    bool openDateTimeChooser(ChromeClientImpl*, WebViewClient*, const blink::DateTimeChooserParameters&);
+    ExternalDateTimeChooser(DateTimeChooserClient*);
+    bool openDateTimeChooser(ChromeClientImpl*, WebViewClient*, const DateTimeChooserParameters&);
 
     // DateTimeChooser function:
     virtual void endChooser() OVERRIDE;
+    virtual AXObject* rootAXObject() OVERRIDE;
 
-    blink::DateTimeChooserClient* m_client;
+    DateTimeChooserClient* m_client;
 };
 
 }

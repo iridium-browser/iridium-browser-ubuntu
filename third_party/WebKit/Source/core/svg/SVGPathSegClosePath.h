@@ -26,6 +26,7 @@
 namespace blink {
 
 class SVGPathSegClosePath FINAL : public SVGPathSegWithContext {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtr<SVGPathSegClosePath> create(SVGPathElement* element)
     {
@@ -34,10 +35,7 @@ public:
 
 private:
     SVGPathSegClosePath(SVGPathElement* element)
-        : SVGPathSegWithContext(element)
-    {
-        ScriptWrappable::init(this);
-    }
+        : SVGPathSegWithContext(element) { }
 
     virtual unsigned short pathSegType() const OVERRIDE { return PATHSEG_CLOSEPATH; }
     virtual String pathSegTypeAsLetter() const OVERRIDE { return "Z"; }
@@ -45,4 +43,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // SVGPathSegClosePath_h

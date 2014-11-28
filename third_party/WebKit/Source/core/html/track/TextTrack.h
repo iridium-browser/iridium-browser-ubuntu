@@ -44,12 +44,13 @@ class VTTRegion;
 class VTTRegionList;
 
 class TextTrack : public TrackBase, public EventTargetWithInlineData {
+    DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(TrackBase);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(TextTrack);
 public:
     static PassRefPtrWillBeRawPtr<TextTrack> create(const AtomicString& kind, const AtomicString& label, const AtomicString& language)
     {
-        return adoptRefWillBeRefCountedGarbageCollected(new TextTrack(kind, label, language, emptyAtom, AddTrack));
+        return adoptRefWillBeNoop(new TextTrack(kind, label, language, emptyAtom, AddTrack));
     }
     virtual ~TextTrack();
 
@@ -144,4 +145,4 @@ DEFINE_TRACK_TYPE_CASTS(TextTrack, TrackBase::TextTrack);
 
 } // namespace blink
 
-#endif
+#endif // TextTrack_h

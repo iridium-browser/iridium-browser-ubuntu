@@ -39,12 +39,12 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_transition_types.h"
 #include "crypto/secure_hash.h"
 #include "grit/browser_resources.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/url_canon.h"
 
@@ -52,7 +52,7 @@ using base::DictionaryValue;
 using base::ListValue;
 using base::Value;
 using content::BrowserThread;
-using content::PageTransition;
+using ui::PageTransition;
 using content::RenderFrameHost;
 using content::SessionStorageNamespace;
 using content::WebContents;
@@ -249,20 +249,20 @@ int GetMaxLocalPredictionTimeMs() {
 }
 
 bool IsBackForward(PageTransition transition) {
-  return (transition & content::PAGE_TRANSITION_FORWARD_BACK) != 0;
+  return (transition & ui::PAGE_TRANSITION_FORWARD_BACK) != 0;
 }
 
 bool IsHomePage(PageTransition transition) {
-  return (transition & content::PAGE_TRANSITION_HOME_PAGE) != 0;
+  return (transition & ui::PAGE_TRANSITION_HOME_PAGE) != 0;
 }
 
 bool IsIntermediateRedirect(PageTransition transition) {
-  return (transition & content::PAGE_TRANSITION_CHAIN_END) == 0;
+  return (transition & ui::PAGE_TRANSITION_CHAIN_END) == 0;
 }
 
 bool IsFormSubmit(PageTransition transition) {
-  return PageTransitionCoreTypeIs(transition,
-                                  content::PAGE_TRANSITION_FORM_SUBMIT);
+  return ui::PageTransitionCoreTypeIs(transition,
+                                      ui::PAGE_TRANSITION_FORM_SUBMIT);
 }
 
 bool ShouldExcludeTransitionForPrediction(PageTransition transition) {
@@ -455,10 +455,35 @@ class PrerenderLocalPredictor::PrefetchList {
       return_value = true;
     }
     // If the item has been seen in both the history and in tab contents,
-    // erase it from the map to make room for new prefetches.
-    if (it->second->seen_tabcontents_ && it->second->seen_history_)
+    // and the page load time has been recorded, erase it from the map to
+    // make room for new prefetches.
+    if (it->second->seen_tabcontents_ && it->second->seen_history_ &&
+        it->second->seen_plt_) {
       entries_.erase(url.spec().c_str());
+    }
     return return_value;
+  }
+
+  // Marks the PLT for the provided UR as seen. Returns true
+  // iff the item is currently in the list and the PLT had not been seen
+  // before, i.e. the sighting was successful.
+  bool MarkPLTSeen(const GURL& url, base::TimeDelta plt) {
+    ExpireOldItems();
+    base::hash_map<string, ListEntry*>::iterator it =
+        entries_.find(url.spec().c_str());
+    if (it == entries_.end() || it->second->seen_plt_ ||
+        it->second->add_time_ > GetCurrentTime() - plt) {
+      return false;
+    }
+    it->second->seen_plt_ = true;
+    // If the item has been seen in both the history and in tab contents,
+    // and the page load time has been recorded, erase it from the map to
+    // make room for new prefetches.
+    if (it->second->seen_tabcontents_ && it->second->seen_history_ &&
+        it->second->seen_plt_) {
+      entries_.erase(url.spec().c_str());
+    }
+    return true;
   }
 
  private:
@@ -467,12 +492,14 @@ class PrerenderLocalPredictor::PrefetchList {
         : url_(url),
           add_time_(GetCurrentTime()),
           seen_tabcontents_(false),
-          seen_history_(false) {
+          seen_history_(false),
+          seen_plt_(false) {
     }
     std::string url_;
     base::Time add_time_;
     bool seen_tabcontents_;
     bool seen_history_;
+    bool seen_plt_;
   };
 
   void ExpireOldItems() {
@@ -589,6 +616,11 @@ void PrerenderLocalPredictor::OnAddVisit(const history::BriefVisitInfo& info) {
   }
   if (ShouldExcludeTransitionForPrediction(info.transition))
     return;
+  Profile* profile = prerender_manager_->profile();
+  if (!profile ||
+      ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile)) {
+    return;
+  }
   RecordEvent(EVENT_ADD_VISIT_RELEVANT_TRANSITION);
   base::TimeDelta max_age =
       base::TimeDelta::FromMilliseconds(GetMaxLocalPredictionTimeMs());
@@ -973,7 +1005,7 @@ bool PrerenderLocalPredictor::ApplyParsedPrerenderServiceResponse(
                                               !in_index_timed_out);
       }
       if (list->GetSize() > 0)
-        RecordEvent(EVENT_PRERENDER_SERIVCE_RETURNED_HINTING_CANDIDATES);
+        RecordEvent(EVENT_PRERENDER_SERVICE_RETURNED_HINTING_CANDIDATES);
     }
   }
 
@@ -1099,7 +1131,8 @@ void PrerenderLocalPredictor::Init() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordEvent(EVENT_INIT_STARTED);
   Profile* profile = prerender_manager_->profile();
-  if (!profile || DisableLocalPredictorBasedOnSyncAndConfiguration(profile)) {
+  if (!profile ||
+      ShouldDisableLocalPredictorBasedOnSyncAndConfiguration(profile)) {
     RecordEvent(EVENT_INIT_FAILED_UNENCRYPTED_SYNC_NOT_ENABLED);
     return;
   }
@@ -1119,6 +1152,14 @@ void PrerenderLocalPredictor::Init() {
 
 void PrerenderLocalPredictor::OnPLTEventForURL(const GURL& url,
                                                base::TimeDelta page_load_time) {
+  if (prefetch_list_->MarkPLTSeen(url, page_load_time)) {
+    UMA_HISTOGRAM_CUSTOM_TIMES("Prerender.LocalPredictorPrefetchMatchPLT",
+                               page_load_time,
+                               base::TimeDelta::FromMilliseconds(10),
+                               base::TimeDelta::FromSeconds(60),
+                               100);
+  }
+
   scoped_ptr<PrerenderProperties> prerender;
   if (DoesPrerenderMatchPLTRecord(last_swapped_in_prerender_.get(),
                                   url, page_load_time)) {
@@ -1298,7 +1339,7 @@ void PrerenderLocalPredictor::ContinuePrerenderCheck(
       continue;
     }
 #if defined(FULL_SAFE_BROWSING)
-    if (!SkipLocalPredictorWhitelist() && sb_db_manager &&
+    if (!SkipLocalPredictorWhitelist() && sb_db_manager.get() &&
         sb_db_manager->CheckSideEffectFreeWhitelistUrl(url_info->url)) {
       // If a page is on the side-effect free whitelist, we will just prerender
       // it without any additional checks.
@@ -1338,8 +1379,23 @@ void PrerenderLocalPredictor::IssuePrerender(
     CandidatePrerenderInfo* info,
     LocalPredictorURLInfo* url_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (prefetch_list_->AddURL(url_info->url))
+  RecordEvent(EVENT_ISSUE_PRERENDER_CALLED);
+  if (prefetch_list_->AddURL(url_info->url)) {
     RecordEvent(EVENT_PREFETCH_LIST_ADDED);
+    // If we are prefetching rather than prerendering, now is the time to launch
+    // the prefetch.
+    if (IsLocalPredictorPrerenderPrefetchEnabled()) {
+      RecordEvent(EVENT_ISSUE_PRERENDER_PREFETCH_ENABLED);
+      // Obtain the render frame host that caused this prefetch.
+      RenderFrameHost* rfh = RenderFrameHost::FromID(info->render_process_id_,
+                                                     info->render_frame_id_);
+      // If it is still alive, launch the prefresh.
+      if (rfh) {
+        rfh->Send(new PrefetchMsg_Prefetch(rfh->GetRoutingID(), url_info->url));
+        RecordEvent(EVENT_ISSUE_PRERENDER_PREFETCH_ISSUED);
+      }
+    }
+  }
   PrerenderProperties* prerender_properties =
       GetIssuedPrerenderSlotForPriority(url_info->url, url_info->priority);
   if (!prerender_properties) {
@@ -1394,16 +1450,6 @@ void PrerenderLocalPredictor::IssuePrerender(
     if (new_prerender_handle) {
       new_prerender_handle->OnCancel();
       RecordEvent(EVENT_ISSUE_PRERENDER_CANCELLED_OLD_PRERENDER);
-    }
-    // If we are prefetching rather than prerendering, now is the time to launch
-    // the prefetch.
-    if (IsLocalPredictorPrerenderPrefetchEnabled()) {
-      // Obtain the render frame host that caused this prefetch.
-      RenderFrameHost* rfh = RenderFrameHost::FromID(info->render_process_id_,
-                                                     info->render_frame_id_);
-      // If it is still alive, launch the prefresh.
-      if (rfh)
-        rfh->Send(new PrefetchMsg_Prefetch(rfh->GetRoutingID(), url));
     }
   }
 

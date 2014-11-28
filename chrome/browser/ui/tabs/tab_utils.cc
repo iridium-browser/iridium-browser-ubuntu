@@ -4,11 +4,14 @@
 
 #include "chrome/browser/ui/tabs/tab_utils.h"
 
+#include "base/command_line.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/media/audio_stream_monitor.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
-#include "grit/generated_resources.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/grit/generated_resources.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -117,9 +120,7 @@ bool ShouldTabShowCloseButton(int capacity,
 }
 
 bool IsPlayingAudio(content::WebContents* contents) {
-  AudioStreamMonitor* const audio_stream_monitor =
-      AudioStreamMonitor::FromWebContents(contents);
-  return audio_stream_monitor && audio_stream_monitor->WasRecentlyAudible();
+  return contents->WasRecentlyAudible();
 }
 
 TabMediaState GetTabMediaStateForContents(content::WebContents* contents) {
@@ -129,13 +130,15 @@ TabMediaState GetTabMediaStateForContents(content::WebContents* contents) {
   scoped_refptr<MediaStreamCaptureIndicator> indicator =
       MediaCaptureDevicesDispatcher::GetInstance()->
           GetMediaStreamCaptureIndicator();
-  if (indicator) {
+  if (indicator.get()) {
     if (indicator->IsBeingMirrored(contents))
       return TAB_MEDIA_STATE_CAPTURING;
     if (indicator->IsCapturingUserMedia(contents))
       return TAB_MEDIA_STATE_RECORDING;
   }
 
+  if (IsTabAudioMutingFeatureEnabled() && contents->IsAudioMuted())
+    return TAB_MEDIA_STATE_AUDIO_MUTING;
   if (IsPlayingAudio(contents))
     return TAB_MEDIA_STATE_AUDIO_PLAYING;
 
@@ -147,6 +150,8 @@ const gfx::Image& GetTabMediaIndicatorImage(TabMediaState media_state) {
   switch (media_state) {
     case TAB_MEDIA_STATE_AUDIO_PLAYING:
       return rb.GetNativeImageNamed(IDR_TAB_AUDIO_INDICATOR);
+    case TAB_MEDIA_STATE_AUDIO_MUTING:
+      return rb.GetNativeImageNamed(IDR_TAB_AUDIO_MUTING_INDICATOR);
     case TAB_MEDIA_STATE_RECORDING:
       return rb.GetNativeImageNamed(IDR_TAB_RECORDING_INDICATOR);
     case TAB_MEDIA_STATE_CAPTURING:
@@ -156,6 +161,22 @@ const gfx::Image& GetTabMediaIndicatorImage(TabMediaState media_state) {
   }
   NOTREACHED();
   return rb.GetNativeImageNamed(IDR_SAD_FAVICON);
+}
+
+const gfx::Image& GetTabMediaIndicatorAffordanceImage(
+    TabMediaState media_state) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  switch (media_state) {
+    case TAB_MEDIA_STATE_AUDIO_PLAYING:
+    case TAB_MEDIA_STATE_AUDIO_MUTING:
+      return rb.GetNativeImageNamed(IDR_TAB_AUDIO_MUTING_AFFORDANCE);
+    case TAB_MEDIA_STATE_NONE:
+    case TAB_MEDIA_STATE_RECORDING:
+    case TAB_MEDIA_STATE_CAPTURING:
+      return GetTabMediaIndicatorImage(media_state);
+  }
+  NOTREACHED();
+  return GetTabMediaIndicatorImage(media_state);
 }
 
 scoped_ptr<gfx::Animation> CreateTabMediaIndicatorFadeAnimation(
@@ -193,6 +214,10 @@ base::string16 AssembleTabTooltipText(const base::string16& title,
       result.append(
           l10n_util::GetStringUTF16(IDS_TOOLTIP_TAB_MEDIA_STATE_AUDIO_PLAYING));
       break;
+    case TAB_MEDIA_STATE_AUDIO_MUTING:
+      result.append(
+          l10n_util::GetStringUTF16(IDS_TOOLTIP_TAB_MEDIA_STATE_AUDIO_MUTING));
+      break;
     case TAB_MEDIA_STATE_RECORDING:
       result.append(
           l10n_util::GetStringUTF16(IDS_TOOLTIP_TAB_MEDIA_STATE_RECORDING));
@@ -206,6 +231,49 @@ base::string16 AssembleTabTooltipText(const base::string16& title,
       break;
   }
   return result;
+}
+
+bool IsTabAudioMutingFeatureEnabled() {
+#if defined(USE_AURA)
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableTabAudioMuting);
+#else
+  return false;
+#endif
+}
+
+bool CanToggleAudioMute(content::WebContents* contents) {
+  switch (GetTabMediaStateForContents(contents)) {
+    case TAB_MEDIA_STATE_NONE:
+    case TAB_MEDIA_STATE_AUDIO_PLAYING:
+    case TAB_MEDIA_STATE_AUDIO_MUTING:
+      return IsTabAudioMutingFeatureEnabled();
+    case TAB_MEDIA_STATE_RECORDING:
+    case TAB_MEDIA_STATE_CAPTURING:
+      return false;
+  }
+  NOTREACHED();
+  return false;
+}
+
+void SetTabAudioMuted(content::WebContents* contents, bool mute) {
+  if (!contents || !chrome::CanToggleAudioMute(contents))
+    return;
+  contents->SetAudioMuted(mute);
+}
+
+bool IsTabAudioMuted(content::WebContents* contents) {
+  return contents && contents->IsAudioMuted();
+}
+
+bool AreAllTabsMuted(const TabStripModel& tab_strip,
+                     const std::vector<int>& indices) {
+  for (std::vector<int>::const_iterator i = indices.begin(); i != indices.end();
+       ++i) {
+    if (!IsTabAudioMuted(tab_strip.GetWebContentsAt(*i)))
+      return false;
+  }
+  return true;
 }
 
 }  // namespace chrome

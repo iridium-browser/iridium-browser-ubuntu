@@ -8,8 +8,8 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/launch_services_util.h"
@@ -28,7 +28,6 @@
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/mac/dock.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration.h"
@@ -38,12 +37,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #import "chrome/common/mac/app_mode_common.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "grit/chrome_unscaled_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #import "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -448,7 +447,7 @@ bool IsShimForProfile(const base::FilePath& base_name,
   std::string app_id = base_name.RemoveExtension().value();
   // Strip (profile_base_name + " ") from the start.
   app_id = app_id.substr(profile_base_name.size() + 1);
-  return extensions::Extension::IdIsValid(app_id);
+  return crx_file::id_util::IdIsValid(app_id);
 }
 
 std::vector<base::FilePath> GetAllAppBundlesInPath(
@@ -554,6 +553,50 @@ void UpdateFileTypes(NSMutableDictionary* plist,
 }
 
 }  // namespace
+
+@interface CrCreateAppShortcutCheckboxObserver : NSObject {
+ @private
+  NSButton* checkbox_;
+  NSButton* continueButton_;
+}
+
+- (id)initWithCheckbox:(NSButton*)checkbox
+        continueButton:(NSButton*)continueButton;
+- (void)startObserving;
+- (void)stopObserving;
+@end
+
+@implementation CrCreateAppShortcutCheckboxObserver
+
+- (id)initWithCheckbox:(NSButton*)checkbox
+        continueButton:(NSButton*)continueButton {
+  if ((self = [super init])) {
+    checkbox_ = checkbox;
+    continueButton_ = continueButton;
+  }
+  return self;
+}
+
+- (void)startObserving {
+  [checkbox_ addObserver:self
+              forKeyPath:@"cell.state"
+                 options:0
+                 context:nil];
+}
+
+- (void)stopObserving {
+  [checkbox_ removeObserver:self
+                 forKeyPath:@"cell.state"];
+}
+
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary*)change
+                       context:(void*)context {
+  [continueButton_ setEnabled:([checkbox_ state] == NSOnState)];
+}
+
+@end
 
 namespace web_app {
 
@@ -986,6 +1029,13 @@ void CreateAppShortcutInfoLoaded(
       setTitle:l10n_util::GetNSString(IDS_CREATE_SHORTCUTS_APP_FOLDER_CHKBOX)];
   [application_folder_checkbox setState:NSOnState];
   [application_folder_checkbox sizeToFit];
+
+  base::scoped_nsobject<CrCreateAppShortcutCheckboxObserver> checkbox_observer(
+      [[CrCreateAppShortcutCheckboxObserver alloc]
+          initWithCheckbox:application_folder_checkbox
+            continueButton:continue_button]);
+  [checkbox_observer startObserving];
+
   [alert setAccessoryView:application_folder_checkbox];
 
   const int kIconPreviewSizePixels = 128;
@@ -1007,6 +1057,8 @@ void CreateAppShortcutInfoLoaded(
     CreateShortcuts(
         SHORTCUT_CREATION_BY_USER, ShortcutLocations(), profile, app);
   }
+
+  [checkbox_observer stopObserving];
 
   if (!close_callback.is_null())
     close_callback.Run(dialog_accepted);

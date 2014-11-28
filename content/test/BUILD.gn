@@ -14,12 +14,16 @@ content_tests_gypi_values = exec_script(
 
 # GYP version //content/content_tests.gypi:test_support_content
 static_library("test_support") {
+  testonly = true
+  public_deps = []
   deps = [
-    "//content/public/app",
-    "//content/public/browser",
-    "//content/public/common",
+    "//cc/blink",
+    "//content/public/app:both",
+    "//content/public/browser:browser_sources",
+    "//content/public/common:common_sources",
     "//net:test_support",
     "//skia",
+    "//storage/common",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/accessibility:ax_gen",
@@ -30,22 +34,25 @@ static_library("test_support") {
     "//ui/events:test_support",
     "//ui/events:gesture_detection",
     "//ui/gfx:test_support",
+    "//ui/gl",
     "//ui/resources",
     "//url",
-    "//webkit/common",
   ]
 
   if (!is_ios) {
     sources = rebase_path(content_tests_gypi_values.test_support_content_sources,
                           ".", "//content")
 
+    public_deps += [
+      "//third_party/WebKit/public:blink",
+    ]
     deps += [
       "//content/browser/speech/proto",
-      "//content/child",
+      "//content/public/child:child_sources",
       "//content/gpu",
-      "//content/ppapi_plugin",
-      "//content/public/renderer",
-      "//content/public/utility",
+      "//content/public/renderer:renderer_sources",
+      "//content/public/utility:utility_sources",
+      "//content/shell:pak",
       "//cc",
       "//cc:test_support",
       "//media",
@@ -53,22 +60,20 @@ static_library("test_support") {
       "//ppapi:ppapi_proxy",
       "//ppapi:ppapi_shared",
       "//ppapi:ppapi_unittest_shared",
-      "//third_party/WebKit/public:blink",
+      "//storage/browser",
+      "//storage/common",
       "//ui/surface",
       "//v8",
-      "//webkit/child",
       "//webkit/common/gpu",
-      "//webkit/browser:storage",
-      "//webkit/common:storage",
     ]
 
-    forward_dependent_configs_from = [
-      "//third_party/WebKit/public:blink",
-    ]
+    if (enable_plugins) {
+      deps += [ "//content/ppapi_plugin" ]
+    }
 
     if (enable_webrtc) {
       # TODO(GYP) remove this when libjingle is converted.
-      configs += [ "//content:libjingle_stub_config" ]
+      configs += [ "//third_party/libjingle:jingle_direct_dependent_configs" ]
 
       sources += [
         "../renderer/media/mock_media_stream_dispatcher.cc",
@@ -84,8 +89,11 @@ static_library("test_support") {
       deps += [
         #"//third_party/libjingle:webrtc",  TODO(GYP)
         #"//third_party/libjingle:peerconnection",  TODO(GYP)
-        #"//third_party/webrtc/modules:video_capture",  TODO(GYP)
+        "//third_party/webrtc/modules/video_capture",
       ]
+    }
+    if (!enable_plugins) {
+      sources -= [ "ppapi_unittest.cc" ]
     }
 
     if (use_glib) {
@@ -109,7 +117,7 @@ static_library("test_support") {
     }
 
     if (!is_android && !is_ios) {
-      #deps += [ "//third_party/libvpx" ]  TODO(GYP)
+      deps += [ "//third_party/libvpx" ]
     }
 
     if (is_android) {
@@ -140,21 +148,33 @@ if (!is_ios) {
 
   # GYP version //content/content_tests.gypi:layouttest_support_content
   static_library("layouttest_support") {
+    testonly = true
     sources = rebase_path(content_tests_gypi_values.layouttest_support_content_sources,
                           ".", "//content")
 
     deps = [
       ":test_support",
+      "//cc",
+      "//cc/blink",
+      "//content/public/common",
       "//skia",
       "//v8",
       "//ui/accessibility:ax_gen",
     ]
 
     if (is_android) {
-      #deps += [ "test_support_content_jni_headers" ]  TODO(GYP)
+      deps += [ ":jni" ]
     }
   }
 
+  if (is_android) {
+    import("//build/config/android/rules.gni")
+
+    generate_jni("jni") {
+      sources = [ "../public/test/android/javatests/src/org/chromium/content/browser/test/NestedSystemMessageHandler.java" ]
+      jni_package = "content/public/test"
+    }
+  }
 }  # !is_ios
 
 # TODO(GYP): Unit test targets

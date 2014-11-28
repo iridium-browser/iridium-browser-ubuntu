@@ -278,10 +278,10 @@ Position::AnchorType Position::anchorTypeForLegacyEditingPosition(Node* anchorNo
 // FIXME: This method is confusing (does it return anchorNode() or containerNode()?) and should be renamed or removed
 Element* Position::element() const
 {
-    Node* n = anchorNode();
-    while (n && !n->isElementNode())
-        n = n->parentNode();
-    return toElement(n);
+    Node* node = anchorNode();
+    if (!node || node->isElementNode())
+        return toElement(node);
+    return node->parentElement();
 }
 
 PassRefPtrWillBeRawPtr<CSSComputedStyleDeclaration> Position::computedStyle() const
@@ -1188,6 +1188,11 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
             }
             caretOffset = inlineBox->caretLeftmostOffset();
         }
+    } else if (m_anchorNode->selfOrAncestorHasDirAutoAttribute()) {
+        if (inlineBox->bidiLevel() < level)
+            caretOffset = inlineBox->caretLeftmostOffset();
+        else
+            caretOffset = inlineBox->caretRightmostOffset();
     } else {
         InlineBox* nextBox = inlineBox->nextLeafChildIgnoringLineBreak();
         if (!nextBox || nextBox->bidiLevel() < level) {
@@ -1197,10 +1202,7 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
                     break;
                 inlineBox = prevBox;
             }
-            if (m_anchorNode->selfOrAncestorHasDirAutoAttribute())
-                caretOffset = inlineBox->bidiLevel() < level ? inlineBox->caretLeftmostOffset() : inlineBox->caretRightmostOffset();
-            else
-                caretOffset = inlineBox->caretLeftmostOffset();
+            caretOffset = inlineBox->caretLeftmostOffset();
         } else if (nextBox->bidiLevel() > level) {
             // Left edge of a "tertiary" run. Set to the right edge of that run.
             while (InlineBox* tertiaryBox = inlineBox->nextLeafChildIgnoringLineBreak()) {

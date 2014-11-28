@@ -17,8 +17,8 @@
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/extension_set.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/common/fileapi/file_system_util.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/common/fileapi/file_system_util.h"
 
 using sync_file_system::SyncEventObserver;
 
@@ -85,7 +85,7 @@ void ExtensionSyncEventObserver::OnSyncStateUpdated(
 }
 
 void ExtensionSyncEventObserver::OnFileSynced(
-    const fileapi::FileSystemURL& url,
+    const storage::FileSystemURL& url,
     sync_file_system::SyncFileStatus status,
     sync_file_system::SyncAction action,
     sync_file_system::SyncDirection direction) {

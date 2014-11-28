@@ -13,10 +13,24 @@
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/browser/api/api_resource_manager.h"
 
+namespace device {
+class HidConnection;
+}
+
 namespace extensions {
 
 class HidConnectionResource : public ApiResource {
  public:
+#if defined(OS_MACOSX)
+  // Migration from FILE thread to UI thread. OS X gets it first.
+  static const content::BrowserThread::ID kThreadId =
+      content::BrowserThread::UI;
+#else
+  // TODO(reillyg): Migrate Linux/CrOS and Windows as well.
+  static const content::BrowserThread::ID kThreadId =
+      content::BrowserThread::FILE;
+#endif
+
   HidConnectionResource(const std::string& owner_extension_id,
                         scoped_refptr<device::HidConnection> connection);
   virtual ~HidConnectionResource();
@@ -25,10 +39,9 @@ class HidConnectionResource : public ApiResource {
     return connection_;
   }
 
-  static const char* service_name() { return "HidConnectionResourceManager"; }
+  virtual bool IsPersistent() const OVERRIDE;
 
-  static const content::BrowserThread::ID kThreadId =
-      content::BrowserThread::FILE;
+  static const char* service_name() { return "HidConnectionResourceManager"; }
 
  private:
   scoped_refptr<device::HidConnection> connection_;

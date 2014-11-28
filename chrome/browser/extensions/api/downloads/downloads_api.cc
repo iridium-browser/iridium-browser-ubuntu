@@ -11,8 +11,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -35,7 +35,6 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/download/drag_download_item.h"
-#include "chrome/browser/extensions/extension_warning_service.h"
 #include "chrome/browser/icon_loader.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/platform_util.h"
@@ -64,6 +63,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/browser/warning_service.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
@@ -86,7 +86,9 @@ const char kIconNotFound[] = "Icon not found";
 const char kInvalidDangerType[] = "Invalid danger type";
 const char kInvalidFilename[] = "Invalid filename";
 const char kInvalidFilter[] = "Invalid query filter";
-const char kInvalidHeader[] = "Invalid request header";
+const char kInvalidHeaderName[] = "Invalid request header name";
+const char kInvalidHeaderUnsafe[] = "Unsafe request header name";
+const char kInvalidHeaderValue[] = "Invalid request header value";
 const char kInvalidId[] = "Invalid downloadId";
 const char kInvalidOrderBy[] = "Invalid orderBy field";
 const char kInvalidQueryLimit[] = "Invalid query limit";
@@ -736,7 +738,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
         // later take precedence over previous extensions.
         if (!filename.empty() ||
             (conflict_action != downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY)) {
-          ExtensionWarningSet warnings;
+          WarningSet warnings;
           std::string winner_extension_id;
           ExtensionDownloadsEventRouter::DetermineFilenameInternal(
               filename,
@@ -750,7 +752,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
               &determined_conflict_action_,
               &warnings);
           if (!warnings.empty())
-            ExtensionWarningService::NotifyWarningsOnUI(profile, warnings);
+            WarningService::NotifyWarningsOnUI(profile, warnings);
           if (winner_extension_id == determiners_[index].extension_id)
             determiner_ = determiners_[index];
         }
@@ -1036,8 +1038,16 @@ bool DownloadsDownloadFunction::RunAsync() {
          iter != options.headers->end();
          ++iter) {
       const HeaderNameValuePair& name_value = **iter;
+      if (!net::HttpUtil::IsValidHeaderName(name_value.name)) {
+        error_ = errors::kInvalidHeaderName;
+        return false;
+      }
       if (!net::HttpUtil::IsSafeHeader(name_value.name)) {
-        error_ = errors::kInvalidHeader;
+        error_ = errors::kInvalidHeaderUnsafe;
+        return false;
+      }
+      if (!net::HttpUtil::IsValidHeaderValue(name_value.value)) {
+        error_ = errors::kInvalidHeaderValue;
         return false;
       }
       download_params->add_request_header(name_value.name, name_value.value);
@@ -1656,7 +1666,7 @@ void ExtensionDownloadsEventRouter::DetermineFilenameInternal(
     std::string* winner_extension_id,
     base::FilePath* determined_filename,
     downloads::FilenameConflictAction* determined_conflict_action,
-    ExtensionWarningSet* warnings) {
+    WarningSet* warnings) {
   DCHECK(!filename.empty() ||
          (conflict_action != downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY));
   DCHECK(!suggesting_extension_id.empty());
@@ -1670,7 +1680,7 @@ void ExtensionDownloadsEventRouter::DetermineFilenameInternal(
 
   if (suggesting_install_time < incumbent_install_time) {
     *winner_extension_id = incumbent_extension_id;
-    warnings->insert(ExtensionWarning::CreateDownloadFilenameConflictWarning(
+    warnings->insert(Warning::CreateDownloadFilenameConflictWarning(
         suggesting_extension_id,
         incumbent_extension_id,
         filename,
@@ -1679,7 +1689,7 @@ void ExtensionDownloadsEventRouter::DetermineFilenameInternal(
   }
 
   *winner_extension_id = suggesting_extension_id;
-  warnings->insert(ExtensionWarning::CreateDownloadFilenameConflictWarning(
+  warnings->insert(Warning::CreateDownloadFilenameConflictWarning(
       incumbent_extension_id,
       suggesting_extension_id,
       *determined_filename,

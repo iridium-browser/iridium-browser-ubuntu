@@ -18,8 +18,22 @@
 #include "gpu/config/dx_diag_node.h"
 #include "gpu/config/gpu_performance_stats.h"
 #include "gpu/gpu_export.h"
+#include "media/video/video_encode_accelerator.h"
 
 namespace gpu {
+
+// Result for the various Collect*Info* functions below.
+// Fatal failures are for cases where we can't create a context at all or
+// something, making the use of the GPU impossible.
+// Non-fatal failures are for cases where we could gather most info, but maybe
+// some is missing (e.g. unable to parse a version string or to detect the exact
+// model).
+enum CollectInfoResult {
+  kCollectInfoNone = 0,
+  kCollectInfoSuccess = 1,
+  kCollectInfoNonFatalFailure = 2,
+  kCollectInfoFatalFailure = 3
+};
 
 struct GPU_EXPORT GPUInfo {
   struct GPU_EXPORT GPUDevice {
@@ -51,9 +65,6 @@ struct GPU_EXPORT GPUInfo {
   bool SupportsAccelerated2dCanvas() const {
     return !can_lose_context && !software_rendering;
   }
-
-  // Whether more GPUInfo fields might be collected in the future.
-  bool finalized;
 
   // The amount of time taken to get from the process starting to the message
   // loop being pumped.
@@ -156,10 +167,19 @@ struct GPU_EXPORT GPUInfo {
   // Number of GPU process crashes recorded.
   int process_crash_count;
 
+  // The state of whether the basic/context/DxDiagnostics info is collected and
+  // if the collection fails or not.
+  CollectInfoResult basic_info_state;
+  CollectInfoResult context_info_state;
 #if defined(OS_WIN)
+  CollectInfoResult dx_diagnostics_info_state;
+
   // The information returned by the DirectX Diagnostics Tool.
   DxDiagNode dx_diagnostics;
 #endif
+
+  std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+      video_encode_accelerator_supported_profiles;
   // Note: when adding new members, please remember to update EnumerateFields
   // in gpu_info.cc.
 
@@ -183,6 +203,11 @@ struct GPU_EXPORT GPUInfo {
     // Markers indicating that a GPUDevice is being described.
     virtual void BeginGPUDevice() = 0;
     virtual void EndGPUDevice() = 0;
+
+    // Markers indicating that a VideoEncodeAccelerator::SupportedProfile is
+    // being described.
+    virtual void BeginVideoEncodeAcceleratorSupportedProfile() = 0;
+    virtual void EndVideoEncodeAcceleratorSupportedProfile() = 0;
 
     // Markers indicating that "auxiliary" attributes of the GPUInfo
     // (according to the DevTools protocol) are being described.

@@ -130,10 +130,8 @@ class SigninManager : public SigninManagerBase {
   bool IsSignoutProhibited() const;
 
   // Add or remove observers for the merge session notification.
-  virtual void AddMergeSessionObserver(
-      MergeSessionHelper::Observer* observer);
-  virtual void RemoveMergeSessionObserver(
-      MergeSessionHelper::Observer* observer);
+  void AddMergeSessionObserver(MergeSessionHelper::Observer* observer);
+  void RemoveMergeSessionObserver(MergeSessionHelper::Observer* observer);
 
  protected:
   // Flag saying whether signing out is allowed.
@@ -193,8 +191,6 @@ class SigninManager : public SigninManagerBase {
   // token service so that it does not need to mint new ones.
   std::string temp_refresh_token_;
 
-  base::WeakPtrFactory<SigninManager> weak_pointer_factory_;
-
   // The SigninClient object associated with this object. Must outlive this
   // object.
   SigninClient* client_;
@@ -212,6 +208,8 @@ class SigninManager : public SigninManagerBase {
 
   // Helper to merge signed in account into the content area.
   scoped_ptr<MergeSessionHelper> merge_session_helper_;
+
+  base::WeakPtrFactory<SigninManager> weak_pointer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninManager);
 };

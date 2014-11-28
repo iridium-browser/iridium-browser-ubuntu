@@ -2,34 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "athena/content/public/content_activity_factory.h"
-#include "athena/content/public/content_app_model_builder.h"
+#include "athena/activity/public/activity_factory.h"
+#include "athena/activity/public/activity_manager.h"
 #include "athena/content/public/web_contents_view_delegate_creator.h"
-#include "athena/home/public/home_card.h"
-#include "athena/main/athena_app_window_controller.h"
-#include "athena/main/athena_launcher.h"
-#include "athena/main/debug/debug_window.h"
-#include "athena/main/placeholder.h"
-#include "athena/main/url_search_provider.h"
+#include "athena/env/public/athena_env.h"
+#include "athena/extensions/public/extensions_delegate.h"
+#include "athena/main/athena_content_client.h"
+#include "athena/main/athena_renderer_pdf_helper.h"
+#include "athena/main/public/athena_launcher.h"
 #include "athena/screen/public/screen_manager.h"
-#include "athena/virtual_keyboard/public/virtual_keyboard_manager.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
+#include "components/pdf/renderer/ppb_pdf_impl.h"
 #include "content/public/app/content_main.h"
+#include "content/public/browser/browser_thread.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_client.h"
 #include "extensions/shell/app/shell_main_delegate.h"
+#include "extensions/shell/browser/desktop_controller.h"
+#include "extensions/shell/browser/shell_app_delegate.h"
 #include "extensions/shell/browser/shell_browser_main_delegate.h"
 #include "extensions/shell/browser/shell_content_browser_client.h"
-#include "extensions/shell/browser/shell_desktop_controller.h"
 #include "extensions/shell/browser/shell_extension_system.h"
+#include "extensions/shell/browser/shell_native_app_window.h"
+#include "extensions/shell/common/shell_content_client.h"
 #include "extensions/shell/common/switches.h"
-#include "extensions/shell/renderer/shell_renderer_main_delegate.h"
-#include "ui/app_list/app_list_switches.h"
+#include "extensions/shell/renderer/shell_content_renderer_client.h"
+#include "ppapi/c/private/ppb_pdf.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_controller_observer.h"
-#include "ui/native_theme/native_theme_switches.h"
 #include "ui/wm/core/visibility_controller.h"
 
 namespace {
@@ -38,39 +40,37 @@ namespace {
 // to run athena_main at src/
 const char kDefaultAppPath[] =
     "chrome/common/extensions/docs/examples/apps/calculator/app";
+
 }  // namespace
 
-// This class observes the change of the virtual keyboard and distribute the
-// change to appropriate modules of athena.
-// TODO(oshima): move the VK bounds logic to screen manager.
-class VirtualKeyboardObserver : public keyboard::KeyboardControllerObserver {
- public:
-  VirtualKeyboardObserver() {
-    keyboard::KeyboardController::GetInstance()->AddObserver(this);
-  }
-
-  virtual ~VirtualKeyboardObserver() {
-    keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
-  }
-
- private:
-  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE {
-    athena::HomeCard::Get()->UpdateVirtualKeyboardBounds(new_bounds);
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(VirtualKeyboardObserver);
-};
-
-class AthenaDesktopController : public extensions::ShellDesktopController {
+class AthenaDesktopController : public extensions::DesktopController {
  public:
   AthenaDesktopController() {}
   virtual ~AthenaDesktopController() {}
 
  private:
-  // extensions::ShellDesktopController:
-  virtual wm::FocusRules* CreateFocusRules() OVERRIDE {
-    return athena::ScreenManager::CreateFocusRules();
+  // extensions::DesktopController:
+  virtual aura::WindowTreeHost* GetHost() OVERRIDE {
+    return athena::AthenaEnv::Get()->GetHost();
   }
+
+  // Creates a new app window and adds it to the desktop. The desktop maintains
+  // ownership of the window.
+  // TODO(jamescook|oshima): Is this function needed?
+  virtual extensions::AppWindow* CreateAppWindow(
+      content::BrowserContext* context,
+      const extensions::Extension* extension) OVERRIDE {
+    NOTIMPLEMENTED();
+    return NULL;
+  }
+
+  // Adds the window to the desktop.
+  virtual void AddAppWindow(aura::Window* window) OVERRIDE {
+    NOTIMPLEMENTED();
+  }
+
+  // Closes and destroys the app windows.
+  virtual void CloseAppWindows() OVERRIDE {}
 
   DISALLOW_COPY_AND_ASSIGN(AthenaDesktopController);
 };
@@ -83,10 +83,6 @@ class AthenaBrowserMainDelegate : public extensions::ShellBrowserMainDelegate {
   // extensions::ShellBrowserMainDelegate:
   virtual void Start(content::BrowserContext* context) OVERRIDE {
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-
-    // Force showing in the experimental app-list view.
-    command_line->AppendSwitch(app_list::switches::kEnableExperimentalAppList);
-    command_line->AppendSwitch(switches::kEnableOverlayScrollbar);
 
     base::FilePath app_dir = base::FilePath::FromUTF8Unsafe(
         command_line->HasSwitch(extensions::switches::kAppShellAppPath)
@@ -102,36 +98,24 @@ class AthenaBrowserMainDelegate : public extensions::ShellBrowserMainDelegate {
       extension_system->LoadApp(app_absolute_dir);
     }
 
-    athena::StartAthena(
-        extensions::ShellDesktopController::instance()->host()->window(),
-        new athena::ContentActivityFactory(),
-        new athena::ContentAppModelBuilder(context));
-    athena::HomeCard::Get()->RegisterSearchProvider(
-        new athena::UrlSearchProvider(context));
-    athena::VirtualKeyboardManager::Create(context);
-    keyboard_observer_.reset(new VirtualKeyboardObserver());
-
-    CreateTestPages(context);
-    CreateDebugWindow();
+    athena::StartAthenaEnv(content::BrowserThread::GetBlockingPool()->
+        GetTaskRunnerWithShutdownBehavior(
+            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+    athena::ExtensionsDelegate::CreateExtensionsDelegateForShell(context);
+    athena::CreateVirtualKeyboardWithContext(context);
+    athena::StartAthenaSessionWithContext(context);
   }
 
   virtual void Shutdown() OVERRIDE {
-    keyboard_observer_.reset();
+    athena::AthenaEnv::Get()->OnTerminating();
     athena::ShutdownAthena();
   }
 
-  virtual extensions::ShellDesktopController* CreateDesktopController()
-      OVERRIDE {
-    // TODO(mukai): create Athena's own ShellDesktopController subclass so that
-    // it can initialize its own window manager logic.
-    extensions::ShellDesktopController* desktop = new AthenaDesktopController();
-    desktop->SetAppWindowController(new athena::AthenaAppWindowController());
-    return desktop;
+  virtual extensions::DesktopController* CreateDesktopController() OVERRIDE {
+    return new AthenaDesktopController();
   }
 
  private:
-  scoped_ptr<VirtualKeyboardObserver> keyboard_observer_;
-
   DISALLOW_COPY_AND_ASSIGN(AthenaBrowserMainDelegate);
 };
 
@@ -153,20 +137,25 @@ class AthenaContentBrowserClient
   DISALLOW_COPY_AND_ASSIGN(AthenaContentBrowserClient);
 };
 
-class AthenaRendererMainDelegate
-    : public extensions::ShellRendererMainDelegate {
+class AthenaContentRendererClient
+    : public extensions::ShellContentRendererClient {
  public:
-  AthenaRendererMainDelegate() {}
-  virtual ~AthenaRendererMainDelegate() {}
+  AthenaContentRendererClient() {}
+  virtual ~AthenaContentRendererClient() {}
 
- private:
-  // extensions::ShellRendererMainDelegate:
-  virtual void OnThreadStarted(content::RenderThread* thread) OVERRIDE {}
-
-  virtual void OnViewCreated(content::RenderView* render_view) OVERRIDE {
+  // content::ContentRendererClient:
+  virtual void RenderFrameCreated(content::RenderFrame* render_frame) OVERRIDE {
+    new athena::AthenaRendererPDFHelper(render_frame);
+    extensions::ShellContentRendererClient::RenderFrameCreated(render_frame);
   }
 
-  DISALLOW_COPY_AND_ASSIGN(AthenaRendererMainDelegate);
+  virtual const void* CreatePPAPIInterface(
+      const std::string& interface_name) OVERRIDE {
+    if (interface_name == PPB_PDF_INTERFACE)
+      return pdf::PPB_PDF_Impl::GetInterface();
+    return extensions::ShellContentRendererClient::CreatePPAPIInterface(
+        interface_name);
+  }
 };
 
 class AthenaMainDelegate : public extensions::ShellMainDelegate {
@@ -176,15 +165,17 @@ class AthenaMainDelegate : public extensions::ShellMainDelegate {
 
  private:
   // extensions::ShellMainDelegate:
+  virtual content::ContentClient* CreateContentClient() OVERRIDE {
+    return new athena::AthenaContentClient();
+  }
   virtual content::ContentBrowserClient* CreateShellContentBrowserClient()
       OVERRIDE {
     return new AthenaContentBrowserClient();
   }
 
-  virtual scoped_ptr<extensions::ShellRendererMainDelegate>
-  CreateShellRendererMainDelegate() OVERRIDE {
-    return scoped_ptr<extensions::ShellRendererMainDelegate>(
-        new AthenaRendererMainDelegate());
+  virtual content::ContentRendererClient* CreateShellContentRendererClient()
+      OVERRIDE {
+    return new AthenaContentRendererClient();
   }
 
   virtual void InitializeResourceBundle() OVERRIDE {

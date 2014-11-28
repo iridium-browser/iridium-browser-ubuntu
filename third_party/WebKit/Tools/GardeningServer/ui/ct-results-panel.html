@@ -5,11 +5,12 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="../bower_components/core-menu/core-menu.html">
-<link rel="import" href="../bower_components/paper-item/paper-item.html">
 <link rel="import" href="ct-results-by-builder.html">
 <link rel="import" href="ct-embedded-flakiness-dashboard.html">
+<link rel="import" href="ct-popout-iframe.html">
+<link rel="import" href="ct-commit-list.html">
 
-<polymer-element name="ct-results-panel" attributes="failures tree">
+<polymer-element name="ct-results-panel" attributes="group">
   <template>
     <style>
       :host {
@@ -17,13 +18,21 @@ found in the LICENSE file.
         flex-direction: column;
       }
 
-      paper-item.core-selected {
+      core-menu > div {
+        padding: 5px 10px;
+      }
+
+      core-menu > div.core-selected {
         font-weight: bold;
       }
 
       .message {
         margin: 20px;
         text-align: center;
+      }
+
+      iframe {
+        height: 100%;
       }
 
       core-menu {
@@ -44,32 +53,44 @@ found in the LICENSE file.
         padding-top: 6px;
       }
     </style>
-    <template if="{{ !failures.length }}">
-      <div class="message">No results to display.</div>
+
+    <template if="{{ !group.data.url && !group.data.failures.length }}">
+      <div class="message">{{ loading ? 'Loading...' : 'No results to display.' }}</div>
     </template>
-    <template if="{{ failures.length }}">
-      <core-menu selected="{{ selected }}">
-        <template repeat="{{ failure in failures }}">
-          <template if="{{ failure.testName }}">
-            <paper-item label="{{ failure.testName }}"></paper-item>
+
+    <template if="{{ group.data.url }}">
+      <ct-popout-iframe src="{{ group.data.url }}"></ct-popout-iframe>
+    </template>
+
+    <template if="{{ group.data.failures }}">
+      <template if="{{ group.data.failures.length }}">
+        <core-menu selected="{{ selected }}">
+          <template repeat="{{ failure in group.data.failures }}">
+            <template if="{{ failure.testName }}">
+              <div>{{ failure.testName }}</div>
+            </template>
           </template>
-        </template>
-      </core-menu>
+        </core-menu>
+      </template>
       <div class="results">
-        <template if="{{ failures[selected].testName }}">
-          <ct-embedded-flakiness-dashboard test="{{ failures[selected] }}" tree="{{ tree }}"></ct-embedded-flakiness-dashboard>
+        <template if="{{ group.data.failures[selected].testName }}">
+          <ct-embedded-flakiness-dashboard test="{{ group.data.failures[selected] }}"></ct-embedded-flakiness-dashboard>
         </template>
-        <ct-results-by-builder failure="{{ failures[selected] }}"></ct-results-by-builder>
+        <ct-results-by-builder failure="{{ group.data.failures[selected] }}"></ct-results-by-builder>
+        <ct-commit-list commitList="{{ group.data.commitList }}" detailed="true"></ct-commit-list>
       </div>
     </template>
+
   </template>
   <script>
     Polymer({
-      failures: [],
+      group: null,
       selected: 0,
-      tree: '',
+      loading: true,
 
-      failuresChanged: function() {
+      groupChanged: function() {
+        if (this.group)
+          this.loading = false;
         this.selected = 0;
       },
     });

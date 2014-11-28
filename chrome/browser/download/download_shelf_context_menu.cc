@@ -13,12 +13,12 @@
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/common/extension.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_WIN)
@@ -217,7 +217,7 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id, int event_flags) {
           content::OpenURLParams(GURL(chrome::kDownloadInterruptedLearnMoreURL),
                                  content::Referrer(),
                                  NEW_FOREGROUND_TAB,
-                                 content::PAGE_TRANSITION_LINK,
+                                 ui::PAGE_TRANSITION_LINK,
                                  false));
       break;
   }

@@ -204,11 +204,12 @@ ChromeSigninClient::AddCookieChangedCallback(
   return subscription.Pass();
 }
 
-void ChromeSigninClient::GoogleSigninSucceeded(const std::string& username,
+void ChromeSigninClient::GoogleSigninSucceeded(const std::string& account_id,
+                                               const std::string& username,
                                                const std::string& password) {
-#if !defined(OS_ANDROID)
-  // Don't store password hash except for users of account consistency features.
-  if (switches::IsEnableAccountConsistency())
+#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_CHROMEOS)
+  // Don't store password hash except for users of new profile management.
+  if (switches::IsNewProfileManagement())
     chrome::SetLocalAuthCredentials(profile_, password);
 #endif
 }

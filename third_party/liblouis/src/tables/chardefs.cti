@@ -144,20 +144,20 @@ math \x00BD 1456-2-34-23-3456 VULGAR FRACTION ONE HALF No 0031 2044 0032
 math \x00BE 1456-25-34-23-3456 VULGAR FRACTION THREE QUARTERS No 0033 
 math \x00D7 16 MULTIPLICATION SIGN 
 math \x00F7 4-34 DIVISION SIGN 
-punctuation \x0092 3
-punctuation \x0097 36-36
+noback punctuation \x0092 3
+noback punctuation \x0097 36-36
 punctuation \x00A1 235 INVERTED EXCLAMATION MARK 
 punctuation \x00ad 36
 punctuation \x00BF 236 INVERTED QUESTION MARK 
 punctuation \x2011 36
 punctuation \x2013 36-36
 punctuation \x2014 36-36
-punctuation \x2018 6-236
-punctuation \x2019 3
-punctuation \x2019 356-3
+noback punctuation \x2018 6-236
+noback punctuation \x2019 3
+noback punctuation \x2019 356-3
 punctuation \x201c 236
 punctuation \x201d 356
-punctuation \x2026 3
+noback punctuation \x2026 3
 sign \x2122 45-2345 trademark sign
 sign \x00A2 4-14 CENT SIGN 
 sign \x00A3 3456 POUND SIGN 

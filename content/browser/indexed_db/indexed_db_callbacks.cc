@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/guid.h"
+#include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -21,12 +22,12 @@
 #include "content/browser/indexed_db/indexed_db_value.h"
 #include "content/common/indexed_db/indexed_db_constants.h"
 #include "content/common/indexed_db/indexed_db_messages.h"
-#include "webkit/browser/blob/blob_storage_context.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/common/blob/blob_data.h"
-#include "webkit/common/blob/shareable_file_reference.h"
+#include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/common/blob/blob_data.h"
+#include "storage/common/blob/shareable_file_reference.h"
 
-using webkit_blob::ShareableFileReference;
+using storage::ShareableFileReference;
 
 namespace content {
 
@@ -91,6 +92,13 @@ void IndexedDBCallbacks::OnError(const IndexedDBDatabaseError& error) {
   dispatcher_host_->Send(new IndexedDBMsg_CallbacksError(
       ipc_thread_id_, ipc_callbacks_id_, error.code(), error.message()));
   dispatcher_host_ = NULL;
+
+  if (!connection_open_start_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "WebCore.IndexedDB.OpenTime.Error",
+        base::TimeTicks::Now() - connection_open_start_time_);
+    connection_open_start_time_ = base::TimeTicks();
+  }
 }
 
 void IndexedDBCallbacks::OnSuccess(const std::vector<base::string16>& value) {
@@ -126,6 +134,13 @@ void IndexedDBCallbacks::OnBlocked(int64 existing_version) {
   sent_blocked_ = true;
   dispatcher_host_->Send(new IndexedDBMsg_CallbacksIntBlocked(
       ipc_thread_id_, ipc_callbacks_id_, existing_version));
+
+  if (!connection_open_start_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "WebCore.IndexedDB.OpenTime.Blocked",
+        base::TimeTicks::Now() - connection_open_start_time_);
+    connection_open_start_time_ = base::TimeTicks();
+  }
 }
 
 void IndexedDBCallbacks::OnDataLoss(blink::WebIDBDataLoss data_loss,
@@ -162,6 +177,13 @@ void IndexedDBCallbacks::OnUpgradeNeeded(
   params.data_loss = data_loss_;
   params.data_loss_message = data_loss_message_;
   dispatcher_host_->Send(new IndexedDBMsg_CallbacksUpgradeNeeded(params));
+
+  if (!connection_open_start_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "WebCore.IndexedDB.OpenTime.UpgradeNeeded",
+        base::TimeTicks::Now() - connection_open_start_time_);
+    connection_open_start_time_ = base::TimeTicks();
+  }
 }
 
 void IndexedDBCallbacks::OnSuccess(scoped_ptr<IndexedDBConnection> connection,
@@ -189,17 +211,24 @@ void IndexedDBCallbacks::OnSuccess(scoped_ptr<IndexedDBConnection> connection,
       ipc_object_id,
       IndexedDBDispatcherHost::ConvertMetadata(metadata)));
   dispatcher_host_ = NULL;
+
+  if (!connection_open_start_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "WebCore.IndexedDB.OpenTime.Success",
+        base::TimeTicks::Now() - connection_open_start_time_);
+    connection_open_start_time_ = base::TimeTicks();
+  }
 }
 
 static std::string CreateBlobData(
     const IndexedDBBlobInfo& blob_info,
     scoped_refptr<IndexedDBDispatcherHost> dispatcher_host,
-    webkit_blob::BlobStorageContext* blob_storage_context,
+    storage::BlobStorageContext* blob_storage_context,
     base::TaskRunner* task_runner) {
   std::string uuid = blob_info.uuid();
   if (!uuid.empty()) {
     // We're sending back a live blob, not a reference into our backing store.
-    scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle(
+    scoped_ptr<storage::BlobDataHandle> blob_data_handle(
         blob_storage_context->GetBlobDataFromUUID(uuid));
     dispatcher_host->HoldBlobDataHandle(uuid, blob_data_handle.Pass());
     return uuid;
@@ -216,12 +245,11 @@ static std::string CreateBlobData(
   }
 
   uuid = base::GenerateGUID();
-  scoped_refptr<webkit_blob::BlobData> blob_data =
-      new webkit_blob::BlobData(uuid);
+  scoped_refptr<storage::BlobData> blob_data = new storage::BlobData(uuid);
   blob_data->set_content_type(base::UTF16ToUTF8(blob_info.type()));
   blob_data->AppendFile(
       blob_info.file_path(), 0, blob_info.size(), blob_info.last_modified());
-  scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle(
+  scoped_ptr<storage::BlobDataHandle> blob_data_handle(
       blob_storage_context->AddFinishedBlob(blob_data.get()));
   dispatcher_host->HoldBlobDataHandle(uuid, blob_data_handle.Pass());
 
@@ -578,6 +606,11 @@ void IndexedDBCallbacks::OnSuccess() {
   dispatcher_host_->Send(new IndexedDBMsg_CallbacksSuccessUndefined(
       ipc_thread_id_, ipc_callbacks_id_));
   dispatcher_host_ = NULL;
+}
+
+void IndexedDBCallbacks::SetConnectionOpenStartTime(
+    const base::TimeTicks& start_time) {
+  connection_open_start_time_ = start_time;
 }
 
 }  // namespace content

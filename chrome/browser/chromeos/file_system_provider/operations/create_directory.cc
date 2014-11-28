@@ -17,12 +17,10 @@ CreateDirectory::CreateDirectory(
     extensions::EventRouter* event_router,
     const ProvidedFileSystemInfo& file_system_info,
     const base::FilePath& directory_path,
-    bool exclusive,
     bool recursive,
-    const fileapi::AsyncFileUtil::StatusCallback& callback)
+    const storage::AsyncFileUtil::StatusCallback& callback)
     : Operation(event_router, file_system_info),
       directory_path_(directory_path),
-      exclusive_(exclusive),
       recursive_(recursive),
       callback_(callback) {
 }
@@ -31,18 +29,23 @@ CreateDirectory::~CreateDirectory() {
 }
 
 bool CreateDirectory::Execute(int request_id) {
+  using extensions::api::file_system_provider::CreateDirectoryRequestedOptions;
+
   if (!file_system_info_.writable())
     return false;
 
-  scoped_ptr<base::DictionaryValue> values(new base::DictionaryValue);
-  values->SetString("directoryPath", directory_path_.AsUTF8Unsafe());
-  values->SetBoolean("exclusive", exclusive_);
-  values->SetBoolean("recursive", recursive_);
+  CreateDirectoryRequestedOptions options;
+  options.file_system_id = file_system_info_.file_system_id();
+  options.request_id = request_id;
+  options.directory_path = directory_path_.AsUTF8Unsafe();
+  options.recursive = recursive_;
 
-  return SendEvent(request_id,
-                   extensions::api::file_system_provider::
-                       OnCreateDirectoryRequested::kEventName,
-                   values.Pass());
+  return SendEvent(
+      request_id,
+      extensions::api::file_system_provider::OnCreateDirectoryRequested::
+          kEventName,
+      extensions::api::file_system_provider::OnCreateDirectoryRequested::Create(
+          options));
 }
 
 void CreateDirectory::OnSuccess(int /* request_id */,

@@ -62,21 +62,11 @@ using content::RenderViewHost;
 #if defined(DISABLE_NACL)
 
 #define TEST_PPAPI_NACL(test_name)
-#define TEST_PPAPI_NACL_NO_PNACL(test_name)
 #define TEST_PPAPI_NACL_DISALLOWED_SOCKETS(test_name)
 #define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name)
 #define TEST_PPAPI_NACL_SUBTESTS(test_name, run_statement)
 
 #else
-
-// TODO(dmichael): Remove this macro, crbug.com/384539
-#define TEST_PPAPI_NACL_NO_PNACL(test_name) \
-    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
-      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
-    } \
-    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(test_name)) { \
-      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
-    } \
 
 // NaCl based PPAPI tests
 #define TEST_PPAPI_NACL(test_name) \
@@ -448,11 +438,14 @@ TEST_PPAPI_NACL(HostResolverPrivate_ResolveIPv4)
   )
 
 // Note: we do not support Trusted APIs in NaCl, so these will be skipped.
+// XRequestedWithHeader isn't trusted per-se, but the header isn't provided
+// for NaCl and thus must be skipped.
 #define RUN_URLLOADER_TRUSTED_SUBTESTS \
   RunTestViaHTTP( \
       LIST_TEST(URLLoader_TrustedSameOriginRestriction) \
       LIST_TEST(URLLoader_TrustedCrossOriginRequest) \
       LIST_TEST(URLLoader_TrustedHttpRequests) \
+      LIST_TEST(URLLoader_XRequestedWithHeader) \
   )
 
 IN_PROC_BROWSER_TEST_F(PPAPITest, URLLoader0) {
@@ -975,6 +968,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, Flash) {
       LIST_TEST(WebSocket_AbortSendMessageCall) \
       LIST_TEST(WebSocket_AbortCloseCall) \
       LIST_TEST(WebSocket_AbortReceiveMessageCall) \
+      LIST_TEST(WebSocket_ClosedFromServerWhileSending) \
       LIST_TEST(WebSocket_CcInterfaces) \
       LIST_TEST(WebSocket_UtilityInvalidConnect) \
       LIST_TEST(WebSocket_UtilityProtocols) \
@@ -1121,7 +1115,7 @@ TEST_PPAPI_NACL(View_CreatedVisible);
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_CreateInvisible) {
   // Make a second tab in the foreground.
   GURL url = GetTestFileUrl("View_CreatedInvisible");
-  chrome::NavigateParams params(browser(), url, content::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
   params.disposition = NEW_BACKGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 }
@@ -1144,7 +1138,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, DISABLED_View_PageHideShow) {
   // Make a new tab to cause the original one to hide, this should trigger the
   // next phase of the test.
   chrome::NavigateParams params(
-      browser(), GURL(url::kAboutBlankURL), content::PAGE_TRANSITION_LINK);
+      browser(), GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 
@@ -1284,9 +1278,7 @@ TEST_PPAPI_NACL(VideoSource)
 // Printing doesn't work in content_browsertests.
 TEST_PPAPI_OUT_OF_PROCESS(Printing)
 
-// TODO(dmichael): Make this work on PNaCl and remove the macro.
-//                 crbug.com/384539
-TEST_PPAPI_NACL_NO_PNACL(MessageHandler)
+TEST_PPAPI_NACL(MessageHandler)
 
 TEST_PPAPI_NACL(MessageLoop_Basics)
 TEST_PPAPI_NACL(MessageLoop_Post)

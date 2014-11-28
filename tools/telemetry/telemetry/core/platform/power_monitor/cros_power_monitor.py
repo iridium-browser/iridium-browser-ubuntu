@@ -6,52 +6,66 @@ import collections
 import re
 
 from telemetry import decorators
-from telemetry.core.platform.power_monitor import cros_sysfs_platform
 from telemetry.core.platform.power_monitor import sysfs_power_monitor
 
-CPU_PATH = '/sys/devices/system/cpu/'
 
 class CrosPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
   """PowerMonitor that relies on 'power_supply_info' to monitor power
   consumption of a single ChromeOS application.
   """
-  def __init__(self, cri):
+  def __init__(self, platform_backend):
     """Constructor.
 
     Args:
-        cri: Chrome interface.
+        platform_backend: A LinuxBasedPlatformBackend object.
 
     Attributes:
-        _browser: The browser to monitor.
-        _cri: The Chrome interface.
         _initial_power: The result of 'power_supply_info' before the test.
+        _start_time: The epoch time at which the test starts executing.
     """
-    super(CrosPowerMonitor, self).__init__(
-        cros_sysfs_platform.CrosSysfsPlatform(cri))
-    self._browser = None
-    self._cri = cri
-    self._end_time = None
+    super(CrosPowerMonitor, self).__init__(platform_backend)
     self._initial_power = None
     self._start_time = None
 
   @decorators.Cache
   def CanMonitorPower(self):
-    return self._IsOnBatteryPower()
+    return super(CrosPowerMonitor, self).CanMonitorPower()
 
   def StartMonitoringPower(self, browser):
     super(CrosPowerMonitor, self).StartMonitoringPower(browser)
-    self._initial_power = self._cri.RunCmdOnDevice(['power_supply_info'])[0]
-    self._start_time = int(self._cri.RunCmdOnDevice(['date', '+%s'])[0])
+    if self._IsOnBatteryPower():
+      sample = self._platform.RunCommand(['power_supply_info;', 'date', '+%s'])
+      self._initial_power, self._start_time = CrosPowerMonitor.SplitSample(
+          sample)
 
   def StopMonitoringPower(self):
     cpu_stats = super(CrosPowerMonitor, self).StopMonitoringPower()
-    final_power = self._cri.RunCmdOnDevice(['power_supply_info'])[0]
-    self._end_time = int(self._cri.RunCmdOnDevice(['date', '+%s'])[0])
-    # The length of the test is used to measure energy consumption.
-    length_h = (self._end_time - self._start_time) / 3600.0
-    power_stats = CrosPowerMonitor.ParsePower(
-        self._initial_power, final_power, length_h)
+    power_stats = {}
+    if self._IsOnBatteryPower():
+      sample = self._platform.RunCommand(['power_supply_info;', 'date', '+%s'])
+      final_power, end_time = CrosPowerMonitor.SplitSample(sample)
+      # The length of the test is used to measure energy consumption.
+      length_h = (end_time - self._start_time) / 3600.0
+      power_stats = CrosPowerMonitor.ParsePower(self._initial_power,
+                                                final_power, length_h)
     return CrosPowerMonitor.CombineResults(cpu_stats, power_stats)
+
+  @staticmethod
+  def SplitSample(sample):
+    """Splits a power and time sample into the two separate values.
+
+    Args:
+        sample: The result of calling 'power_supply_info; date +%s' on the
+            device.
+
+    Returns:
+        A tuple of power sample and epoch time of the sample.
+    """
+    sample = sample.strip()
+    index = sample.rfind('\n')
+    power = sample[:index]
+    time = sample[index + 1:]
+    return power, int(time)
 
   @staticmethod
   def IsOnBatteryPower(status, board):
@@ -78,8 +92,8 @@ class CrosPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
         True if the device is on battery power; False otherwise.
     """
     status = CrosPowerMonitor.ParsePowerSupplyInfo(
-        self._cri.RunCmdOnDevice(['power_supply_info'])[0])
-    board_data = self._cri.RunCmdOnDevice(['cat', '/etc/lsb-release'])[0]
+        self._platform.RunCommand(['power_supply_info']))
+    board_data = self._platform.RunCommand(['cat', '/etc/lsb-release'])
     board = re.search('BOARD=(.*)', board_data).group(1)
     return CrosPowerMonitor.IsOnBatteryPower(status, board)
 
@@ -146,22 +160,3 @@ class CrosPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
     component_utilization['battery'] = battery
     out_dict['component_utilization'] = component_utilization
     return out_dict
-
-  @staticmethod
-  def CombineResults(cpu_stats, power_stats):
-    """Add frequency and c-state residency data to the power data.
-
-    Args:
-        cpu_stats: Dictionary of CPU data gathered from SysfsPowerMonitor.
-        power_stats: Dictionary containing power statistics.
-
-    Returns:
-        Dictionary in the format returned by StopMonitoringPower.
-    """
-    if not cpu_stats:
-      return power_stats
-    comp_util = power_stats['component_utilization']
-    # Add CPU stats to power stat dictionary.
-    for cpu in cpu_stats:
-      comp_util[cpu] = cpu_stats[cpu]
-    return power_stats

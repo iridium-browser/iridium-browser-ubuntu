@@ -13,7 +13,11 @@
 
 #include <stdlib.h>  // For malloc.
 
-#include "basic_types.h"
+#include "libyuv/basic_types.h"
+
+#if defined(__native_client__)
+#include "ppapi/c/pp_macros.h"  // For PPAPI_RELEASE
+#endif
 
 #ifdef __cplusplus
 namespace libyuv {
@@ -38,7 +42,8 @@ extern "C" {
   var = 0
 
 #if defined(__pnacl__) || defined(__CLR_VER) || defined(COVERAGE_ENABLED) || \
-    defined(TARGET_IPHONE_SIMULATOR)
+    defined(TARGET_IPHONE_SIMULATOR) || \
+    (defined(_MSC_VER) && defined(__clang__))
 #define LIBYUV_DISABLE_X86
 #endif
 // True if compiling for SSSE3 as a requirement.
@@ -47,7 +52,12 @@ extern "C" {
 #endif
 
 // Enable for NaCL pepper 33 for bundle and AVX2 support.
-//  #define NEW_BINUTILS
+#if defined(__native_client__) && PPAPI_RELEASE >= 33
+#define NEW_BINUTILS
+#endif
+#if defined(__native_client__) && defined(__arm__) && PPAPI_RELEASE < 37
+#define LIBYUV_DISABLE_NEON
+#endif
 
 // The following are available on all x86 platforms:
 #if !defined(LIBYUV_DISABLE_X86) && \
@@ -152,6 +162,11 @@ extern "C" {
 #define HAS_YUY2TOYROW_SSE2
 #endif
 
+// The following are available on x64 Visual C:
+#if !defined(LIBYUV_DISABLE_X86) && defined (_M_X64)
+#define HAS_I422TOARGBROW_SSSE3
+#endif
+
 // GCC >= 4.7.0 required for AVX2.
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #if (__GNUC__ > 4) || (__GNUC__ == 4 && (__GNUC_MINOR__ >= 7))
@@ -233,6 +248,98 @@ extern "C" {
 #define HAS_ARGBBLENDROW_SSE2
 #define HAS_ARGBATTENUATEROW_SSE2
 #define HAS_MIRRORROW_SSE2
+#endif
+
+// The following are available on arm64 platforms:
+#if !defined(LIBYUV_DISABLE_NEON) && defined(__aarch64__)
+// #define HAS_I444TOARGBROW_NEON
+// #define HAS_I422TOARGBROW_NEON
+// #define HAS_I411TOARGBROW_NEON
+// #define HAS_I422TOBGRAROW_NEON
+// #define HAS_I422TOABGRROW_NEON
+// #define HAS_I422TORGBAROW_NEON
+// #define HAS_I422TORGB24ROW_NEON
+// #define HAS_I422TORAWROW_NEON
+// #define HAS_I422TORGB565ROW_NEON
+// #define HAS_I422TOARGB1555ROW_NEON
+// #define HAS_I422TOARGB4444ROW_NEON
+// #define HAS_YTOARGBROW_NEON
+// #define HAS_I400TOARGBROW_NEON
+// #define HAS_NV12TOARGBROW_NEON
+// #define HAS_NV21TOARGBROW_NEON
+// #define HAS_NV12TORGB565ROW_NEON
+// #define HAS_NV21TORGB565ROW_NEON
+// #define HAS_YUY2TOARGBROW_NEON
+// #define HAS_UYVYTOARGBROW_NEON
+#define HAS_SPLITUVROW_NEON
+#define HAS_MERGEUVROW_NEON
+#define HAS_COPYROW_NEON
+#define HAS_SETROW_NEON
+#define HAS_ARGBSETROWS_NEON
+#define HAS_MIRRORROW_NEON
+#define HAS_MIRRORUVROW_NEON
+#define HAS_ARGBMIRRORROW_NEON
+#define HAS_RGB24TOARGBROW_NEON
+#define HAS_RAWTOARGBROW_NEON
+// #define HAS_RGB565TOARGBROW_NEON
+// #define HAS_ARGB1555TOARGBROW_NEON
+// #define HAS_ARGB4444TOARGBROW_NEON
+#define HAS_ARGBTORGB24ROW_NEON
+#define HAS_ARGBTORAWROW_NEON
+#define HAS_YUY2TOYROW_NEON
+#define HAS_UYVYTOYROW_NEON
+#define HAS_YUY2TOUV422ROW_NEON
+#define HAS_UYVYTOUV422ROW_NEON
+#define HAS_YUY2TOUVROW_NEON
+#define HAS_UYVYTOUVROW_NEON
+#define HAS_HALFROW_NEON
+#define HAS_ARGBTOBAYERROW_NEON
+#define HAS_ARGBTOBAYERGGROW_NEON
+#define HAS_ARGBSHUFFLEROW_NEON
+#define HAS_I422TOYUY2ROW_NEON
+#define HAS_I422TOUYVYROW_NEON
+// #define HAS_ARGBTORGB565ROW_NEON
+// #define HAS_ARGBTOARGB1555ROW_NEON
+// #define HAS_ARGBTOARGB4444ROW_NEON
+#define HAS_ARGBTOYROW_NEON
+#define HAS_ARGBTOYJROW_NEON
+// #define HAS_ARGBTOUV444ROW_NEON
+// #define HAS_ARGBTOUV422ROW_NEON
+// #define HAS_ARGBTOUV411ROW_NEON
+// #define HAS_ARGBTOUVROW_NEON
+// #define HAS_ARGBTOUVJROW_NEON
+// #define HAS_BGRATOUVROW_NEON
+// #define HAS_ABGRTOUVROW_NEON
+// #define HAS_RGBATOUVROW_NEON
+// #define HAS_RGB24TOUVROW_NEON
+// #define HAS_RAWTOUVROW_NEON
+// #define HAS_RGB565TOUVROW_NEON
+// #define HAS_ARGB1555TOUVROW_NEON
+// #define HAS_ARGB4444TOUVROW_NEON
+// #define HAS_RGB565TOYROW_NEON
+// #define HAS_ARGB1555TOYROW_NEON
+// #define HAS_ARGB4444TOYROW_NEON
+// #define HAS_BGRATOYROW_NEON
+// #define HAS_ABGRTOYROW_NEON
+// #define HAS_RGBATOYROW_NEON
+// #define HAS_RGB24TOYROW_NEON
+// #define HAS_RAWTOYROW_NEON
+// #define HAS_INTERPOLATEROW_NEON
+// #define HAS_ARGBBLENDROW_NEON
+// #define HAS_ARGBATTENUATEROW_NEON
+// #define HAS_ARGBQUANTIZEROW_NEON
+// #define HAS_ARGBSHADEROW_NEON
+// #define HAS_ARGBGRAYROW_NEON
+// #define HAS_ARGBSEPIAROW_NEON
+// #define HAS_ARGBCOLORMATRIXROW_NEON
+#define HAS_ARGBMULTIPLYROW_NEON
+#define HAS_ARGBADDROW_NEON
+#define HAS_ARGBSUBTRACTROW_NEON
+#define HAS_SOBELROW_NEON
+#define HAS_SOBELTOPLANEROW_NEON
+#define HAS_SOBELXYROW_NEON
+#define HAS_SOBELXROW_NEON
+#define HAS_SOBELYROW_NEON
 #endif
 
 // The following are available on Neon platforms:
@@ -330,7 +437,8 @@ extern "C" {
 #endif
 
 // The following are available on Mips platforms:
-#if !defined(LIBYUV_DISABLE_MIPS) && defined(__mips__)
+#if !defined(LIBYUV_DISABLE_MIPS) && defined(__mips__) && \
+    (_MIPS_SIM == _MIPS_SIM_ABI32)
 #define HAS_COPYROW_MIPS
 #if defined(__mips_dsp) && (__mips_dsp_rev >= 2)
 #define HAS_I422TOABGRROW_MIPS_DSPR2
@@ -426,7 +534,7 @@ typedef uint8 uvec8[16];
     "lea " #offset "(%q" #base ",%q" #index "," #scale "),%%r14d\n" \
     #opcode " (%%r15,%%r14),%" #arg "\n" \
     BUNDLEUNLOCK
-#else
+#else  // defined(__native_client__) && defined(__x86_64__)
 #define BUNDLEALIGN "\n"
 #define MEMACCESS(base) "(%" #base ")"
 #define MEMACCESS2(offset, base) #offset "(%" #base ")"
@@ -443,6 +551,15 @@ typedef uint8 uvec8[16];
     #opcode " %%" #reg ","#offset "(%" #base ",%" #index "," #scale ")\n"
 #define MEMOPARG(opcode, offset, base, index, scale, arg) \
     #opcode " " #offset "(%" #base ",%" #index "," #scale "),%" #arg "\n"
+#endif  // defined(__native_client__) && defined(__x86_64__)
+
+#if defined(__arm__) || defined(__aarch64__)
+#undef MEMACCESS
+#if defined(__native_client__)
+#define MEMACCESS(base) ".p2align   3\nbic %" #base ", #0xc0000000\n"
+#else
+#define MEMACCESS(base) "\n"
+#endif
 #endif
 
 void I444ToARGBRow_NEON(const uint8* src_y,

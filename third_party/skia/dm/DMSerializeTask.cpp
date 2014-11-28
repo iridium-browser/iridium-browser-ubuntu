@@ -6,11 +6,11 @@
 #include "SkPicture.h"
 #include "SkPixelRef.h"
 
-DEFINE_bool(serialize, true, "If true, run picture serialization tests.");
-DECLARE_bool(skr);  // in DMReplayTask.cpp
+DEFINE_bool(serialize,     true, "If true, run picture serialization tests via SkPictureData.");
+DEFINE_bool(serialize_skr, true, "If true, run picture serialization tests via SkRecord.");
 
-static const char* kSuffixes[] = { "serialize", "serialize_skr" };
-static const bool* kEnabled[]  = { &FLAGS_serialize, &FLAGS_skr };
+static const char* kSuffixes[] = { "serialize", "serialize-skr" };
+static const bool* kEnabled[]  = { &FLAGS_serialize, &FLAGS_serialize_skr };
 
 namespace DM {
 
@@ -39,7 +39,7 @@ void SerializeTask::draw() {
     DrawPicture(*reconstructed, &bitmap);
     if (!BitmapsEqual(bitmap, fReference)) {
         this->fail();
-        this->spawnChild(SkNEW_ARGS(WriteTask, (*this, bitmap)));
+        this->spawnChild(SkNEW_ARGS(WriteTask, (*this, "GM", bitmap)));
     }
 }
 

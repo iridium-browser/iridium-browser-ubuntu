@@ -1,10 +1,11 @@
 #!/usr/bin/python
-
 # Copyright (c) 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Test the archive_lib module."""
+
+from __future__ import print_function
 
 import logging
 import os
@@ -15,6 +16,7 @@ from chromite.cbuildbot import archive_lib
 from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import cbuildbot_run
 from chromite.lib import cros_test_lib
+from chromite.lib import parallel_unittest
 
 import mock
 
@@ -74,20 +76,7 @@ def _NewBuilderRun(options=None, config=None):
   Returns:
     BuilderRun object.
   """
-  # Make up a fake object with a Queue() method.
-  class _FakeMultiprocessManager(object):
-    """This just needs to not crash when various methods are called."""
-    def Queue(self):
-      return 'SomeQueue'
-    def RLock(self):
-      return 'SomeLock'
-    def dict(self):
-      return {}
-    def list(self):
-      return []
-
-  manager = _FakeMultiprocessManager()
-
+  manager = parallel_unittest.FakeMultiprocessManager()
   options = options or DEFAULT_OPTIONS
   config = config or DEFAULT_CONFIG
   return cbuildbot_run.BuilderRun(options, config, manager)

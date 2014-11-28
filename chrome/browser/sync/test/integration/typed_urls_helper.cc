@@ -13,11 +13,11 @@
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/multi_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "components/history/core/browser/history_types.h"
 
 using sync_datatype_helper::test;
 
@@ -156,7 +156,7 @@ void WaitForHistoryDBThread(int index) {
 // type.
 void AddToHistory(HistoryService* service,
                   const GURL& url,
-                  content::PageTransition transition,
+                  ui::PageTransition transition,
                   history::VisitSource source,
                   const base::Time& timestamp) {
   service->AddPage(url,
@@ -263,19 +263,19 @@ base::Time GetTimestamp() {
 }
 
 void AddUrlToHistory(int index, const GURL& url) {
-  AddUrlToHistoryWithTransition(index, url, content::PAGE_TRANSITION_TYPED,
+  AddUrlToHistoryWithTransition(index, url, ui::PAGE_TRANSITION_TYPED,
                                 history::SOURCE_BROWSED);
 }
 void AddUrlToHistoryWithTransition(int index,
                                    const GURL& url,
-                                   content::PageTransition transition,
+                                   ui::PageTransition transition,
                                    history::VisitSource source) {
   base::Time timestamp = GetTimestamp();
   AddUrlToHistoryWithTimestamp(index, url, transition, source, timestamp);
 }
 void AddUrlToHistoryWithTimestamp(int index,
                                   const GURL& url,
-                                  content::PageTransition transition,
+                                  ui::PageTransition transition,
                                   history::VisitSource source,
                                   const base::Time& timestamp) {
   AddToHistory(HistoryServiceFactory::GetForProfileWithoutCreating(

@@ -11,7 +11,7 @@ cr.define('options', function() {
    * Encapsulated handling of the confirmation overlay page when creating a
    * supervised user.
    * @constructor
-   * @class
+   * @extends {cr.ui.pageManager.Page}
    */
   function SupervisedUserCreateConfirmOverlay() {
     Page.call(this, 'supervisedUserCreateConfirm',
@@ -88,14 +88,9 @@ cr.define('options', function() {
   };
 
   // Forward public APIs to private implementations.
-  [
+  cr.makePublic(SupervisedUserCreateConfirmOverlay, [
     'setProfileInfo',
-  ].forEach(function(name) {
-    SupervisedUserCreateConfirmOverlay[name] = function() {
-      var instance = SupervisedUserCreateConfirmOverlay.getInstance();
-      return instance[name + '_'].apply(instance, arguments);
-    };
-  });
+  ]);
 
   // Export
   return {

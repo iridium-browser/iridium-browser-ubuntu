@@ -50,13 +50,13 @@
 
 namespace blink {
 
-static PassOwnPtr<WebMediaPlayer> createWebMediaPlayer(WebMediaPlayerClient* client, const WebURL& url, LocalFrame* frame)
+static PassOwnPtr<WebMediaPlayer> createWebMediaPlayer(WebMediaPlayerClient* client, const WebURL& url, LocalFrame* frame, WebContentDecryptionModule* initialCdm)
 {
     WebLocalFrameImpl* webFrame = WebLocalFrameImpl::fromFrame(frame);
 
     if (!webFrame || !webFrame->client())
         return nullptr;
-    return adoptPtr(webFrame->client()->createMediaPlayer(webFrame, url, client));
+    return adoptPtr(webFrame->client()->createMediaPlayer(webFrame, url, client, initialCdm));
 }
 
 WebMediaPlayer* WebMediaPlayerClientImpl::webMediaPlayer() const
@@ -180,6 +180,21 @@ void WebMediaPlayerClientImpl::requestSeek(double time)
     m_client->mediaPlayerRequestSeek(time);
 }
 
+void WebMediaPlayerClientImpl::remoteRouteAvailabilityChanged(bool routesAvailable)
+{
+    mediaElement().remoteRouteAvailabilityChanged(routesAvailable);
+}
+
+void WebMediaPlayerClientImpl::connectedToRemoteDevice()
+{
+    mediaElement().connectedToRemoteDevice();
+}
+
+void WebMediaPlayerClientImpl::disconnectedFromRemoteDevice()
+{
+    mediaElement().disconnectedFromRemoteDevice();
+}
+
 // MediaPlayer -------------------------------------------------
 void WebMediaPlayerClientImpl::load(WebMediaPlayer::LoadType loadType, const WTF::String& url, WebMediaPlayer::CORSMode corsMode)
 {
@@ -191,7 +206,7 @@ void WebMediaPlayerClientImpl::load(WebMediaPlayer::LoadType loadType, const WTF
     WebURL poster = m_client->mediaPlayerPosterURL();
 
     KURL kurl(ParsedURLString, url);
-    m_webMediaPlayer = createWebMediaPlayer(this, kurl, frame);
+    m_webMediaPlayer = createWebMediaPlayer(this, kurl, frame, HTMLMediaElementEncryptedMedia::contentDecryptionModule(mediaElement()));
     if (!m_webMediaPlayer)
         return;
 
@@ -204,8 +219,6 @@ void WebMediaPlayerClientImpl::load(WebMediaPlayer::LoadType loadType, const WTF
 
     m_webMediaPlayer->setPoster(poster);
 
-    // Tell WebMediaPlayer about any connected CDM (may be null).
-    m_webMediaPlayer->setContentDecryptionModule(HTMLMediaElementEncryptedMedia::contentDecryptionModule(mediaElement()));
     m_webMediaPlayer->load(loadType, kurl, corsMode);
 }
 
@@ -256,7 +269,7 @@ void WebMediaPlayerClientImpl::AudioSourceProviderImpl::setClient(AudioSourcePro
     MutexLocker locker(provideInputLock);
 
     if (client)
-        m_client = adoptPtrWillBeNoop(new WebMediaPlayerClientImpl::AudioClientImpl(client));
+        m_client = new WebMediaPlayerClientImpl::AudioClientImpl(client);
     else
         m_client.clear();
 

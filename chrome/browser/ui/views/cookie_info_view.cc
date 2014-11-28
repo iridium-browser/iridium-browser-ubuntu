@@ -13,7 +13,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/parsed_cookie.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -26,13 +25,6 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/window/dialog_delegate.h"
-
-namespace {
-
-// Adjustment to the spacing between subsequent label-field lines.
-const int kExtraLineHeightPadding = 3;
-
-}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // CookieInfoView, public:
@@ -118,22 +110,22 @@ void CookieInfoView::ViewHierarchyChanged(
     Init();
 }
 
-void CookieInfoView::AddLabelRow(int layout_id, views::GridLayout* layout,
+void CookieInfoView::AddLabelRow(int layout_id,
+                                 views::GridLayout* layout,
                                  views::Label* label,
-                                 views::Textfield* text_field) {
+                                 views::Textfield* textfield) {
   layout->StartRow(0, layout_id);
   layout->AddView(label);
-  layout->AddView(text_field, 2, 1, views::GridLayout::FILL,
-                  views::GridLayout::CENTER);
-  layout->AddPaddingRow(0, kExtraLineHeightPadding);
+  layout->AddView(
+      textfield, 2, 1, views::GridLayout::FILL, views::GridLayout::CENTER);
 
   // Now that the Textfield is in the view hierarchy, it can be initialized.
-  text_field->SetReadOnly(true);
-  text_field->SetBorder(views::Border::NullBorder());
+  textfield->SetReadOnly(true);
+  textfield->SetBorder(views::Border::NullBorder());
   // Color these borderless text areas the same as the containing dialog.
-  text_field->SetBackgroundColor(GetNativeTheme()->GetSystemColor(
+  textfield->SetBackgroundColor(GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_DialogBackground));
-  text_field->SetTextColor(SkColorSetRGB(0x78, 0x78, 0x78));
+  textfield->SetTextColor(SkColorSetRGB(0x78, 0x78, 0x78));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

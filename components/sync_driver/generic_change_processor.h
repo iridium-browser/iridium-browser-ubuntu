@@ -13,6 +13,7 @@
 #include "components/sync_driver/change_processor.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/data_type_error_handler.h"
+#include "sync/api/attachments/attachment_store.h"
 #include "sync/api/sync_change_processor.h"
 #include "sync/api/sync_merge_result.h"
 #include "sync/internal_api/public/attachments/attachment_service.h"
@@ -43,13 +44,17 @@ class GenericChangeProcessor : public ChangeProcessor,
                                public syncer::AttachmentService::Delegate,
                                public base::NonThreadSafe {
  public:
-  // Create a change processor and connect it to the syncer.
+  // Create a change processor for |type| and connect it to the syncer.
+  // |attachment_store| can be NULL which means that datatype will not use sync
+  // attachments.
   GenericChangeProcessor(
+      syncer::ModelType type,
       DataTypeErrorHandler* error_handler,
       const base::WeakPtr<syncer::SyncableService>& local_service,
       const base::WeakPtr<syncer::SyncMergeResult>& merge_result,
       syncer::UserShare* user_share,
-      SyncApiComponentFactory* sync_factory);
+      SyncApiComponentFactory* sync_factory,
+      const scoped_refptr<syncer::AttachmentStore>& attachment_store);
   virtual ~GenericChangeProcessor();
 
   // ChangeProcessor interface.
@@ -80,23 +85,20 @@ class GenericChangeProcessor : public ChangeProcessor,
   // Similar to above, but returns a SyncError for use by direct clients
   // of GenericChangeProcessor that may need more error visibility.
   virtual syncer::SyncError GetAllSyncDataReturnError(
-      syncer::ModelType type,
       syncer::SyncDataList* data) const;
 
-  // If a datatype context associated with |type| exists, fills |context| and
-  // returns true. Otheriwse, if there has not been a context set, returns
-  // false.
-  virtual bool GetDataTypeContext(syncer::ModelType type,
-                                  std::string* context) const;
+  // If a datatype context associated with this GenericChangeProcessor's type
+  // exists, fills |context| and returns true. Otheriwse, if there has not been
+  // a context set, returns false.
+  virtual bool GetDataTypeContext(std::string* context) const;
 
   // Returns the number of items for this type.
-  virtual int GetSyncCountForType(syncer::ModelType type);
+  virtual int GetSyncCount();
 
   // Generic versions of AssociatorInterface methods. Called by
   // syncer::SyncableServiceAdapter or the DataTypeController.
-  virtual bool SyncModelHasUserCreatedNodes(syncer::ModelType type,
-                                            bool* has_nodes);
-  virtual bool CryptoReadyIfNecessary(syncer::ModelType type);
+  virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes);
+  virtual bool CryptoReadyIfNecessary();
 
  protected:
   // ChangeProcessor interface.
@@ -110,21 +112,26 @@ class GenericChangeProcessor : public ChangeProcessor,
   // that need to be stored.  This method will append to it.
   syncer::SyncError HandleActionAdd(const syncer::SyncChange& change,
                                     const std::string& type_str,
-                                    const syncer::ModelType& type,
                                     const syncer::WriteTransaction& trans,
                                     syncer::WriteNode* sync_node,
-                                    syncer::AttachmentList* new_attachments);
+                                    syncer::AttachmentIdSet* new_attachments);
 
   // Logically part of ProcessSyncChanges.
   //
   // |new_attachments| is an output parameter containing newly added attachments
   // that need to be stored.  This method will append to it.
-  syncer::SyncError HandleActionUpdate(const syncer::SyncChange& change,
-                                       const std::string& type_str,
-                                       const syncer::ModelType& type,
-                                       const syncer::WriteTransaction& trans,
-                                       syncer::WriteNode* sync_node,
-                                       syncer::AttachmentList* new_attachments);
+  syncer::SyncError HandleActionUpdate(
+      const syncer::SyncChange& change,
+      const std::string& type_str,
+      const syncer::WriteTransaction& trans,
+      syncer::WriteNode* sync_node,
+      syncer::AttachmentIdSet* new_attachments);
+
+  // Begin uploading attachments that have not yet been uploaded to the sync
+  // server.
+  void UploadAllAttachmentsNotOnServer();
+
+  const syncer::ModelType type_;
 
   // The SyncableService this change processor will forward changes on to.
   const base::WeakPtr<syncer::SyncableService> local_service_;
@@ -148,12 +155,18 @@ class GenericChangeProcessor : public ChangeProcessor,
   // and have to keep a local pointer to the user_share.
   syncer::UserShare* const share_handle_;
 
+  // AttachmentService for datatype. Can be NULL if datatype doesn't use
+  // attachments.
   scoped_ptr<syncer::AttachmentService> attachment_service_;
+
   // Must be destroyed before attachment_service_ to ensure WeakPtrs are
   // invalidated before attachment_service_ is destroyed.
-  base::WeakPtrFactory<syncer::AttachmentService>
+  // Can be NULL if attachment_service_ is NULL;
+  scoped_ptr<base::WeakPtrFactory<syncer::AttachmentService> >
       attachment_service_weak_ptr_factory_;
-  syncer::AttachmentServiceProxy attachment_service_proxy_;
+  scoped_ptr<syncer::AttachmentServiceProxy> attachment_service_proxy_;
+
+  base::WeakPtrFactory<GenericChangeProcessor> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GenericChangeProcessor);
 };

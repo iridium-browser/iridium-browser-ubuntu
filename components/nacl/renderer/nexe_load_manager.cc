@@ -5,6 +5,8 @@
 #include "components/nacl/renderer/nexe_load_manager.h"
 
 #include "base/command_line.h"
+#include "base/containers/scoped_ptr_hash_map.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_tokenizer.h"
@@ -38,6 +40,8 @@
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
+
+namespace nacl {
 
 namespace {
 
@@ -76,9 +80,11 @@ std::string LookupAttribute(const std::map<std::string, std::string>& args,
   return std::string();
 }
 
-}  // namespace
+typedef base::ScopedPtrHashMap<PP_Instance, NexeLoadManager> NexeLoadManagerMap;
+base::LazyInstance<NexeLoadManagerMap> g_load_manager_map =
+    LAZY_INSTANCE_INITIALIZER;
 
-namespace nacl {
+}  // namespace
 
 NexeLoadManager::NexeLoadManager(
     PP_Instance pp_instance)
@@ -89,7 +95,9 @@ NexeLoadManager::NexeLoadManager(
       exit_status_(-1),
       nexe_size_(0),
       plugin_instance_(content::PepperPluginInstance::Get(pp_instance)),
+      crash_info_shmem_handle_(base::SharedMemory::NULLHandle()),
       weak_factory_(this) {
+  set_exit_status(-1);
   SetLastError("");
   HistogramEnumerateOsArch(GetSandboxArch());
   if (plugin_instance_) {
@@ -103,6 +111,34 @@ NexeLoadManager::~NexeLoadManager() {
     base::TimeDelta uptime = base::Time::Now() - ready_time_;
     HistogramTimeLarge("NaCl.ModuleUptime.Normal", uptime.InMilliseconds());
   }
+  if (base::SharedMemory::IsHandleValid(crash_info_shmem_handle_))
+    base::SharedMemory::CloseHandle(crash_info_shmem_handle_);
+}
+
+void NexeLoadManager::Create(PP_Instance instance) {
+  scoped_ptr<NexeLoadManager> new_load_manager(new NexeLoadManager(instance));
+  NexeLoadManagerMap& map = g_load_manager_map.Get();
+  DLOG_IF(ERROR, map.count(instance) != 0) << "Instance count should be 0";
+  map.add(instance, new_load_manager.Pass());
+}
+
+NexeLoadManager* NexeLoadManager::Get(PP_Instance instance) {
+  NexeLoadManagerMap& map = g_load_manager_map.Get();
+  NexeLoadManagerMap::iterator iter = map.find(instance);
+  if (iter != map.end())
+    return iter->second;
+  return NULL;
+}
+
+void NexeLoadManager::Delete(PP_Instance instance) {
+  NexeLoadManagerMap& map = g_load_manager_map.Get();
+  // The erase may call NexeLoadManager's destructor prior to removing it from
+  // the map. In that case, it is possible for the trusted Plugin to re-enter
+  // the NexeLoadManager (e.g., by calling ReportLoadError). Passing out the
+  // NexeLoadManager to a local scoped_ptr just ensures that its entry is gone
+  // from the map prior to the destructor being invoked.
+  scoped_ptr<NexeLoadManager> temp(map.take(instance));
+  map.erase(instance);
 }
 
 void NexeLoadManager::NexeFileDidOpen(int32_t pp_error,
@@ -231,7 +267,7 @@ void NexeLoadManager::ReportLoadAbort() {
   LogToConsole(error_string);
 }
 
-void NexeLoadManager::NexeDidCrash(const char* crash_log) {
+void NexeLoadManager::NexeDidCrash() {
   VLOG(1) << "Plugin::NexeDidCrash: crash event!";
     // The NaCl module voluntarily exited.  However, this is still a
     // crash from the point of view of Pepper, since PPAPI plugins are
@@ -259,7 +295,23 @@ void NexeLoadManager::NexeDidCrash(const char* crash_log) {
   // crash log.  In the event that this is called twice, the second
   // invocation will just be a no-op, since the entire crash log will
   // have been received and we'll just get an EOF indication.
-  CopyCrashLogToJsConsole(crash_log);
+
+  base::SharedMemory shmem(crash_info_shmem_handle_, true);
+  if (shmem.Map(kNaClCrashInfoShmemSize)) {
+    uint32_t crash_log_length;
+    // We cast the length value to volatile here to prevent the compiler from
+    // reordering instructions in a way that could introduce a TOCTTOU race.
+    crash_log_length = *(static_cast<volatile uint32_t*>(shmem.memory()));
+    crash_log_length = std::min<uint32_t>(crash_log_length,
+                                          kNaClCrashInfoMaxLogSize);
+
+    scoped_ptr<char[]> crash_log_data(new char[kNaClCrashInfoShmemSize]);
+    memcpy(crash_log_data.get(),
+           static_cast<char*>(shmem.memory()) + sizeof(uint32_t),
+           crash_log_length);
+    std::string crash_log(crash_log_data.get(), crash_log_length);
+    CopyCrashLogToJsConsole(crash_log);
+  }
 }
 
 void NexeLoadManager::set_trusted_plugin_channel(

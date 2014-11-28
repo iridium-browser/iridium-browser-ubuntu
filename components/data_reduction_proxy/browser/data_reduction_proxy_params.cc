@@ -24,21 +24,34 @@
 using base::FieldTrialList;
 
 namespace {
+
 const char kEnabled[] = "Enabled";
-}
+const char kDefaultOrigin[] = "https://proxy.googlezip.net:443/";
+const char kDevOrigin[] = "https://proxy-dev.googlezip.net:443/";
+const char kDevFallbackOrigin[] = "http://proxy-dev.googlezip.net:80/";
+const char kDefaultFallbackOrigin[] = "http://compress.googlezip.net:80/";
+// This is for a proxy that supports HTTP CONNECT to tunnel SSL traffic.
+// The proxy listens on port 443, but uses the HTTP protocol to set up
+// the tunnel, not HTTPS.
+const char kDefaultSslOrigin[] = "http://ssl.googlezip.net:443/";
+const char kDefaultAltOrigin[] = "http://ssl.googlezip.net:80/";
+const char kDefaultAltFallbackOrigin[] = "http://ssl.googlezip.net:80/";
+const char kDefaultProbeUrl[] = "http://check.googlezip.net/connect";
+const char kDefaultWarmupUrl[] = "http://www.gstatic.com/generate_204";
+
+}  // namespace
 
 namespace data_reduction_proxy {
 
 // static
-bool DataReductionProxyParams::IsIncludedInFieldTrial() {
-  return base::FieldTrialList::FindFullName(
-      "DataCompressionProxyRollout") == kEnabled;
-}
-
-// static
 bool DataReductionProxyParams::IsIncludedInAlternativeFieldTrial() {
-  return base::FieldTrialList::FindFullName(
-      "DataCompressionProxyAlternativeConfiguration") == kEnabled;
+  const std::string group_name = base::FieldTrialList::FindFullName(
+      "DataCompressionProxyAlternativeConfiguration");
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          data_reduction_proxy::switches::kEnableDataReductionProxyAlt)) {
+    return true;
+  }
+  return group_name == kEnabled;
 }
 
 // static
@@ -49,16 +62,27 @@ bool DataReductionProxyParams::IsIncludedInPromoFieldTrial() {
 
 // static
 bool DataReductionProxyParams::IsIncludedInPreconnectHintingFieldTrial() {
-  return IsIncludedInFieldTrial() &&
-      FieldTrialList::FindFullName(
+  return FieldTrialList::FindFullName(
           "DataCompressionProxyPreconnectHints") == kEnabled;
 }
 
 // static
 bool DataReductionProxyParams::IsIncludedInCriticalPathBypassFieldTrial() {
-  return IsIncludedInFieldTrial() &&
-      FieldTrialList::FindFullName(
+  return FieldTrialList::FindFullName(
           "DataCompressionProxyCriticalBypass") == kEnabled;
+}
+
+// static
+bool DataReductionProxyParams::IsIncludedInHoldbackFieldTrial() {
+  return FieldTrialList::FindFullName(
+      "DataCompressionProxyHoldback") == kEnabled;
+}
+
+// static
+bool DataReductionProxyParams::
+    IsIncludedInRemoveMissingViaHeaderOtherBypassFieldTrial() {
+  return FieldTrialList::FindFullName(
+      "DataReductionProxyRemoveMissingViaHeaderOtherBypass") == kEnabled;
 }
 
 DataReductionProxyTypeInfo::DataReductionProxyTypeInfo()
@@ -71,19 +95,17 @@ DataReductionProxyTypeInfo::DataReductionProxyTypeInfo()
 DataReductionProxyTypeInfo::~DataReductionProxyTypeInfo(){
 }
 
-bool DataReductionProxyParams::IsIncludedInHoldbackFieldTrial() {
-  return FieldTrialList::FindFullName(
-      "DataCompressionProxyHoldback") == kEnabled;
-}
-
 DataReductionProxyParams::DataReductionProxyParams(int flags)
     : allowed_((flags & kAllowed) == kAllowed),
       fallback_allowed_((flags & kFallbackAllowed) == kFallbackAllowed),
       alt_allowed_((flags & kAlternativeAllowed) == kAlternativeAllowed),
+      alt_fallback_allowed_(
+          (flags & kAlternativeFallbackAllowed) == kAlternativeFallbackAllowed),
       promo_allowed_((flags & kPromoAllowed) == kPromoAllowed),
       holdback_((flags & kHoldback) == kHoldback),
       configured_on_command_line_(false) {
-  bool result = Init(allowed_, fallback_allowed_, alt_allowed_);
+  bool result = Init(
+      allowed_, fallback_allowed_, alt_allowed_, alt_fallback_allowed_);
   DCHECK(result);
 }
 
@@ -104,6 +126,7 @@ DataReductionProxyParams::DataReductionProxyParams(
       allowed_(other.allowed_),
       fallback_allowed_(other.fallback_allowed_),
       alt_allowed_(other.alt_allowed_),
+      alt_fallback_allowed_(other.alt_fallback_allowed_),
       promo_allowed_(other.promo_allowed_),
       holdback_(other.holdback_),
       configured_on_command_line_(other.configured_on_command_line_) {
@@ -117,10 +140,6 @@ DataReductionProxyParams::GetAllowedProxies() const {
   DataReductionProxyList list;
   if (allowed_) {
     list.push_back(origin_);
-    // TODO(bolian): revert this once the proxy PAC fix is ready.
-    if (GURL(GetDefaultDevOrigin()) == origin()) {
-      list.push_back(GURL(GetDefaultOrigin()));
-    }
   }
   if (allowed_ && fallback_allowed_)
     list.push_back(fallback_origin_);
@@ -128,7 +147,7 @@ DataReductionProxyParams::GetAllowedProxies() const {
     list.push_back(alt_origin_);
     list.push_back(ssl_origin_);
   }
-  if (alt_allowed_ && fallback_allowed_)
+  if (alt_allowed_ && alt_fallback_allowed_)
     list.push_back(alt_fallback_origin_);
   return list;
 }
@@ -138,17 +157,22 @@ DataReductionProxyParams::DataReductionProxyParams(int flags,
     : allowed_((flags & kAllowed) == kAllowed),
       fallback_allowed_((flags & kFallbackAllowed) == kFallbackAllowed),
       alt_allowed_((flags & kAlternativeAllowed) == kAlternativeAllowed),
+      alt_fallback_allowed_(
+          (flags & kAlternativeFallbackAllowed) == kAlternativeFallbackAllowed),
       promo_allowed_((flags & kPromoAllowed) == kPromoAllowed),
       holdback_((flags & kHoldback) == kHoldback),
       configured_on_command_line_(false) {
   if (should_call_init) {
-    bool result = Init(allowed_, fallback_allowed_, alt_allowed_);
+    bool result = Init(
+        allowed_, fallback_allowed_, alt_allowed_, alt_fallback_allowed_);
     DCHECK(result);
   }
 }
 
-bool DataReductionProxyParams::Init(
-    bool allowed, bool fallback_allowed, bool alt_allowed) {
+bool DataReductionProxyParams::Init(bool allowed,
+                                    bool fallback_allowed,
+                                    bool alt_allowed,
+                                    bool alt_fallback_allowed) {
   InitWithoutChecks();
   // Verify that all necessary params are set.
   if (allowed) {
@@ -182,7 +206,7 @@ bool DataReductionProxyParams::Init(
     }
   }
 
-  if (alt_allowed && fallback_allowed) {
+  if (alt_allowed && alt_fallback_allowed) {
     if (!alt_fallback_origin_.is_valid()) {
       DVLOG(1) << "Invalid alternative fallback origin:"
           << alt_fallback_origin_.spec();
@@ -198,6 +222,11 @@ bool DataReductionProxyParams::Init(
   if (fallback_allowed_ && !allowed_) {
     DVLOG(1) << "The data reduction proxy fallback cannot be allowed if "
         << "the data reduction proxy is not allowed";
+    return false;
+  }
+  if (alt_fallback_allowed_ && !alt_allowed_) {
+    DVLOG(1) << "The data reduction proxy alternative fallback cannot be "
+        << "allowed if the alternative data reduction proxy is not allowed";
     return false;
   }
   if (promo_allowed_ && !allowed_) {
@@ -237,8 +266,7 @@ void DataReductionProxyParams::InitWithoutChecks() {
   if (configured_on_command_line_)
     allowed_ = true;
   if (!(ssl_origin.empty() &&
-        alt_origin.empty() &&
-        alt_fallback_origin.empty()))
+        alt_origin.empty()))
     alt_allowed_ = true;
 
   std::string probe_url = command_line.GetSwitchValueASCII(
@@ -252,6 +280,8 @@ void DataReductionProxyParams::InitWithoutChecks() {
     origin = GetDefaultDevOrigin();
   if (origin.empty())
     origin = GetDefaultOrigin();
+  if (fallback_origin.empty())
+    fallback_origin = GetDefaultDevFallbackOrigin();
   if (fallback_origin.empty())
     fallback_origin = GetDefaultFallbackOrigin();
   if (ssl_origin.empty())
@@ -294,22 +324,6 @@ bool DataReductionProxyParams::IsDataReductionProxy(
     return true;
   }
 
-  // TODO(bolian): revert this once the proxy PAC fix is ready.
-  //
-  // If dev host is configured as the primary proxy, we treat the default
-  // origin as a valid data reduction proxy to workaround PAC script.
-  if (GURL(GetDefaultDevOrigin()) == origin()) {
-    const GURL& default_origin = GURL(GetDefaultOrigin());
-    if (net::HostPortPair::FromURL(default_origin).Equals(host_port_pair)) {
-      if (proxy_info) {
-        proxy_info->proxy_servers.first = default_origin;
-        if (fallback_allowed())
-          proxy_info->proxy_servers.second = fallback_origin();
-      }
-      return true;
-    }
-  }
-
   if (fallback_allowed() &&
       net::HostPortPair::FromURL(fallback_origin()).Equals(host_port_pair)) {
     if (proxy_info) {
@@ -323,12 +337,12 @@ bool DataReductionProxyParams::IsDataReductionProxy(
     if (proxy_info) {
       proxy_info->proxy_servers.first = alt_origin();
       proxy_info->is_alternative = true;
-      if (fallback_allowed())
+      if (alternative_fallback_allowed())
         proxy_info->proxy_servers.second = alt_fallback_origin();
     }
     return true;
   }
-  if (fallback_allowed() &&
+  if (alternative_fallback_allowed() &&
       net::HostPortPair::FromURL(alt_fallback_origin()).Equals(
       host_port_pair)) {
     if (proxy_info) {
@@ -366,16 +380,26 @@ bool DataReductionProxyParams::IsBypassedByDataReductionProxyLocalRules(
 }
 
 std::string DataReductionProxyParams::GetDefaultDevOrigin() const {
-#if defined(DATA_REDUCTION_DEV_HOST)
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDisableDataReductionProxyDev))
     return std::string();
   if (command_line.HasSwitch(switches::kEnableDataReductionProxyDev) ||
       (FieldTrialList::FindFullName("DataCompressionProxyDevRollout") ==
          kEnabled)) {
-    return DATA_REDUCTION_DEV_HOST;
+    return kDevOrigin;
   }
-#endif
+  return std::string();
+}
+
+std::string DataReductionProxyParams::GetDefaultDevFallbackOrigin() const {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kDisableDataReductionProxyDev))
+    return std::string();
+  if (command_line.HasSwitch(switches::kEnableDataReductionProxyDev) ||
+      (FieldTrialList::FindFullName("DataCompressionProxyDevRollout") ==
+           kEnabled)) {
+    return kDevFallbackOrigin;
+  }
   return std::string();
 }
 
@@ -464,53 +488,33 @@ bool DataReductionProxyParams::ArePrimaryAndFallbackBypassed(
   return found != retry_map.end();
 }
 
+// TODO(kundaji): Remove tests for macro definitions.
 std::string DataReductionProxyParams::GetDefaultOrigin() const {
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  return SPDY_PROXY_AUTH_ORIGIN;
-#endif
-  return std::string();
+  return kDefaultOrigin;
 }
 
 std::string DataReductionProxyParams::GetDefaultFallbackOrigin() const {
-#if defined(DATA_REDUCTION_FALLBACK_HOST)
-  return DATA_REDUCTION_FALLBACK_HOST;
-#endif
-  return std::string();
+  return kDefaultFallbackOrigin;
 }
 
 std::string DataReductionProxyParams::GetDefaultSSLOrigin() const {
-#if defined(DATA_REDUCTION_PROXY_SSL_ORIGIN)
-  return DATA_REDUCTION_PROXY_SSL_ORIGIN;
-#endif
-  return std::string();
+  return kDefaultSslOrigin;
 }
 
 std::string DataReductionProxyParams::GetDefaultAltOrigin() const {
-#if defined(DATA_REDUCTION_PROXY_ALT_ORIGIN)
-  return DATA_REDUCTION_PROXY_ALT_ORIGIN;
-#endif
-  return std::string();
+  return kDefaultAltOrigin;
 }
 
 std::string DataReductionProxyParams::GetDefaultAltFallbackOrigin() const {
-#if defined(DATA_REDUCTION_PROXY_ALT_FALLBACK_ORIGIN)
-  return DATA_REDUCTION_PROXY_ALT_FALLBACK_ORIGIN;
-#endif
-  return std::string();
+  return kDefaultAltFallbackOrigin;
 }
 
 std::string DataReductionProxyParams::GetDefaultProbeURL() const {
-#if defined(DATA_REDUCTION_PROXY_PROBE_URL)
-  return DATA_REDUCTION_PROXY_PROBE_URL;
-#endif
-  return std::string();
+  return kDefaultProbeUrl;
 }
 
 std::string DataReductionProxyParams::GetDefaultWarmupURL() const {
-#if defined(DATA_REDUCTION_PROXY_WARMUP_URL)
-  return DATA_REDUCTION_PROXY_WARMUP_URL;
-#endif
-  return std::string();
+  return kDefaultWarmupUrl;
 }
 
 }  // namespace data_reduction_proxy

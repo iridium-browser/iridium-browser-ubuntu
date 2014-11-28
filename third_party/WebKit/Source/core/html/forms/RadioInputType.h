@@ -51,8 +51,7 @@ private:
     virtual bool shouldSendChangeEventAfterCheckedChanged() OVERRIDE;
     virtual PassOwnPtrWillBeRawPtr<ClickHandlingState> willDispatchClick() OVERRIDE;
     virtual void didDispatchClick(Event*, const ClickHandlingState&) OVERRIDE;
-    virtual bool isRadioButton() const OVERRIDE;
-    virtual bool supportsIndeterminateAppearance() const OVERRIDE;
+    virtual bool shouldAppearIndeterminate() const OVERRIDE;
 };
 
 } // namespace blink

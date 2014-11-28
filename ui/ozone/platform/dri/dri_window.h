@@ -5,6 +5,7 @@
 #ifndef UI_OZONE_PLATFORM_DRI_DRI_WINDOW_H_
 #define UI_OZONE_PLATFORM_DRI_DRI_WINDOW_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
@@ -12,15 +13,23 @@
 
 namespace ui {
 
-class DriSurfaceFactory;
+class DriWindowDelegate;
+class DriWindowDelegateManager;
+class DriWindowManager;
+class EventFactoryEvdev;
 
 class DriWindow : public PlatformWindow,
                   public PlatformEventDispatcher {
  public:
   DriWindow(PlatformWindowDelegate* delegate,
             const gfx::Rect& bounds,
-            DriSurfaceFactory* surface_factory);
+            scoped_ptr<DriWindowDelegate> dri_window_delegate,
+            EventFactoryEvdev* event_factory,
+            DriWindowDelegateManager* window_delegate_manager,
+            DriWindowManager* window_manager);
   virtual ~DriWindow();
+
+  void Initialize();
 
   // PlatformWindow:
   virtual void Show() OVERRIDE;
@@ -45,6 +54,10 @@ class DriWindow : public PlatformWindow,
   PlatformWindowDelegate* delegate_;
   gfx::Rect bounds_;
   gfx::AcceleratedWidget widget_;
+  DriWindowDelegate* dri_window_delegate_;
+  EventFactoryEvdev* event_factory_;
+  DriWindowDelegateManager* window_delegate_manager_;
+  DriWindowManager* window_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(DriWindow);
 };

@@ -11,6 +11,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util_proxy.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/shared_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process.h"
@@ -106,12 +107,6 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   content::BrowserPpapiHost* browser_ppapi_host() { return ppapi_host_.get(); }
 
  private:
-  // Internal class that holds the NaClHandle objecs so that
-  // nacl_process_host.h doesn't include NaCl headers.  Needed since it's
-  // included by src\content, which can't depend on the NaCl gyp file because it
-  // depends on chrome.gyp (circular dependency).
-  struct NaClInternal;
-
   bool LaunchNaClGdb();
 
   // Mark the process as using a particular GDB debug stub port and notify
@@ -171,10 +166,14 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   void OnSetKnownToValidate(const std::string& signature);
   void OnResolveFileToken(uint64 file_token_lo, uint64 file_token_hi,
                           IPC::Message* reply_msg);
+  void OnResolveFileTokenAsync(uint64 file_token_lo, uint64 file_token_hi);
   void FileResolved(const base::FilePath& file_path,
                     IPC::Message* reply_msg,
                     base::File file);
-
+  void FileResolvedAsync(uint64_t file_token_lo,
+                         uint64_t file_token_hi,
+                         const base::FilePath& file_path,
+                         base::File file);
 #if defined(OS_WIN)
   // Message handler for Windows hardware exception handling.
   void OnAttachDebugExceptionHandler(const std::string& info,
@@ -219,11 +218,6 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // debug the NaCl loader.
   base::FilePath manifest_path_;
 
-  // Socket pairs for the NaCl process and renderer.
-  scoped_ptr<NaClInternal> internal_;
-
-  base::WeakPtrFactory<NaClProcessHost> weak_factory_;
-
   scoped_ptr<content::BrowserChildProcessHost> process_;
 
   bool uses_irt_;
@@ -247,6 +241,15 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 
   // Throttling time in milliseconds for PpapiHostMsg_Keepalive IPCs.
   static unsigned keepalive_throttle_interval_milliseconds_;
+
+  // Shared memory provided to the plugin and renderer for
+  // reporting crash information.
+  base::SharedMemory crash_info_shmem_;
+
+  base::File socket_for_renderer_;
+  base::File socket_for_sel_ldr_;
+
+  base::WeakPtrFactory<NaClProcessHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClProcessHost);
 };

@@ -90,7 +90,7 @@ class ProfileImpl : public Profile {
           bool in_memory) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
+  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
   virtual content::PushMessagingService* GetPushMessagingService() OVERRIDE;
   virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
 
@@ -206,7 +206,7 @@ class ProfileImpl : public Profile {
   PrefProxyConfigTracker* CreateProxyConfigTracker();
 
   scoped_ptr<domain_reliability::DomainReliabilityMonitor>
-      CreateDomainReliabilityMonitor();
+      CreateDomainReliabilityMonitor(PrefService* local_state);
 
   scoped_ptr<content::HostZoomMap::Subscription> zoom_subscription_;
   PrefChangeRegistrar pref_change_registrar_;

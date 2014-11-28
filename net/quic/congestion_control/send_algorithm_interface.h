@@ -25,7 +25,9 @@ class RttStats;
 
 class NET_EXPORT_PRIVATE SendAlgorithmInterface {
  public:
-  typedef std::map<QuicPacketSequenceNumber, TransmissionInfo> CongestionMap;
+  // A sorted vector of packets.
+  typedef std::vector<std::pair<QuicPacketSequenceNumber, TransmissionInfo>>
+      CongestionVector;
 
   static SendAlgorithmInterface* Create(const QuicClock* clock,
                                         const RttStats* rtt_stats,
@@ -48,8 +50,8 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   // any packets considered acked or lost as a result of the congestion event.
   virtual void OnCongestionEvent(bool rtt_updated,
                                  QuicByteCount bytes_in_flight,
-                                 const CongestionMap& acked_packets,
-                                 const CongestionMap& lost_packets) = 0;
+                                 const CongestionVector& acked_packets,
+                                 const CongestionVector& lost_packets) = 0;
 
   // Inform that we sent |bytes| to the wire, and if the packet is
   // retransmittable. Returns true if the packet should be tracked by the
@@ -96,6 +98,9 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   // Whether the send algorithm is currently in slow start.  When true, the
   // BandwidthEstimate is expected to be too low.
   virtual bool InSlowStart() const = 0;
+
+  // Whether the send algorithm is currently in recovery.
+  virtual bool InRecovery() const = 0;
 
   // Returns the size of the slow start congestion window in bytes,
   // aka ssthresh.  Some send algorithms do not define a slow start

@@ -46,11 +46,11 @@ WebInspector.WorkerTargetManager.prototype = {
         }
 
         /**
-         * @param {!WebInspector.Target} target
+         * @param {?WebInspector.Target} target
          */
         function targetCreated(target)
         {
-            if (data.inspectorConnected)
+            if (target && data.inspectorConnected)
                 target.runtimeAgent().run();
         }
     },
@@ -73,7 +73,7 @@ WebInspector.WorkerConnection = function(target, workerId, inspectorConnected, o
 {
     InspectorBackendClass.Connection.call(this);
     //FIXME: remove resourceTreeModel and others from worker targets
-    this.suppressErrorsForDomains(["Worker", "Page", "CSS", "DOM", "DOMStorage", "Database", "Network"]);
+    this.suppressErrorsForDomains(["Worker", "Page", "CSS", "DOM", "DOMStorage", "Database", "Network", "IndexedDB"]);
     this._target = target;
     this._workerId = workerId;
     this._workerAgent = target.workerAgent();

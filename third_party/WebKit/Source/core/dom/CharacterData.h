@@ -31,6 +31,7 @@ namespace blink {
 class ExceptionState;
 
 class CharacterData : public Node {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     void atomize();
     const String& data() const { return m_data; }
@@ -56,7 +57,6 @@ protected:
         , m_data(!text.isNull() ? text : emptyString())
     {
         ASSERT(type == CreateOther || type == CreateText || type == CreateEditingText);
-        ScriptWrappable::init(this);
     }
 
     void setDataWithoutUpdate(const String& data)

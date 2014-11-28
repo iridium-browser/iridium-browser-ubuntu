@@ -25,10 +25,10 @@ function ImageLoader() {
 
   // Grant permissions to all volumes, initialize the cache and then start the
   // worker.
-  chrome.fileBrowserPrivate.getVolumeMetadataList(function(volumeMetadataList) {
+  chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeMetadataList) {
     var initPromises = volumeMetadataList.map(function(volumeMetadata) {
       var requestPromise = new Promise(function(callback) {
-        chrome.fileBrowserPrivate.requestFileSystem(
+        chrome.fileManagerPrivate.requestFileSystem(
             volumeMetadata.volumeId,
             callback);
       });
@@ -40,33 +40,32 @@ function ImageLoader() {
     Promise.all(initPromises).then(this.worker_.start.bind(this.worker_));
 
     // Listen for mount events, and grant permissions to volumes being mounted.
-    chrome.fileBrowserPrivate.onMountCompleted.addListener(
+    chrome.fileManagerPrivate.onMountCompleted.addListener(
         function(event) {
           if (event.eventType == 'mount' && event.status == 'success') {
-            chrome.fileBrowserPrivate.requestFileSystem(
+            chrome.fileManagerPrivate.requestFileSystem(
                 event.volumeMetadata.volumeId, function() {});
           }
         });
   }.bind(this));
 
   // Listen for incoming requests.
-  chrome.extension.onMessageExternal.addListener(function(request,
-                                                          sender,
-                                                          sendResponse) {
-    if (ImageLoader.ALLOWED_CLIENTS.indexOf(sender.id) !== -1) {
-      // Sending a response may fail if the receiver already went offline.
-      // This is not an error, but a normal and quite common situation.
-      var failSafeSendResponse = function(response) {
-        try {
-          sendResponse(response);
+  chrome.extension.onMessageExternal.addListener(
+      function(request, sender, sendResponse) {
+        if (ImageLoader.ALLOWED_CLIENTS.indexOf(sender.id) !== -1) {
+          // Sending a response may fail if the receiver already went offline.
+          // This is not an error, but a normal and quite common situation.
+          var failSafeSendResponse = function(response) {
+            try {
+              sendResponse(response);
+            }
+            catch (e) {
+              // Ignore the error.
+            }
+          };
+          return this.onMessage_(sender.id, request, failSafeSendResponse);
         }
-        catch (e) {
-          // Ignore the error.
-        }
-      };
-      return this.onMessage_(sender.id, request, failSafeSendResponse);
-    }
-  }.bind(this));
+      }.bind(this));
 }
 
 /**
@@ -168,18 +167,16 @@ ImageLoader.resizeDimensions = function(width, height, options) {
     targetHeight = sourceHeight * options.scale;
   }
 
-  if (options.maxWidth &&
-      targetWidth > options.maxWidth) {
-      var scale = options.maxWidth / targetWidth;
-      targetWidth *= scale;
-      targetHeight *= scale;
+  if (options.maxWidth && targetWidth > options.maxWidth) {
+    var scale = options.maxWidth / targetWidth;
+    targetWidth *= scale;
+    targetHeight *= scale;
   }
 
-  if (options.maxHeight &&
-      targetHeight > options.maxHeight) {
-      var scale = options.maxHeight / targetHeight;
-      targetWidth *= scale;
-      targetHeight *= scale;
+  if (options.maxHeight && targetHeight > options.maxHeight) {
+    var scale = options.maxHeight / targetHeight;
+    targetWidth *= scale;
+    targetHeight *= scale;
   }
 
   if (options.width)

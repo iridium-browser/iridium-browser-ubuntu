@@ -11,7 +11,6 @@
 #include "base/memory/ref_counted.h"
 #include "mojo/application_manager/application_loader.h"
 #include "mojo/public/cpp/system/core.h"
-#include "mojo/shell/keep_alive.h"
 #include "url/gurl.h"
 
 namespace dbus {
@@ -65,8 +64,8 @@ class DBusApplicationLoader : public ApplicationLoader {
                     const GURL& url,
                     scoped_refptr<LoadCallbacks> callbacks) OVERRIDE;
 
-  virtual void OnServiceError(ApplicationManager* manager,
-                              const GURL& url) OVERRIDE;
+  virtual void OnApplicationError(ApplicationManager* manager,
+                                  const GURL& url) OVERRIDE;
 
  private:
   class LoadContext;

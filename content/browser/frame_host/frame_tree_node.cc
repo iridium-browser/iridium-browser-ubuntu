@@ -42,7 +42,11 @@ bool FrameTreeNode::IsMainFrame() const {
 }
 
 void FrameTreeNode::AddChild(scoped_ptr<FrameTreeNode> child,
+                             int process_id,
                              int frame_routing_id) {
+  // Child frame must always be created in the same process as the parent.
+  CHECK_EQ(process_id, render_manager_.current_host()->GetProcess()->GetID());
+
   // Initialize the RenderFrameHost for the new node.  We always create child
   // frames in the same SiteInstance as the current frame, and they can swap to
   // a different one if they navigate away.
@@ -75,6 +79,9 @@ void FrameTreeNode::RemoveChild(FrameTreeNode* child) {
 
 void FrameTreeNode::ResetForNewProcess() {
   current_url_ = GURL();
+
+  // The RenderFrame no longer exists and will need to be created again.
+  current_frame_host()->set_render_frame_created(false);
 
   // The children may not have been cleared if a cross-process navigation
   // commits before the old process cleans everything up.  Make sure the child

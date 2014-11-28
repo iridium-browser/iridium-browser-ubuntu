@@ -49,10 +49,9 @@ namespace blink {
 DeprecatedStorageQuota::DeprecatedStorageQuota(Type type)
     : m_type(type)
 {
-    ScriptWrappable::init(this);
 }
 
-void DeprecatedStorageQuota::queryUsageAndQuota(ExecutionContext* executionContext, PassOwnPtr<StorageUsageCallback> successCallback, PassOwnPtr<StorageErrorCallback> errorCallback)
+void DeprecatedStorageQuota::queryUsageAndQuota(ExecutionContext* executionContext, StorageUsageCallback* successCallback, StorageErrorCallback* errorCallback)
 {
     ASSERT(executionContext);
 
@@ -70,11 +69,11 @@ void DeprecatedStorageQuota::queryUsageAndQuota(ExecutionContext* executionConte
     }
 
     KURL storagePartition = KURL(KURL(), securityOrigin->toString());
-    OwnPtr<StorageQuotaCallbacks> callbacks = DeprecatedStorageQuotaCallbacksImpl::create(successCallback, errorCallback);
+    OwnPtrWillBeRawPtr<StorageQuotaCallbacks> callbacks = DeprecatedStorageQuotaCallbacksImpl::create(successCallback, errorCallback);
     Platform::current()->queryStorageUsageAndQuota(storagePartition, storageType, callbacks.release());
 }
 
-void DeprecatedStorageQuota::requestQuota(ExecutionContext* executionContext, unsigned long long newQuotaInBytes, PassOwnPtr<StorageQuotaCallback> successCallback, PassOwnPtr<StorageErrorCallback> errorCallback)
+void DeprecatedStorageQuota::requestQuota(ExecutionContext* executionContext, unsigned long long newQuotaInBytes, StorageQuotaCallback* successCallback, StorageErrorCallback* errorCallback)
 {
     ASSERT(executionContext);
 

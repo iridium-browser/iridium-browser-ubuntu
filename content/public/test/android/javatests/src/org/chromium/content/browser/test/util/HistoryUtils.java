@@ -9,7 +9,7 @@ import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 import android.app.Instrumentation;
 
 import org.chromium.base.test.util.InstrumentationUtils;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.WebContents;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -23,83 +23,83 @@ public class HistoryUtils {
     protected static final long WAIT_TIMEOUT_SECONDS = scaleTimeout(15);
 
     /**
-     * Calls {@link ContentViewCore#canGoBack()} on UI thread.
+     * Calls {@link NavigationController#canGoBack()} on UI thread.
      *
      * @param instrumentation an Instrumentation instance.
      * @param contentViewCore a ContentViewCore instance.
-     * @return result of {@link ContentViewCore#canGoBack()}
+     * @return result of {@link NavigationController#canGoBack()}
      * @throws Throwable
      */
     public static boolean canGoBackOnUiThread(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore) throws Throwable {
+            final WebContents webContents) throws Throwable {
         return InstrumentationUtils.runOnMainSyncAndGetResult(
                 instrumentation, new Callable<Boolean>() {
             @Override
             public Boolean call() {
-                return contentViewCore.canGoBack();
+                return webContents.getNavigationController().canGoBack();
             }
         });
     }
 
     /**
-     * Calls {@link ContentViewCore#canGoToOffset(int)} on UI thread.
+     * Calls {@link NavigationController#canGoToOffset(int)} on UI thread.
      *
      * @param instrumentation an Instrumentation instance.
      * @param contentViewCore a ContentViewCore instance.
      * @param offset The number of steps to go on the UI thread, with negative
      *      representing going back.
-     * @return result of {@link ContentViewCore#canGoToOffset(int)}
+     * @return result of {@link NavigationController#canGoToOffset(int)}
      * @throws Throwable
      */
     public static boolean canGoToOffsetOnUiThread(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore, final int offset) throws Throwable {
+            final WebContents webContents, final int offset) throws Throwable {
         return InstrumentationUtils.runOnMainSyncAndGetResult(
                 instrumentation, new Callable<Boolean>() {
             @Override
             public Boolean call() throws Exception {
-                return contentViewCore.canGoToOffset(offset);
+                return webContents.getNavigationController().canGoToOffset(offset);
             }
         });
     }
 
     /**
-     * Calls {@link ContentViewCore#canGoForward()} on UI thread.
+     * Calls {@link NavigationController#canGoForward()} on UI thread.
      *
      * @param instrumentation an Instrumentation instance.
      * @param contentViewCore a ContentViewCore instance.
-     * @return result of {@link ContentViewCore#canGoForward()}
+     * @return result of {@link NavigationController#canGoForward()}
      * @throws Throwable
      */
     public static boolean canGoForwardOnUiThread(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore) throws Throwable {
+            final WebContents webContents) throws Throwable {
         return InstrumentationUtils.runOnMainSyncAndGetResult(
                 instrumentation, new Callable<Boolean>() {
             @Override
             public Boolean call() {
-                return contentViewCore.canGoForward();
+                return webContents.getNavigationController().canGoForward();
             }
         });
     }
 
     /**
-     * Calls {@link ContentViewCore#clearHistory()} on UI thread.
+     * Calls {@link NavigationController#clearHistory()} on UI thread.
      *
      * @param instrumentation an Instrumentation instance.
      * @param contentViewCore a ContentViewCore instance.
      * @throws Throwable
      */
     public static void clearHistoryOnUiThread(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore) throws Throwable {
+            final WebContents webContents) throws Throwable {
         instrumentation.runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                contentViewCore.clearHistory();
+                webContents.getNavigationController().clearHistory();
             }
         });
     }
 
     /**
-     * Calls {@link ContentViewCore#getUrl()} on UI Thread to get the current URL.
+     * Calls {@link NavigationController#getUrl()} on UI Thread to get the current URL.
      *
      * @param instrumentation an Instrumentation instance.
      * @param contentViewCore a ContentViewCore instance.
@@ -107,40 +107,14 @@ public class HistoryUtils {
      * @throws Throwable
      */
     public static String getUrlOnUiThread(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore) throws Throwable {
+            final WebContents webContents) throws Throwable {
         return InstrumentationUtils.runOnMainSyncAndGetResult(
                 instrumentation, new Callable<String>() {
             @Override
             public String call() throws Exception {
-                return contentViewCore.getUrl();
+                return webContents.getUrl();
             }
         });
-    }
-
-    /**
-     * Performs navigation in the history on UI thread and waits until
-     * onPageFinished is called.
-     *
-     * @param instrumentation an Instrumentation instance.
-     * @param contentViewCore a ContentViewCore instance.
-     * @param onPageFinishedHelper the CallbackHelper instance associated with the onPageFinished
-     *                             callback of contentViewCore.
-     * @param offset
-     * @throws Throwable
-     */
-    public static void goToOffsetSync(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore, CallbackHelper onPageFinishedHelper,
-            final int offset) throws Throwable {
-        int currentCallCount = onPageFinishedHelper.getCallCount();
-        instrumentation.runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                contentViewCore.goToOffset(offset);
-            }
-        });
-
-        // Wait for onPageFinished event or timeout after 30s
-        onPageFinishedHelper.waitForCallback(currentCallCount, 1, 30, TimeUnit.SECONDS);
     }
 
     /**
@@ -154,13 +128,13 @@ public class HistoryUtils {
      * @throws Throwable
      */
     public static void goBackSync(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore,
+            final WebContents webContents,
             CallbackHelper onPageFinishedHelper) throws Throwable {
         int currentCallCount = onPageFinishedHelper.getCallCount();
         instrumentation.runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                contentViewCore.goBack();
+                webContents.getNavigationController().goBack();
             }
         });
 
@@ -177,13 +151,13 @@ public class HistoryUtils {
      * @throws Throwable
      */
     public static void goForwardSync(Instrumentation instrumentation,
-            final ContentViewCore contentViewCore,
+            final WebContents webContents,
             CallbackHelper onPageFinishedHelper) throws Throwable {
         int currentCallCount = onPageFinishedHelper.getCallCount();
         instrumentation.runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                contentViewCore.goForward();
+                webContents.getNavigationController().goForward();
             }
         });
 

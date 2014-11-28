@@ -37,12 +37,13 @@ class HttpFsNode : public Node {
   virtual Error GetSize(off_t* out_size);
 
   void SetCachedSize(off_t size);
-  void SetMode(int mode);
 
  protected:
   HttpFsNode(Filesystem* filesystem,
              const std::string& url,
              bool cache_content);
+
+  virtual ~HttpFsNode();
 
  private:
   Error GetStat_Locked(struct stat* stat);

@@ -21,14 +21,14 @@ import com.google.ipc.invalidation.external.client.InvalidationListener.Registra
 import com.google.ipc.invalidation.external.client.android.service.AndroidLogger;
 import com.google.ipc.invalidation.external.client.types.AckHandle;
 import com.google.ipc.invalidation.external.client.types.ErrorInfo;
-import com.google.ipc.invalidation.ticl.ProtoConverter;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.ErrorUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.InvalidateUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.RegistrationFailureUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.RegistrationStatusUpcall;
-import com.google.protos.ipc.invalidation.AndroidService.ListenerUpcall.ReissueRegistrationsUpcall;
+import com.google.ipc.invalidation.ticl.ProtoWrapperConverter;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.ErrorUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.InvalidateUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.RegistrationFailureUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.RegistrationStatusUpcall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ListenerUpcall.ReissueRegistrationsUpcall;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
 
 import android.content.Context;
 import android.content.Intent;
@@ -46,9 +46,6 @@ public final class AndroidInvalidationListenerIntentMapper {
 
   /** The logger. */
   private final AndroidLogger logger = AndroidLogger.forPrefix("");
-
-  private final AndroidIntentProtocolValidator validator =
-      new AndroidIntentProtocolValidator(logger);
 
   /** Client passed to the listener (supports downcalls). */
   public final InvalidationClient client;
@@ -82,28 +79,28 @@ public final class AndroidInvalidationListenerIntentMapper {
 
     if (upcall.hasReady()) {
       listener.ready(client);
-    } else if (upcall.hasInvalidate()) {
+    } else if (upcall.getNullableInvalidate() != null) {
       // Handle all invalidation-related upcalls on a common path, since they require creating
       // an AckHandleP.
-      onInvalidateUpcall(upcall, listener);
-    } else if (upcall.hasRegistrationStatus()) {
-      RegistrationStatusUpcall regStatus = upcall.getRegistrationStatus();
+      onInvalidateUpcall(upcall.getNullableInvalidate(), listener);
+    } else if (upcall.getNullableRegistrationStatus() != null) {
+      RegistrationStatusUpcall regStatus = upcall.getNullableRegistrationStatus();
       listener.informRegistrationStatus(client,
-          ProtoConverter.convertFromObjectIdProto(regStatus.getObjectId()),
+          ProtoWrapperConverter.convertFromObjectIdProto(regStatus.getObjectId()),
           regStatus.getIsRegistered() ?
               RegistrationState.REGISTERED : RegistrationState.UNREGISTERED);
-    } else if (upcall.hasRegistrationFailure()) {
-      RegistrationFailureUpcall failure = upcall.getRegistrationFailure();
+    } else if (upcall.getNullableRegistrationFailure() != null) {
+      RegistrationFailureUpcall failure = upcall.getNullableRegistrationFailure();
       listener.informRegistrationFailure(client,
-          ProtoConverter.convertFromObjectIdProto(failure.getObjectId()),
+          ProtoWrapperConverter.convertFromObjectIdProto(failure.getObjectId()),
           failure.getTransient(),
           failure.getMessage());
-    } else if (upcall.hasReissueRegistrations()) {
-      ReissueRegistrationsUpcall reissueRegs = upcall.getReissueRegistrations();
-      listener.reissueRegistrations(client, reissueRegs.getPrefix().toByteArray(),
+    } else if (upcall.getNullableReissueRegistrations() != null) {
+      ReissueRegistrationsUpcall reissueRegs = upcall.getNullableReissueRegistrations();
+      listener.reissueRegistrations(client, reissueRegs.getPrefix().getByteArray(),
           reissueRegs.getLength());
-    } else if (upcall.hasError()) {
-      ErrorUpcall error = upcall.getError();
+    } else if (upcall.getNullableError() != null) {
+      ErrorUpcall error = upcall.getNullableError();
       ErrorInfo errorInfo = ErrorInfo.newInstance(error.getErrorCode(), error.getIsTransient(),
           error.getErrorMessage(), null);
       listener.informError(client, errorInfo);
@@ -116,18 +113,18 @@ public final class AndroidInvalidationListenerIntentMapper {
    * Handles an invalidation-related listener {@code upcall} by dispatching to the appropriate
    * method on an instance of {@link InvalidationListener}.
    */
-  private void onInvalidateUpcall(ListenerUpcall upcall, InvalidationListener listener) {
-    InvalidateUpcall invalidate = upcall.getInvalidate();
-    AckHandle ackHandle = AckHandle.newInstance(invalidate.getAckHandle().toByteArray());
-    if (invalidate.hasInvalidation()) {
+  private void onInvalidateUpcall(InvalidateUpcall invalidate, InvalidationListener listener) {
+    AckHandle ackHandle = AckHandle.newInstance(invalidate.getAckHandle().getByteArray());
+    if (invalidate.getNullableInvalidation() != null) {
       listener.invalidate(client,
-          ProtoConverter.convertFromInvalidationProto(invalidate.getInvalidation()),
+          ProtoWrapperConverter.convertFromInvalidationProto(invalidate.getNullableInvalidation()),
           ackHandle);
     } else if (invalidate.hasInvalidateAll()) {
       listener.invalidateAll(client, ackHandle);
-    } else if (invalidate.hasInvalidateUnknown()) {
+    } else if (invalidate.getNullableInvalidateUnknown() != null) {
       listener.invalidateUnknownVersion(client,
-          ProtoConverter.convertFromObjectIdProto(invalidate.getInvalidateUnknown()), ackHandle);
+          ProtoWrapperConverter.convertFromObjectIdProto(invalidate.getNullableInvalidateUnknown()),
+          ackHandle);
     } else {
       throw new RuntimeException("Invalid invalidate upcall: " + invalidate);
     }
@@ -147,12 +144,8 @@ public final class AndroidInvalidationListenerIntentMapper {
     }
     try {
       ListenerUpcall upcall = ListenerUpcall.parseFrom(upcallBytes);
-      if (!validator.isListenerUpcallValid(upcall)) {
-        logger.warning("Ignoring invalid listener upcall: %s", upcall);
-        return null;
-      }
       return upcall;
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.severe("Could not parse listener upcall from %s", Arrays.toString(upcallBytes));
       return null;
     }

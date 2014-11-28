@@ -101,6 +101,15 @@ function Downloads() {
   // Icon load request queue.
   this.iconLoadQueue_ = [];
   this.isIconLoading_ = false;
+
+  this.progressForeground1_ = new Image();
+  this.progressForeground1_.src =
+    'chrome://theme/IDR_DOWNLOAD_PROGRESS_FOREGROUND_32@1x';
+  this.progressForeground2_ = new Image();
+  this.progressForeground2_.src =
+    'chrome://theme/IDR_DOWNLOAD_PROGRESS_FOREGROUND_32@2x';
+
+  window.addEventListener('keydown', this.onKeyDown_.bind(this));
 }
 
 /**
@@ -148,7 +157,7 @@ Downloads.prototype.updateSummary = function() {
     this.summary_.textContent = loadTimeData.getStringF('searchresultsfor',
                                                         this.searchText_);
   } else {
-    this.summary_.textContent = loadTimeData.getString('downloads');
+    this.summary_.textContent = '';
   }
 
   var hasDownloads = false;
@@ -260,6 +269,19 @@ Downloads.prototype.isUpdateNeeded = function(downloads) {
   return false;
 };
 
+/**
+ * Handles shortcut keys.
+ * @param {Event} evt The keyboard event.
+ * @private
+ */
+Downloads.prototype.onKeyDown_ = function(evt) {
+  var keyEvt = /** @type {KeyboardEvent} */(evt);
+  if (keyEvt.keyCode == 67 && keyEvt.altKey) {  // alt + c.
+    clearAll();
+    keyEvt.preventDefault();
+  }
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // Download
 /**
@@ -301,6 +323,7 @@ function Download(download) {
   }
 
   this.nodeImg_ = createElementWithClassName('img', 'icon');
+  this.nodeImg_.alt = '';
   this.safe_.appendChild(this.nodeImg_);
 
   // FileLink is used for completed downloads, otherwise we show FileName.
@@ -383,6 +406,7 @@ function Download(download) {
   this.node.appendChild(this.danger_);
 
   this.dangerNodeImg_ = createElementWithClassName('img', 'icon');
+  this.dangerNodeImg_.alt = '';
   this.danger_.appendChild(this.dangerNodeImg_);
 
   this.dangerDesc_ = document.createElement('div');
@@ -486,15 +510,6 @@ computeDownloadProgress();
   window.matchMedia(media).addListener(computeDownloadProgress);
 });
 
-var ImageCache = {};
-function getCachedImage(src) {
-  if (!ImageCache[src]) {
-    ImageCache[src] = new Image();
-    ImageCache[src].src = src;
-  }
-  return ImageCache[src];
-}
-
 /**
  * Updates the download to reflect new data.
  * @param {BackendDownloadObject} download A backend download object
@@ -559,9 +574,8 @@ Download.prototype.update = function(download) {
       this.nodeProgressForeground_.width = Download.Progress.width;
       this.nodeProgressForeground_.height = Download.Progress.height;
 
-      var foregroundImage = getCachedImage(
-          'chrome://theme/IDR_DOWNLOAD_PROGRESS_FOREGROUND_32@' +
-          window.devicePixelRatio + 'x');
+      var foregroundImage = (window.devicePixelRatio < 2) ?
+        downloads.progressForeground1_ : downloads.progressForeground2_;
 
       // Draw a pie-slice for the progress.
       this.canvasProgress_.globalCompositeOperation = 'copy';
@@ -891,13 +905,6 @@ function load() {
   };
   openDownloadsFolderLink.oncontextmenu = function() { return false; };
 
-  $('search-link').onclick = function(e) {
-    setSearch('');
-    e.preventDefault();
-    $('term').value = '';
-    return false;
-  };
-
   $('term').onsearch = function(e) {
     setSearch($('term').value);
   };
@@ -982,3 +989,5 @@ function tryDownloadUpdatedPeriodically() {
 
 // Add handlers to HTML elements.
 window.addEventListener('DOMContentLoaded', load);
+
+preventDefaultOnPoundLinkClicks();  // From util.js.

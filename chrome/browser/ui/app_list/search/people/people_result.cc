@@ -16,11 +16,11 @@
 #include "chrome/browser/ui/app_list/search/people/person.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/common/extensions/api/hangouts_private.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/event_router.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -152,7 +152,7 @@ void PeopleResult::OpenChat() {
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetInstance()->GetForProfile(profile_);
   DCHECK(signin_manager);
-  request.from = signin_manager->GetAuthenticatedAccountId();
+  request.from = signin_manager->GetAuthenticatedUsername();
 
   // to: list of users with whom to start this hangout is with.
   linked_ptr<User> target(new User());
@@ -174,7 +174,7 @@ void PeopleResult::OpenChat() {
 void PeopleResult::SendEmail() {
   chrome::NavigateParams params(profile_,
                                 GURL(kEmailUrlPrefix + person_->email),
-                                content::PAGE_TRANSITION_LINK);
+                                ui::PAGE_TRANSITION_LINK);
   // If no window exists, this will open a new window this one tab.
   params.disposition = NEW_FOREGROUND_TAB;
   chrome::Navigate(&params);

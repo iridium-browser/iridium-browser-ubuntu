@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/pickle.h"
@@ -99,6 +100,14 @@ EmbeddedWorkerContextClient::EmbeddedWorkerContextClient(
       sender_(ChildThread::current()->thread_safe_sender()),
       main_thread_proxy_(base::MessageLoopProxy::current()),
       weak_factory_(this) {
+  TRACE_EVENT_ASYNC_BEGIN0("ServiceWorker",
+                           "EmbeddedWorkerContextClient::StartingWorkerContext",
+                           this);
+  TRACE_EVENT_ASYNC_STEP_INTO0(
+      "ServiceWorker",
+      "EmbeddedWorkerContextClient::StartingWorkerContext",
+      this,
+      "PrepareWorker");
 }
 
 EmbeddedWorkerContextClient::~EmbeddedWorkerContextClient() {
@@ -138,6 +147,10 @@ void EmbeddedWorkerContextClient::getClients(
   script_context_->GetClientDocuments(callbacks);
 }
 
+void EmbeddedWorkerContextClient::workerReadyForInspection() {
+  Send(new EmbeddedWorkerHostMsg_WorkerReadyForInspection(embedded_worker_id_));
+}
+
 void EmbeddedWorkerContextClient::workerContextFailedToStart() {
   DCHECK(main_thread_proxy_->RunsTasksOnCurrentThread());
   DCHECK(!script_context_);
@@ -150,7 +163,7 @@ void EmbeddedWorkerContextClient::workerContextFailedToStart() {
 
 void EmbeddedWorkerContextClient::workerContextStarted(
     blink::WebServiceWorkerContextProxy* proxy) {
-  DCHECK(!worker_task_runner_);
+  DCHECK(!worker_task_runner_.get());
   worker_task_runner_ = new WorkerThreadTaskRunner(
       WorkerTaskRunner::Instance()->CurrentWorkerId());
   DCHECK_NE(0, WorkerTaskRunner::Instance()->CurrentWorkerId());
@@ -161,7 +174,9 @@ void EmbeddedWorkerContextClient::workerContextStarted(
   g_worker_client_tls.Pointer()->Set(this);
   script_context_.reset(new ServiceWorkerScriptContext(this, proxy));
 
-  Send(new EmbeddedWorkerHostMsg_WorkerScriptLoaded(embedded_worker_id_));
+  Send(new EmbeddedWorkerHostMsg_WorkerScriptLoaded(
+      embedded_worker_id_,
+      WorkerTaskRunner::Instance()->CurrentWorkerId()));
 
   // Schedule a task to send back WorkerStarted asynchronously,
   // so that at the time we send it we can be sure that the worker
@@ -170,6 +185,11 @@ void EmbeddedWorkerContextClient::workerContextStarted(
       FROM_HERE,
       base::Bind(&EmbeddedWorkerContextClient::SendWorkerStarted,
                  weak_factory_.GetWeakPtr()));
+  TRACE_EVENT_ASYNC_STEP_INTO0(
+      "ServiceWorker",
+      "EmbeddedWorkerContextClient::StartingWorkerContext",
+      this,
+      "ExecuteScript");
 }
 
 void EmbeddedWorkerContextClient::willDestroyWorkerContext() {
@@ -259,7 +279,7 @@ void EmbeddedWorkerContextClient::didHandleFetchEvent(
     int request_id,
     const blink::WebServiceWorkerResponse& web_response) {
   DCHECK(script_context_);
-  std::map<std::string, std::string> headers;
+  ServiceWorkerHeaderMap headers;
   const blink::WebVector<blink::WebString>& header_keys =
       web_response.getHeaderKeys();
   for (size_t i = 0; i < header_keys.size(); ++i) {
@@ -324,9 +344,10 @@ void EmbeddedWorkerContextClient::OnMessageToWorker(
 
 void EmbeddedWorkerContextClient::SendWorkerStarted() {
   DCHECK(worker_task_runner_->RunsTasksOnCurrentThread());
-  Send(new EmbeddedWorkerHostMsg_WorkerStarted(
-      WorkerTaskRunner::Instance()->CurrentWorkerId(),
-      embedded_worker_id_));
+  TRACE_EVENT_ASYNC_END0("ServiceWorker",
+                         "EmbeddedWorkerContextClient::StartingWorkerContext",
+                         this);
+  Send(new EmbeddedWorkerHostMsg_WorkerStarted(embedded_worker_id_));
 }
 
 }  // namespace content

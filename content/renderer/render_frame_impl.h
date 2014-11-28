@@ -19,10 +19,10 @@
 #include "content/public/common/javascript_message_type.h"
 #include "content/public/common/referrer.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/renderer/media/webmediaplayer_delegate.h"
 #include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/renderer_webcookiejar_impl.h"
 #include "ipc/ipc_message.h"
+#include "media/blink/webmediaplayer_delegate.h"
 #include "third_party/WebKit/public/web/WebAXObject.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
@@ -59,9 +59,10 @@ class Rect;
 namespace content {
 
 class ChildFrameCompositingHelper;
+class ExternalPopupMenu;
 class GeolocationDispatcher;
+class ManifestManager;
 class MediaStreamDispatcher;
-class MediaStreamImpl;
 class MediaStreamRendererFactory;
 class MidiDispatcher;
 class NotificationPermissionDispatcher;
@@ -77,12 +78,13 @@ class RenderViewImpl;
 class RenderWidget;
 class RenderWidgetFullscreenPepper;
 class ScreenOrientationDispatcher;
+class UserMediaClientImpl;
 struct CustomContextMenuContext;
 
 class CONTENT_EXPORT RenderFrameImpl
     : public RenderFrame,
       NON_EXPORTED_BASE(public blink::WebFrameClient),
-      NON_EXPORTED_BASE(public WebMediaPlayerDelegate) {
+      NON_EXPORTED_BASE(public media::WebMediaPlayerDelegate) {
  public:
   // Creates a new RenderFrame. |render_view| is the RenderView object that this
   // frame belongs to.
@@ -145,9 +147,6 @@ class CONTENT_EXPORT RenderFrameImpl
   // tree. It creates all objects that depend on the frame being at its proper
   // spot.
   void Initialize();
-
-  // Notification from RenderView.
-  virtual void OnStop();
 
   // Notifications from RenderWidget.
   void WasHidden();
@@ -238,6 +237,10 @@ class CONTENT_EXPORT RenderFrameImpl
   // NULL.
   MediaStreamDispatcher* GetMediaStreamDispatcher();
 
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
+  void DidHideExternalPopupMenu();
+#endif
+
   // IPC::Sender
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
@@ -247,7 +250,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // RenderFrame implementation:
   virtual RenderView* GetRenderView() OVERRIDE;
   virtual int GetRoutingID() OVERRIDE;
-  virtual blink::WebFrame* GetWebFrame() OVERRIDE;
+  virtual blink::WebLocalFrame* GetWebFrame() OVERRIDE;
   virtual WebPreferences& GetWebkitPreferences() OVERRIDE;
   virtual int ShowContextMenu(ContextMenuClient* client,
                               const ContextMenuParams& params) OVERRIDE;
@@ -264,14 +267,21 @@ class CONTENT_EXPORT RenderFrameImpl
   virtual bool IsHidden() OVERRIDE;
   virtual ServiceRegistry* GetServiceRegistry() OVERRIDE;
   virtual bool IsFTPDirectoryListing() OVERRIDE;
+  virtual void AttachGuest(int element_instance_id) OVERRIDE;
 
   // blink::WebFrameClient implementation:
   virtual blink::WebPlugin* createPlugin(blink::WebLocalFrame* frame,
                                          const blink::WebPluginParams& params);
+  // TODO(jrummell): Remove this method once blink updated.
   virtual blink::WebMediaPlayer* createMediaPlayer(
       blink::WebLocalFrame* frame,
       const blink::WebURL& url,
       blink::WebMediaPlayerClient* client);
+  virtual blink::WebMediaPlayer* createMediaPlayer(
+      blink::WebLocalFrame* frame,
+      const blink::WebURL& url,
+      blink::WebMediaPlayerClient* client,
+      blink::WebContentDecryptionModule* initial_cdm);
   virtual blink::WebContentDecryptionModule* createContentDecryptionModule(
       blink::WebLocalFrame* frame,
       const blink::WebSecurityOrigin& security_origin,
@@ -281,6 +291,9 @@ class CONTENT_EXPORT RenderFrameImpl
       blink::WebApplicationCacheHostClient* client);
   virtual blink::WebWorkerPermissionClientProxy*
       createWorkerPermissionClientProxy(blink::WebLocalFrame* frame);
+  virtual blink::WebExternalPopupMenu* createExternalPopupMenu(
+      const blink::WebPopupMenuInfo& popup_menu_info,
+      blink::WebExternalPopupMenuClient* popup_menu_client);
   virtual blink::WebCookieJar* cookieJar(blink::WebLocalFrame* frame);
   virtual blink::WebServiceWorkerProvider* createServiceWorkerProvider(
       blink::WebLocalFrame* frame);
@@ -428,9 +441,11 @@ class CONTENT_EXPORT RenderFrameImpl
   virtual void didLoseWebGLContext(blink::WebLocalFrame* frame,
                                    int arb_robustness_status_code);
   virtual void forwardInputEvent(const blink::WebInputEvent* event);
-  virtual void initializeChildFrame(const blink::WebRect& frame_rect,
-                                    float scale_factor);
   virtual blink::WebScreenOrientationClient* webScreenOrientationClient();
+  virtual bool isControlledByServiceWorker();
+  virtual void postAccessibilityEvent(const blink::WebAXObject& obj,
+                                      blink::WebAXEvent event);
+  virtual void didChangeManifest(blink::WebLocalFrame*);
 
   // WebMediaPlayerDelegate implementation:
   virtual void DidPlay(blink::WebMediaPlayer* player) OVERRIDE;
@@ -452,6 +467,10 @@ class CONTENT_EXPORT RenderFrameImpl
  private:
   friend class RenderFrameObserver;
   friend class RendererAccessibilityTest;
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuDisplayNoneTest, SelectItem);
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuRemoveTest, RemoveOnChange);
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, NormalCase);
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, ShowPopupThenNavigate);
   FRIEND_TEST_ALL_PREFIXES(RendererAccessibilityTest,
                            AccessibilityMessagesQueueWhileSwappedOut);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameImplTest,
@@ -484,6 +503,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // content/common/*_messages.h for the message that the function is handling.
   void OnBeforeUnload();
   void OnSwapOut(int proxy_routing_id);
+  void OnStop();
   void OnShowContextMenu(const gfx::Point& location);
   void OnContextMenuClosed(const CustomContextMenuContext& custom_context);
   void OnCustomContextMenuAction(const CustomContextMenuContext& custom_context,
@@ -504,6 +524,9 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnJavaScriptExecuteRequest(const base::string16& javascript,
                                   int id,
                                   bool notify_result);
+  void OnJavaScriptExecuteRequestForTests(const base::string16& javascript,
+                                          int id,
+                                          bool notify_result);
   void OnSetEditableSelectionOffsets(int start, int end);
   void OnSetCompositionFromExistingText(
       int start, int end,
@@ -515,7 +538,12 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnSetupTransitionView(const std::string& markup);
   void OnBeginExitTransition(const std::string& css_selector);
   void OnSetAccessibilityMode(AccessibilityMode new_mode);
-#if defined(OS_MACOSX)
+  void OnDisownOpener();
+#if defined(OS_ANDROID)
+  void OnSelectPopupMenuItems(bool canceled,
+                              const std::vector<int>& selected_indices);
+#elif defined(OS_MACOSX)
+  void OnSelectPopupMenuItem(int selected_index);
   void OnCopyToFindPboard();
 #endif
 
@@ -569,6 +597,11 @@ class CONTENT_EXPORT RenderFrameImpl
                                const blink::WebURLError& error,
                                bool replace);
 
+  void HandleJavascriptExecutionResult(const base::string16& javascript,
+                                       int id,
+                                       bool notify_result,
+                                       v8::Handle<v8::Value> result);
+
   // Initializes |web_user_media_client_|. If this fails, because it wasn't
   // possible to create a MediaStreamClient (e.g., WebRTC is disabled), then
   // |web_user_media_client_| will remain NULL.
@@ -588,7 +621,8 @@ class CONTENT_EXPORT RenderFrameImpl
 #if defined(OS_ANDROID)
   blink::WebMediaPlayer* CreateAndroidWebMediaPlayer(
       const blink::WebURL& url,
-      blink::WebMediaPlayerClient* client);
+      blink::WebMediaPlayerClient* client,
+      blink::WebContentDecryptionModule* initial_cdm);
 
   RendererMediaPlayerManager* GetMediaPlayerManager();
 #endif
@@ -665,7 +699,7 @@ class CONTENT_EXPORT RenderFrameImpl
   NotificationProvider* notification_provider_;
 
   // Destroyed via the RenderFrameObserver::OnDestruct() mechanism.
-  MediaStreamImpl* web_user_media_client_;
+  UserMediaClientImpl* web_user_media_client_;
 
   // MidiClient attached to this frame; lazily initialized.
   MidiDispatcher* midi_dispatcher_;
@@ -702,12 +736,21 @@ class CONTENT_EXPORT RenderFrameImpl
   // initialized.
   ScreenOrientationDispatcher* screen_orientation_dispatcher_;
 
+  // The Manifest Manager handles the manifest requests from the browser
+  // process.
+  ManifestManager* manifest_manager_;
+
   // The current accessibility mode.
   AccessibilityMode accessibility_mode_;
 
   // Only valid if |accessibility_mode_| is anything other than
   // AccessibilityModeOff.
   RendererAccessibility* renderer_accessibility_;
+
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
+  // The external popup for the currently showing select popup.
+  scoped_ptr<ExternalPopupMenu> external_popup_menu_;
+#endif
 
   base::WeakPtrFactory<RenderFrameImpl> weak_factory_;
 

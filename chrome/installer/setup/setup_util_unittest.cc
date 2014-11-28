@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process/kill.h"
@@ -21,8 +21,8 @@
 #include "base/version.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
-#include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/setup/setup_constants.h"
+#include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/installer_state.h"
@@ -66,13 +66,15 @@ bool CurrentProcessHasPrivilege(const wchar_t* privilege_name) {
 
   // First get the size of the buffer needed for |privileges| below.
   DWORD size;
-  EXPECT_FALSE(::GetTokenInformation(token, TokenPrivileges, NULL, 0, &size));
+  EXPECT_FALSE(::GetTokenInformation(token.Get(), TokenPrivileges, NULL, 0,
+                                     &size));
 
   scoped_ptr<BYTE[]> privileges_bytes(new BYTE[size]);
   TOKEN_PRIVILEGES* privileges =
       reinterpret_cast<TOKEN_PRIVILEGES*>(privileges_bytes.get());
 
-  if (!::GetTokenInformation(token, TokenPrivileges, privileges, size, &size)) {
+  if (!::GetTokenInformation(token.Get(), TokenPrivileges, privileges, size,
+                             &size)) {
     ADD_FAILURE();
     return false;
   }
@@ -408,8 +410,7 @@ namespace {
 class MigrateMultiToSingleTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
-    registry_override_manager_.OverrideRegistry(kRootKey,
-                                                L"MigrateMultiToSingleTest");
+    registry_override_manager_.OverrideRegistry(kRootKey);
   }
 
   static const bool kSystemLevel = false;

@@ -4,38 +4,38 @@
 
 #include "content/public/test/sandbox_file_system_test_helper.h"
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_file_system_context.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_file_util.h"
+#include "storage/browser/fileapi/file_system_operation_context.h"
+#include "storage/browser/fileapi/file_system_operation_runner.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/fileapi/file_system_usage_cache.h"
+#include "storage/browser/fileapi/sandbox_file_system_backend.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
+#include "storage/common/fileapi/file_system_util.h"
 #include "url/gurl.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_file_util.h"
-#include "webkit/browser/fileapi/file_system_operation_context.h"
-#include "webkit/browser/fileapi/file_system_operation_runner.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/fileapi/file_system_usage_cache.h"
-#include "webkit/browser/fileapi/sandbox_file_system_backend.h"
-#include "webkit/browser/quota/quota_manager_proxy.h"
-#include "webkit/common/fileapi/file_system_util.h"
 
-using fileapi::FileSystemContext;
-using fileapi::FileSystemOperationContext;
-using fileapi::FileSystemOperationRunner;
-using fileapi::FileSystemURL;
+using storage::FileSystemContext;
+using storage::FileSystemOperationContext;
+using storage::FileSystemOperationRunner;
+using storage::FileSystemURL;
 
 namespace content {
 
 SandboxFileSystemTestHelper::SandboxFileSystemTestHelper(
     const GURL& origin,
-    fileapi::FileSystemType type)
+    storage::FileSystemType type)
     : origin_(origin), type_(type), file_util_(NULL) {
 }
 
 SandboxFileSystemTestHelper::SandboxFileSystemTestHelper()
     : origin_(GURL("http://foo.com")),
-      type_(fileapi::kFileSystemTypeTemporary),
+      type_(storage::kFileSystemTypeTemporary),
       file_util_(NULL) {
 }
 
@@ -55,7 +55,7 @@ void SandboxFileSystemTestHelper::SetUp(
 
 void SandboxFileSystemTestHelper::SetUp(
     const base::FilePath& base_dir,
-    quota::QuotaManagerProxy* quota_manager_proxy) {
+    storage::QuotaManagerProxy* quota_manager_proxy) {
   file_system_context_ = CreateFileSystemContextForTesting(
       quota_manager_proxy, base_dir);
 
@@ -106,7 +106,7 @@ int64 SandboxFileSystemTestHelper::ComputeCurrentOriginUsage() {
   usage_cache()->CloseCacheFiles();
   int64 size = base::ComputeDirectorySize(GetOriginRootPath());
   if (base::PathExists(GetUsageCachePath()))
-    size -= fileapi::FileSystemUsageCache::kUsageFileSize;
+    size -= storage::FileSystemUsageCache::kUsageFileSize;
   return size;
 }
 
@@ -131,12 +131,18 @@ SandboxFileSystemTestHelper::NewOperationContext() {
 }
 
 void SandboxFileSystemTestHelper::AddFileChangeObserver(
-    fileapi::FileChangeObserver* observer) {
-  file_system_context_->sandbox_backend()->GetQuotaUtil()->
-      AddFileChangeObserver(type_, observer, NULL);
+    storage::FileChangeObserver* observer) {
+  file_system_context_->sandbox_delegate()->AddFileChangeObserver(
+      type_, observer, NULL);
 }
 
-fileapi::FileSystemUsageCache* SandboxFileSystemTestHelper::usage_cache() {
+void SandboxFileSystemTestHelper::AddFileUpdateObserver(
+    storage::FileUpdateObserver* observer) {
+  file_system_context_->sandbox_delegate()->AddFileUpdateObserver(
+      type_, observer, NULL);
+}
+
+storage::FileSystemUsageCache* SandboxFileSystemTestHelper::usage_cache() {
   return file_system_context()->sandbox_delegate()->usage_cache();
 }
 

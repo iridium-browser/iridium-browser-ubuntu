@@ -23,6 +23,8 @@ using testing::_;
 
 namespace {
 
+void IgnoreInitializationStatus(CastInitializationStatus status) {}
+
 class VEAFactory {
  public:
   VEAFactory(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
@@ -117,7 +119,7 @@ class ExternalVideoEncoderTest : public ::testing::Test {
     gfx::Size size(video_config_.width, video_config_.height);
     video_frame_ = media::VideoFrame::CreateFrame(
         VideoFrame::I420, size, gfx::Rect(size), size, base::TimeDelta());
-    PopulateVideoFrame(video_frame_, 123);
+    PopulateVideoFrame(video_frame_.get(), 123);
 
     testing_clock_ = new base::SimpleTestTickClock();
     task_runner_ = new test::FakeSingleThreadTaskRunner(testing_clock_);
@@ -134,6 +136,7 @@ class ExternalVideoEncoderTest : public ::testing::Test {
     video_encoder_.reset(new ExternalVideoEncoder(
         cast_environment_,
         video_config_,
+        base::Bind(&IgnoreInitializationStatus),
         base::Bind(&VEAFactory::CreateVideoEncodeAccelerator,
                    base::Unretained(&vea_factory)),
         base::Bind(&CreateSharedMemory)));
@@ -229,6 +232,7 @@ TEST(ExternalVideoEncoderEarlyDestroyTest, DestroyBeforeVEACreatedCallback) {
   scoped_ptr<ExternalVideoEncoder> video_encoder(new ExternalVideoEncoder(
       cast_environment,
       video_config,
+      base::Bind(&IgnoreInitializationStatus),
       base::Bind(&VEAFactory::CreateVideoEncodeAccelerator,
                  base::Unretained(&vea_factory)),
       base::Bind(&CreateSharedMemory)));

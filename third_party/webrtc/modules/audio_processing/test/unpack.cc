@@ -22,17 +22,11 @@
 #include "webrtc/typedefs.h"
 
 // TODO(andrew): unpack more of the data.
-DEFINE_string(input_file, "input.pcm", "The name of the input stream file.");
-DEFINE_string(float_input_file, "input.float",
-              "The name of the float input stream file.");
-DEFINE_string(output_file, "ref_out.pcm",
+DEFINE_string(input_file, "input", "The name of the input stream file.");
+DEFINE_string(output_file, "ref_out",
               "The name of the reference output stream file.");
-DEFINE_string(float_output_file, "ref_out.float",
-              "The name of the float reference output stream file.");
-DEFINE_string(reverse_file, "reverse.pcm",
+DEFINE_string(reverse_file, "reverse",
               "The name of the reverse input stream file.");
-DEFINE_string(float_reverse_file, "reverse.float",
-              "The name of the float reverse input stream file.");
 DEFINE_string(delay_file, "delay.int32", "The name of the delay file.");
 DEFINE_string(drift_file, "drift.int32", "The name of the drift file.");
 DEFINE_string(level_file, "level.int32", "The name of the level file.");
@@ -40,6 +34,7 @@ DEFINE_string(keypress_file, "keypress.bool", "The name of the keypress file.");
 DEFINE_string(settings_file, "settings.txt", "The name of the settings file.");
 DEFINE_bool(full, false,
             "Unpack the full set of files (normally not needed).");
+DEFINE_bool(raw, false, "Write raw data instead of a WAV file.");
 
 namespace webrtc {
 
@@ -72,7 +67,19 @@ int do_main(int argc, char* argv[]) {
 
   Event event_msg;
   int frame_count = 0;
-while (ReadMessageFromFile(debug_file, &event_msg)) {
+  int reverse_samples_per_channel = 0;
+  int input_samples_per_channel = 0;
+  int output_samples_per_channel = 0;
+  int num_reverse_channels = 0;
+  int num_input_channels = 0;
+  int num_output_channels = 0;
+  scoped_ptr<WavFile> reverse_wav_file;
+  scoped_ptr<WavFile> input_wav_file;
+  scoped_ptr<WavFile> output_wav_file;
+  scoped_ptr<RawFile> reverse_raw_file;
+  scoped_ptr<RawFile> input_raw_file;
+  scoped_ptr<RawFile> output_raw_file;
+  while (ReadMessageFromFile(debug_file, &event_msg)) {
     if (event_msg.type() == Event::REVERSE_STREAM) {
       if (!event_msg.has_reverse_stream()) {
         printf("Corrupt input file: ReverseStream missing.\n");
@@ -81,17 +88,30 @@ while (ReadMessageFromFile(debug_file, &event_msg)) {
 
       const ReverseStream msg = event_msg.reverse_stream();
       if (msg.has_data()) {
-        static FILE* reverse_file = OpenFile(FLAGS_reverse_file, "wb");
-        WriteData(msg.data().data(), msg.data().size(), reverse_file,
-                  FLAGS_reverse_file);
-
+        if (FLAGS_raw && !reverse_raw_file) {
+          reverse_raw_file.reset(new RawFile(FLAGS_reverse_file + ".pcm"));
+        }
+        // TODO(aluebs): Replace "num_reverse_channels *
+        // reverse_samples_per_channel" with "msg.data().size() /
+        // sizeof(int16_t)" and so on when this fix in audio_processing has made
+        // it into stable: https://webrtc-codereview.appspot.com/15299004/
+        WriteIntData(reinterpret_cast<const int16_t*>(msg.data().data()),
+                     num_reverse_channels * reverse_samples_per_channel,
+                     reverse_wav_file.get(),
+                     reverse_raw_file.get());
       } else if (msg.channel_size() > 0) {
-        static FILE* float_reverse_file = OpenFile(FLAGS_float_reverse_file,
-                                                   "wb");
-        // TODO(ajm): Interleave multiple channels.
-        assert(msg.channel_size() == 1);
-        WriteData(msg.channel(0).data(), msg.channel(0).size(),
-                  float_reverse_file, FLAGS_reverse_file);
+        if (FLAGS_raw && !reverse_raw_file) {
+          reverse_raw_file.reset(new RawFile(FLAGS_reverse_file + ".float"));
+        }
+        scoped_ptr<const float*[]> data(new const float*[num_reverse_channels]);
+        for (int i = 0; i < num_reverse_channels; ++i) {
+          data[i] = reinterpret_cast<const float*>(msg.channel(i).data());
+        }
+        WriteFloatData(data.get(),
+                       reverse_samples_per_channel,
+                       num_reverse_channels,
+                       reverse_wav_file.get(),
+                       reverse_raw_file.get());
       }
     } else if (event_msg.type() == Event::STREAM) {
       frame_count++;
@@ -102,30 +122,50 @@ while (ReadMessageFromFile(debug_file, &event_msg)) {
 
       const Stream msg = event_msg.stream();
       if (msg.has_input_data()) {
-        static FILE* input_file = OpenFile(FLAGS_input_file, "wb");
-        WriteData(msg.input_data().data(), msg.input_data().size(),
-                  input_file, FLAGS_input_file);
-
+        if (FLAGS_raw && !input_raw_file) {
+          input_raw_file.reset(new RawFile(FLAGS_input_file + ".pcm"));
+        }
+        WriteIntData(reinterpret_cast<const int16_t*>(msg.input_data().data()),
+                     num_input_channels * input_samples_per_channel,
+                     input_wav_file.get(),
+                     input_raw_file.get());
       } else if (msg.input_channel_size() > 0) {
-        static FILE* float_input_file = OpenFile(FLAGS_float_input_file, "wb");
-        // TODO(ajm): Interleave multiple channels.
-        assert(msg.input_channel_size() == 1);
-        WriteData(msg.input_channel(0).data(), msg.input_channel(0).size(),
-                  float_input_file, FLAGS_float_input_file);
+        if (FLAGS_raw && !input_raw_file) {
+          input_raw_file.reset(new RawFile(FLAGS_input_file + ".float"));
+        }
+        scoped_ptr<const float*[]> data(new const float*[num_input_channels]);
+        for (int i = 0; i < num_input_channels; ++i) {
+          data[i] = reinterpret_cast<const float*>(msg.input_channel(i).data());
+        }
+        WriteFloatData(data.get(),
+                       input_samples_per_channel,
+                       num_input_channels,
+                       input_wav_file.get(),
+                       input_raw_file.get());
       }
 
       if (msg.has_output_data()) {
-        static FILE* output_file = OpenFile(FLAGS_output_file, "wb");
-        WriteData(msg.output_data().data(), msg.output_data().size(),
-                  output_file, FLAGS_output_file);
-
+        if (FLAGS_raw && !output_raw_file) {
+          output_raw_file.reset(new RawFile(FLAGS_output_file + ".pcm"));
+        }
+        WriteIntData(reinterpret_cast<const int16_t*>(msg.output_data().data()),
+                     num_output_channels * output_samples_per_channel,
+                     output_wav_file.get(),
+                     output_raw_file.get());
       } else if (msg.output_channel_size() > 0) {
-        static FILE* float_output_file = OpenFile(FLAGS_float_output_file,
-                                                  "wb");
-        // TODO(ajm): Interleave multiple channels.
-        assert(msg.output_channel_size() == 1);
-        WriteData(msg.output_channel(0).data(), msg.output_channel(0).size(),
-                  float_output_file, FLAGS_float_output_file);
+        if (FLAGS_raw && !output_raw_file) {
+          output_raw_file.reset(new RawFile(FLAGS_output_file + ".float"));
+        }
+        scoped_ptr<const float*[]> data(new const float*[num_output_channels]);
+        for (int i = 0; i < num_output_channels; ++i) {
+          data[i] =
+              reinterpret_cast<const float*>(msg.output_channel(i).data());
+        }
+        WriteFloatData(data.get(),
+                       output_samples_per_channel,
+                       num_output_channels,
+                       output_wav_file.get(),
+                       output_raw_file.get());
       }
 
       if (FLAGS_full) {
@@ -164,15 +204,47 @@ while (ReadMessageFromFile(debug_file, &event_msg)) {
       const Init msg = event_msg.init();
       // These should print out zeros if they're missing.
       fprintf(settings_file, "Init at frame: %d\n", frame_count);
-      fprintf(settings_file, "  Sample rate: %d\n", msg.sample_rate());
-      fprintf(settings_file, "  Input channels: %d\n",
-              msg.num_input_channels());
-      fprintf(settings_file, "  Output channels: %d\n",
-              msg.num_output_channels());
-      fprintf(settings_file, "  Reverse channels: %d\n",
-              msg.num_reverse_channels());
+      int input_sample_rate = msg.sample_rate();
+      fprintf(settings_file, "  Input sample rate: %d\n", input_sample_rate);
+      int output_sample_rate = msg.output_sample_rate();
+      fprintf(settings_file, "  Output sample rate: %d\n", output_sample_rate);
+      int reverse_sample_rate = msg.reverse_sample_rate();
+      fprintf(settings_file,
+              "  Reverse sample rate: %d\n",
+              reverse_sample_rate);
+      num_input_channels = msg.num_input_channels();
+      fprintf(settings_file, "  Input channels: %d\n", num_input_channels);
+      num_output_channels = msg.num_output_channels();
+      fprintf(settings_file, "  Output channels: %d\n", num_output_channels);
+      num_reverse_channels = msg.num_reverse_channels();
+      fprintf(settings_file, "  Reverse channels: %d\n", num_reverse_channels);
 
       fprintf(settings_file, "\n");
+
+      if (reverse_sample_rate == 0) {
+        reverse_sample_rate = input_sample_rate;
+      }
+      if (output_sample_rate == 0) {
+        output_sample_rate = input_sample_rate;
+      }
+
+      reverse_samples_per_channel = reverse_sample_rate / 100;
+      input_samples_per_channel = input_sample_rate / 100;
+      output_samples_per_channel = output_sample_rate / 100;
+
+      if (!FLAGS_raw) {
+        // The WAV files need to be reset every time, because they cant change
+        // their sample rate or number of channels.
+        reverse_wav_file.reset(new WavFile(FLAGS_reverse_file + ".wav",
+                                           reverse_sample_rate,
+                                           num_reverse_channels));
+        input_wav_file.reset(new WavFile(FLAGS_input_file + ".wav",
+                                         input_sample_rate,
+                                         num_input_channels));
+        output_wav_file.reset(new WavFile(FLAGS_output_file + ".wav",
+                                          output_sample_rate,
+                                          num_output_channels));
+      }
     }
   }
 

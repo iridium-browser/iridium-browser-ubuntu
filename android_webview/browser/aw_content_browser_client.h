@@ -152,16 +152,10 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                                int render_process_id,
                                int opener_id,
                                bool* no_javascript_access) OVERRIDE;
-  virtual std::string GetWorkerProcessTitle(
-      const GURL& url,
-      content::ResourceContext* context) OVERRIDE;
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual net::NetLog* GetNetLog() OVERRIDE;
   virtual content::AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
   virtual bool IsFastShutdownPossible() OVERRIDE;
-  virtual void UpdateInspectorSetting(content::RenderViewHost* rvh,
-                                      const std::string& key,
-                                      const std::string& value) OVERRIDE;
   virtual void ClearCache(content::RenderViewHost* rvh) OVERRIDE;
   virtual void ClearCookies(content::RenderViewHost* rvh) OVERRIDE;
   virtual base::FilePath GetDefaultDownloadDirectory() OVERRIDE;
@@ -181,6 +175,8 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       OverrideCreateExternalVideoSurfaceContainer(
           content::WebContents* web_contents) OVERRIDE;
 #endif
+  virtual content::DevToolsManagerDelegate*
+      GetDevToolsManagerDelegate() OVERRIDE;
 
  private:
   // Android WebView currently has a single global (non-off-the-record) browser

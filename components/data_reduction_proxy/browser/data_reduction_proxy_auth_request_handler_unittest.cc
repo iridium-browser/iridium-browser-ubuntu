@@ -127,7 +127,7 @@ class DataReductionProxyAuthRequestHandlerTest : public testing::Test {
   base::MessageLoopProxy* loop_proxy_;
 };
 
-TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
+TEST_F(DataReductionProxyAuthRequestHandlerTest, AuthorizationOnIO) {
   scoped_ptr<TestDataReductionProxyParams> params;
   params.reset(
       new TestDataReductionProxyParams(
@@ -135,7 +135,10 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
           DataReductionProxyParams::kFallbackAllowed |
           DataReductionProxyParams::kPromoAllowed,
           TestDataReductionProxyParams::HAS_EVERYTHING &
-          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN));
+          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+          ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
+  // loop_proxy_ is just the current message loop. This means loop_proxy_
+  // is the network thread used by DataReductionProxyAuthRequestHandler.
   TestDataReductionProxyAuthRequestHandler auth_handler(kClient,
                                                         kVersion,
                                                         params.get(),
@@ -150,7 +153,7 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
   EXPECT_EQ(kExpectedSession, auth_handler.session_);
 
   // Now set a key.
-  auth_handler.SetKeyOnUI(kTestKey2);
+  auth_handler.InitAuthentication(kTestKey2);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(kTestKey2, auth_handler.key_);
   EXPECT_EQ(kExpectedCredentials2, auth_handler.credentials_);
@@ -168,7 +171,17 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
       &headers);
   EXPECT_FALSE(headers.HasHeader(kChromeProxyHeader));
 
-  // Write headers with a valid data reduction proxy;
+  // Don't write headers with a valid data reduction ssl proxy.
+  auth_handler.MaybeAddRequestHeader(
+      NULL,
+      net::ProxyServer::FromURI(
+          net::HostPortPair::FromURL(
+              GURL(params->DefaultSSLOrigin())).ToString(),
+          net::ProxyServer::SCHEME_HTTP),
+      &headers);
+  EXPECT_FALSE(headers.HasHeader(kChromeProxyHeader));
+
+  // Write headers with a valid data reduction proxy.
   auth_handler.MaybeAddRequestHeader(
       NULL,
       net::ProxyServer::FromURI(
@@ -180,10 +193,20 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
   headers.GetHeader(kChromeProxyHeader, &header_value);
   EXPECT_EQ(kExpectedHeader2, header_value);
 
+  // Write headers with a valid data reduction ssl proxy when one is expected.
+  net::HttpRequestHeaders ssl_headers;
+  auth_handler.MaybeAddProxyTunnelRequestHandler(
+      net::HostPortPair::FromURL(GURL(params->DefaultSSLOrigin())),
+      &ssl_headers);
+  EXPECT_TRUE(ssl_headers.HasHeader(kChromeProxyHeader));
+  std::string ssl_header_value;
+  ssl_headers.GetHeader(kChromeProxyHeader, &ssl_header_value);
+  EXPECT_EQ(kExpectedHeader2, ssl_header_value);
+
   // Fast forward 24 hours. The header should be the same.
   auth_handler.set_offset(base::TimeDelta::FromSeconds(24 * 60 * 60));
   net::HttpRequestHeaders headers2;
-  // Write headers with a valid data reduction proxy;
+  // Write headers with a valid data reduction proxy.
   auth_handler.MaybeAddRequestHeader(
       NULL,
       net::ProxyServer::FromURI(
@@ -198,7 +221,7 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
   // Fast forward one more second. The header should be new.
   auth_handler.set_offset(base::TimeDelta::FromSeconds(24 * 60 * 60 + 1));
   net::HttpRequestHeaders headers3;
-  // Write headers with a valid data reduction proxy;
+  // Write headers with a valid data reduction proxy.
   auth_handler.MaybeAddRequestHeader(
       NULL,
       net::ProxyServer::FromURI(
@@ -211,6 +234,40 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, Authorization) {
   EXPECT_EQ(kExpectedHeader3, header_value3);
 }
 
+TEST_F(DataReductionProxyAuthRequestHandlerTest, AuthorizationIgnoresEmptyKey) {
+scoped_ptr<TestDataReductionProxyParams> params;
+  params.reset(
+      new TestDataReductionProxyParams(
+          DataReductionProxyParams::kAllowed |
+          DataReductionProxyParams::kFallbackAllowed |
+          DataReductionProxyParams::kPromoAllowed,
+          TestDataReductionProxyParams::HAS_EVERYTHING &
+          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+          ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
+  // loop_proxy_ is just the current message loop. This means loop_proxy_
+  // is the network thread used by DataReductionProxyAuthRequestHandler.
+  TestDataReductionProxyAuthRequestHandler auth_handler(kClient,
+                                                        kVersion,
+                                                        params.get(),
+                                                        loop_proxy_);
+  auth_handler.Init();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(auth_handler.client_, kClient);
+  EXPECT_EQ(kExpectedBuild, auth_handler.build_number_);
+  EXPECT_EQ(kExpectedPatch, auth_handler.patch_number_);
+  EXPECT_EQ(auth_handler.key_, kTestKey);
+  EXPECT_EQ(kExpectedCredentials, auth_handler.credentials_);
+  EXPECT_EQ(kExpectedSession, auth_handler.session_);
+
+  // Now set an empty key. The auth handler should ignore that, and the key
+  // remains |kTestKey|.
+  auth_handler.InitAuthentication("");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(auth_handler.key_, kTestKey);
+  EXPECT_EQ(kExpectedCredentials, auth_handler.credentials_);
+  EXPECT_EQ(kExpectedSession, auth_handler.session_);
+}
+
 TEST_F(DataReductionProxyAuthRequestHandlerTest, AuthorizationBogusVersion) {
   scoped_ptr<TestDataReductionProxyParams> params;
   params.reset(
@@ -219,7 +276,8 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, AuthorizationBogusVersion) {
           DataReductionProxyParams::kFallbackAllowed |
           DataReductionProxyParams::kPromoAllowed,
           TestDataReductionProxyParams::HAS_EVERYTHING &
-          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN));
+          ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+          ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
   TestDataReductionProxyAuthRequestHandler auth_handler(kClient,
                                                         kBogusVersion,
                                                         params.get(),
@@ -228,7 +286,7 @@ TEST_F(DataReductionProxyAuthRequestHandlerTest, AuthorizationBogusVersion) {
   EXPECT_TRUE(auth_handler.patch_number_.empty());
 
   // Now set a key.
-  auth_handler.SetKeyOnUI(kTestKey2);
+  auth_handler.InitAuthentication(kTestKey2);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(kTestKey2, auth_handler.key_);
   EXPECT_EQ(kExpectedCredentials2, auth_handler.credentials_);

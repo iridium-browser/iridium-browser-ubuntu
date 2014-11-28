@@ -11,15 +11,10 @@
 #ifndef NATIVE_CLIENT_SRC_TRUSTED_PLUGIN_SERVICE_RUNTIME_H_
 #define NATIVE_CLIENT_SRC_TRUSTED_PLUGIN_SERVICE_RUNTIME_H_
 
-#include <set>
-
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
-#include "native_client/src/include/nacl_string.h"
 #include "native_client/src/shared/platform/nacl_sync.h"
 #include "native_client/src/shared/srpc/nacl_srpc.h"
-#include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
-#include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 #include "native_client/src/trusted/reverse_service/reverse_service.h"
 #include "native_client/src/trusted/weak_ref/weak_ref.h"
 
@@ -27,10 +22,6 @@
 #include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 struct NaClFileInfo;
-
-namespace nacl {
-class DescWrapper;
-}  // namespace
 
 namespace plugin {
 
@@ -43,7 +34,7 @@ class ServiceRuntime;
 // Struct of params used by StartSelLdr.  Use a struct so that callback
 // creation templates aren't overwhelmed with too many parameters.
 struct SelLdrStartParams {
-  SelLdrStartParams(const nacl::string& url,
+  SelLdrStartParams(const std::string& url,
                     const PP_NaClFileInfo& file_info,
                     bool uses_irt,
                     bool uses_ppapi,
@@ -58,7 +49,7 @@ struct SelLdrStartParams {
         enable_exception_handling(enable_exception_handling),
         enable_crash_throttling(enable_crash_throttling) {
   }
-  nacl::string url;
+  std::string url;
   PP_NaClFileInfo file_info;
   bool uses_irt;
   bool uses_ppapi;
@@ -96,18 +87,17 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   PluginReverseInterface(nacl::WeakRefAnchor* anchor,
                          PP_Instance pp_instance,
                          ServiceRuntime* service_runtime,
-                         pp::CompletionCallback init_done_cb,
-                         pp::CompletionCallback crash_cb);
+                         pp::CompletionCallback init_done_cb);
 
   virtual ~PluginReverseInterface();
 
   void ShutDown();
 
-  virtual void DoPostMessage(nacl::string message);
+  virtual void DoPostMessage(std::string message);
 
   virtual void StartupInitializationComplete();
 
-  virtual bool OpenManifestEntry(nacl::string url_key,
+  virtual bool OpenManifestEntry(std::string url_key,
                                  struct NaClFileInfo *info);
 
   virtual void ReportCrash();
@@ -116,7 +106,7 @@ class PluginReverseInterface: public nacl::ReverseInterface {
 
   // TODO(teravest): Remove this method once it's gone from
   // nacl::ReverseInterface.
-  virtual int64_t RequestQuotaForWrite(nacl::string file_id,
+  virtual int64_t RequestQuotaForWrite(std::string file_id,
                                        int64_t offset,
                                        int64_t bytes_to_write);
 
@@ -139,20 +129,16 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   bool shutting_down_;
 
   pp::CompletionCallback init_done_cb_;
-  pp::CompletionCallback crash_cb_;
 };
 
 //  ServiceRuntime abstracts a NativeClient sel_ldr instance.
 class ServiceRuntime {
  public:
-  // TODO(sehr): This class should also implement factory methods, using the
-  // Start method below.
   ServiceRuntime(Plugin* plugin,
                  PP_Instance pp_instance,
                  bool main_service_runtime,
                  bool uses_nonsfi_mode,
-                 pp::CompletionCallback init_done_cb,
-                 pp::CompletionCallback crash_cb);
+                 pp::CompletionCallback init_done_cb);
   // The destructor terminates the sel_ldr process.
   ~ServiceRuntime();
 
@@ -186,18 +172,9 @@ class ServiceRuntime {
   // Starts the application channel to the nexe.
   SrpcClient* SetupAppChannel();
 
-  bool RemoteLog(int severity, const nacl::string& msg);
+  bool RemoteLog(int severity, const std::string& msg);
   Plugin* plugin() const { return plugin_; }
   void Shutdown();
-
-  // exit_status is -1 when invalid; when we set it, we will ensure
-  // that it is non-negative (the portion of the exit status from the
-  // nexe that is transferred is the low 8 bits of the argument to the
-  // exit syscall).
-  int exit_status();  // const, but grabs mutex etc.
-  void set_exit_status(int exit_status);
-
-  nacl::string GetCrashLogOutput();
 
   bool main_service_runtime() const { return main_service_runtime_; }
 

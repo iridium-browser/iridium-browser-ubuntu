@@ -26,6 +26,8 @@
 #include "config.h"
 #include "core/dom/PendingScript.h"
 
+#include "bindings/core/v8/ScriptSourceCode.h"
+#include "bindings/core/v8/ScriptStreamer.h"
 #include "core/dom/Element.h"
 #include "core/fetch/ScriptResource.h"
 
@@ -35,11 +37,42 @@ PendingScript::~PendingScript()
 {
 }
 
+void PendingScript::watchForLoad(ScriptResourceClient* client)
+{
+    ASSERT(!m_watchingForLoad);
+    ASSERT(!isReady());
+    if (m_streamer) {
+        m_streamer->addClient(client);
+    } else {
+        // addClient() will call notifyFinished() if the load is
+        // complete. Callers do not expect to be re-entered from this call, so
+        // they should not become a client of an already-loaded Resource.
+        resource()->addClient(client);
+    }
+    m_watchingForLoad = true;
+}
+
+void PendingScript::stopWatchingForLoad(ScriptResourceClient* client)
+{
+    if (!m_watchingForLoad)
+        return;
+    ASSERT(resource());
+    if (m_streamer) {
+        m_streamer->cancel();
+        m_streamer->removeClient(client);
+        m_streamer.clear();
+    } else {
+        resource()->removeClient(client);
+    }
+    m_watchingForLoad = false;
+}
+
 PassRefPtrWillBeRawPtr<Element> PendingScript::releaseElementAndClear()
 {
     setScriptResource(0);
     m_watchingForLoad = false;
     m_startingPosition = TextPosition::belowRangePosition();
+    m_streamer.release();
     return m_element.release();
 }
 
@@ -48,13 +81,43 @@ void PendingScript::setScriptResource(ScriptResource* resource)
     setResource(resource);
 }
 
-void PendingScript::notifyFinished(Resource*)
+void PendingScript::notifyFinished(Resource* resource)
 {
+    if (m_streamer)
+        m_streamer->notifyFinished(resource);
+}
+
+void PendingScript::notifyAppendData(ScriptResource* resource)
+{
+    if (m_streamer)
+        m_streamer->notifyAppendData(resource);
 }
 
 void PendingScript::trace(Visitor* visitor)
 {
     visitor->trace(m_element);
+}
+
+ScriptSourceCode PendingScript::getSource(const KURL& documentURL, bool& errorOccurred) const
+{
+    if (resource()) {
+        errorOccurred = resource()->errorOccurred();
+        ASSERT(resource()->isLoaded());
+        if (m_streamer && !m_streamer->streamingSuppressed())
+            return ScriptSourceCode(m_streamer, resource());
+        return ScriptSourceCode(resource());
+    }
+    errorOccurred = false;
+    return ScriptSourceCode(m_element->textContent(), documentURL, startingPosition());
+}
+
+bool PendingScript::isReady() const
+{
+    if (resource() && !resource()->isLoaded())
+        return false;
+    if (m_streamer && !m_streamer->isFinished())
+        return false;
+    return true;
 }
 
 }

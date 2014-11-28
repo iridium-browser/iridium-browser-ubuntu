@@ -44,6 +44,7 @@ class FileWriterSync;
 class ExceptionState;
 
 class DOMFileSystemSync FINAL : public DOMFileSystemBase, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static DOMFileSystemSync* create(ExecutionContext* context, const String& name, FileSystemType type, const KURL& rootURL)
     {
@@ -54,7 +55,7 @@ public:
 
     virtual ~DOMFileSystemSync();
 
-    virtual void reportError(PassOwnPtr<ErrorCallback>, PassRefPtrWillBeRawPtr<FileError>) OVERRIDE;
+    virtual void reportError(ErrorCallback*, PassRefPtrWillBeRawPtr<FileError>) OVERRIDE;
 
     DirectoryEntrySync* root();
 
@@ -65,6 +66,6 @@ private:
     DOMFileSystemSync(ExecutionContext*, const String& name, FileSystemType, const KURL& rootURL);
 };
 
-}
+} // namespace blink
 
 #endif // DOMFileSystemSync_h

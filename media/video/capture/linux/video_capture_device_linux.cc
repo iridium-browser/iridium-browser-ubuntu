@@ -43,7 +43,8 @@ enum { kTypicalFramerate = 30 };
 // V4L2 color formats VideoCaptureDeviceLinux support.
 static const int32 kV4l2RawFmts[] = {
   V4L2_PIX_FMT_YUV420,
-  V4L2_PIX_FMT_YUYV
+  V4L2_PIX_FMT_YUYV,
+  V4L2_PIX_FMT_UYVY
 };
 
 // USB VID and PID are both 4 bytes long.
@@ -81,6 +82,9 @@ VideoPixelFormat VideoCaptureDeviceLinux::V4l2ColorToVideoCaptureColorFormat(
       break;
     case V4L2_PIX_FMT_YUYV:
       result = PIXEL_FORMAT_YUY2;
+      break;
+    case V4L2_PIX_FMT_UYVY:
+      result = PIXEL_FORMAT_UYVY;
       break;
     case V4L2_PIX_FMT_MJPEG:
     case V4L2_PIX_FMT_JPEG:
@@ -200,7 +204,7 @@ void VideoCaptureDeviceLinux::SetRotationOnV4L2Thread(int rotation) {
 
 void VideoCaptureDeviceLinux::OnAllocateAndStart(int width,
                                                  int height,
-                                                 int frame_rate,
+                                                 float frame_rate,
                                                  scoped_ptr<Client> client) {
   DCHECK_EQ(v4l2_thread_.message_loop(), base::MessageLoop::current());
 
@@ -503,7 +507,6 @@ void VideoCaptureDeviceLinux::DeAllocateVideoBuffers() {
 void VideoCaptureDeviceLinux::SetErrorState(const std::string& reason) {
   DCHECK(!v4l2_thread_.IsRunning() ||
          v4l2_thread_.message_loop() == base::MessageLoop::current());
-  DVLOG(1) << reason;
   state_ = kError;
   client_->OnError(reason);
 }

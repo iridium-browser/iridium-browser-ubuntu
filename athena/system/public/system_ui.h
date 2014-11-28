@@ -12,15 +12,36 @@ namespace base {
 class TaskRunner;
 }
 
+namespace gfx {
+class ImageSkia;
+}
+
+namespace views {
+class View;
+}
+
 namespace athena {
 
 class ATHENA_EXPORT SystemUI {
  public:
+  enum ColorScheme {
+    COLOR_SCHEME_LIGHT,
+    COLOR_SCHEME_DARK
+  };
+
   // Creates and deletes the singleton object of the SystemUI implementation.
   static SystemUI* Create(scoped_refptr<base::TaskRunner> io_task_runner);
+  static SystemUI* Get();
   static void Shutdown();
 
   virtual ~SystemUI() {}
+
+  // Sets the background image.
+  virtual void SetBackgroundImage(const gfx::ImageSkia& image) = 0;
+
+  // Creates a view which displays the time, status icons, and debug
+  // information.
+  virtual views::View* CreateSystemInfoView(ColorScheme color_scheme) = 0;
 };
 
 }  // namespace athena

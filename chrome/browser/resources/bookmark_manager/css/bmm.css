@@ -2,6 +2,8 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
+<include src="../search_header.css">
+
 html,
 body {
   cursor: default;
@@ -249,37 +251,6 @@ list > .folder > .label,
 </if>
 }
 
-.logo {
-  -webkit-appearance: none;
-  background: url('../images/bookmarks_section_32.png') no-repeat 50% 50%;
-  border: 0;
-  cursor: pointer;
-  float: left;
-  height: 32px;
-  margin: 10px;
-  width: 32px;
-}
-
-html:not(.focus-outline-visible) .logo:focus {
-  outline: none;
-}
-
-.header form {
-  float: left;
-  margin: 14px 2px 0 2px;
-  width: 171px;
-}
-
-.header {
-  min-width: 400px;
-}
-
-html[dir=rtl] .logo,
-html[dir=rtl] .header > div,
-html[dir=rtl] .header form {
-  float: right;
-}
-
 .tree-row.drag-on,
 .drag-on {
   background-color: hsla(214, 91%, 85%, .5);
@@ -323,29 +294,21 @@ list > .drag-above {
   overflow : visible;
 }
 
-.summary {
-  background-color: rgb(235, 239, 249);
-  border-top: 1px solid rgb(156, 194, 239);
-  clear: both;
-  padding: 5px 10px;
-  white-space: nowrap;
-}
-
 .summary > * {
-  display: inline-block;
   font-size: 100%;
   margin: 0;
 }
 
 .summary button {
   -webkit-appearance: none;
-  -webkit-margin-start: 10px;
+  -webkit-margin-start: 16px;
   -webkit-padding-end: 11px;
   -webkit-padding-start: 0;
   background: transparent -webkit-canvas(drop-down-arrow)
               no-repeat right center;
   border: 0;
   font: inherit;
+  font-weight: bold;
   padding-bottom: 0;
   padding-top: 0;
 }

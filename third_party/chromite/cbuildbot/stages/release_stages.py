@@ -4,19 +4,22 @@
 
 """Module containing the various stages that a builder runs."""
 
+from __future__ import print_function
+
 import json
 import logging
 import os
 
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot.stages import artifact_stages
 from chromite.lib import cros_build_lib
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import timeout_util
+from chromite.lib.paygen import gspaths
+from chromite.lib.paygen import paygen_build_lib
 
 
 class InvalidTestConditionException(Exception):
@@ -31,7 +34,7 @@ class SignerTestStage(artifact_stages.ArchivingStage):
 
   # If the signer tests take longer than 30 minutes, abort. They usually take
   # five minutes to run.
-  SIGNER_TEST_TIMEOUT = 1800
+  SIGNER_TEST_TIMEOUT = 30 * 60
 
   def PerformStage(self):
     if not self.archive_stage.WaitForRecoveryImage():
@@ -81,9 +84,6 @@ class PaygenStage(artifact_stages.ArchivingStage):
   # Poll for new results every 30 seconds.
   SIGNING_PERIOD = 30
 
-  # Timeout for PushImage to finish uploading images. 2 hours in seconds.
-  PUSHIMAGE_TIMEOUT = 2 * 60 * 60
-
   # Timeout for the signing process. 2 hours in seconds.
   SIGNING_TIMEOUT = 2 * 60 * 60
 
@@ -114,6 +114,10 @@ class PaygenStage(artifact_stages.ArchivingStage):
     # If Paygen fails to find anything needed in release.conf, treat it
     # as a warning, not a failure. This is common during new board bring up.
     if issubclass(exc_type, PaygenNoPaygenConfigForBoard):
+      return self._HandleExceptionAsWarning(exc_info)
+
+    # Warn so people look at ArchiveStage for the real error.
+    if issubclass(exc_type, MissingInstructionException):
       return self._HandleExceptionAsWarning(exc_info)
 
     # If the exception is a TestLabFailure that means we couldn't schedule the
@@ -235,15 +239,14 @@ class PaygenStage(artifact_stages.ArchivingStage):
     Raises:
       MissingInstructionException: If push_image sent us an error, or timed out.
     """
-    try:
-      instruction_urls_per_channel = self.board_runattrs.GetParallel(
-          'instruction_urls_per_channel', timeout=self.PUSHIMAGE_TIMEOUT)
-    except cbuildbot_run.AttrTimeoutError:
-      instruction_urls_per_channel = None
+    # This call will NEVER time out.
+    instruction_urls_per_channel = self.board_runattrs.GetParallel(
+        'instruction_urls_per_channel', timeout=None)
 
-    # A value of None signals an error, either in PushImage, or a timeout.
+    # A value of None signals an error in PushImage.
     if instruction_urls_per_channel is None:
-      raise MissingInstructionException('PushImage results not available.')
+      raise MissingInstructionException(
+          'ArchiveStage: PushImage failed. No images means no Paygen.')
 
     return instruction_urls_per_channel
 
@@ -308,14 +311,11 @@ class PaygenStage(artifact_stages.ArchivingStage):
     # this here, no in the sub-process so we don't have to pass back a
     # failure reason.
     try:
-      from crostools.lib import paygen_build_lib
       paygen_build_lib.ValidateBoardConfig(board)
     except  paygen_build_lib.BoardNotConfigured:
       raise PaygenNoPaygenConfigForBoard(
           'No release.conf entry was found for board %s. Get a TPM to fix.' %
           board)
-    except  ImportError:
-      raise PaygenCrostoolsNotAvailableError()
 
     with parallel.BackgroundTaskRunner(self._RunPaygenInProcess) as per_channel:
       def channel_notifier(channel):
@@ -347,17 +347,6 @@ class PaygenStage(artifact_stages.ArchivingStage):
       skip_test_payloads: Skip generating test payloads, and auto tests.
       skip_delta_payloads: Skip generating delta payloads.
     """
-    # TODO(dgarrett): Remove when crbug.com/341152 is fixed.
-    # These modules are imported here because they aren't always available at
-    # cbuildbot startup.
-    # pylint: disable=F0401
-    try:
-      from crostools.lib import gspaths
-      from crostools.lib import paygen_build_lib
-    except  ImportError:
-      # We can't generate payloads without crostools.
-      raise PaygenCrostoolsNotAvailableError()
-
     # Convert to release tools naming for channels.
     if not channel.endswith('-channel'):
       channel += '-channel'

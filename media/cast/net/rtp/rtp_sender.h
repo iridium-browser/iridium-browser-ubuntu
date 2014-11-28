@@ -46,7 +46,17 @@ class RtpSender {
 
   void ResendPackets(const MissingFramesAndPacketsMap& missing_packets,
                      bool cancel_rtx_if_not_in_list,
-                     base::TimeDelta dedupe_window);
+                     const DedupInfo& dedup_info);
+
+  // Returns the total number of bytes sent to the socket when the specified
+  // frame was just sent.
+  // Returns 0 if the frame cannot be found or the frame was only sent
+  // partially.
+  int64 GetLastByteSentForFrame(uint32 frame_id);
+
+  void CancelSendingFrames(const std::vector<uint32>& frame_ids);
+
+  void ResendFrameForKickstart(uint32 frame_id, base::TimeDelta dedupe_window);
 
   size_t send_packet_count() const {
     return packetizer_ ? packetizer_->send_packet_count() : 0;
@@ -61,8 +71,8 @@ class RtpSender {
 
   base::TickClock* clock_;  // Not owned by this class.
   RtpPacketizerConfig config_;
+  PacketStorage storage_;
   scoped_ptr<RtpPacketizer> packetizer_;
-  scoped_ptr<PacketStorage> storage_;
   PacedSender* const transport_;
   scoped_refptr<base::SingleThreadTaskRunner> transport_task_runner_;
 

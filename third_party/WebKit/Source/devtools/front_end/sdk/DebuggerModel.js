@@ -60,6 +60,7 @@ WebInspector.DebuggerModel = function(target)
     this.enableDebugger();
 
     WebInspector.settings.skipStackFramesPattern.addChangeListener(this._applySkipStackFrameSettings, this);
+    WebInspector.settings.skipContentScripts.addChangeListener(this._applySkipStackFrameSettings, this);
     this._applySkipStackFrameSettings();
 }
 
@@ -170,7 +171,7 @@ WebInspector.DebuggerModel.prototype = {
 
     _profilingStateChanged: function()
     {
-        if (WebInspector.experimentsSettings.disableAgentsWhenProfile.isEnabled()) {
+        if (Runtime.experiments.isEnabled("disableAgentsWhenProfile")) {
             if (WebInspector.profilingLock().isAcquired())
                 this.disableDebugger();
             else
@@ -496,7 +497,7 @@ WebInspector.DebuggerModel.prototype = {
         var scripts = this._scriptsBySourceURL.get(script.sourceURL);
         if (!scripts) {
             scripts = [];
-            this._scriptsBySourceURL.put(script.sourceURL, scripts);
+            this._scriptsBySourceURL.set(script.sourceURL, scripts);
         }
         scripts.push(script);
     },
@@ -666,7 +667,7 @@ WebInspector.DebuggerModel.prototype = {
 
     _applySkipStackFrameSettings: function()
     {
-        this._agent.skipStackFrames(WebInspector.settings.skipStackFramesPattern.get());
+        this._agent.skipStackFrames(WebInspector.settings.skipStackFramesPattern.get(), WebInspector.settings.skipContentScripts.get());
     },
 
     /**
@@ -691,7 +692,7 @@ WebInspector.DebuggerModel.prototype = {
             }
             var location = response.location;
             var script = this.scriptForId(location.scriptId);
-            var rawLocation = script ? this.createRawLocation(script, location.lineNumber + 1, location.columnNumber + 1) : null;
+            var rawLocation = script ? this.createRawLocation(script, location.lineNumber, location.columnNumber || 0) : null;
             var sourceURL = script ? script.contentURL() : null;
             callback({location: rawLocation, sourceURL: sourceURL, functionName: response.functionName, scopeChain: response.scopeChain || null});
         }
@@ -722,6 +723,7 @@ WebInspector.DebuggerModel.prototype = {
         WebInspector.settings.pauseOnExceptionEnabled.removeChangeListener(this._pauseOnExceptionStateChanged, this);
         WebInspector.settings.pauseOnCaughtException.removeChangeListener(this._pauseOnExceptionStateChanged, this);
         WebInspector.settings.skipStackFramesPattern.removeChangeListener(this._applySkipStackFrameSettings, this);
+        WebInspector.settings.skipContentScripts.removeChangeListener(this._applySkipStackFrameSettings, this);
         WebInspector.settings.enableAsyncStackTraces.removeChangeListener(this._asyncStackTracesStateChanged, this);
     },
 

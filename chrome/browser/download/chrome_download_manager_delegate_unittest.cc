@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
@@ -218,7 +218,7 @@ content::MockDownloadItem*
   ON_CALL(*item, GetTargetFilePath())
       .WillByDefault(ReturnRefOfCopy(base::FilePath()));
   ON_CALL(*item, GetTransitionType())
-      .WillByDefault(Return(content::PAGE_TRANSITION_LINK));
+      .WillByDefault(Return(ui::PAGE_TRANSITION_LINK));
   ON_CALL(*item, GetWebContents())
       .WillByDefault(Return(web_contents()));
   ON_CALL(*item, HasUserGesture())

@@ -74,9 +74,11 @@
             "settingType": "checkbox"
         }
     ],
+    "dependencies": [
+        "components"
+    ],
     "scripts": [
         "Spectrum.js",
-        "DOMSyntaxHighlighter.js",
         "ElementsTreeOutline.js",
         "EventListenersSidebarPane.js",
         "MetricsSidebarPane.js",

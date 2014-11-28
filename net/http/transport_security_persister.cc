@@ -6,8 +6,8 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop/message_loop.h"
@@ -97,7 +97,7 @@ namespace net {
 TransportSecurityPersister::TransportSecurityPersister(
     TransportSecurityState* state,
     const base::FilePath& profile_path,
-    base::SequencedTaskRunner* background_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& background_runner,
     bool readonly)
     : transport_security_state_(state),
       writer_(profile_path.AppendASCII("TransportSecurity"), background_runner),
@@ -108,7 +108,7 @@ TransportSecurityPersister::TransportSecurityPersister(
   transport_security_state_->SetDelegate(this);
 
   base::PostTaskAndReplyWithResult(
-      background_runner_,
+      background_runner_.get(),
       FROM_HERE,
       base::Bind(&::LoadState, writer_.path()),
       base::Bind(&TransportSecurityPersister::CompleteLoad,

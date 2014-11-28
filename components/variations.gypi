@@ -12,11 +12,13 @@
         '..',
       ],
       'dependencies': [
+        # List of dependencies is intentionally very minimal. Please avoid
+        # adding extra dependencies without first checking with OWNERS.
         '../base/base.gyp:base',
         '../third_party/mt19937ar/mt19937ar.gyp:mt19937ar',
-        'components.gyp:google_core_browser',
       ],
       'sources': [
+        # Note: sources list duplicated in GN build.
         'variations/active_field_trials.cc',
         'variations/active_field_trials.h',
         'variations/android/component_jni_registrar.cc',
@@ -41,8 +43,6 @@
         'variations/study_filtering.h',
         'variations/variations_associated_data.cc',
         'variations/variations_associated_data.h',
-        'variations/variations_http_header_provider.cc',
-        'variations/variations_http_header_provider.h',
         'variations/variations_seed_processor.cc',
         'variations/variations_seed_processor.h',
         'variations/variations_seed_simulator.cc',
@@ -61,6 +61,23 @@
         }],
       ],
     },
+    {
+      # GN version: //components/variations_http_provider
+      'target_name': 'variations_http_provider',
+      'type': 'static_library',
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        '../base/base.gyp:base',
+        'components.gyp:google_core_browser',
+        'variations',
+      ],
+      'sources': [
+        'variations/variations_http_header_provider.cc',
+        'variations/variations_http_header_provider.h',
+      ],
+    },
   ],
   'conditions': [
     ['OS=="android"', {
@@ -77,6 +94,7 @@
           'includes': [ '../build/java.gypi' ],
         },
         {
+          # GN version: //components/variations:variations_java
           'target_name': 'variations_jni_headers',
           'type': 'none',
           'sources': [

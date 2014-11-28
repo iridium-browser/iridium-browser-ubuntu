@@ -1,0 +1,56 @@
+{% from "module_macros.tmpl" import enum_values %}
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import mojo.bindings.descriptor as _descriptor
+import mojo.bindings.reflection as _reflection
+{% if imports %}
+
+{% for import in imports %}
+import {{import.python_module}}
+{% endfor %}
+{% endif %}
+{#--- Constants #}
+{% if module.constants %}
+
+{% for constant in module.constants %}
+{{constant|name}} = {{constant.value|expression_to_text}}
+{% endfor %}
+{% endif %}
+{% for enum in module.enums %}
+
+class {{enum|name}}(object):
+  __metaclass__ = _reflection.MojoEnumType
+  VALUES = {{enum_values(enum)|indent(2)}}
+{% endfor %}
+{% for struct in module.structs %}
+
+class {{struct|name}}(object):
+  __metaclass__ = _reflection.MojoStructType
+  DESCRIPTOR = {
+{%   if struct.constants %}
+    'constants': {
+{%     for constant in struct.constants %}
+      '{{constant|name}}': {{constant.value|expression_to_text}},
+{%     endfor %}
+    },
+{%   endif %}
+{%   if struct.enums %}
+    'enums': {
+{%     for enum in struct.enums %}
+      '{{enum|name}}': {{enum_values(enum)|indent(6)}},
+{%     endfor %}
+    },
+{%   endif %}
+{%   if struct.fields %}
+    'fields': [
+{%    for byte in struct.bytes %}
+{%      if byte.packed_fields %}
+      {{byte|field_group}},
+{%      endif %}
+{%   endfor %}
+    ],
+{%   endif %}
+  }
+{% endfor %}

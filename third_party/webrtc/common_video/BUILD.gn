@@ -34,9 +34,15 @@ source_set("common_video") {
 
   direct_dependent_configs = [ ":common_video_config" ]
 
+  if (is_clang) {
+    # Suppress warnings from Chrome's Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
+
   deps = [ "../system_wrappers" ]
 
-  if (build_libyuv) {
+  if (rtc_build_libyuv) {
     deps += [ "//third_party/libyuv" ]
   } else {
     # Need to add a directory normally exported by libyuv.

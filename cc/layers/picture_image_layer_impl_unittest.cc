@@ -84,7 +84,8 @@ class PictureImageLayerImplTest : public testing::Test {
         maximum_animation_contents_scale;
     layer->draw_properties().screen_space_transform_is_animating =
         animating_transform_to_screen;
-    layer->UpdateTiles(NULL);
+    bool resourceless_software_draw = false;
+    layer->UpdateTiles(Occlusion(), resourceless_software_draw);
   }
 
  protected:
@@ -154,7 +155,7 @@ TEST_F(PictureImageLayerImplTest, IgnoreIdealContentScale) {
   active_layer->AppendQuads(render_pass.get(), occlusion_tracker, &data);
   active_layer->DidDraw(NULL);
 
-  EXPECT_EQ(DrawQuad::TILED_CONTENT, render_pass->quad_list[0]->material);
+  EXPECT_EQ(DrawQuad::TILED_CONTENT, render_pass->quad_list.front()->material);
 
   // Tiles are ready at correct scale, so should not set had_incomplete_tile.
   EXPECT_EQ(0, data.num_incomplete_tiles);

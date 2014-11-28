@@ -10,20 +10,20 @@
 
 class BookmarkModel;
 
-namespace test {
+namespace bookmarks {
 
-class TestBookmarkClient : public bookmarks::BookmarkClient {
+class TestBookmarkClient : public BookmarkClient {
  public:
   TestBookmarkClient();
   virtual ~TestBookmarkClient();
 
   // Create a BookmarkModel using this object as its client. The returned
   // BookmarkModel* is owned by the caller.
-  scoped_ptr<BookmarkModel> CreateModel(bool index_urls);
+  scoped_ptr<BookmarkModel> CreateModel();
 
   // Sets the list of extra nodes to be returned by the next call to
   // CreateModel() or GetLoadExtraNodesCallback().
-  void SetExtraNodesToLoad(bookmarks::BookmarkPermanentNodeList extra_nodes);
+  void SetExtraNodesToLoad(BookmarkPermanentNodeList extra_nodes);
 
   // Returns the current extra_nodes, set via SetExtraNodesToLoad().
   const std::vector<BookmarkPermanentNode*>& extra_nodes() {
@@ -37,27 +37,27 @@ class TestBookmarkClient : public bookmarks::BookmarkClient {
   bool IsAnExtraNode(const BookmarkNode* node);
 
  private:
-  // bookmarks::BookmarkClient:
+  // BookmarkClient:
   virtual bool IsPermanentNodeVisible(
       const BookmarkPermanentNode* node) OVERRIDE;
   virtual void RecordAction(const base::UserMetricsAction& action) OVERRIDE;
-  virtual bookmarks::LoadExtraCallback GetLoadExtraNodesCallback() OVERRIDE;
+  virtual LoadExtraCallback GetLoadExtraNodesCallback() OVERRIDE;
   virtual bool CanSetPermanentNodeTitle(
       const BookmarkNode* permanent_node) OVERRIDE;
   virtual bool CanSyncNode(const BookmarkNode* node) OVERRIDE;
   virtual bool CanBeEditedByUser(const BookmarkNode* node) OVERRIDE;
 
   // Helpers for GetLoadExtraNodesCallback().
-  static bookmarks::BookmarkPermanentNodeList LoadExtraNodes(
-      bookmarks::BookmarkPermanentNodeList extra_nodes,
+  static BookmarkPermanentNodeList LoadExtraNodes(
+      BookmarkPermanentNodeList extra_nodes,
       int64* next_id);
 
-  bookmarks::BookmarkPermanentNodeList extra_nodes_to_load_;
+  BookmarkPermanentNodeList extra_nodes_to_load_;
   std::vector<BookmarkPermanentNode*> extra_nodes_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBookmarkClient);
 };
 
-}  // namespace test
+}  // namespace bookmarks
 
 #endif  // COMPONENTS_BOOKMARKS_TEST_TEST_BOOKMARK_CLIENT_H_

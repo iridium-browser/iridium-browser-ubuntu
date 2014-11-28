@@ -140,21 +140,24 @@ void InspectorClientImpl::resetScrollAndPageScaleFactor()
     m_inspectedWebView->resetScrollAndScaleState();
 }
 
+float InspectorClientImpl::minimumPageScaleFactor()
+{
+    return m_inspectedWebView->minimumPageScaleFactor();
+}
+
+float InspectorClientImpl::maximumPageScaleFactor()
+{
+    return m_inspectedWebView->maximumPageScaleFactor();
+}
+
+void InspectorClientImpl::setPageScaleFactor(float pageScaleFactor)
+{
+    m_inspectedWebView->setPageScaleFactor(pageScaleFactor);
+}
+
 void InspectorClientImpl::showContextMenu(float x, float y, PassRefPtr<ContextMenuProvider> menuProvider)
 {
     m_inspectedWebView->showContextMenuAtPoint(x, y, menuProvider);
-}
-
-void InspectorClientImpl::getAllocatedObjects(HashSet<const void*>& set)
-{
-    if (WebDevToolsAgentImpl* agent = devToolsAgent())
-        agent->getAllocatedObjects(set);
-}
-
-void InspectorClientImpl::dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>& map)
-{
-    if (WebDevToolsAgentImpl* agent = devToolsAgent())
-        agent->dumpUncountedAllocatedObjects(map);
 }
 
 void InspectorClientImpl::dispatchKeyEvent(const PlatformKeyboardEvent& event)
@@ -203,6 +206,12 @@ void InspectorClientImpl::stopGPUEventsRecording()
 {
     if (WebDevToolsAgentImpl* agent = devToolsAgent())
         agent->stopGPUEventsRecording();
+}
+
+void InspectorClientImpl::resumeStartup()
+{
+    if (WebDevToolsAgentImpl* agent = devToolsAgent())
+        agent->resumeStartup();
 }
 
 WebDevToolsAgentImpl* InspectorClientImpl::devToolsAgent()

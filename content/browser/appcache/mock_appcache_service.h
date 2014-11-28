@@ -8,7 +8,7 @@
 #include "base/compiler_specific.h"
 #include "content/browser/appcache/appcache_service_impl.h"
 #include "content/browser/appcache/mock_appcache_storage.h"
-#include "webkit/browser/quota/quota_manager.h"
+#include "storage/browser/quota/quota_manager.h"
 
 namespace content {
 
@@ -28,7 +28,7 @@ class MockAppCacheService : public AppCacheServiceImpl {
       const GURL& origin,
       const net::CompletionCallback& callback) OVERRIDE;
 
-  void set_quota_manager_proxy(quota::QuotaManagerProxy* proxy) {
+  void set_quota_manager_proxy(storage::QuotaManagerProxy* proxy) {
     quota_manager_proxy_ = proxy;
   }
 

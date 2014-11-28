@@ -22,11 +22,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/metrics/chrome_stability_metrics_provider.h"
-#include "chrome/browser/metrics/gpu_metrics_provider.h"
-#include "chrome/browser/metrics/network_metrics_provider.h"
 #include "chrome/browser/metrics/omnibox_metrics_provider.h"
-#include "chrome/browser/metrics/profiler_metrics_provider.h"
-#include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -34,8 +30,12 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
+#include "components/metrics/net/network_metrics_provider.h"
+#include "components/metrics/profiler/profiler_metrics_provider.h"
+#include "components/metrics/profiler/tracking_synchronizer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
@@ -43,7 +43,9 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/metrics/android_metrics_provider.h"
-#else
+#endif
+
+#if defined(ENABLE_FULL_PRINTING)
 #include "chrome/browser/service_process/service_process_control.h"
 #endif
 
@@ -156,7 +158,7 @@ void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterInt64Pref(prefs::kUninstallLastLaunchTimeSec, 0);
   registry->RegisterInt64Pref(prefs::kUninstallLastObservedRunTimeSec, 0);
 
-  MetricsService::RegisterPrefs(registry);
+  metrics::MetricsService::RegisterPrefs(registry);
   ChromeStabilityMetricsProvider::RegisterPrefs(registry);
 
 #if defined(OS_ANDROID)
@@ -238,11 +240,6 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
   DCHECK(!waiting_for_collect_final_metrics_step_);
   waiting_for_collect_final_metrics_step_ = true;
 
-#if !defined(OS_CHROMEOS) && !defined(OS_IOS)
-  // Record the signin status histogram value.
-  signin_status_metrics_provider_->RecordSigninStatusHistogram();
-#endif
-
   base::Closure callback =
       base::Bind(&ChromeMetricsServiceClient::OnMemoryDetailCollectionDone,
                  weak_ptr_factory_.GetWeakPtr());
@@ -270,6 +267,14 @@ ChromeMetricsServiceClient::CreateUploader(
           on_upload_complete));
 }
 
+base::string16 ChromeMetricsServiceClient::GetRegistryBackupKey() {
+#if defined(OS_WIN)
+  return L"Software\\" PRODUCT_STRING_PATH L"\\StabilityMetrics";
+#else
+  return base::string16();
+#endif
+}
+
 void ChromeMetricsServiceClient::LogPluginLoadingError(
     const base::FilePath& plugin_path) {
 #if defined(ENABLE_PLUGINS)
@@ -280,7 +285,7 @@ void ChromeMetricsServiceClient::LogPluginLoadingError(
 }
 
 void ChromeMetricsServiceClient::Initialize() {
-  metrics_service_.reset(new MetricsService(
+  metrics_service_.reset(new metrics::MetricsService(
       metrics_state_manager_, this, g_browser_process->local_state()));
 
   // Register metrics providers.
@@ -290,14 +295,15 @@ void ChromeMetricsServiceClient::Initialize() {
           new ExtensionsMetricsProvider(metrics_state_manager_)));
 #endif
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new NetworkMetricsProvider));
+      scoped_ptr<metrics::MetricsProvider>(new NetworkMetricsProvider(
+          content::BrowserThread::GetBlockingPool())));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new ChromeStabilityMetricsProvider));
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new GPUMetricsProvider()));
-  profiler_metrics_provider_ = new ProfilerMetricsProvider;
+      scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider()));
+  profiler_metrics_provider_ = new metrics::ProfilerMetricsProvider;
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(profiler_metrics_provider_));
 
@@ -329,10 +335,9 @@ void ChromeMetricsServiceClient::Initialize() {
 #endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
-  signin_status_metrics_provider_ =
-      SigninStatusMetricsProvider::CreateInstance();
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(signin_status_metrics_provider_));
+      scoped_ptr<metrics::MetricsProvider>(
+          SigninStatusMetricsProvider::CreateInstance()));
 #endif
 }
 
@@ -363,7 +368,7 @@ void ChromeMetricsServiceClient::OnInitTaskGotPluginInfo() {
 void ChromeMetricsServiceClient::OnInitTaskGotGoogleUpdateData() {
   // Start the next part of the init task: fetching performance data.  This will
   // call into |FinishedReceivingProfilerData()| when the task completes.
-  chrome_browser_metrics::TrackingSynchronizer::FetchProfilerDataAsynchronously(
+  metrics::TrackingSynchronizer::FetchProfilerDataAsynchronously(
       weak_ptr_factory_.GetWeakPtr());
 }
 
@@ -394,10 +399,9 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
 
   DCHECK_EQ(num_async_histogram_fetches_in_progress_, 0);
 
-#if defined(OS_ANDROID)
-  // Android has no service process.
+#if !defined(ENABLE_FULL_PRINTING)
   num_async_histogram_fetches_in_progress_ = 1;
-#else  // OS_ANDROID
+#else  // !ENABLE_FULL_PRINTING
   num_async_histogram_fetches_in_progress_ = 2;
   // Run requests to service and content in parallel.
   if (!ServiceProcessControl::GetInstance()->GetHistograms(callback, timeout)) {
@@ -408,7 +412,7 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
     // here to make code work even if |GetHistograms()| fired |callback|.
     --num_async_histogram_fetches_in_progress_;
   }
-#endif  // OS_ANDROID
+#endif  // !ENABLE_FULL_PRINTING
 
   // Set up the callback to task to call after we receive histograms from all
   // child processes. |timeout| specifies how long to wait before absolutely

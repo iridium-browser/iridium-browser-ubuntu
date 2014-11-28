@@ -13,20 +13,37 @@
 
 namespace blink {
 
-{{cpp_class}}* {{v8_class}}::toNative(v8::Isolate* isolate, v8::Handle<v8::Value> v8Value)
+{{cpp_class}}* {{v8_class}}::toImpl(v8::Isolate* isolate, v8::Handle<v8::Value> v8Value, ExceptionState& exceptionState)
 {
+    ASSERT(isUndefinedOrNull(v8Value) || v8Value->IsObject());
+
     {{cpp_class}}* impl = {{cpp_class}}::create();
     // FIXME: Do not use Dictionary and DictionaryHelper
     // https://crbug.com/321462
     Dictionary dictionary(v8Value, isolate);
+    // FIXME: Remove this v8::TryCatch once the code is switched from
+    // Dictionary/DictionaryHelper to something that uses ExceptionState.
+    v8::TryCatch block;
     {% for member in members %}
     {{member.cpp_type}} {{member.name}};
-    if (DictionaryHelper::get(dictionary, "{{member.name}}", {{member.name}}))
-        impl->{{member.setter_name}}({{member.name}});
-    {% if member.cpp_default_value %}
-    else
-        impl->{{member.setter_name}}({{member.cpp_default_value}});
+    if (DictionaryHelper::getWithUndefinedOrNullCheck(dictionary, "{{member.name}}", {{member.name}})) {
+    {% if member.enum_validation_expression %}
+        String string = {{member.name}};
+        if (!({{member.enum_validation_expression}})) {
+            exceptionState.throwTypeError("member {{member.name}} ('" + string + "') is not a valid enum value.");
+            return 0;
+        }
+    {% elif member.is_object %}
+        if (!{{member.name}}.isObject()) {
+            exceptionState.throwTypeError("member {{member.name}} is not an object.");
+            return 0;
+        }
     {% endif %}
+        impl->{{member.setter_name}}({{member.name}});
+    } else if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return 0;
+    }
     {% endfor %}
     return impl;
 }
@@ -35,12 +52,16 @@ v8::Handle<v8::Value> toV8({{cpp_class}}* impl, v8::Handle<v8::Object> creationC
 {
     v8::Handle<v8::Object> v8Object = v8::Object::New(isolate);
     {% for member in members %}
-    if (impl->{{member.has_method_name}}())
+    if (impl->{{member.has_method_name}}()) {
+        {% if member.is_object %}
+        ASSERT(impl->{{member.name}}().isObject());
+        {% endif %}
         v8Object->Set(v8String(isolate, "{{member.name}}"), {{member.cpp_value_to_v8_value}});
     {% if member.v8_default_value %}
-    else
+    } else {
         v8Object->Set(v8String(isolate, "{{member.name}}"), {{member.v8_default_value}});
     {% endif %}
+    }
     {% endfor %}
     return v8Object;
 }

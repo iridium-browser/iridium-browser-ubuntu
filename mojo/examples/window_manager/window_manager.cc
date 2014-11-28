@@ -4,13 +4,16 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "mojo/application/application_runner_chromium.h"
 #include "mojo/examples/keyboard/keyboard.mojom.h"
 #include "mojo/examples/window_manager/debug_panel.h"
 #include "mojo/examples/window_manager/window_manager.mojom.h"
+#include "mojo/public/c/system/main.h"
 #include "mojo/public/cpp/application/application_connection.h"
 #include "mojo/public/cpp/application/application_delegate.h"
 #include "mojo/public/cpp/application/application_impl.h"
 #include "mojo/public/cpp/application/interface_factory_impl.h"
+#include "mojo/public/cpp/application/service_provider_impl.h"
 #include "mojo/services/public/cpp/geometry/geometry_type_converters.h"
 #include "mojo/services/public/cpp/input_events/input_events_type_converters.h"
 #include "mojo/services/public/cpp/view_manager/view.h"
@@ -19,7 +22,6 @@
 #include "mojo/services/public/cpp/view_manager/view_observer.h"
 #include "mojo/services/public/cpp/view_manager/window_manager_delegate.h"
 #include "mojo/services/public/interfaces/input_events/input_events.mojom.h"
-#include "mojo/services/public/interfaces/launcher/launcher.mojom.h"
 #include "mojo/services/public/interfaces/navigation/navigation.mojom.h"
 #include "mojo/services/window_manager/window_manager_app.h"
 #include "mojo/views/views_init.h"
@@ -64,19 +66,17 @@ class WindowManagerConnection : public InterfaceImpl<IWindowManager> {
 
 class NavigatorHostImpl : public InterfaceImpl<NavigatorHost> {
  public:
-  explicit NavigatorHostImpl(WindowManager* window_manager)
-      : window_manager_(window_manager) {}
+  explicit NavigatorHostImpl(WindowManager* window_manager, Id view_id)
+      : window_manager_(window_manager), view_id_(view_id) {}
   virtual ~NavigatorHostImpl() {
   }
 
  private:
-  virtual void DidNavigateLocally(uint32 source_view_id,
-                                  const mojo::String& url) OVERRIDE;
-  virtual void RequestNavigate(
-      uint32 source_view_id,
-      Target target,
-      NavigationDetailsPtr nav_details) OVERRIDE;
+  virtual void DidNavigateLocally(const mojo::String& url) OVERRIDE;
+  virtual void RequestNavigate(Target target, URLRequestPtr request) OVERRIDE;
+
   WindowManager* window_manager_;
+  Id view_id_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigatorHostImpl);
 };
@@ -201,8 +201,6 @@ class RootLayoutManager : public ViewObserver {
 
     View* content_view = view_manager_->GetViewById(content_view_id_);
     content_view->SetBounds(new_bounds);
-    // Force the view's bitmap to be recreated
-    content_view->SetColor(SK_ColorBLUE);
 
     int delta_width = new_bounds.width() - old_bounds.width();
     int delta_height = new_bounds.height() - old_bounds.height();
@@ -247,6 +245,34 @@ class RootLayoutManager : public ViewObserver {
   DISALLOW_COPY_AND_ASSIGN(RootLayoutManager);
 };
 
+class Window : public InterfaceFactory<NavigatorHost> {
+ public:
+  Window(WindowManager* window_manager, View* view)
+      : window_manager_(window_manager), view_(view) {}
+
+  virtual ~Window() {}
+
+  View* view() const { return view_; }
+
+  void Embed(const std::string& url) {
+    scoped_ptr<ServiceProviderImpl> service_provider_impl(
+        new ServiceProviderImpl());
+    service_provider_impl->AddService<NavigatorHost>(this);
+    view_->Embed(url, service_provider_impl.Pass());
+  }
+
+ private:
+  // InterfaceFactory<NavigatorHost>
+  virtual void Create(ApplicationConnection* connection,
+                      InterfaceRequest<NavigatorHost> request) OVERRIDE {
+    BindToRequest(new NavigatorHostImpl(window_manager_, view_->id()),
+                  &request);
+  }
+
+  WindowManager* window_manager_;
+  View* view_;
+};
+
 class WindowManager
     : public ApplicationDelegate,
       public DebugPanel::Delegate,
@@ -256,24 +282,24 @@ class WindowManager
  public:
   WindowManager()
       : window_manager_factory_(this),
-        navigator_host_factory_(this),
         launcher_ui_(NULL),
         view_manager_(NULL),
         window_manager_app_(new WindowManagerApp(this, this)),
         app_(NULL) {}
 
   virtual ~WindowManager() {
-    window_manager_app_->host()->window()->RemovePreTargetHandler(this);
+    // host() may be destroyed by the time we get here.
+    // TODO: figure out a way to always cleanly remove handler.
+    if (window_manager_app_->host())
+      window_manager_app_->host()->window()->RemovePreTargetHandler(this);
   }
 
   void CloseWindow(Id view_id) {
-    View* view = view_manager_->GetViewById(view_id);
-    DCHECK(view);
-    std::vector<View*>::iterator iter =
-        std::find(windows_.begin(), windows_.end(), view);
+    WindowVector::iterator iter = GetWindowByViewId(view_id);
     DCHECK(iter != windows_.end());
+    Window* window = *iter;
     windows_.erase(iter);
-    view->Destroy();
+    window->view()->Destroy();
   }
 
   void ShowKeyboard(Id view_id, const gfx::Rect& bounds) {
@@ -309,25 +335,21 @@ class WindowManager
   // Overridden from DebugPanel::Delegate:
   virtual void CloseTopWindow() OVERRIDE {
     if (!windows_.empty())
-      CloseWindow(windows_.back()->id());
+      CloseWindow(windows_.back()->view()->id());
   }
 
-  virtual void RequestNavigate(
-    uint32 source_view_id,
-    Target target,
-    NavigationDetailsPtr nav_details) OVERRIDE {
-    launcher_->Launch(nav_details.Pass(),
-                      base::Bind(&WindowManager::OnLaunch,
-                                 base::Unretained(this),
-                                 source_view_id,
-                                 target));
+  virtual void RequestNavigate(uint32 source_view_id,
+                               Target target,
+                               URLRequestPtr request) OVERRIDE {
+    OnLaunch(source_view_id, target, request->url);
   }
 
  private:
+  typedef std::vector<Window*> WindowVector;
+
   // Overridden from ApplicationDelegate:
   virtual void Initialize(ApplicationImpl* app) MOJO_OVERRIDE {
     app_ = app;
-    app->ConnectToService("mojo:mojo_launcher", &launcher_);
     views_init_.reset(new ViewsInit);
     window_manager_app_->Initialize(app);
   }
@@ -335,7 +357,6 @@ class WindowManager
   virtual bool ConfigureIncomingConnection(ApplicationConnection* connection)
       MOJO_OVERRIDE {
     connection->AddService(&window_manager_factory_);
-    connection->AddService(&navigator_host_factory_);
     window_manager_app_->ConfigureIncomingConnection(connection);
     return true;
   }
@@ -352,8 +373,6 @@ class WindowManager
     root->AddChild(view);
     view->SetBounds(gfx::Rect(root->bounds().size()));
     content_view_id_ = view->id();
-
-    root->SetColor(SK_ColorBLUE);
 
     Id launcher_ui_id = CreateLauncherUI();
     Id control_panel_id = CreateControlPanel(view);
@@ -377,9 +396,8 @@ class WindowManager
   virtual void Embed(
       const String& url,
       InterfaceRequest<ServiceProvider> service_provider) OVERRIDE {
-    CreateWindow(url,
-                 NavigationDetailsPtr().Pass(),
-                 ResponseDetailsPtr().Pass());
+    const Id kInvalidSourceViewId = 0;
+    OnLaunch(kInvalidSourceViewId, TARGET_DEFAULT, url);
   }
   virtual void DispatchEvent(EventPtr event) MOJO_OVERRIDE {}
 
@@ -393,18 +411,9 @@ class WindowManager
     }
   }
 
-  void OnLaunch(
-      uint32 source_view_id,
-      Target requested_target,
-      const mojo::String& handler_url,
-      const mojo::String& view_url,
-      ResponseDetailsPtr response) {
-    // TODO(mpcomplete): This seems to be unused in favor of |response|. We
-    // might need to use it (and fill it in properly, with method, etc) if we
-    // need to preserve that information.
-    NavigationDetailsPtr nav_details(NavigationDetails::New());
-    nav_details->request->url = view_url;
-
+  void OnLaunch(uint32 source_view_id,
+                Target requested_target,
+                const mojo::String& url) {
     Target target = debug_panel_->navigation_target();
     if (target == TARGET_DEFAULT) {
       if (requested_target != TARGET_DEFAULT) {
@@ -416,39 +425,36 @@ class WindowManager
       }
     }
 
-    View* dest_view = NULL;
+    Window* dest_view = NULL;
     if (target == TARGET_SOURCE_NODE) {
-      View* source_view = view_manager_->GetViewById(source_view_id);
-      bool app_initiated = std::find(windows_.begin(), windows_.end(),
-                                     source_view) != windows_.end();
+      WindowVector::iterator source_view = GetWindowByViewId(source_view_id);
+      bool app_initiated = source_view != windows_.end();
       if (app_initiated)
-        dest_view = source_view;
+        dest_view = *source_view;
       else if (!windows_.empty())
         dest_view = windows_.back();
     }
 
-    if (dest_view)
-      Embed(dest_view, handler_url, nav_details.Pass(), response.Pass());
-    else
-      CreateWindow(handler_url, nav_details.Pass(), response.Pass());
+    if (!dest_view) {
+      dest_view = CreateWindow();
+      windows_.push_back(dest_view);
+    }
+
+    dest_view->Embed(url);
   }
 
   // TODO(beng): proper layout manager!!
   Id CreateLauncherUI() {
-    NavigationDetailsPtr nav_details;
-    ResponseDetailsPtr response;
     View* view = view_manager_->GetViewById(content_view_id_);
     gfx::Rect bounds = view->bounds();
     bounds.Inset(kBorderInset, kBorderInset);
     bounds.set_height(kTextfieldHeight);
-    launcher_ui_ = CreateChild(content_view_id_, "mojo:mojo_browser", bounds,
-                               nav_details.Pass(), response.Pass());
-    return launcher_ui_->id();
+    launcher_ui_ = CreateWindow(bounds);
+    launcher_ui_->Embed("mojo:mojo_browser");
+    return launcher_ui_->view()->id();
   }
 
-  void CreateWindow(const std::string& handler_url,
-                    NavigationDetailsPtr nav_details,
-                    ResponseDetailsPtr response) {
+  Window* CreateWindow() {
     View* view = view_manager_->GetViewById(content_view_id_);
     gfx::Rect bounds(kBorderInset,
                      2 * kBorderInset + kTextfieldHeight,
@@ -457,37 +463,20 @@ class WindowManager
                      view->bounds().height() -
                          (3 * kBorderInset + kTextfieldHeight));
     if (!windows_.empty()) {
-      gfx::Point position = windows_.back()->bounds().origin();
+      gfx::Point position = windows_.back()->view()->bounds().origin();
       position.Offset(35, 35);
       bounds.set_origin(position);
     }
-    windows_.push_back(CreateChild(content_view_id_, handler_url, bounds,
-                                   nav_details.Pass(), response.Pass()));
+    return CreateWindow(bounds);
   }
 
-  View* CreateChild(Id parent_id,
-                    const std::string& url,
-                    const gfx::Rect& bounds,
-                    NavigationDetailsPtr nav_details,
-                    ResponseDetailsPtr response) {
-    View* view = view_manager_->GetViewById(parent_id);
-    View* embedded = View::Create(view_manager_);
-    view->AddChild(embedded);
-    embedded->SetBounds(bounds);
-    Embed(embedded, url, nav_details.Pass(), response.Pass());
-    embedded->SetFocus();
-    return embedded;
-  }
-
-  void Embed(View* view, const std::string& app_url,
-             NavigationDetailsPtr nav_details,
-             ResponseDetailsPtr response) {
-    view->Embed(app_url);
-    if (nav_details) {
-      NavigatorPtr navigator;
-      app_->ConnectToService(app_url, &navigator);
-      navigator->Navigate(view->id(), nav_details.Pass(), response.Pass());
-    }
+  Window* CreateWindow(const gfx::Rect& bounds) {
+    View* content = view_manager_->GetViewById(content_view_id_);
+    View* view = View::Create(view_manager_);
+    content->AddChild(view);
+    view->SetBounds(bounds);
+    view->SetFocus();
+    return new Window(this, view);
   }
 
   bool IsDescendantOfKeyboard(View* target) {
@@ -511,16 +500,24 @@ class WindowManager
     return view->id();
   }
 
+  WindowVector::iterator GetWindowByViewId(Id view_id) {
+    for (std::vector<Window*>::iterator iter = windows_.begin();
+         iter != windows_.end();
+         ++iter) {
+      if ((*iter)->view()->id() == view_id) {
+        return iter;
+      }
+    }
+    return windows_.end();
+  }
+
   InterfaceFactoryImplWithContext<WindowManagerConnection, WindowManager>
       window_manager_factory_;
-  InterfaceFactoryImplWithContext<NavigatorHostImpl, WindowManager>
-      navigator_host_factory_;
 
   scoped_ptr<ViewsInit> views_init_;
   DebugPanel* debug_panel_;
-  LauncherPtr launcher_;
-  View* launcher_ui_;
-  std::vector<View*> windows_;
+  Window* launcher_ui_;
+  WindowVector windows_;
   ViewManager* view_manager_;
   scoped_ptr<RootLayoutManager> root_layout_manager_;
 
@@ -547,23 +544,18 @@ void WindowManagerConnection::HideKeyboard(Id view_id) {
   window_manager_->HideKeyboard(view_id);
 }
 
-void NavigatorHostImpl::DidNavigateLocally(uint32 source_view_id,
-                                           const mojo::String& url) {
-  window_manager_->DidNavigateLocally(source_view_id, url);
+void NavigatorHostImpl::DidNavigateLocally(const mojo::String& url) {
+  window_manager_->DidNavigateLocally(view_id_, url);
 }
 
-void NavigatorHostImpl::RequestNavigate(
-    uint32 source_view_id,
-    Target target,
-    NavigationDetailsPtr nav_details) {
-  window_manager_->RequestNavigate(source_view_id, target, nav_details.Pass());
+void NavigatorHostImpl::RequestNavigate(Target target, URLRequestPtr request) {
+  window_manager_->RequestNavigate(view_id_, target, request.Pass());
 }
 
 }  // namespace examples
-
-// static
-ApplicationDelegate* ApplicationDelegate::Create() {
-  return new examples::WindowManager;
-}
-
 }  // namespace mojo
+
+MojoResult MojoMain(MojoHandle shell_handle) {
+  mojo::ApplicationRunnerChromium runner(new mojo::examples::WindowManager);
+  return runner.Run(shell_handle);
+}

@@ -9,6 +9,7 @@
 #include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -19,6 +20,7 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/binary_feature_extractor.h"
@@ -31,6 +33,7 @@
 #include "chrome/common/safe_browsing/download_protection_util.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "chrome/common/url_constants.h"
+#include "components/google/core/browser/google_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
@@ -309,12 +312,12 @@ class DownloadProtectionService::CheckClientDownloadRequest
       switch (reason) {
         case REASON_EMPTY_URL_CHAIN:
         case REASON_INVALID_URL:
-          PostFinishTask(SAFE, reason);
+          PostFinishTask(UNKNOWN, reason);
           return;
 
         case REASON_NOT_BINARY_FILE:
           RecordFileExtensionType(item_->GetTargetFilePath());
-          PostFinishTask(SAFE, reason);
+          PostFinishTask(UNKNOWN, reason);
           return;
 
         default:
@@ -355,7 +358,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
             service_->download_request_timeout_ms()));
   }
 
-  // Canceling a request will cause us to always report the result as SAFE
+  // Canceling a request will cause us to always report the result as UNKNOWN
   // unless a pending request is about to call FinishRequest.
   void Cancel() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -369,7 +372,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
     // reference to this object.  We'll eventually wind up in some method on
     // the UI thread that will call FinishRequest() again.  If FinishRequest()
     // is called a second time, it will be a no-op.
-    FinishRequest(SAFE, REASON_REQUEST_CANCELED);
+    FinishRequest(UNKNOWN, REASON_REQUEST_CANCELED);
     // Calling FinishRequest might delete this object, we may be deleted by
     // this point.
   }
@@ -397,7 +400,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
         "SBClientDownload.DownloadRequestNetError",
         -source->GetStatus().error());
     DownloadCheckResultReason reason = REASON_SERVER_PING_FAILED;
-    DownloadCheckResult result = SAFE;
+    DownloadCheckResult result = UNKNOWN;
     if (source->GetStatus().is_success() &&
         net::HTTP_OK == source->GetResponseCode()) {
       ClientDownloadResponse response;
@@ -406,16 +409,19 @@ class DownloadProtectionService::CheckClientDownloadRequest
       DCHECK(got_data);
       if (!response.ParseFromString(data)) {
         reason = REASON_INVALID_RESPONSE_PROTO;
+        result = UNKNOWN;
       } else if (response.verdict() == ClientDownloadResponse::SAFE) {
         reason = REASON_DOWNLOAD_SAFE;
+        result = SAFE;
       } else if (service_ && !service_->IsSupportedDownload(
           *item_, item_->GetTargetFilePath())) {
         // The client of the download protection service assumes that we don't
         // support this download so we cannot return any other verdict than
-        // SAFE even if the server says it's dangerous to download this file.
+        // UNKNOWN even if the server says it's dangerous to download this file.
         // Note: if service_ is NULL we already cancelled the request and
-        // returned SAFE.
+        // returned UNKNOWN.
         reason = REASON_DOWNLOAD_NOT_SUPPORTED;
+        result = UNKNOWN;
       } else if (response.verdict() == ClientDownloadResponse::DANGEROUS) {
         reason = REASON_DOWNLOAD_DANGEROUS;
         result = DANGEROUS;
@@ -433,6 +439,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
         LOG(DFATAL) << "Unknown download response verdict: "
                     << response.verdict();
         reason = REASON_INVALID_RESPONSE_VERDICT;
+        result = UNKNOWN;
       }
       DownloadFeedbackService::MaybeStorePingsForDownload(
           result, item_, client_download_request_data_, data);
@@ -564,55 +571,69 @@ class DownloadProtectionService::CheckClientDownloadRequest
                         base::TimeTicks::Now() - zip_analysis_start_time_);
 
     if (!zipped_executable_) {
-      PostFinishTask(SAFE, REASON_ARCHIVE_WITHOUT_BINARIES);
+      PostFinishTask(UNKNOWN, REASON_ARCHIVE_WITHOUT_BINARIES);
       return;
     }
     OnFileFeatureExtractionDone();
   }
 
+  static void RecordCountOfSignedOrWhitelistedDownload() {
+    UMA_HISTOGRAM_COUNTS("SBClientDownload.SignedOrWhitelistedDownload", 1);
+  }
+
   void CheckWhitelists() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    DownloadCheckResultReason reason = REASON_MAX;
+
     if (!database_manager_.get()) {
-      reason = REASON_SB_DISABLED;
-    } else {
-      const GURL& url = url_chain_.back();
-      if (url.is_valid() && database_manager_->MatchDownloadWhitelistUrl(url)) {
-        VLOG(2) << url << " is on the download whitelist.";
-        reason = REASON_WHITELISTED_URL;
-      }
-      if (reason != REASON_MAX || signature_info_.trusted()) {
-        UMA_HISTOGRAM_COUNTS("SBClientDownload.SignedOrWhitelistedDownload", 1);
-      }
+      PostFinishTask(UNKNOWN, REASON_SB_DISABLED);
+      return;
     }
-    if (reason == REASON_MAX && signature_info_.trusted()) {
+
+    const GURL& url = url_chain_.back();
+    if (url.is_valid() && database_manager_->MatchDownloadWhitelistUrl(url)) {
+      VLOG(2) << url << " is on the download whitelist.";
+      RecordCountOfSignedOrWhitelistedDownload();
+      PostFinishTask(SAFE, REASON_WHITELISTED_URL);
+      return;
+    }
+
+    if (signature_info_.trusted()) {
+      RecordCountOfSignedOrWhitelistedDownload();
       for (int i = 0; i < signature_info_.certificate_chain_size(); ++i) {
         if (CertificateChainIsWhitelisted(
                 signature_info_.certificate_chain(i))) {
-          reason = REASON_TRUSTED_EXECUTABLE;
-          break;
+          PostFinishTask(SAFE, REASON_TRUSTED_EXECUTABLE);
+          return;
         }
       }
     }
-    if (reason != REASON_MAX) {
-      PostFinishTask(SAFE, reason);
-    } else if (!pingback_enabled_) {
-      PostFinishTask(SAFE, REASON_PING_DISABLED);
-    } else {
-      // Currently, the UI only works on Windows so we don't even bother
-      // with pinging the server if we're not on Windows.  TODO(noelutz):
-      // change this code once the UI is done for Linux and Mac.
-#if defined(OS_WIN)
-      // The URLFetcher is owned by the UI thread, so post a message to
-      // start the pingback.
-      BrowserThread::PostTask(
-          BrowserThread::UI,
-          FROM_HERE,
-          base::Bind(&CheckClientDownloadRequest::GetTabRedirects, this));
-#else
-      PostFinishTask(SAFE, REASON_OS_NOT_SUPPORTED);
-#endif
+
+    if (!pingback_enabled_) {
+      PostFinishTask(UNKNOWN, REASON_PING_DISABLED);
+      return;
     }
+
+    // Currently, the UI only works on Windows so we don't even bother with
+    // pinging the server if we're not on Windows.
+    // TODO(noelutz): change this code once the UI is done for Linux and Mac.
+#if defined(OS_MACOSX)
+  // TODO(mattm): remove this (see crbug.com/414834).
+  if (base::FieldTrialList::FindFullName("SafeBrowsingOSXClientDownloadPings")
+      != "Enabled") {
+    PostFinishTask(UNKNOWN, REASON_OS_NOT_SUPPORTED);
+    return;
+  }
+#endif
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    // The URLFetcher is owned by the UI thread, so post a message to
+    // start the pingback.
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(&CheckClientDownloadRequest::GetTabRedirects, this));
+#else
+    PostFinishTask(UNKNOWN, REASON_OS_NOT_SUPPORTED);
+#endif
   }
 
   void GetTabRedirects() {
@@ -707,7 +728,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
     request.mutable_signature()->CopyFrom(signature_info_);
     request.mutable_image_headers()->CopyFrom(image_headers_);
     if (!request.SerializeToString(&client_download_request_data_)) {
-      FinishRequest(SAFE, REASON_INVALID_REQUEST_PROTO);
+      FinishRequest(UNKNOWN, REASON_INVALID_REQUEST_PROTO);
       return;
     }
 
@@ -763,10 +784,18 @@ class DownloadProtectionService::CheckClientDownloadRequest
     }
     if (service_) {
       VLOG(2) << "SafeBrowsing download verdict for: "
-              << item_->DebugString(true) << " verdict:" << reason;
+              << item_->DebugString(true) << " verdict:" << reason
+              << " result:" << result;
       UMA_HISTOGRAM_ENUMERATION("SBClientDownload.CheckDownloadStats",
                                 reason,
                                 REASON_MAX);
+#if defined(OS_MACOSX)
+      // OSX is currently sending pings only for evaluation purposes, ignore
+      // the result for now.
+      // TODO(mattm): remove this and update the ifdef in
+      // DownloadItemImpl::IsDangerous (see crbug.com/413968).
+      result = UNKNOWN;
+#endif
       callback_.Run(result);
       item_->RemoveObserver(this);
       item_ = NULL;
@@ -776,7 +805,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
       // DownloadProtectionService::RequestFinished will decrement our refcount,
       // so we may be deleted now.
     } else {
-      callback_.Run(SAFE);
+      callback_.Run(UNKNOWN);
     }
   }
 
@@ -916,18 +945,17 @@ void DownloadProtectionService::CheckDownloadUrl(
 bool DownloadProtectionService::IsSupportedDownload(
     const content::DownloadItem& item,
     const base::FilePath& target_path) const {
-  // Currently, the UI only works on Windows.  On Linux and Mac we still
+  // Currently, the UI is only enabled on Windows.  On Mac we send the ping but
+  // ignore the result (see ifdef in FinishRequest).  On Linux we still
   // want to show the dangerous file type warning if the file is possibly
   // dangerous which means we have to always return false here.
 #if defined(OS_WIN)
   DownloadCheckResultReason reason = REASON_MAX;
   ClientDownloadRequest::DownloadType type =
       ClientDownloadRequest::WIN_EXECUTABLE;
-  return (CheckClientDownloadRequest::IsSupportedDownload(item, target_path,
-                                                          &reason, &type) &&
-          (ClientDownloadRequest::ANDROID_APK == type ||
-           ClientDownloadRequest::WIN_EXECUTABLE == type ||
-           ClientDownloadRequest::ZIPPED_EXECUTABLE == type));
+  return (CheckClientDownloadRequest::IsSupportedDownload(
+              item, target_path, &reason, &type) &&
+          (ClientDownloadRequest::CHROME_EXTENSION != type));
 #else
   return false;
 #endif
@@ -959,11 +987,13 @@ void DownloadProtectionService::ShowDetailsForDownload(
     const content::DownloadItem& item,
     content::PageNavigator* navigator) {
   GURL learn_more_url(chrome::kDownloadScanningLearnMoreURL);
+  learn_more_url = google_util::AppendGoogleLocaleParam(
+      learn_more_url, g_browser_process->GetApplicationLocale());
   navigator->OpenURL(
       content::OpenURLParams(learn_more_url,
                              content::Referrer(),
                              NEW_FOREGROUND_TAB,
-                             content::PAGE_TRANSITION_LINK,
+                             ui::PAGE_TRANSITION_LINK,
                              false));
 }
 

@@ -15,7 +15,7 @@
 #include "base/strings/string16.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
-#include "webkit/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/async_file_util.h"
 
 namespace base {
 class FilePath;
@@ -104,11 +104,12 @@ class MTPDeviceDelegateImplWin : public MTPDeviceAsyncDelegate {
       const CreateSnapshotFileSuccessCallback& success_callback,
       const ErrorCallback& error_callback) OVERRIDE;
   virtual bool IsStreaming() OVERRIDE;
-  virtual void ReadBytes(
-      const base::FilePath& device_file_path,
-      net::IOBuffer* buf, int64 offset, int buf_len,
-      const ReadBytesSuccessCallback& success_callback,
-      const ErrorCallback& error_callback) OVERRIDE;
+  virtual void ReadBytes(const base::FilePath& device_file_path,
+                         const scoped_refptr<net::IOBuffer>& buf,
+                         int64 offset,
+                         int buf_len,
+                         const ReadBytesSuccessCallback& success_callback,
+                         const ErrorCallback& error_callback) OVERRIDE;
   virtual void CancelPendingTasksAndDeleteDelegate() OVERRIDE;
 
   // Ensures the device is initialized for communication by doing a
@@ -159,7 +160,7 @@ class MTPDeviceDelegateImplWin : public MTPDeviceAsyncDelegate {
   // is invoked to notify the caller about the platform file |error|.
   void OnDidReadDirectory(const ReadDirectorySuccessCallback& success_callback,
                           const ErrorCallback& error_callback,
-                          fileapi::AsyncFileUtil::EntryList* file_list,
+                          storage::AsyncFileUtil::EntryList* file_list,
                           base::File::Error error);
 
   // Called when the get file stream request completes.

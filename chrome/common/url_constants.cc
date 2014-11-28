@@ -14,7 +14,7 @@ namespace chrome {
 
 #if defined(OS_CHROMEOS)
 const char kCrosScheme[] = "cros";
-const char kDriveScheme[] = "drive";
+const char kExternalFileScheme[] = "externalfile";
 #endif
 
 // Add Chrome UI URLs as necessary, in alphabetical order.
@@ -69,7 +69,6 @@ const char kChromeUINetInternalsURL[] = "chrome://net-internals/";
 const char kChromeUINewProfile[] = "chrome://newprofile/";
 const char kChromeUINewTabURL[] = "chrome://newtab/";
 const char kChromeUIOmniboxURL[] = "chrome://omnibox/";
-const char kChromeUIPerformanceMonitorURL[] = "chrome://performance/";
 const char kChromeUIPluginsURL[] = "chrome://plugins/";
 const char kChromeUIPolicyURL[] = "chrome://policy/";
 const char kChromeUIProfileSigninConfirmationURL[] =
@@ -213,7 +212,6 @@ const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUIOmniboxHost[] = "omnibox";
 const char kChromeUIPasswordManagerInternalsHost[] =
     "password-manager-internals";
-const char kChromeUIPerformanceMonitorHost[] = "performance";
 const char kChromeUIPluginsHost[] = "plugins";
 const char kChromeUIComponentsHost[] = "components";
 const char kChromeUIPolicyHost[] = "policy";
@@ -221,7 +219,6 @@ const char kChromeUIProfileSigninConfirmationHost[] =
     "profile-signin-confirmation";
 const char kChromeUIUserManagerHost[] = "user-manager";
 const char kChromeUIPredictorsHost[] = "predictors";
-const char kChromeUIPrintHost[] = "print";
 const char kChromeUIProfilerHost[] = "profiler";
 const char kChromeUIQuotaInternalsHost[] = "quota-internals";
 const char kChromeUIQuitHost[] = "quit";
@@ -258,6 +255,10 @@ const char kChromeUIWorkersHost[] = "workers";
 
 const char kChromeUIScreenshotPath[] = "screenshots";
 const char kChromeUIThemePath[] = "theme";
+
+#if defined(ENABLE_FULL_PRINTING)
+const char kChromeUIPrintHost[] = "print";
+#endif  // ENABLE_FULL_PRINTING
 
 #if defined(OS_ANDROID)
 const char kChromeUIWelcomeHost[] = "welcome";
@@ -555,9 +556,6 @@ const char kLearnMoreEnterpriseURL[] =
 const char kRemoveNonCWSExtensionURL[] =
     "https://support.google.com/chrome/answer/2811969?"
     "p=ui_remove_non_cws_extensions&rd=1";
-
-const char kCorruptExtensionURL[] =
-    "https://support.google.com/chrome/?p=settings_corrupt_extension";
 
 const char kNotificationsHelpURL[] =
     "https://support.google.com/chrome/?p=ui_notifications";

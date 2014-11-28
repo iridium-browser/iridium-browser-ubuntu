@@ -12,9 +12,9 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.HistoryUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.io.File;
@@ -29,7 +29,7 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient;
     private AwContents mAwContents;
-    private ContentViewCore mContentViewCore;
+    private WebContents mWebContents;
 
     @Override
     public void setUp() throws Exception {
@@ -38,7 +38,7 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
         final AwTestContainerView testContainerView =
                 createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = testContainerView.getAwContents();
-        mContentViewCore = testContainerView.getContentViewCore();
+        mWebContents = mAwContents.getWebContents();
     }
 
     protected void loadDataWithBaseUrlSync(
@@ -202,11 +202,11 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
         final String historyUrl = "http://history.com/";
         loadDataWithBaseUrlSync(pageHtml, "text/html", false, baseUrl, historyUrl);
         assertEquals(historyUrl, HistoryUtils.getUrlOnUiThread(
-                getInstrumentation(), mContentViewCore));
+                getInstrumentation(), mWebContents));
 
         loadDataWithBaseUrlSync(pageHtml, "text/html", false, baseUrl, null);
         assertEquals("about:blank", HistoryUtils.getUrlOnUiThread(
-                getInstrumentation(), mContentViewCore));
+                getInstrumentation(), mWebContents));
     }
 
     @SmallTest
@@ -228,7 +228,7 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
         final String historyUrl = "http://history.com/";
         loadDataWithBaseUrlSync(pageHtml, "text/html", false, "data:foo", historyUrl);
         assertEquals("data:text/html," + pageHtml, HistoryUtils.getUrlOnUiThread(
-                getInstrumentation(), mContentViewCore));
+                getInstrumentation(), mWebContents));
     }
 
     /*
@@ -260,7 +260,7 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             loadDataSync(mAwContents, onPageFinishedHelper, page2Html, "text/html", false);
             assertEquals(page2Title, getTitleOnUiThread(mAwContents));
 
-            HistoryUtils.goBackSync(getInstrumentation(), mContentViewCore, onPageFinishedHelper);
+            HistoryUtils.goBackSync(getInstrumentation(), mWebContents, onPageFinishedHelper);
             // The title of the 'about.html' specified via historyUrl.
             assertEquals(CommonResources.ABOUT_TITLE, getTitleOnUiThread(mAwContents));
 
@@ -274,12 +274,12 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
      * base URL.
      */
     private boolean canAccessFileFromData(String baseUrl, String fileUrl) throws Throwable {
-        final String IMAGE_LOADED = "LOADED";
-        final String IMAGE_NOT_LOADED = "NOT_LOADED";
+        final String imageLoaded = "LOADED";
+        final String imageNotLoaded = "NOT_LOADED";
         String data = "<html><body>" +
                 "<img src=\"" + fileUrl + "\" " +
-                "onload=\"document.title=\'" + IMAGE_LOADED + "\';\" " +
-                "onerror=\"document.title=\'" + IMAGE_NOT_LOADED + "\';\" />" +
+                "onload=\"document.title=\'" + imageLoaded + "\';\" " +
+                "onerror=\"document.title=\'" + imageNotLoaded + "\';\" />" +
                 "</body></html>";
 
         loadDataWithBaseUrlSync(data, "text/html", false, baseUrl, null);
@@ -288,11 +288,11 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             @Override
             public Boolean call() throws Exception {
                 String title = getTitleOnUiThread(mAwContents);
-                return IMAGE_LOADED.equals(title) || IMAGE_NOT_LOADED.equals(title);
+                return imageLoaded.equals(title) || imageNotLoaded.equals(title);
             }
         });
 
-        return IMAGE_LOADED.equals(getTitleOnUiThread(mAwContents));
+        return imageLoaded.equals(getTitleOnUiThread(mAwContents));
     }
 
     @SmallTest
@@ -312,27 +312,27 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
         contentSettings.setJavaScriptEnabled(true);
 
         try {
-            final String DATA_BASE_URL = "data:";
-            final String NON_DATA_BASE_URL = "http://example.com";
+            final String dataBaseUrl = "data:";
+            final String nonDataBaseUrl = "http://example.com";
 
             mAwContents.getSettings().setAllowFileAccess(false);
             String token = "" + System.currentTimeMillis();
             // All access to file://, including android_asset and android_res is blocked
             // with a data: base URL, regardless of AwSettings.getAllowFileAccess().
-            assertFalse(canAccessFileFromData(DATA_BASE_URL,
+            assertFalse(canAccessFileFromData(dataBaseUrl,
                   "file:///android_asset/asset_icon.png?" + token));
-            assertFalse(canAccessFileFromData(DATA_BASE_URL,
+            assertFalse(canAccessFileFromData(dataBaseUrl,
                   "file:///android_res/raw/resource_icon.png?" + token));
-            assertFalse(canAccessFileFromData(DATA_BASE_URL, "file://" + imagePath + "?" + token));
+            assertFalse(canAccessFileFromData(dataBaseUrl, "file://" + imagePath + "?" + token));
 
             // WebView always has access to android_asset and android_res for non-data
             // base URLs and can access other file:// URLs based on the value of
             // AwSettings.getAllowFileAccess().
-            assertTrue(canAccessFileFromData(NON_DATA_BASE_URL,
+            assertTrue(canAccessFileFromData(nonDataBaseUrl,
                   "file:///android_asset/asset_icon.png?" + token));
-            assertTrue(canAccessFileFromData(NON_DATA_BASE_URL,
+            assertTrue(canAccessFileFromData(nonDataBaseUrl,
                   "file:///android_res/raw/resource_icon.png?" + token));
-            assertFalse(canAccessFileFromData(NON_DATA_BASE_URL,
+            assertFalse(canAccessFileFromData(nonDataBaseUrl,
                   "file://" + imagePath + "?" + token));
 
             token += "a";
@@ -340,17 +340,17 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             // We should still be unable to access any file:// with when loading with a
             // data: base URL, but we should now be able to access the wider file system
             // (still restricted by OS-level permission checks) with a non-data base URL.
-            assertFalse(canAccessFileFromData(DATA_BASE_URL,
+            assertFalse(canAccessFileFromData(dataBaseUrl,
                   "file:///android_asset/asset_icon.png?" + token));
-            assertFalse(canAccessFileFromData(DATA_BASE_URL,
+            assertFalse(canAccessFileFromData(dataBaseUrl,
                   "file:///android_res/raw/resource_icon.png?" + token));
-            assertFalse(canAccessFileFromData(DATA_BASE_URL, "file://" + imagePath + "?" + token));
+            assertFalse(canAccessFileFromData(dataBaseUrl, "file://" + imagePath + "?" + token));
 
-            assertTrue(canAccessFileFromData(NON_DATA_BASE_URL,
+            assertTrue(canAccessFileFromData(nonDataBaseUrl,
                   "file:///android_asset/asset_icon.png?" + token));
-            assertTrue(canAccessFileFromData(NON_DATA_BASE_URL,
+            assertTrue(canAccessFileFromData(nonDataBaseUrl,
                   "file:///android_res/raw/resource_icon.png?" + token));
-            assertTrue(canAccessFileFromData(NON_DATA_BASE_URL,
+            assertTrue(canAccessFileFromData(nonDataBaseUrl,
                   "file://" + imagePath + "?" + token));
         } finally {
             if (!tempImage.delete()) throw new AssertionError();

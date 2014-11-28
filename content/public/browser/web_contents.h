@@ -57,6 +57,7 @@ class SiteInstance;
 class WebContentsDelegate;
 struct CustomContextMenuContext;
 struct DropData;
+struct Manifest;
 struct RendererPreferences;
 
 // WebContents is the core class in content/. A WebContents renders web content
@@ -304,6 +305,10 @@ class WebContents : public PageNavigator,
   virtual void IncrementCapturerCount(const gfx::Size& capture_size) = 0;
   virtual void DecrementCapturerCount() = 0;
   virtual int GetCapturerCount() const = 0;
+
+  // Indicates/Sets whether all audio output from this WebContents is muted.
+  virtual bool IsAudioMuted() const = 0;
+  virtual void SetAudioMuted(bool mute) = 0;
 
   // Indicates whether this tab should be considered crashed. The setter will
   // also notify the delegate when the flag is changed.
@@ -576,20 +581,19 @@ class WebContents : public PageNavigator,
   // Requests the renderer to insert CSS into the main frame's document.
   virtual void InsertCSS(const std::string& css) = 0;
 
+  // Returns true if audio has recently been audible from the WebContents.
+  virtual bool WasRecentlyAudible() = 0;
+
+  typedef base::Callback<void(const Manifest&)> GetManifestCallback;
+
+  // Requests the Manifest of the main frame's document.
+  virtual void GetManifest(const GetManifestCallback&) = 0;
+
 #if defined(OS_ANDROID)
   CONTENT_EXPORT static WebContents* FromJavaWebContents(
       jobject jweb_contents_android);
   virtual base::android::ScopedJavaLocalRef<jobject> GetJavaWebContents() = 0;
 #elif defined(OS_MACOSX)
-  // The web contents view assumes that its view will never be overlapped by
-  // another view (either partially or fully). This allows it to perform
-  // optimizations. If the view is in a view hierarchy where it might be
-  // overlapped by another view, notify the view by calling this with |true|.
-  virtual void SetAllowOverlappingViews(bool overlapping) = 0;
-
-  // Returns true if overlapping views are allowed, false otherwise.
-  virtual bool GetAllowOverlappingViews() = 0;
-
   // Allowing other views disables optimizations which assume that only a single
   // WebContents is present.
   virtual void SetAllowOtherViews(bool allow) = 0;

@@ -45,6 +45,7 @@ class URLRequestContextGetter;
 namespace sync_file_system {
 
 class RemoteChangeProcessor;
+class SyncFileSystemTest;
 
 namespace drive_backend {
 
@@ -128,12 +129,11 @@ class SyncEngine : public RemoteFileSyncService,
   virtual void PromoteDemotedChanges(const base::Closure& callback) OVERRIDE;
 
   // LocalChangeProcessor overrides.
-  virtual void ApplyLocalChange(
-      const FileChange& local_change,
-      const base::FilePath& local_path,
-      const SyncFileMetadata& local_metadata,
-      const fileapi::FileSystemURL& url,
-      const SyncStatusCallback& callback) OVERRIDE;
+  virtual void ApplyLocalChange(const FileChange& local_change,
+                                const base::FilePath& local_path,
+                                const SyncFileMetadata& local_metadata,
+                                const storage::FileSystemURL& url,
+                                const SyncStatusCallback& callback) OVERRIDE;
 
   // drive::DriveNotificationObserver overrides.
   virtual void OnNotificationReceived() OVERRIDE;
@@ -149,19 +149,22 @@ class SyncEngine : public RemoteFileSyncService,
 
   // SigninManagerBase::Observer overrides.
   virtual void GoogleSigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void GoogleSigninSucceeded(const std::string& username,
+  virtual void GoogleSigninSucceeded(const std::string& account_id,
+                                     const std::string& username,
                                      const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& username) OVERRIDE;
+  virtual void GoogleSignedOut(const std::string& account_id,
+                               const std::string& username) OVERRIDE;
 
  private:
   class WorkerObserver;
 
   friend class DriveBackendSyncTest;
   friend class SyncEngineTest;
+  friend class sync_file_system::SyncFileSystemTest;
 
-  SyncEngine(base::SingleThreadTaskRunner* ui_task_runner,
-             base::SequencedTaskRunner* worker_task_runner,
-             base::SequencedTaskRunner* drive_task_runner,
+  SyncEngine(const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner,
+             const scoped_refptr<base::SequencedTaskRunner>& worker_task_runner,
+             const scoped_refptr<base::SequencedTaskRunner>& drive_task_runner,
              const base::FilePath& sync_file_system_dir,
              TaskLogger* task_logger,
              drive::DriveNotificationManager* notification_manager,
@@ -174,7 +177,7 @@ class SyncEngine : public RemoteFileSyncService,
 
   // Called by WorkerObserver.
   void OnPendingFileListUpdated(int item_count);
-  void OnFileStatusChanged(const fileapi::FileSystemURL& url,
+  void OnFileStatusChanged(const storage::FileSystemURL& url,
                            SyncFileStatus file_status,
                            SyncAction sync_action,
                            SyncDirection direction);

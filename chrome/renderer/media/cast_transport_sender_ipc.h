@@ -22,6 +22,7 @@ class CastTransportSenderIPC
  public:
   CastTransportSenderIPC(
       const net::IPEndPoint& remote_end_point,
+      scoped_ptr<base::DictionaryValue> options,
       const media::cast::CastTransportStatusCallback& status_cb,
       const media::cast::BulkRawEventsCallback& raw_events_cb);
 
@@ -36,26 +37,22 @@ class CastTransportSenderIPC
       const media::cast::CastTransportRtpConfig& config,
       const media::cast::RtcpCastMessageCallback& cast_message_cb,
       const media::cast::RtcpRttCallback& rtt_cb) OVERRIDE;
-  virtual void InsertCodedAudioFrame(
-      const media::cast::EncodedFrame& audio_frame) OVERRIDE;
-  virtual void InsertCodedVideoFrame(
-      const media::cast::EncodedFrame& video_frame) OVERRIDE;
+  virtual void InsertFrame(uint32 ssrc,
+      const media::cast::EncodedFrame& frame) OVERRIDE;
   virtual void SendSenderReport(
       uint32 ssrc,
       base::TimeTicks current_time,
       uint32 current_time_as_rtp_timestamp) OVERRIDE;
-  virtual void ResendPackets(
-      bool is_audio,
-      const media::cast::MissingFramesAndPacketsMap& missing_packets,
-      bool cancel_rtx_if_not_in_list,
-      base::TimeDelta dedupe_window)
-      OVERRIDE;
+  virtual void CancelSendingFrames(
+      uint32 ssrc,
+      const std::vector<uint32>& frame_ids) OVERRIDE;
+  virtual void ResendFrameForKickstart(uint32 ssrc, uint32 frame_id) OVERRIDE;
 
   void OnNotifyStatusChange(
       media::cast::CastTransportStatus status);
   void OnRawEvents(const std::vector<media::cast::PacketEvent>& packet_events,
                    const std::vector<media::cast::FrameEvent>& frame_events);
-  void OnRtt(uint32 ssrc, const media::cast::RtcpRttReport& rtt_report);
+  void OnRtt(uint32 ssrc, base::TimeDelta rtt);
   void OnRtcpCastMessage(uint32 ssrc,
                          const media::cast::RtcpCastMessage& cast_message);
 

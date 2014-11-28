@@ -128,6 +128,7 @@ IPC_ENUM_TRAITS_MAX_VALUE(PP_UDPSocket_Option,
 IPC_ENUM_TRAITS(PP_VideoDecodeError_Dev)
 IPC_ENUM_TRAITS(PP_VideoDecoder_Profile)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_VideoFrame_Format, PP_VIDEOFRAME_FORMAT_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_HardwareAcceleration, PP_HARDWAREACCELERATION_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_VideoProfile, PP_VIDEOPROFILE_MAX)
 
 IPC_STRUCT_TRAITS_BEGIN(PP_Point)
@@ -756,6 +757,10 @@ IPC_MESSAGE_ROUTED3(
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPPContentDecryptor_Initialize,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* key_system, String */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_SetServerCertificate,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    std::vector<uint8_t> /* certificate */)
 IPC_MESSAGE_ROUTED5(PpapiMsg_PPPContentDecryptor_CreateSession,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
@@ -771,10 +776,18 @@ IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_UpdateSession,
                     uint32_t /* promise_id */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */,
                     ppapi::proxy::SerializedVar /* response, ArrayBuffer */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_ReleaseSession,
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_CloseSession,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
-                    ppapi::proxy::SerializedVar /* web_session_id, String */)
+                    std::string /* web_session_id */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_RemoveSession,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    std::string /* web_session_id */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_GetUsableKeyIds,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    std::string /* web_session_id */)
 IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_Decrypt,
                     PP_Instance /* instance */,
                     ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
@@ -827,9 +840,11 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_ChannelCreated,
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_StartupInitializationComplete)
 
 // Calls renderer to open a resource file for nacl_irt_open_resource().
-IPC_SYNC_MESSAGE_CONTROL1_1(PpapiHostMsg_OpenResource,
+IPC_SYNC_MESSAGE_CONTROL1_3(PpapiHostMsg_OpenResource,
                             std::string /* key */,
-                            ppapi::proxy::SerializedHandle /* fd */)
+                            ppapi::proxy::SerializedHandle /* fd */,
+                            uint64_t /* file_token_lo */,
+                            uint64_t /* file_token_hi */)
 
 // Logs the given message to the console of all instances.
 IPC_MESSAGE_CONTROL4(PpapiHostMsg_LogWithSource,
@@ -855,11 +870,12 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_ReleaseResource,
                     ppapi::HostResource)
 
 // PPB_Graphics3D.
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBGraphics3D_Create,
+IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_Create,
                            PP_Instance /* instance */,
                            ppapi::HostResource /* share_context */,
                            std::vector<int32_t> /* attrib_list */,
-                           ppapi::HostResource /* result */)
+                           ppapi::HostResource /* result */,
+                           ppapi::proxy::SerializedHandle /* shared_state */)
 IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBGraphics3D_SetGetBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* transfer_buffer_id */)
@@ -1091,6 +1107,10 @@ IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithSession,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithKeyIds,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    std::vector<std::vector<uint8_t> > /* key_ids */)
 IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_PromiseRejected,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
@@ -1102,6 +1122,14 @@ IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_SessionMessage,
                     ppapi::proxy::SerializedVar /* web_session_id, String */,
                     ppapi::proxy::SerializedVar /* message, ArrayBuffer */,
                     ppapi::proxy::SerializedVar /* destination_url, String */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_SessionKeysChange,
+                    PP_Instance /* instance */,
+                    std::string /* web_session_id */,
+                    PP_Bool /* has_additional_usable_key */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_SessionExpirationChange,
+                    PP_Instance /* instance */,
+                    std::string /* web_session_id */,
+                    PP_Time /* new_expiry_time */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SessionReady,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */)
@@ -1700,11 +1728,11 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_UDPSocket_Bind,
                      PP_NetAddress_Private /* net_addr */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_UDPSocket_BindReply,
                      PP_NetAddress_Private /* bound_addr */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_UDPSocket_RecvFrom,
-                     int32_t /* num_bytes */)
-IPC_MESSAGE_CONTROL2(PpapiPluginMsg_UDPSocket_RecvFromReply,
+IPC_MESSAGE_CONTROL3(PpapiPluginMsg_UDPSocket_PushRecvResult,
+                     int32_t /* result */,
                      std::string /* data */,
                      PP_NetAddress_Private /* remote_addr */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_UDPSocket_RecvSlotAvailable)
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_UDPSocket_SendTo,
                      std::string /* data */,
                      PP_NetAddress_Private /* net_addr */)
@@ -1900,7 +1928,7 @@ IPC_MESSAGE_CONTROL0(PpapiHostMsg_VideoDecoder_Create)
 IPC_MESSAGE_CONTROL3(PpapiHostMsg_VideoDecoder_Initialize,
                      ppapi::HostResource /* graphics_context */,
                      PP_VideoProfile /* profile */,
-                     bool /* allow_software_fallback */)
+                     PP_HardwareAcceleration /* acceleration */)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_VideoDecoder_InitializeReply)
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_VideoDecoder_GetShm,
                      uint32_t /* shm_id */,

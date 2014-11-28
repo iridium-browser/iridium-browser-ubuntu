@@ -3,8 +3,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import os
 import re
 import unittest
+import HTMLParser
 
 from tvcm import parse_html_deps
 from tvcm import module as module_module
@@ -32,7 +34,7 @@ class ParseTests(unittest.TestCase):
     html = """<!DOCTYPE html>
               <html>
                 <head>
-                  <script src="polymer.min.js"></script>
+                  <script src="polymer.js"></script>
                   <script src="foo.js"></script>
                 </head>
                 <body>
@@ -40,35 +42,13 @@ class ParseTests(unittest.TestCase):
               </html>"""
     parser = parse_html_deps.HTMLModuleParser()
     module = parser.Parse(html)
-    self.assertEquals(['polymer.min.js', 'foo.js'], module.scripts_external);
+    self.assertEquals(['polymer.js', 'foo.js'], module.scripts_external);
     self.assertEquals([], module.inline_scripts)
     self.assertEquals([], module.stylesheets)
     self.assertEquals([], module.imports)
     self.assertTrue(module.has_decl)
     self.assertTrue('DOCTYPE html' not in module.html_contents_without_links_and_script)
 
-    class Ctl(html_generation_controller.HTMLGenerationController):
-      def GetHTMLForScriptHRef(self, href):
-        if href == "polymer.min.js":
-          return "<script>POLYMER</script>"
-        elif href == "foo.js":
-          return "<script>FOO</script>"
-        return None
-
-      def GetHTMLForStylesheetHRef(self, href):
-        return None
-
-    gen_html = module.GenerateHTML(Ctl())
-    ghtm = """
-              <html>
-                <head>
-                  <script>POLYMER</script>
-                  <script>FOO</script>
-                </head>
-                <body>
-                </body>
-              </html>"""
-    self.assertEquals(ghtm, gen_html)
 
   def test_parse_link_rel_import(self):
     html = """<!DOCTYPE html>
@@ -139,9 +119,6 @@ class ParseTests(unittest.TestCase):
     self.assertFalse(module.has_decl)
 
     class Ctl(html_generation_controller.HTMLGenerationController):
-      def GetHTMLForScriptHRef(self, href):
-        return None
-
       def GetHTMLForStylesheetHRef(self, href):
         if href == "frameworkstyles.css":
           return "<style>FRAMEWORK</style>"
@@ -149,10 +126,10 @@ class ParseTests(unittest.TestCase):
 
     gen_html = module.GenerateHTML(Ctl())
     ghtm = """<polymer-element name="hi">
-                <template>
-                  <style>FRAMEWORK</style>
-                </template>
-              </polymer-element>"""
+<template>
+<style>FRAMEWORK</style>
+</template>
+</polymer-element>"""
     self.assertEquals(ghtm, gen_html)
 
 
@@ -234,20 +211,6 @@ class ParseTests(unittest.TestCase):
     self.assertEquals("""<a b="c">d</a>""",
                       module.html_contents_without_links_and_script.strip())
 
-  def test_malformed_script_raises(self):
-    html = """<script src="x"/>"""
-    parser = parse_html_deps.HTMLModuleParser()
-    def DoIt():
-      module = parser.Parse(html)
-    self.assertRaises(Exception, DoIt)
-
-  def test_malformed_br_raises(self):
-    html = """<br>"""
-    parser = parse_html_deps.HTMLModuleParser()
-    def DoIt():
-      module = parser.Parse(html)
-    self.assertRaises(Exception, DoIt)
-
   def test_br_does_not_raise(self):
     html = """<div><br/></div>"""
     parser = parse_html_deps.HTMLModuleParser()
@@ -270,13 +233,6 @@ class ParseTests(unittest.TestCase):
     parser = parse_html_deps.HTMLModuleParser()
     module = parser.Parse(html)
 
-  def test_malformed_script_raises(self):
-    html = """<script src="/jszip-inflate.js"</script>"""
-    parser = parse_html_deps.HTMLModuleParser()
-    def DoIt():
-      module = parser.Parse(html)
-    self.assertRaises(Exception, DoIt)
-
   def test_script_with_script_inside_as_js(self):
     html = """<script>
               var html_lines = [
@@ -298,6 +254,23 @@ class ParseTests(unittest.TestCase):
     def DoIt():
       module = parser.Parse(html)
     self.assertRaises(Exception, DoIt)
+
+  def test_script_with_cdata(self):
+    html = """<script></h2></script>"""
+    parser = parse_html_deps.HTMLModuleParser()
+    module = parser.Parse(html)
+    self.assertEquals(1, len(module.inline_scripts))
+    self.assertEquals('</h2>', module.inline_scripts[0].contents)
+
+
+
+  def test_tvcm_parse(self):
+    basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    tvcm_html_file = os.path.join(basedir, 'src', 'tvcm.html')
+    with open(tvcm_html_file, 'r') as f:
+      tvcm_contents = f.read()
+    parser = parse_html_deps.HTMLModuleParser()
+    parser.Parse(tvcm_contents)
 
 if __name__ == '__main__':
   unittest.main()

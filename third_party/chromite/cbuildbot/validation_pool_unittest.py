@@ -1,11 +1,13 @@
 #!/usr/bin/python
-
 # Copyright (c) 2011-2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Module that contains unittests for validation_pool module."""
 
+from __future__ import print_function
+
+import ConfigParser
 import contextlib
 import copy
 import functools
@@ -35,6 +37,7 @@ from chromite.lib import gerrit
 from chromite.lib import gob_util
 from chromite.lib import gs
 from chromite.lib import osutils
+from chromite.lib import parallel
 from chromite.lib import parallel_unittest
 from chromite.lib import partial_mock
 from chromite.lib import patch as cros_patch
@@ -76,6 +79,7 @@ class Base(cros_test_lib.MockTestCase):
   """Test case base class with helpers for other test suites."""
 
   def setUp(self):
+    self.manager = parallel.Manager()
     self.patch_mock = None
     self._patch_counter = (itertools.count(1)).next
     self.build_root = 'fakebuildroot'
@@ -174,28 +178,29 @@ class MoxBase(Base, cros_test_lib.MoxTestCase):
 class IgnoredStagesTest(Base):
   """Tests for functions that calculate what stages to ignore."""
 
+  def GetOption(self, path, section='GENERAL', option='ignored-stages'):
+    return validation_pool._GetOptionFromConfigFile(path, section, option)
+
   def testBadConfigFile(self):
     """Test if we can handle an incorrectly formatted config file."""
     with osutils.TempDir(set_global=True) as tempdir:
       path = os.path.join(tempdir, 'foo.ini')
       osutils.WriteFile(path, 'foobar')
-      ignored = validation_pool.GetStagesToIgnoreFromConfigFile(path)
-      self.assertEqual([], ignored)
+      self.assertRaises(ConfigParser.Error, self.GetOption, path)
 
   def testMissingConfigFile(self):
     """Test if we can handle a missing config file."""
     with osutils.TempDir(set_global=True) as tempdir:
       path = os.path.join(tempdir, 'foo.ini')
-      ignored = validation_pool.GetStagesToIgnoreFromConfigFile(path)
-      self.assertEqual([], ignored)
+      self.assertEqual(None, self.GetOption(path))
 
   def testGoodConfigFile(self):
     """Test if we can handle a good config file."""
     with osutils.TempDir(set_global=True) as tempdir:
       path = os.path.join(tempdir, 'foo.ini')
       osutils.WriteFile(path, '[GENERAL]\nignored-stages: bar baz\n')
-      ignored = validation_pool.GetStagesToIgnoreFromConfigFile(path)
-      self.assertEqual(['bar', 'baz'], ignored)
+      ignored = self.GetOption(path)
+      self.assertEqual('bar baz', ignored)
 
 
 class TestPatchSeries(MoxBase):
@@ -642,19 +647,25 @@ class TestSubmitChange(MoxBase):
   def tearDown(self):
     validation_pool.SUBMITTED_WAIT_TIMEOUT = self.orig_timeout
 
-  def _TestSubmitChange(self, results):
+  def _TestSubmitChange(self, results, build_id=31337):
     """Test submitting a change with the given results."""
     results = [cros_test_lib.EasyAttr(status=r) for r in results]
     change = self.MockPatch(change_id=12345, patch_number=1)
     pool = self.mox.CreateMock(validation_pool.ValidationPool)
     pool.dryrun = False
     pool._metadata = metadata_lib.CBuildbotMetadata()
+    pool._metadata.UpdateWithDict({'build_id': build_id})
     pool._helper_pool = self.mox.CreateMock(validation_pool.HelperPool)
     helper = self.mox.CreateMock(validation_pool.gerrit.GerritHelper)
+
+    self.mox.StubOutWithMock(validation_pool.ValidationPool,
+                             '_InsertCLActionToDatabase')
 
     # Prepare replay script.
     pool._helper_pool.ForChange(change).AndReturn(helper)
     helper.SubmitChange(change, dryrun=False)
+    validation_pool.ValidationPool._InsertCLActionToDatabase(build_id, change,
+                                                             mox.IgnoreArg())
     for result in results:
       helper.QuerySingleRecord(change.gerrit_number).AndReturn(result)
     self.mox.ReplayAll()
@@ -1241,6 +1252,22 @@ class TestFindSuspects(MoxBase):
     changes = [self.kernel_patch, self.power_manager_patch] + suspects
     self._AssertSuspects(changes, suspects, lab_fail=False, infra_fail=True)
 
+  def testManualBlame(self):
+    """If there are changes that were manually blamed, pick those changes."""
+    approvals1 = [{'type': 'VRIF', 'value': '-1', 'grantedOn': 1391733002},
+                  {'type': 'CRVW', 'value': '2', 'grantedOn': 1391733002},
+                  {'type': 'COMR', 'value': '1', 'grantedOn': 1391733002},]
+    approvals2 = [{'type': 'VRIF', 'value': '1', 'grantedOn': 1391733002},
+                  {'type': 'CRVW', 'value': '-2', 'grantedOn': 1391733002},
+                  {'type': 'COMR', 'value': '1', 'grantedOn': 1391733002},]
+    suspects = [self.MockPatch(approvals=approvals1),
+                self.MockPatch(approvals=approvals2)]
+    changes = [self.kernel_patch, self.chromite_patch] + suspects
+    self._AssertSuspects(changes, suspects, lab_fail=False, infra_fail=False)
+    self._AssertSuspects(changes, suspects, lab_fail=True, infra_fail=False)
+    self._AssertSuspects(changes, suspects, lab_fail=True, infra_fail=True)
+    self._AssertSuspects(changes, suspects, lab_fail=False, infra_fail=True)
+
   def _GetMessages(self, lab_fail=0, infra_fail=0, other_fail=0):
     """Returns a list of BuildFailureMessage objects."""
     messages = []
@@ -1512,41 +1539,42 @@ class MockValidationPool(partial_mock.PartialMock):
   ATTRS = ('ReloadChanges', 'RemoveCommitReady', '_SubmitChange',
            'SendNotification')
 
-  def __init__(self):
+  def __init__(self, manager):
     partial_mock.PartialMock.__init__(self)
     self.submit_results = {}
-    self.max_submits = None
+    self.max_submits = manager.Value('i', -1)
+    self.submitted = manager.list()
+    self.notification_calls = manager.list()
 
   def GetSubmittedChanges(self):
-    calls = []
-    for call in self.patched['_SubmitChange'].call_args_list:
-      call_args, _ = call
-      calls.append(call_args[1])
-    return calls
+    return list(self.submitted)
 
   def _SubmitChange(self, _inst, change):
     result = self.submit_results.get(change, True)
+    self.submitted.append(change)
     if isinstance(result, Exception):
       raise result
-    if result and self.max_submits is not None:
-      if self.max_submits <= 0:
+    if result and self.max_submits.value != -1:
+      if self.max_submits.value <= 0:
         return False
-      self.max_submits -= 1
+      self.max_submits.value -= 1
     return result
+
+  def SendNotification(self, *args, **kwargs):
+    self.notification_calls.append((args, kwargs))
 
   @classmethod
   def ReloadChanges(cls, changes):
     return changes
 
   RemoveCommitReady = None
-  SendNotification = None
 
 
 class BaseSubmitPoolTestCase(Base, cros_build_lib_unittest.RunCommandTestCase):
   """Test full ability to submit and reject CL pools."""
 
   def setUp(self):
-    self.pool_mock = self.StartPatcher(MockValidationPool())
+    self.pool_mock = self.StartPatcher(MockValidationPool(self.manager))
     self.patch_mock = self.StartPatcher(MockPatchSeries())
     self.PatchObject(gerrit.GerritHelper, 'QuerySingleRecord')
     self.patches = self.GetPatches(2)
@@ -1606,7 +1634,7 @@ class SubmitPoolTest(BaseSubmitPoolTestCase):
         argument by index. Otherwise, look up a keyword argument.
     """
     names = []
-    for call in self.pool_mock.patched['SendNotification'].call_args_list:
+    for call in self.pool_mock.notification_calls:
       call_args, call_kwargs = call
       if change == call_args[1]:
         if isinstance(key, int):
@@ -1650,7 +1678,7 @@ class SubmitPoolTest(BaseSubmitPoolTestCase):
 
   def testSubmitPartialCycle(self):
     """Submit a failed cyclic set of dependencies"""
-    self.pool_mock.max_submits = 1
+    self.pool_mock.max_submits.value = 1
     self.patch_mock.SetCQDependencies(self.patches[0], [self.patches[1]])
     self.SubmitPool(submitted=self.patches, rejected=[self.patches[1]])
     (submitted, rejected) = self.pool_mock.GetSubmittedChanges()
@@ -1663,11 +1691,11 @@ class SubmitPoolTest(BaseSubmitPoolTestCase):
 
   def testSubmitFailedCycle(self):
     """Submit a failed cyclic set of dependencies"""
-    self.pool_mock.max_submits = 0
+    self.pool_mock.max_submits.value = 0
     self.patch_mock.SetCQDependencies(self.patches[0], [self.patches[1]])
     self.SubmitPool(submitted=[self.patches[0]], rejected=self.patches)
     (attempted,) = self.pool_mock.GetSubmittedChanges()
-    (rejected,) = [x for x in self.patches if x != attempted]
+    (rejected,) = [x for x in self.patches if x.id != attempted.id]
     failed_submit = validation_pool.PatchFailedToSubmit(
         attempted, validation_pool.ValidationPool.INCONSISTENT_SUBMIT_MSG)
     dep_failed = cros_patch.DependencyError(rejected, failed_submit)

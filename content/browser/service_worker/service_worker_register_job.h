@@ -33,9 +33,9 @@ class ServiceWorkerStorage;
 //  - waiting for older ServiceWorkerVersions to deactivate
 //  - designating the new version to be the 'active' version
 //  - updating storage
-class ServiceWorkerRegisterJob
-    : public ServiceWorkerRegisterJobBase,
-      public EmbeddedWorkerInstance::Listener {
+class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
+                                 public EmbeddedWorkerInstance::Listener,
+                                 public ServiceWorkerRegistration::Listener {
  public:
   typedef base::Callback<void(ServiceWorkerStatusCode status,
                               ServiceWorkerRegistration* registration,
@@ -55,11 +55,11 @@ class ServiceWorkerRegisterJob
   virtual ~ServiceWorkerRegisterJob();
 
   // Registers a callback to be called when the promise would resolve (whether
-  // successfully or not). Multiple callbacks may be registered. If |process_id|
-  // is not -1, it's added to the existing clients when deciding in which
-  // process to create the Service Worker instance.  If there are no existing
-  // clients, a new RenderProcessHost will be created.
-  void AddCallback(const RegistrationCallback& callback, int process_id);
+  // successfully or not). Multiple callbacks may be registered.
+  // If |provider_host| is not NULL, its process will be regarded as a candidate
+  // process to run the worker.
+  void AddCallback(const RegistrationCallback& callback,
+                   ServiceWorkerProviderHost* provider_host);
 
   // ServiceWorkerRegisterJobBase implementation:
   virtual void Start() OVERRIDE;
@@ -74,14 +74,15 @@ class ServiceWorkerRegisterJob
                            DisassociateVersionFromDocuments);
 
   enum Phase {
-     INITIAL,
-     START,
-     REGISTER,
-     UPDATE,
-     INSTALL,
-     STORE,
-     COMPLETE,
-     ABORT,
+    INITIAL,
+    START,
+    WAIT_FOR_UNINSTALL,
+    REGISTER,
+    UPDATE,
+    INSTALL,
+    STORE,
+    COMPLETE,
+    ABORT,
   };
 
   // Holds internal state of ServiceWorkerRegistrationJob, to compel use of the
@@ -94,12 +95,18 @@ class ServiceWorkerRegisterJob
     // Holds the version created by this job. It can be the 'installing',
     // 'waiting', or 'active' version depending on the phase.
     scoped_refptr<ServiceWorkerVersion> new_version;
+
+    scoped_refptr<ServiceWorkerRegistration> uninstalling_registration;
   };
 
-  void set_registration(ServiceWorkerRegistration* registration);
+  void set_registration(
+      const scoped_refptr<ServiceWorkerRegistration>& registration);
   ServiceWorkerRegistration* registration();
   void set_new_version(ServiceWorkerVersion* version);
   ServiceWorkerVersion* new_version();
+  void set_uninstalling_registration(
+      const scoped_refptr<ServiceWorkerRegistration>& registration);
+  ServiceWorkerRegistration* uninstalling_registration();
 
   void SetPhase(Phase phase);
 
@@ -110,6 +117,11 @@ class ServiceWorkerRegisterJob
       ServiceWorkerStatusCode status,
       const scoped_refptr<ServiceWorkerRegistration>& registration);
   void RegisterAndContinue(ServiceWorkerStatusCode status);
+  void WaitForUninstall(
+      const scoped_refptr<ServiceWorkerRegistration>& registration);
+  void ContinueWithRegistrationForSameScriptUrl(
+      const scoped_refptr<ServiceWorkerRegistration>& existing_registration,
+      ServiceWorkerStatusCode status);
   void UpdateAndContinue();
   void OnStartWorkerFinished(ServiceWorkerStatusCode status);
   void OnStoreRegistrationComplete(ServiceWorkerStatusCode status);
@@ -127,6 +139,10 @@ class ServiceWorkerRegisterJob
   virtual void OnPausedAfterDownload() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
+  // ServiceWorkerRegistration::Listener overrides
+  virtual void OnRegistrationFinishedUninstalling(
+      ServiceWorkerRegistration* registration) OVERRIDE;
+
   void OnCompareScriptResourcesComplete(
       ServiceWorkerVersion* most_recent_version,
       ServiceWorkerStatusCode status,
@@ -142,7 +158,6 @@ class ServiceWorkerRegisterJob
   const GURL pattern_;
   const GURL script_url_;
   std::vector<RegistrationCallback> callbacks_;
-  std::vector<int> pending_process_ids_;
   Phase phase_;
   Internal internal_;
   bool is_promise_resolved_;

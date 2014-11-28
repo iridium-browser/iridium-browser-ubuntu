@@ -33,6 +33,7 @@ class SessionStateDelegateChromeos
       aura::Window* window) OVERRIDE;
   virtual int GetMaximumNumberOfLoggedInUsers() const OVERRIDE;
   virtual int NumberOfLoggedInUsers() const OVERRIDE;
+  virtual bool CanAddUserToMultiProfile(AddUserError* error) const OVERRIDE;
   virtual bool IsActiveUserSessionStarted() const OVERRIDE;
   virtual bool CanLockScreen() const OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
@@ -75,6 +76,10 @@ class SessionStateDelegateChromeos
 
   // Notify observers about session state change.
   void NotifySessionStateChanged();
+
+  // Switches to a new user. This call might show a dialog asking the user if he
+  // wants to stop desktop casting before switching.
+  void TryToSwitchUser(const std::string& user_id);
 
   // List of observers is only used on Chrome OS for now.
   ObserverList<ash::SessionStateObserver> session_state_observer_list_;

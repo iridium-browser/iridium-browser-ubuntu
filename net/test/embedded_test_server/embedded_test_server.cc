@@ -5,8 +5,8 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process_metrics.h"
@@ -93,6 +93,18 @@ HttpListenSocket::HttpListenSocket(const SocketDescriptor socket_descriptor,
 void HttpListenSocket::Listen() {
   DCHECK(thread_checker_.CalledOnValidThread());
   TCPListenSocket::Listen();
+}
+
+void HttpListenSocket::ListenOnIOThread() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+#if !defined(OS_POSIX)
+  // This method may be called after the IO thread is changed, thus we need to
+  // call |WatchSocket| again to make sure it listens on the current IO thread.
+  // Only needed for non POSIX platforms, since on POSIX platforms
+  // StreamListenSocket::Listen already calls WatchSocket inside the function.
+  WatchSocket(WAITING_ACCEPT);
+#endif
+  Listen();
 }
 
 HttpListenSocket::~HttpListenSocket() {
@@ -198,7 +210,7 @@ void EmbeddedTestServer::InitializeOnIOThread() {
 void EmbeddedTestServer::ListenOnIOThread() {
   DCHECK(io_thread_->message_loop_proxy()->BelongsToCurrentThread());
   DCHECK(Started());
-  listen_socket_->Listen();
+  listen_socket_->ListenOnIOThread();
 }
 
 void EmbeddedTestServer::ShutdownOnIOThread() {

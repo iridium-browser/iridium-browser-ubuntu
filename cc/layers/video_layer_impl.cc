@@ -12,7 +12,7 @@
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/quads/yuv_video_draw_quad.h"
 #include "cc/resources/resource_provider.h"
-#include "cc/resources/single_release_callback.h"
+#include "cc/resources/single_release_callback_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/occlusion_tracker.h"
 #include "cc/trees/proxy.h"
@@ -122,7 +122,8 @@ bool VideoLayerImpl::WillDraw(DrawMode draw_mode,
   for (size_t i = 0; i < external_resources.mailboxes.size(); ++i) {
     unsigned resource_id = resource_provider->CreateResourceFromTextureMailbox(
         external_resources.mailboxes[i],
-        SingleReleaseCallback::Create(external_resources.release_callbacks[i]));
+        SingleReleaseCallbackImpl::Create(
+            external_resources.release_callbacks[i]));
     frame_resources_.push_back(resource_id);
   }
 
@@ -176,7 +177,8 @@ void VideoLayerImpl::AppendQuads(
   gfx::Size coded_size = frame_->coded_size();
 
   gfx::Rect visible_quad_rect =
-      occlusion_tracker.UnoccludedContentRect(quad_rect, transform);
+      occlusion_tracker.GetCurrentOcclusionForLayer(transform)
+          .GetUnoccludedContentRect(quad_rect);
   if (visible_quad_rect.IsEmpty())
     return;
 
@@ -336,8 +338,10 @@ void VideoLayerImpl::DidDraw(ResourceProvider* resource_provider) {
 
   if (frame_resource_type_ ==
       VideoFrameExternalResources::SOFTWARE_RESOURCE) {
-    for (size_t i = 0; i < software_resources_.size(); ++i)
-      software_release_callback_.Run(0, false);
+    for (size_t i = 0; i < software_resources_.size(); ++i) {
+      software_release_callback_.Run(
+          0, false, layer_tree_impl()->BlockingMainThreadTaskRunner());
+    }
 
     software_resources_.clear();
     software_release_callback_.Reset();

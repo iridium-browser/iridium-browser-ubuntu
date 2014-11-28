@@ -5,8 +5,8 @@
 #include "content/test/ppapi/ppapi_test.h"
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -16,6 +16,10 @@
 #include "net/base/filename_util.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
 #include "ppapi/shared_impl/test_harness_utils.h"
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/audio/cras_audio_handler.h"
+#endif
 
 namespace content {
 
@@ -127,6 +131,20 @@ std::string PPAPITest::BuildQuery(const std::string& base,
 
 OutOfProcessPPAPITest::OutOfProcessPPAPITest() {
   in_process_ = false;
+}
+
+void OutOfProcessPPAPITest::SetUp() {
+#if defined(OS_CHROMEOS)
+    chromeos::CrasAudioHandler::InitializeForTesting();
+#endif
+  ContentBrowserTest::SetUp();
+}
+
+void OutOfProcessPPAPITest::TearDown() {
+  ContentBrowserTest::TearDown();
+#if defined(OS_CHROMEOS)
+    chromeos::CrasAudioHandler::Shutdown();
+#endif
 }
 
 }  // namespace content

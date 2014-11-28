@@ -17,12 +17,12 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 
-import com.google.common.annotations.VisibleForTesting;
-
-import java.lang.CharSequence;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.VisibleForTesting;
+import org.chromium.ui.picker.InputDialogContainer;
+
+import java.lang.CharSequence;
 
 /**
  * Adapts and plumbs android IME service onto the chrome text input API.
@@ -74,15 +74,22 @@ public class ImeAdapter {
     }
 
     private class DelayedDismissInput implements Runnable {
-        private final long mNativeImeAdapter;
+        private long mNativeImeAdapter;
 
         DelayedDismissInput(long nativeImeAdapter) {
             mNativeImeAdapter = nativeImeAdapter;
         }
 
+        // http://crbug.com/413744
+        void detach() {
+            mNativeImeAdapter = 0;
+        }
+
         @Override
         public void run() {
-            attach(mNativeImeAdapter, sTextInputTypeNone, sTextInputFlagNone);
+            if (mNativeImeAdapter != 0) {
+                attach(mNativeImeAdapter, sTextInputTypeNone, sTextInputFlagNone);
+            }
             dismissInput(true);
         }
     }
@@ -693,7 +700,10 @@ public class ImeAdapter {
 
     @CalledByNative
     void detach() {
-        if (mDismissInput != null) mHandler.removeCallbacks(mDismissInput);
+        if (mDismissInput != null) {
+            mHandler.removeCallbacks(mDismissInput);
+            mDismissInput.detach();
+        }
         mNativeImeAdapterAndroid = 0;
         mTextInputType = 0;
     }

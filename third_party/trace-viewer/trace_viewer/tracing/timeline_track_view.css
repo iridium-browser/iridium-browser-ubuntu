@@ -18,14 +18,6 @@
   position: relative;
 }
 
-.timeline-track-view .mode-indicator {
-  height: 32px;
-  position: absolute;
-  right: 5px;
-  top: 38px;
-  width: 33px;
-}
-
 .model-track-container {
   -webkit-box-flex: 1;
   overflow: auto;
@@ -36,4 +28,11 @@
   border: 1px solid rgb(0, 0, 96);
   font-size: 75%;
   position: fixed;
+}
+
+.timeline-track-view > .hint-text {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 8pt;
 }

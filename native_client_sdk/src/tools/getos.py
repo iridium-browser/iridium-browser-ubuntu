@@ -83,8 +83,8 @@ def GetSDKVersion():
     raise Error("error parsing SDK README: %s" % readme)
 
   try:
-    revision = int(revision)
     version = int(version)
+    revision = int(revision)
   except ValueError:
     raise Error("error parsing SDK README: %s" % readme)
 
@@ -184,6 +184,10 @@ def GetNaClArch(platform):
 
 
 def ParseVersion(version):
+  """Parses a version number of the form '<major>.<position>'.
+
+  <position> is the Cr-Commit-Position number.
+  """
   if '.' in version:
     version = version.split('.')
   else:
@@ -193,6 +197,22 @@ def ParseVersion(version):
     return tuple(int(x) for x in version)
   except ValueError:
     raise Error('error parsing SDK version: %s' % version)
+
+
+def CheckVersion(required_version):
+  """Determines whether the current SDK version meets the required version.
+
+  Args:
+    required_version: (major, position) pair, where position is the
+    Cr-Commit-Position number.
+
+  Raises:
+    Error: The SDK version is older than required_version.
+  """
+  version = GetSDKVersion()[:2]
+  if version < required_version:
+    raise Error("SDK version too old (current: %d.%d, required: %d.%d)"
+           % (version[0], version[1], required_version[0], required_version[1]))
 
 
 def main(args):
@@ -211,8 +231,10 @@ def main(args):
   parser.add_option('--sdk-commit-position', action='store_true',
       help='Print commit position of the NaCl SDK.')
   parser.add_option('--check-version',
+      metavar='MAJOR.POSITION',
       help='Check that the SDK version is at least as great as the '
-           'version passed in.')
+           'version passed in. MAJOR is the major version number and POSITION '
+           'is the Cr-Commit-Position number.')
 
   options, _ = parser.parse_args(args)
 
@@ -239,11 +261,7 @@ def main(args):
     out = GetSDKVersion()[2]
   elif options.check_version:
     required_version = ParseVersion(options.check_version)
-    version = GetSDKVersion()
-    if version < required_version:
-      raise Error("SDK version too old (current: %s.%s, required: %s.%s)"
-             % (version[0], version[1],
-                required_version[0], required_version[1]))
+    CheckVersion(required_version)
     out = None
 
   if out:

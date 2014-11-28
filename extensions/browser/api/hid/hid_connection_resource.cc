@@ -30,6 +30,12 @@ HidConnectionResource::HidConnectionResource(
     scoped_refptr<device::HidConnection> connection)
     : ApiResource(owner_extension_id), connection_(connection) {}
 
-HidConnectionResource::~HidConnectionResource() {}
+HidConnectionResource::~HidConnectionResource() {
+  connection_->Close();
+}
+
+bool HidConnectionResource::IsPersistent() const {
+  return false;
+}
 
 }  // namespace extensions

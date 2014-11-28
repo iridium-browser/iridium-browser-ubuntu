@@ -6,12 +6,12 @@
 
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "storage/common/database/database_identifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/common/database/database_identifier.h"
 
 namespace {
 
-using webkit_database::DatabaseIdentifier;
+using storage::DatabaseIdentifier;
 
 class CannedBrowsingDataDatabaseHelperTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;

@@ -194,6 +194,10 @@ UI_BASE_EXPORT void GetAcceptLanguagesForLocale(
 // designer given constraints which might dependent on the language used.
 UI_BASE_EXPORT int GetLocalizedContentsWidthInPixels(int pixel_resource_id);
 
+UI_BASE_EXPORT const char* const* GetAcceptLanguageListForTesting();
+
+UI_BASE_EXPORT size_t GetAcceptLanguageListSizeForTesting();
+
 }  // namespace l10n_util
 
 #endif  // UI_BASE_L10N_L10N_UTIL_H_

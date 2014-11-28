@@ -10,11 +10,11 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#include "chrome/grit/generated_resources.h"
 #include "extensions/browser/extension_system.h"
-#include "grit/generated_resources.h"
-#include "grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
+#include "ui/strings/grit/ui_strings.h"
 
 // NOTE(koz): Linux doesn't use the thick shadowed border, so we add padding
 // here.

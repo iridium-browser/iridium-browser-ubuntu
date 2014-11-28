@@ -126,6 +126,14 @@ WebInspector.CodeMirrorTextEditor = function(url, delegate)
     this._enableBracketMatchingIfNeeded();
 
     this._codeMirror.setOption("keyMap", WebInspector.isMac() ? "devtools-mac" : "devtools-pc");
+
+    CodeMirror.commands.maybeAvoidSmartSingleQuotes = this._maybeAvoidSmartQuotes.bind(this, "'");
+    CodeMirror.commands.maybeAvoidSmartDoubleQuotes = this._maybeAvoidSmartQuotes.bind(this, "\"");
+    this._codeMirror.addKeyMap({
+        "'": "maybeAvoidSmartSingleQuotes",
+        "'\"'": "maybeAvoidSmartDoubleQuotes"
+    });
+
     this._codeMirror.setOption("flattenSpans", false);
 
     this._codeMirror.setOption("maxHighlightLength", WebInspector.CodeMirrorTextEditor.maxHighlightLength);
@@ -327,6 +335,29 @@ WebInspector.CodeMirrorTextEditor.MaximumNumberOfWhitespacesPerSingleSpan = 16;
 WebInspector.CodeMirrorTextEditor.MaxEditableTextSize = 1024 * 1024 * 10;
 
 WebInspector.CodeMirrorTextEditor.prototype = {
+    /**
+     * @param {string} quoteCharacter
+     * @return {*}
+     */
+    _maybeAvoidSmartQuotes: function(quoteCharacter)
+    {
+        if (!WebInspector.settings.textEditorBracketMatching.get())
+            return CodeMirror.Pass;
+        var selections = this.selections();
+        if (selections.length !== 1 || !selections[0].isEmpty())
+            return CodeMirror.Pass;
+
+        var selection = selections[0];
+        var token = this.tokenAtTextPosition(selection.startLine, selection.startColumn);
+        if (!token || token.type.indexOf("string") === -1)
+            return CodeMirror.Pass;
+        var line = this.line(selection.startLine);
+        var tokenValue = line.substring(token.startColumn, token.endColumn);
+        if (tokenValue[0] === tokenValue[tokenValue.length - 1] && (tokenValue[0] === "'" || tokenValue[0] === "\""))
+            return CodeMirror.Pass;
+        this._codeMirror.replaceSelection(quoteCharacter);
+    },
+
     _onKeyHandled: function()
     {
         WebInspector.shortcutRegistry.dismissPendingShortcutAction();
@@ -1038,7 +1069,7 @@ WebInspector.CodeMirrorTextEditor.prototype = {
     addDecoration: function(lineNumber, element)
     {
         var widget = this._codeMirror.addLineWidget(lineNumber, element);
-        this._elementToWidget.put(element, widget);
+        this._elementToWidget.set(element, widget);
     },
 
     /**
@@ -1053,7 +1084,7 @@ WebInspector.CodeMirrorTextEditor.prototype = {
     },
 
     /**
-     * @param {number} lineNumber
+     * @param {number} lineNumber 0-based
      * @param {number=} columnNumber
      * @param {boolean=} shouldHighlight
      */
@@ -2355,7 +2386,7 @@ WebInspector.CodeMirrorTextEditor.SelectNextOccurrenceController.prototype = {
         var regexSource = textToFind.escapeForRegExp();
         if (fullWord)
             regexSource = "\\b" + regexSource + "\\b";
-        var wordRegex = new RegExp(regexSource, "gi");
+        var wordRegex = new RegExp(regexSource, "g");
         var currentLineText = this._codeMirror.getLine(range.startLine);
 
         findWordInLine(wordRegex, range.startLine, currentLineText, range.endColumn, currentLineText.length);

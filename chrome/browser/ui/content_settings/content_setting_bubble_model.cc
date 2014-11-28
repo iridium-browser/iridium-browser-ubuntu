@@ -23,9 +23,10 @@
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
 #include "chrome/browser/ui/content_settings/media_setting_changed_infobar_delegate.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/content_settings.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -33,12 +34,11 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
+#include "grit/components_strings.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/resources/grit/ui_resources.h"
 
 using base::UserMetricsAction;
 using content::WebContents;
@@ -356,8 +356,8 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
   } else {
     SettingInfo info;
     HostContentSettingsMap* map = profile()->GetHostContentSettingsMap();
-    scoped_ptr<base::Value> value(map->GetWebsiteSetting(
-        url, url, content_type(), std::string(), &info));
+    scoped_ptr<base::Value> value =
+        map->GetWebsiteSetting(url, url, content_type(), std::string(), &info);
     setting = content_settings::ValueToContentSetting(value.get());
     setting_source = info.source;
     setting_is_wildcard =
@@ -806,8 +806,8 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
       TabSpecificContentSettings::FromWebContents(web_contents());
   const std::string& requested_microphone =
        content_settings->media_stream_requested_audio_device();
-   const std::string& requested_camera =
-       content_settings->media_stream_requested_video_device();
+  const std::string& requested_camera =
+      content_settings->media_stream_requested_video_device();
 
   // Add microphone menu.
   PrefService* prefs = profile()->GetPrefs();
@@ -1029,7 +1029,6 @@ ContentSettingRPHBubbleModel::ContentSettingRPHBubbleModel(
       registry_(registry),
       pending_handler_(ProtocolHandler::EmptyProtocolHandler()),
       previous_handler_(ProtocolHandler::EmptyProtocolHandler()) {
-
   DCHECK_EQ(CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS, content_type);
 
   TabSpecificContentSettings* content_settings =

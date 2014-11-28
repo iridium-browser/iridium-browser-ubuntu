@@ -121,11 +121,10 @@ struct SelectedFileInfo;
 }
 
 namespace content {
+
 class BrowserPluginManager;
 class DevToolsAgent;
 class DocumentState;
-class ExternalPopupMenu;
-class FaviconHelper;
 class HistoryController;
 class HistoryEntry;
 class ImageResourceFetcher;
@@ -150,7 +149,7 @@ class WebMediaPlayerProxyAndroid;
 
 //
 // RenderView is an object that manages a WebView object, and provides a
-// communication interface with an embedding application process
+// communication interface with an embedding application process.
 //
 class CONTENT_EXPORT RenderViewImpl
     : public RenderWidget,
@@ -212,8 +211,6 @@ class CONTENT_EXPORT RenderViewImpl
     send_content_state_immediately_ = value;
   }
 
-  RenderFrameImpl* main_render_frame() { return main_render_frame_.get(); }
-
   MouseLockDispatcher* mouse_lock_dispatcher() {
     return mouse_lock_dispatcher_;
   }
@@ -246,9 +243,6 @@ class CONTENT_EXPORT RenderViewImpl
 
 #if defined(OS_ANDROID)
   void DismissDateTimeDialog();
-#endif
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-  void DidHideExternalPopupMenu();
 #endif
 
   bool is_loading() const { return frames_in_progress_ != 0; }
@@ -336,6 +330,7 @@ class CONTENT_EXPORT RenderViewImpl
 
   // Change the device ICC color profile while running a layout test.
   void SetDeviceColorProfileForTesting(const std::vector<char>& color_profile);
+  virtual void ResetDeviceColorProfileForTesting() OVERRIDE;
 
   // Used to force the size of a window when running layout tests.
   void ForceResizeForTesting(const gfx::Size& new_size);
@@ -354,7 +349,6 @@ class CONTENT_EXPORT RenderViewImpl
   // blink::WebWidgetClient implementation ------------------------------------
 
   // Most methods are handled by RenderWidget.
-  virtual void didCommitAndDrawCompositorFrame();
   virtual void didFocus();
   virtual void didBlur();
   virtual void show(blink::WebNavigationPolicy policy);
@@ -377,21 +371,24 @@ class CONTENT_EXPORT RenderViewImpl
                                      blink::WebNavigationPolicy policy,
                                      bool suppress_opener);
   virtual blink::WebWidget* createPopupMenu(blink::WebPopupType popup_type);
-  virtual blink::WebExternalPopupMenu* createExternalPopupMenu(
-      const blink::WebPopupMenuInfo& popup_menu_info,
-      blink::WebExternalPopupMenuClient* popup_menu_client);
   virtual blink::WebStorageNamespace* createSessionStorageNamespace();
   virtual void printPage(blink::WebLocalFrame* frame);
   virtual bool enumerateChosenDirectory(
       const blink::WebString& path,
       blink::WebFileChooserCompletion* chooser_completion);
+  virtual void saveImageFromDataURL(const blink::WebString& data_url);
   virtual void didCancelCompositionOnSelectionChange();
   virtual bool handleCurrentKeyboardEvent();
   virtual bool runFileChooser(
       const blink::WebFileChooserParams& params,
       blink::WebFileChooserCompletion* chooser_completion);
+  void SetValidationMessageDirection(base::string16* main_text,
+                                     blink::WebTextDirection main_text_hint,
+                                     base::string16* sub_text,
+                                     blink::WebTextDirection sub_text_hint);
   virtual void showValidationMessage(const blink::WebRect& anchor_in_root_view,
                                      const blink::WebString& main_text,
+                                     blink::WebTextDirection main_text_hint,
                                      const blink::WebString& sub_text,
                                      blink::WebTextDirection hint) OVERRIDE;
   virtual void hideValidationMessage() OVERRIDE;
@@ -410,30 +407,25 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void focusPrevious();
   virtual void focusedNodeChanged(const blink::WebNode& node);
   virtual void didUpdateLayout();
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS)
   virtual bool didTapMultipleTargets(
-      const blink::WebGestureEvent& event,
+      const blink::WebSize& inner_viewport_offset,
+      const blink::WebRect& touch_rect,
       const blink::WebVector<blink::WebRect>& target_rects);
 #endif
   virtual blink::WebString acceptLanguages();
   virtual void navigateBackForwardSoon(int offset);
   virtual int historyBackListCount();
   virtual int historyForwardListCount();
-  virtual void postAccessibilityEvent(
-      const blink::WebAXObject& obj, blink::WebAXEvent event);
-  virtual void didUpdateInspectorSetting(const blink::WebString& key,
-                                         const blink::WebString& value);
   virtual blink::WebSpeechRecognizer* speechRecognizer();
   virtual void zoomLimitsChanged(double minimum_level, double maximum_level);
   virtual void zoomLevelChanged();
   virtual double zoomLevelToZoomFactor(double zoom_level) const;
   virtual double zoomFactorToZoomLevel(double factor) const;
   virtual void registerProtocolHandler(const blink::WebString& scheme,
-                                       const blink::WebURL& base_url,
                                        const blink::WebURL& url,
                                        const blink::WebString& title);
   virtual void unregisterProtocolHandler(const blink::WebString& scheme,
-                                         const blink::WebURL& base_url,
                                          const blink::WebURL& url);
   virtual blink::WebPageVisibilityState visibilityState() const;
   virtual blink::WebPushClient* webPushClient();
@@ -462,7 +454,7 @@ class CONTENT_EXPORT RenderViewImpl
   // RenderView implementation -------------------------------------------------
 
   virtual bool Send(IPC::Message* message) OVERRIDE;
-  virtual RenderFrame* GetMainRenderFrame() OVERRIDE;
+  virtual RenderFrameImpl* GetMainRenderFrame() OVERRIDE;
   virtual int GetRoutingID() const OVERRIDE;
   virtual gfx::Size GetSize() const OVERRIDE;
   virtual WebPreferences& GetWebkitPreferences() OVERRIDE;
@@ -561,7 +553,6 @@ class CONTENT_EXPORT RenderViewImpl
 
  private:
   // For unit tests.
-  friend class ExternalPopupMenuTest;
   friend class PepperDeviceTest;
   friend class RenderViewImplTest;
   friend class RenderViewTest;
@@ -572,10 +563,6 @@ class CONTENT_EXPORT RenderViewImpl
   // code away from this class.
   friend class RenderFrameImpl;
 
-  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuDisplayNoneTest, SelectItem);
-  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuRemoveTest, RemoveOnChange);
-  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, NormalCase);
-  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, ShowPopupThenNavigate);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, DecideNavigationPolicyForWebUI);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            DidFailProvisionalLoadWithErrorForError);
@@ -722,7 +709,6 @@ class CONTENT_EXPORT RenderViewImpl
   void OnSetWebUIProperty(const std::string& name, const std::string& value);
   void OnSetZoomLevelForLoadingURL(const GURL& url, double zoom_level);
   void OnSetZoomLevelForView(bool uses_temporary_zoom_level, double level);
-  void OnStop();
   void OnStopFinding(StopFindAction action);
   void OnSuppressDialogsUntilSwapOut();
   void OnThemeChanged();
@@ -730,7 +716,6 @@ class CONTENT_EXPORT RenderViewImpl
   void OnUpdateWebPreferences(const WebPreferences& prefs);
   void OnZoom(PageZoom zoom);
   void OnEnableViewSourceMode();
-  void OnDisownOpener();
   void OnWindowSnapshotCompleted(const int snapshot_id,
       const gfx::Size& size, const std::vector<unsigned char>& png);
   void OnForceRedraw(int request_id);
@@ -738,8 +723,6 @@ class CONTENT_EXPORT RenderViewImpl
 #if defined(OS_ANDROID)
   void OnActivateNearestFindResult(int request_id, float x, float y);
   void OnFindMatchRects(int current_version);
-  void OnSelectPopupMenuItems(bool canceled,
-                              const std::vector<int>& selected_indices);
   void OnUndoScrollFocusedEditableNodeIntoRect();
   void OnUpdateTopControlsState(bool enable_hiding,
                                 bool enable_showing,
@@ -749,7 +732,6 @@ class CONTENT_EXPORT RenderViewImpl
   void OnGetRenderedText();
   void OnPluginImeCompositionCompleted(const base::string16& text,
                                        int plugin_id);
-  void OnSelectPopupMenuItem(int selected_index);
   void OnSetInLiveResize(bool in_live_resize);
   void OnSetWindowVisibility(bool visible);
   void OnWindowFrameChanged(const gfx::Rect& window_frame,
@@ -762,20 +744,6 @@ class CONTENT_EXPORT RenderViewImpl
   // Misc private functions ----------------------------------------------------
   // Check whether the preferred size has changed.
   void CheckPreferredSize();
-
-  // This callback is triggered when DownloadFavicon completes, either
-  // succesfully or with a failure. See DownloadFavicon for more
-  // details.
-  void DidDownloadFavicon(ImageResourceFetcher* fetcher,
-                          const SkBitmap& image);
-
-  // Requests to download a favicon image. When done, the RenderView is notified
-  // by way of DidDownloadFavicon. Returns true if the request was successfully
-  // started, false otherwise. id is used to uniquely identify the request and
-  // passed back to the DidDownloadFavicon method. If the image has multiple
-  // frames, the frame whose size is image_size is returned. If the image
-  // doesn't have a frame at the specified size, the first is returned.
-  bool DownloadFavicon(int id, const GURL& image_url, int image_size);
 
   // Called to get the WebPlugin to handle find requests in the document.
   // Returns NULL if there is no such WebPlugin.
@@ -1016,8 +984,6 @@ class CONTENT_EXPORT RenderViewImpl
   bool has_scrolled_focused_editable_node_into_rect_;
   gfx::Rect rect_for_scrolled_focused_editable_node_;
 
-  bool has_scrolled_main_frame_;
-
   // Helper objects ------------------------------------------------------------
 
   scoped_ptr<RenderFrameImpl> main_render_frame_;
@@ -1109,11 +1075,6 @@ class CONTENT_EXPORT RenderViewImpl
   // Stores edit commands associated to the next key event.
   // Shall be cleared as soon as the next key event is processed.
   EditCommands edit_commands_;
-
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-  // The external popup for the currently showing select popup.
-  scoped_ptr<ExternalPopupMenu> external_popup_menu_;
-#endif
 
   // All the registered observers.  We expect this list to be small, so vector
   // is fine.

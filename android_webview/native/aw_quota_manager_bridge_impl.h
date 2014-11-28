@@ -23,9 +23,9 @@ namespace content {
 class StoragePartition;
 }
 
-namespace quota {
+namespace storage {
 class QuotaManager;
-}  // namespace quota
+}  // namespace storage
 
 namespace android_webview {
 
@@ -60,7 +60,7 @@ class AwQuotaManagerBridgeImpl : public AwQuotaManagerBridge {
 
   content::StoragePartition* GetStoragePartition() const;
 
-  quota::QuotaManager* GetQuotaManager() const;
+  storage::QuotaManager* GetQuotaManager() const;
 
   void DeleteAllDataOnUiThread();
   void DeleteOriginOnUiThread(const base::string16& origin);
@@ -77,9 +77,10 @@ class AwQuotaManagerBridgeImpl : public AwQuotaManagerBridge {
   void QuotaUsageCallbackImpl(
       int jcallback_id, bool is_quota, int64 usage, int64 quota);
 
-  base::WeakPtrFactory<AwQuotaManagerBridgeImpl> weak_factory_;
   AwBrowserContext* browser_context_;
   JavaObjectWeakGlobalRef java_ref_;
+
+  base::WeakPtrFactory<AwQuotaManagerBridgeImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AwQuotaManagerBridgeImpl);
 };

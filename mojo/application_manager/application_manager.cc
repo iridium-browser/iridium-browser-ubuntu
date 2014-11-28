@@ -36,6 +36,8 @@ class StubServiceProvider : public InterfaceImpl<ServiceProvider> {
 
 }  // namespace
 
+ApplicationManager::Delegate::~Delegate() {}
+
 class ApplicationManager::LoadCallbacksImpl
     : public ApplicationLoader::LoadCallbacks {
  public:
@@ -64,12 +66,12 @@ class ApplicationManager::LoadCallbacksImpl
   }
 
   virtual void LoadWithContentHandler(const GURL& content_handler_url,
-                                      URLResponsePtr content) OVERRIDE {
+                                      URLResponsePtr url_response) OVERRIDE {
     if (manager_) {
       manager_->LoadWithContentHandler(requested_url_,
                                        requestor_url_,
                                        content_handler_url,
-                                       content.Pass(),
+                                       url_response.Pass(),
                                        service_provider_.Pass());
     }
   }
@@ -148,7 +150,9 @@ bool ApplicationManager::TestAPI::HasFactoryForURL(const GURL& url) const {
 }
 
 ApplicationManager::ApplicationManager()
-    : interceptor_(NULL), weak_ptr_factory_(this) {
+    : delegate_(NULL),
+      interceptor_(NULL),
+      weak_ptr_factory_(this) {
 }
 
 ApplicationManager::~ApplicationManager() {
@@ -216,9 +220,14 @@ void ApplicationManager::RegisterLoadedApplication(
     shell_impl = iter->second;
   } else {
     MessagePipe pipe;
+    URLToArgsMap::const_iterator args_it = url_to_args_.find(url);
+    Array<String> args;
+    if (args_it != url_to_args_.end())
+      args = Array<String>::From(args_it->second);
     shell_impl = WeakBindToPipe(new ShellImpl(this, url), pipe.handle1.Pass());
     url_to_shell_impl_[url] = shell_impl;
     *shell_handle = pipe.handle0.Pass();
+    shell_impl->client()->Initialize(args.Pass());
   }
 
   ConnectToClient(shell_impl, url, requestor_url, service_provider.Pass());
@@ -228,7 +237,7 @@ void ApplicationManager::LoadWithContentHandler(
     const GURL& content_url,
     const GURL& requestor_url,
     const GURL& content_handler_url,
-    URLResponsePtr content,
+    URLResponsePtr url_response,
     ServiceProviderPtr service_provider) {
   ContentHandlerConnection* connection = NULL;
   URLToContentHandlerMap::iterator iter =
@@ -239,8 +248,11 @@ void ApplicationManager::LoadWithContentHandler(
     connection = new ContentHandlerConnection(this, content_handler_url);
     url_to_content_handler_[content_handler_url] = connection;
   }
+
+  InterfaceRequest<ServiceProvider> spir;
+  spir.Bind(service_provider.PassMessagePipe());
   connection->content_handler->OnConnect(
-      content_url.spec(), content.Pass(), service_provider.Pass());
+      content_url.spec(), url_response.Pass(), spir.Pass());
 }
 
 void ApplicationManager::SetLoaderForURL(scoped_ptr<ApplicationLoader> loader,
@@ -258,6 +270,11 @@ void ApplicationManager::SetLoaderForScheme(
   if (it != scheme_to_loader_.end())
     delete it->second;
   scheme_to_loader_[scheme] = loader.release();
+}
+
+void ApplicationManager::SetArgsForURL(const std::vector<std::string>& args,
+                                       const GURL& url) {
+  url_to_args_[url] = args;
 }
 
 void ApplicationManager::SetInterceptor(Interceptor* interceptor) {
@@ -284,7 +301,9 @@ void ApplicationManager::OnShellImplError(ShellImpl* shell_impl) {
   url_to_shell_impl_.erase(it);
   ApplicationLoader* loader = GetLoaderForURL(url);
   if (loader)
-    loader->OnServiceError(this, url);
+    loader->OnApplicationError(this, url);
+  if (delegate_)
+    delegate_->OnApplicationError(url);
 }
 
 ScopedMessagePipeHandle ApplicationManager::ConnectToServiceByName(

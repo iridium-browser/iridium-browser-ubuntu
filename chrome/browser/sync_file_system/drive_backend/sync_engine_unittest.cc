@@ -17,6 +17,7 @@
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sync_file_system {
@@ -45,8 +46,8 @@ class SyncEngineTest : public testing::Test,
             base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 
     sync_engine_.reset(new drive_backend::SyncEngine(
-        ui_task_runner,
-        worker_task_runner_,
+        ui_task_runner.get(),
+        worker_task_runner_.get(),
         NULL /* drive_task_runner */,
         profile_dir_.path(),
         NULL /* task_logger */,
@@ -72,6 +73,10 @@ class SyncEngineTest : public testing::Test,
     sync_engine_.reset();
     WaitForWorkerTaskRunner();
     worker_pool_->Shutdown();
+
+    worker_task_runner_ = NULL;
+    worker_pool_ = NULL;
+
     base::RunLoop().RunUntilIdle();
   }
 
@@ -103,7 +108,7 @@ class SyncEngineTest : public testing::Test,
   }
 
   void WaitForWorkerTaskRunner() {
-    DCHECK(worker_task_runner_);
+    DCHECK(worker_task_runner_.get());
 
     base::RunLoop run_loop;
     worker_task_runner_->PostTask(
@@ -223,7 +228,7 @@ TEST_F(SyncEngineTest, UpdateServiceState) {
 
 TEST_F(SyncEngineTest, ProcessRemoteChange) {
   SyncStatusCode sync_status;
-  fileapi::FileSystemURL url;
+  storage::FileSystemURL url;
   sync_engine()->ProcessRemoteChange(CreateResultReceiver(&sync_status, &url));
   WaitForWorkerTaskRunner();
   EXPECT_EQ(SYNC_STATUS_OK, sync_status);

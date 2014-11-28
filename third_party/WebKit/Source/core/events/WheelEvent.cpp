@@ -25,6 +25,7 @@
 #include "core/events/WheelEvent.h"
 
 #include "core/clipboard/DataTransfer.h"
+#include "platform/PlatformMouseEvent.h"
 #include "platform/PlatformWheelEvent.h"
 
 namespace blink {
@@ -45,7 +46,6 @@ WheelEvent::WheelEvent()
     , m_deltaZ(0)
     , m_deltaMode(DOM_DELTA_PIXEL)
 {
-    ScriptWrappable::init(this);
 }
 
 WheelEvent::WheelEvent(const AtomicString& type, const WheelEventInit& initializer)
@@ -56,24 +56,20 @@ WheelEvent::WheelEvent(const AtomicString& type, const WheelEventInit& initializ
     , m_deltaZ(initializer.deltaZ)
     , m_deltaMode(initializer.deltaMode)
 {
-    ScriptWrappable::init(this);
 }
 
 WheelEvent::WheelEvent(const FloatPoint& wheelTicks, const FloatPoint& rawDelta, unsigned deltaMode,
     PassRefPtrWillBeRawPtr<AbstractView> view, const IntPoint& screenLocation, const IntPoint& pageLocation,
     bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
-    : MouseEvent(EventTypeNames::wheel,
-                 true, true, view, 0, screenLocation.x(), screenLocation.y(),
-                 pageLocation.x(), pageLocation.y(),
-                 0, 0,
-                 ctrlKey, altKey, shiftKey, metaKey, 0, nullptr, nullptr, false)
+    : MouseEvent(EventTypeNames::wheel, true, true, view, 0, screenLocation.x(), screenLocation.y(),
+        pageLocation.x(), pageLocation.y(), 0, 0, ctrlKey, altKey, shiftKey, metaKey, 0, nullptr,
+        nullptr, false, PlatformMouseEvent::RealOrIndistinguishable)
     , m_wheelDelta(wheelTicks.x() * TickMultiplier, wheelTicks.y() * TickMultiplier)
     , m_deltaX(-rawDelta.x())
     , m_deltaY(-rawDelta.y())
     , m_deltaZ(0)
     , m_deltaMode(deltaMode)
 {
-    ScriptWrappable::init(this);
 }
 
 const AtomicString& WheelEvent::interfaceName() const

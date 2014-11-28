@@ -7,7 +7,6 @@
 namespace app_list {
 
 const SkColor kContentsBackgroundColor = SkColorSetRGB(0xFB, 0xFB, 0xFB);
-const SkColor kContentsSwitcherBackgroundColor = SK_ColorWHITE;
 const SkColor kSearchBoxBackground = SK_ColorWHITE;
 const SkColor kTopSeparatorColor = SkColorSetRGB(0xE5, 0xE5, 0xE5);
 const SkColor kBottomSeparatorColor = SkColorSetRGB(0xE5, 0xE5, 0xE5);
@@ -31,9 +30,6 @@ const SkColor kResultURLTextColor = SkColorSetRGB(0x00, 0x99, 0x33);
 
 const SkColor kGridTitleColor = SkColorSetRGB(0x5A, 0x5A, 0x5A);
 const SkColor kGridTitleHoverColor = SkColorSetRGB(0x3C, 0x3C, 0x3C);
-
-// Color of the borders used in the experimental app list start page.
-const SkColor kStartPageBorderColor = SkColorSetRGB(0xEE, 0xEE, 0xEE);
 
 // Color of the folder ink bubble.
 const SkColor kFolderBubbleColor = SkColorSetRGB(0xD7, 0xD7, 0xD7);
@@ -70,16 +66,19 @@ const int kGridIconDimension = 48;
 const int kListIconSize = 32;
 const int kTileIconSize = 48;
 
+// Preferred number of columns and rows in the centered app list apps grid.
+const int kCenteredPreferredCols = 6;
+const int kCenteredPreferredRows = 3;
+
 // Preferred number of columns and rows in the experimental app list apps grid.
 const int kExperimentalPreferredCols = 6;
-const int kExperimentalPreferredRows = 3;
+const int kExperimentalPreferredRows = 4;
 
 // Radius of the circle, in which if entered, show re-order preview.
 const int kReorderDroppingCircleRadius = 35;
 
-// Height of separator between the main view and contents switcher and of
-// the launcher page indicator.
-const int kContentsSwitcherSeparatorHeight = 1;
+// The padding around the outside of the experimental app list (top and sides).
+const int kExperimentalWindowPadding = 23;
 
 // Max items allowed in a folder.
 size_t kMaxFolderItems = 16;

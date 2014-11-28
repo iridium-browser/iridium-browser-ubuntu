@@ -37,11 +37,6 @@ class InfoBarService : public infobars::InfoBarManager,
   static content::WebContents* WebContentsFromInfoBar(
       infobars::InfoBar* infobar);
 
-  // Retrieve the WebContents for the tab this service is associated with.
-  content::WebContents* web_contents() {
-    return content::WebContentsObserver::web_contents();
-  }
-
   // Makes it so the next reload is ignored. That is, if the next commit is a
   // reload then it is treated as if nothing happened and no infobars are
   // attempted to be closed.

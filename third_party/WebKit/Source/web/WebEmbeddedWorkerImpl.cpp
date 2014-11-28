@@ -33,12 +33,14 @@
 
 #include "core/dom/CrossThreadTask.h"
 #include "core/dom/Document.h"
+#include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/WorkerDebuggerAgent.h"
 #include "core/inspector/WorkerInspectorController.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/SubstituteData.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerGlobalScope.h"
+#include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerLoaderProxy.h"
 #include "core/workers/WorkerScriptLoader.h"
 #include "core/workers/WorkerScriptLoaderClient.h"
@@ -48,7 +50,9 @@
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
+#include "public/platform/Platform.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/web/WebDevToolsAgent.h"
 #include "public/web/WebServiceWorkerContextClient.h"
 #include "public/web/WebServiceWorkerNetworkProvider.h"
 #include "public/web/WebSettings.h"
@@ -60,8 +64,6 @@
 #include "web/WebLocalFrameImpl.h"
 #include "web/WorkerPermissionClient.h"
 #include "wtf/Functional.h"
-
-using namespace blink;
 
 namespace blink {
 
@@ -82,7 +84,7 @@ public:
     {
         ASSERT(loadingContext);
         m_callback = callback;
-        m_scriptLoader->setRequestContext(blink::WebURLRequest::RequestContextServiceWorker);
+        m_scriptLoader->setRequestContext(WebURLRequest::RequestContextServiceWorker);
         m_scriptLoader->loadAsynchronously(
             *loadingContext, scriptURL, DenyCrossOriginRequests, this);
     }
@@ -158,10 +160,12 @@ WebEmbeddedWorkerImpl::WebEmbeddedWorkerImpl(
     PassOwnPtr<WebWorkerPermissionClientProxy> permissionClient)
     : m_workerContextClient(client)
     , m_permissionClient(permissionClient)
+    , m_workerInspectorProxy(WorkerInspectorProxy::create())
     , m_webView(0)
     , m_mainFrame(0)
     , m_askedToTerminate(false)
     , m_pauseAfterDownloadState(DontPauseAfterDownload)
+    , m_waitingForDebuggerState(NotWaitingForDebugger)
 {
     runningWorkerInstances().add(this);
 }
@@ -218,76 +222,64 @@ void WebEmbeddedWorkerImpl::terminateWorkerContext()
     }
     if (m_workerThread)
         m_workerThread->stop();
+    m_workerInspectorProxy->workerThreadTerminated();
 }
-
-namespace {
-
-void resumeWorkerContextTask(ExecutionContext* context, bool)
-{
-    toWorkerGlobalScope(context)->workerInspectorController()->resume();
-}
-
-void connectToWorkerContextInspectorTask(ExecutionContext* context, bool)
-{
-    toWorkerGlobalScope(context)->workerInspectorController()->connectFrontend();
-}
-
-void reconnectToWorkerContextInspectorTask(ExecutionContext* context, const String& savedState)
-{
-    WorkerInspectorController* ic = toWorkerGlobalScope(context)->workerInspectorController();
-    ic->restoreInspectorStateFromCookie(savedState);
-    ic->resume();
-}
-
-void disconnectFromWorkerContextInspectorTask(ExecutionContext* context, bool)
-{
-    toWorkerGlobalScope(context)->workerInspectorController()->disconnectFrontend();
-}
-
-void dispatchOnInspectorBackendTask(ExecutionContext* context, const String& message)
-{
-    toWorkerGlobalScope(context)->workerInspectorController()->dispatchMessageFromFrontend(message);
-}
-
-} // namespace
 
 void WebEmbeddedWorkerImpl::resumeAfterDownload()
 {
     ASSERT(!m_askedToTerminate);
     bool wasPaused = (m_pauseAfterDownloadState == IsPausedAfterDownload);
     m_pauseAfterDownloadState = DontPauseAfterDownload;
-    if (wasPaused)
+
+    // If we were asked to wait for debugger while updating service worker version then it is good time now.
+    m_workerContextClient->workerReadyForInspection();
+    if (m_workerStartData.waitForDebuggerMode == WebEmbeddedWorkerStartData::WaitForDebugger)
+        m_waitingForDebuggerState = WaitingForDebuggerAfterScriptLoaded;
+    else if (wasPaused)
         startWorkerThread();
 }
 
 void WebEmbeddedWorkerImpl::resumeWorkerContext()
 {
-    if (m_workerThread)
-        m_workerThread->postDebuggerTask(createCrossThreadTask(resumeWorkerContextTask, true));
 }
 
-void WebEmbeddedWorkerImpl::attachDevTools()
+void WebEmbeddedWorkerImpl::attachDevTools(const WebString& hostId)
 {
-    if (m_workerThread)
-        m_workerThread->postDebuggerTask(createCrossThreadTask(connectToWorkerContextInspectorTask, true));
+    WebDevToolsAgent* devtoolsAgent = m_webView->devToolsAgent();
+    if (devtoolsAgent)
+        devtoolsAgent->attach(hostId);
 }
 
-void WebEmbeddedWorkerImpl::reattachDevTools(const WebString& savedState)
+void WebEmbeddedWorkerImpl::reattachDevTools(const WebString& hostId, const WebString& savedState)
 {
-    m_workerThread->postDebuggerTask(createCrossThreadTask(reconnectToWorkerContextInspectorTask, String(savedState)));
+    WebDevToolsAgent* devtoolsAgent = m_webView->devToolsAgent();
+    if (devtoolsAgent)
+        devtoolsAgent->reattach(hostId, savedState);
+    resumeStartup();
 }
 
 void WebEmbeddedWorkerImpl::detachDevTools()
 {
-    m_workerThread->postDebuggerTask(createCrossThreadTask(disconnectFromWorkerContextInspectorTask, true));
+    WebDevToolsAgent* devtoolsAgent = m_webView->devToolsAgent();
+    if (devtoolsAgent)
+        devtoolsAgent->detach();
 }
 
 void WebEmbeddedWorkerImpl::dispatchDevToolsMessage(const WebString& message)
 {
     if (m_askedToTerminate)
         return;
-    m_workerThread->postDebuggerTask(createCrossThreadTask(dispatchOnInspectorBackendTask, String(message)));
-    m_workerThread->interruptAndDispatchInspectorCommands();
+    WebDevToolsAgent* devtoolsAgent = m_webView->devToolsAgent();
+    if (devtoolsAgent)
+        devtoolsAgent->dispatchOnInspectorBackend(message);
+}
+
+void WebEmbeddedWorkerImpl::postMessageToPageInspector(const String& message)
+{
+    WorkerInspectorProxy::PageInspector* pageInspector = m_workerInspectorProxy->pageInspector();
+    if (!pageInspector)
+        return;
+    pageInspector->dispatchMessageFromWorker(message);
 }
 
 void WebEmbeddedWorkerImpl::prepareShadowPageForLoader()
@@ -305,6 +297,7 @@ void WebEmbeddedWorkerImpl::prepareShadowPageForLoader()
     m_webView->settings()->setAcceleratedCompositingEnabled(false);
     m_mainFrame = WebLocalFrame::create(this);
     m_webView->setMainFrame(m_mainFrame);
+    m_webView->setDevToolsAgentClient(this);
 
     WebLocalFrameImpl* webFrame = toWebLocalFrameImpl(m_webView->mainFrame());
 
@@ -325,6 +318,42 @@ void WebEmbeddedWorkerImpl::willSendRequest(
 }
 
 void WebEmbeddedWorkerImpl::didFinishDocumentLoad(WebLocalFrame* frame)
+{
+    // If we were asked to wait for debugger then it is the good time to do that.
+    // However if we are updating service worker version (m_pauseAfterDownloadState is set)
+    // Then we need to load the worker script to check the version, so in this case we wait for debugger
+    // later in ::resumeAfterDownload().
+    if (m_pauseAfterDownloadState != DoPauseAfterDownload) {
+        m_workerContextClient->workerReadyForInspection();
+        if (m_workerStartData.waitForDebuggerMode == WebEmbeddedWorkerStartData::WaitForDebugger) {
+            m_waitingForDebuggerState = WaitingForDebuggerBeforeLoadingScript;
+            return;
+        }
+    }
+    startScriptLoader(frame);
+}
+
+void WebEmbeddedWorkerImpl::sendMessageToInspectorFrontend(const WebString& message)
+{
+    m_workerContextClient->dispatchDevToolsMessage(message);
+}
+
+void WebEmbeddedWorkerImpl::resumeStartup()
+{
+    WaitingForDebuggerState waitingForDebuggerState = m_waitingForDebuggerState;
+    m_waitingForDebuggerState = NotWaitingForDebugger;
+    if (waitingForDebuggerState == WaitingForDebuggerBeforeLoadingScript)
+        startScriptLoader(toWebLocalFrameImpl(m_mainFrame));
+    else if (waitingForDebuggerState == WaitingForDebuggerAfterScriptLoaded)
+        startWorkerThread();
+}
+
+void WebEmbeddedWorkerImpl::saveAgentRuntimeState(const WebString& inspectorState)
+{
+    m_workerContextClient->saveDevToolsAgentState(inspectorState);
+}
+
+void WebEmbeddedWorkerImpl::startScriptLoader(WebLocalFrame* frame)
 {
     ASSERT(!m_mainScriptLoader);
     ASSERT(!m_networkProvider);
@@ -352,6 +381,8 @@ void WebEmbeddedWorkerImpl::onScriptLoaderFinished()
         return;
     }
 
+    Platform::current()->histogramCustomCounts("ServiceWorker.ScriptSize", m_mainScriptLoader->script().length(), 1000, 5000000, 50);
+
     if (m_pauseAfterDownloadState == DoPauseAfterDownload) {
         m_pauseAfterDownloadState = IsPausedAfterDownload;
         m_workerContextClient->didPauseAfterDownload();
@@ -365,17 +396,20 @@ void WebEmbeddedWorkerImpl::startWorkerThread()
     ASSERT(m_pauseAfterDownloadState == DontPauseAfterDownload);
     ASSERT(!m_askedToTerminate);
 
-    WorkerThreadStartMode startMode =
-        (m_workerStartData.waitForDebuggerMode == WebEmbeddedWorkerStartData::WaitForDebugger)
-        ? PauseWorkerGlobalScopeOnStart : DontPauseWorkerGlobalScopeOnStart;
+    Document* document = toWebLocalFrameImpl(m_mainFrame)->frame()->document();
+
+    WorkerThreadStartMode startMode = DontPauseWorkerGlobalScopeOnStart;
+    if (InspectorInstrumentation::shouldPauseDedicatedWorkerOnStart(document))
+        startMode = PauseWorkerGlobalScopeOnStart;
 
     OwnPtrWillBeRawPtr<WorkerClients> workerClients = WorkerClients::create();
     providePermissionClientToWorker(workerClients.get(), m_permissionClient.release());
     provideServiceWorkerGlobalScopeClientToWorker(workerClients.get(), ServiceWorkerGlobalScopeClientImpl::create(*m_workerContextClient));
 
+    KURL scriptURL = m_mainScriptLoader->url();
     OwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData =
         WorkerThreadStartupData::create(
-            m_mainScriptLoader->url(),
+            scriptURL,
             m_workerStartData.userAgent,
             m_mainScriptLoader->script(),
             startMode,
@@ -386,11 +420,11 @@ void WebEmbeddedWorkerImpl::startWorkerThread()
 
     m_mainScriptLoader.clear();
 
-    m_workerGlobalScopeProxy = ServiceWorkerGlobalScopeProxy::create(*this, *toWebLocalFrameImpl(m_mainFrame)->frame()->document(), *m_workerContextClient);
+    m_workerGlobalScopeProxy = ServiceWorkerGlobalScopeProxy::create(*this, *document, *m_workerContextClient);
     m_loaderProxy = LoaderProxy::create(*this);
-
     m_workerThread = ServiceWorkerThread::create(*m_loaderProxy, *m_workerGlobalScopeProxy, startupData.release());
     m_workerThread->start();
+    m_workerInspectorProxy->workerThreadCreated(document, m_workerThread.get(), scriptURL);
 }
 
 } // namespace blink

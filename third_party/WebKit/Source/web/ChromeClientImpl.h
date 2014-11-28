@@ -115,7 +115,6 @@ public:
     virtual void invalidateContentsAndRootView(const IntRect&) OVERRIDE;
     virtual void invalidateContentsForSlowScroll(const IntRect&) OVERRIDE;
     virtual void scheduleAnimation() OVERRIDE;
-    virtual void scroll() OVERRIDE;
     virtual IntRect rootViewToScreen(const IntRect&) const OVERRIDE;
     virtual WebScreenInfo screenInfo() const OVERRIDE;
     virtual void contentsSizeChanged(LocalFrame*, const IntSize&) const OVERRIDE;
@@ -146,6 +145,7 @@ public:
     virtual void exitFullScreenForElement(Element*) OVERRIDE;
 
     virtual void clearCompositedSelectionBounds() OVERRIDE;
+    virtual void updateCompositedSelectionBounds(const blink::CompositedSelectionBound& anchor, const blink::CompositedSelectionBound& focus) OVERRIDE;
 
     // ChromeClient methods:
     virtual void postAccessibilityNotification(AXObject*, AXObjectCache::AXNotification) OVERRIDE;
@@ -156,7 +156,7 @@ public:
     void setNewWindowNavigationPolicy(WebNavigationPolicy);
 
     virtual bool hasOpenedPopup() const OVERRIDE;
-    virtual PassRefPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) const OVERRIDE;
+    virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) const OVERRIDE;
     PagePopup* openPagePopup(PagePopupClient*, const IntRect&);
     void closePagePopup(PagePopup*);
     virtual void setPagePopupDriver(PagePopupDriver*) OVERRIDE;

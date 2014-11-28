@@ -99,6 +99,12 @@ bool NetworkState::PropertyChanged(const std::string& key,
     return GetStringValue(key, value, &activation_state_);
   } else if (key == shill::kRoamingStateProperty) {
     return GetStringValue(key, value, &roaming_);
+  } else if (key == shill::kPaymentPortalProperty) {
+    const base::DictionaryValue* olp;
+    if (!value.GetAsDictionary(&olp))
+      return false;
+    return olp->GetStringWithoutPathExpansion(shill::kPaymentPortalURL,
+                                              &payment_url_);
   } else if (key == shill::kSecurityProperty) {
     return GetStringValue(key, value, &security_);
   } else if (key == shill::kEapMethodProperty) {
@@ -157,9 +163,10 @@ bool NetworkState::InitialPropertiesReceived(
   has_ca_cert_nss_ = IsCaCertNssSet(properties);
   changed |= had_ca_cert_nss != has_ca_cert_nss_;
 
-  // By convention, all visible WiFi networks have a SignalStrength > 0.
-  if (visible() && type() == shill::kTypeWifi) {
-    if (signal_strength_ <= 0)
+  // By convention, all visible WiFi and WiMAX networks have a
+  // SignalStrength > 0.
+  if ((type() == shill::kTypeWifi || type() == shill::kTypeWimax) &&
+      visible() && signal_strength_ <= 0) {
       signal_strength_ = 1;
   }
 

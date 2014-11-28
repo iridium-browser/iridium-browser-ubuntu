@@ -63,14 +63,14 @@ static LocalFrame* findFrame(v8::Local<v8::Object> host, v8::Local<v8::Value> da
         v8::Handle<v8::Object> windowWrapper = V8Window::findInstanceInPrototypeChain(host, isolate);
         if (windowWrapper.IsEmpty())
             return 0;
-        return V8Window::toNative(windowWrapper)->frame();
+        return V8Window::toImpl(windowWrapper)->frame();
     }
 
     if (V8History::wrapperTypeInfo.equals(type))
-        return V8History::toNative(host)->frame();
+        return V8History::toImpl(host)->frame();
 
     if (V8Location::wrapperTypeInfo.equals(type))
-        return V8Location::toNative(host)->frame();
+        return V8Location::toImpl(host)->frame();
 
     // This function can handle only those types listed above.
     ASSERT_NOT_REACHED();
@@ -103,9 +103,18 @@ static void messageHandlerInMainThread(v8::Handle<v8::Message> message, v8::Hand
 
     v8::Handle<v8::StackTrace> stackTrace = message->GetStackTrace();
     RefPtrWillBeRawPtr<ScriptCallStack> callStack = nullptr;
+    int scriptId = message->GetScriptOrigin().ScriptID()->Value();
     // Currently stack trace is only collected when inspector is open.
-    if (!stackTrace.IsEmpty() && stackTrace->GetFrameCount() > 0)
+    if (!stackTrace.IsEmpty() && stackTrace->GetFrameCount() > 0) {
         callStack = createScriptCallStack(stackTrace, ScriptCallStack::maxCallStackSizeToCapture, isolate);
+        bool success = false;
+        int topScriptId = callStack->at(0).scriptId().toInt(&success);
+        if (success && topScriptId == scriptId)
+            scriptId = 0;
+    } else {
+        Vector<ScriptCallFrame> callFrames;
+        callStack = ScriptCallStack::create(callFrames);
+    }
 
     v8::Handle<v8::Value> resourceName = message->GetScriptOrigin().ResourceName();
     bool shouldUseDocumentURL = resourceName.IsEmpty() || !resourceName->IsString();
@@ -118,7 +127,7 @@ static void messageHandlerInMainThread(v8::Handle<v8::Message> message, v8::Hand
         v8::Handle<v8::Object> obj = v8::Handle<v8::Object>::Cast(data);
         const WrapperTypeInfo* type = toWrapperTypeInfo(obj);
         if (V8DOMException::wrapperTypeInfo.isSubclass(type)) {
-            DOMException* exception = V8DOMException::toNative(obj);
+            DOMException* exception = V8DOMException::toImpl(obj);
             if (exception && !exception->messageForConsole().isEmpty())
                 event->setUnsanitizedMessage("Uncaught " + exception->toStringForConsole());
         }
@@ -140,9 +149,9 @@ static void messageHandlerInMainThread(v8::Handle<v8::Message> message, v8::Hand
         // other isolated worlds (which means that the error events won't fire any event listeners
         // in user's scripts).
         EventDispatchForbiddenScope::AllowUserAgentEvents allowUserAgentEvents;
-        enteredWindow->document()->reportException(event.release(), callStack, corsStatus);
+        enteredWindow->document()->reportException(event.release(), scriptId, callStack, corsStatus);
     } else {
-        enteredWindow->document()->reportException(event.release(), callStack, corsStatus);
+        enteredWindow->document()->reportException(event.release(), scriptId, callStack, corsStatus);
     }
 }
 
@@ -180,10 +189,6 @@ static void timerTraceProfilerInMainThread(const char* name, int status)
 
 static void initializeV8Common(v8::Isolate* isolate)
 {
-    v8::ResourceConstraints constraints;
-    constraints.ConfigureDefaults(static_cast<uint64_t>(blink::Platform::current()->physicalMemoryMB()) << 20, static_cast<uint32_t>(blink::Platform::current()->virtualMemoryLimitMB()) << 20, static_cast<uint32_t>(blink::Platform::current()->numberOfProcessors()));
-    v8::SetResourceConstraints(isolate, &constraints);
-
     v8::V8::AddGCPrologueCallback(V8GCController::gcPrologue);
     v8::V8::AddGCEpilogueCallback(V8GCController::gcEpilogue);
 
@@ -192,7 +197,7 @@ static void initializeV8Common(v8::Isolate* isolate)
     isolate->SetAutorunMicrotasks(false);
 }
 
-void V8Initializer::initializeMainThreadIfNeeded(v8::Isolate* isolate)
+void V8Initializer::initializeMainThreadIfNeeded()
 {
     ASSERT(isMainThread());
 
@@ -201,10 +206,13 @@ void V8Initializer::initializeMainThreadIfNeeded(v8::Isolate* isolate)
         return;
     initialized = true;
 
+    gin::IsolateHolder::Initialize(gin::IsolateHolder::kNonStrictMode, v8ArrayBufferAllocator());
+
+    v8::Isolate* isolate = V8PerIsolateData::initialize();
+
     initializeV8Common(isolate);
 
     v8::V8::SetFatalErrorHandler(reportFatalErrorInMainThread);
-    V8PerIsolateData::ensureInitialized(isolate);
     v8::V8::AddMessageListener(messageHandlerInMainThread);
     v8::V8::SetFailedAccessCheckCallbackFunction(failedAccessCheckCallbackInMainThread);
     v8::V8::SetAllowCodeGenerationFromStringsCallback(codeGenerationCheckCallbackInMainThread);
@@ -235,6 +243,7 @@ static void messageHandlerInWorker(v8::Handle<v8::Message> message, v8::Handle<v
     if (ExecutionContext* context = scriptState->executionContext()) {
         String errorMessage = toCoreString(message->Get());
         TOSTRING_VOID(V8StringResource<>, sourceURL, message->GetScriptOrigin().ResourceName());
+        int scriptId = message->GetScriptOrigin().ScriptID()->Value();
 
         RefPtrWillBeRawPtr<ErrorEvent> event = ErrorEvent::create(errorMessage, sourceURL, message->GetLineNumber(), message->GetStartColumn() + 1, &DOMWrapperWorld::current(isolate));
         AccessControlStatus corsStatus = message->IsSharedCrossOrigin() ? SharableCrossOrigin : NotSharableCrossOrigin;
@@ -243,7 +252,7 @@ static void messageHandlerInWorker(v8::Handle<v8::Message> message, v8::Handle<v
         // the error event from the v8::Message, quietly leave.
         if (!v8::V8::IsExecutionTerminating(isolate)) {
             V8ErrorHandler::storeExceptionOnErrorEventWrapper(event.get(), data, scriptState->context()->Global(), isolate);
-            context->reportException(event.release(), nullptr, corsStatus);
+            context->reportException(event.release(), scriptId, nullptr, corsStatus);
         }
     }
 
@@ -259,10 +268,8 @@ void V8Initializer::initializeWorker(v8::Isolate* isolate)
     v8::V8::AddMessageListener(messageHandlerInWorker);
     v8::V8::SetFatalErrorHandler(reportFatalErrorInWorker);
 
-    v8::ResourceConstraints resourceConstraints;
     uint32_t here;
-    resourceConstraints.set_stack_limit(&here - kWorkerMaxStackSize / sizeof(uint32_t*));
-    v8::SetResourceConstraints(isolate, &resourceConstraints);
+    isolate->SetStackLimit(reinterpret_cast<uintptr_t>(&here - kWorkerMaxStackSize / sizeof(uint32_t*)));
 }
 
 } // namespace blink

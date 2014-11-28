@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
@@ -59,7 +59,7 @@ ACTION_P3(InvokeOnConfigureDone, pss, error_callback, result) {
   DataTypeManager::ConfigureResult configure_result =
       static_cast<DataTypeManager::ConfigureResult>(result);
   if (result.status == sync_driver::DataTypeManager::ABORTED)
-    error_callback.Run();
+    error_callback.Run(&configure_result);
   service->OnConfigureDone(configure_result);
 }
 
@@ -87,8 +87,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
                        content::TestBrowserThreadBundle::REAL_FILE_THREAD |
                        content::TestBrowserThreadBundle::REAL_IO_THREAD),
         profile_manager_(TestingBrowserProcess::GetGlobal()),
-        sync_(NULL),
-        failed_data_types_handler_(NULL) {}
+        sync_(NULL) {}
 
   virtual ~ProfileSyncServiceStartupTest() {
   }
@@ -148,14 +147,14 @@ class ProfileSyncServiceStartupTest : public testing::Test {
     return static_cast<FakeSigninManagerForTesting*>(sync_->signin());
   }
 
-  void SetError() {
-    sync_driver::FailedDataTypesHandler::TypeErrorMap errors;
+  void SetError(DataTypeManager::ConfigureResult* result) {
+    sync_driver::DataTypeStatusTable::TypeErrorMap errors;
     errors[syncer::BOOKMARKS] =
         syncer::SyncError(FROM_HERE,
                           syncer::SyncError::UNRECOVERABLE_ERROR,
                           "Error",
                           syncer::BOOKMARKS);
-    failed_data_types_handler_->UpdateFailedDataTypes(errors);
+    result->data_type_status_table.UpdateFailedDataTypes(errors);
   }
 
  protected:
@@ -166,16 +165,17 @@ class ProfileSyncServiceStartupTest : public testing::Test {
     fake_signin()->SignIn("test_user@gmail.com", "");
 #else
     fake_signin()->SetAuthenticatedUsername("test_user@gmail.com");
-    sync_->GoogleSigninSucceeded("test_user@gmail.com", "");
+    sync_->GoogleSigninSucceeded("test_user@gmail.com",
+                                 "test_user@gmail.com",
+                                 "");
 #endif
   }
 
   DataTypeManagerMock* SetUpDataTypeManager() {
     DataTypeManagerMock* data_type_manager = new DataTypeManagerMock();
     EXPECT_CALL(*components_factory_mock(),
-                CreateDataTypeManager(_, _, _, _, _, _)).
-        WillOnce(DoAll(SaveArg<5>(&failed_data_types_handler_),
-                       Return(data_type_manager)));
+                CreateDataTypeManager(_, _, _, _, _)).
+        WillOnce(Return(data_type_manager));
     return data_type_manager;
   }
 
@@ -193,7 +193,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   TestingProfile* profile_;
   ProfileSyncService* sync_;
   ProfileSyncServiceObserverMock observer_;
-  sync_driver::FailedDataTypesHandler* failed_data_types_handler_;
+  sync_driver::DataTypeStatusTable data_type_status_table_;
 };
 
 class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
@@ -215,7 +215,7 @@ class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
     signin->SetAuthenticatedUsername("test_user@gmail.com");
     ProfileOAuth2TokenService* oauth2_token_service =
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
-    EXPECT_FALSE(signin->GetAuthenticatedUsername().empty());
+    EXPECT_TRUE(signin->IsAuthenticated());
     return new TestProfileSyncServiceNoBackup(
         scoped_ptr<ProfileSyncComponentsFactory>(
             new ProfileSyncComponentsFactoryMock()),
@@ -277,7 +277,7 @@ TEST_F(ProfileSyncServiceStartupTest, DISABLED_StartNoCredentials) {
   // Should not actually start, rather just clean things up and wait
   // to be enabled.
   EXPECT_CALL(*components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
   sync_->Initialize();
 
@@ -351,7 +351,7 @@ TEST_F(ProfileSyncServiceStartupTest, DISABLED_StartInvalidCredentials) {
 #endif
 TEST_F(ProfileSyncServiceStartupCrosTest, MAYBE_StartCrosNoCredentials) {
   EXPECT_CALL(*components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(*components_factory_mock(),
               CreateSyncBackendHost(_, _, _, _, _)).Times(0);
   profile_->GetPrefs()->ClearPref(sync_driver::prefs::kSyncHasSetupCompleted);
@@ -494,7 +494,7 @@ TEST_F(ProfileSyncServiceStartupTest, MAYBE_ManagedStartup) {
   // Disable sync through policy.
   profile_->GetPrefs()->SetBoolean(sync_driver::prefs::kSyncManaged, true);
   EXPECT_CALL(*components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
 
   sync_->Initialize();
@@ -526,7 +526,7 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
   // should not start up automatically (kSyncSetupCompleted will be false).
   Mock::VerifyAndClearExpectations(data_type_manager);
   EXPECT_CALL(*components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
   profile_->GetPrefs()->ClearPref(sync_driver::prefs::kSyncManaged);
 }

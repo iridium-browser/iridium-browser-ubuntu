@@ -14,6 +14,7 @@
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_factory.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/public/browser/browser_thread.h"
@@ -42,20 +43,6 @@ bool FrameTreeNodeForId(int64 frame_tree_node_id,
   return true;
 }
 
-bool FrameTreeNodeForRoutingId(int routing_id,
-                               int process_id,
-                               FrameTreeNode** out_node,
-                               FrameTreeNode* node) {
-  // TODO(creis): Look through the swapped out RFHs as well.
-  if (node->current_frame_host()->GetProcess()->GetID() == process_id &&
-      node->current_frame_host()->GetRoutingID() == routing_id) {
-    *out_node = node;
-    // Terminate iteration once the node has been found.
-    return false;
-  }
-  return true;
-}
-
 // Iterate over the FrameTree to reset any node affected by the loss of the
 // given RenderViewHost's process.
 bool ResetNodesForNewProcess(RenderViewHost* render_view_host,
@@ -72,7 +59,7 @@ bool CreateProxyForSiteInstance(FrameTreeNode* source_node,
   if (source_node == node)
     return true;
 
-  node->render_manager()->CreateRenderFrameProxy(instance);
+  node->render_manager()->CreateRenderFrameProxy(instance.get());
   return true;
 }
 
@@ -120,10 +107,23 @@ FrameTreeNode* FrameTree::FindByID(int64 frame_tree_node_id) {
 }
 
 FrameTreeNode* FrameTree::FindByRoutingID(int routing_id, int process_id) {
-  FrameTreeNode* node = NULL;
-  ForEach(
-      base::Bind(&FrameTreeNodeForRoutingId, routing_id, process_id, &node));
-  return node;
+  RenderFrameHostImpl* render_frame_host =
+      RenderFrameHostImpl::FromID(process_id, routing_id);
+  if (render_frame_host) {
+    FrameTreeNode* result = render_frame_host->frame_tree_node();
+    if (this == result->frame_tree())
+      return result;
+  }
+
+  RenderFrameProxyHost* render_frame_proxy_host =
+      RenderFrameProxyHost::FromID(process_id, routing_id);
+  if (render_frame_proxy_host) {
+    FrameTreeNode* result = render_frame_proxy_host->frame_tree_node();
+    if (this == result->frame_tree())
+      return result;
+  }
+
+  return NULL;
 }
 
 void FrameTree::ForEach(
@@ -143,8 +143,16 @@ void FrameTree::ForEach(
 }
 
 RenderFrameHostImpl* FrameTree::AddFrame(FrameTreeNode* parent,
+                                         int process_id,
                                          int new_routing_id,
                                          const std::string& frame_name) {
+  // A child frame always starts with an initial empty document, which means
+  // it is in the same SiteInstance as the parent frame. Ensure that the process
+  // which requested a child frame to be added is the same as the process of the
+  // parent node.
+  if (parent->current_frame_host()->GetProcess()->GetID() != process_id)
+    return nullptr;
+
   scoped_ptr<FrameTreeNode> node(new FrameTreeNode(
       this, parent->navigator(), render_frame_delegate_, render_view_delegate_,
       render_widget_delegate_, manager_delegate_, frame_name));
@@ -154,7 +162,7 @@ RenderFrameHostImpl* FrameTree::AddFrame(FrameTreeNode* parent,
   CHECK(result.second);
   FrameTreeNode* node_ptr = node.get();
   // AddChild is what creates the RenderFrameHost.
-  parent->AddChild(node.Pass(), new_routing_id);
+  parent->AddChild(node.Pass(), process_id, new_routing_id);
   return node_ptr->current_frame_host();
 }
 

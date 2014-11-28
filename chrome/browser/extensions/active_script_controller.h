@@ -12,9 +12,9 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/memory/linked_ptr.h"
-#include "chrome/browser/extensions/location_bar_controller.h"
+#include "base/scoped_observer.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/user_script.h"
 
@@ -30,13 +30,14 @@ class ExtensionAction;
 
 namespace extensions {
 class Extension;
+class ExtensionRegistry;
 
 // The provider for ExtensionActions corresponding to scripts which are actively
 // running or need permission.
 // TODO(rdevlin.cronin): This isn't really a controller, but it has good parity
-// with PageAction"Controller".
-class ActiveScriptController : public LocationBarController::ActionProvider,
-                               public content::WebContentsObserver {
+// with LocationBar"Controller".
+class ActiveScriptController : public content::WebContentsObserver,
+                               public ExtensionRegistryObserver {
  public:
   explicit ActiveScriptController(content::WebContents* web_contents);
   virtual ~ActiveScriptController();
@@ -58,16 +59,13 @@ class ActiveScriptController : public LocationBarController::ActionProvider,
   // |extension| permission to always run script injections on the origin.
   void AlwaysRunOnVisibleOrigin(const Extension* extension);
 
-  // Returns true if there is an active script injection action for |extension|.
-  bool HasActiveScriptAction(const Extension* extension);
+  // Notifies the ActiveScriptController that the action for |extension| has
+  // been clicked, running any pending tasks that were previously shelved.
+  void OnClicked(const Extension* extension);
 
-  // LocationBarControllerProvider implementation.
-  virtual ExtensionAction* GetActionForExtension(
-      const Extension* extension) OVERRIDE;
-  virtual ExtensionAction::ShowAction OnClicked(
-      const Extension* extension) OVERRIDE;
-  virtual void OnNavigated() OVERRIDE;
-  virtual void OnExtensionUnloaded(const Extension* extension) OVERRIDE;
+  // Returns true if the given |extension| has a pending script that wants to
+  // run.
+  bool WantsToRun(const Extension* extension);
 
 #if defined(UNIT_TEST)
   // Only used in tests.
@@ -98,7 +96,6 @@ class ActiveScriptController : public LocationBarController::ActionProvider,
   void RequestScriptInjection(const Extension* extension,
                               const base::Closure& callback);
 
-  // Register a request for a script injection, to be executed by running
   // Runs any pending injections for the corresponding extension.
   void RunPendingForExtension(const Extension* extension);
 
@@ -111,11 +108,20 @@ class ActiveScriptController : public LocationBarController::ActionProvider,
   // Grants permission for the given request to run.
   void PermitScriptInjection(int64 request_id);
 
-  // content::WebContentsObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-
   // Log metrics.
   void LogUMA() const;
+
+  // content::WebContentsObserver implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE;
+
+  // ExtensionRegistryObserver:
+  virtual void OnExtensionUnloaded(
+      content::BrowserContext* browser_context,
+      const Extension* extension,
+      UnloadedExtensionInfo::Reason reason) OVERRIDE;
 
   // Whether or not the ActiveScriptController is enabled (corresponding to the
   // kActiveScriptEnforcement switch). If it is not, it acts as an empty shell,
@@ -131,11 +137,8 @@ class ActiveScriptController : public LocationBarController::ActionProvider,
   // should incorporate more fully with ActiveTab.
   std::set<std::string> permitted_extensions_;
 
-  // Script badges that have been generated for extensions. This is both those
-  // with actions already declared that are copied and normalised, and actions
-  // that get generated for extensions that haven't declared anything.
-  typedef std::map<std::string, linked_ptr<ExtensionAction> > ActiveScriptMap;
-  ActiveScriptMap active_script_actions_;
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ActiveScriptController);
 };

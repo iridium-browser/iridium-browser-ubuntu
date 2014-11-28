@@ -10,6 +10,7 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension.h"
@@ -29,27 +30,62 @@ using content::V8ValueConverter;
 
 namespace extensions {
 
+namespace {
+
+std::string GetContextTypeDescriptionString(Feature::Context context_type) {
+  switch (context_type) {
+    case Feature::UNSPECIFIED_CONTEXT:
+      return "UNSPECIFIED";
+    case Feature::BLESSED_EXTENSION_CONTEXT:
+      return "BLESSED_EXTENSION";
+    case Feature::UNBLESSED_EXTENSION_CONTEXT:
+      return "UNBLESSED_EXTENSION";
+    case Feature::CONTENT_SCRIPT_CONTEXT:
+      return "CONTENT_SCRIPT";
+    case Feature::WEB_PAGE_CONTEXT:
+      return "WEB_PAGE";
+    case Feature::BLESSED_WEB_PAGE_CONTEXT:
+      return "BLESSED_WEB_PAGE";
+    case Feature::WEBUI_CONTEXT:
+      return "WEBUI";
+  }
+  NOTREACHED();
+  return std::string();
+}
+
+}  // namespace
+
 ScriptContext::ScriptContext(const v8::Handle<v8::Context>& v8_context,
                              blink::WebFrame* web_frame,
                              const Extension* extension,
-                             Feature::Context context_type)
+                             Feature::Context context_type,
+                             const Extension* effective_extension,
+                             Feature::Context effective_context_type)
     : v8_context_(v8_context),
       web_frame_(web_frame),
       extension_(extension),
       context_type_(context_type),
+      effective_extension_(effective_extension),
+      effective_context_type_(effective_context_type),
       safe_builtins_(this),
       isolate_(v8_context->GetIsolate()) {
   VLOG(1) << "Created context:\n"
           << "  extension id: " << GetExtensionID() << "\n"
           << "  frame:        " << web_frame_ << "\n"
           << "  URL:          " << GetURL() << "\n"
-          << "  context type: " << GetContextTypeDescription();
+          << "  context type: " << GetContextTypeDescription() << "\n"
+          << "  effective extension id: "
+          << (effective_extension_.get() ? effective_extension_->id() : "")
+          << "  effective context type: "
+          << GetEffectiveContextTypeDescription();
   gin::PerContextData::From(v8_context)->set_runner(this);
 }
 
 ScriptContext::~ScriptContext() {
   VLOG(1) << "Destroyed context for extension\n"
-          << "  extension id: " << GetExtensionID();
+          << "  extension id: " << GetExtensionID() << "\n"
+          << "  effective extension id: "
+          << (effective_extension_.get() ? effective_extension_->id() : "");
   Invalidate();
 }
 
@@ -69,8 +105,13 @@ const std::string& ScriptContext::GetExtensionID() const {
 content::RenderView* ScriptContext::GetRenderView() const {
   if (web_frame_ && web_frame_->view())
     return content::RenderView::FromWebView(web_frame_->view());
-  else
-    return NULL;
+  return NULL;
+}
+
+content::RenderFrame* ScriptContext::GetRenderFrame() const {
+  if (web_frame_)
+    return content::RenderFrame::FromWebFrame(web_frame_);
+  return NULL;
 }
 
 v8::Local<v8::Value> ScriptContext::CallFunction(
@@ -127,24 +168,11 @@ void ScriptContext::DispatchOnUnloadEvent() {
 }
 
 std::string ScriptContext::GetContextTypeDescription() {
-  switch (context_type_) {
-    case Feature::UNSPECIFIED_CONTEXT:
-      return "UNSPECIFIED";
-    case Feature::BLESSED_EXTENSION_CONTEXT:
-      return "BLESSED_EXTENSION";
-    case Feature::UNBLESSED_EXTENSION_CONTEXT:
-      return "UNBLESSED_EXTENSION";
-    case Feature::CONTENT_SCRIPT_CONTEXT:
-      return "CONTENT_SCRIPT";
-    case Feature::WEB_PAGE_CONTEXT:
-      return "WEB_PAGE";
-    case Feature::BLESSED_WEB_PAGE_CONTEXT:
-      return "BLESSED_WEB_PAGE";
-    case Feature::WEBUI_CONTEXT:
-      return "WEBUI";
-  }
-  NOTREACHED();
-  return std::string();
+  return GetContextTypeDescriptionString(context_type_);
+}
+
+std::string ScriptContext::GetEffectiveContextTypeDescription() {
+  return GetContextTypeDescriptionString(effective_context_type_);
 }
 
 GURL ScriptContext::GetURL() const {

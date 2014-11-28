@@ -93,8 +93,6 @@ int16_t ACMISAC::InternalCreateEncoder() { return -1; }
 
 void ACMISAC::DestructEncoderSafe() { return; }
 
-void ACMISAC::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
-
 int16_t ACMISAC::Transcode(uint8_t* /* bitstream */,
                            int16_t* /* bitstream_len_byte */,
                            int16_t /* q_bwe */,
@@ -349,8 +347,9 @@ int16_t ACMISAC::InternalEncode(uint8_t* bitstream,
       return -1;
     }
     *bitstream_len_byte = ACM_ISAC_ENCODE(
-        codec_inst_ptr_->inst, &in_audio_[in_audio_ix_read_],
-        reinterpret_cast<int16_t*>(bitstream));
+        codec_inst_ptr_->inst,
+        &in_audio_[in_audio_ix_read_],
+        bitstream);
     // increment the read index this tell the caller that how far
     // we have gone forward in reading the audio buffer
     in_audio_ix_read_ += samples_in_10ms_audio_;
@@ -458,13 +457,6 @@ void ACMISAC::UpdateFrameLen() {
 void ACMISAC::DestructEncoderSafe() {
   // codec with shared instance cannot delete.
   encoder_initialized_ = false;
-  return;
-}
-
-void ACMISAC::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    ACM_ISAC_FREE(static_cast<ACM_ISAC_STRUCT *>(ptr_inst));
-  }
   return;
 }
 
@@ -736,7 +728,7 @@ int ACMISAC::Decode(const uint8_t* encoded,
                     size_t encoded_len,
                     int16_t* decoded,
                     SpeechType* speech_type) {
-  int16_t temp_type;
+  int16_t temp_type = 1;  // Default is speech.
   CriticalSectionScoped lock(codec_inst_crit_sect_.get());
   int ret =
       ACM_ISAC_DECODE_B(static_cast<ACM_ISAC_STRUCT*>(codec_inst_ptr_->inst),

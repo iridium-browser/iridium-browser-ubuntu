@@ -198,7 +198,9 @@
                     { "name": "scrollY", "type": "number", "description": "Y scroll offset in CSS pixels." },
                     { "name": "contentsWidth", "type": "number", "description": "Contents width in CSS pixels." },
                     { "name": "contentsHeight", "type": "number", "description": "Contents height in CSS pixels." },
-                    { "name": "pageScaleFactor", "type": "number", "description": "Page scale factor." }
+                    { "name": "pageScaleFactor", "type": "number", "description": "Page scale factor." },
+                    { "name": "minimumPageScaleFactor", "type": "number", "description": "Minimum page scale factor." },
+                    { "name": "maximumPageScaleFactor", "type": "number", "description": "Maximum page scale factor." }
                 ],
                 "hidden": true
             },
@@ -225,7 +227,8 @@
         "commands": [
             {
                 "name": "enable",
-                "description": "Enables page domain notifications."
+                "description": "Enables page domain notifications.",
+                "handlers": ["browser", "renderer"]
             },
             {
                 "name": "disable",
@@ -379,6 +382,14 @@
                 "hidden": true
             },
             {
+                "name": "setPageScaleFactor",
+                "description": "Sets a specified page scale factor.",
+                "parameters": [
+                    { "name": "pageScaleFactor", "type": "number", "description": "Page scale factor." }
+                ],
+                "hidden": true
+            },
+            {
                 "name": "setShowPaintRects",
                 "description": "Requests that backend shows paint rectangles",
                 "parameters": [
@@ -485,6 +496,7 @@
             },
             {
                 "name": "captureScreenshot",
+                "async": true,
                 "description": "Capture page screenshot.",
                 "parameters": [],
                 "returns": [
@@ -503,6 +515,15 @@
                 "handlers": ["browser"]
             },
             {
+                "name": "canEmulate",
+                "description": "Tells whether emulation is supported.",
+                "returns": [
+                    { "name": "result", "type": "boolean", "description": "True if emulation is supported." }
+                ],
+                "hidden": true,
+                "handlers": ["browser"]
+            },
+            {
                 "name": "startScreencast",
                 "description": "Starts sending each frame using the <code>screencastFrame</code> event.",
                 "parameters": [
@@ -512,13 +533,13 @@
                     { "name": "maxHeight", "type": "integer", "optional": true, "description": "Maximum screenshot height." }
                 ],
                 "hidden": true,
-                "handlers": ["browser"]
+                "handlers": ["browser", "renderer"]
             },
             {
                 "name": "stopScreencast",
                 "description": "Stops sending each frame in the <code>screencastFrame</code>.",
                 "hidden": true,
-                "handlers": ["browser"]
+                "handlers": ["browser", "renderer"]
             },
             {
                 "name": "handleJavaScriptDialog",
@@ -541,6 +562,7 @@
             },
             {
                 "name": "queryUsageAndQuota",
+                "async": true,
                 "parameters": [
                     { "name": "securityOrigin", "type": "string", "description": "Security origin quota and usage requested for" }
                 ],
@@ -549,6 +571,15 @@
                     { "name": "usage", "$ref": "Usage", "description": "Current usage for requested security origin." }
                 ],
                 "description": "Queries more detailed quota and usage data than Storage API provides.",
+                "hidden": true,
+                "handlers": ["browser"]
+            },
+            {
+                "name": "setColorPickerEnabled",
+                "parameters": [
+                    { "name": "enabled", "type": "boolean", "description": "Shows / hides color picker" }
+                ],
+                "description": "Shows / hides color picker",
                 "hidden": true,
                 "handlers": ["browser"]
             }
@@ -672,6 +703,27 @@
                     { "name": "viewport", "$ref": "Viewport", "description": "Viewport description." }
                 ],
                 "hidden": true
+            },
+            {
+                "name": "colorPicked",
+                "description": "Fired when a color has been picked.",
+                "parameters": [
+                    { "name": "color", "$ref": "DOM.RGBA", "description": "RGBA of the picked color." }
+                ],
+                "hidden": true,
+                "handlers": ["browser"]
+            },
+            {
+                "name": "interstitialShown",
+                "description": "Fired when interstitial page was shown",
+                "hidden": true,
+                "handlers": ["browser"]
+            },
+            {
+                "name": "interstitialHidden",
+                "description": "Fired when interstitial page was hidden",
+                "hidden": true,
+                "handlers": ["browser"]
             }
         ]
     },
@@ -690,12 +742,12 @@
                 "description": "Mirror object referencing original JavaScript object.",
                 "properties": [
                     { "name": "type", "type": "string", "enum": ["object", "function", "undefined", "string", "number", "boolean", "symbol"], "description": "Object type." },
-                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date"], "description": "Object subtype hint. Specified for <code>object</code> type values only." },
+                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date", "map", "set"], "description": "Object subtype hint. Specified for <code>object</code> type values only." },
                     { "name": "className", "type": "string", "optional": true, "description": "Object class (constructor) name. Specified for <code>object</code> type values only." },
                     { "name": "value", "type": "any", "optional": true, "description": "Remote object value in case of primitive values or JSON values (if it was requested), or description string if the value can not be JSON-stringified (like NaN, Infinity, -Infinity, -0)." },
                     { "name": "description", "type": "string", "optional": true, "description": "String representation of the object." },
                     { "name": "objectId", "$ref": "RemoteObjectId", "optional": true, "description": "Unique object identifier (for non-primitive values)." },
-                    { "name": "preview", "$ref": "ObjectPreview", "optional": true, "description": "Preview containing abbreviated property values.", "hidden": true }
+                    { "name": "preview", "$ref": "ObjectPreview", "optional": true, "description": "Preview containing abbreviated property values. Specified for <code>object</code> type values only.", "hidden": true }
                 ]
             },
             {
@@ -704,9 +756,13 @@
                 "hidden": true,
                 "description": "Object containing abbreviated remote object value.",
                 "properties": [
+                    { "name": "type", "type": "string", "enum": ["object", "function", "undefined", "string", "number", "boolean", "symbol"], "description": "Object type." },
+                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date", "map", "set"], "description": "Object subtype hint. Specified for <code>object</code> type values only." },
+                    { "name": "description", "type": "string", "optional": true, "description": "String representation of the object." },
                     { "name": "lossless", "type": "boolean", "description": "Determines whether preview is lossless (contains all information of the original object)." },
-                    { "name": "overflow", "type": "boolean", "description": "True iff some of the properties of the original did not fit." },
-                    { "name": "properties", "type": "array", "items": { "$ref": "PropertyPreview" }, "description": "List of the properties." }
+                    { "name": "overflow", "type": "boolean", "description": "True iff some of the properties or entries of the original object did not fit." },
+                    { "name": "properties", "type": "array", "items": { "$ref": "PropertyPreview" }, "description": "List of the properties." },
+                    { "name": "entries", "type": "array", "items": { "$ref": "EntryPreview" }, "optional": true, "description": "List of the entries. Specified for <code>map</code> and <code>set</code> subtype values only." }
                 ]
             },
             {
@@ -718,7 +774,16 @@
                     { "name": "type", "type": "string", "enum": ["object", "function", "undefined", "string", "number", "boolean", "symbol", "accessor"], "description": "Object type. Accessor means that the property itself is an accessor property." },
                     { "name": "value", "type": "string", "optional": true, "description": "User-friendly property value string." },
                     { "name": "valuePreview", "$ref": "ObjectPreview", "optional": true, "description": "Nested value preview." },
-                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date"], "description": "Object subtype hint. Specified for <code>object</code> type values only." }
+                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date", "map", "set"], "description": "Object subtype hint. Specified for <code>object</code> type values only." }
+                ]
+            },
+            {
+                "id": "EntryPreview",
+                "type": "object",
+                "hidden": true,
+                "properties": [
+                    { "name": "key", "$ref": "ObjectPreview", "optional": true, "description": "Preview of the key. Specified for map-like collection entries." },
+                    { "name": "value", "$ref": "ObjectPreview", "description": "Preview of the value." }
                 ]
             },
             {
@@ -770,6 +835,7 @@
                 "properties": [
                     { "name": "id", "$ref": "ExecutionContextId", "description": "Unique id of the execution context. It can be used to specify in which execution context script evaluation should be performed." },
                     { "name": "isPageContext", "type": "boolean", "description": "True if this is a context where inpspected web page scripts run. False if it is a content script isolated context.", "hidden": true },
+                    { "name": "origin", "type": "string", "description": "Execution context origin.", "hidden": true},
                     { "name": "name", "type": "string", "description": "Human readable name describing given context.", "hidden": true},
                     { "name": "frameId", "$ref": "Page.FrameId", "description": "Id of the owning frame." }
                 ]
@@ -900,6 +966,7 @@
                     { "name": "level", "type": "string", "enum": ["log", "warning", "error", "debug", "info"], "description": "Message severity." },
                     { "name": "text", "type": "string", "description": "Message text." },
                     { "name": "type", "type": "string", "optional": true, "enum": ["log", "dir", "dirxml", "table", "trace", "clear", "startGroup", "startGroupCollapsed", "endGroup", "assert", "profile", "profileEnd"], "description": "Console message type." },
+                    { "name": "scriptId", "type": "string", "optional": true, "description": "Script ID of the message origin." },
                     { "name": "url", "type": "string", "optional": true, "description": "URL of the message origin." },
                     { "name": "line", "type": "integer", "optional": true, "description": "Line number in the resource that generated this message." },
                     { "name": "column", "type": "integer", "optional": true, "description": "Column number in the resource that generated this message." },
@@ -1047,6 +1114,9 @@
                     { "name": "connectEnd", "type": "number", "description": "Connected to the remote host." },
                     { "name": "sslStart", "type": "number", "description": "Started SSL handshake." },
                     { "name": "sslEnd", "type": "number", "description": "Finished SSL handshake." },
+                    { "name": "serviceWorkerFetchStart", "type": "number", "description": "Started fetching via ServiceWorker.", "hidden": true },
+                    { "name": "serviceWorkerFetchReady", "type": "number", "description": "Prepared a ServiceWorker.", "hidden": true },
+                    { "name": "serviceWorkerFetchEnd", "type": "number", "description": "Finished fetching via ServiceWorker.", "hidden": true },
                     { "name": "sendStart", "type": "number", "description": "Started sending request." },
                     { "name": "sendEnd", "type": "number", "description": "Finished sending request." },
                     { "name": "receiveHeadersEnd", "type": "number", "description": "Finished receiving response headers." }
@@ -1081,6 +1151,7 @@
                     { "name": "remoteIPAddress", "type": "string", "optional": true, "hidden": true, "description": "Remote IP address." },
                     { "name": "remotePort", "type": "integer", "optional": true, "hidden": true, "description": "Remote port."},
                     { "name": "fromDiskCache", "type": "boolean", "optional": true, "description": "Specifies that the request was served from the disk cache." },
+                    { "name": "fromServiceWorker", "type": "boolean", "optional": true, "description": "Specifies that the request was served from the ServiceWorker." },
                     { "name": "encodedDataLength", "type": "number", "optional": false, "description": "Total number of bytes received for this request so far." },
                     { "name": "timing", "$ref": "ResourceTiming", "optional": true, "description": "Timing information for the given request." }
                 ]
@@ -2671,13 +2742,16 @@
                     { "name": "parentStyleSheetId", "$ref": "StyleSheetId", "optional": true, "description": "Identifier of the stylesheet containing this object (if exists)." },
                     { "name": "mediaList", "type": "array", "items": { "$ref": "MediaQuery" }, "optional": true, "hidden": true, "description": "Array of media queries." }
                 ],
-                "description": "CSS media query descriptor."
+                "description": "CSS media rule descriptor."
             },
             {
                 "id": "MediaQuery",
-                "type": "array",
-                "items": { "$ref": "MediaQueryExpression" },
-                "description": "An array of media query expressions.",
+                "type": "object",
+                "properties": [
+                    { "name": "expressions", "type": "array", "items": { "$ref": "MediaQueryExpression" }, "description": "Array of media query expressions." },
+                    { "name": "active", "type": "boolean", "description": "Whether the media query condition is satisfied." }
+                ],
+                "description": "Media query descriptor.",
                 "hidden": true
             },
             {
@@ -2689,7 +2763,7 @@
                     { "name": "feature", "type": "string", "description": "Media query expression feature."},
                     { "name": "computedLength", "type": "number", "optional": true, "description": "Computed length of media query expression (if applicable)."}
                 ],
-                "description": "Media query expression data.",
+                "description": "Media query expression descriptor.",
                 "hidden": true
             },
             {
@@ -3003,6 +3077,16 @@
                 "description": "Information about the function."
             },
             {
+                "id": "CollectionEntry",
+                "hidden": true,
+                "type": "object",
+                "properties": [
+                    { "name": "key", "$ref": "Runtime.RemoteObject", "optional": true, "description": "Entry key of a map-like collection, otherwise not provided." },
+                    { "name": "value", "$ref": "Runtime.RemoteObject", "description": "Entry value." }
+                ],
+                "description": "Collection entry."
+            },
+            {
                 "id": "CallFrame",
                 "type": "object",
                 "properties": [
@@ -3060,6 +3144,18 @@
                     }
                 ],
                 "description": "Error data for setScriptSource command. compileError is a case type for uncompilable script source error.",
+                "hidden": true
+            },
+            {
+                "id": "PromiseDetails",
+                "type": "object",
+                "description": "Information about the promise.",
+                "properties": [
+                    { "name": "id", "type": "integer", "description": "Unique id of the promise." },
+                    { "name": "status", "type": "string", "enum": ["pending", "resolved", "rejected"], "description": "Status of the promise." },
+                    { "name": "parentId", "type": "integer", "optional": true, "description": "Id of the parent promise." },
+                    { "name": "callFrame", "$ref": "Console.CallFrame", "optional": true, "description": "Top call frame on promise creation."}
+                ],
                 "hidden": true
             }
         ],
@@ -3220,7 +3316,18 @@
                 "returns": [
                     { "name": "details", "$ref": "FunctionDetails", "description": "Information about the function." }
                 ],
-                "description": "Returns detailed informtation on given function."
+                "description": "Returns detailed information on given function."
+            },
+            {
+                "name": "getCollectionEntries",
+                "hidden": true,
+                "parameters": [
+                    { "name": "objectId", "$ref": "Runtime.RemoteObjectId", "description": "Id of the collection to get entries for." }
+                ],
+                "returns": [
+                    { "name": "entries", "type": "array", "items": { "$ref": "CollectionEntry" }, "description": "Array of collection entries." }
+                ],
+                "description": "Returns entries of given collection."
             },
             {
                 "name": "setPauseOnExceptions",
@@ -3319,7 +3426,8 @@
             {
                 "name": "skipStackFrames",
                 "parameters": [
-                    { "name": "script", "optional": true, "type": "string", "description": "Regular expression defining the scripts to ignore while stepping." }
+                    { "name": "script", "type": "string", "optional": true, "description": "Regular expression defining the scripts to ignore while stepping." },
+                    { "name": "skipContentScripts", "type": "boolean", "optional": true, "description": "True, if all content scripts should be ignored." }
                 ],
                 "hidden": true,
                 "description": "Makes backend skip steps in the sources with names matching given pattern. VM will try leave blacklisted scripts by performing 'step in' several times, finally resorting to 'step out' if unsuccessful."
@@ -3331,6 +3439,36 @@
                 ],
                 "hidden": true,
                 "description": "Enables or disables async call stacks tracking."
+            },
+            {
+                "name": "enablePromiseTracker",
+                "hidden": true,
+                "description": "Enables promise tracking, information about <code>Promise</code>s created or updated will now be stored on the backend."
+            },
+            {
+                "name": "disablePromiseTracker",
+                "hidden": true,
+                "description": "Disables promise tracking."
+            },
+            {
+                "name": "getPromises",
+                "returns": [
+                    { "name": "promises", "type": "array", "items": { "$ref": "PromiseDetails" }, "description": "Information about stored promises." }
+                ],
+                "hidden": true,
+                "description": "Returns detailed information about all <code>Promise</code>s that were created or updated after the <code>enablePromiseTracker</code> command, and have not been garbage collected yet."
+            },
+            {
+                "name": "getPromiseById",
+                "parameters": [
+                    { "name": "promiseId", "type": "integer" },
+                    { "name": "objectGroup", "type": "string", "optional": true, "description": "Symbolic group name that can be used to release multiple objects." }
+                ],
+                "returns": [
+                    { "name": "promise", "$ref": "Runtime.RemoteObject", "description": "Object wrapper for <code>Promise</code> with specified ID, if any." }
+                ],
+                "hidden": true,
+                "description": "Returns <code>Promise</code> with specified ID."
             }
         ],
         "events": [
@@ -3756,7 +3894,7 @@
                     { "name": "enumName", "type": "string", "optional": true, "description": "Enum name, if any, that stands for the value (for example, a WebGL enum name)." },
                     { "name": "resourceId", "$ref": "ResourceId", "optional": true, "description": "Resource identifier. Specified for <code>Resource</code> objects only." },
                     { "name": "type", "type": "string", "optional": true, "enum": ["object", "function", "undefined", "string", "number", "boolean"], "description": "Object type. Specified for non <code>Resource</code> objects only." },
-                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date"], "description": "Object subtype hint. Specified for <code>object</code> type values only." },
+                    { "name": "subtype", "type": "string", "optional": true, "enum": ["array", "null", "node", "regexp", "date", "map", "set"], "description": "Object subtype hint. Specified for <code>object</code> type values only." },
                     { "name": "remoteObject", "$ref": "Runtime.RemoteObject", "optional": true, "description": "The <code>RemoteObject</code>, if requested." }
                 ]
             },
@@ -3977,11 +4115,11 @@
                     { "name": "type", "type": "string", "enum": ["mousePressed", "mouseReleased", "mouseMoved", "mouseWheel"], "description": "Type of the mouse event." },
                     { "name": "x", "type": "integer", "description": "X coordinate of the mouse pointer in DIP."},
                     { "name": "y", "type": "integer", "description": "Y coordinate of the mouse pointer in DIP."},
+                    { "name": "timestamp", "type": "number", "description": "Time at which the event occurred. Measured in UTC time in seconds since January 1, 1970." },
+                    { "name": "button", "type": "string", "enum": ["none", "left", "middle", "right"], "description": "Mouse button." },
                     { "name": "deltaX", "type": "number", "optional": true, "description": "X delta in DIP for mouse wheel event (default: 0)."},
                     { "name": "deltaY", "type": "number", "optional": true, "description": "Y delta in DIP for mouse wheel event (default: 0)."},
                     { "name": "modifiers", "type": "integer", "optional": true, "description": "Bit field representing pressed modifier keys. Alt=1, Ctrl=2, Meta/Command=4, Shift=8 (default: 0)." },
-                    { "name": "timestamp", "type": "number", "optional": true, "description": "Time at which the event occurred. Measured in UTC time in seconds since January 1, 1970 (default: current time)." },
-                    { "name": "button", "type": "string", "enum": ["none", "left", "middle", "right"], "optional": true, "description": "Mouse button (default: \"none\")." },
                     { "name": "clickCount", "type": "integer", "optional": true, "description": "Number of times the mouse button was clicked (default: 0)." }
                 ],
                 "description": "Emulates touch event from the mouse event parameters.",
@@ -4200,6 +4338,7 @@
             },
             {
                 "name": "getCategories",
+                "async": true,
                 "description": "Gets supported tracing categories.",
                 "returns": [
                     { "name": "categories", "type": "array", "items": { "type": "string" }, "description": "A list of supported tracing categories." }
@@ -4210,18 +4349,8 @@
         "events": [
             {
                 "name": "started",
-                "parameters": [
-                    { "name": "consoleTimeline", "type": "boolean", "description": "If specified, identifies that tracing was started using console.timeline() call." },
-                    { "name": "sessionId", "type": "string", "description": "A system-unique identifier of the tracing session that allows associating of some of the trace events with the inspected page" }
-                ],
                 "description": "Fired when tracing is started.",
-                "handlers": ["renderer", "browser", "frontend"],
-                "hidden": true
-            },
-            {
-                "name": "stopped",
-                "description": "Fired when tracing is stopped.",
-                "handlers": ["renderer", "browser", "frontend"],
+                "handlers": ["browser", "frontend"],
                 "hidden": true
             },
             {
@@ -4229,7 +4358,7 @@
                 "parameters": [
                     { "name": "value", "type": "array", "items": { "type": "object" } }
                 ],
-                "description": "Contains an bucket of collected trace events.",
+                "description": "Contains an bucket of collected trace events. When tracing is stopped collected events will be send as a sequence of dataCollected events followed by tracingComplete event.",
                 "handlers": ["browser", "frontend"]
             },
             {

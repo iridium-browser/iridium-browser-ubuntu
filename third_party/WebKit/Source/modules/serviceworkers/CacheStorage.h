@@ -9,18 +9,19 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "wtf/Forward.h"
+#include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
+class Cache;
 class WebServiceWorkerCacheStorage;
 
-// See https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#cache-storage
-class CacheStorage FINAL : public RefCountedWillBeGarbageCollected<CacheStorage>, public ScriptWrappable {
+class CacheStorage FINAL : public GarbageCollected<CacheStorage>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_NONCOPYABLE(CacheStorage);
 public:
-    static PassRefPtrWillBeRawPtr<CacheStorage> create(WebServiceWorkerCacheStorage*);
+    static CacheStorage* create(WebServiceWorkerCacheStorage*);
 
     ScriptPromise get(ScriptState*, const String& cacheName);
     ScriptPromise has(ScriptState*, const String& cacheName);
@@ -28,12 +29,21 @@ public:
     ScriptPromise deleteFunction(ScriptState*, const String& cacheName);
     ScriptPromise keys(ScriptState*);
 
-    void trace(Visitor*) { }
+    void trace(Visitor*);
 
 private:
+    class Callbacks;
+    class WithCacheCallbacks;
+    class DeleteCallbacks;
+    class KeysCallbacks;
+
+    friend class WithCacheCallbacks;
+    friend class DeleteCallbacks;
+
     explicit CacheStorage(WebServiceWorkerCacheStorage*);
 
     WebServiceWorkerCacheStorage* m_webCacheStorage;
+    HeapHashMap<String, Member<Cache> > m_nameToCacheMap;
 };
 
 } // namespace blink

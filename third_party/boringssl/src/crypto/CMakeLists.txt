@@ -4,7 +4,7 @@ if(APPLE)
 	set(PERLASM_STYLE macosx)
 	set(ASM_EXT S)
 	enable_language(ASM)
-else(UNIX)
+elseif(UNIX)
 	set(PERLASM_STYLE elf)
 	set(ASM_EXT S)
 	enable_language(ASM)
@@ -71,6 +71,7 @@ add_subdirectory(bytestring)
 
 # Level 0.2 - depends on nothing but itself
 add_subdirectory(sha)
+add_subdirectory(md4)
 add_subdirectory(md5)
 add_subdirectory(modes)
 add_subdirectory(aes)
@@ -112,6 +113,7 @@ add_library(
 	crypto
 	STATIC
 
+	crypto.c
 	crypto_error.c
 	mem.c
 	thread.c
@@ -129,6 +131,7 @@ add_library(
 	$<TARGET_OBJECTS:base64>
 	$<TARGET_OBJECTS:bytestring>
 	$<TARGET_OBJECTS:sha>
+	$<TARGET_OBJECTS:md4>
 	$<TARGET_OBJECTS:md5>
 	$<TARGET_OBJECTS:digest>
 	$<TARGET_OBJECTS:cipher>

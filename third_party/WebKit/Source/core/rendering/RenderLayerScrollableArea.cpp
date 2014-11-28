@@ -46,13 +46,14 @@
 
 #include "core/accessibility/AXObjectCache.h"
 #include "core/css/PseudoStyleRequest.h"
+#include "core/dom/Node.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/FrameSelection.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/inspector/InspectorTraceEvents.h"
+#include "core/page/Chrome.h"
 #include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
@@ -141,6 +142,13 @@ RenderLayerScrollableArea::~RenderLayerScrollableArea()
         m_resizer->destroy();
 }
 
+HostWindow* RenderLayerScrollableArea::hostWindow() const
+{
+    if (Page* page = box().frame()->page())
+        return &page->chrome();
+    return nullptr;
+}
+
 GraphicsLayer* RenderLayerScrollableArea::layerForScrolling() const
 {
     return layer()->hasCompositedLayerMapping() ? layer()->compositedLayerMapping()->scrollingContentsLayer() : 0;
@@ -177,18 +185,18 @@ void RenderLayerScrollableArea::invalidateScrollbarRect(Scrollbar* scrollbar, co
 
     if (scrollbar == m_vBar.get()) {
         if (GraphicsLayer* layer = layerForVerticalScrollbar()) {
-            layer->setNeedsDisplayInRect(rect);
+            layer->setNeedsDisplayInRect(rect, WebInvalidationDebugAnnotationsScrollbar);
             return;
         }
     } else {
         if (GraphicsLayer* layer = layerForHorizontalScrollbar()) {
-            layer->setNeedsDisplayInRect(rect);
+            layer->setNeedsDisplayInRect(rect, WebInvalidationDebugAnnotationsScrollbar);
             return;
         }
     }
 
     IntRect scrollRect = rect;
-    // If we are not yet inserted into the tree, there is no need to repaint.
+    // If we are not yet inserted into the tree, there is no need to issue paint invaldiations.
     if (!box().parent())
         return;
 
@@ -200,10 +208,10 @@ void RenderLayerScrollableArea::invalidateScrollbarRect(Scrollbar* scrollbar, co
     if (scrollRect.isEmpty())
         return;
 
-    LayoutRect repaintRect = scrollRect;
-    box().flipForWritingMode(repaintRect);
+    LayoutRect paintInvalidationRect = scrollRect;
+    box().flipForWritingMode(paintInvalidationRect);
 
-    IntRect intRect = pixelSnappedIntRect(repaintRect);
+    IntRect intRect = pixelSnappedIntRect(paintInvalidationRect);
 
     if (box().frameView()->isInPerformLayout())
         addScrollbarDamage(scrollbar, intRect);
@@ -214,7 +222,7 @@ void RenderLayerScrollableArea::invalidateScrollbarRect(Scrollbar* scrollbar, co
 void RenderLayerScrollableArea::invalidateScrollCornerRect(const IntRect& rect)
 {
     if (GraphicsLayer* layer = layerForScrollCorner()) {
-        layer->setNeedsDisplayInRect(rect);
+        layer->setNeedsDisplayInRect(rect, WebInvalidationDebugAnnotationsScrollbar);
         return;
     }
 
@@ -355,14 +363,14 @@ void RenderLayerScrollableArea::setScrollOffset(const IntPoint& newScrollOffset)
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::willScrollLayer(&box());
 
-    const RenderLayerModelObject* repaintContainer = box().containerForPaintInvalidation();
+    const RenderLayerModelObject* paintInvalidationContainer = box().containerForPaintInvalidation();
 
     // Update the positions of our child layers (if needed as only fixed layers should be impacted by a scroll).
     // We don't update compositing layers, because we need to do a deep update from the compositing ancestor.
     if (!frameView->isInPerformLayout()) {
         // If we're in the middle of layout, we'll just update layers once layout has finished.
         layer()->clipper().clearClipRectsIncludingDescendants();
-        box().setPreviousPaintInvalidationRect(box().boundsRectForPaintInvalidation(repaintContainer));
+        box().setPreviousPaintInvalidationRect(box().boundsRectForPaintInvalidation(paintInvalidationContainer));
         // Update regions, scrolling may change the clip of a particular region.
         frameView->updateAnnotatedRegions();
         frameView->setNeedsUpdateWidgetPositions();
@@ -374,10 +382,10 @@ void RenderLayerScrollableArea::setScrollOffset(const IntPoint& newScrollOffset)
 
     FloatQuad quadForFakeMouseMoveEvent = FloatQuad(layer()->renderer()->previousPaintInvalidationRect());
 
-    quadForFakeMouseMoveEvent = repaintContainer->localToAbsoluteQuad(quadForFakeMouseMoveEvent);
+    quadForFakeMouseMoveEvent = paintInvalidationContainer->localToAbsoluteQuad(quadForFakeMouseMoveEvent);
     frame->eventHandler().dispatchFakeMouseMoveEventSoonInQuad(quadForFakeMouseMoveEvent);
 
-    bool requiresRepaint = true;
+    bool requiresPaintInvalidation = true;
 
     if (!box().isMarquee() && box().view()->compositor()->inCompositingMode()) {
         // Hits in virtual/gpu/fast/canvas/canvas-scroll-path-into-view.html.
@@ -389,16 +397,12 @@ void RenderLayerScrollableArea::setScrollOffset(const IntPoint& newScrollOffset)
             && box().style()->backgroundLayers().attachment() != LocalBackgroundAttachment;
 
         if (usesCompositedScrolling() || onlyScrolledCompositedLayers)
-            requiresRepaint = false;
+            requiresPaintInvalidation = false;
     }
 
-    // Just schedule a full repaint of our object.
-    if (requiresRepaint) {
-        if (box().frameView()->isInPerformLayout())
-            box().setShouldDoFullPaintInvalidation(true);
-        else
-            box().invalidatePaintUsingContainer(repaintContainer, layer()->renderer()->previousPaintInvalidationRect(), InvalidationScroll);
-    }
+    // Just schedule a full paint invalidation of our object.
+    if (requiresPaintInvalidation)
+        box().setShouldDoFullPaintInvalidation(true);
 
     // Schedule the scroll DOM event.
     if (box().node())
@@ -691,10 +695,19 @@ static bool overflowDefinesAutomaticScrollbar(EOverflow overflow)
     return overflow == OAUTO || overflow == OOVERLAY;
 }
 
+// This function returns true if the given box requires overflow scrollbars (as
+// opposed to the 'viewport' scrollbars managed by the RenderLayerCompositor).
+// FIXME: we should use the same scrolling machinery for both the viewport and
+// overflow. Currently, we need to avoid producing scrollbars here if they'll be
+// handled externally in the RLC.
+static bool canHaveOverflowScrollbars(const RenderBox& box)
+{
+    return !box.isRenderView() && box.document().viewportDefiningElement() != box.node();
+}
+
 void RenderLayerScrollableArea::updateAfterStyleChange(const RenderStyle* oldStyle)
 {
-    // RenderView shouldn't provide scrollbars on its own.
-    if (box().isRenderView())
+    if (!canHaveOverflowScrollbars(box()))
         return;
 
     if (!m_scrollDimensionsDirty)
@@ -1438,7 +1451,7 @@ bool RenderLayerScrollableArea::usesCompositedScrolling() const
 static bool layerNeedsCompositedScrolling(const RenderLayer* layer)
 {
     return layer->scrollsOverflow()
-        && layer->compositor()->acceleratedCompositingForOverflowScrollEnabled()
+        && layer->compositor()->preferCompositingToLCDTextEnabled()
         && !layer->hasDescendantWithClipPath()
         && !layer->hasAncestorWithClipPath()
         && !layer->renderer()->style()->hasBorderRadius();

@@ -19,7 +19,7 @@ import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
-/*
+/**
  * Tests that we can scroll and fling a ContentView running inside ContentShell.
  */
 public class ContentViewScrollingTest extends ContentShellTestBase {
@@ -105,15 +105,15 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
             @Override
             public boolean isSatisfied() {
                 // Scrolling and flinging don't result in exact coordinates.
-                final int MIN_THRESHOLD = 5;
-                final int MAX_THRESHOLD = 100;
+                final int minThreshold = 5;
+                final int maxThreshold = 100;
 
                 boolean xCorrect = hugLeft ?
-                        getContentViewCore().getNativeScrollXForTest() < MIN_THRESHOLD :
-                        getContentViewCore().getNativeScrollXForTest() > MAX_THRESHOLD;
+                        getContentViewCore().getNativeScrollXForTest() < minThreshold :
+                        getContentViewCore().getNativeScrollXForTest() > maxThreshold;
                 boolean yCorrect = hugTop ?
-                        getContentViewCore().getNativeScrollYForTest() < MIN_THRESHOLD :
-                        getContentViewCore().getNativeScrollYForTest() > MAX_THRESHOLD;
+                        getContentViewCore().getNativeScrollYForTest() < minThreshold :
+                        getContentViewCore().getNativeScrollYForTest() > maxThreshold;
                 return xCorrect && yCorrect;
             }
         }));
@@ -152,24 +152,30 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"Main"})
     public void testFling() throws Throwable {
+        // Scaling the initial velocity by the device scale factor ensures that
+        // it's of sufficient magnitude for all displays densities.
+        float deviceScaleFactor =
+                getInstrumentation().getTargetContext().getResources().getDisplayMetrics().density;
+        int velocity = (int) (1000 * deviceScaleFactor);
+
         // Vertical fling to lower-left.
-        fling(0, -1000);
+        fling(0, -velocity);
         assertWaitForScroll(true, false);
 
         // Horizontal fling to lower-right.
-        fling(-1000, 0);
+        fling(-velocity, 0);
         assertWaitForScroll(false, false);
 
         // Vertical fling to upper-right.
-        fling(0, 1000);
+        fling(0, velocity);
         assertWaitForScroll(false, true);
 
         // Horizontal fling to top-left.
-        fling(1000, 0);
+        fling(velocity, 0);
         assertWaitForScroll(true, true);
 
         // Diagonal fling to bottom-right.
-        fling(-1000, -1000);
+        fling(-velocity, -velocity);
         assertWaitForScroll(false, false);
     }
 

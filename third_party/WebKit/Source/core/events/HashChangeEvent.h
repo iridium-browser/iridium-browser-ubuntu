@@ -26,15 +26,14 @@
 namespace blink {
 
 struct HashChangeEventInit : public EventInit {
-    HashChangeEventInit()
-    {
-    };
+    HashChangeEventInit() { }
 
     String oldURL;
     String newURL;
 };
 
 class HashChangeEvent FINAL : public Event {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HashChangeEvent> create()
     {
@@ -70,26 +69,17 @@ public:
     virtual void trace(Visitor* visitor) OVERRIDE { Event::trace(visitor); }
 
 private:
-    HashChangeEvent()
-    {
-        ScriptWrappable::init(this);
-    }
+    HashChangeEvent() { }
 
     HashChangeEvent(const String& oldURL, const String& newURL)
         : Event(EventTypeNames::hashchange, false, false)
         , m_oldURL(oldURL)
-        , m_newURL(newURL)
-    {
-        ScriptWrappable::init(this);
-    }
+        , m_newURL(newURL) { }
 
     HashChangeEvent(const AtomicString& type, const HashChangeEventInit& initializer)
         : Event(type, initializer)
         , m_oldURL(initializer.oldURL)
-        , m_newURL(initializer.newURL)
-    {
-        ScriptWrappable::init(this);
-    }
+        , m_newURL(initializer.newURL) { }
 
     String m_oldURL;
     String m_newURL;

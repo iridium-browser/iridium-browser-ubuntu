@@ -16,14 +16,14 @@
 
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.SystemResources;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.SystemResources.Scheduler;
 import com.google.ipc.invalidation.ticl.RecurringTask;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidSchedulerEvent;
 import com.google.ipc.invalidation.util.NamedRunnable;
+import com.google.ipc.invalidation.util.Preconditions;
 import com.google.ipc.invalidation.util.TypedUtil;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidSchedulerEvent;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
@@ -135,9 +135,10 @@ public final class AndroidInternalScheduler implements Scheduler {
    * REQUIRES: a recurring task with the name in the intent be present in {@link #registeredTasks}.
    */
   void handleSchedulerEvent(AndroidSchedulerEvent event) {
-    Runnable recurringTaskRunnable = Preconditions.checkNotNull(
-        TypedUtil.mapGet(registeredTasks, event.getEventName()),
-        "No task registered for %s", event.getEventName());
+    Runnable recurringTaskRunnable = TypedUtil.mapGet(registeredTasks, event.getEventName());
+    if (recurringTaskRunnable == null) {
+      throw new NullPointerException("No task registered for " + event.getEventName());
+    }
     if (ticlId != event.getTiclId()) {
       logger.warning("Ignoring event with wrong ticl id (not %s): %s", ticlId, event);
       return;
@@ -152,9 +153,17 @@ public final class AndroidInternalScheduler implements Scheduler {
    */
   void registerTask(String name, Runnable runnable) {
     Runnable previous = registeredTasks.put(name, runnable);
-    Preconditions.checkState(previous == null,
-        "Cannot overwrite task registered on %s, %s; tasks = %s",
-        name, this, registeredTasks.keySet());
+    if (previous != null) {
+      String message = new StringBuilder()
+          .append("Cannot overwrite task registered on ")
+          .append(name)
+          .append(", ")
+          .append(this)
+          .append("; tasks = ")
+          .append(registeredTasks.keySet())
+          .toString();
+      throw new IllegalStateException(message);
+    }
   }
 
   @Override

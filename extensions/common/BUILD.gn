@@ -8,6 +8,12 @@ import("//build/config/features.gni")
 source_set("common") {
   sources = [
     "api/messaging/message.h",
+    "api/bluetooth/bluetooth_manifest_data.cc",
+    "api/bluetooth/bluetooth_manifest_data.h",
+    "api/bluetooth/bluetooth_manifest_handler.cc",
+    "api/bluetooth/bluetooth_manifest_handler.h",
+    "api/bluetooth/bluetooth_manifest_permission.cc",
+    "api/bluetooth/bluetooth_manifest_permission.h",
     "api/sockets/sockets_manifest_data.cc",
     "api/sockets/sockets_manifest_data.h",
     "api/sockets/sockets_manifest_handler.cc",
@@ -78,8 +84,8 @@ source_set("common") {
     "features/simple_feature_filter.h",
     "file_util.cc",
     "file_util.h",
-    "id_util.cc",
-    "id_util.h",
+    "guest_view/guest_view_constants.cc",
+    "guest_view/guest_view_constants.h",
     "install_warning.cc",
     "install_warning.h",
     "manifest.cc",
@@ -104,8 +110,12 @@ source_set("common") {
     "manifest_handlers/incognito_info.h",
     "manifest_handlers/kiosk_mode_info.cc",
     "manifest_handlers/kiosk_mode_info.h",
+    "manifest_handlers/launcher_page_info.cc",
+    "manifest_handlers/launcher_page_info.h",
     "manifest_handlers/offline_enabled_info.cc",
     "manifest_handlers/offline_enabled_info.h",
+    "manifest_handlers/options_page_info.cc",
+    "manifest_handlers/options_page_info.h",
     "manifest_handlers/permissions_parser.cc",
     "manifest_handlers/permissions_parser.h",
     "manifest_handlers/requirements_info.cc",
@@ -167,6 +177,8 @@ source_set("common") {
     "stack_frame.h",
     "switches.cc",
     "switches.h",
+    "update_manifest.cc",
+    "update_manifest.h",
     "url_pattern.cc",
     "url_pattern.h",
     "url_pattern_set.cc",
@@ -184,14 +196,15 @@ source_set("common") {
     # api resources compiled into the chrome resource bundle.
     # http://crbug.com/162530
     "//chrome:resources",
+    "//components/crx_file",
     "//components/url_matcher",
     "//content/public/common",
     "//crypto",
-    "//extensions/common/api",
     "//extensions/strings",
     "//ipc",
     "//net",
     "//third_party/icu",
+    "//third_party/libxml",
     "//third_party/re2",
     "//ui/base",
     "//ui/gfx/geometry",
@@ -205,10 +218,18 @@ source_set("common") {
     ]
 
     deps += [
+      "//device/bluetooth",
       "//device/usb",
+      "//extensions/common/api",
     ]
   } else {
     sources -= [
+      "api/bluetooth/bluetooth_manifest_data.cc",
+      "api/bluetooth/bluetooth_manifest_data.h",
+      "api/bluetooth/bluetooth_manifest_handler.cc",
+      "api/bluetooth/bluetooth_manifest_handler.h",
+      "api/bluetooth/bluetooth_manifest_permission.cc",
+      "api/bluetooth/bluetooth_manifest_permission.h",
       "api/messaging/message.h",
       "api/sockets/sockets_manifest_data.cc",
       "api/sockets/sockets_manifest_data.h",
@@ -219,6 +240,8 @@ source_set("common") {
       "extension_api.cc",
       "manifest_handlers/externally_connectable.cc",
       "manifest_handlers/externally_connectable.h",
+      "manifest_handlers/options_page_info.cc",
+      "manifest_handlers/options_page_info.h",
     ]
   }
 

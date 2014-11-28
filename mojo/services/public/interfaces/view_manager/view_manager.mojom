@@ -5,6 +5,7 @@
 import "mojo/public/interfaces/application/service_provider.mojom"
 import "mojo/services/public/interfaces/geometry/geometry.mojom"
 import "mojo/services/public/interfaces/input_events/input_events.mojom"
+import "mojo/services/public/interfaces/surfaces/surface_id.mojom"
 import "mojo/services/public/interfaces/view_manager/view_manager_constants.mojom"
 
 module mojo {
@@ -13,7 +14,12 @@ struct ViewData {
   uint32 parent_id;
   uint32 view_id;
   mojo.Rect bounds;
-  // TODO(sky): add visible.
+  // True if this view is visible. The view may not be drawn on screen (see
+  // drawn for specifics).
+  bool visible;
+  // True if this view is drawn on screen. A view is drawn if attached to the
+  // root and all ancestors (including this view) are visible.
+  bool drawn;
 };
 
 enum ErrorCode {
@@ -34,7 +40,7 @@ interface ViewManagerInitService {
   // typically referred to as the "window manager", and will have a specific
   // definition of where within its View hierarchy to embed an unparented URL.
   // See ViewManagerService below for more details about |service_provider|.
-  Embed(string url, ServiceProvider service_provider) => (bool success);
+  Embed(string url, ServiceProvider? service_provider) => (bool success);
 };
 
 // Views are identified by a uint32. The upper 16 bits are the connection id,
@@ -100,19 +106,13 @@ interface ViewManagerService {
   // search (pre-order).
   GetViewTree(uint32 view_id) => (ViewData[] views);
 
-  // Shows the specified image (png encoded) in the specified view.
-  SetViewContents(uint32 view_id,
-                  handle<shared_buffer> buffer,
-                  uint32 buffer_size) => (bool success);
+  // Shows the surface in the specified view.
+  SetViewSurfaceId(uint32 view_id, SurfaceId surface_id) => (bool success);
 
   // Embeds the app for |url| in the specified view. More specifically this
   // creates a new connection to the specified url, expecting to get a
   // ViewManagerClient and configures it with the root view |view|. Fails
   // if |view| was not created by this connection.
-  //
-  // If a particular client invokes Embed() multiple times with the same url,
-  // the connection is reused. When this happens the ViewManagerClient is
-  // notified of the additional roots by way of OnEmbed().
   //
   // A view may only be a root of one connection at a time. Subsequent calls to
   // Embed() for the same view result in the view being removed from the
@@ -136,7 +136,7 @@ interface ViewManagerService {
   // any services it provided are not broken and continue to be valid.
   Embed(string url,
         uint32 view_id,
-        ServiceProvider service_provider) => (bool success);
+        ServiceProvider? service_provider) => (bool success);
 
   // TODO(sky): move these to a separate interface when FIFO works.
 
@@ -154,10 +154,12 @@ interface ViewManagerClient {
   OnEmbed(uint16 connection_id,
           string embedder_url,
           ViewData root,
-          ServiceProvider& service_provider);
+          ServiceProvider&? service_provider);
 
   // Invoked when a view's bounds have changed.
-  OnViewBoundsChanged(uint32 view, mojo.Rect old_bounds, mojo.Rect new_bounds);
+  OnViewBoundsChanged(uint32 view,
+                      mojo.Rect old_bounds,
+                      mojo.Rect new_bounds);
 
   // Invoked when a change is done to the hierarchy. A value of 0 is used to
   // identify a null view. For example, if the old_parent is NULL, 0 is
@@ -178,6 +180,21 @@ interface ViewManagerClient {
   // Invoked when a view is deleted.
   OnViewDeleted(uint32 view);
 
+  // Invoked when the visibility of the specified view changes.
+  OnViewVisibilityChanged(uint32 view, bool visible);
+
+  // Invoked when a change to the visibility of |view| or one if it's ancestors
+  // is done such that the drawn state changes. This is only invoked for the
+  // top most view of a particular connection. For example, if you have the
+  // hierarchy: A -> B1 -> B2 (B2 is a child of B1 and B1 a child of A), B1/B2
+  // are from connection 2 and A from connection 1 with all views visible and
+  // drawn and the visiblity of A changes to false, then connection 2 is told
+  // the drawn state of B1 has changed (to false), but is not told anything
+  // about B2 as it's drawn state can be calculated from that of B1.
+  //
+  // NOTE: This is not invoked if OnViewVisibilityChanged() is invoked.
+  OnViewDrawnStateChanged(uint32 view, bool drawn);
+
   // Invoked when an event is targeted at the specified view.
   OnViewInputEvent(uint32 view, mojo.Event event) => ();
 
@@ -188,7 +205,7 @@ interface ViewManagerClient {
   //            once support for derived FIFOs is landed.
 
   // Requests the window manager create a "top level" view embedding |url|.
-  Embed(string url, ServiceProvider& service_provider);
+  Embed(string url, ServiceProvider&? service_provider);
 
   // Requests the view manager dispatch the event.
   DispatchOnViewInputEvent(mojo.Event event);

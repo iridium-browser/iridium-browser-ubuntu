@@ -34,18 +34,17 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<ChannelSplitterNode> ChannelSplitterNode::create(AudioContext* context, float sampleRate, unsigned numberOfOutputs)
+ChannelSplitterNode* ChannelSplitterNode::create(AudioContext* context, float sampleRate, unsigned numberOfOutputs)
 {
     if (!numberOfOutputs || numberOfOutputs > AudioContext::maxNumberOfChannels())
-        return nullptr;
+        return 0;
 
-    return adoptRefWillBeNoop(new ChannelSplitterNode(context, sampleRate, numberOfOutputs));
+    return adoptRefCountedGarbageCollectedWillBeNoop(new ChannelSplitterNode(context, sampleRate, numberOfOutputs));
 }
 
 ChannelSplitterNode::ChannelSplitterNode(AudioContext* context, float sampleRate, unsigned numberOfOutputs)
     : AudioNode(context, sampleRate)
 {
-    ScriptWrappable::init(this);
     addInput();
 
     // Create a fixed number of outputs (able to handle the maximum number of channels fed to an input).

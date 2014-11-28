@@ -16,11 +16,14 @@
 #include "extensions/browser/api/test/test_api.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/test_util.h"
+#include "extensions/test/result_catcher.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notification_list.h"
 #include "ui/message_center/notifier_settings.h"
 
 using extensions::Extension;
+using extensions::ResultCatcher;
 
 namespace utils = extension_function_test_utils;
 
@@ -162,7 +165,8 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestPartialUpdate) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestGetPermissionLevel) {
-  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension(
+      extensions::test_util::CreateEmptyExtension());
 
   // Get permission level for the extension whose notifications are enabled.
   {

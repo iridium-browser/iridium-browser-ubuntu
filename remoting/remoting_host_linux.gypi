@@ -4,7 +4,7 @@
 
 {
   'conditions': [
-    ['OS=="linux" and branding=="Chrome" and enable_remoting_host==1', {
+    ['OS=="linux" and branding=="Chrome" and enable_remoting_host==1 and chromeos==0', {
       'variables': {
         'build_deb_script': 'host/installer/linux/build-deb.sh',
         'deb_filename': 'host/installer/<!(["<(build_deb_script)", "-p", "-s", "<(DEPTH)"])',
@@ -116,25 +116,6 @@
         #     }],  # 'linux_dump_symbols==1'
         #   ],  # end of 'conditions'
         # },  # end of target 'remoting_linux_symbols'
-        {
-          'target_name': 'remoting_start_host',
-          'type': 'executable',
-          'dependencies': [
-            'remoting_host_setup_base',
-          ],
-          'sources': [
-            'host/setup/host_starter.cc',
-            'host/setup/host_starter.h',
-            'host/setup/start_host.cc',
-          ],
-          'conditions': [
-            ['use_allocator!="none"', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        },  # end of target 'remoting_start_host'
       ],  # end of 'targets'
     }],  # 'OS=="linux"'
 

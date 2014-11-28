@@ -7,13 +7,14 @@
 
 #include <map>
 
+#include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "mojo/application_manager/application_loader.h"
 #include "mojo/public/cpp/system/core.h"
 #include "mojo/services/public/interfaces/network/network_service.mojom.h"
 #include "mojo/shell/dynamic_service_runner.h"
-#include "mojo/shell/keep_alive.h"
 #include "url/gurl.h"
 
 namespace mojo {
@@ -21,6 +22,7 @@ namespace shell {
 
 class Context;
 class DynamicServiceRunnerFactory;
+class DynamicServiceRunner;
 
 // An implementation of ApplicationLoader that retrieves a dynamic library
 // containing the implementation of the service and loads/runs it (via a
@@ -39,29 +41,25 @@ class DynamicApplicationLoader : public ApplicationLoader {
   virtual void Load(ApplicationManager* manager,
                     const GURL& url,
                     scoped_refptr<LoadCallbacks> callbacks) OVERRIDE;
-  virtual void OnServiceError(ApplicationManager* manager,
-                              const GURL& url) OVERRIDE;
+  virtual void OnApplicationError(ApplicationManager* manager,
+                                  const GURL& url) OVERRIDE;
 
  private:
-  typedef std::map<std::string, GURL> MimeTypeToURLMap;
+  class Loader;
+  class LocalLoader;
+  class NetworkLoader;
 
-  void LoadLocalService(const GURL& resolved_url,
-                        scoped_refptr<LoadCallbacks> callbacks);
-  void LoadNetworkService(const GURL& resolved_url,
-                          scoped_refptr<LoadCallbacks> callbacks);
-  void OnLoadNetworkServiceComplete(scoped_refptr<LoadCallbacks> callbacks,
-                                    URLResponsePtr url_response);
-  void RunLibrary(const base::FilePath& response_file,
-                  scoped_refptr<LoadCallbacks> callbacks,
-                  bool delete_file_after,
-                  bool response_path_exists);
+  typedef std::map<std::string, GURL> MimeTypeToURLMap;
+  typedef base::Callback<void(Loader*)> LoaderCompleteCallback;
+
+  void LoaderComplete(Loader* loader);
 
   Context* const context_;
   scoped_ptr<DynamicServiceRunnerFactory> runner_factory_;
   NetworkServicePtr network_service_;
-  URLLoaderPtr url_loader_;
   MimeTypeToURLMap mime_type_to_url_;
-  base::WeakPtrFactory<DynamicApplicationLoader> weak_ptr_factory_;
+  ScopedVector<Loader> loaders_;
+  LoaderCompleteCallback loader_complete_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(DynamicApplicationLoader);
 };

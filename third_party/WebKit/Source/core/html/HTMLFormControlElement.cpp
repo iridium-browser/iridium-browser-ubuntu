@@ -25,14 +25,15 @@
 #include "config.h"
 #include "core/html/HTMLFormControlElement.h"
 
+#include "core/dom/ElementTraversal.h"
 #include "core/events/Event.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLDataListElement.h"
 #include "core/html/HTMLFieldSetElement.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLLegendElement.h"
 #include "core/html/ValidityState.h"
-#include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/page/Page.h"
 #include "core/page/ValidationMessageClient.h"
@@ -170,7 +171,8 @@ void HTMLFormControlElement::parseAttribute(const QualifiedName& name, const Ato
 void HTMLFormControlElement::disabledAttributeChanged()
 {
     setNeedsWillValidateCheck();
-    didAffectSelector(AffectedSelectorDisabled | AffectedSelectorEnabled);
+    pseudoStateChanged(CSSSelector::PseudoDisabled);
+    pseudoStateChanged(CSSSelector::PseudoEnabled);
     if (renderer() && renderer()->style()->hasAppearance())
         RenderTheme::theme().stateChanged(renderer(), EnabledControlState);
     if (isDisabledFormControl() && treeScope().adjustedFocusedElement() == this) {
@@ -333,6 +335,11 @@ bool HTMLFormControlElement::shouldShowFocusRingOnMouseFocus() const
     return false;
 }
 
+bool HTMLFormControlElement::shouldHaveFocusAppearance() const
+{
+    return !m_wasFocusedByMouse || shouldShowFocusRingOnMouseFocus();
+}
+
 void HTMLFormControlElement::dispatchFocusEvent(Element* oldFocusedElement, FocusType type)
 {
     if (type != FocusTypePage)
@@ -340,23 +347,16 @@ void HTMLFormControlElement::dispatchFocusEvent(Element* oldFocusedElement, Focu
     HTMLElement::dispatchFocusEvent(oldFocusedElement, type);
 }
 
-bool HTMLFormControlElement::shouldHaveFocusAppearance() const
-{
-    ASSERT(focused());
-    return shouldShowFocusRingOnMouseFocus() || !m_wasFocusedByMouse;
-}
-
 void HTMLFormControlElement::willCallDefaultEventHandler(const Event& event)
 {
-    if (!event.isKeyboardEvent() || event.type() != EventTypeNames::keydown)
-        return;
     if (!m_wasFocusedByMouse)
+        return;
+    if (!event.isKeyboardEvent() || event.type() != EventTypeNames::keydown)
         return;
     m_wasFocusedByMouse = false;
     if (renderer())
-        renderer()->paintInvalidationForWholeRenderer();
+        renderer()->setShouldDoFullPaintInvalidation(true);
 }
-
 
 short HTMLFormControlElement::tabIndex() const
 {
@@ -553,4 +553,4 @@ void HTMLFormControlElement::setFocus(bool flag)
         dispatchFormControlChangeEvent();
 }
 
-} // namespace Webcore
+} // namespace blink

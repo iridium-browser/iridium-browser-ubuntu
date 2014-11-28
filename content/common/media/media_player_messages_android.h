@@ -153,9 +153,10 @@ IPC_MESSAGE_ROUTED3(MediaPlayerMsg_MediaVideoSizeChanged,
                     int /* height */)
 
 // The current play time has updated.
-IPC_MESSAGE_ROUTED2(MediaPlayerMsg_MediaTimeUpdate,
+IPC_MESSAGE_ROUTED3(MediaPlayerMsg_MediaTimeUpdate,
                     int /* player_id */,
-                    base::TimeDelta /* current_time */)
+                    base::TimeDelta /* current_timestamp */,
+                    base::TimeTicks /* current_time_ticks */)
 
 // The player has been released.
 IPC_MESSAGE_ROUTED1(MediaPlayerMsg_MediaPlayerReleased,
@@ -197,12 +198,14 @@ IPC_MESSAGE_ROUTED2(MediaPlayerMsg_ConnectedToRemoteDevice,
 IPC_MESSAGE_ROUTED1(MediaPlayerMsg_DisconnectedFromRemoteDevice,
                     int /* player_id */)
 
+// The availability of remote devices has changed
+IPC_MESSAGE_ROUTED2(MediaPlayerMsg_RemoteRouteAvailabilityChanged,
+                    int /* player_id */,
+                    bool /* routes_available */)
+
 // Instructs the video element to enter fullscreen.
 IPC_MESSAGE_ROUTED1(MediaPlayerMsg_RequestFullscreen,
                     int /*player_id */)
-
-// Pauses all video playback.
-IPC_MESSAGE_ROUTED0(MediaPlayerMsg_PauseVideo)
 
 // Messages for controlling the media playback in browser process ----------
 
@@ -246,6 +249,14 @@ IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_EnterFullscreen, int /* player_id */)
 
 // Requests the player to exit fullscreen.
 IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_ExitFullscreen, int /* player_id */)
+
+// Play the media on a remote device, if possible.
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_RequestRemotePlayback,
+                    int /* demuxer_client_id */)
+
+// Control media playing on a remote device.
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_RequestRemotePlaybackControl,
+                    int /* demuxer_client_id */)
 
 // Requests the player with |player_id| to use the CDM with |cdm_id|.
 IPC_MESSAGE_ROUTED2(MediaPlayerHostMsg_SetCdm,

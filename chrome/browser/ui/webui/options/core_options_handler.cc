@@ -16,10 +16,13 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
@@ -30,10 +33,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
-#include "grit/theme_resources.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -42,18 +42,6 @@ using base::UserMetricsAction;
 namespace options {
 
 namespace {
-
-// Only allow changes to the metrics reporting checkbox if we were succesfully
-// able to change the service.
-bool AllowMetricsReportingChange(const base::Value* to_value) {
-  bool enable;
-  if (!to_value->GetAsBoolean(&enable)) {
-    NOTREACHED();
-    return false;
-  }
-
-  return enable == ResolveMetricsReportingEnabled(enable);
-}
 
 // Whether "controlledBy" property of pref value sent to options web UI needs to
 // be set to "extension" when the preference is controlled by an extension.
@@ -73,6 +61,19 @@ bool CanSetExtensionControlledPrefValue(
 #endif
 }
 
+// Hack to re-use IDS_ABOUT, which is a menu item for the About page.
+// Since it's a menu item, it may include a "&" to indicate a hotkey.
+base::string16 GetAboutString() {
+  if (!switches::AboutInSettingsEnabled())
+    return base::string16();
+
+  base::string16 str = l10n_util::GetStringUTF16(IDS_ABOUT);
+  size_t start_pos = str.find(base::ASCIIToUTF16("&"));
+  if (start_pos != base::string16::npos)
+    str.erase(start_pos, 1);
+  return str;
+}
+
 }  // namespace
 
 CoreOptionsHandler::CoreOptionsHandler()
@@ -90,8 +91,12 @@ void CoreOptionsHandler::InitializeHandler() {
                  base::Unretained(this),
                  profile->GetPrefs()));
 
-  pref_change_filters_[prefs::kMetricsReportingEnabled] =
-      base::Bind(&AllowMetricsReportingChange);
+  pref_change_filters_[prefs::kBrowserGuestModeEnabled] =
+      base::Bind(&CoreOptionsHandler::IsUserUnsupervised,
+                 base::Unretained(this));
+  pref_change_filters_[prefs::kBrowserAddPersonEnabled] =
+      base::Bind(&CoreOptionsHandler::IsUserUnsupervised,
+                 base::Unretained(this));
 }
 
 void CoreOptionsHandler::InitializePage() {
@@ -153,6 +158,11 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
   localized_strings->SetString("searchPageHelpURL",
                                chrome::kSettingsSearchHelpURL);
+
+  // About
+  localized_strings->SetBoolean("showAbout",
+                                switches::AboutInSettingsEnabled());
+  localized_strings->SetString("aboutButton", GetAboutString());
 
   // Common
   localized_strings->SetString("ok",
@@ -655,6 +665,10 @@ void CoreOptionsHandler::UpdatePepperFlashSettingsEnabled() {
           plugin_status_pref_setter_.IsPepperFlashSettingsEnabled());
   web_ui()->CallJavascriptFunction(
       "OptionsPage.setPepperFlashSettingsEnabled", enabled);
+}
+
+bool CoreOptionsHandler::IsUserUnsupervised(const base::Value* to_value) {
+  return !Profile::FromWebUI(web_ui())->IsSupervised();
 }
 
 }  // namespace options

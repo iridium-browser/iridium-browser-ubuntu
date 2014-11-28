@@ -8,7 +8,7 @@ from telemetry.page import test_expectations
 #
 # Operating systems:
 #     win, xp, vista, win7, mac, leopard, snowleopard, lion, mountainlion,
-#     linux, chromeos, android
+#     mavericks, yosemite, linux, chromeos, android
 #
 # GPU vendors:
 #     amd, arm, broadcom, hisilicon, intel, imagination, nvidia, qualcomm,
@@ -37,13 +37,8 @@ class WebGLConformanceExpectations(test_expectations.TestExpectations):
         ['win'], bug=391957)
     self.Fail('conformance/glsl/bugs/conditional-discard-in-loop.html',
         ['win'], bug=402195)
-    self.Fail('conformance/rendering/negative-one-index.html',
-        ['win'], bug=396058)
-
-    # Win D3D9 failures (unfortunately can not target just this
-    # configuration with test expectations)
-    self.Fail('conformance/extensions/angle-instanced-arrays.html',
-        ['win'], bug=401713)
+    self.Fail('conformance/attribs/gl-bindAttribLocation-matrix.html',
+        ['win'], bug=415688)
 
     # Win7 / Intel failures
     self.Fail('conformance/rendering/gl-scissor-test.html',
@@ -56,10 +51,6 @@ class WebGLConformanceExpectations(test_expectations.TestExpectations):
         ['win7', 'intel'], bug=372511)
     self.Fail('conformance/glsl/misc/shader-with-array-of-structs-uniform.html',
         ['win7', 'intel', 'nvidia'], bug=373972)
-
-    # Mac failures
-    self.Fail('conformance/glsl/misc/shader-struct-scope.html',
-        ['mac'], bug=368910)
 
     # Mac / Intel failures
     # Radar 13499466
@@ -84,6 +75,12 @@ class WebGLConformanceExpectations(test_expectations.TestExpectations):
         ['mountainlion', ('intel', 0x116)], bug=314997)
     self.Fail('conformance/ogles/GL/operators/operators_009_to_016.html',
         ['mountainlion', ('intel', 0x116)], bug=322795)
+
+    # Mac 10.9 / Intel HD 3000 failures
+    self.Fail('conformance/ogles/GL/operators/operators_009_to_016.html',
+        ['mavericks', ('intel', 0x116)], bug=417415)
+    self.Fail('conformance/rendering/gl-scissor-test.html',
+        ['mavericks', ('intel', 0x116)], bug=417415)
 
     # Mac Retina failures
     self.Fail(
@@ -132,31 +129,6 @@ class WebGLConformanceExpectations(test_expectations.TestExpectations):
         ['lion', 'intel'], bug=393331)
     self.Fail('conformance/extensions/webgl-compressed-texture-size-limit.html',
         ['lion', 'intel'], bug=393331)
-
-    # Linux NVIDIA failures
-    self.Fail('conformance/glsl/constructors/glsl-construct-bvec2.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-bvec3.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-bvec4.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-ivec2.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-ivec3.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-ivec4.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-vec2.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-vec3.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail('conformance/glsl/constructors/glsl-construct-vec4.html',
-        ['linux', 'nvidia'], bug=391960)
-    self.Fail(
-        'conformance/glsl/constructors/' +
-        'glsl-construct-vec-mat-corner-cases.html',
-        ['linux', 'nvidia'], bug=391960)
-
 
     # Android failures
     # The following test is very slow and therefore times out on Android bot.

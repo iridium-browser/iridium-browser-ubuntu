@@ -1515,7 +1515,19 @@ static void test_conservativelyContains(skiatest::Reporter* reporter) {
                                                                                 SkIntToScalar(20),
                                                                                 SkIntToScalar(5))));
 
-    // same as above path and first test but with an extra moveTo.
+
+    // Test that multiple move commands do not cause asserts.
+
+    // At the time of writing, this would not modify cached convexity. This caused an assert while
+    // checking conservative containment again. http://skbug.com/1460
+    path.moveTo(SkIntToScalar(100), SkIntToScalar(100));
+#if 0
+    REPORTER_ASSERT(reporter, path.conservativelyContainsRect(SkRect::MakeXYWH(SkIntToScalar(50), 0,
+                                                                               SkIntToScalar(10),
+                                                                               SkIntToScalar(10))));
+#endif
+
+    // Same as above path and first test but with an extra moveTo.
     path.reset();
     path.moveTo(100, 100);
     path.moveTo(0, 0);
@@ -1525,6 +1537,21 @@ static void test_conservativelyContains(skiatest::Reporter* reporter) {
     REPORTER_ASSERT(reporter, path.conservativelyContainsRect(SkRect::MakeXYWH(SkIntToScalar(50), 0,
                                                                                SkIntToScalar(10),
                                                                                SkIntToScalar(10))));
+
+    // Test that multiple move commands do not cause asserts and that the function
+    // is not confused by the multiple moves.
+    path.reset();
+    path.moveTo(0, 0);
+    path.lineTo(SkIntToScalar(100), 0);
+    path.lineTo(0, SkIntToScalar(100));
+    path.moveTo(0, SkIntToScalar(200));
+    path.lineTo(SkIntToScalar(100), SkIntToScalar(200));
+    path.lineTo(0, SkIntToScalar(300));
+
+    REPORTER_ASSERT(reporter, !path.conservativelyContainsRect(
+                                                            SkRect::MakeXYWH(SkIntToScalar(50), 0,
+                                                                             SkIntToScalar(10),
+                                                                             SkIntToScalar(10))));
 
     path.reset();
     path.lineTo(100, 100);
@@ -3361,7 +3388,7 @@ public:
             REPORTER_ASSERT(reporter, 2*kRepeatCnt == pathRef->countPoints());
             REPORTER_ASSERT(reporter, kRepeatCnt == pathRef->countWeights());
             REPORTER_ASSERT(reporter, SkPath::kConic_SegmentMask == pathRef->getSegmentMasks());
-            REPORTER_ASSERT(reporter, NULL != weights);
+            REPORTER_ASSERT(reporter, weights);
             for (int i = 0; i < kRepeatCnt; ++i) {
                 REPORTER_ASSERT(reporter, SkPath::kConic_Verb == pathRef->atVerb(i));
             }
@@ -3403,9 +3430,9 @@ static void test_operatorEqual(skiatest::Reporter* reporter) {
 }
 
 static void compare_dump(skiatest::Reporter* reporter, const SkPath& path, bool force,
-        const char* str) {
+        bool dumpAsHex, const char* str) {
     SkDynamicMemoryWStream wStream;
-    path.dump(&wStream, force);
+    path.dump(&wStream, force, dumpAsHex);
     SkAutoDataUnref data(wStream.copyToData());
     REPORTER_ASSERT(reporter, data->size() == strlen(str));
     REPORTER_ASSERT(reporter, !memcmp(data->data(), str, strlen(str)));
@@ -3413,31 +3440,41 @@ static void compare_dump(skiatest::Reporter* reporter, const SkPath& path, bool 
 
 static void test_dump(skiatest::Reporter* reporter) {
     SkPath p;
-    compare_dump(reporter, p, false, "");
-    compare_dump(reporter, p, true, "");
+    compare_dump(reporter, p, false, false, "");
+    compare_dump(reporter, p, true, false, "");
     p.moveTo(1, 2);
     p.lineTo(3, 4);
-    compare_dump(reporter, p, false, "path.moveTo(1, 2);\n"
-                                     "path.lineTo(3, 4);\n");
-    compare_dump(reporter, p, true,  "path.moveTo(1, 2);\n"
-                                     "path.lineTo(3, 4);\n"
-                                     "path.lineTo(1, 2);\n"
-                                     "path.close();\n");
+    compare_dump(reporter, p, false, false, "path.moveTo(1, 2);\n"
+                                            "path.lineTo(3, 4);\n");
+    compare_dump(reporter, p, true, false,  "path.moveTo(1, 2);\n"
+                                            "path.lineTo(3, 4);\n"
+                                            "path.lineTo(1, 2);\n"
+                                            "path.close();\n");
     p.reset();
     p.moveTo(1, 2);
     p.quadTo(3, 4, 5, 6);
-    compare_dump(reporter, p, false, "path.moveTo(1, 2);\n"
-                                     "path.quadTo(3, 4, 5, 6);\n");
+    compare_dump(reporter, p, false, false, "path.moveTo(1, 2);\n"
+                                            "path.quadTo(3, 4, 5, 6);\n");
     p.reset();
     p.moveTo(1, 2);
     p.conicTo(3, 4, 5, 6, 0.5f);
-    compare_dump(reporter, p, false, "path.moveTo(1, 2);\n"
-                                     "path.conicTo(3, 4, 5, 6, 0.5f);\n");
+    compare_dump(reporter, p, false, false, "path.moveTo(1, 2);\n"
+                                            "path.conicTo(3, 4, 5, 6, 0.5f);\n");
     p.reset();
     p.moveTo(1, 2);
     p.cubicTo(3, 4, 5, 6, 7, 8);
-    compare_dump(reporter, p, false, "path.moveTo(1, 2);\n"
-                                     "path.cubicTo(3, 4, 5, 6, 7, 8);\n");
+    compare_dump(reporter, p, false, false, "path.moveTo(1, 2);\n"
+                                            "path.cubicTo(3, 4, 5, 6, 7, 8);\n");
+    p.reset();
+    p.moveTo(1, 2);
+    p.lineTo(3, 4);
+    compare_dump(reporter, p, false, true,  "path.moveTo(SkBits2Float(0x3f800000), SkBits2Float(0x40000000));\n"
+                                            "path.lineTo(SkBits2Float(0x40400000), SkBits2Float(0x40800000));\n");
+    p.reset();
+    p.moveTo(SkBits2Float(0x3f800000), SkBits2Float(0x40000000));
+    p.lineTo(SkBits2Float(0x40400000), SkBits2Float(0x40800000));
+    compare_dump(reporter, p, false, false, "path.moveTo(1, 2);\n"
+                                            "path.lineTo(3, 4);\n");
 }
 
 class PathTest_Private {

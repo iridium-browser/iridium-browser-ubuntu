@@ -5,15 +5,13 @@
 #ifndef UI_EVENTS_GESTURE_DETECTION_UI_MOTION_EVENT_H_
 #define UI_EVENTS_GESTURE_DETECTION_UI_MOTION_EVENT_H_
 
-#include "ui/events/gesture_detection/motion_event.h"
-
 #include <map>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "ui/events/event.h"
 #include "ui/events/events_export.h"
-#include "ui/events/gestures/gesture_sequence.h"
+#include "ui/events/gesture_detection/motion_event.h"
 
 namespace ui {
 
@@ -36,9 +34,12 @@ class EVENTS_EXPORT MotionEventAura : public MotionEvent {
   virtual float GetRawX(size_t pointer_index) const OVERRIDE;
   virtual float GetRawY(size_t pointer_index) const OVERRIDE;
   virtual float GetTouchMajor(size_t pointer_index) const OVERRIDE;
+  virtual float GetTouchMinor(size_t pointer_index) const OVERRIDE;
+  virtual float GetOrientation(size_t pointer_index) const OVERRIDE;
   virtual float GetPressure(size_t pointer_index) const OVERRIDE;
   virtual ToolType GetToolType(size_t pointer_index) const OVERRIDE;
   virtual int GetButtonState() const OVERRIDE;
+  virtual int GetFlags() const OVERRIDE;
   virtual base::TimeTicks GetEventTime() const OVERRIDE;
 
   virtual scoped_ptr<MotionEvent> Clone() const OVERRIDE;
@@ -63,7 +64,9 @@ class EVENTS_EXPORT MotionEventAura : public MotionEvent {
     int touch_id;
     float pressure;
     int source_device_id;
-    float major_radius;
+    float touch_major;
+    float touch_minor;
+    float orientation;
   };
 
   MotionEventAura(
@@ -71,7 +74,8 @@ class EVENTS_EXPORT MotionEventAura : public MotionEvent {
       const base::TimeTicks& last_touch_time,
       Action cached_action,
       int cached_action_index,
-      const PointData (&active_touches)[GestureSequence::kMaxGesturePoints]);
+      int flags,
+      const PointData (&active_touches)[MotionEvent::MAX_TOUCH_POINT_COUNT]);
 
   static PointData GetPointDataFromTouchEvent(const TouchEvent& touch);
   void AddTouch(const TouchEvent& touch);
@@ -85,10 +89,10 @@ class EVENTS_EXPORT MotionEventAura : public MotionEvent {
   // The index of the touch responsible for last ACTION_POINTER_DOWN or
   // ACTION_POINTER_UP. -1 if no such action has occurred.
   int cached_action_index_;
+  int flags_;
 
   // We want constant time indexing by pointer_index, and fast indexing by id.
-  // TODO(tdresser): figure out which constant to use here.
-  PointData active_touches_[GestureSequence::kMaxGesturePoints];
+  PointData active_touches_[MotionEvent::MAX_TOUCH_POINT_COUNT];
 
   DISALLOW_COPY_AND_ASSIGN(MotionEventAura);
 };

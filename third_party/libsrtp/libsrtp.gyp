@@ -56,9 +56,19 @@
           'CPU_CISC',
         ],
       }],
-      ['target_arch=="mipsel"', {
+      ['target_arch=="mipsel" or target_arch=="mips64el"', {
         'defines': [
           'CPU_RISC',
+        ],
+      }],
+      ['target_arch=="mipsel" or target_arch=="arm" or target_arch=="armv7" or target_arch=="ia32"', {
+        'defines': [
+          # Define FORCE_64BIT_ALIGN to avoid alignment-related-crashes like
+          # crbug/414919. Without this, aes_cbc_alloc will allocate an
+          # aes_cbc_ctx_t not 64-bit aligned and the v128_t members of
+          # aes_cbc_ctx_t will not be 64-bit aligned, which breaks the
+          # compiler optimizations that assume 64-bit alignment of v128_t.
+          'FORCE_64BIT_ALIGN',
         ],
       }],
     ],
@@ -98,7 +108,7 @@
             'CPU_CISC',
           ],
         }],
-        ['target_arch=="mipsel"', {
+        ['target_arch=="mipsel" or target_arch=="mips64el"', {
           'defines': [
             'CPU_RISC',
           ],

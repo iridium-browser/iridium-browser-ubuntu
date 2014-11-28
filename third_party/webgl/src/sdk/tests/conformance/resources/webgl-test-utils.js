@@ -1038,13 +1038,12 @@ var checkCanvasRectColor = function(gl, x, y, width, height, color, opt_errorRan
     var offset = i * 4;
     for (var j = 0; j < color.length; ++j) {
       if (Math.abs(buf[offset + j] - color[j]) > errorRange[j]) {
-        differentFn();
         var was = buf[offset + 0].toString();
         for (j = 1; j < color.length; ++j) {
           was += "," + buf[offset + j];
         }
-        logFn('at (' + (x + (i % width)) + ', ' + (y + Math.floor(i / width)) +
-              ') expected: ' + color + ' was ' + was);
+        differentFn('at (' + (x + (i % width)) + ', ' + (y + Math.floor(i / width)) +
+                    ') expected: ' + color + ' was ' + was);
         return;
       }
     }
@@ -1069,18 +1068,15 @@ var checkCanvasRectColor = function(gl, x, y, width, height, color, opt_errorRan
  *        color checking. 0 by default.
  */
 var checkCanvasRect = function(gl, x, y, width, height, color, opt_msg, opt_errorRange) {
-  var msg = opt_msg;
-  if (msg === undefined) {
-    msg = "should be " + color.toString();
-  }
   checkCanvasRectColor(
       gl, x, y, width, height, color, opt_errorRange,
       function() {
+        var msg = opt_msg;
+        if (msg === undefined)
+          msg = "should be " + color.toString();
         testPassed(msg);
       },
-      function() {
-        testFailed(msg);
-      },
+      testFailed,
       debug);
 };
 
@@ -1999,12 +1995,14 @@ var loadImagesAsync = function(urls, callback) {
   function countDown() {
     --count;
     if (count == 0) {
+      log("loadImagesAsync: all images loaded");
       callback(images);
     }
   }
   function imageLoaded(url) {
     return function(img) {
       images[url] = img;
+      log("loadImagesAsync: loaded " + url);
       countDown();
     }
   }
@@ -2043,15 +2041,61 @@ var getUrlArguments = function() {
 };
 
 /**
- * Makes an image from a canvas.
- * @param {!HTMLCanvas} canvas Canvas to make image from.
+ * Makes an image from a src.
+ * @param {string} src Image source URL.
+ * @param {function} onload Callback to call when the image has finised loading.
+ * @param {function} onerror Callback to call when an error occurs.
  * @return {!Image} The created image.
  */
-var makeImage = function(canvas) {
+var makeImage = function(src, onload, onerror) {
   var img = document.createElement('img');
-  img.src = canvas.toDataURL();
+  if (onload) {
+    img.onload = onload;
+  }
+  if (onerror) {
+    img.onerror = onerror;
+  } else {
+    img.onerror = function() {
+      log("WARNING: creating image failed; src: " + this.src);
+    };
+  }
+  if (src) {
+    img.src = src;
+  }
   return img;
+}
+
+/**
+ * Makes an image element from a canvas.
+ * @param {!HTMLCanvas} canvas Canvas to make image from.
+ * @param {function} onload Callback to call when the image has finised loading.
+ * @param {string} imageFormat Image format to be passed to toDataUrl().
+ * @return {!Image} The created image.
+ */
+var makeImageFromCanvas = function(canvas, onload, imageFormat) {
+  return makeImage(canvas.toDataURL(imageFormat), onload);
 };
+
+/**
+ * Makes a video element from a src.
+ * @param {string} src Video source URL.
+ * @param {function} onerror Callback to call when an error occurs.
+ * @return {!Video} The created video.
+ */
+var makeVideo = function(src, onerror) {
+  var vid = document.createElement('video');
+  if (onerror) {
+    vid.onerror = onerror;
+  } else {
+    vid.onerror = function() {
+      log("WARNING: creating video failed; src: " + this.src);
+    };
+  }
+  if (src) {
+    vid.src = src;
+  }
+  return vid;
+}
 
 /**
  * Inserts an image with a caption into 'element'.
@@ -2622,6 +2666,8 @@ return {
   log: log,
   loggingOff: loggingOff,
   makeImage: makeImage,
+  makeImageFromCanvas: makeImageFromCanvas,
+  makeVideo: makeVideo,
   error: error,
   shallowCopyObject: shallowCopyObject,
   setupColorQuad: setupColorQuad,

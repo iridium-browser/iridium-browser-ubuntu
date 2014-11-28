@@ -97,6 +97,13 @@ class TestBrowserAccessibilityDelegate
       OVERRIDE {
     return NULL;
   }
+  virtual BrowserAccessibilityManager* AccessibilityGetChildFrame(
+      int accessibility_node_id) OVERRIDE {
+    return NULL;
+  }
+  virtual BrowserAccessibility* AccessibilityGetParentFrame() OVERRIDE {
+    return NULL;
+  }
 
   bool got_fatal_error() const { return got_fatal_error_; }
   void reset_got_fatal_error() { got_fatal_error_ = false; }

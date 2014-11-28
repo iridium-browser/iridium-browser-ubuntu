@@ -55,6 +55,7 @@ UdpTransport::UdpTransport(
       client_connected_(false),
       next_dscp_value_(net::DSCP_NO_CHANGE),
       status_callback_(status_callback),
+      bytes_sent_(0),
       weak_factory_(this) {
   DCHECK(!IsEmpty(local_end_point) || !IsEmpty(remote_end_point));
 }
@@ -115,12 +116,12 @@ void UdpTransport::ReceiveNextPacket(int length_or_status) {
       next_packet_.reset(new Packet(kMaxPacketSize));
       recv_buf_ = new net::WrappedIOBuffer(
           reinterpret_cast<char*>(&next_packet_->front()));
-      length_or_status = udp_socket_->RecvFrom(
-          recv_buf_,
-          kMaxPacketSize,
-          &recv_addr_,
-          base::Bind(&UdpTransport::ReceiveNextPacket,
-                     weak_factory_.GetWeakPtr()));
+      length_or_status =
+          udp_socket_->RecvFrom(recv_buf_.get(),
+                                kMaxPacketSize,
+                                &recv_addr_,
+                                base::Bind(&UdpTransport::ReceiveNextPacket,
+                                           weak_factory_.GetWeakPtr()));
       if (length_or_status == net::ERR_IO_PENDING) {
         receive_pending_ = true;
         return;
@@ -160,6 +161,9 @@ void UdpTransport::ReceiveNextPacket(int length_or_status) {
 bool UdpTransport::SendPacket(PacketRef packet, const base::Closure& cb) {
   DCHECK(io_thread_proxy_->RunsTasksOnCurrentThread());
 
+  // Increase byte count no matter the packet was sent or dropped.
+  bytes_sent_ += packet->data.size();
+
   DCHECK(!send_pending_);
   if (send_pending_) {
     VLOG(1) << "Cannot send because of pending IO.";
@@ -192,11 +196,10 @@ bool UdpTransport::SendPacket(PacketRef packet, const base::Closure& cb) {
     // If we called Connect() before we must call Write() instead of
     // SendTo(). Otherwise on some platforms we might get
     // ERR_SOCKET_IS_CONNECTED.
-    result = udp_socket_->Write(buf,
-                                static_cast<int>(packet->data.size()),
-                                callback);
+    result = udp_socket_->Write(
+        buf.get(), static_cast<int>(packet->data.size()), callback);
   } else if (!IsEmpty(remote_addr_)) {
-    result = udp_socket_->SendTo(buf,
+    result = udp_socket_->SendTo(buf.get(),
                                  static_cast<int>(packet->data.size()),
                                  remote_addr_,
                                  callback);
@@ -212,6 +215,10 @@ bool UdpTransport::SendPacket(PacketRef packet, const base::Closure& cb) {
   }
   OnSent(buf, packet, base::Closure(), result);
   return true;
+}
+
+int64 UdpTransport::GetBytesSent() {
+  return bytes_sent_;
 }
 
 void UdpTransport::OnSent(const scoped_refptr<net::IOBuffer>& buf,

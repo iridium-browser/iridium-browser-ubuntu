@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_warning_dialog.h"
 
 #include "ash/shell.h"
-#include "grit/generated_resources.h"
+#include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/checkbox.h"
@@ -31,10 +31,10 @@ const int kTopInset = 10;
 // Dialog for multi-profiles teleport warning.
 class TeleportWarningView : public views::DialogDelegateView {
  public:
-  TeleportWarningView(base::Callback<void(bool)> on_accept);
+  explicit TeleportWarningView(const base::Callback<void(bool)>& on_accept);
   virtual ~TeleportWarningView();
 
-  static void ShowDialog(const base::Callback<void(bool)> on_accept);
+  static void ShowDialog(const base::Callback<void(bool)>& on_accept);
 
   // views::DialogDelegate overrides.
   virtual bool Accept() OVERRIDE;
@@ -58,7 +58,7 @@ class TeleportWarningView : public views::DialogDelegateView {
 // TeleportWarningView implementation.
 
 TeleportWarningView::TeleportWarningView(
-    const base::Callback<void(bool)> on_accept)
+    const base::Callback<void(bool)>& on_accept)
     : on_accept_(on_accept) {
 }
 
@@ -67,7 +67,7 @@ TeleportWarningView::~TeleportWarningView() {
 
 // static
 void TeleportWarningView::ShowDialog(
-    const base::Callback<void(bool)> on_accept) {
+    const base::Callback<void(bool)>& on_accept) {
   TeleportWarningView* dialog_view =
       new TeleportWarningView(on_accept);
   views::DialogDelegate::CreateDialogWidget(
@@ -156,7 +156,7 @@ void TeleportWarningView::InitDialog() {
 // Factory function.
 
 void ShowMultiprofilesWarningDialog(
-   const base::Callback<void(bool)> on_accept) {
+    const base::Callback<void(bool)>& on_accept) {
   TeleportWarningView::ShowDialog(on_accept);
 }
 

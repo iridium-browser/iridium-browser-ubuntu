@@ -22,5 +22,8 @@
 */
 
 shouldBeTrue("successfullyParsed");
-debug('<br /><span class="pass">TEST COMPLETE</span>');
+_addSpan('<br /><span class="pass">TEST COMPLETE</span>');
+if (_jsTestPreVerboseLogging) {
+    _logToConsole('TEST COMPLETE');
+}
 notifyFinishedToHarness()

@@ -31,8 +31,9 @@
 namespace blink {
 
 class ValidityState : public NoBaseWillBeGarbageCollectedFinalized<ValidityState>, public ScriptWrappable {
-    WTF_MAKE_NONCOPYABLE(ValidityState);
+    DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(ValidityState);
 public:
     static PassOwnPtrWillBeRawPtr<ValidityState> create(FormAssociatedElement* control)
     {
@@ -61,10 +62,8 @@ public:
     bool valid() const;
 
 private:
-    explicit ValidityState(FormAssociatedElement* control) : m_control(control)
-    {
-        ScriptWrappable::init(this);
-    }
+    explicit ValidityState(FormAssociatedElement* control)
+        : m_control(control) { }
 
     RawPtrWillBeMember<FormAssociatedElement> m_control;
 };

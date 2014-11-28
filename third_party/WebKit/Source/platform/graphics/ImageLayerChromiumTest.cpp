@@ -27,7 +27,6 @@
 
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/skia/NativeImageSkia.h"
-#include "public/platform/WebImageLayer.h"
 #include "wtf/PassOwnPtr.h"
 
 #include <gtest/gtest.h>
@@ -56,7 +55,7 @@ public:
         , m_size(size)
     {
         SkBitmap bitmap;
-        EXPECT_TRUE(bitmap.allocN32Pixels(size.width(), size.height(), isOpaque));
+        bitmap.allocN32Pixels(size.width(), size.height(), isOpaque);
         m_nativeImage = NativeImageSkia::create(bitmap);
     }
 
@@ -106,6 +105,27 @@ public:
 
     virtual WebLayer* contentsLayer() const { return GraphicsLayer::contentsLayer(); }
 };
+
+TEST(ImageLayerChromiumTest, imageLayerContentReset)
+{
+    MockGraphicsLayerClient client;
+    OwnPtr<GraphicsLayerForTesting> graphicsLayer = adoptPtr(new GraphicsLayerForTesting(&client));
+    ASSERT_TRUE(graphicsLayer.get());
+
+    ASSERT_FALSE(graphicsLayer->hasContentsLayer());
+    ASSERT_FALSE(graphicsLayer->contentsLayer());
+
+    RefPtr<Image> image = TestImage::create(IntSize(100, 100), false);
+    ASSERT_TRUE(image.get());
+
+    graphicsLayer->setContentsToImage(image.get());
+    ASSERT_TRUE(graphicsLayer->hasContentsLayer());
+    ASSERT_TRUE(graphicsLayer->contentsLayer());
+
+    graphicsLayer->setContentsToImage(0);
+    ASSERT_FALSE(graphicsLayer->hasContentsLayer());
+    ASSERT_FALSE(graphicsLayer->contentsLayer());
+}
 
 TEST(ImageLayerChromiumTest, opaqueImages)
 {

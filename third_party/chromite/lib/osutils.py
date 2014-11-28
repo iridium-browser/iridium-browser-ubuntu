@@ -4,6 +4,8 @@
 
 """Common file and os related utilities, including tempdir manipulation."""
 
+from __future__ import print_function
+
 import collections
 import contextlib
 import cStringIO
@@ -245,14 +247,6 @@ def Which(binary, path=None, mode=os.X_OK):
     if os.path.isfile(p) and os.access(p, mode):
       return p
   return None
-
-
-def FindDepotTools():
-  """Returns the location of depot_tools if it is in $PATH."""
-  gclient_dir = os.path.dirname(Which('gclient.py', mode=os.F_OK) or '')
-  gitcl_dir = os.path.dirname(Which('git_cl.py', mode=os.F_OK) or '')
-  if gclient_dir and gclient_dir == gitcl_dir:
-    return gclient_dir
 
 
 def FindMissingBinaries(needed_tools):
@@ -696,7 +690,8 @@ def ListBlockDevices(device_path=None, in_bytes=False):
     cmd.append(device_path)
 
   cmd += ['--output', ','.join(keys)]
-  output = cros_build_lib.RunCommand(cmd, capture_output=True).output.strip()
+  output = cros_build_lib.RunCommand(
+      cmd, debug_level=logging.DEBUG, capture_output=True).output.strip()
   devices = []
   for line in output.splitlines():
     d = {}
@@ -1026,3 +1021,35 @@ def IterateMountPoints(proc_file='/proc/mounts'):
       ]
       mtab = MountInfo(source, destination, filesystem, options)
       yield mtab
+
+
+def ResolveSymlink(file_name, root='/'):
+  """Resolve a symlink |file_name| relative to |root|.
+
+  For example:
+
+    ROOT-A/absolute_symlink --> /an/abs/path
+    ROOT-A/relative_symlink --> a/relative/path
+
+    absolute_symlink will be resolved to ROOT-A/an/abs/path
+    relative_symlink will be resolved to ROOT-A/a/relative/path
+
+  Args:
+    file_name: A path to the file.
+    root: A path to the root directory.
+
+  Returns:
+    |file_name| if |file_name| is not a symlink. Otherwise, the ultimate path
+    that |file_name| points to, with links resolved relative to |root|.
+  """
+  count = 0
+  while os.path.islink(file_name):
+    count += 1
+    if count > 128:
+      raise ValueError('Too many link levels for %s.' % file_name)
+    link = os.readlink(file_name)
+    if link.startswith('/'):
+      file_name = os.path.join(root, link[1:])
+    else:
+      file_name = os.path.join(os.path.dirname(file_name), link)
+  return file_name

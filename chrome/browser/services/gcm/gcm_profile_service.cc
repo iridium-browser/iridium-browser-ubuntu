@@ -16,6 +16,9 @@
 #include "components/gcm_driver/gcm_driver_android.h"
 #else
 #include "base/bind.h"
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/services/gcm/chromeos_gcm_connection_observer.h"
+#endif
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/services/gcm/gcm_account_tracker.h"
@@ -111,12 +114,16 @@ void GCMProfileService::IdentityObserver::OnActiveAccountLogin() {
 }
 
 void GCMProfileService::IdentityObserver::OnActiveAccountLogout() {
+  account_id_.clear();
+
   // Check is necessary to not crash browser_tests.
   if (gcm_account_tracker_)
     gcm_account_tracker_->Stop();
-  // TODO(fgorski): If we purge here, what should happen when we get
-  // OnActiveAccountLogin() right after that?
-  driver_->Purge();
+  // When sign-in enforcement is not dropped, OnSignedOut will also clear all
+  // the GCM data and a new GCM ID will be retrieved after the user signs in
+  // again. Otherwise, the user sign-out will not affect the existing GCM
+  // data.
+  driver_->OnSignedOut();
 }
 
 std::string GCMProfileService::IdentityObserver::SignedInUserName() const {
@@ -162,8 +169,14 @@ GCMProfileService::GCMProfileService(
 
   driver_ = CreateGCMDriverDesktop(
       gcm_client_factory.Pass(),
+      profile_->GetPrefs(),
       profile_->GetPath().Append(chrome::kGCMStoreDirname),
       profile_->GetRequestContext());
+
+#if defined(OS_CHROMEOS)
+  chromeos_connection_observer_.reset(new gcm::ChromeOSGCMConnectionObserver);
+  driver_->AddConnectionObserver(chromeos_connection_observer_.get());
+#endif
 
   identity_observer_.reset(new IdentityObserver(
       profile, static_cast<gcm::GCMDriverDesktop*>(driver_.get())));
@@ -200,8 +213,11 @@ void GCMProfileService::Shutdown() {
 #if !defined(OS_ANDROID)
   identity_observer_.reset();
 #endif  // !defined(OS_ANDROID)
-
   if (driver_) {
+#if defined(OS_CHROMEOS)
+    driver_->RemoveConnectionObserver(chromeos_connection_observer_.get());
+    chromeos_connection_observer_.reset();
+#endif
     driver_->Shutdown();
     driver_.reset();
   }

@@ -111,8 +111,6 @@
         'net/rtp/cast_message_builder.h',
         'net/rtp/frame_buffer.cc',
         'net/rtp/frame_buffer.h',
-        'net/rtp/frame_id_map.cc',
-        'net/rtp/frame_id_map.h',
         'net/rtp/framer.cc',
         'net/rtp/framer.h',
         'net/rtp/receiver_stats.cc',
@@ -122,6 +120,17 @@
         'net/rtp/rtp_receiver_defines.cc',
         'net/rtp/rtp_receiver_defines.h',
       ], # source
+      'conditions': [
+        # use a restricted subset of media and no software codecs on iOS
+        ['OS=="ios"', {
+          'dependencies': [ '<(DEPTH)/media/media.gyp:media_for_cast_ios' ],
+          'dependencies!': [
+            '<(DEPTH)/media/media.gyp:media',
+            '<(DEPTH)/third_party/opus/opus.gyp:opus',
+            '<(DEPTH)/third_party/libvpx/libvpx.gyp:libvpx',
+          ],
+        }], # OS=="ios"
+      ], # conditions
     },
     {
       # GN version: //media/cast:sender
@@ -152,10 +161,8 @@
         'sender/external_video_encoder.cc',
         'sender/fake_software_video_encoder.h',
         'sender/fake_software_video_encoder.cc',
-	'sender/frame_sender.cc',
+        'sender/frame_sender.cc',
         'sender/frame_sender.h',
-        'sender/rtp_timestamp_helper.cc',
-        'sender/rtp_timestamp_helper.h',
         'sender/software_video_encoder.h',
         'sender/video_encoder.h',
         'sender/video_encoder_impl.h',
@@ -165,6 +172,25 @@
         'sender/vp8_encoder.cc',
         'sender/vp8_encoder.h',
       ], # source
+      'conditions': [
+        # use a restricted subset of media and no software codecs on iOS
+        ['OS=="ios"', {
+          'dependencies': [ '<(DEPTH)/media/media.gyp:media_for_cast_ios' ],
+          'dependencies!': [
+            '<(DEPTH)/media/media.gyp:media',
+            '<(DEPTH)/third_party/opus/opus.gyp:opus',
+            '<(DEPTH)/third_party/libvpx/libvpx.gyp:libvpx',
+          ],
+          'sources!': [
+            'sender/external_video_encoder.h',
+            'sender/external_video_encoder.cc',
+            'sender/video_encoder_impl.h',
+            'sender/video_encoder_impl.cc',
+            'sender/vp8_encoder.cc',
+            'sender/vp8_encoder.h',
+          ],
+        }], # OS=="ios"
+      ], # conditions
     },
     {
       # GN version: //media/cast:net
@@ -188,14 +214,12 @@
         'net/pacing/paced_sender.cc',
         'net/pacing/paced_sender.h',
         'net/rtcp/receiver_rtcp_event_subscriber.cc',
+        'net/rtcp/rtcp_builder.cc',
+        'net/rtcp/rtcp_builder.h',
         'net/rtcp/rtcp_defines.cc',
         'net/rtcp/rtcp_defines.h',
         'net/rtcp/rtcp.h',
         'net/rtcp/rtcp.cc',
-        'net/rtcp/rtcp_receiver.cc',
-        'net/rtcp/rtcp_receiver.h',
-        'net/rtcp/rtcp_sender.cc',
-        'net/rtcp/rtcp_sender.h',
         'net/rtcp/rtcp_utility.cc',
         'net/rtcp/rtcp_utility.h',
         'net/rtp/packet_storage.cc',

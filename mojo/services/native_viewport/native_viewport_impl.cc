@@ -4,13 +4,18 @@
 
 #include "mojo/services/native_viewport/native_viewport_impl.h"
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/application/application_delegate.h"
+#include "mojo/public/cpp/application/application_impl.h"
 #include "mojo/public/cpp/application/interface_factory.h"
+#include "mojo/services/native_viewport/platform_viewport_headless.h"
+#include "mojo/services/native_viewport/viewport_surface.h"
 #include "mojo/services/public/cpp/geometry/geometry_type_converters.h"
 #include "mojo/services/public/cpp/input_events/input_events_type_converters.h"
+#include "mojo/services/public/cpp/surfaces/surfaces_type_converters.h"
 #include "ui/events/event.h"
 
 namespace mojo {
@@ -24,10 +29,15 @@ bool IsRateLimitedEventType(ui::Event* event) {
 
 }  // namespace
 
-NativeViewportImpl::NativeViewportImpl()
-      : widget_(gfx::kNullAcceleratedWidget),
-        waiting_for_event_ack_(false),
-        weak_factory_(this) {}
+NativeViewportImpl::NativeViewportImpl(ApplicationImpl* app, bool is_headless)
+    : is_headless_(is_headless),
+      widget_id_(0u),
+      waiting_for_event_ack_(false),
+      weak_factory_(this) {
+  app->ConnectToService("mojo:mojo_surfaces_service", &surfaces_service_);
+  // TODO(jamesr): Should be mojo_gpu_service
+  app->ConnectToService("mojo:mojo_native_viewport_service", &gpu_service_);
+}
 
 NativeViewportImpl::~NativeViewportImpl() {
   // Destroy the NativeViewport early on as it may call us back during
@@ -35,11 +45,14 @@ NativeViewportImpl::~NativeViewportImpl() {
   platform_viewport_.reset();
 }
 
-void NativeViewportImpl::Create(RectPtr bounds) {
-  platform_viewport_ = PlatformViewport::Create(this);
-  platform_viewport_->Init(bounds.To<gfx::Rect>());
-  client()->OnCreated();
-  OnBoundsChanged(bounds.To<gfx::Rect>());
+void NativeViewportImpl::Create(SizePtr bounds) {
+  if (is_headless_)
+    platform_viewport_ = PlatformViewportHeadless::Create(this);
+  else
+    platform_viewport_ = PlatformViewport::Create(this);
+  gfx::Rect rect = gfx::Rect(bounds.To<gfx::Size>());
+  platform_viewport_->Init(rect);
+  OnBoundsChanged(rect);
 }
 
 void NativeViewportImpl::Show() {
@@ -51,34 +64,47 @@ void NativeViewportImpl::Hide() {
 }
 
 void NativeViewportImpl::Close() {
-  command_buffer_.reset();
   DCHECK(platform_viewport_);
   platform_viewport_->Close();
 }
 
-void NativeViewportImpl::SetBounds(RectPtr bounds) {
-  platform_viewport_->SetBounds(bounds.To<gfx::Rect>());
+void NativeViewportImpl::SetBounds(SizePtr bounds) {
+  platform_viewport_->SetBounds(gfx::Rect(bounds.To<gfx::Size>()));
 }
 
-void NativeViewportImpl::CreateGLES2Context(
-    InterfaceRequest<CommandBuffer> command_buffer_request) {
-  if (command_buffer_ || command_buffer_request_.is_pending()) {
-    LOG(ERROR) << "Can't create multiple contexts on a NativeViewport";
-    return;
+void NativeViewportImpl::SubmittedFrame(SurfaceIdPtr child_surface_id) {
+  if (child_surface_id_.is_null()) {
+    // If this is the first indication that the client will use surfaces,
+    // initialize that system.
+    // TODO(jamesr): When everything is converted to surfaces initialize this
+    // eagerly.
+    viewport_surface_.reset(
+        new ViewportSurface(surfaces_service_.get(),
+                            gpu_service_.get(),
+                            bounds_.size(),
+                            child_surface_id.To<cc::SurfaceId>()));
+    if (widget_id_)
+      viewport_surface_->SetWidgetId(widget_id_);
   }
-  command_buffer_request_ = command_buffer_request.Pass();
-  CreateCommandBufferIfNeeded();
+  child_surface_id_ = child_surface_id.To<cc::SurfaceId>();
+  if (viewport_surface_)
+    viewport_surface_->SetChildId(child_surface_id_);
 }
 
 void NativeViewportImpl::OnBoundsChanged(const gfx::Rect& bounds) {
-  CreateCommandBufferIfNeeded();
-  client()->OnBoundsChanged(Rect::From(bounds));
+  bounds_ = bounds;
+  client()->OnBoundsChanged(Size::From(bounds.size()));
+  if (viewport_surface_)
+    viewport_surface_->SetSize(bounds.size());
 }
 
 void NativeViewportImpl::OnAcceleratedWidgetAvailable(
     gfx::AcceleratedWidget widget) {
-  widget_ = widget;
-  CreateCommandBufferIfNeeded();
+  widget_id_ = static_cast<uint64_t>(bit_cast<uintptr_t>(widget));
+  // TODO(jamesr): Remove once everything is converted to surfaces.
+  client()->OnCreated(widget_id_);
+  if (viewport_surface_)
+    viewport_surface_->SetWidgetId(widget_id_);
 }
 
 bool NativeViewportImpl::OnEvent(ui::Event* ui_event) {
@@ -100,38 +126,18 @@ bool NativeViewportImpl::OnEvent(ui::Event* ui_event) {
     return false;
 
   client()->OnEvent(
-      TypeConverter<EventPtr, ui::Event>::ConvertFrom(*ui_event),
-      base::Bind(&NativeViewportImpl::AckEvent,
-                 weak_factory_.GetWeakPtr()));
+      Event::From(*ui_event),
+      base::Bind(&NativeViewportImpl::AckEvent, weak_factory_.GetWeakPtr()));
   waiting_for_event_ack_ = true;
   return false;
 }
 
 void NativeViewportImpl::OnDestroyed() {
-  client()->OnDestroyed(base::Bind(&NativeViewportImpl::AckDestroyed,
-                                   base::Unretained(this)));
+  client()->OnDestroyed();
 }
 
 void NativeViewportImpl::AckEvent() {
   waiting_for_event_ack_ = false;
-}
-
-void NativeViewportImpl::CreateCommandBufferIfNeeded() {
-  if (!command_buffer_request_.is_pending())
-    return;
-  DCHECK(!command_buffer_.get());
-  if (widget_ == gfx::kNullAcceleratedWidget)
-    return;
-  gfx::Size size = platform_viewport_->GetSize();
-  if (size.IsEmpty())
-    return;
-  command_buffer_.reset(
-      new CommandBufferImpl(widget_, platform_viewport_->GetSize()));
-  WeakBindToRequest(command_buffer_.get(), &command_buffer_request_);
-}
-
-void NativeViewportImpl::AckDestroyed() {
-  command_buffer_.reset();
 }
 
 }  // namespace mojo

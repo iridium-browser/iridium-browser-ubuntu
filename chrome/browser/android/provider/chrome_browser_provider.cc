@@ -26,7 +26,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/android/android_history_types.h"
 #include "chrome/browser/history/android/sqlite_cursor.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
@@ -34,6 +33,7 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/history/core/android/android_history_types.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
@@ -1613,7 +1613,7 @@ void ChromeBrowserProvider::Observe(
     ScopedJavaLocalRef<jobject> obj = weak_java_provider_.get(env);
     if (obj.is_null())
       return;
-    Java_ChromeBrowserProvider_onBookmarkChanged(env, obj.obj());
+    Java_ChromeBrowserProvider_onHistoryChanged(env, obj.obj());
   } else if (type ==
       chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED) {
     JNIEnv* env = AttachCurrentThread();

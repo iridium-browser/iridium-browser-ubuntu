@@ -14,9 +14,9 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/generated_resources.h"
 
 namespace options {
 
@@ -106,9 +106,17 @@ void HandlerOptionsHandler::GetHandlersForProtocol(
     const std::string& protocol,
     base::DictionaryValue* handlers_value) {
   ProtocolHandlerRegistry* registry = GetProtocolHandlerRegistry();
+  // The items which are to be written into |handlers_value| are also described
+  // in chrome/browser/resources/options/handler_options.js in @typedef
+  // for Handlers. Please update them whenever you add or remove any keys here.
   handlers_value->SetString("protocol", protocol);
   handlers_value->SetInteger("default_handler",
       registry->GetHandlerIndex(protocol));
+  handlers_value->SetBoolean(
+      "is_default_handler_set_by_user",
+      registry->IsRegisteredByUser(registry->GetHandlerFor(protocol)));
+  handlers_value->SetBoolean("has_policy_recommendations",
+                             registry->HasPolicyRegisteredHandler(protocol));
 
   base::ListValue* handlers_list = new base::ListValue();
   GetHandlersAsListValue(registry->GetHandlersFor(protocol), handlers_list);

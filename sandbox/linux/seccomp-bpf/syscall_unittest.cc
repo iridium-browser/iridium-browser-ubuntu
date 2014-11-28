@@ -41,7 +41,7 @@ TEST(Syscall, WellKnownEntryPoint) {
 // Test that Syscall::Call(-1) is handled specially. Don't do this on ARM,
 // where syscall(-1) crashes with SIGILL. Not running the test is fine, as we
 // are still testing ARM code in the next set of tests.
-#if !defined(__arm__)
+#if !defined(__arm__) && !defined(__aarch64__)
   EXPECT_NE(Syscall::Call(-1), syscall(-1));
 #endif
 
@@ -61,6 +61,8 @@ TEST(Syscall, WellKnownEntryPoint) {
 #elif defined(__mips__)
   // Opcode for MIPS sycall is in the lower 16-bits
   EXPECT_EQ(0x0cu, (((uint32_t*)Syscall::Call(-1))[-1]) & 0x0000FFFF);
+#elif defined(__aarch64__)
+  EXPECT_EQ(0xD4000001u, ((uint32_t*)Syscall::Call(-1))[-1]);  // SVC 0
 #else
 #warning Incomplete test case; need port for target platform
 #endif
@@ -97,18 +99,26 @@ intptr_t CopySyscallArgsToAux(const struct arch_seccomp_data& args, void* aux) {
   return -ENOMEM;
 }
 
-ErrorCode CopyAllArgsOnUnamePolicy(SandboxBPF* sandbox,
-                                   int sysno,
-                                   std::vector<uint64_t>* aux) {
-  if (!SandboxBPF::IsValidSyscallNumber(sysno)) {
-    return ErrorCode(ENOSYS);
+class CopyAllArgsOnUnamePolicy : public SandboxBPFPolicy {
+ public:
+  explicit CopyAllArgsOnUnamePolicy(std::vector<uint64_t>* aux) : aux_(aux) {}
+  virtual ~CopyAllArgsOnUnamePolicy() {}
+
+  virtual ErrorCode EvaluateSyscall(SandboxBPF* sandbox,
+                                    int sysno) const OVERRIDE {
+    DCHECK(SandboxBPF::IsValidSyscallNumber(sysno));
+    if (sysno == __NR_uname) {
+      return sandbox->Trap(CopySyscallArgsToAux, aux_);
+    } else {
+      return ErrorCode(ErrorCode::ERR_ALLOWED);
+    }
   }
-  if (sysno == __NR_uname) {
-    return sandbox->Trap(CopySyscallArgsToAux, aux);
-  } else {
-    return ErrorCode(ErrorCode::ERR_ALLOWED);
-  }
-}
+
+ private:
+  std::vector<uint64_t>* aux_;
+
+  DISALLOW_COPY_AND_ASSIGN(CopyAllArgsOnUnamePolicy);
+};
 
 // We are testing Syscall::Call() by making use of a BPF filter that
 // allows us
@@ -153,7 +163,8 @@ BPF_TEST(Syscall,
 
 TEST(Syscall, ComplexSyscallSixArgs) {
   int fd;
-  ASSERT_LE(0, fd = Syscall::Call(__NR_open, "/dev/null", O_RDWR, 0L));
+  ASSERT_LE(0,
+            fd = Syscall::Call(__NR_openat, AT_FDCWD, "/dev/null", O_RDWR, 0L));
 
   // Use mmap() to allocate some read-only memory
   char* addr0;
@@ -186,7 +197,9 @@ TEST(Syscall, ComplexSyscallSixArgs) {
 
   // Check that the offset argument (i.e. the sixth argument) is processed
   // correctly.
-  ASSERT_GE(fd = Syscall::Call(__NR_open, "/proc/self/exe", O_RDONLY, 0L), 0);
+  ASSERT_GE(
+      fd = Syscall::Call(__NR_openat, AT_FDCWD, "/proc/self/exe", O_RDONLY, 0L),
+      0);
   char* addr2, *addr3;
   ASSERT_NE((char*)NULL,
             addr2 = reinterpret_cast<char*>(Syscall::Call(

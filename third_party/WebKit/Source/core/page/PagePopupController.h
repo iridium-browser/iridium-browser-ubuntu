@@ -41,6 +41,7 @@ namespace blink {
 class PagePopupClient;
 
 class PagePopupController FINAL : public RefCountedWillBeGarbageCollected<PagePopupController>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<PagePopupController> create(PagePopupClient*);
     void setValueAndClosePopup(int numValue, const String& stringValue);
@@ -49,6 +50,7 @@ public:
     String localizeNumberString(const String&);
     String formatMonth(int year, int zeroBaseMonth);
     String formatShortMonth(int year, int zeroBaseMonth);
+    String formatWeek(int year, int weekNumber, const String& localizedStartDate);
     void clearPagePopupClient();
     void histogramEnumeration(const String& name, int sample, int boundaryValue);
 
@@ -60,5 +62,6 @@ private:
     PagePopupClient* m_popupClient;
 };
 
-}
-#endif
+} // namespace blink
+
+#endif // PagePopupController_h

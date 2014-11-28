@@ -54,7 +54,6 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     self._browser_directory = browser_directory
     self._port = None
-    self._profile_dir = None
     self._tmp_minidump_dir = tempfile.mkdtemp()
     self._crash_service = None
 
@@ -69,7 +68,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         self._tmp_profile_dir = self._output_profile_path
       else:
         self._tmp_profile_dir = tempfile.mkdtemp()
-      profile_dir = self._profile_dir or self.browser_options.profile_dir
+      profile_dir = self.browser_options.profile_dir
       if profile_dir:
         if self._is_content_shell:
           logging.critical('Profiles cannot be used with content shell')
@@ -174,16 +173,6 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         args.append('--user-data-dir=%s' % self._tmp_profile_dir)
     return args
 
-  def SetProfileDirectory(self, profile_dir):
-    # Make sure _profile_dir hasn't already been set.
-    assert self._profile_dir is None
-
-    if self._is_content_shell:
-      logging.critical('Profile creation cannot be used with content shell')
-      sys.exit(1)
-
-    self._profile_dir = profile_dir
-
   def Start(self):
     assert not self._proc, 'Must call Close() before Start()'
 
@@ -269,31 +258,47 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       logging.warning('minidump_stackwalk binary not found.')
       return None
 
-    symbols = glob.glob(os.path.join(self._browser_directory, '*.breakpad*'))
-    if not symbols:
-      logging.warning('No breakpad symbols found.')
-      return None
-
     with open(minidump, 'rb') as infile:
       minidump += '.stripped'
       with open(minidump, 'wb') as outfile:
         outfile.write(''.join(infile.read().partition('MDMP')[1:]))
 
     symbols_path = os.path.join(self._tmp_minidump_dir, 'symbols')
-    for symbol in sorted(symbols, key=os.path.getmtime, reverse=True):
-      if not os.path.isfile(symbol):
-        continue
-      with open(symbol, 'r') as f:
-        fields = f.readline().split()
-        if not fields:
+
+    symbols = glob.glob(os.path.join(self._browser_directory, '*.breakpad*'))
+    if symbols:
+      for symbol in sorted(symbols, key=os.path.getmtime, reverse=True):
+        if not os.path.isfile(symbol):
           continue
-        sha = fields[3]
-        binary = ' '.join(fields[4:])
-      symbol_path = os.path.join(symbols_path, binary, sha)
-      if os.path.exists(symbol_path):
-        continue
-      os.makedirs(symbol_path)
-      shutil.copyfile(symbol, os.path.join(symbol_path, binary + '.sym'))
+        with open(symbol, 'r') as f:
+          fields = f.readline().split()
+          if not fields:
+            continue
+          sha = fields[3]
+          binary = ' '.join(fields[4:])
+        symbol_path = os.path.join(symbols_path, binary, sha)
+        if os.path.exists(symbol_path):
+          continue
+        os.makedirs(symbol_path)
+        shutil.copyfile(symbol, os.path.join(symbol_path, binary + '.sym'))
+    else:
+      logging.info('Dumping breakpad symbols')
+      generate_breakpad_symbols_path = os.path.join(
+          util.GetChromiumSrcDir(), "components", "breakpad",
+          "tools", "generate_breakpad_symbols.py")
+      cmd = [
+          sys.executable,
+          generate_breakpad_symbols_path,
+          '--binary=%s' % self._executable,
+          '--symbols-dir=%s' % symbols_path,
+          '--build-dir=%s' % self._browser_directory,
+          ]
+
+      try:
+        subprocess.check_output(cmd, stderr=open(os.devnull, 'w'))
+      except subprocess.CalledProcessError:
+        logging.warning('Failed to execute "%s"' % ' '.join(cmd))
+        return None
 
     return subprocess.check_output([stackwalk, minidump, symbols_path],
                                    stderr=open(os.devnull, 'w'))
@@ -329,13 +334,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     # Shutdown aggressively if the above failed or if the profile is temporary.
     if self.IsBrowserRunning():
       self._proc.kill()
-
-    try:
-      util.WaitFor(lambda: not self.IsBrowserRunning(), timeout=10)
-    except util.TimeoutException:
-      raise Exception('Could not shutdown the browser.')
-    finally:
-      self._proc = None
+    self._proc = None
 
     if self._crash_service:
       self._crash_service.kill()

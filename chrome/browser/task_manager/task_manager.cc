@@ -9,7 +9,6 @@
 #include "base/i18n/rtl.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/process/process_metrics.h"
-#include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -30,6 +29,7 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
@@ -40,13 +40,12 @@
 #include "content/public/browser/worker_service.h"
 #include "content/public/common/result_codes.h"
 #include "extensions/browser/extension_system.h"
-#include "grit/generated_resources.h"
-#include "grit/ui_resources.h"
 #include "third_party/icu/source/i18n/unicode/coll.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/resources/grit/ui_resources.h"
 
 #if defined(OS_MACOSX)
 #include "content/public/browser/browser_child_process_host.h"
@@ -197,8 +196,6 @@ TaskManagerModel::PerResourceValues::PerResourceValues()
       network_usage(0),
       is_process_id_valid(false),
       process_id(0),
-      is_goats_teleported_valid(false),
-      goats_teleported(0),
       is_webcore_stats_valid(false),
       is_sqlite_memory_bytes_valid(false),
       sqlite_memory_bytes(0),
@@ -241,7 +238,7 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       update_requests_(0),
       listen_requests_(0),
       update_state_(IDLE),
-      goat_salt_(base::RandUint64()) {
+      is_updating_byte_count_(false) {
   AddResourceProvider(
       new task_manager::BrowserProcessResourceProvider(task_manager));
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
@@ -252,10 +249,12 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::TabContentsInformation())));
+#if defined(ENABLE_FULL_PRINTING)
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::PrintingInformation())));
+#endif  // ENABLE_FULL_PRINTING
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
@@ -359,9 +358,6 @@ base::string16 TaskManagerModel::GetResourceById(int index, int col_id) const {
 
     case IDS_TASK_MANAGER_IDLE_WAKEUPS_COLUMN:
       return GetResourceIdleWakeupsPerSecond(index);
-
-    case IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN:
-      return GetResourceGoatsTeleported(index);
 
     case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
       return GetResourceWebCoreImageCacheSize(index);
@@ -524,11 +520,6 @@ base::string16 TaskManagerModel::GetResourceSqliteMemoryUsed(int index) const {
 base::string16 TaskManagerModel::GetResourceIdleWakeupsPerSecond(int index)
     const {
   return base::FormatNumber(GetIdleWakeupsPerSecond(GetResource(index)));
-}
-
-base::string16 TaskManagerModel::GetResourceGoatsTeleported(int index) const {
-  CHECK_LT(index, ResourceCount());
-  return base::FormatNumber(GetGoatsTeleported(index));
 }
 
 base::string16 TaskManagerModel::GetResourceV8MemoryAllocatedSize(
@@ -698,16 +689,6 @@ bool TaskManagerModel::GetV8MemoryUsed(int index, size_t* result) const {
 bool TaskManagerModel::CanActivate(int index) const {
   CHECK_LT(index, ResourceCount());
   return GetResourceWebContents(index) != NULL;
-}
-
-int TaskManagerModel::GetGoatsTeleported(int index) const {
-  PerResourceValues& values(GetPerResourceValues(index));
-  if (!values.is_goats_teleported_valid) {
-    values.is_goats_teleported_valid = true;
-    values.goats_teleported = goat_salt_ * (index + 1);
-    values.goats_teleported = (values.goats_teleported >> 16) & 255;
-  }
-  return values.goats_teleported;
 }
 
 bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
@@ -904,9 +885,6 @@ int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
           OrderUnavailableValue(value1_valid, value2_valid);
     }
 
-    case IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN:
-      return ValueCompare(GetGoatsTeleported(row1), GetGoatsTeleported(row2));
-
     case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN:
       return ValueCompareMember(
           this, &TaskManagerModel::GetV8Memory, row1, row2);
@@ -1055,6 +1033,10 @@ void TaskManagerModel::StartUpdating() {
     FOR_EACH_OBSERVER(TaskManagerModelObserver, observer_list_,
                       OnReadyPeriodicalUpdate());
   }
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&TaskManagerModel::SetUpdatingByteCount, this, true));
 }
 
 void TaskManagerModel::StopUpdating() {
@@ -1070,6 +1052,10 @@ void TaskManagerModel::StopUpdating() {
 
   // Notify resource providers that we are done updating.
   StopListening();
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&TaskManagerModel::SetUpdatingByteCount, this, false));
 }
 
 void TaskManagerModel::StartListening() {
@@ -1134,8 +1120,6 @@ void TaskManagerModel::ModelChanged() {
 }
 
 void TaskManagerModel::Refresh() {
-  goat_salt_ = base::RandUint64();
-
   per_resource_cache_.clear();
   per_process_cache_.clear();
 
@@ -1172,14 +1156,14 @@ void TaskManagerModel::Refresh() {
       values.is_cpu_usage_valid = true;
       values.cpu_usage = metrics_iter->second->GetCPUUsage();
     }
-#if defined(OS_MACOSX)
-    // TODO: Implement GetIdleWakeupsPerSecond() on other platforms,
+#if defined(OS_MACOSX) || defined(OS_LINUX)
+    // TODO(port): Implement GetIdleWakeupsPerSecond() on other platforms,
     // crbug.com/120488
     if (!values.is_idle_wakeups_valid) {
       values.is_idle_wakeups_valid = true;
       values.idle_wakeups = metrics_iter->second->GetIdleWakeupsPerSecond();
     }
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MACOSX) || defined(OS_LINUX)
   }
 
   // Send a request to refresh GPU memory consumption values
@@ -1244,6 +1228,8 @@ void TaskManagerModel::NotifyV8HeapStats(base::ProcessId renderer_id,
 void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
                                        int byte_count) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (!is_updating_byte_count_)
+    return;
 
   // Only net::URLRequestJob instances created by the ResourceDispatcherHost
   // have an associated ResourceRequestInfo and a render frame associated.
@@ -1393,6 +1379,11 @@ void TaskManagerModel::NotifyMultipleBytesRead() {
                  base::Owned(bytes_read_buffer)));
 }
 
+void TaskManagerModel::SetUpdatingByteCount(bool is_updating) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  is_updating_byte_count_ = is_updating;
+}
+
 int64 TaskManagerModel::GetNetworkUsage(Resource* resource) const {
   int64 net_usage = GetNetworkUsageForResource(resource);
   if (net_usage == 0 && !resource->SupportNetworkUsage())
@@ -1539,7 +1530,7 @@ void TaskManager::OpenAboutMemory(chrome::HostDesktopType desktop_type) {
   chrome::NavigateParams params(
       ProfileManager::GetLastUsedProfileAllowedByPolicy(),
       GURL(chrome::kChromeUIMemoryURL),
-      content::PAGE_TRANSITION_LINK);
+      ui::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   params.host_desktop_type = desktop_type;
   chrome::Navigate(&params);

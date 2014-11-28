@@ -66,10 +66,17 @@ tvcm.exportTo('tracing', function() {
    * @constructor
    */
   function Selection(opt_events) {
+    // sunburst_zoom_level is used by sunburst chart to remember
+    // zoom level across selection changes.
+    // TODO(gholap): get rid of this eventually when
+    //               selections support frames.
+    this.sunburst_zoom_level = undefined;
+
     this.bounds_dirty_ = true;
     this.bounds_ = new tvcm.Range();
     this.length_ = 0;
     this.guid_ = tvcm.GUID.allocate();
+    this.pushed_guids_ = {};
 
     if (opt_events) {
       for (var i = 0; i < opt_events.length; i++)
@@ -110,7 +117,16 @@ tvcm.exportTo('tracing', function() {
       this.bounds_dirty_ = true;
     },
 
+    // push pushes only unique events.
+    // If an event has been already pushed, do nothing.
     push: function(event) {
+      if (event.guid == undefined)
+        throw new Error('Event must have a GUID');
+
+      if (this.pushed_guids_[event.guid])
+        return event;
+
+      this.pushed_guids_[event.guid] = true;
       this[this.length_++] = event;
       this.bounds_dirty_ = true;
       return event;
@@ -135,11 +151,13 @@ tvcm.exportTo('tracing', function() {
       return selection;
     },
 
-    getEventsOrganizedByType: function() {
+    getEventsOrganizedByType: function(opt_pruneEmpty) {
       var events = {};
       EVENT_TYPES.forEach(function(eventType) {
         events[eventType.pluralName] = new Selection();
-      });
+        if (this.sunburst_zoom_level !== undefined)
+          events[eventType.pluralName].sunburst_zoom_level = this.sunburst_zoom_level;
+      }, this);
       for (var i = 0; i < this.length_; i++) {
         var event = this[i];
         EVENT_TYPES.forEach(function(eventType) {
@@ -147,18 +165,22 @@ tvcm.exportTo('tracing', function() {
             events[eventType.pluralName].push(event);
         });
       }
-      return events;
+      if (opt_pruneEmpty) {
+        var prunedEvents = {}
+        for (var eventType in events) {
+          if (events[eventType].length > 0)
+            prunedEvents[eventType] = events[eventType];
+        }
+        return prunedEvents;
+      } else {
+        return events;
+      }
     },
 
     enumEventsOfType: function(type, func) {
       for (var i = 0; i < this.length_; i++)
         if (this[i] instanceof type)
           func(this[i]);
-    },
-
-    map: function(fn) {
-      for (var i = 0; i < this.length_; i++)
-        fn(this[i]);
     },
 
     /**
@@ -200,7 +222,33 @@ tvcm.exportTo('tracing', function() {
       if (newSelection.length == 0)
         return undefined;
       return newSelection;
-    }
+    },
+
+    forEach: function(fn, opt_this) {
+      for (var i = 0; i < this.length; i++)
+        fn.call(opt_this, this[i], i)
+    },
+
+    map: function(fn, opt_this) {
+      var res = [];
+      for (var i = 0; i < this.length; i++)
+        res.push(fn.call(opt_this, this[i], i));
+      return res;
+    },
+
+    every: function(fn, opt_this) {
+      for (var i = 0; i < this.length; i++)
+        if (!fn.call(opt_this, this[i], i))
+          return false;
+      return true;
+    },
+
+    some: function(fn, opt_this) {
+      for (var i = 0; i < this.length; i++)
+        if (fn.call(opt_this, this[i], i))
+          return true;
+      return false;
+    },
   };
 
   return {

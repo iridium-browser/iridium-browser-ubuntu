@@ -6,12 +6,26 @@ cr.define('options', function() {
   /** @const */ var Page = cr.ui.pageManager.Page;
   /** @const */ var PageManager = cr.ui.pageManager.PageManager;
 
+  // Lookup table to generate the i18n strings.
+  /** @const */ var permissionsLookup = {
+    'location': 'location',
+    'notifications': 'notifications',
+    'media-stream': 'mediaStream',
+    'cookies': 'cookies',
+    'multiple-automatic-downloads': 'multipleAutomaticDownloads',
+    'images': 'images',
+    'plugins': 'plugins',
+    'popups': 'popups',
+    'javascript': 'javascript'
+  };
+
   //////////////////////////////////////////////////////////////////////////////
   // ContentSettings class:
 
   /**
    * Encapsulated handling of content settings page.
    * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function ContentSettings() {
     this.activeNavTab = null;
@@ -33,17 +47,18 @@ cr.define('options', function() {
           this.pageDiv.querySelectorAll('.exceptions-list-button');
       for (var i = 0; i < exceptionsButtons.length; i++) {
         exceptionsButtons[i].onclick = function(event) {
-          var page = ContentSettingsExceptionsArea.getInstance();
-
-          // Add on the proper hash for the content type, and store that in the
-          // history so back/forward and tab restore works.
           var hash = event.currentTarget.getAttribute('contentType');
-          var url = page.name + '#' + hash;
-          uber.pushState({pageName: page.name}, url);
+          PageManager.showPageByName('contentExceptions', true,
+                                     {hash: '#' + hash});
+        };
+      }
 
-          // Navigate after the local history has been replaced in order to have
-          // the correct hash loaded.
-          PageManager.showPageByName('contentExceptions', false);
+      var experimentalExceptionsButtons =
+          this.pageDiv.querySelectorAll('.website-settings-permission-button');
+      for (var i = 0; i < experimentalExceptionsButtons.length; i++) {
+        experimentalExceptionsButtons[i].onclick = function(event) {
+          var hash = event.currentTarget.getAttribute('contentType');
+          WebsiteSettingsManager.showWebsiteSettings(hash);
         };
       }
 
@@ -78,6 +93,20 @@ cr.define('options', function() {
           ContentSettings.setDefaultMicrophone_);
       $('media-select-camera').addEventListener('change',
           ContentSettings.setDefaultCamera_);
+
+      if (loadTimeData.getBoolean('websiteSettingsManagerEnabled')) {
+        var oldUI =
+            this.pageDiv.querySelectorAll('.replace-with-website-settings');
+        for (var i = 0; i < oldUI.length; i++) {
+          oldUI[i].hidden = true;
+        }
+
+        var newUI =
+            this.pageDiv.querySelectorAll('.experimental-website-settings');
+        for (var i = 0; i < newUI.length; i++) {
+          newUI[i].hidden = false;
+        }
+      }
     },
   };
 
@@ -88,12 +117,20 @@ cr.define('options', function() {
   };
 
   /**
-   * Sets the values for all the content settings radios.
+   * Sets the values for all the content settings radios and labels.
    * @param {Object} dict A mapping from radio groups to the checked value for
    *     that group.
    */
   ContentSettings.setContentFilterSettingsValue = function(dict) {
     for (var group in dict) {
+      var settingLabel = $(group + '-default-string');
+      if (settingLabel) {
+        var value = dict[group].value;
+        var valueId =
+            permissionsLookup[group] + value[0].toUpperCase() + value.slice(1);
+        settingLabel.textContent = loadTimeData.getString(valueId);
+      }
+
       var managedBy = dict[group].managedBy;
       var controlledBy = managedBy == 'policy' || managedBy == 'extension' ?
           managedBy : null;
@@ -126,14 +163,16 @@ cr.define('options', function() {
    * Updates the labels and indicators for the Media settings. Those require
    * special handling because they are backed by multiple prefs and can change
    * their scope based on the managed state of the backing prefs.
-   * @param {Object} mediaSettings A dictionary containing the following fields:
-   *     {String} askText The label for the ask radio button.
-   *     {String} blockText The label for the block radio button.
-   *     {Boolean} cameraDisabled Whether to disable the camera dropdown.
-   *     {Boolean} micDisabled Whether to disable the microphone dropdown.
-   *     {Boolean} showBubble Wether to show the managed icon and bubble for the
-   *         media label.
-   *     {String} bubbleText The text to use inside the bubble if it is shown.
+   * @param {{askText: string, blockText: string, cameraDisabled: boolean,
+   *          micDisabled: boolean, showBubble: boolean, bubbleText: string}}
+   *     mediaSettings A dictionary containing the following fields:
+   *     askText The label for the ask radio button.
+   *     blockText The label for the block radio button.
+   *     cameraDisabled Whether to disable the camera dropdown.
+   *     micDisabled Whether to disable the microphone dropdown.
+   *     showBubble Wether to show the managed icon and bubble for the media
+   *                label.
+   *     bubbleText The text to use inside the bubble if it is shown.
    */
   ContentSettings.updateMediaUI = function(mediaSettings) {
     $('media-stream-ask-label').innerHTML =
@@ -194,11 +233,15 @@ cr.define('options', function() {
   /**
    * @param {string} type The type of exceptions (e.g. "location") to get.
    * @param {string} mode The mode of the desired exceptions list (e.g. otr).
-   * @return {?ExceptionsList} The corresponding exceptions list or null.
+   * @return {?options.contentSettings.ExceptionsList} The corresponding
+   *     exceptions list or null.
    */
   ContentSettings.getExceptionsList = function(type, mode) {
-    return document.querySelector(
+    var exceptionsList = document.querySelector(
         'div[contentType=' + type + '] list[mode=' + mode + ']');
+    return !exceptionsList ? null :
+        assertInstanceof(exceptionsList,
+                         options.contentSettings.ExceptionsList);
   };
 
   /**
@@ -207,7 +250,7 @@ cr.define('options', function() {
    * @param {string} type The content type.
    * @param {string} mode The browser mode.
    * @param {string} pattern The pattern.
-   * @param {bool} valid Whether said pattern is valid in the context of
+   * @param {boolean} valid Whether said pattern is valid in the context of
    *     a content exception setting.
    */
   ContentSettings.patternValidityCheckComplete =
@@ -238,7 +281,7 @@ cr.define('options', function() {
 
   /**
    * Shows/hides the whole Web MIDI settings.
-   * @param {bool} show Wether to show the whole Web MIDI settings.
+   * @param {boolean} show Wether to show the whole Web MIDI settings.
    */
   ContentSettings.showExperimentalWebMIDISettings = function(show) {
     $('experimental-web-midi-settings').hidden = !show;
@@ -279,7 +322,7 @@ cr.define('options', function() {
 
   /**
    * Enables/disables the protected content exceptions button.
-   * @param {bool} enable Whether to enable the button.
+   * @param {boolean} enable Whether to enable the button.
    */
   ContentSettings.enableProtectedContentExceptions = function(enable) {
     var exceptionsButton = $('protected-content-exceptions');

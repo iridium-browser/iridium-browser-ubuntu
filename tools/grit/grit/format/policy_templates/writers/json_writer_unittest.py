@@ -86,6 +86,40 @@ class JsonWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '}')
     self.CompareOutputs(output, expected_output)
 
+  def testRecommendedOnlyPolicy(self):
+    # Tests a policy group with a single policy of type 'main'.
+    grd = self.PrepareTest(
+        '{'
+        '  "policy_definitions": ['
+        '    {'
+        '      "name": "MainPolicy",'
+        '      "type": "main",'
+        '      "caption": "Example Main Policy",'
+        '      "desc": "Example Main Policy",'
+        '      "features": {'
+        '        "can_be_recommended": True,'
+        '        "can_be_mandatory": False'
+        '      },'
+        '      "supported_on": ["chrome.linux:8-"],'
+        '      "example_value": True'
+        '    },'
+        '  ],'
+        '  "placeholders": [],'
+        '  "messages": {},'
+        '}')
+    output = self.GetOutput(grd, 'fr', {'_google_chrome' : '1'}, 'json', 'en')
+    expected_output = (
+        TEMPLATE_HEADER +
+        '  // Note: this policy is supported only in recommended mode.\n' +
+        '  // The JSON file should be placed in' +
+        ' /etc/opt/chrome/policies/recommended.\n' +
+        '  // Example Main Policy\n' +
+        HEADER_DELIMETER +
+        '  // Example Main Policy\n\n'
+        '  //"MainPolicy": true\n\n'
+        '}')
+    self.CompareOutputs(output, expected_output)
+
   def testStringPolicy(self):
     # Tests a policy group with a single policy of type 'string'.
     grd = self.PrepareTest(

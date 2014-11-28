@@ -38,6 +38,7 @@
 #include "core/fetch/FetchUtils.h"
 #include "core/fetch/Resource.h"
 #include "core/fetch/ResourceFetcher.h"
+#include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -139,7 +140,9 @@ void DocumentThreadableLoader::makeCrossOriginAccessRequest(const ResourceReques
         m_actualRequest = crossOriginRequest.release();
         m_actualOptions = crossOriginOptions.release();
 
-        if (CrossOriginPreflightResultCache::shared().canSkipPreflight(securityOrigin()->toString(), m_actualRequest->url(), effectiveAllowCredentials(), m_actualRequest->httpMethod(), m_actualRequest->httpHeaderFields())) {
+        bool shouldForcePreflight = InspectorInstrumentation::shouldForceCORSPreflight(&m_document);
+        bool canSkipPreflight = CrossOriginPreflightResultCache::shared().canSkipPreflight(securityOrigin()->toString(), m_actualRequest->url(), effectiveAllowCredentials(), m_actualRequest->httpMethod(), m_actualRequest->httpHeaderFields());
+        if (canSkipPreflight && !shouldForcePreflight) {
             loadActualRequest();
         } else {
             ResourceRequest preflightRequest = createAccessControlPreflightRequest(*m_actualRequest, securityOrigin());
@@ -314,17 +317,8 @@ void DocumentThreadableLoader::responseReceived(Resource* resource, const Resour
     handleResponse(resource->identifier(), response);
 }
 
-void DocumentThreadableLoader::handlePreflightResponse(unsigned long identifier, const ResourceResponse& response)
+void DocumentThreadableLoader::handlePreflightResponse(const ResourceResponse& response)
 {
-    // Notifying the inspector here is necessary because a call to handlePreflightFailure() might synchronously
-    // cause the underlying ResourceLoader to be cancelled before it tells the inspector about the response.
-    // In that case, if we don't tell the inspector about the response now, the resource type in the inspector
-    // will default to "other" instead of something more descriptive.
-    DocumentLoader* loader = m_document.frame()->loader().documentLoader();
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceReceiveResponse", "data", InspectorReceiveResponseEvent::data(identifier, m_document.frame(), response));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
-    InspectorInstrumentation::didReceiveResourceResponse(m_document.frame(), identifier, loader, response, resource() ? resource()->loader() : 0);
-
     String accessControlErrorDescription;
 
     if (!passesAccessControlCheck(response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
@@ -348,12 +342,23 @@ void DocumentThreadableLoader::handlePreflightResponse(unsigned long identifier,
     CrossOriginPreflightResultCache::shared().appendEntry(securityOrigin()->toString(), m_actualRequest->url(), preflightResult.release());
 }
 
+void DocumentThreadableLoader::notifyResponseReceived(unsigned long identifier, const ResourceResponse& response)
+{
+    DocumentLoader* loader = m_document.frame()->loader().documentLoader();
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceReceiveResponse", "data", InspectorReceiveResponseEvent::data(identifier, m_document.frame(), response));
+    LocalFrame* frame = m_document.frame();
+    InspectorInstrumentation::didReceiveResourceResponse(frame, identifier, loader, response, resource() ? resource()->loader() : 0);
+    // It is essential that inspector gets resource response BEFORE console.
+    frame->console().reportResourceResponseReceived(loader, identifier, response);
+}
+
 void DocumentThreadableLoader::handleResponse(unsigned long identifier, const ResourceResponse& response)
 {
     ASSERT(m_client);
 
     if (m_actualRequest) {
-        handlePreflightResponse(identifier, response);
+        notifyResponseReceived(identifier, response);
+        handlePreflightResponse(response);
         return;
     }
 
@@ -361,11 +366,13 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
     bool isCrossOriginResponse = false;
     if (response.wasFetchedViaServiceWorker()) {
         if (!isAllowedByPolicy(response.url())) {
+            notifyResponseReceived(identifier, response);
             m_client->didFailRedirectCheck();
             return;
         }
         isCrossOriginResponse = !securityOrigin()->canRequest(response.url());
         if (m_options.crossOriginRequestPolicy == DenyCrossOriginRequests && isCrossOriginResponse) {
+            notifyResponseReceived(identifier, response);
             m_client->didFail(ResourceError(errorDomainBlinkInternal, 0, response.url().string(), "Cross origin requests are not supported."));
             return;
         }
@@ -380,6 +387,7 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
     if (isCrossOriginResponse && m_options.crossOriginRequestPolicy == UseAccessControl) {
         String accessControlErrorDescription;
         if (!passesAccessControlCheck(response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
+            notifyResponseReceived(identifier, response);
             m_client->didFailAccessControlCheck(ResourceError(errorDomainBlinkInternal, 0, response.url().string(), accessControlErrorDescription));
             return;
         }
@@ -478,10 +486,8 @@ void DocumentThreadableLoader::loadRequest(const ResourceRequest& request, Resou
         resourceLoaderOptions.allowCredentials = DoNotAllowStoredCredentials;
     resourceLoaderOptions.securityOrigin = m_securityOrigin;
     if (m_async) {
-        if (m_actualRequest) {
-            resourceLoaderOptions.sniffContent = DoNotSniffContent;
+        if (m_actualRequest)
             resourceLoaderOptions.dataBufferingPolicy = BufferData;
-        }
 
         if (m_options.timeoutMilliseconds > 0)
             m_timeoutTimer.startOneShot(m_options.timeoutMilliseconds / 1000.0, FROM_HERE);

@@ -7,6 +7,8 @@
 # Add new suites here before upgrading them to the stable list below.
 EXPERIMENTAL_TEST_SUITES = [
     'content_gl_tests',
+    'heap_profiler_unittests',
+    'devtools_bridge_tests',
 ]
 
 # Do not modify this list without approval of an android owner.
@@ -39,21 +41,4 @@ STABLE_TEST_SUITES = [
 ASAN_EXCLUDED_TEST_SUITES = [
     'breakpad_unittests',
     'sandbox_linux_unittests'
-]
-
-WEBRTC_CHROMIUM_TEST_SUITES = [
-    'content_browsertests',
-]
-
-WEBRTC_NATIVE_TEST_SUITES = [
-    'audio_decoder_unittests',
-    'common_audio_unittests',
-    'common_video_unittests',
-    'modules_tests',
-    'modules_unittests',
-    'system_wrappers_unittests',
-    'test_support_unittests',
-    'tools_unittests',
-    'video_engine_core_unittests',
-    'voice_engine_unittests',
 ]

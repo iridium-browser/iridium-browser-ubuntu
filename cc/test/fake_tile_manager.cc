@@ -7,6 +7,7 @@
 #include <deque>
 
 #include "base/lazy_instance.h"
+#include "cc/resources/raster_buffer.h"
 #include "cc/resources/rasterizer.h"
 
 namespace cc {
@@ -48,10 +49,12 @@ class FakeRasterizerImpl : public Rasterizer, public RasterizerTaskClient {
   }
 
   // Overridden from RasterizerTaskClient:
-  virtual SkCanvas* AcquireCanvasForRaster(RasterTask* task) OVERRIDE {
-    return NULL;
+  virtual scoped_ptr<RasterBuffer> AcquireBufferForRaster(
+      const Resource* resource) OVERRIDE {
+    return scoped_ptr<RasterBuffer>();
   }
-  virtual void ReleaseCanvasForRaster(RasterTask* task) OVERRIDE {}
+  virtual void ReleaseBufferForRaster(
+      scoped_ptr<RasterBuffer> buffer) OVERRIDE {}
 
  private:
   RasterTask::Vector completed_tasks_;
@@ -92,10 +95,6 @@ bool FakeTileManager::HasBeenAssignedMemory(Tile* tile) {
   return std::find(tiles_for_raster.begin(),
                    tiles_for_raster.end(),
                    tile) != tiles_for_raster.end();
-}
-
-void FakeTileManager::DidFinishRunningTasksForTesting() {
-  DidFinishRunningTasks();
 }
 
 void FakeTileManager::Release(Tile* tile) {

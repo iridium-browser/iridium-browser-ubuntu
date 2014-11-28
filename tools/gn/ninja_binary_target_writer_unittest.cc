@@ -6,140 +6,175 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "tools/gn/ninja_binary_target_writer.h"
+#include "tools/gn/target.h"
 #include "tools/gn/test_with_scope.h"
 
 TEST(NinjaBinaryTargetWriter, SourceSet) {
   TestWithScope setup;
+  Err err;
+
   setup.build_settings()->SetBuildDir(SourceDir("//out/Debug/"));
   setup.settings()->set_target_os(Settings::WIN);
 
   Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
   target.set_output_type(Target::SOURCE_SET);
+  target.visibility().SetPublic();
   target.sources().push_back(SourceFile("//foo/input1.cc"));
   target.sources().push_back(SourceFile("//foo/input2.cc"));
   // Also test object files, which should be just passed through to the
   // dependents to link.
   target.sources().push_back(SourceFile("//foo/input3.o"));
   target.sources().push_back(SourceFile("//foo/input4.obj"));
-  target.OnResolved();
+  target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(target.OnResolved(&err));
 
   // Source set itself.
   {
     std::ostringstream out;
-    NinjaBinaryTargetWriter writer(&target, setup.toolchain(), out);
+    NinjaBinaryTargetWriter writer(&target, out);
     writer.Run();
 
-    const char expected_win[] =
+    const char expected[] =
         "defines =\n"
-        "includes =\n"
+        "include_dirs =\n"
         "cflags =\n"
         "cflags_c =\n"
         "cflags_cc =\n"
         "cflags_objc =\n"
         "cflags_objcc =\n"
-        "target_name = bar\n"
+        "root_out_dir = .\n"
         "target_out_dir = obj/foo\n"
-        "root_out_dir = \n"
+        "target_output_name = bar\n"
         "\n"
-        "build obj/foo/bar.input1.obj: cxx ../../foo/input1.cc\n"
-        "build obj/foo/bar.input2.obj: cxx ../../foo/input2.cc\n"
+        "build obj/foo/bar.input1.o: cxx ../../foo/input1.cc\n"
+        "build obj/foo/bar.input2.o: cxx ../../foo/input2.cc\n"
         "\n"
-        "build obj/foo/bar.stamp: stamp obj/foo/bar.input1.obj "
-            "obj/foo/bar.input2.obj ../../foo/input3.o ../../foo/input4.obj\n";
+        "build obj/foo/bar.stamp: stamp obj/foo/bar.input1.o "
+            "obj/foo/bar.input2.o ../../foo/input3.o ../../foo/input4.obj\n";
     std::string out_str = out.str();
-#if defined(OS_WIN)
-    std::replace(out_str.begin(), out_str.end(), '\\', '/');
-#endif
-    EXPECT_EQ(expected_win, out_str);
+    EXPECT_EQ(expected, out_str);
   }
 
   // A shared library that depends on the source set.
   Target shlib_target(setup.settings(), Label(SourceDir("//foo/"), "shlib"));
   shlib_target.set_output_type(Target::SHARED_LIBRARY);
-  shlib_target.deps().push_back(LabelTargetPair(&target));
-  shlib_target.OnResolved();
+  shlib_target.public_deps().push_back(LabelTargetPair(&target));
+  shlib_target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(shlib_target.OnResolved(&err));
 
   {
     std::ostringstream out;
-    NinjaBinaryTargetWriter writer(&shlib_target, setup.toolchain(), out);
+    NinjaBinaryTargetWriter writer(&shlib_target, out);
     writer.Run();
 
-    const char expected_win[] =
+    const char expected[] =
         "defines =\n"
-        "includes =\n"
+        "include_dirs =\n"
         "cflags =\n"
         "cflags_c =\n"
         "cflags_cc =\n"
         "cflags_objc =\n"
         "cflags_objcc =\n"
-        "target_name = shlib\n"
+        "root_out_dir = .\n"
         "target_out_dir = obj/foo\n"
-        "root_out_dir = \n"
+        "target_output_name = libshlib\n"
         "\n"
         "\n"
-        "manifests = obj/foo/shlib.intermediate.manifest\n"
-        "ldflags = /MANIFEST /ManifestFile:obj/foo/shlib.intermediate."
-            "manifest\n"
-        "libs =\n"
         // Ordering of the obj files here should come out in the order
         // specified, with the target's first, followed by the source set's, in
         // order.
-        "build shlib.dll shlib.dll.lib: solink obj/foo/bar.input1.obj "
-            "obj/foo/bar.input2.obj ../../foo/input3.o "
-            "../../foo/input4.obj\n"
-        "  soname = shlib.dll\n"
-        "  lib = shlib.dll\n"
-        "  dll = shlib.dll\n"
-        "  implibflag = /IMPLIB:shlib.dll.lib\n\n";
+        "build ./libshlib.so: solink obj/foo/bar.input1.o "
+            "obj/foo/bar.input2.o ../../foo/input3.o ../../foo/input4.obj\n"
+        "  ldflags =\n"
+        "  libs =\n"
+        "  output_extension = .so\n";
     std::string out_str = out.str();
-#if defined(OS_WIN)
-    std::replace(out_str.begin(), out_str.end(), '\\', '/');
-#endif
-    EXPECT_EQ(expected_win, out_str);
+    EXPECT_EQ(expected, out_str);
   }
 
   // A static library that depends on the source set (should not link it).
   Target stlib_target(setup.settings(), Label(SourceDir("//foo/"), "stlib"));
   stlib_target.set_output_type(Target::STATIC_LIBRARY);
-  stlib_target.deps().push_back(LabelTargetPair(&target));
-  stlib_target.OnResolved();
+  stlib_target.public_deps().push_back(LabelTargetPair(&target));
+  stlib_target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(stlib_target.OnResolved(&err));
 
   {
     std::ostringstream out;
-    NinjaBinaryTargetWriter writer(&stlib_target, setup.toolchain(), out);
+    NinjaBinaryTargetWriter writer(&stlib_target, out);
     writer.Run();
 
-    const char expected_win[] =
+    const char expected[] =
         "defines =\n"
-        "includes =\n"
+        "include_dirs =\n"
         "cflags =\n"
         "cflags_c =\n"
         "cflags_cc =\n"
         "cflags_objc =\n"
         "cflags_objcc =\n"
-        "target_name = stlib\n"
+        "root_out_dir = .\n"
         "target_out_dir = obj/foo\n"
-        "root_out_dir = \n"
+        "target_output_name = libstlib\n"
         "\n"
         "\n"
-        "manifests = obj/foo/stlib.intermediate.manifest\n"
-        "ldflags = /MANIFEST /ManifestFile:obj/foo/stlib.intermediate.manifest\n"
-        "libs =\n"
-        // There are no sources so there are no params to alink.
-        "build obj/foo/stlib.lib: alink\n\n";
+        // There are no sources so there are no params to alink. (In practice
+        // this will probably fail in the archive tool.)
+        "build obj/foo/libstlib.a: alink\n"
+        "  ldflags =\n"
+        "  libs =\n"
+        "  output_extension = \n";
     std::string out_str = out.str();
-#if defined(OS_WIN)
-    std::replace(out_str.begin(), out_str.end(), '\\', '/');
-#endif
-    EXPECT_EQ(expected_win, out_str);
+    EXPECT_EQ(expected, out_str);
   }
 
+  // Make the static library 'complete', which means it should be linked.
+  stlib_target.set_complete_static_lib(true);
+  {
+    std::ostringstream out;
+    NinjaBinaryTargetWriter writer(&stlib_target, out);
+    writer.Run();
+
+    const char expected[] =
+        "defines =\n"
+        "include_dirs =\n"
+        "cflags =\n"
+        "cflags_c =\n"
+        "cflags_cc =\n"
+        "cflags_objc =\n"
+        "cflags_objcc =\n"
+        "root_out_dir = .\n"
+        "target_out_dir = obj/foo\n"
+        "target_output_name = libstlib\n"
+        "\n"
+        "\n"
+        // Ordering of the obj files here should come out in the order
+        // specified, with the target's first, followed by the source set's, in
+        // order.
+        "build obj/foo/libstlib.a: alink obj/foo/bar.input1.o "
+            "obj/foo/bar.input2.o ../../foo/input3.o ../../foo/input4.obj\n"
+        "  ldflags =\n"
+        "  libs =\n"
+        "  output_extension = \n";
+    std::string out_str = out.str();
+    EXPECT_EQ(expected, out_str);
+  }
 }
 
-TEST(NinjaBinaryTargetWriter, ProductExtension) {
+// This tests that output extension overrides apply, and input dependencies
+// are applied.
+TEST(NinjaBinaryTargetWriter, ProductExtensionAndInputDeps) {
   TestWithScope setup;
+  Err err;
+
   setup.build_settings()->SetBuildDir(SourceDir("//out/Debug/"));
   setup.settings()->set_target_os(Settings::LINUX);
+
+  // An action for our library to depend on.
+  Target action(setup.settings(), Label(SourceDir("//foo/"), "action"));
+  action.set_output_type(Target::ACTION_FOREACH);
+  action.visibility().SetPublic();
+  action.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(action.OnResolved(&err));
 
   // A shared library w/ the product_extension set to a custom value.
   Target target(setup.settings(), Label(SourceDir("//foo/"), "shlib"));
@@ -147,44 +182,49 @@ TEST(NinjaBinaryTargetWriter, ProductExtension) {
   target.set_output_extension(std::string("so.6"));
   target.sources().push_back(SourceFile("//foo/input1.cc"));
   target.sources().push_back(SourceFile("//foo/input2.cc"));
-  target.OnResolved();
+  target.public_deps().push_back(LabelTargetPair(&action));
+  target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(target.OnResolved(&err));
 
   std::ostringstream out;
-  NinjaBinaryTargetWriter writer(&target, setup.toolchain(), out);
+  NinjaBinaryTargetWriter writer(&target, out);
   writer.Run();
 
   const char expected[] =
       "defines =\n"
-      "includes =\n"
+      "include_dirs =\n"
       "cflags =\n"
       "cflags_c =\n"
       "cflags_cc =\n"
       "cflags_objc =\n"
       "cflags_objcc =\n"
-      "target_name = shlib\n"
+      "root_out_dir = .\n"
       "target_out_dir = obj/foo\n"
-      "root_out_dir = \n"
+      "target_output_name = libshlib\n"
       "\n"
-      "build obj/foo/shlib.input1.o: cxx ../../foo/input1.cc\n"
-      "build obj/foo/shlib.input2.o: cxx ../../foo/input2.cc\n"
+      "build obj/foo/shlib.inputdeps.stamp: stamp obj/foo/action.stamp\n"
+      "build obj/foo/libshlib.input1.o: cxx ../../foo/input1.cc"
+        " || obj/foo/shlib.inputdeps.stamp\n"
+      "build obj/foo/libshlib.input2.o: cxx ../../foo/input2.cc"
+        " || obj/foo/shlib.inputdeps.stamp\n"
       "\n"
-      "ldflags =\n"
-      "libs =\n"
-      "build libshlib.so.6: solink obj/foo/shlib.input1.o "
-          "obj/foo/shlib.input2.o\n"
-      "  soname = libshlib.so.6\n"
-      "  lib = libshlib.so.6\n"
-      "\n";
+      "build ./libshlib.so.6: solink obj/foo/libshlib.input1.o "
+      // The order-only dependency here is stricly unnecessary since the
+      // sources list this as an order-only dep. See discussion in the code
+      // that writes this.
+          "obj/foo/libshlib.input2.o || obj/foo/action.stamp\n"
+      "  ldflags =\n"
+      "  libs =\n"
+      "  output_extension = .so.6\n";
 
   std::string out_str = out.str();
-#if defined(OS_WIN)
-  std::replace(out_str.begin(), out_str.end(), '\\', '/');
-#endif
   EXPECT_EQ(expected, out_str);
 }
 
 TEST(NinjaBinaryTargetWriter, EmptyProductExtension) {
   TestWithScope setup;
+  Err err;
+
   setup.build_settings()->SetBuildDir(SourceDir("//out/Debug/"));
   setup.settings()->set_target_os(Settings::LINUX);
 
@@ -196,36 +236,34 @@ TEST(NinjaBinaryTargetWriter, EmptyProductExtension) {
   target.sources().push_back(SourceFile("//foo/input1.cc"));
   target.sources().push_back(SourceFile("//foo/input2.cc"));
 
+  target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(target.OnResolved(&err));
+
   std::ostringstream out;
-  NinjaBinaryTargetWriter writer(&target, setup.toolchain(), out);
+  NinjaBinaryTargetWriter writer(&target, out);
   writer.Run();
 
   const char expected[] =
       "defines =\n"
-      "includes =\n"
+      "include_dirs =\n"
       "cflags =\n"
       "cflags_c =\n"
       "cflags_cc =\n"
       "cflags_objc =\n"
       "cflags_objcc =\n"
-      "target_name = shlib\n"
+      "root_out_dir = .\n"
       "target_out_dir = obj/foo\n"
-      "root_out_dir = \n"
+      "target_output_name = libshlib\n"
       "\n"
-      "build obj/foo/shlib.input1.o: cxx ../../foo/input1.cc\n"
-      "build obj/foo/shlib.input2.o: cxx ../../foo/input2.cc\n"
+      "build obj/foo/libshlib.input1.o: cxx ../../foo/input1.cc\n"
+      "build obj/foo/libshlib.input2.o: cxx ../../foo/input2.cc\n"
       "\n"
-      "ldflags =\n"
-      "libs =\n"
-      "build libshlib.so: solink obj/foo/shlib.input1.o "
-          "obj/foo/shlib.input2.o\n"
-      "  soname = libshlib.so\n"
-      "  lib = libshlib.so\n"
-      "\n";
+      "build ./libshlib.so: solink obj/foo/libshlib.input1.o "
+          "obj/foo/libshlib.input2.o\n"
+      "  ldflags =\n"
+      "  libs =\n"
+      "  output_extension = .so\n";
 
   std::string out_str = out.str();
-#if defined(OS_WIN)
-  std::replace(out_str.begin(), out_str.end(), '\\', '/');
-#endif
   EXPECT_EQ(expected, out_str);
 }

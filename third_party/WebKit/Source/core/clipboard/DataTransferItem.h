@@ -48,13 +48,14 @@ class ExecutionContext;
 
 class DataTransferItem FINAL : public RefCountedWillBeGarbageCollected<DataTransferItem>, public ScriptWrappable {
     DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(DataTransferItem);
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<DataTransferItem> create(PassRefPtrWillBeRawPtr<DataTransfer>, PassRefPtrWillBeRawPtr<DataObjectItem>);
 
     String kind() const;
     String type() const;
 
-    void getAsString(ExecutionContext*, PassOwnPtr<StringCallback>) const;
+    void getAsString(ExecutionContext*, StringCallback*) const;
     PassRefPtrWillBeRawPtr<Blob> getAsFile() const;
 
     DataTransfer* dataTransfer() { return m_dataTransfer.get(); }

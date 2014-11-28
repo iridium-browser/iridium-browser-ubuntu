@@ -1,0 +1,65 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<script>
+function CTStepFailure(step, reason, resultsByBuilder) {
+  this.key = step + '::' + reason;
+  this.step = step;
+  // FIXME: Rename this to reason.
+  this.testName = reason;
+  // Maps a builder_name (e.g. "Mac ASan Tests (1)")
+  // to the details of the failure on that builder.
+  this.resultNodesByBuilder = resultsByBuilder;
+}
+
+CTStepFailure.prototype.flakinessDashboardURL = function() {
+  var testType = this.step;
+
+  // FIXME: Remove this once the flakiness dashboard stops having webkit_tests
+  // masquerade as layout-tests.
+  if (testType == 'webkit_tests')
+      testType = 'layout-tests';
+
+  return 'http://test-results.appspot.com/dashboards/flakiness_dashboard.html#' +
+    Object.toQueryString({
+      tests: this.testName,
+      testType: testType,
+    });
+}
+
+CTStepFailure.prototype.embeddedFlakinessDashboardURL = function() {
+  return this.flakinessDashboardURL() + '&showChrome=false';
+}
+
+CTStepFailure.prototype.reasonGroupName = function() {
+  if (!this.testName)
+    return undefined;
+  if (this.step == 'webkit_tests')
+    return this.testName.substr(0, this.testName.lastIndexOf('/'));
+  return this.testName.substr(0, this.testName.lastIndexOf('.'));
+};
+
+CTStepFailure.prototype.keys = function() {
+  return Object.values(this.resultNodesByBuilder).map('key');
+};
+
+CTStepFailure.prototype.annotations = function() {
+  var annotations = [];
+  Object.values(this.resultNodesByBuilder, function(result) {
+    annotations.push(result.annotation ? result.annotation : {});
+  });
+  return annotations;
+};
+
+// FIXME: This should just be provided as part of the alerts feed.
+CTStepFailure.createKey = function(alert) {
+  function normalize(str) {
+    str = str == null ? '' : String(str);
+    return str.replace(/:/g, '_');
+  }
+  return [alert.master_url, alert.builder_name, alert.failing_build, alert.step_name, alert.reason].map(normalize).join('::');
+}
+</script>

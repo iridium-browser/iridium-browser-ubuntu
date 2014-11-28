@@ -118,6 +118,7 @@ DOMWrapperWorld::~DOMWrapperWorld()
 
 void DOMWrapperWorld::dispose()
 {
+    m_domObjectHolders.clear();
     m_domDataStore.clear();
 }
 
@@ -172,6 +173,26 @@ void DOMWrapperWorld::setIsolatedWorldSecurityOrigin(int worldId, PassRefPtr<Sec
         isolatedWorldSecurityOrigins().remove(worldId);
 }
 
+typedef HashMap<int, String > IsolatedWorldHumanReadableNameMap;
+static IsolatedWorldHumanReadableNameMap& isolatedWorldHumanReadableNames()
+{
+    ASSERT(isMainThread());
+    DEFINE_STATIC_LOCAL(IsolatedWorldHumanReadableNameMap, map, ());
+    return map;
+}
+
+String DOMWrapperWorld::isolatedWorldHumanReadableName()
+{
+    ASSERT(this->isIsolatedWorld());
+    return isolatedWorldHumanReadableNames().get(worldId());
+}
+
+void DOMWrapperWorld::setIsolatedWorldHumanReadableName(int worldId, const String& humanReadableName)
+{
+    ASSERT(isIsolatedWorldId(worldId));
+    isolatedWorldHumanReadableNames().set(worldId, humanReadableName);
+}
+
 typedef HashMap<int, bool> IsolatedWorldContentSecurityPolicyMap;
 static IsolatedWorldContentSecurityPolicyMap& isolatedWorldContentSecurityPolicies()
 {
@@ -195,6 +216,26 @@ void DOMWrapperWorld::setIsolatedWorldContentSecurityPolicy(int worldId, const S
         isolatedWorldContentSecurityPolicies().set(worldId, true);
     else
         isolatedWorldContentSecurityPolicies().remove(worldId);
+}
+
+void DOMWrapperWorld::registerDOMObjectHolderInternal(PassOwnPtr<DOMObjectHolderBase> holderBase)
+{
+    ASSERT(!m_domObjectHolders.contains(holderBase.get()));
+    holderBase->setWorld(this);
+    holderBase->setWeak(&DOMWrapperWorld::weakCallbackForDOMObjectHolder);
+    m_domObjectHolders.add(holderBase);
+}
+
+void DOMWrapperWorld::unregisterDOMObjectHolder(DOMObjectHolderBase* holderBase)
+{
+    ASSERT(m_domObjectHolders.contains(holderBase));
+    m_domObjectHolders.remove(holderBase);
+}
+
+void DOMWrapperWorld::weakCallbackForDOMObjectHolder(const v8::WeakCallbackData<v8::Value, DOMObjectHolderBase>& data)
+{
+    DOMObjectHolderBase* holderBase = data.GetParameter();
+    holderBase->world()->unregisterDOMObjectHolder(holderBase);
 }
 
 } // namespace blink

@@ -40,14 +40,6 @@ float GetProgress(double t, size_t i, const Keyframes& keyframes) {
   return progress;
 }
 
-scoped_ptr<TimingFunction> CloneTimingFunction(
-    const TimingFunction* timing_function) {
-  DCHECK(timing_function);
-  scoped_ptr<AnimationCurve> curve(timing_function->Clone());
-  return scoped_ptr<TimingFunction>(
-      static_cast<TimingFunction*>(curve.release()));
-}
-
 }  // namespace
 
 Keyframe::Keyframe(double time, scoped_ptr<TimingFunction> timing_function)
@@ -81,7 +73,7 @@ SkColor ColorKeyframe::Value() const { return value_; }
 scoped_ptr<ColorKeyframe> ColorKeyframe::Clone() const {
   scoped_ptr<TimingFunction> func;
   if (timing_function())
-    func = CloneTimingFunction(timing_function());
+    func = timing_function()->Clone();
   return ColorKeyframe::Create(Time(), Value(), func.Pass());
 }
 
@@ -108,7 +100,7 @@ float FloatKeyframe::Value() const {
 scoped_ptr<FloatKeyframe> FloatKeyframe::Clone() const {
   scoped_ptr<TimingFunction> func;
   if (timing_function())
-    func = CloneTimingFunction(timing_function());
+    func = timing_function()->Clone();
   return FloatKeyframe::Create(Time(), Value(), func.Pass());
 }
 
@@ -135,7 +127,7 @@ const TransformOperations& TransformKeyframe::Value() const {
 scoped_ptr<TransformKeyframe> TransformKeyframe::Clone() const {
   scoped_ptr<TimingFunction> func;
   if (timing_function())
-    func = CloneTimingFunction(timing_function());
+    func = timing_function()->Clone();
   return TransformKeyframe::Create(Time(), Value(), func.Pass());
 }
 
@@ -162,7 +154,7 @@ const FilterOperations& FilterKeyframe::Value() const {
 scoped_ptr<FilterKeyframe> FilterKeyframe::Clone() const {
   scoped_ptr<TimingFunction> func;
   if (timing_function())
-    func = CloneTimingFunction(timing_function());
+    func = timing_function()->Clone();
   return FilterKeyframe::Create(Time(), Value(), func.Pass());
 }
 
@@ -352,23 +344,30 @@ bool KeyframedTransformAnimationCurve::IsTranslation() const {
   return true;
 }
 
-bool KeyframedTransformAnimationCurve::MaximumScale(float* max_scale) const {
+bool KeyframedTransformAnimationCurve::MaximumTargetScale(
+    bool forward_direction,
+    float* max_scale) const {
   DCHECK_GE(keyframes_.size(), 2ul);
   *max_scale = 0.f;
-  for (size_t i = 1; i < keyframes_.size(); ++i) {
-    float min_progress = 0.f;
-    float max_progress = 1.f;
-    if (keyframes_[i - 1]->timing_function())
-      keyframes_[i - 1]->timing_function()->Range(&min_progress, &max_progress);
 
-    float max_scale_for_segment = 0.f;
-    if (!keyframes_[i]->Value().MaximumScale(keyframes_[i - 1]->Value(),
-                                             min_progress,
-                                             max_progress,
-                                             &max_scale_for_segment))
+  // If |forward_direction| is true, then skip the first frame, otherwise
+  // skip the last frame, since that is the original position in the animation.
+  size_t start = 1;
+  size_t end = keyframes_.size();
+  if (!forward_direction) {
+    --start;
+    --end;
+  }
+
+  for (size_t i = start; i < end; ++i) {
+    gfx::Vector3dF target_scale_for_segment;
+    if (!keyframes_[i]->Value().ScaleComponent(&target_scale_for_segment))
       return false;
-
-    *max_scale = std::max(*max_scale, max_scale_for_segment);
+    float max_scale_for_segment =
+        fmax(std::abs(target_scale_for_segment.x()),
+             fmax(std::abs(target_scale_for_segment.y()),
+                  std::abs(target_scale_for_segment.z())));
+    *max_scale = fmax(*max_scale, max_scale_for_segment);
   }
   return true;
 }

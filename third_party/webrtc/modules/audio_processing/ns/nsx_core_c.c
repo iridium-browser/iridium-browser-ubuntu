@@ -8,6 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <assert.h>
+
 #include "webrtc/modules/audio_processing/ns/include/noise_suppression_x.h"
 #include "webrtc/modules/audio_processing/ns/nsx_core.h"
 
@@ -39,16 +41,16 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
   for (i = 0; i < inst->magnLen; i++) {
     besselTmpFX32 = (int32_t)postLocSnr[i]; // Q11
     normTmp = WebRtcSpl_NormU32(postLocSnr[i]);
-    num = WEBRTC_SPL_LSHIFT_U32(postLocSnr[i], normTmp); // Q(11+normTmp)
+    num = postLocSnr[i] << normTmp;  // Q(11+normTmp)
     if (normTmp > 10) {
-      den = WEBRTC_SPL_LSHIFT_U32(priorLocSnr[i], normTmp - 11); // Q(normTmp)
+      den = priorLocSnr[i] << (normTmp - 11);  // Q(normTmp)
     } else {
       den = WEBRTC_SPL_RSHIFT_U32(priorLocSnr[i], 11 - normTmp); // Q(normTmp)
     }
     if (den > 0) {
-      besselTmpFX32 -= WEBRTC_SPL_UDIV(num, den); // Q11
+      besselTmpFX32 -= num / den;  // Q11
     } else {
-      besselTmpFX32 -= num; // Q11
+      besselTmpFX32 = 0;
     }
 
     // inst->logLrtTimeAvg[i] += LRT_TAVG * (besselTmp - log(snrLocPrior)
@@ -62,8 +64,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
     frac32 = tmp32 + 37;
     // tmp32 = log2(priorLocSnr[i])
     tmp32 = (int32_t)(((31 - zeros) << 12) + frac32) - (11 << 12); // Q12
-    logTmp = WEBRTC_SPL_RSHIFT_W32(WEBRTC_SPL_MUL_32_16(tmp32, 178), 8);
-                                                  // log2(priorLocSnr[i])*log(2)
+    logTmp = (tmp32 * 178) >> 8;  // log2(priorLocSnr[i])*log(2)
     tmp32no1 = WEBRTC_SPL_RSHIFT_W32(logTmp + inst->logLrtTimeAvgW32[i], 1);
                                                   // Q12
     inst->logLrtTimeAvgW32[i] += (besselTmpFX32 - tmp32no1); // Q12
@@ -122,11 +123,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
       //widthPrior = widthPrior * 2.0;
       nShifts++;
     }
-    tmp32no1 = (int32_t)WebRtcSpl_DivU32U16(WEBRTC_SPL_LSHIFT_U32(tmpU32no2,
-                                                                  nShifts), 25);
-                                                     //Q14
-    tmpU32no1 = WebRtcSpl_DivU32U16(WEBRTC_SPL_LSHIFT_U32(tmpU32no2, nShifts),
-                                    25); //Q14
+    tmpU32no1 = WebRtcSpl_DivU32U16(tmpU32no2 << nShifts, 25);  // Q14
     // compute indicator function: sigmoid map
     // FLOAT code
     // indicator1 = 0.5 * (tanh(sgnMap * widthPrior *
@@ -152,20 +149,18 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
     if (inst->featureSpecDiff) {
       normTmp = WEBRTC_SPL_MIN(20 - inst->stages,
                                WebRtcSpl_NormU32(inst->featureSpecDiff));
-      tmpU32no1 = WEBRTC_SPL_LSHIFT_U32(inst->featureSpecDiff, normTmp);
-                                                         // Q(normTmp-2*stages)
+      assert(normTmp >= 0);
+      tmpU32no1 = inst->featureSpecDiff << normTmp;  // Q(normTmp-2*stages)
       tmpU32no2 = WEBRTC_SPL_RSHIFT_U32(inst->timeAvgMagnEnergy,
                                         20 - inst->stages - normTmp);
       if (tmpU32no2 > 0) {
         // Q(20 - inst->stages)
-        tmpU32no1 = WEBRTC_SPL_UDIV(tmpU32no1, tmpU32no2);
+        tmpU32no1 /= tmpU32no2;
       } else {
         tmpU32no1 = (uint32_t)(0x7fffffff);
       }
     }
-    tmpU32no3 = WEBRTC_SPL_UDIV(WEBRTC_SPL_LSHIFT_U32(inst->thresholdSpecDiff,
-                                                      17),
-                                25);
+    tmpU32no3 = (inst->thresholdSpecDiff << 17) / 25;
     tmpU32no2 = tmpU32no1 - tmpU32no3;
     nShifts = 1;
     tmpIndFX = 16384; // Q14(1.0)
@@ -248,14 +243,12 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
           if (normTmp + normTmp2 < 15) {
             invLrtFX = WEBRTC_SPL_RSHIFT_W32(invLrtFX, 15 - normTmp2 - normTmp);
             // Q(normTmp+normTmp2-7)
-            tmp32no1 = WEBRTC_SPL_MUL_32_16(invLrtFX,
-                                            (16384 - inst->priorNonSpeechProb));
+            tmp32no1 = invLrtFX * (16384 - inst->priorNonSpeechProb);
             // Q(normTmp+normTmp2+7)
             invLrtFX = WEBRTC_SPL_SHIFT_W32(tmp32no1, 7 - normTmp - normTmp2);
                                                                   // Q14
           } else {
-            tmp32no1 = WEBRTC_SPL_MUL_32_16(invLrtFX,
-                                            (16384 - inst->priorNonSpeechProb));
+            tmp32no1 = invLrtFX * (16384 - inst->priorNonSpeechProb);
                                                                   // Q22
             invLrtFX = WEBRTC_SPL_RSHIFT_W32(tmp32no1, 8); // Q14
           }
@@ -263,8 +256,8 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
           tmp32no1 = WEBRTC_SPL_LSHIFT_W32((int32_t)inst->priorNonSpeechProb,
                                            8); // Q22
 
-          nonSpeechProbFinal[i] = (uint16_t)WEBRTC_SPL_DIV(tmp32no1,
-              (int32_t)inst->priorNonSpeechProb + invLrtFX); // Q8
+          nonSpeechProbFinal[i] = tmp32no1 /
+              (inst->priorNonSpeechProb + invLrtFX);  // Q8
         }
       }
     }

@@ -132,17 +132,56 @@ base::Value* RunFunctionAndReturnSingleResult(
       function, args, context, dispatcher.Pass(), flags);
 }
 
+std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
+                                      const std::string& args,
+                                      content::BrowserContext* context) {
+  return RunFunctionAndReturnError(function, args, context, NONE);
+}
+
+std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
+                                      const std::string& args,
+                                      content::BrowserContext* context,
+                                      RunFunctionFlags flags) {
+  TestFunctionDispatcherDelegate delegate;
+  scoped_ptr<ExtensionFunctionDispatcher> dispatcher(
+      new ExtensionFunctionDispatcher(context, &delegate));
+  scoped_refptr<ExtensionFunction> function_owner(function);
+  // Without a callback the function will not generate a result.
+  function->set_has_callback(true);
+  RunFunction(function, args, context, dispatcher.Pass(), flags);
+  EXPECT_FALSE(function->GetResultList()) << "Did not expect a result";
+  return function->GetError();
+}
+
+bool RunFunction(UIThreadExtensionFunction* function,
+                 const std::string& args,
+                 content::BrowserContext* context) {
+  TestFunctionDispatcherDelegate delegate;
+  scoped_ptr<ExtensionFunctionDispatcher> dispatcher(
+      new ExtensionFunctionDispatcher(context, &delegate));
+  return RunFunction(function, args, context, dispatcher.Pass(), NONE);
+}
+
 bool RunFunction(UIThreadExtensionFunction* function,
                  const std::string& args,
                  content::BrowserContext* context,
                  scoped_ptr<extensions::ExtensionFunctionDispatcher> dispatcher,
                  RunFunctionFlags flags) {
-  SendResponseDelegate response_delegate;
-  function->set_test_delegate(&response_delegate);
   scoped_ptr<base::ListValue> parsed_args(ParseList(args));
   EXPECT_TRUE(parsed_args.get())
       << "Could not parse extension function arguments: " << args;
-  function->SetArgs(parsed_args.get());
+  return RunFunction(
+      function, parsed_args.Pass(), context, dispatcher.Pass(), flags);
+}
+
+bool RunFunction(UIThreadExtensionFunction* function,
+                 scoped_ptr<base::ListValue> args,
+                 content::BrowserContext* context,
+                 scoped_ptr<extensions::ExtensionFunctionDispatcher> dispatcher,
+                 RunFunctionFlags flags) {
+  SendResponseDelegate response_delegate;
+  function->set_test_delegate(&response_delegate);
+  function->SetArgs(args.get());
 
   CHECK(dispatcher);
   function->set_dispatcher(dispatcher->AsWeakPtr());

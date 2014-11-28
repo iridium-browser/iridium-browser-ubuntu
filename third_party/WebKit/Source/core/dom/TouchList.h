@@ -35,13 +35,14 @@
 namespace blink {
 
 class TouchList FINAL : public RefCountedWillBeGarbageCollected<TouchList>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<TouchList> create()
     {
         return adoptRefWillBeNoop(new TouchList);
     }
 
-    static PassRefPtrWillBeRawPtr<TouchList> create(WillBeHeapVector<RefPtrWillBeMember<Touch> >& touches)
+    static PassRefPtrWillBeRawPtr<TouchList> adopt(WillBeHeapVector<RefPtrWillBeMember<Touch> >& touches)
     {
         return adoptRefWillBeNoop(new TouchList(touches));
     }
@@ -56,15 +57,11 @@ public:
     void trace(Visitor*);
 
 private:
-    TouchList()
-    {
-        ScriptWrappable::init(this);
-    }
+    TouchList() { }
 
     TouchList(WillBeHeapVector<RefPtrWillBeMember<Touch> >& touches)
     {
         m_values.swap(touches);
-        ScriptWrappable::init(this);
     }
 
     WillBeHeapVector<RefPtrWillBeMember<Touch> > m_values;
@@ -72,4 +69,4 @@ private:
 
 } // namespace blink
 
-#endif /* TouchList_h */
+#endif // TouchList_h

@@ -74,7 +74,7 @@ TEST_P(DecodePerfTest, PerfTest) {
   libvpx_test::WebMVideoSource video(video_name);
   video.Init();
 
-  vpx_codec_dec_cfg_t cfg = {0};
+  vpx_codec_dec_cfg_t cfg = vpx_codec_dec_cfg_t();
   cfg.threads = threads;
   libvpx_test::VP9Decoder decoder(cfg, 0);
 
@@ -92,6 +92,7 @@ TEST_P(DecodePerfTest, PerfTest) {
   const double fps = double(frames) / elapsed_secs;
 
   printf("{\n");
+  printf("\t\"type\" : \"decode_perf_test\",\n");
   printf("\t\"version\" : \"%s\",\n", VERSION_STRING_NOSP);
   printf("\t\"videoName\" : \"%s\",\n", video_name);
   printf("\t\"threadCount\" : %u,\n", threads);

@@ -80,7 +80,7 @@ public:
     void invalidateRegions();
     bool hasValidRegionInfo() const { return !m_regionsInvalidated && !m_multiColumnSetList.isEmpty(); }
 
-    void repaintRectangleInRegions(const LayoutRect&) const;
+    void paintInvalidationRectangleInRegions(const LayoutRect&) const;
 
     LayoutUnit pageLogicalHeightForOffset(LayoutUnit);
     LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit, PageBoundaryRule = IncludePageBoundary);
@@ -93,8 +93,6 @@ public:
     // FIXME: These 2 functions should return a RenderMultiColumnSet.
     RenderRegion* firstRegion() const;
     RenderRegion* lastRegion() const;
-
-    void setRegionRangeForBox(const RenderBox*, LayoutUnit offsetFromLogicalTopOfFirstPage);
 
     virtual bool addForcedRegionBreak(LayoutUnit, RenderObject* breakChild, bool isBefore, LayoutUnit* offsetBreakAdjustment = 0) { return false; }
 
@@ -115,9 +113,7 @@ protected:
     virtual const char* renderName() const = 0;
 
     void updateRegionsFlowThreadPortionRect();
-    bool shouldRepaint(const LayoutRect&) const;
-
-    void getRegionRangeForBox(const RenderBox*, RenderMultiColumnSet*& startColumnSet, RenderMultiColumnSet*& endColumnSet) const;
+    bool shouldIssuePaintInvalidations(const LayoutRect&) const;
 
     virtual RenderMultiColumnSet* columnSetAtBlockOffset(LayoutUnit) const = 0;
 
@@ -176,10 +172,6 @@ protected:
         LayoutUnit m_offset;
         RenderRegion* m_result;
     };
-
-    // A maps from RenderBox
-    typedef HashMap<const RenderBox*, RenderMultiColumnSetRange> RenderMultiColumnSetRangeMap;
-    RenderMultiColumnSetRangeMap m_multiColumnSetRangeMap;
 
     // Stack of objects that pushed a LayoutState object on the RenderView. The
     // objects on the stack are the ones that are curently in the process of being

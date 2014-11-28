@@ -57,12 +57,15 @@ class IDBRequest
     , public EventTargetWithInlineData
     , public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<IDBRequest>);
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(IDBRequest);
 public:
     static IDBRequest* create(ScriptState*, IDBAny* source, IDBTransaction*);
     virtual ~IDBRequest();
+    void dispose();
     virtual void trace(Visitor*) OVERRIDE;
 
+    ScriptState* scriptState() { return m_scriptState.get(); }
     ScriptValue result(ExceptionState&);
     PassRefPtrWillBeRawPtr<DOMError> error(ExceptionState&) const;
     ScriptValue source() const;
@@ -140,6 +143,7 @@ protected:
 
 private:
     void setResultCursor(IDBCursor*, IDBKey*, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo> >);
+    void setBlobInfo(PassOwnPtr<Vector<WebBlobInfo>>);
     void handleBlobAcks();
 
     RefPtr<ScriptState> m_scriptState;

@@ -4,9 +4,13 @@
 
 #include "content/public/browser/browser_plugin_guest_manager.h"
 
-#include "base/values.h"
-
 namespace content {
+
+WebContents* BrowserPluginGuestManager::GetGuestByInstanceID(
+    WebContents* embedder_web_contents,
+    int browser_plugin_instance_id) {
+  return NULL;
+}
 
 bool BrowserPluginGuestManager::ForEachGuest(
     WebContents* embedder_web_contents,

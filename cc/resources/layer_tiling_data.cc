@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "cc/base/region.h"
+#include "cc/base/simple_enclosed_region.h"
 
 namespace cc {
 
@@ -88,28 +90,6 @@ gfx::Rect LayerTilingData::TileRect(const Tile* tile) const {
   gfx::Rect tile_rect = tiling_data_.TileBoundsWithBorder(tile->i(), tile->j());
   tile_rect.set_size(tile_size());
   return tile_rect;
-}
-
-Region LayerTilingData::OpaqueRegionInContentRect(
-    const gfx::Rect& content_rect) const {
-  if (content_rect.IsEmpty())
-    return Region();
-
-  Region opaque_region;
-  int left, top, right, bottom;
-  ContentRectToTileIndices(content_rect, &left, &top, &right, &bottom);
-  for (int j = top; j <= bottom; ++j) {
-    for (int i = left; i <= right; ++i) {
-      Tile* tile = TileAt(i, j);
-      if (!tile)
-        continue;
-
-      gfx::Rect tile_opaque_rect =
-          gfx::IntersectRects(content_rect, tile->opaque_rect());
-      opaque_region.Union(tile_opaque_rect);
-    }
-  }
-  return opaque_region;
 }
 
 void LayerTilingData::SetTilingSize(const gfx::Size& tiling_size) {

@@ -37,19 +37,20 @@ namespace blink {
 AudioSummingJunction::AudioSummingJunction(AudioContext* context)
     : m_context(context)
     , m_renderingStateNeedUpdating(false)
+    , m_didCallDispose(false)
 {
     ASSERT(context);
-#if ENABLE(OILPAN)
     m_context->registerLiveAudioSummingJunction(*this);
-#endif
+}
+
+void AudioSummingJunction::dispose()
+{
+    m_didCallDispose = true;
+    m_context->removeMarkedSummingJunction(this);
 }
 
 AudioSummingJunction::~AudioSummingJunction()
 {
-#if !ENABLE(OILPAN)
-    if (m_renderingStateNeedUpdating && m_context.get())
-        m_context->removeMarkedSummingJunction(this);
-#endif
 }
 
 void AudioSummingJunction::trace(Visitor* visitor)
@@ -60,7 +61,7 @@ void AudioSummingJunction::trace(Visitor* visitor)
 void AudioSummingJunction::changedOutputs()
 {
     ASSERT(context()->isGraphOwner());
-    if (!m_renderingStateNeedUpdating && canUpdateState()) {
+    if (!m_renderingStateNeedUpdating && !m_didCallDispose) {
         context()->markSummingJunctionDirty(this);
         m_renderingStateNeedUpdating = true;
     }
@@ -69,7 +70,7 @@ void AudioSummingJunction::changedOutputs()
 void AudioSummingJunction::updateRenderingState()
 {
     ASSERT(context()->isAudioThread() && context()->isGraphOwner());
-    if (m_renderingStateNeedUpdating && canUpdateState()) {
+    if (m_renderingStateNeedUpdating) {
         // Copy from m_outputs to m_renderingOutputs.
         m_renderingOutputs.resize(m_outputs.size());
         unsigned j = 0;

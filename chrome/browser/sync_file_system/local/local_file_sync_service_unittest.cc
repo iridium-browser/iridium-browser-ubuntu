@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -29,14 +29,14 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
+#include "storage/browser/fileapi/file_system_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
 #include "third_party/leveldatabase/src/include/leveldb/env.h"
-#include "webkit/browser/fileapi/file_system_context.h"
 
 using content::BrowserThread;
-using fileapi::FileSystemURL;
+using storage::FileSystemURL;
 using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::InvokeWithoutArgs;
@@ -543,7 +543,7 @@ TEST_F(LocalFileSyncServiceTest, RecordFakeChange) {
 
   EXPECT_EQ(0, GetNumChangesInTracker());
 
-  fileapi::FileSystemURLSet urlset;
+  storage::FileSystemURLSet urlset;
   file_system_->GetChangedURLsInTracker(&urlset);
   EXPECT_TRUE(urlset.empty());
 

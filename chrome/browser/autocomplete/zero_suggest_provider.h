@@ -12,13 +12,14 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/autocomplete/base_search_provider.h"
-#include "chrome/browser/autocomplete/search_provider.h"
-#include "chrome/browser/history/history_types.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
+#include "components/omnibox/base_search_provider.h"
+#include "components/omnibox/search_provider.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 class AutocompleteProviderListener;
+class Profile;
 class TemplateURLService;
 
 namespace base {
@@ -58,15 +59,12 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   // AutocompleteProvider:
   virtual void Start(const AutocompleteInput& input,
                      bool minimal_changes) OVERRIDE;
+  virtual void Stop(bool clear_cached_results) OVERRIDE;
   virtual void DeleteMatch(const AutocompleteMatch& match) OVERRIDE;
+  virtual void AddProviderInfo(ProvidersInfo* provider_info) const OVERRIDE;
 
   // Sets |field_trial_triggered_| to false.
   virtual void ResetSession() OVERRIDE;
-
- protected:
-  // BaseSearchProvider:
-  virtual void ModifyProviderInfo(
-      metrics::OmniboxEventProto_ProviderInfo* provider_info) const OVERRIDE;
 
  private:
   ZeroSuggestProvider(AutocompleteProviderListener* listener,
@@ -80,8 +78,6 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   virtual const AutocompleteInput GetInput(bool is_keyword) const OVERRIDE;
   virtual bool ShouldAppendExtraParams(
       const SearchSuggestionParser::SuggestResult& result) const OVERRIDE;
-  virtual void StopSuggest() OVERRIDE;
-  virtual void ClearAllResults() OVERRIDE;
   virtual void RecordDeletionResult(bool success) OVERRIDE;
 
   // net::URLFetcherDelegate:
@@ -134,6 +130,7 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   void MaybeUseCachedSuggestions();
 
   AutocompleteProviderListener* listener_;
+  Profile* profile_;
 
   // The URL for which a suggestion fetch is pending.
   std::string current_query_;

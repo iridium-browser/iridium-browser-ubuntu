@@ -15,6 +15,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_translation_tables.h"
@@ -26,6 +27,17 @@ namespace chromeos {
 namespace onc {
 
 namespace {
+
+bool ConvertListValueToStringVector(const base::ListValue& string_list,
+                                    std::vector<std::string>* result) {
+  for (size_t i = 0; i < string_list.GetSize(); ++i) {
+    std::string str;
+    if (!string_list.GetString(i, &str))
+      return false;
+    result->push_back(str);
+  }
+  return true;
+}
 
 scoped_ptr<base::StringValue> ConvertValueToString(const base::Value& value) {
   std::string str;
@@ -55,9 +67,11 @@ class LocalTranslator {
  private:
   void TranslateEthernet();
   void TranslateOpenVPN();
+  void TranslateIPsec();
   void TranslateVPN();
   void TranslateWiFi();
   void TranslateEAP();
+  void TranslateStaticIPConfig();
   void TranslateNetworkConfiguration();
 
   // Copies all entries from |onc_object_| to |shill_dictionary_| for which a
@@ -88,12 +102,16 @@ class LocalTranslator {
 void LocalTranslator::TranslateFields() {
   if (onc_signature_ == &kNetworkConfigurationSignature)
     TranslateNetworkConfiguration();
+  else if (onc_signature_ == &kStaticIPConfigSignature)
+    TranslateStaticIPConfig();
   else if (onc_signature_ == &kEthernetSignature)
     TranslateEthernet();
   else if (onc_signature_ == &kVPNSignature)
     TranslateVPN();
   else if (onc_signature_ == &kOpenVPNSignature)
     TranslateOpenVPN();
+  else if (onc_signature_ == &kIPsecSignature)
+    TranslateIPsec();
   else if (onc_signature_ == &kWiFiSignature)
     TranslateWiFi();
   else if (onc_signature_ == &kEAPSignature)
@@ -116,7 +134,30 @@ void LocalTranslator::TranslateEthernet() {
   CopyFieldsAccordingToSignature();
 }
 
+
+void LocalTranslator::TranslateStaticIPConfig() {
+  const base::ListValue* onc_nameservers = NULL;
+  if (onc_object_->GetListWithoutPathExpansion(::onc::ipconfig::kNameServers,
+                                               &onc_nameservers)) {
+    std::vector<std::string> onc_nameservers_vector;
+    ConvertListValueToStringVector(*onc_nameservers, &onc_nameservers_vector);
+    std::string shill_nameservers = JoinString(onc_nameservers_vector, ',');
+    shill_dictionary_->SetStringWithoutPathExpansion(
+        shill::kStaticIPNameServersProperty, shill_nameservers);
+  }
+
+  CopyFieldsAccordingToSignature();
+}
+
 void LocalTranslator::TranslateOpenVPN() {
+  // SaveCredentials needs special handling when translating from Shill -> ONC
+  // so handle it explicitly here.
+  bool save_credentials;
+  if (onc_object_->GetBooleanWithoutPathExpansion(
+          ::onc::vpn::kSaveCredentials, &save_credentials)) {
+    shill_dictionary_->SetBooleanWithoutPathExpansion(
+        shill::kSaveCredentialsProperty, save_credentials);
+  }
   // Shill supports only one RemoteCertKU but ONC a list.
   // Copy only the first entry if existing.
   const base::ListValue* certKUs = NULL;
@@ -131,8 +172,7 @@ void LocalTranslator::TranslateOpenVPN() {
   for (base::DictionaryValue::Iterator it(*onc_object_); !it.IsAtEnd();
        it.Advance()) {
     scoped_ptr<base::Value> translated;
-    if (it.key() == ::onc::vpn::kSaveCredentials ||
-        it.key() == ::onc::openvpn::kRemoteCertKU ||
+    if (it.key() == ::onc::openvpn::kRemoteCertKU ||
         it.key() == ::onc::openvpn::kServerCAPEMs) {
       translated.reset(it.value().DeepCopy());
     } else {
@@ -143,7 +183,25 @@ void LocalTranslator::TranslateOpenVPN() {
   }
 }
 
+void LocalTranslator::TranslateIPsec() {
+  CopyFieldsAccordingToSignature();
+
+  // SaveCredentials needs special handling when translating from Shill -> ONC
+  // so handle it explicitly here.
+  bool save_credentials;
+  if (onc_object_->GetBooleanWithoutPathExpansion(
+          ::onc::vpn::kSaveCredentials, &save_credentials)) {
+    shill_dictionary_->SetBooleanWithoutPathExpansion(
+        shill::kSaveCredentialsProperty, save_credentials);
+  }
+}
+
 void LocalTranslator::TranslateVPN() {
+  std::string host;
+  if (onc_object_->GetStringWithoutPathExpansion(::onc::vpn::kHost, &host)) {
+    shill_dictionary_->SetStringWithoutPathExpansion(
+        shill::kProviderHostProperty, host);
+  }
   std::string type;
   onc_object_->GetStringWithoutPathExpansion(::onc::vpn::kType, &type);
   TranslateWithTableAndSet(type, kVPNTypeTable, shill::kProviderTypeProperty);

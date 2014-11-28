@@ -4,11 +4,10 @@
 
 #include "athena/screen/public/screen_manager.h"
 
-#include "athena/common/container_priorities.h"
-#include "athena/common/fill_layout_manager.h"
 #include "athena/input/public/accelerator_manager.h"
-#include "athena/screen/background_controller.h"
 #include "athena/screen/screen_accelerator_handler.h"
+#include "athena/util/container_priorities.h"
+#include "athena/util/fill_layout_manager.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -24,6 +23,8 @@
 #include "ui/gfx/screen.h"
 #include "ui/wm/core/base_focus_rules.h"
 #include "ui/wm/core/capture_controller.h"
+#include "ui/wm/core/focus_controller.h"
+#include "ui/wm/core/window_util.h"
 
 namespace athena {
 namespace {
@@ -42,12 +43,10 @@ bool GrabsInput(aura::Window* container) {
 
 // Returns the container which contains |window|.
 aura::Window* GetContainer(aura::Window* window) {
-  // No containers for NULL or the root window itself.
-  if (!window || !window->parent())
-    return NULL;
-  if (window->parent()->IsRootWindow())
-    return window;
-  return GetContainer(window->parent());
+  aura::Window* container = window;
+  while (container && !container->GetProperty(kContainerParamsKey))
+    container = container->parent();
+  return container;
 }
 
 class AthenaFocusRules : public wm::BaseFocusRules {
@@ -94,6 +93,9 @@ class AthenaWindowTreeClient : public aura::client::WindowTreeClient {
   virtual aura::Window* GetDefaultParent(aura::Window* context,
                                          aura::Window* window,
                                          const gfx::Rect& bounds) OVERRIDE {
+    aura::Window* transient_parent = wm::GetTransientParent(window);
+    if (transient_parent)
+      return GetContainer(transient_parent);
     return container_;
   }
 
@@ -202,24 +204,28 @@ class ScreenManagerImpl : public ScreenManager {
       const ContainerParams& params) OVERRIDE;
   virtual aura::Window* CreateContainer(const ContainerParams& params) OVERRIDE;
   virtual aura::Window* GetContext() OVERRIDE { return root_window_; }
-  virtual void SetBackgroundImage(const gfx::ImageSkia& image) OVERRIDE;
   virtual void SetRotation(gfx::Display::Rotation rotation) OVERRIDE;
-  virtual ui::LayerAnimator* GetScreenAnimator() OVERRIDE;
+  virtual void SetRotationLocked(bool rotation_locked) OVERRIDE;
 
+  // Not owned.
   aura::Window* root_window_;
-  aura::Window* background_window_;
 
-  scoped_ptr<BackgroundController> background_controller_;
+  scoped_ptr<aura::client::FocusClient> focus_client_;
   scoped_ptr<aura::client::WindowTreeClient> window_tree_client_;
   scoped_ptr<AcceleratorHandler> accelerator_handler_;
   scoped_ptr< ::wm::ScopedCaptureClient> capture_client_;
   scoped_ptr<aura::client::ScreenPositionClient> screen_position_client_;
 
+  gfx::Display::Rotation last_requested_rotation_;
+  bool rotation_locked_;
+
   DISALLOW_COPY_AND_ASSIGN(ScreenManagerImpl);
 };
 
 ScreenManagerImpl::ScreenManagerImpl(aura::Window* root_window)
-    : root_window_(root_window) {
+    : root_window_(root_window),
+      last_requested_rotation_(gfx::Display::ROTATE_0),
+      rotation_locked_(false) {
   DCHECK(root_window_);
   DCHECK(!instance);
   instance = this;
@@ -228,19 +234,31 @@ ScreenManagerImpl::ScreenManagerImpl(aura::Window* root_window)
 ScreenManagerImpl::~ScreenManagerImpl() {
   aura::client::SetScreenPositionClient(root_window_, NULL);
   aura::client::SetWindowTreeClient(root_window_, NULL);
+  wm::FocusController* focus_controller =
+      static_cast<wm::FocusController*>(focus_client_.get());
+  root_window_->RemovePreTargetHandler(focus_controller);
+  aura::client::SetActivationClient(root_window_, NULL);
+  aura::client::SetFocusClient(root_window_, NULL);
+  aura::Window::Windows children = root_window_->children();
+  // Close All children:
+  for (aura::Window::Windows::iterator iter = children.begin();
+       iter != children.end();
+       ++iter) {
+    delete *iter;
+  }
   instance = NULL;
 }
 
 void ScreenManagerImpl::Init() {
-  // TODO(oshima): Move the background out from ScreenManager.
+  wm::FocusController* focus_controller =
+      new wm::FocusController(new AthenaFocusRules());
+
+  aura::client::SetFocusClient(root_window_, focus_controller);
+  root_window_->AddPreTargetHandler(focus_controller);
+  aura::client::SetActivationClient(root_window_, focus_controller);
+  focus_client_.reset(focus_controller);
+
   root_window_->SetLayoutManager(new FillLayoutManager(root_window_));
-  background_window_ =
-      CreateContainer(ContainerParams("AthenaBackground", CP_BACKGROUND));
-
-  background_window_->SetLayoutManager(
-      new FillLayoutManager(background_window_));
-  background_controller_.reset(new BackgroundController(background_window_));
-
   capture_client_.reset(new ::wm::ScopedCaptureClient(root_window_));
   accelerator_handler_.reset(new ScreenAcceleratorHandler(root_window_));
 }
@@ -324,12 +342,9 @@ aura::Window* ScreenManagerImpl::CreateContainer(
   return container;
 }
 
-void ScreenManagerImpl::SetBackgroundImage(const gfx::ImageSkia& image) {
-  background_controller_->SetImage(image);
-}
-
 void ScreenManagerImpl::SetRotation(gfx::Display::Rotation rotation) {
-  if (rotation ==
+  last_requested_rotation_ = rotation;
+  if (rotation_locked_ || rotation ==
       gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().rotation()) {
     return;
   }
@@ -340,8 +355,10 @@ void ScreenManagerImpl::SetRotation(gfx::Display::Rotation rotation) {
       SetDisplayRotation(rotation);
 }
 
-ui::LayerAnimator* ScreenManagerImpl::GetScreenAnimator() {
-  return root_window_->layer()->GetAnimator();
+void ScreenManagerImpl::SetRotationLocked(bool rotation_locked) {
+  rotation_locked_ = rotation_locked;
+  if (!rotation_locked_)
+    SetRotation(last_requested_rotation_);
 }
 
 }  // namespace
@@ -372,11 +389,6 @@ void ScreenManager::Shutdown() {
   DCHECK(instance);
   delete instance;
   DCHECK(!instance);
-}
-
-// static
-wm::FocusRules* ScreenManager::CreateFocusRules() {
-  return new AthenaFocusRules();
 }
 
 }  // namespace athena

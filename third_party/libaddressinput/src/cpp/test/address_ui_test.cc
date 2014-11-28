@@ -17,6 +17,7 @@
 #include <libaddressinput/address_field.h>
 #include <libaddressinput/address_ui_component.h>
 #include <libaddressinput/localization.h>
+#include <libaddressinput/util/basictypes.h>
 
 #include <set>
 #include <string>
@@ -28,14 +29,16 @@ namespace {
 
 using i18n::addressinput::AddressField;
 using i18n::addressinput::AddressUiComponent;
-using i18n::addressinput::ADMIN_AREA;
 using i18n::addressinput::BuildComponents;
-using i18n::addressinput::COUNTRY;
 using i18n::addressinput::GetRegionCodes;
 using i18n::addressinput::Localization;
+
+using i18n::addressinput::COUNTRY;
+using i18n::addressinput::ADMIN_AREA;
 using i18n::addressinput::POSTAL_CODE;
-using i18n::addressinput::RECIPIENT;
 using i18n::addressinput::STREET_ADDRESS;
+using i18n::addressinput::ORGANIZATION;
+using i18n::addressinput::RECIPIENT;
 
 static const char kUiLanguageTag[] = "en";
 
@@ -70,8 +73,12 @@ testing::AssertionResult ComponentsAreValid(
 // Tests for address UI functions.
 class AddressUiTest : public testing::TestWithParam<std::string> {
  protected:
+  AddressUiTest() {}
   Localization localization_;
   std::string best_address_language_tag_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(AddressUiTest);
 };
 
 // Verifies that a region code consists of two characters, for example "TW".
@@ -142,8 +149,12 @@ struct LanguageTestCase {
 class BestAddressLanguageTagTest
     : public testing::TestWithParam<LanguageTestCase> {
  protected:
+  BestAddressLanguageTagTest() {}
   Localization localization_;
   std::string best_address_language_tag_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BestAddressLanguageTagTest);
 };
 
 std::string GetterStub(int) { return std::string(); }
@@ -210,12 +221,12 @@ INSTANTIATE_TEST_CASE_P(
         LanguageTestCase("MO", "en", "zh-Latn", RECIPIENT),
 
         // Switzerland supports de, fr, and it.
-        LanguageTestCase("CH", "de", "de", RECIPIENT),
-        LanguageTestCase("CH", "de-DE", "de", RECIPIENT),
-        LanguageTestCase("CH", "de-Latn-DE", "de", RECIPIENT),
-        LanguageTestCase("CH", "fr", "fr", RECIPIENT),
-        LanguageTestCase("CH", "it", "it", RECIPIENT),
-        LanguageTestCase("CH", "en", "de", RECIPIENT),
+        LanguageTestCase("CH", "de", "de", ORGANIZATION),
+        LanguageTestCase("CH", "de-DE", "de", ORGANIZATION),
+        LanguageTestCase("CH", "de-Latn-DE", "de", ORGANIZATION),
+        LanguageTestCase("CH", "fr", "fr", ORGANIZATION),
+        LanguageTestCase("CH", "it", "it", ORGANIZATION),
+        LanguageTestCase("CH", "en", "de", ORGANIZATION),
 
         // Antarctica does not have language information.
         LanguageTestCase("AQ", "en", "en", RECIPIENT),

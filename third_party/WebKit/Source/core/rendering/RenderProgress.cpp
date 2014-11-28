@@ -44,6 +44,15 @@ RenderProgress::~RenderProgress()
 {
 }
 
+void RenderProgress::destroy()
+{
+    if (m_animating) {
+        m_animationTimer.stop();
+        m_animating = false;
+    }
+    RenderBlockFlow::destroy();
+}
+
 void RenderProgress::updateFromElement()
 {
     HTMLProgressElement* element = progressElement();
@@ -52,7 +61,7 @@ void RenderProgress::updateFromElement()
     m_position = element->position();
 
     updateAnimationState();
-    paintInvalidationForWholeRenderer();
+    setShouldDoFullPaintInvalidation(true);
     RenderBlockFlow::updateFromElement();
 }
 
@@ -69,7 +78,7 @@ bool RenderProgress::isDeterminate() const
 
 void RenderProgress::animationTimerFired(Timer<RenderProgress>*)
 {
-    paintInvalidationForWholeRenderer();
+    setShouldDoFullPaintInvalidation(true);
     if (!m_animationTimer.isActive() && m_animating)
         m_animationTimer.startOneShot(m_animationRepeatInterval, FROM_HERE);
 }

@@ -5,6 +5,8 @@
 
 """Unittests for parallel library."""
 
+from __future__ import print_function
+
 import contextlib
 import cPickle
 import logging
@@ -45,6 +47,31 @@ _GREETING = 'hello world'
 _SKIP_FLAKY_TESTS = True
 
 
+class FakeMultiprocessManager(object):
+  """A fake implementation of the multiprocess manager.
+
+  This is only intended for use with ParallelMock.
+  """
+
+  def __enter__(self, *args, **kwargs):
+    return self
+
+  def __exit__(self, *args, **kwargs):
+    return None
+
+  def Queue(self):
+    return multiprocessing.Queue()
+
+  def RLock(self):
+    return multiprocessing.RLock()
+
+  def dict(self, *args, **kwargs):
+    return dict(*args, **kwargs)
+
+  def list(self, *args, **kwargs):
+    return list(*args, **kwargs)
+
+
 class ParallelMock(partial_mock.PartialMock):
   """Run parallel steps in sequence for testing purposes.
 
@@ -55,6 +82,10 @@ class ParallelMock(partial_mock.PartialMock):
 
   TARGET = 'chromite.lib.parallel._BackgroundTask'
   ATTRS = ('ParallelTasks', 'TaskRunner')
+
+  def PreStart(self):
+    self.PatchObject(parallel, 'Manager', side_effect=FakeMultiprocessManager)
+    partial_mock.PartialMock.PreStart(self)
 
   @contextlib.contextmanager
   def ParallelTasks(self, steps, max_parallel=None, halt_on_error=False):

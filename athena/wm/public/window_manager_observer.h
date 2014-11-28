@@ -18,6 +18,12 @@ class ATHENA_EXPORT WindowManagerObserver {
 
   // Called immediately after going out of the overview mode.
   virtual void OnOverviewModeExit() = 0;
+
+  // Called immediately before the split view mode is activated.
+  virtual void OnSplitViewModeEnter() = 0;
+
+  // Called immediately after going out of the split view mode.
+  virtual void OnSplitViewModeExit() = 0;
 };
 
 }  // namespace athena

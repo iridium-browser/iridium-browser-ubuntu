@@ -13,7 +13,6 @@
 #include "media/cast/cast_environment.h"
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/net/cast_transport_sender_impl.h"
-#include "media/cast/net/rtcp/rtcp_receiver.h"
 #include "media/cast/sender/audio_sender.h"
 #include "media/cast/test/fake_single_thread_task_runner.h"
 #include "media/cast/test/utility/audio_utility.h"
@@ -28,7 +27,7 @@ class TestPacketSender : public PacketSender {
 
   virtual bool SendPacket(PacketRef packet,
                           const base::Closure& cb) OVERRIDE {
-    if (RtcpReceiver::IsRtcpPacket(&packet->data[0], packet->data.size())) {
+    if (Rtcp::IsRtcpPacket(&packet->data[0], packet->data.size())) {
       ++number_of_rtcp_packets_;
     } else {
       // Check that at least one RTCP packet was sent before the first RTP
@@ -40,6 +39,10 @@ class TestPacketSender : public PacketSender {
       ++number_of_rtp_packets_;
     }
     return true;
+  }
+
+  virtual int64 GetBytesSent() OVERRIDE {
+    return 0;
   }
 
   int number_of_rtp_packets() const { return number_of_rtp_packets_; }
@@ -78,6 +81,7 @@ class AudioSenderTest : public ::testing::Test {
         NULL,
         testing_clock_,
         dummy_endpoint,
+        make_scoped_ptr(new base::DictionaryValue),
         base::Bind(&UpdateCastTransportStatus),
         BulkRawEventsCallback(),
         base::TimeDelta(),

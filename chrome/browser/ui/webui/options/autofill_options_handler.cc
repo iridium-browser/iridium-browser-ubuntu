@@ -19,6 +19,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/country_combobox_model.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
@@ -26,8 +27,6 @@
 #include "components/autofill/core/browser/phone_number_i18n.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/components_strings.h"
-#include "grit/generated_resources.h"
 #include "third_party/libaddressinput/messages.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui_component.h"
@@ -128,6 +127,9 @@ void GetAddressComponents(const std::string& country_code,
       case i18n::addressinput::STREET_ADDRESS:
         component->SetString(kField, kAddressLineField);
         break;
+      case i18n::addressinput::ORGANIZATION:
+        component->SetString(kField, kCompanyNameField);
+        break;
       case i18n::addressinput::RECIPIENT:
         component->SetString(kField, kFullNameField);
         component->SetString(
@@ -184,15 +186,21 @@ void SetCountryData(const PersonalDataManager& manager,
 }
 
 // Get the multi-valued element for |type| and return it in |ListValue| form.
+// Buyer beware: the type of data affects whether GetRawInfo or GetInfo is used.
 void GetValueList(const AutofillProfile& profile,
                   ServerFieldType type,
                   scoped_ptr<base::ListValue>* list) {
   list->reset(new base::ListValue);
 
   std::vector<base::string16> values;
-  profile.GetRawMultiInfo(type, &values);
+  if (AutofillType(type).group() == autofill::NAME) {
+    profile.GetMultiInfo(
+        AutofillType(type), g_browser_process->GetApplicationLocale(), &values);
+  } else {
+    profile.GetRawMultiInfo(type, &values);
+  }
 
-  // |GetRawMultiInfo()| always returns at least one, potentially empty, item.
+  // |Get[Raw]MultiInfo()| always returns at least one, potentially empty, item.
   if (values.size() == 1 && values.front().empty())
     return;
 
@@ -491,38 +499,7 @@ void AutofillOptionsHandler::LoadAddressEditor(const base::ListValue* args) {
   }
 
   base::DictionaryValue address;
-  address.SetString("guid", profile->guid());
-  scoped_ptr<base::ListValue> list;
-  GetValueList(*profile, autofill::NAME_FULL, &list);
-  address.Set(kFullNameField, list.release());
-  address.SetString(
-      kCompanyNameField, profile->GetRawInfo(autofill::COMPANY_NAME));
-  address.SetString(kAddressLineField,
-                    profile->GetRawInfo(autofill::ADDRESS_HOME_STREET_ADDRESS));
-  address.SetString(
-      kCityField, profile->GetRawInfo(autofill::ADDRESS_HOME_CITY));
-  address.SetString(
-      kStateField, profile->GetRawInfo(autofill::ADDRESS_HOME_STATE));
-  address.SetString(
-      kDependentLocalityField,
-      profile->GetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_LOCALITY));
-  address.SetString(kSortingCodeField,
-                    profile->GetRawInfo(autofill::ADDRESS_HOME_SORTING_CODE));
-  address.SetString(kPostalCodeField,
-                    profile->GetRawInfo(autofill::ADDRESS_HOME_ZIP));
-  address.SetString(kCountryField,
-                    profile->GetRawInfo(autofill::ADDRESS_HOME_COUNTRY));
-  GetValueList(*profile, autofill::PHONE_HOME_WHOLE_NUMBER, &list);
-  address.Set("phone", list.release());
-  GetValueList(*profile, autofill::EMAIL_ADDRESS, &list);
-  address.Set("email", list.release());
-  address.SetString(kLanguageCode, profile->language_code());
-
-  scoped_ptr<base::ListValue> components(new base::ListValue);
-  GetAddressComponents(
-      base::UTF16ToUTF8(profile->GetRawInfo(autofill::ADDRESS_HOME_COUNTRY)),
-      profile->language_code(), components.get(), NULL);
-  address.Set(kComponents, components.release());
+  AutofillProfileToDictionary(*profile, &address);
 
   web_ui()->CallJavascriptFunction("AutofillOptions.editAddress", address);
 }
@@ -700,6 +677,46 @@ void AutofillOptionsHandler::ValidatePhoneNumbers(const base::ListValue* args) {
 
 bool AutofillOptionsHandler::IsPersonalDataLoaded() const {
   return personal_data_ && personal_data_->IsDataLoaded();
+}
+
+// static
+void AutofillOptionsHandler::AutofillProfileToDictionary(
+    const autofill::AutofillProfile& profile,
+    base::DictionaryValue* address) {
+  address->SetString("guid", profile.guid());
+  scoped_ptr<base::ListValue> list;
+  GetValueList(profile, autofill::NAME_FULL, &list);
+  address->Set(kFullNameField, list.release());
+  address->SetString(kCompanyNameField,
+                     profile.GetRawInfo(autofill::COMPANY_NAME));
+  address->SetString(kAddressLineField,
+                     profile.GetRawInfo(autofill::ADDRESS_HOME_STREET_ADDRESS));
+  address->SetString(kCityField,
+                     profile.GetRawInfo(autofill::ADDRESS_HOME_CITY));
+  address->SetString(kStateField,
+                     profile.GetRawInfo(autofill::ADDRESS_HOME_STATE));
+  address->SetString(
+      kDependentLocalityField,
+      profile.GetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_LOCALITY));
+  address->SetString(kSortingCodeField,
+                     profile.GetRawInfo(autofill::ADDRESS_HOME_SORTING_CODE));
+  address->SetString(kPostalCodeField,
+                     profile.GetRawInfo(autofill::ADDRESS_HOME_ZIP));
+  address->SetString(kCountryField,
+                     profile.GetRawInfo(autofill::ADDRESS_HOME_COUNTRY));
+  GetValueList(profile, autofill::PHONE_HOME_WHOLE_NUMBER, &list);
+  address->Set("phone", list.release());
+  GetValueList(profile, autofill::EMAIL_ADDRESS, &list);
+  address->Set("email", list.release());
+  address->SetString(kLanguageCode, profile.language_code());
+
+  scoped_ptr<base::ListValue> components(new base::ListValue);
+  GetAddressComponents(
+      base::UTF16ToUTF8(profile.GetRawInfo(autofill::ADDRESS_HOME_COUNTRY)),
+      profile.language_code(),
+      components.get(),
+      NULL);
+  address->Set(kComponents, components.release());
 }
 
 }  // namespace options

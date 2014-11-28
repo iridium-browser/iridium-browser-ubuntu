@@ -120,7 +120,7 @@ SocketStream::SocketStream(const GURL& url, Delegate* delegate,
   DCHECK(delegate_);
 
   if (context_) {
-    if (!cookie_store_)
+    if (!cookie_store_.get())
       cookie_store_ = context_->cookie_store();
 
     net_log_ = BoundNetLog::Make(
@@ -1340,18 +1340,14 @@ int SocketStream::HandleCertificateError(int result) {
   ssl_socket->GetSSLInfo(&ssl_info);
 
   TransportSecurityState* state = context_->transport_security_state();
-  const bool fatal =
-      state &&
-      state->ShouldSSLErrorsBeFatal(
-          url_.host(),
-          SSLConfigService::IsSNIAvailable(context_->ssl_config_service()));
+  const bool fatal = state && state->ShouldSSLErrorsBeFatal(url_.host());
 
   delegate_->OnSSLCertificateError(this, ssl_info, fatal);
   return ERR_IO_PENDING;
 }
 
 CookieStore* SocketStream::cookie_store() const {
-  return cookie_store_;
+  return cookie_store_.get();
 }
 
 }  // namespace net

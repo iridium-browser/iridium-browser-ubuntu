@@ -11,12 +11,15 @@
 #include "chrome/browser/android/accessibility_util.h"
 #include "chrome/browser/android/banners/app_banner_manager.h"
 #include "chrome/browser/android/bookmarks/bookmarks_bridge.h"
+#include "chrome/browser/android/browser_version.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
 #include "chrome/browser/android/chromium_application.h"
 #include "chrome/browser/android/content_view_util.h"
 #include "chrome/browser/android/dev_tools_server.h"
 #include "chrome/browser/android/dom_distiller/feedback_reporter_android.h"
+#include "chrome/browser/android/enhanced_bookmarks/enhanced_bookmarks_bridge.h"
 #include "chrome/browser/android/favicon_helper.h"
+#include "chrome/browser/android/feature_utilities.h"
 #include "chrome/browser/android/foreign_session_helper.h"
 #include "chrome/browser/android/intent_helper.h"
 #include "chrome/browser/android/logo_bridge.h"
@@ -55,7 +58,6 @@
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
 #include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
-#include "chrome/browser/ui/android/autofill/country_adapter_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/android/infobars/auto_login_infobar_delegate_android.h"
@@ -74,7 +76,6 @@
 #include "chrome/browser/ui/android/website_settings_popup_android.h"
 #include "components/bookmarks/common/android/component_jni_registrar.h"
 #include "components/dom_distiller/android/component_jni_registrar.h"
-#include "components/enhanced_bookmarks/android/component_jni_registrar.h"
 #include "components/gcm_driver/android/component_jni_registrar.h"
 #include "components/navigation_interception/component_jni_registrar.h"
 #include "components/variations/android/component_jni_registrar.h"
@@ -93,8 +94,6 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
   // Register JNI for components we depend on.
   { "Bookmarks", bookmarks::android::RegisterBookmarks },
   { "DomDistiller", dom_distiller::android::RegisterDomDistiller },
-  { "EnhancedBookmarks",
-    enhanced_bookmarks::android::RegisterEnhancedBookmarks },
   { "GCMDriver", gcm::android::RegisterGCMDriverJni },
   { "NavigationInterception",
     navigation_interception::RegisterNavigationInterceptionJni },
@@ -120,6 +119,7 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid },
   { "AutoLoginDelegate", AutoLoginInfoBarDelegateAndroid::Register },
   { "BookmarksBridge", BookmarksBridge::RegisterBookmarksBridge },
+  { "BrowserVersion", RegisterBrowserVersion },
   { "CertificateViewer", RegisterCertificateViewer },
   { "ChromeBrowserProvider",
     ChromeBrowserProvider::RegisterChromeBrowserProvider },
@@ -132,17 +132,19 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
   { "ConfirmInfoBarDelegate", RegisterConfirmInfoBarDelegate },
   { "ContentViewUtil", RegisterContentViewUtil },
   { "ContextMenuHelper", RegisterContextMenuHelper },
-  { "CountryAdapterAndroid", autofill::CountryAdapterAndroid::Register },
   { "DataReductionProxyInfoBarDelegate", DataReductionProxyInfoBar::Register },
   { "DataReductionProxySettings", DataReductionProxySettingsAndroid::Register },
   { "DevToolsServer", RegisterDevToolsServer },
   { "DomDistillerServiceFactory",
     dom_distiller::android::DomDistillerServiceFactoryAndroid::Register },
   { "DomDistillerTabUtils", RegisterDomDistillerTabUtils },
+  { "EnhancedBookmarksBridge",
+    enhanced_bookmarks::android::RegisterEnhancedBookmarksBridge},
   { "ExternalPrerenderRequestHandler",
       prerender::ExternalPrerenderHandlerAndroid::
       RegisterExternalPrerenderHandlerAndroid },
   { "FaviconHelper", FaviconHelper::RegisterFaviconHelper },
+  { "FeatureUtilities", RegisterFeatureUtilities },
   { "FeedbackReporter", dom_distiller::android::RegisterFeedbackReporter },
   { "FontSizePrefsAndroid", FontSizePrefsAndroid::Register },
   { "ForeignSessionHelper",

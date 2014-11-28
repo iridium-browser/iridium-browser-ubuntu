@@ -28,8 +28,8 @@
 #include "core/CSSValueKeywords.h"
 #include "core/HTMLNames.h"
 #include "core/css/CSSImageValue.h"
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/StylePropertySet.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/dom/Attribute.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
@@ -45,7 +45,6 @@ using namespace HTMLNames;
 inline HTMLBodyElement::HTMLBodyElement(Document& document)
     : HTMLElement(bodyTag, document)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(HTMLBodyElement)
@@ -102,7 +101,7 @@ void HTMLBodyElement::parseAttribute(const QualifiedName& name, const AtomicStri
                 document().textLinkColors().resetActiveLinkColor();
         } else {
             RGBA32 color;
-            if (BisonCSSParser::parseColor(color, value, !document().inQuirksMode())) {
+            if (CSSParser::parseColor(color, value, !document().inQuirksMode())) {
                 if (name == linkAttr)
                     document().textLinkColors().setLinkColor(color);
                 else if (name == vlinkAttr)
@@ -166,7 +165,7 @@ void HTMLBodyElement::didNotifySubtreeInsertionsToDocument()
     // FIXME: It's surprising this is web compatible since it means a
     // marginwidth and marginheight attribute can magically appear on the <body>
     // of all documents embedded through <iframe> or <frame>.
-    Element* ownerElement = document().ownerElement();
+    HTMLFrameOwnerElement* ownerElement = document().ownerElement();
     if (!isHTMLFrameElementBase(ownerElement))
         return;
     HTMLFrameElementBase& ownerFrameElement = toHTMLFrameElementBase(*ownerElement);
@@ -223,7 +222,7 @@ static int adjustForZoom(int value, Document* document)
 // That said, Blink's {set}scroll{Top,Left} behaviors match Gecko's: even if there is a non-overflown
 // scrollable area, scrolling should not get propagated to the viewport in neither strict
 // or quirks modes.
-int HTMLBodyElement::scrollLeft()
+double HTMLBodyElement::scrollLeft()
 {
     Document& document = this->document();
     document.updateLayoutIgnorePendingStylesheets();
@@ -233,16 +232,17 @@ int HTMLBodyElement::scrollLeft()
         if (!render)
             return 0;
         if (render->hasOverflowClip())
-            return adjustForAbsoluteZoom(render->scrollLeft(), render);
+            return adjustScrollForAbsoluteZoom(render->scrollLeft(), *render);
         if (!document.inQuirksMode())
             return 0;
     }
 
-    FrameView* view = document.view();
-    return view ? adjustForZoom(view->scrollX(), &document) : 0;
+    if (FrameView* view = document.view())
+        return adjustScrollForAbsoluteZoom(view->scrollX(), document.frame()->pageZoomFactor());
+    return 0;
 }
 
-void HTMLBodyElement::setScrollLeft(int scrollLeft)
+void HTMLBodyElement::setScrollLeft(double scrollLeft)
 {
     Document& document = this->document();
     document.updateLayoutIgnorePendingStylesheets();
@@ -269,7 +269,7 @@ void HTMLBodyElement::setScrollLeft(int scrollLeft)
     view->setScrollPosition(IntPoint(static_cast<int>(scrollLeft * frame->pageZoomFactor()), view->scrollY()));
 }
 
-int HTMLBodyElement::scrollTop()
+double HTMLBodyElement::scrollTop()
 {
     Document& document = this->document();
     document.updateLayoutIgnorePendingStylesheets();
@@ -279,16 +279,17 @@ int HTMLBodyElement::scrollTop()
         if (!render)
             return 0;
         if (render->hasOverflowClip())
-            return adjustForAbsoluteZoom(render->scrollTop(), render);
+            return adjustLayoutUnitForAbsoluteZoom(render->scrollTop(), *render);
         if (!document.inQuirksMode())
             return 0;
     }
 
-    FrameView* view = document.view();
-    return view ? adjustForZoom(view->scrollY(), &document) : 0;
+    if (FrameView* view = document.view())
+        return adjustScrollForAbsoluteZoom(view->scrollY(), document.frame()->pageZoomFactor());
+    return 0;
 }
 
-void HTMLBodyElement::setScrollTop(int scrollTop)
+void HTMLBodyElement::setScrollTop(double scrollTop)
 {
     Document& document = this->document();
     document.updateLayoutIgnorePendingStylesheets();

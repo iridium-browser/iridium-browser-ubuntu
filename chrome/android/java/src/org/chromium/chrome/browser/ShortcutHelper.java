@@ -13,6 +13,7 @@ import android.util.Base64;
 import android.util.Log;
 
 import org.chromium.base.CalledByNative;
+import org.chromium.content_public.common.ScreenOrientationConstants;
 
 import java.io.ByteArrayOutputStream;
 import java.util.UUID;
@@ -26,6 +27,7 @@ public class ShortcutHelper {
     public static final String EXTRA_MAC = "org.chromium.chrome.browser.webapp_mac";
     public static final String EXTRA_TITLE = "org.chromium.chrome.browser.webapp_title";
     public static final String EXTRA_URL = "org.chromium.chrome.browser.webapp_url";
+    public static final String EXTRA_ORIENTATION = ScreenOrientationConstants.EXTRA_ORIENTATION;
 
     private static String sFullScreenAction;
 
@@ -38,19 +40,78 @@ public class ShortcutHelper {
     }
 
     /**
+     * Callback to be passed to the initialized() method.
+     */
+    public interface OnInitialized {
+        public void onInitialized(String title);
+    }
+
+    private final Context mAppContext;
+    private final Tab mTab;
+
+    private OnInitialized mCallback;
+    private boolean mIsInitialized;
+    private long mNativeShortcutHelper;
+
+    public ShortcutHelper(Context appContext, Tab tab) {
+        mAppContext = appContext;
+        mTab = tab;
+    }
+
+    /**
+     * Gets all the information required to initialize the UI, the passed
+     * callback will be run when those information will be available.
+     * @param callback Callback to be run when initialized.
+     */
+    public void initialize(OnInitialized callback) {
+        mCallback = callback;
+        mNativeShortcutHelper = nativeInitialize(mTab.getNativePtr());
+    }
+
+    /**
+     * Returns whether the object is initialized.
+     */
+    public boolean isInitialized() {
+        return mIsInitialized;
+    }
+
+    /**
+     * Puts the object in a state where it is safe to be destroyed.
+     */
+    public void tearDown() {
+        nativeTearDown(mNativeShortcutHelper);
+
+        // Make sure the callback isn't run if the tear down happens before
+        // onInitialized() is called.
+        mCallback = null;
+        mNativeShortcutHelper = 0;
+    }
+
+    @CalledByNative
+    private void onInitialized(String title) {
+        mIsInitialized = true;
+
+        if (mCallback != null) {
+            mCallback.onInitialized(title);
+        }
+    }
+
+    /**
      * Adds a shortcut for the current Tab.
-     * @param appContext The application context.
-     * @param tab Tab to create a shortcut for.
      * @param userRequestedTitle Updated title for the shortcut.
      */
-    public static void addShortcut(Context appContext, Tab tab, String userRequestedTitle) {
+    public void addShortcut(String userRequestedTitle) {
         if (TextUtils.isEmpty(sFullScreenAction)) {
             Log.e("ShortcutHelper", "ShortcutHelper is uninitialized.  Aborting.");
             return;
         }
-        ActivityManager am = (ActivityManager) appContext.getSystemService(
+        ActivityManager am = (ActivityManager) mAppContext.getSystemService(
                 Context.ACTIVITY_SERVICE);
-        nativeAddShortcut(tab.getNativePtr(), userRequestedTitle, am.getLauncherLargeIconSize());
+        nativeAddShortcut(mNativeShortcutHelper, userRequestedTitle, am.getLauncherLargeIconSize());
+
+        // The C++ instance is no longer owned by the Java object.
+        mCallback = null;
+        mNativeShortcutHelper = 0;
     }
 
     /**
@@ -61,17 +122,17 @@ public class ShortcutHelper {
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    private static void addShortcut(Context context, String url, String title, Bitmap favicon,
-            int red, int green, int blue, boolean isWebappCapable) {
+    private static void addShortcut(Context context, String url, String title, Bitmap icon,
+            int red, int green, int blue, boolean isWebappCapable, int orientation) {
         assert sFullScreenAction != null;
 
         Intent shortcutIntent;
         if (isWebappCapable) {
-            // Encode the favicon as a base64 string (Launcher drops Bitmaps in the Intent).
+            // Encode the icon as a base64 string (Launcher drops Bitmaps in the Intent).
             String encodedIcon = "";
-            if (favicon != null) {
+            if (icon != null) {
                 ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                favicon.compress(Bitmap.CompressFormat.PNG, 100, byteArrayOutputStream);
+                icon.compress(Bitmap.CompressFormat.PNG, 100, byteArrayOutputStream);
                 byte[] byteArray = byteArrayOutputStream.toByteArray();
                 encodedIcon = Base64.encodeToString(byteArray, Base64.DEFAULT);
             }
@@ -83,6 +144,7 @@ public class ShortcutHelper {
             shortcutIntent.putExtra(EXTRA_ID, UUID.randomUUID().toString());
             shortcutIntent.putExtra(EXTRA_TITLE, title);
             shortcutIntent.putExtra(EXTRA_URL, url);
+            shortcutIntent.putExtra(EXTRA_ORIENTATION, orientation);
 
             // The only reason we convert to a String here is because Android inexplicably eats a
             // byte[] when adding the shortcut -- the Bundle received by the launched Activity even
@@ -97,7 +159,7 @@ public class ShortcutHelper {
 
         shortcutIntent.setPackage(context.getPackageName());
         context.sendBroadcast(BookmarkUtils.createAddToHomeIntent(context, shortcutIntent, title,
-                favicon, red, green, blue));
+                icon, red, green, blue));
 
         // User is sent to the homescreen as soon as the shortcut is created.
         Intent homeIntent = new Intent(Intent.ACTION_MAIN);
@@ -106,6 +168,8 @@ public class ShortcutHelper {
         context.startActivity(homeIntent);
     }
 
-    private static native void nativeAddShortcut(long tabAndroidPtr, String userRequestedTitle,
+    private native long nativeInitialize(long tabAndroidPtr);
+    private native void nativeAddShortcut(long nativeShortcutHelper, String userRequestedTitle,
             int launcherLargeIconSize);
+    private native void nativeTearDown(long nativeShortcutHelper);
 }

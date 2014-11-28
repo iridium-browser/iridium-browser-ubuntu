@@ -15,7 +15,6 @@
  */
 package com.google.ipc.invalidation.external.client.contrib;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.InvalidationClient;
 import com.google.ipc.invalidation.external.client.InvalidationClientConfig;
 import com.google.ipc.invalidation.external.client.InvalidationListener;
@@ -26,19 +25,22 @@ import com.google.ipc.invalidation.external.client.types.AckHandle;
 import com.google.ipc.invalidation.external.client.types.ErrorInfo;
 import com.google.ipc.invalidation.external.client.types.Invalidation;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
-import com.google.ipc.invalidation.ticl.ProtoConverter;
+import com.google.ipc.invalidation.ticl.InvalidationClientCore;
+import com.google.ipc.invalidation.ticl.ProtoWrapperConverter;
 import com.google.ipc.invalidation.ticl.android2.AndroidClock;
 import com.google.ipc.invalidation.ticl.android2.AndroidInvalidationListenerIntentMapper;
 import com.google.ipc.invalidation.ticl.android2.ProtocolIntents;
 import com.google.ipc.invalidation.ticl.android2.channel.AndroidChannelConstants.AuthTokenConstants;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.RegistrationCommand;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.StartCommand;
-import com.google.protos.ipc.invalidation.ClientProtocol.ClientConfigP;
-import com.google.protos.ipc.invalidation.ClientProtocol.InvalidationMessage;
-import com.google.protos.ipc.invalidation.ClientProtocol.InvalidationP;
-import com.google.protos.ipc.invalidation.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.RegistrationCommand;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.StartCommand;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ClientConfigP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.InvalidationMessage;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.InvalidationP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
+import com.google.ipc.invalidation.util.Bytes;
+import com.google.ipc.invalidation.util.Preconditions;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
 
 import android.app.IntentService;
 import android.app.PendingIntent;
@@ -126,7 +128,7 @@ public abstract class AndroidListener extends IntentService {
 
   /** The last client ID passed to the ready up-call. */
   
-  static byte[] lastClientIdForTest;
+  static Bytes lastClientIdForTest;
 
   /**
    * Invalidation listener implementation. We implement the interface on a private field rather
@@ -136,30 +138,30 @@ public abstract class AndroidListener extends IntentService {
   private final InvalidationListener invalidationListener = new InvalidationListener() {
     @Override
     public final void ready(final InvalidationClient client) {
-      byte[] clientId = state.getClientId().toByteArray();
+      Bytes clientId = state.getClientId();
       AndroidListener.lastClientIdForTest = clientId;
-      AndroidListener.this.ready(clientId);
+      AndroidListener.this.ready(clientId.getByteArray());
     }
 
     @Override
     public final void reissueRegistrations(final InvalidationClient client, byte[] prefix,
         int prefixLength) {
-      AndroidListener.this.reissueRegistrations(state.getClientId().toByteArray());
+      AndroidListener.this.reissueRegistrations(state.getClientId().getByteArray());
     }
 
     @Override
     public final void informRegistrationStatus(final InvalidationClient client,
         final ObjectId objectId, final RegistrationState regState) {
       state.informRegistrationSuccess(objectId);
-      AndroidListener.this.informRegistrationStatus(state.getClientId().toByteArray(),
-          objectId, regState);
+      AndroidListener.this.informRegistrationStatus(state.getClientId().getByteArray(), objectId,
+          regState);
     }
 
     @Override
     public final void informRegistrationFailure(final InvalidationClient client,
         final ObjectId objectId, final boolean isTransient, final String errorMessage) {
       state.informRegistrationFailure(objectId, isTransient);
-      AndroidListener.this.informRegistrationFailure(state.getClientId().toByteArray(), objectId,
+      AndroidListener.this.informRegistrationFailure(state.getClientId().getByteArray(), objectId,
           isTransient, errorMessage);
     }
 
@@ -217,7 +219,7 @@ public abstract class AndroidListener extends IntentService {
     Preconditions.checkNotNull(config.clientName);
 
     return AndroidListenerIntents.createStartIntent(context, config.clientType,
-        config.clientName, config.allowSuppression);
+        Bytes.fromByteArray(config.clientName), config.allowSuppression);
   }
 
   /** See specs for {@link InvalidationClient#start}. */
@@ -226,8 +228,8 @@ public abstract class AndroidListener extends IntentService {
     Preconditions.checkNotNull(clientName);
 
     final boolean allowSuppression = true;
-    return AndroidListenerIntents.createStartIntent(context, clientType, clientName,
-        allowSuppression);
+    return AndroidListenerIntents.createStartIntent(context, clientType,
+        Bytes.fromByteArray(clientName), allowSuppression);
   }
 
   /** See specs for {@link InvalidationClient#stop}. */
@@ -251,8 +253,8 @@ public abstract class AndroidListener extends IntentService {
     Preconditions.checkNotNull(objectIds);
 
     final boolean isRegister = true;
-    return AndroidListenerIntents.createRegistrationIntent(context, clientId, objectIds,
-        isRegister);
+    return AndroidListenerIntents.createRegistrationIntent(context, Bytes.fromByteArray(clientId),
+        objectIds, isRegister);
   }
 
   /**
@@ -283,8 +285,8 @@ public abstract class AndroidListener extends IntentService {
     Preconditions.checkNotNull(objectIds);
 
     final boolean isRegister = false;
-    return AndroidListenerIntents.createRegistrationIntent(context, clientId, objectIds,
-        isRegister);
+    return AndroidListenerIntents.createRegistrationIntent(context, Bytes.fromByteArray(clientId),
+        objectIds, isRegister);
   }
 
   /**
@@ -499,7 +501,7 @@ public abstract class AndroidListener extends IntentService {
         }
         return state;
       }
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.warning("Failed to parse listener state: %s", exception);
     }
     return null;
@@ -552,13 +554,13 @@ public abstract class AndroidListener extends IntentService {
     // Make sure the registration is intended for this client. If not, we ignore it (suggests
     // there is a new client now).
     if (!command.getClientId().equals(state.getClientId())) {
-      logger.warning("Ignoring registration request for old client. Old ID = {0}, New ID = {1}",
+      logger.warning("Ignoring registration request for old client. Old ID = %s, New ID = %s",
           command.getClientId(), state.getClientId());
       return true;
     }
     boolean isRegister = command.getIsRegister();
-    for (ObjectIdP objectIdP : command.getObjectIdList()) {
-      ObjectId objectId = ProtoConverter.convertFromObjectIdProto(objectIdP);
+    for (ObjectIdP objectIdP : command.getObjectId()) {
+      ObjectId objectId = ProtoWrapperConverter.convertFromObjectIdProto(objectIdP);
       // We may need to delay the registration command (if it is not already delayed).
       int delayMs = 0;
       if (!command.getIsDelayed()) {
@@ -607,12 +609,14 @@ public abstract class AndroidListener extends IntentService {
     // messages directed at the wrong instance.
     state = new AndroidListenerState(initialMaxDelayMs, maxDelayFactor);
     boolean skipStartForTest = false;
-    ClientConfigP clientConfig = command.getAllowSuppression() ?
-        ClientConfigP.getDefaultInstance() :
-            ClientConfigP.newBuilder().setAllowSuppression(false).build();
+    ClientConfigP clientConfig = InvalidationClientCore.createConfig();
+    if (command.getAllowSuppression() != clientConfig.getAllowSuppression()) {
+      ClientConfigP.Builder clientConfigBuilder = clientConfig.toBuilder();
+      clientConfigBuilder.allowSuppression = command.getAllowSuppression();
+      clientConfig = clientConfigBuilder.build();
+    }
     Intent startIntent = ProtocolIntents.InternalDowncalls.newCreateClientIntent(
-        command.getClientType(), command.getClientName().toByteArray(),
-        clientConfig, skipStartForTest);
+        command.getClientType(), command.getClientName(), clientConfig, skipStartForTest);
     AndroidListenerIntents.issueTiclIntent(getApplicationContext(), startIntent);
     return true;
   }
@@ -639,11 +643,11 @@ public abstract class AndroidListener extends IntentService {
     try {
       InvalidationMessage invalidationMessage = InvalidationMessage.parseFrom(data);
       List<Invalidation> invalidations = new ArrayList<Invalidation>();
-      for (InvalidationP invalidation : invalidationMessage.getInvalidationList()) {
-        invalidations.add(ProtoConverter.convertFromInvalidationProto(invalidation));
+      for (InvalidationP invalidation : invalidationMessage.getInvalidation()) {
+        invalidations.add(ProtoWrapperConverter.convertFromInvalidationProto(invalidation));
       }
       backgroundInvalidateForInternalUse(invalidations);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.info("Failed to parse background invalidation intent payload: %s",
           exception.getMessage());
     }

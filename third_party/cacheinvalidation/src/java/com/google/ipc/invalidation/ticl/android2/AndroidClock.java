@@ -16,7 +16,6 @@
 
 package com.google.ipc.invalidation.ticl.android2;
 
-
 /**
  * Interface for the Android Ticl that provides a source of time.
  *

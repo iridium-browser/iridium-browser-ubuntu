@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/alias.h"
+#include "base/numerics/safe_math.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
@@ -23,8 +24,6 @@
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/media/media_internals.h"
 #include "content/browser/plugin_process_host.h"
-#include "content/browser/plugin_service_impl.h"
-#include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/pepper/pepper_security_helper.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -33,9 +32,11 @@
 #include "content/browser/transition_request_manager.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
+#include "content/common/content_constants_internal.h"
 #include "content/common/cookie_data.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/frame_messages.h"
+#include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 #include "content/common/host_shared_bitmap_manager.h"
 #include "content/common/media/media_param_traits.h"
 #include "content/common/view_messages.h"
@@ -86,7 +87,14 @@
 #include "content/common/sandbox_win.h"
 #endif
 #if defined(OS_ANDROID)
+#include "content/browser/renderer_host/compositor_impl_android.h"
+#include "content/common/gpu/client/gpu_memory_buffer_impl_surface_texture.h"
 #include "media/base/android/webaudio_media_codec_bridge.h"
+#endif
+
+#if defined(ENABLE_PLUGINS)
+#include "content/browser/plugin_service_impl.h"
+#include "content/browser/ppapi_plugin_process_host.h"
 #endif
 
 using net::CookieStore;
@@ -97,10 +105,6 @@ namespace {
 #if defined(ENABLE_PLUGINS)
 const int kPluginsRefreshThresholdInSeconds = 3;
 #endif
-
-// When two CPU usage queries arrive within this interval, we sample the CPU
-// usage only once and send it as a response for both queries.
-static const int64 kCPUUsageSampleIntervalMs = 900;
 
 const uint32 kFilteredMessageClasses[] = {
   ChildProcessMsgStart,
@@ -145,6 +149,7 @@ class RenderMessageCompletionCallback {
   IPC::Message* reply_msg_;
 };
 
+#if defined(ENABLE_PLUGINS)
 class OpenChannelToPpapiPluginCallback
     : public RenderMessageCompletionCallback,
       public PpapiPluginProcessHost::PluginClient {
@@ -216,6 +221,7 @@ class OpenChannelToPpapiBrokerCallback
   scoped_refptr<RenderMessageFilter> filter_;
   int routing_id_;
 };
+#endif  // defined(ENABLE_PLUGINS)
 
 }  // namespace
 
@@ -321,12 +327,12 @@ RenderMessageFilter::RenderMessageFilter(
       incognito_(browser_context->IsOffTheRecord()),
       dom_storage_context_(dom_storage_context),
       render_process_id_(render_process_id),
-      cpu_usage_(0),
       audio_manager_(audio_manager),
       media_internals_(media_internals) {
   DCHECK(request_context_.get());
 
-  render_widget_helper_->Init(render_process_id_, resource_dispatcher_host_);
+  if (render_widget_helper)
+    render_widget_helper_->Init(render_process_id_, resource_dispatcher_host_);
 }
 
 RenderMessageFilter::~RenderMessageFilter() {
@@ -354,18 +360,9 @@ void RenderMessageFilter::OnChannelClosing() {
   }
 #endif  // defined(ENABLE_PLUGINS)
   plugin_host_clients_.clear();
-}
-
-void RenderMessageFilter::OnChannelConnected(int32 peer_id) {
-  base::ProcessHandle handle = PeerHandle();
-#if defined(OS_MACOSX)
-  process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(handle,
-                                                                    NULL));
-#else
-  process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(handle));
+#if defined(OS_ANDROID)
+  CompositorImpl::DestroyAllSurfaceTextures(render_process_id_);
 #endif
-  cpu_usage_ = process_metrics_->GetCPUUsage(); // Initialize CPU usage counters
-  cpu_usage_sample_time_ = base::TimeTicks::Now();
 }
 
 bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
@@ -391,6 +388,8 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_LoadFont, OnLoadFont)
 #endif
     IPC_MESSAGE_HANDLER(ViewHostMsg_DownloadUrl, OnDownloadUrl)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_SaveImageFromDataURL,
+                        OnSaveImageFromDataURL)
 #if defined(ENABLE_PLUGINS)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetPlugins, OnGetPlugins)
     IPC_MESSAGE_HANDLER(FrameHostMsg_GetPluginInfo, OnGetPluginInfo)
@@ -419,6 +418,11 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnAllocateSharedMemory)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(
         ChildProcessHostMsg_SyncAllocateSharedBitmap, OnAllocateSharedBitmap)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(
+        ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer,
+        OnAllocateGpuMemoryBuffer)
+    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_DeletedGpuMemoryBuffer,
+                        OnDeletedGpuMemoryBuffer)
     IPC_MESSAGE_HANDLER(ChildProcessHostMsg_AllocatedSharedBitmap,
                         OnAllocatedSharedBitmap)
     IPC_MESSAGE_HANDLER(ChildProcessHostMsg_DeletedSharedBitmap,
@@ -430,7 +434,6 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidGenerateCacheableMetadata,
                         OnCacheableMetadataAvailable)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_Keygen, OnKeygen)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetCPUUsage, OnGetCPUUsage)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetAudioHardwareConfig,
                         OnGetAudioHardwareConfig)
 #if defined(OS_WIN)
@@ -555,7 +558,7 @@ void RenderMessageFilter::OnGetProcessMemorySizes(size_t* private_bytes,
       PeerHandle()));
 #else
   scoped_ptr<ProcessMetrics> metrics(ProcessMetrics::CreateProcessMetrics(
-      PeerHandle(), content::BrowserChildProcessHost::GetPortProvider()));
+      PeerHandle(), BrowserChildProcessHost::GetPortProvider()));
 #endif
   if (!metrics->GetMemoryBytes(private_bytes, shared_bytes)) {
     *private_bytes = 0;
@@ -831,16 +834,6 @@ void RenderMessageFilter::OnGenerateRoutingID(int* route_id) {
   *route_id = render_widget_helper_->GetNextRoutingID();
 }
 
-void RenderMessageFilter::OnGetCPUUsage(int* cpu_usage) {
-  base::TimeTicks now = base::TimeTicks::Now();
-  int64 since_last_sample_ms = (now - cpu_usage_sample_time_).InMilliseconds();
-  if (since_last_sample_ms > kCPUUsageSampleIntervalMs) {
-    cpu_usage_sample_time_ = now;
-    cpu_usage_ = static_cast<int>(process_metrics_->GetCPUUsage());
-  }
-  *cpu_usage = cpu_usage_;
-}
-
 void RenderMessageFilter::OnGetAudioHardwareConfig(
     media::AudioParameters* input_params,
     media::AudioParameters* output_params) {
@@ -860,11 +853,11 @@ void RenderMessageFilter::OnGetMonitorColorProfile(std::vector<char>* profile) {
 }
 #endif
 
-void RenderMessageFilter::OnDownloadUrl(int render_view_id,
-                                        const GURL& url,
-                                        const Referrer& referrer,
-                                        const base::string16& suggested_name,
-                                        const bool use_prompt) {
+void RenderMessageFilter::DownloadUrl(int render_view_id,
+                                      const GURL& url,
+                                      const Referrer& referrer,
+                                      const base::string16& suggested_name,
+                                      const bool use_prompt) const {
   scoped_ptr<DownloadSaveInfo> save_info(new DownloadSaveInfo());
   save_info->suggested_name = suggested_name;
   save_info->prompt_for_save_location = use_prompt;
@@ -876,6 +869,7 @@ void RenderMessageFilter::OnDownloadUrl(int render_view_id,
   // default cookie store.
   // TODO(tburkard): retrieve the appropriate special cookie store, if this
   // is ever to be used for downloads as well.
+
   scoped_ptr<net::URLRequest> request(
       resource_context_->GetRequestContext()->CreateRequest(
           url, net::DEFAULT_PRIORITY, NULL, NULL));
@@ -889,8 +883,28 @@ void RenderMessageFilter::OnDownloadUrl(int render_view_id,
       render_view_id,
       false,
       save_info.Pass(),
-      content::DownloadItem::kInvalidId,
+      DownloadItem::kInvalidId,
       ResourceDispatcherHostImpl::DownloadStartedCallback());
+}
+
+void RenderMessageFilter::OnDownloadUrl(int render_view_id,
+                                        const GURL& url,
+                                        const Referrer& referrer,
+                                        const base::string16& suggested_name) {
+  DownloadUrl(render_view_id, url, referrer, suggested_name, false);
+}
+
+void RenderMessageFilter::OnSaveImageFromDataURL(int render_view_id,
+                                                 const std::string& url_str) {
+  // Please refer to RenderViewImpl::saveImageFromDataURL().
+  if (url_str.length() >= kMaxLengthOfDataURLString)
+    return;
+
+  GURL data_url(url_str);
+  if (!data_url.SchemeIs(url::kDataScheme))
+    return;
+
+  DownloadUrl(render_view_id, data_url, Referrer(), base::string16(), true);
 }
 
 void RenderMessageFilter::OnCheckNotificationPermission(
@@ -1215,7 +1229,6 @@ void RenderMessageFilter::OnWebAudioMediaCodec(
 }
 #endif
 
-
 void RenderMessageFilter::OnAddNavigationTransitionData(
     int render_frame_id,
     const std::string& allowed_destination_host_pattern,
@@ -1224,6 +1237,70 @@ void RenderMessageFilter::OnAddNavigationTransitionData(
   TransitionRequestManager::GetInstance()->AddPendingTransitionRequestData(
       render_process_id_, render_frame_id, allowed_destination_host_pattern,
       selector, markup);
+}
+
+void RenderMessageFilter::OnAllocateGpuMemoryBuffer(uint32 width,
+                                                    uint32 height,
+                                                    uint32 internalformat,
+                                                    uint32 usage,
+                                                    IPC::Message* reply) {
+  if (!GpuMemoryBufferImpl::IsFormatValid(internalformat) ||
+      !GpuMemoryBufferImpl::IsUsageValid(usage)) {
+    GpuMemoryBufferAllocated(reply, gfx::GpuMemoryBufferHandle());
+    return;
+  }
+  base::CheckedNumeric<int> size = width;
+  size *= height;
+  if (!size.IsValid()) {
+    GpuMemoryBufferAllocated(reply, gfx::GpuMemoryBufferHandle());
+    return;
+  }
+
+#if defined(OS_ANDROID)
+  // TODO(reveman): This should be moved to
+  // GpuMemoryBufferImpl::AllocateForChildProcess and
+  // GpuMemoryBufferImplSurfaceTexture when adding support for out-of-process
+  // GPU service. crbug.com/368716
+  if (GpuMemoryBufferImplSurfaceTexture::IsConfigurationSupported(
+          internalformat, usage)) {
+    // Each surface texture is associated with a render process id. This allows
+    // the GPU service and Java Binder IPC to verify that a renderer is not
+    // trying to use a surface texture it doesn't own.
+    int surface_texture_id =
+        CompositorImpl::CreateSurfaceTexture(render_process_id_);
+    if (surface_texture_id != -1) {
+      gfx::GpuMemoryBufferHandle handle;
+      handle.type = gfx::SURFACE_TEXTURE_BUFFER;
+      handle.surface_texture_id =
+          gfx::SurfaceTextureId(surface_texture_id, render_process_id_);
+      GpuMemoryBufferAllocated(reply, handle);
+      return;
+    }
+  }
+#endif
+
+  GpuMemoryBufferImpl::AllocateForChildProcess(
+      gfx::Size(width, height),
+      internalformat,
+      usage,
+      PeerHandle(),
+      render_process_id_,
+      base::Bind(&RenderMessageFilter::GpuMemoryBufferAllocated, this, reply));
+}
+
+void RenderMessageFilter::GpuMemoryBufferAllocated(
+    IPC::Message* reply,
+    const gfx::GpuMemoryBufferHandle& handle) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer::WriteReplyParams(reply,
+                                                                    handle);
+  Send(reply);
+}
+
+void RenderMessageFilter::OnDeletedGpuMemoryBuffer(
+    gfx::GpuMemoryBufferType type,
+    const gfx::GpuMemoryBufferId& id) {
+  GpuMemoryBufferImpl::DeletedByChildProcess(type, id, PeerHandle());
 }
 
 }  // namespace content

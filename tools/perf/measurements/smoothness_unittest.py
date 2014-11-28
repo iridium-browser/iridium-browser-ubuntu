@@ -13,7 +13,16 @@ from telemetry.unittest import options_for_unittests
 from telemetry.unittest import page_test_test_case
 from telemetry.unittest import test
 
+class FakeTracingController(object):
+  def __init__(self):
+    self.category_filter = None
+  def Start(self, _options, category_filter, _timeout):
+    self.category_filter = category_filter
+
+
 class FakePlatform(object):
+  def __init__(self):
+    self.tracing_controller = FakeTracingController()
   def IsRawDisplayFrameRateSupported(self):
     return False
   def CanMonitorPower(self):
@@ -23,10 +32,6 @@ class FakePlatform(object):
 class FakeBrowser(object):
   def __init__(self):
     self.platform = FakePlatform()
-    self.category_filter = None
-
-  def StartTracing(self, category_filter, _):
-    self.category_filter = category_filter
 
 
 class AnimatedPage(page.Page):
@@ -63,18 +68,19 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
 
     tab = FakeTab()
     measurement = smoothness.Smoothness()
-    measurement.WillStartBrowser(tab.browser)
+    measurement.WillStartBrowser(tab.browser.platform)
     measurement.WillNavigateToPage(test_page, tab)
     measurement.WillRunActions(test_page, tab)
 
-    expected_category_filter = [
+    expected_category_filter = set([
         'DELAY(cc.BeginMainFrame;0.012000;static)',
         'DELAY(cc.DrawAndSwap;0.012000;alternating)',
         'DELAY(gpu.PresentingFrame;0.012000;static)',
         'benchmark'
-    ]
-    actual_category_filter = tab.browser.category_filter.split(',')
-    actual_category_filter.sort()
+    ])
+    tracing_controller = tab.browser.platform.tracing_controller
+    actual_category_filter = (
+      tracing_controller.category_filter.included_categories)
 
     # FIXME: Put blink.console into the expected above and remove these two
     # remove entries when the blink.console change has rolled into chromium.
@@ -121,7 +127,7 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
       self.assertGreater(
           mean_input_event_latency[0].GetRepresentativeNumber(), 0)
 
-  @test.Disabled('mac')  # http://crbug.com/403903
+  @test.Disabled('mac', 'chromeos')  # http://crbug.com/403903
   def testSmoothnessForPageWithNoGesture(self):
     ps = self.CreateEmptyPageSet()
     ps.AddPage(AnimatedPage(ps))
@@ -160,8 +166,8 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
     class BuggyMeasurement(smoothness.Smoothness):
       fake_power = None
       # Inject fake power metric.
-      def WillStartBrowser(self, browser):
-        self.fake_power = self._power_metric = FakePowerMetric(browser)
+      def WillStartBrowser(self, platform):
+        self.fake_power = self._power_metric = FakePowerMetric(platform)
 
     measurement = BuggyMeasurement()
     try:

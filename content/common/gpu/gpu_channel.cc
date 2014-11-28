@@ -410,9 +410,9 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
       software_(software),
       handle_messages_scheduled_(false),
       currently_processing_message_(NULL),
-      weak_factory_(this),
       num_stubs_descheduled_(0),
-      allow_future_sync_points_(allow_future_sync_points) {
+      allow_future_sync_points_(allow_future_sync_points),
+      weak_factory_(this) {
   DCHECK(gpu_channel_manager);
   DCHECK(client_id);
 
@@ -662,16 +662,46 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
+size_t GpuChannel::MatchSwapBufferMessagesPattern(
+    IPC::Message* current_message) {
+  DCHECK(current_message);
+  if (deferred_messages_.empty() || !current_message)
+    return 0;
+  // Only care about AsyncFlush message.
+  if (current_message->type() != GpuCommandBufferMsg_AsyncFlush::ID)
+    return 0;
+
+  size_t index = 0;
+  int32 routing_id = current_message->routing_id();
+
+  // Fetch the first message and move index to point to the second message.
+  IPC::Message* first_message = deferred_messages_[index++];
+
+  // If the current message is AsyncFlush, the expected message sequence for
+  // SwapBuffer should be AsyncFlush->Echo. We only try to match Echo message.
+  if (current_message->type() == GpuCommandBufferMsg_AsyncFlush::ID &&
+      first_message->type() == GpuCommandBufferMsg_Echo::ID &&
+      first_message->routing_id() == routing_id) {
+    return 1;
+  }
+
+  // No matched message is found.
+  return 0;
+}
+
 void GpuChannel::HandleMessage() {
   handle_messages_scheduled_ = false;
   if (deferred_messages_.empty())
     return;
 
-  bool should_fast_track_ack = false;
-  IPC::Message* m = deferred_messages_.front();
-  GpuCommandBufferStub* stub = stubs_.Lookup(m->routing_id());
+  size_t matched_messages_num = 0;
+  bool should_handle_swapbuffer_msgs_immediate = false;
+  IPC::Message* m = NULL;
+  GpuCommandBufferStub* stub = NULL;
 
   do {
+    m = deferred_messages_.front();
+    stub = stubs_.Lookup(m->routing_id());
     if (stub) {
       if (!stub->IsScheduled())
         return;
@@ -715,17 +745,29 @@ void GpuChannel::HandleMessage() {
     if (message_processed)
       MessageProcessed();
 
-    // We want the EchoACK following the SwapBuffers to be sent as close as
-    // possible, avoiding scheduling other channels in the meantime.
-    should_fast_track_ack = false;
-    if (!deferred_messages_.empty()) {
-      m = deferred_messages_.front();
-      stub = stubs_.Lookup(m->routing_id());
-      should_fast_track_ack =
-          (m->type() == GpuCommandBufferMsg_Echo::ID) &&
-          stub && stub->IsScheduled();
+    if (deferred_messages_.empty())
+      break;
+
+    // We process the pending messages immediately if these messages matches
+    // the pattern of SwapBuffers, for example, GLRenderer always issues
+    // SwapBuffers calls with a specific IPC message patterns, for example,
+    // it should be AsyncFlush->Echo sequence.
+    //
+    // Instead of posting a task to message loop, it could avoid the possibility
+    // of being blocked by other channels, and make SwapBuffers executed as soon
+    // as possible.
+    if (!should_handle_swapbuffer_msgs_immediate) {
+      // Start from the current processing message to match SwapBuffer pattern.
+      matched_messages_num = MatchSwapBufferMessagesPattern(message.get());
+      should_handle_swapbuffer_msgs_immediate =
+          matched_messages_num > 0 && stub;
+    } else {
+      DCHECK_GT(matched_messages_num, 0u);
+      --matched_messages_num;
+      if (!stub || matched_messages_num == 0)
+        should_handle_swapbuffer_msgs_immediate = false;
     }
-  } while (should_fast_track_ack);
+  } while (should_handle_swapbuffer_msgs_immediate);
 
   if (!deferred_messages_.empty()) {
     OnScheduled();

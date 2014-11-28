@@ -56,7 +56,7 @@ public:
         ForTextEmphasis
     };
 
-    HarfBuzzShaper(const Font*, const TextRun&, ForTextEmphasisOrNot = NotForTextEmphasis);
+    HarfBuzzShaper(const Font*, const TextRun&, ForTextEmphasisOrNot = NotForTextEmphasis, HashSet<const SimpleFontData*>* fallbackFonts = 0);
 
     void setDrawRange(int from, int to);
     bool shape(GlyphBuffer* = 0);
@@ -72,13 +72,12 @@ private:
         HarfBuzzRun(const HarfBuzzRun&);
         ~HarfBuzzRun();
 
-        static PassOwnPtr<HarfBuzzRun> create(const SimpleFontData* fontData, unsigned startIndex, unsigned numCharacters, TextDirection direction, hb_script_t script)
+        static PassOwnPtr<HarfBuzzRun> create(const SimpleFontData* fontData, unsigned startIndex, unsigned numCharacters, hb_direction_t direction, hb_script_t script)
         {
             return adoptPtr(new HarfBuzzRun(fontData, startIndex, numCharacters, direction, script));
         }
 
         void applyShapeResult(hb_buffer_t*);
-        void copyShapeResultAndGlyphPositions(const HarfBuzzRun&);
         void setGlyphAndPositions(unsigned index, uint16_t glyphId, float advance, float offsetX, float offsetY);
         void setWidth(float width) { m_width = width; }
 
@@ -101,17 +100,18 @@ private:
             return &m_glyphToCharacterIndexes[0];
         }
         float width() { return m_width; }
-        bool rtl() { return m_direction == RTL; }
+        hb_direction_t direction() { return m_direction; }
+        bool rtl() { return m_direction == HB_DIRECTION_RTL; }
         hb_script_t script() { return m_script; }
 
     private:
-        HarfBuzzRun(const SimpleFontData*, unsigned startIndex, unsigned numCharacters, TextDirection, hb_script_t);
+        HarfBuzzRun(const SimpleFontData*, unsigned startIndex, unsigned numCharacters, hb_direction_t, hb_script_t);
 
         const SimpleFontData* m_fontData;
         unsigned m_startIndex;
         size_t m_numCharacters;
         unsigned m_numGlyphs;
-        TextDirection m_direction;
+        hb_direction_t m_direction;
         hb_script_t m_script;
         Vector<uint16_t, 256> m_glyphs;
         Vector<float, 256> m_advances;
@@ -120,14 +120,10 @@ private:
         float m_width;
     };
 
-    bool isWordEnd(unsigned);
     int determineWordBreakSpacing();
     // setPadding sets a number of pixels to be distributed across the TextRun.
     // WebKit uses this to justify text.
     void setPadding(int);
-
-    // In complex text word-spacing affects each line-break, space (U+0020) and non-breaking space (U+00A0).
-    static bool isCodepointSpace(UChar c) { return c == ' ' || c == noBreakSpace || c == '\n'; }
 
     void setFontFeatures();
 
@@ -162,6 +158,7 @@ private:
 
     float m_totalWidth;
     FloatBoxExtent m_glyphBoundingBox;
+    HashSet<const SimpleFontData*>* m_fallbackFonts;
 
     friend struct CachedShapingResults;
 };

@@ -43,15 +43,16 @@
 
 namespace blink {
 
-class Dictionary;
 class ExecutionContext;
+class NotificationOptions;
 class NotificationPermissionCallback;
 
 class Notification : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<Notification>, public ActiveDOMObject, public EventTargetWithInlineData {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<Notification>);
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Notification);
 public:
-    static Notification* create(ExecutionContext*, const String& title, const Dictionary& options);
+    static Notification* create(ExecutionContext*, const String& title, const NotificationOptions&);
 
     virtual ~Notification();
 
@@ -79,7 +80,7 @@ public:
 
     static const String& permissionString(NotificationClient::Permission);
     static const String& permission(ExecutionContext*);
-    static void requestPermission(ExecutionContext*, PassOwnPtr<NotificationPermissionCallback> = nullptr);
+    static void requestPermission(ExecutionContext*, NotificationPermissionCallback* = nullptr);
 
     // EventTarget interface.
     virtual ExecutionContext* executionContext() const OVERRIDE FINAL { return ActiveDOMObject::executionContext(); }

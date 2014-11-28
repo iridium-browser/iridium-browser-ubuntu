@@ -111,7 +111,7 @@ public:
     virtual void VisitPersistentHandle(v8::Persistent<v8::Value>* value, uint16_t classId) OVERRIDE
     {
         // A minor DOM GC can collect only Nodes.
-        if (classId != v8DOMNodeClassId)
+        if (classId != WrapperTypeInfo::NodeClassId)
             return;
 
         // To make minor GC cycle time bounded, we limit the number of wrappers handled
@@ -131,7 +131,7 @@ public:
         v8::Handle<v8::Object>* wrapper = reinterpret_cast<v8::Handle<v8::Object>*>(value);
         ASSERT(V8DOMWrapper::isDOMWrapper(*wrapper));
         ASSERT(V8Node::hasInstance(*wrapper, m_isolate));
-        Node* node = V8Node::toNative(*wrapper);
+        Node* node = V8Node::toImpl(*wrapper);
         // A minor DOM GC can handle only node wrappers in the main world.
         // Note that node->wrapper().IsEmpty() returns true for nodes that
         // do not have wrappers in the main world.
@@ -146,8 +146,10 @@ public:
             // See https://code.google.com/p/chromium/issues/detail?id=164882
             if (isHTMLImageElement(*node) && toHTMLImageElement(*node).hasPendingActivity())
                 return;
-            // FIXME: Remove the special handling for SVG context elements.
-            if (node->isSVGElement() && toSVGElement(node)->isContextElement())
+            // FIXME: Remove the special handling for SVG elements.
+            // We currently can't collect SVG Elements from minor gc, as we have
+            // strong references from SVG property tear-offs keeping context SVG element alive.
+            if (node->isSVGElement())
                 return;
 
             m_nodesInNewSpace.append(node);
@@ -252,7 +254,7 @@ public:
 
     virtual void VisitPersistentHandle(v8::Persistent<v8::Value>* value, uint16_t classId) OVERRIDE
     {
-        if (classId != v8DOMNodeClassId && classId != v8DOMObjectClassId)
+        if (classId != WrapperTypeInfo::NodeClassId && classId != WrapperTypeInfo::ObjectClassId)
             return;
 
         // Casting to a Handle is safe here, since the Persistent doesn't get GCd
@@ -270,17 +272,17 @@ public:
         if (activeDOMObject && activeDOMObject->hasPendingActivity())
             m_isolate->SetObjectGroupId(*value, liveRootId());
 
-        if (classId == v8DOMNodeClassId) {
+        if (classId == WrapperTypeInfo::NodeClassId) {
             ASSERT(V8Node::hasInstance(*wrapper, m_isolate));
-            Node* node = V8Node::toNative(*wrapper);
+            Node* node = V8Node::toImpl(*wrapper);
             if (node->hasEventListeners())
                 addReferencesForNodeWithEventListeners(m_isolate, node, v8::Persistent<v8::Object>::Cast(*value));
             Node* root = V8GCController::opaqueRootForGC(node, m_isolate);
             m_isolate->SetObjectGroupId(*value, v8::UniqueId(reinterpret_cast<intptr_t>(root)));
             if (m_constructRetainedObjectInfos)
                 m_groupsWhichNeedRetainerInfo.append(root);
-        } else if (classId == v8DOMObjectClassId) {
-            type->visitDOMWrapper(toInternalPointer(*wrapper), v8::Persistent<v8::Object>::Cast(*value), m_isolate);
+        } else if (classId == WrapperTypeInfo::ObjectClassId) {
+            type->visitDOMWrapper(toScriptWrappableBase(*wrapper), v8::Persistent<v8::Object>::Cast(*value), m_isolate);
         } else {
             ASSERT_NOT_REACHED();
         }
@@ -401,7 +403,7 @@ void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
         // to collect all garbage, you need to wait until the next event loop.
         // Regarding (2), it would be OK in practice to trigger only one GC per gcEpilogue, because
         // GCController.collectAll() forces 7 V8's GC.
-        Heap::collectGarbage(ThreadState::HeapPointersOnStack);
+        Heap::collectGarbage(ThreadState::HeapPointersOnStack, ThreadState::ForcedGC);
 
         // Forces a precise GC at the end of the current event loop.
         Heap::setForcePreciseGCForTesting();
@@ -422,12 +424,26 @@ void V8GCController::minorGCEpilogue(v8::Isolate* isolate)
 
 void V8GCController::majorGCEpilogue(v8::Isolate* isolate)
 {
-    v8::HandleScope scope(isolate);
-
     TRACE_EVENT_END0("v8", "majorGC");
     if (isMainThread()) {
         TRACE_EVENT_SET_NONCONST_SAMPLING_STATE(V8PerIsolateData::from(isolate)->previousSamplingState());
         ScriptForbiddenScope::exit();
+
+        // Schedule a precise GC to avoid the following scenario:
+        // (1) A DOM object X holds a v8::Persistent to a V8 object.
+        //     Assume that X is small but the V8 object is huge.
+        //     The v8::Persistent is released when X is destructed.
+        // (2) X's DOM wrapper is created.
+        // (3) The DOM wrapper becomes unreachable.
+        // (4) V8 triggers a GC. The V8's GC collects the DOM wrapper.
+        //     However, X is not collected until a next Oilpan's GC is
+        //     triggered.
+        // (5) If a lot of such DOM objects are created, we end up with
+        //     a situation where V8's GC collects the DOM wrappers but
+        //     the DOM objects are not collected forever. (Note that
+        //     Oilpan's GC is not triggered unless Oilpan's heap gets full.)
+        // (6) V8 hits OOM.
+        ThreadState::current()->setGCRequested();
     }
 }
 

@@ -72,6 +72,7 @@ cr.define('options', function() {
   /**
    * Encapsulated handling of ChromeOS language options page.
    * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function LanguageOptions(model) {
     Page.call(this, 'languages',
@@ -84,13 +85,14 @@ cr.define('options', function() {
   LanguageOptions.prototype = {
     __proto__: Page.prototype,
 
-    /* For recording the prospective language (the next locale after relaunch).
+    /**
+     * For recording the prospective language (the next locale after relaunch).
      * @type {?string}
      * @private
      */
     prospectiveUiLanguageCode_: null,
 
-    /*
+    /**
      * Map from language code to spell check dictionary download status for that
      * language.
      * @type {Array}
@@ -100,7 +102,7 @@ cr.define('options', function() {
 
     /**
      * Number of times a spell check dictionary download failed.
-     * @type {int}
+     * @type {number}
      * @private
      */
     spellcheckDictionaryDownloadFailures_: 0,
@@ -333,8 +335,7 @@ cr.define('options', function() {
           button.inputMethodId = inputMethod.id;
           button.onclick = function(inputMethodId, e) {
             chrome.send('inputMethodOptionsOpen', [inputMethodId]);
-          };
-          button.onclick = button.onclick.bind(this, inputMethod.id);
+          }.bind(this, inputMethod.id);
           element.appendChild(button);
         }
 
@@ -751,10 +752,9 @@ cr.define('options', function() {
 
     /**
      * Updates the language list in the add language overlay.
-     * @param {string} languageCode Language code (ex. "fr").
      * @private
      */
-    updateLanguageListInAddLanguageOverlay_: function(languageCode) {
+    updateLanguageListInAddLanguageOverlay_: function() {
       // Change the visibility of the language list in the add language
       // overlay. Languages that are already active will become invisible,
       // so that users don't add the same language twice.
@@ -828,7 +828,7 @@ cr.define('options', function() {
      * @private
      */
     handleCheckboxClick_: function(e) {
-      var checkbox = e.target;
+      var checkbox = assertInstanceof(e.target, Element);
 
       // Third party IMEs require additional confirmation prior to enabling due
       // to privacy risk.
@@ -912,10 +912,10 @@ cr.define('options', function() {
      * @param {Event} e Change event.
      * @private
      */
-    updateEnableSpellCheck_: function() {
+    updateEnableSpellCheck_: function(e) {
        var value = !$('enable-spell-check').checked;
        $('language-options-spell-check-language-button').disabled = value;
-       if (!cr.IsMac)
+       if (!cr.isMac)
          $('edit-dictionary-button').hidden = value;
      },
 
@@ -1169,10 +1169,17 @@ cr.define('options', function() {
     // If this will go as final UI, refactor this to share the component with
     // new new tab page.
     /**
-     * Shows notification
      * @private
      */
     notificationTimeout_: null,
+
+    /**
+     * Shows notification.
+     * @param {string} text
+     * @param {string} actionText
+     * @param {number=} opt_delay
+     * @private
+     */
     showNotification_: function(text, actionText, opt_delay) {
       var notificationElement = $('notification');
       var actionLink = notificationElement.querySelector('.link-color');
@@ -1298,7 +1305,7 @@ cr.define('options', function() {
       }
     },
 
-    /*
+    /**
      * Converts the language code for Translation. There are some differences
      * between the language set for Translation and that for Accept-Language.
      * @param {string} languageCode The language code like 'fr'.
@@ -1331,7 +1338,7 @@ cr.define('options', function() {
 
   /**
    * Shows the node at |index| in |nodes|, hides all others.
-   * @param {Array<HTMLElement>} nodes The nodes to be shown or hidden.
+   * @param {Array.<HTMLElement>} nodes The nodes to be shown or hidden.
    * @param {number} index The index of |nodes| to show.
    */
   function showMutuallyExclusiveNodes(nodes, index) {

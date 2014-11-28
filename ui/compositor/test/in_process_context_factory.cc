@@ -20,7 +20,10 @@ namespace ui {
 
 InProcessContextFactory::InProcessContextFactory()
     : shared_bitmap_manager_(new cc::TestSharedBitmapManager()) {
-  DCHECK_NE(gfx::GetGLImplementation(), gfx::kGLImplementationNone);
+  DCHECK_NE(gfx::GetGLImplementation(), gfx::kGLImplementationNone)
+      << "If running tests, ensure that main() is calling "
+      << "gfx::GLSurface::InitializeOneOffForTests()";
+
 #if defined(OS_CHROMEOS)
   bool use_thread = !CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kUIDisableThreadedCompositing);
@@ -70,7 +73,7 @@ void InProcessContextFactory::RemoveReflector(
 
 scoped_refptr<cc::ContextProvider>
 InProcessContextFactory::SharedMainThreadContextProvider() {
-  if (shared_main_thread_contexts_ &&
+  if (shared_main_thread_contexts_.get() &&
       !shared_main_thread_contexts_->DestroyedOnMainThread())
     return shared_main_thread_contexts_;
 
@@ -78,7 +81,7 @@ InProcessContextFactory::SharedMainThreadContextProvider() {
   shared_main_thread_contexts_ =
       webkit::gpu::ContextProviderInProcess::CreateOffscreen(
           lose_context_when_out_of_memory);
-  if (shared_main_thread_contexts_ &&
+  if (shared_main_thread_contexts_.get() &&
       !shared_main_thread_contexts_->BindToCurrentThread())
     shared_main_thread_contexts_ = NULL;
 
@@ -96,7 +99,7 @@ cc::SharedBitmapManager* InProcessContextFactory::GetSharedBitmapManager() {
 base::MessageLoopProxy* InProcessContextFactory::GetCompositorMessageLoop() {
   if (!compositor_thread_)
     return NULL;
-  return compositor_thread_->message_loop_proxy();
+  return compositor_thread_->message_loop_proxy().get();
 }
 
 }  // namespace ui

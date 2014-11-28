@@ -30,6 +30,7 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
+#include "bindings/core/v8/V8Document.h"
 #include "core/FetchInitiatorTypeNames.h"
 #include "core/HTMLNames.h"
 #include "core/XMLNSNames.h"
@@ -52,7 +53,6 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/ImageLoader.h"
 #include "core/svg/graphics/SVGImage.h"
-#include "core/xml/XMLTreeViewer.h"
 #include "core/xml/parser/SharedBufferReader.h"
 #include "core/xml/parser/XMLDocumentParserScope.h"
 #include "core/xml/parser/XMLParserInput.h"
@@ -441,6 +441,12 @@ void XMLDocumentParser::finish()
     // makes sense to call any methods on DocumentParser once it's been stopped.
     // However, FrameLoader::stop calls DocumentParser::finish unconditionally.
 
+    // flush may ending up executing arbitrary script, and possibly detach the parser.
+    RefPtrWillBeRawPtr<XMLDocumentParser> protect(this);
+    flush();
+    if (isDetached())
+        return;
+
     if (m_parserPaused)
         m_finishCalled = true;
     else
@@ -651,6 +657,8 @@ static void* openFunc(const char* uri)
     if (!shouldAllowExternalLoad(finalURL))
         return &globalDescriptor;
 
+    UseCounter::count(XMLDocumentParserScope::currentFetcher->document(), UseCounter::XMLExternalResourceLoad);
+
     return new SharedBufferReader(data);
 }
 
@@ -801,10 +809,10 @@ XMLDocumentParser::XMLDocumentParser(DocumentFragment* fragment, Element* parent
     while (parentElement) {
         elemStack.append(parentElement);
 
-        ContainerNode* n = parentElement->parentNode();
-        if (!n || !n->isElementNode())
+        Element* grandParentElement = parentElement->parentElement();
+        if (!grandParentElement)
             break;
-        parentElement = toElement(n);
+        parentElement = grandParentElement;
     }
 
     if (elemStack.isEmpty())
@@ -907,7 +915,7 @@ static inline void handleNamespaceAttributes(Vector<Attribute>& prefixedAttribut
         AtomicString namespaceQName = xmlnsAtom;
         AtomicString namespaceURI = toAtomicString(namespaces[i].uri);
         if (namespaces[i].prefix)
-            namespaceQName = "xmlns:" + toString(namespaces[i].prefix);
+            namespaceQName = WTF::xmlnsWithColon + namespaces[i].prefix;
 
         QualifiedName parsedName = anyName;
         if (!Element::parseAttributeName(parsedName, XMLNSNames::xmlnsNamespaceURI, namespaceQName, exceptionState))
@@ -998,6 +1006,13 @@ void XMLDocumentParser::startElementNs(const AtomicString& localName, const Atom
         m_scriptStartPosition = textPosition();
 
     m_currentNode->parserAppendChild(newElement.get());
+
+    // Event handlers may synchronously trigger removal of the
+    // document and cancellation of this parser.
+    if (isStopped()) {
+        stopParsing();
+        return;
+    }
 
     if (isHTMLTemplateElement(*newElement))
         pushCurrentNode(toHTMLTemplateElement(*newElement).content());
@@ -1434,7 +1449,6 @@ void XMLDocumentParser::initializeParserContext(const CString& chunk)
     sax.ignorableWhitespace = ignorableWhitespaceHandler;
     sax.entityDecl = xmlSAX2EntityDecl;
     sax.initialized = XML_SAX2_MAGIC;
-    DocumentParser::startParsing();
     m_sawError = false;
     m_sawCSS = false;
     m_sawXSLTransform = false;
@@ -1465,8 +1479,9 @@ void XMLDocumentParser::doEnd()
 
     bool xmlViewerMode = !m_sawError && !m_sawCSS && !m_sawXSLTransform && hasNoStyleInformation(document());
     if (xmlViewerMode) {
-        XMLTreeViewer xmlTreeViewer(document());
-        xmlTreeViewer.transformDocumentToTreeView();
+        const char noStyleMessage[] = "This XML file does not appear to have any style information associated with it. The document tree is shown below.";
+        document()->setIsViewSource(true);
+        V8Document::PrivateScript::transformDocumentToTreeViewMethod(document()->frame(), document(), noStyleMessage);
     } else if (m_sawXSLTransform) {
         xmlDocPtr doc = xmlDocPtrForString(document()->fetcher(), m_originalSourceForTransform.toString(), document()->url().string());
         document()->setTransformSource(adoptPtr(new TransformSource(doc)));

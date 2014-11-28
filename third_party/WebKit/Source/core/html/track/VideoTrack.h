@@ -11,10 +11,11 @@
 namespace blink {
 
 class VideoTrack FINAL : public TrackBase, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<VideoTrack> create(const String& id, const AtomicString& kind, const AtomicString& label, const AtomicString& language, bool selected)
     {
-        return adoptRefWillBeRefCountedGarbageCollected(new VideoTrack(id, kind, label, language, selected));
+        return adoptRefWillBeNoop(new VideoTrack(id, kind, label, language, selected));
     }
     virtual ~VideoTrack();
 
@@ -45,6 +46,6 @@ private:
 
 DEFINE_TRACK_TYPE_CASTS(VideoTrack, TrackBase::VideoTrack);
 
-}
+} // namespace blink
 
-#endif
+#endif // VideoTrack_h

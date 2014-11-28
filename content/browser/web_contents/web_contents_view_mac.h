@@ -77,8 +77,6 @@ class WebContentsViewMac : public WebContentsView,
   virtual void RestoreFocus() OVERRIDE;
   virtual DropData* GetDropData() const OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
-  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
-  virtual bool GetAllowOverlappingViews() const OVERRIDE;
   virtual void SetAllowOtherViews(bool allow) OVERRIDE;
   virtual bool GetAllowOtherViews() const OVERRIDE;
   virtual void CreateView(
@@ -95,9 +93,10 @@ class WebContentsViewMac : public WebContentsView,
   virtual void CloseTabAfterEventTracking() OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegateView.
-  virtual void ShowContextMenu(content::RenderFrameHost* render_frame_host,
+  virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
                                const ContextMenuParams& params) OVERRIDE;
-  virtual void ShowPopupMenu(const gfx::Rect& bounds,
+  virtual void ShowPopupMenu(RenderFrameHost* render_frame_host,
+                             const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
                              int selected_item,
@@ -134,9 +133,6 @@ class WebContentsViewMac : public WebContentsView,
 
   // Our optional delegate.
   scoped_ptr<WebContentsViewDelegate> delegate_;
-
-  // Whether to allow overlapping views.
-  bool allow_overlapping_views_;
 
   // Whether to allow other views.
   bool allow_other_views_;

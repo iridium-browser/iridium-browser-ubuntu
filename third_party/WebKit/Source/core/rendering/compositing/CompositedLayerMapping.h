@@ -90,7 +90,6 @@ public:
     bool hasAncestorClippingLayer() const { return m_ancestorClippingLayer; }
     GraphicsLayer* ancestorClippingLayer() const { return m_ancestorClippingLayer.get(); }
 
-    bool hasContentsLayer() const { return m_foregroundLayer; }
     GraphicsLayer* foregroundLayer() const { return m_foregroundLayer.get(); }
 
     GraphicsLayer* backgroundLayer() const { return m_backgroundLayer.get(); }
@@ -133,14 +132,13 @@ public:
     void setSquashingContentsNeedDisplay();
     void setContentsNeedDisplay();
     // r is in the coordinate space of the layer's render object
-    void setContentsNeedDisplayInRect(const LayoutRect&);
+    void setContentsNeedDisplayInRect(const LayoutRect&, WebInvalidationDebugAnnotations);
 
     // Notification from the renderer that its content changed.
     void contentChanged(ContentChangeType);
 
     LayoutRect compositedBounds() const { return m_compositedBounds; }
     IntRect pixelSnappedCompositedBounds() const;
-    void updateCompositedBounds();
 
     void positionOverflowControlsLayers(const IntSize& offsetFromRoot);
     bool hasUnpositionedOverflowControlsLayers() const;
@@ -204,17 +202,17 @@ public:
     }
 
     // If there is a squashed layer painting into this CLM that is an ancestor of the given RenderObject, return it. Otherwise return 0.
-    const GraphicsLayerPaintInfo* containingSquashedLayer(const RenderObject*);
+    const GraphicsLayerPaintInfo* containingSquashedLayer(const RenderObject*, unsigned maxSquashedLayerIndex);
 
     void updateScrollingBlockSelection();
 
 private:
-    static const GraphicsLayerPaintInfo* containingSquashedLayer(const RenderObject*,  const Vector<GraphicsLayerPaintInfo>& layers);
+    static const GraphicsLayerPaintInfo* containingSquashedLayer(const RenderObject*,  const Vector<GraphicsLayerPaintInfo>& layers, unsigned maxSquashedLayerIndex);
 
     // Helper methods to updateGraphicsLayerGeometry:
     void computeGraphicsLayerParentLocation(const RenderLayer* compositingContainer, const IntRect& ancestorCompositingBounds, IntPoint& graphicsLayerParentLocation);
     void updateSquashingLayerGeometry(const LayoutPoint& offsetFromCompositedAncestor, const IntPoint& graphicsLayerParentLocation, const RenderLayer& referenceLayer, Vector<GraphicsLayerPaintInfo>& layers, GraphicsLayer*, LayoutPoint* offsetFromTransformedAncestor, Vector<RenderLayer*>& layersNeedingPaintInvalidation);
-    void updateMainGraphicsLayerGeometry(const IntRect& relativeCompositingBounds, const IntRect& localCompositingBounds, IntPoint& graphicsLayerParentLocation);
+    void updateMainGraphicsLayerGeometry(const IntRect& relativeCompositingBounds, const IntRect& localCompositingBounds, const IntPoint& graphicsLayerParentLocation);
     void updateAncestorClippingLayerGeometry(const RenderLayer* compositingContainer, const IntPoint& snappedOffsetFromCompositedAncestor, IntPoint& graphicsLayerParentLocation);
     void updateOverflowControlsHostLayerGeometry(const RenderLayer* compositingStackingContext);
     void updateChildContainmentLayerGeometry(const IntRect& clippingBox, const IntRect& localCompositingBounds);
@@ -254,6 +252,7 @@ private:
     bool updateSquashingLayers(bool needsSquashingLayers);
     void updateDrawsContent();
     void updateChildrenTransform();
+    void updateCompositedBounds();
     void registerScrollingLayers();
 
     // Also sets subpixelAccumulation on the layer.
@@ -273,8 +272,6 @@ private:
     // Return the opacity value that this layer should use for compositing.
     float compositingOpacity(float rendererOpacity) const;
 
-    bool isMainFrameRenderViewLayer() const;
-
     bool paintsChildren() const;
 
     // Returns true if this layer has content that needs to be rendered by painting into the backing store.
@@ -286,6 +283,7 @@ private:
     Color rendererBackgroundColor() const;
     void updateBackgroundColor();
     void updateContentsRect();
+    void updateContentsOffsetInCompositingLayer(const IntPoint& snappedOffsetFromCompositedAncestor, const IntPoint& graphicsLayerParentLocation);
     void updateAfterWidgetResize();
     void updateCompositingReasons();
 
@@ -417,6 +415,9 @@ private:
     LayoutPoint m_squashingLayerOffsetFromTransformedAncestor;
 
     LayoutRect m_compositedBounds;
+
+    LayoutSize m_contentOffsetInCompositingLayer;
+    unsigned m_contentOffsetInCompositingLayerDirty : 1;
 
     unsigned m_pendingUpdateScope : 2;
     unsigned m_isMainFrameRenderViewLayer : 1;

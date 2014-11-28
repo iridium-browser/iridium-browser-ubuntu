@@ -63,6 +63,11 @@
 
 #include <openssl/opensslfeatures.h>
 
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+
 #if defined(__x86_64) || defined(_M_AMD64) || defined(_M_X64)
 #define OPENSSL_64_BIT
 #define OPENSSL_X86_64
@@ -89,7 +94,7 @@
 #define OPENSSL_APPLE
 #endif
 
-#if defined(WIN32)
+#if defined(WIN32) || defined(_WIN32)
 #define OPENSSL_WINDOWS
 #endif
 
@@ -184,8 +189,10 @@ typedef struct evp_pkey_ctx_st EVP_PKEY_CTX;
 typedef struct evp_pkey_method_st EVP_PKEY_METHOD;
 typedef struct evp_pkey_st EVP_PKEY;
 typedef struct hmac_ctx_st HMAC_CTX;
+typedef struct md4_state_st MD4_CTX;
 typedef struct md5_state_st MD5_CTX;
 typedef struct pkcs8_priv_key_info_st PKCS8_PRIV_KEY_INFO;
+typedef struct pkcs12_st PKCS12;
 typedef struct rand_meth_st RAND_METHOD;
 typedef struct rsa_meth_st RSA_METHOD;
 typedef struct rsa_st RSA;
@@ -203,5 +210,9 @@ typedef struct x509_store_ctx_st X509_STORE_CTX;
 typedef struct x509_store_st X509_STORE;
 typedef void *OPENSSL_BLOCK;
 
+
+#if defined(__cplusplus)
+}  /* extern C */
+#endif
 
 #endif  /* OPENSSL_HEADER_BASE_H */

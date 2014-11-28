@@ -20,9 +20,9 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/history/top_sites_backend.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/page_usage_data.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -204,8 +204,6 @@ class TopSitesImpl : public TopSites {
   void ResetThreadSafeCache();
 
   void ResetThreadSafeImageCache();
-
-  void NotifyTopSitesChanged();
 
   // Stops and starts timer with a delay of |delta|.
   void RestartQueryForTopSitesTimer(base::TimeDelta delta);

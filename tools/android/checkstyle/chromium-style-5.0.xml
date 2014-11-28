@@ -38,11 +38,17 @@
       <property name="allowMissingThrowsTags" value="true"/>
     </module>
     <module name="PackageName">
-      <property name="severity" value="warning"/>
-      <property name="format" value="^[a-z]+(\.[a-z][a-z0-9]{1,})*$"/>
+      <property name="severity" value="error"/>
+      <property name="format" value="^[a-z]+(\.[a-z][a-z0-9_]{1,})*$"/>
+    </module>
+    <module name="SimplifyBooleanExpression">
+      <property name="severity" value="error"/>
+    </module>
+    <module name="SimplifyBooleanReturn">
+      <property name="severity" value="error"/>
     </module>
     <module name="TypeName">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
     </module>
     <module name="ConstantName">
       <property name="severity" value="error"/>
@@ -63,15 +69,23 @@
         <property name="applyToPublic" value="false"/>
         <message key="name.invalidPattern" value="Static field names start with s."/>
     </module>
-    <module name="MethodName" />
+    <module name="MethodName">
+        <property name="severity" value="error"/>
+        <property name="format" value="^[a-z][a-zA-Z0-9_]*$"/>
+        <message key="name.invalidPattern" value="Method names should start with a lower case letter (e.g. getWidth())"/>
+    </module>
     <module name="ParameterName">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
     </module>
     <module name="LocalFinalVariableName">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
+      <property name="format" value="^m|s|((([ms][a-z0-9])|([a-ln-rt-z]))[a-zA-Z0-9]*)$"/>
+      <message key="name.invalidPattern" value="Local variables should be camel-cased (e.g. int minWidth = 4)."/>
     </module>
     <module name="LocalVariableName">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
+      <property name="format" value="^m|s|((([ms][a-z0-9])|([a-ln-rt-z]))[a-zA-Z0-9]*)$"/>
+      <message key="name.invalidPattern" value="Local variables should be camel-cased (e.g. int minWidth = 4)."/>
     </module>
     <module name="LineLength">
       <property name="severity" value="error"/>
@@ -79,10 +93,10 @@
       <property name="max" value="100"/>
     </module>
     <module name="LeftCurly">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
     </module>
     <module name="RightCurly">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
     </module>
     <module name="NeedBraces">
       <property name="severity" value="warning"/>
@@ -110,6 +124,7 @@
       <property name="allowEmptyMethods" value="true"/>
    </module>
     <module name="WhitespaceAfter">
+      <property name="severity" value="error"/>
       <property name="tokens" value="COMMA, SEMI, TYPECAST"/>
     </module>
     <module name="NoWhitespaceAfter">
@@ -121,11 +136,14 @@
       <property name="allowLineBreaks" value="true"/>
       <property name="tokens" value="SEMI, DOT, POST_DEC, POST_INC"/>
     </module>
+    <module name="EmptyStatement">
+      <property name="severity" value="error"/>
+    </module>
     <module name="NoFinalizer">
       <property name="severity" value="warning"/>
     </module>
     <module name="ParenPad">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
     </module>
     <module name="ImportOrder">
       <property name="severity" value="error"/>
@@ -135,11 +153,16 @@
       <property name="option" value="top"/>
       <property name="separated" value="true"/>
     </module>
+    <!-- TODO(aurimas): make indentation an error once https://github.com/checkstyle/checkstyle/issues/255 is fixed. -->
     <module name="Indentation">
+      <property name="severity" value="warning"/>
       <property name="basicOffset" value="4"/>
+      <property name="throwsIndent" value="8"/>
     </module>
   </module>
-  <module name="FileTabCharacter"/>
+  <module name="FileTabCharacter">
+    <property name="severity" value="error"/>
+  </module>
   <module name="RegexpSingleline">
     <property name="format" value="((//.*)|(\*.*))FIXME"/>
     <property name="message" value="TODO is preferred to FIXME.  e.g. &quot;TODO(johndoe):"/>

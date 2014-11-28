@@ -10,16 +10,16 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/url_constants.h"
-#include "grit/ui_resources.h"
+#include "components/history/core/browser/history_types.h"
 #include "jni/NavigationPopup_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/image/image.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "url/gurl.h"
 
 using base::android::ConvertUTF8ToJavaString;

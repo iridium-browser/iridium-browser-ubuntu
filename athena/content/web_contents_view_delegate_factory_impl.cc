@@ -5,6 +5,7 @@
 #include "athena/content/public/web_contents_view_delegate_creator.h"
 
 #include "athena/content/render_view_context_menu_impl.h"
+#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/single_web_contents_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -31,17 +32,12 @@ class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
   }
 
   virtual bool Focus() OVERRIDE {
-    web_modal::WebContentsModalDialogManager* manager =
-        web_modal::WebContentsModalDialogManager::FromWebContents(
-            web_contents_);
-    if (manager)
-      manager->FocusTopmostDialog();
+    web_modal::PopupManager* popup_manager =
+        web_modal::PopupManager::FromWebContents(web_contents_);
+    if (popup_manager)
+      popup_manager->WasFocused(web_contents_);
     return false;
   }
-
-  virtual void TakeFocus(bool reverse) OVERRIDE {}
-  virtual void StoreFocus() OVERRIDE {}
-  virtual void RestoreFocus() OVERRIDE {}
 
   virtual void ShowContextMenu(
       content::RenderFrameHost* render_frame_host,
@@ -53,6 +49,17 @@ class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
   virtual void SizeChanged(const gfx::Size& size) OVERRIDE {
     // TODO(oshima|sadrul): Implement this when sad_tab is componentized.
     // See c/b/ui/views/tab_contents/chrome_web_contents_view_delegate_views.cc
+  }
+
+  virtual void ShowDisambiguationPopup(
+      const gfx::Rect& target_rect,
+      const SkBitmap& zoomed_bitmap,
+      const gfx::NativeView content,
+      const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
+      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) OVERRIDE {
+  }
+
+  virtual void HideDisambiguationPopup() OVERRIDE {
   }
 
   scoped_ptr<RenderViewContextMenuImpl> BuildMenu(
@@ -144,16 +151,3 @@ content::WebContentsViewDelegate* CreateWebContentsViewDelegate(
 }
 
 }  // namespace athena
-
-namespace web_modal {
-
-SingleWebContentsDialogManager*
-WebContentsModalDialogManager::CreateNativeWebModalManager(
-    NativeWebContentsModalDialog dialog,
-    SingleWebContentsDialogManagerDelegate* native_delegate) {
-  // TODO(oshima): Investigate if we need to implement this.
-  NOTREACHED();
-  return NULL;
-}
-
-}  // namespace web_modal

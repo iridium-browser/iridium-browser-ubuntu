@@ -67,10 +67,10 @@ public:
     virtual void setContinuousPaintingEnabled(bool) OVERRIDE;
     virtual void setShowScrollBottleneckRects(bool) OVERRIDE;
     virtual void resetScrollAndPageScaleFactor() OVERRIDE;
+    virtual float minimumPageScaleFactor() OVERRIDE;
+    virtual float maximumPageScaleFactor() OVERRIDE;
+    virtual void setPageScaleFactor(float) OVERRIDE;
     virtual void showContextMenu(float x, float y, PassRefPtr<ContextMenuProvider>) OVERRIDE;
-
-    virtual void getAllocatedObjects(HashSet<const void*>&) OVERRIDE;
-    virtual void dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>&) OVERRIDE;
 
     virtual void dispatchKeyEvent(const PlatformKeyboardEvent&) OVERRIDE;
     virtual void dispatchMouseEvent(const PlatformMouseEvent&) OVERRIDE;
@@ -82,6 +82,8 @@ public:
 
     virtual void startGPUEventsRecording() OVERRIDE;
     virtual void stopGPUEventsRecording() OVERRIDE;
+
+    virtual void resumeStartup() OVERRIDE;
 
 private:
     WebDevToolsAgentImpl* devToolsAgent();

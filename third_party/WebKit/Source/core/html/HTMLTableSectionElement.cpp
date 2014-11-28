@@ -41,7 +41,6 @@ using namespace HTMLNames;
 inline HTMLTableSectionElement::HTMLTableSectionElement(const QualifiedName& tagName, Document& document)
     : HTMLTablePartElement(tagName, document)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLTableSectionElement)
@@ -51,12 +50,6 @@ const StylePropertySet* HTMLTableSectionElement::additionalPresentationAttribute
     if (HTMLTableElement* table = findParentTable())
         return table->additionalGroupStyle(true);
     return 0;
-}
-
-PassRefPtrWillBeRawPtr<HTMLElement> HTMLTableSectionElement::insertRow(ExceptionState& exceptionState)
-{
-    // The default 'index' argument value is -1.
-    return insertRow(-1, exceptionState);
 }
 
 // these functions are rather slow, since we need to get the row at

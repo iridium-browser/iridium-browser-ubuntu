@@ -63,7 +63,7 @@ SharedQuadState* CreateAndAppendTestSharedQuadState(
 // Draws a very simple frame with no surface references.
 TEST_F(SurfacesPixelTest, DrawSimpleFrame) {
   gfx::Rect rect(device_viewport_size_);
-  RenderPass::Id id(1, 1);
+  RenderPassId id(1, 1);
   scoped_ptr<RenderPass> pass = RenderPass::Create();
   pass->SetNew(id, rect, rect, gfx::Transform());
 
@@ -87,7 +87,7 @@ TEST_F(SurfacesPixelTest, DrawSimpleFrame) {
 
   SurfaceId root_surface_id = allocator_.GenerateId();
   factory_.Create(root_surface_id, device_viewport_size_);
-  factory_.SubmitFrame(root_surface_id, root_frame.Pass());
+  factory_.SubmitFrame(root_surface_id, root_frame.Pass(), base::Closure());
 
   SurfaceAggregator aggregator(&manager_, resource_provider_.get());
   scoped_ptr<CompositorFrame> aggregated_frame =
@@ -112,7 +112,7 @@ TEST_F(SurfacesPixelTest, DrawSimpleAggregatedFrame) {
   factory_.Create(root_surface_id, device_viewport_size_);
   {
     gfx::Rect rect(device_viewport_size_);
-    RenderPass::Id id(1, 1);
+    RenderPassId id(1, 1);
     scoped_ptr<RenderPass> pass = RenderPass::Create();
     pass->SetNew(id, rect, rect, gfx::Transform());
 
@@ -141,12 +141,12 @@ TEST_F(SurfacesPixelTest, DrawSimpleAggregatedFrame) {
     scoped_ptr<CompositorFrame> root_frame(new CompositorFrame);
     root_frame->delegated_frame_data = delegated_frame_data.Pass();
 
-    factory_.SubmitFrame(root_surface_id, root_frame.Pass());
+    factory_.SubmitFrame(root_surface_id, root_frame.Pass(), base::Closure());
   }
 
   {
     gfx::Rect rect(child_size);
-    RenderPass::Id id(1, 1);
+    RenderPassId id(1, 1);
     scoped_ptr<RenderPass> pass = RenderPass::Create();
     pass->SetNew(id, rect, rect, gfx::Transform());
 
@@ -168,7 +168,7 @@ TEST_F(SurfacesPixelTest, DrawSimpleAggregatedFrame) {
     scoped_ptr<CompositorFrame> child_frame(new CompositorFrame);
     child_frame->delegated_frame_data = delegated_frame_data.Pass();
 
-    factory_.SubmitFrame(child_surface_id, child_frame.Pass());
+    factory_.SubmitFrame(child_surface_id, child_frame.Pass(), base::Closure());
   }
 
   SurfaceAggregator aggregator(&manager_, resource_provider_.get());
@@ -206,7 +206,7 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
 
   {
     gfx::Rect rect(device_viewport_size_);
-    RenderPass::Id id(1, 1);
+    RenderPassId id(1, 1);
     scoped_ptr<RenderPass> pass = RenderPass::Create();
     pass->SetNew(id, rect, rect, gfx::Transform());
 
@@ -238,12 +238,12 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
     scoped_ptr<CompositorFrame> root_frame(new CompositorFrame);
     root_frame->delegated_frame_data = delegated_frame_data.Pass();
 
-    factory_.SubmitFrame(root_surface_id, root_frame.Pass());
+    factory_.SubmitFrame(root_surface_id, root_frame.Pass(), base::Closure());
   }
 
   {
     gfx::Rect rect(child_size);
-    RenderPass::Id id(1, 1);
+    RenderPassId id(1, 1);
     scoped_ptr<RenderPass> pass = RenderPass::Create();
     pass->SetNew(id, rect, rect, gfx::Transform());
 
@@ -273,12 +273,12 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
     scoped_ptr<CompositorFrame> child_frame(new CompositorFrame);
     child_frame->delegated_frame_data = delegated_frame_data.Pass();
 
-    factory_.SubmitFrame(left_child_id, child_frame.Pass());
+    factory_.SubmitFrame(left_child_id, child_frame.Pass(), base::Closure());
   }
 
   {
     gfx::Rect rect(child_size);
-    RenderPass::Id id(1, 1);
+    RenderPassId id(1, 1);
     scoped_ptr<RenderPass> pass = RenderPass::Create();
     pass->SetNew(id, rect, rect, gfx::Transform());
 
@@ -308,7 +308,7 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
     scoped_ptr<CompositorFrame> child_frame(new CompositorFrame);
     child_frame->delegated_frame_data = delegated_frame_data.Pass();
 
-    factory_.SubmitFrame(right_child_id, child_frame.Pass());
+    factory_.SubmitFrame(right_child_id, child_frame.Pass(), base::Closure());
   }
 
   SurfaceAggregator aggregator(&manager_, resource_provider_.get());

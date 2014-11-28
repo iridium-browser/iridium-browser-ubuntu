@@ -246,21 +246,33 @@ UI_BASE_EXPORT bool CopyAreaToCanvas(XID drawable,
 
 enum WindowManagerName {
   WM_UNKNOWN,
+
+  WM_AWESOME,
   WM_BLACKBOX,
-  WM_CHROME_OS,
   WM_COMPIZ,
   WM_ENLIGHTENMENT,
+  WM_I3,
   WM_ICE_WM,
+  WM_ION3,
   WM_KWIN,
+  WM_MATCHBOX,
   WM_METACITY,
   WM_MUFFIN,
   WM_MUTTER,
+  WM_NOTION,
   WM_OPENBOX,
+  WM_QTILE,
+  WM_RATPOISON,
+  WM_STUMPWM,
   WM_XFWM4,
 };
 // Attempts to guess the window maager. Returns WM_UNKNOWN if we can't
 // determine it for one reason or another.
 UI_BASE_EXPORT WindowManagerName GuessWindowManager();
+
+// The same as GuessWindowManager(), but returns the raw string.  If we
+// can't determine it, return "Unknown".
+UI_BASE_EXPORT std::string GuessWindowManagerName();
 
 // Enable the default X error handlers. These will log the error and abort
 // the process if called. Use SetX11ErrorHandlers() from x11_util_internal.h

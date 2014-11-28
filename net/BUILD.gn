@@ -84,26 +84,24 @@ component("net") {
     "NET_IMPLEMENTATION"
   ]
   configs += [ ":net_win_size_truncation" ]
-  direct_dependent_configs = [ ":net_config" ]
+  public_configs = [ ":net_config" ]
   include_dirs = []
 
+  public_deps = [
+    "//crypto",
+    "//crypto:platform"
+  ]
   deps = [
    ":net_resources",
     "//base",
     "//base:i18n",
     "//base:prefs",
     "//base/third_party/dynamic_annotations",
-    "//crypto",
-    "//crypto:platform",
     "//net/base/registry_controlled_domains",
     "//sdch",
     "//third_party/icu",
     "//third_party/zlib",
     "//url",
-  ]
-  forward_dependent_configs_from = [
-    "//crypto",
-    "//crypto:platform"
   ]
 
   if (use_kerberos) {
@@ -254,7 +252,6 @@ component("net") {
   } else {
     sources -= [
       "base/crypto_module_openssl.cc",
-      "base/keygen_handler_openssl.cc",
       "cert/ct_log_verifier_openssl.cc",
       "cert/ct_objects_extractor_openssl.cc",
       "cert/jwk_serializer_openssl.cc",
@@ -294,6 +291,7 @@ component("net") {
 
   if (!use_openssl_certs) {
     sources -= [
+      "base/keygen_handler_openssl.cc",
       "base/openssl_private_key_store.h",
       "base/openssl_private_key_store_memory.cc",
       "cert/cert_database_openssl.cc",
@@ -476,10 +474,12 @@ component("net") {
   }
 
   if (is_mac) {
-    deps += [
-      "//third_party/nss:nspr",
-      "//third_party/nss",
-    ]
+    if (!use_openssl) {
+      deps += [
+        "//third_party/nss:nspr",
+        "//third_party/nss",
+      ]
+    }
     libs = [
       "Foundation.framework",
       "Security.framework",
@@ -556,10 +556,20 @@ component("net") {
 
 grit("net_resources") {
   source = "base/net_resources.grd"
+  use_qualified_include = true
   outputs = [
     "grit/net_resources.h",
     "net_resources.pak",
     "net_resources.rc",
+  ]
+}
+
+static_library("extras") {
+  sources = gypi_values.net_extras_sources
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+  deps = [
+    ":net",
+    "//sql:sql",
   ]
 }
 
@@ -584,6 +594,7 @@ static_library("http_server") {
 }
 
 executable("dump_cache") {
+  testonly = true
   sources = [
     "tools/dump_cache/cache_dumper.cc",
     "tools/dump_cache/cache_dumper.h",
@@ -592,8 +603,6 @@ executable("dump_cache") {
     "tools/dump_cache/dump_files.h",
     "tools/dump_cache/simple_cache_dumper.cc",
     "tools/dump_cache/simple_cache_dumper.h",
-    "tools/dump_cache/upgrade_win.cc",
-    "tools/dump_cache/upgrade_win.h",
     "tools/dump_cache/url_to_filename_encoder.cc",
     "tools/dump_cache/url_to_filename_encoder.h",
     "tools/dump_cache/url_utilities.h",
@@ -610,6 +619,7 @@ executable("dump_cache") {
 }
 
 source_set("test_support") {
+  testonly = true
   sources = [
     "base/capturing_net_log.cc",
     "base/capturing_net_log.h",
@@ -679,13 +689,15 @@ source_set("test_support") {
     "test/spawned_test_server/spawner_communicator.h",
     "url_request/test_url_fetcher_factory.cc",
     "url_request/test_url_fetcher_factory.h",
+    "url_request/test_url_request_interceptor.cc",
+    "url_request/test_url_request_interceptor.h",
     "url_request/url_request_test_util.cc",
     "url_request/url_request_test_util.h",
   ]
 
   configs += [ ":net_win_size_truncation" ]
 
-  deps = [
+  public_deps = [
     "//base",
     "//base/test:test_support",
     "//crypto",
@@ -697,7 +709,7 @@ source_set("test_support") {
   ]
 
   if (is_ios) {
-    deps += [ "//third_party/nss" ]
+    public_deps += [ "//third_party/nss" ]
   }
 
   if (!is_android) {
@@ -710,7 +722,7 @@ source_set("test_support") {
   }
 
   if (use_v8_in_net) {
-    deps += [ ":net_with_v8" ]
+    public_deps += [ ":net_with_v8" ]
   }
 
   if (!enable_mdns) {
@@ -721,14 +733,12 @@ source_set("test_support") {
   }
 
   if (use_nss_certs) {
-    deps += ["//crypto:platform" ]
+    public_deps += ["//crypto:platform" ]
   } else {
     sources -= [
       "test/cert_test_util_nss.cc",
     ]
   }
-
-  forward_dependent_configs_from = deps
 }
 
 source_set("balsa") {
@@ -776,20 +786,21 @@ if (use_v8_in_net) {
       "//build/config/compiler:wexit_time_destructors",
     ]
 
-    deps = [
+    public_deps = [
       ":net",
+    ]
+    deps = [
       "//base",
       "//gin",
       "//url",
       "//v8",
     ]
-
-    forward_dependent_configs_from = [ ":net" ]
   }
 }
 
 if (!is_ios && !is_android) {
   executable("crash_cache") {
+    testonly = true
     sources = [ "tools/crash_cache/crash_cache.cc" ]
     configs += [ ":net_win_size_truncation" ]
     deps = [
@@ -800,6 +811,7 @@ if (!is_ios && !is_android) {
   }
 
   executable("crl_set_dump") {
+    testonly = true
     sources = [ "tools/crl_set_dump/crl_set_dump.cc" ]
     configs += [ ":net_win_size_truncation" ]
     deps = [
@@ -809,6 +821,7 @@ if (!is_ios && !is_android) {
   }
 
   executable("dns_fuzz_stub") {
+    testonly = true
     sources = [ "tools/dns_fuzz_stub/dns_fuzz_stub.cc" ]
     configs += [ ":net_win_size_truncation" ]
     deps = [
@@ -818,6 +831,7 @@ if (!is_ios && !is_android) {
   }
 
   executable("gdig") {
+    testonly = true
     sources = [
       "tools/gdig/file_net_log.cc",
       "tools/gdig/gdig.cc",
@@ -829,6 +843,7 @@ if (!is_ios && !is_android) {
   }
 
   executable("get_server_time") {
+    testonly = true
     sources = [ "tools/get_server_time/get_server_time.cc" ]
     configs += [ ":net_win_size_truncation" ]
     deps = [
@@ -841,6 +856,7 @@ if (!is_ios && !is_android) {
 
   if (use_v8_in_net) {
     executable("net_watcher") {
+      testonly = true
       sources = [ "tools/net_watcher/net_watcher.cc" ]
       deps = [
         ":net",
@@ -859,6 +875,7 @@ if (!is_ios && !is_android) {
   }
 
   executable("run_testserver") {
+    testonly = true
     sources = [ "tools/testserver/run_testserver.cc" ]
     deps = [
       ":net",  # TODO(brettw) bug 363749: this shouldn't be necessary. It's not
@@ -871,6 +888,7 @@ if (!is_ios && !is_android) {
   }
 
   executable("stress_cache") {
+    testonly = true
     sources = [ "disk_cache/blockfile/stress_cache.cc" ]
     configs += [ ":net_win_size_truncation" ]
     deps = [
@@ -904,6 +922,7 @@ if (is_linux) {
   }
 
   static_library("flip_in_mem_edsm_server_base") {
+    testonly = true
     sources = [
       "tools/dump_cache/url_to_filename_encoder.cc",
       "tools/dump_cache/url_to_filename_encoder.h",
@@ -947,6 +966,7 @@ if (is_linux) {
   }
 
   executable("flip_in_mem_edsm_server_unittests") {
+    testonly = true
     sources = [
       "tools/flip_server/flip_test_utils.cc",
       "tools/flip_server/flip_test_utils.h",
@@ -966,6 +986,7 @@ if (is_linux) {
   }
 
   executable("flip_in_mem_edsm_server") {
+    testonly = true
     sources = [ "tools/flip_server/flip_in_mem_edsm_server.cc" ]
     deps = [
       ":flip_in_mem_edsm_server_base",
@@ -992,6 +1013,8 @@ if (is_linux) {
       "tools/quic/quic_in_memory_cache.h",
       "tools/quic/quic_packet_writer_wrapper.cc",
       "tools/quic/quic_packet_writer_wrapper.h",
+      "tools/quic/quic_per_connection_packet_writer.cc",
+      "tools/quic/quic_per_connection_packet_writer.h",
       "tools/quic/quic_server.cc",
       "tools/quic/quic_server.h",
       "tools/quic/quic_server_session.cc",
@@ -1042,10 +1065,17 @@ if (is_android) {
     ]
     jni_package = "net"
   }
+  generate_jni("net_test_jni_headers") {
+    sources = [
+      "android/javatests/src/org/chromium/net/AndroidKeyStoreTestUtil.java",
+    ]
+    jni_package = "net"
+  }
 }
 
 if (is_android || is_linux) {
   executable("disk_cache_memory_test") {
+    testonly = true
     sources = [ "tools/disk_cache_memory_test/disk_cache_memory_test.cc" ]
     deps = [
       ":net",
@@ -1092,6 +1122,7 @@ test("net_unittests") {
   defines = []
 
   deps = [
+    ":extras",
     ":http_server",
     ":net",
     ":quic_tools",
@@ -1158,14 +1189,17 @@ test("net_unittests") {
     # TODO(bulach): Add equivalent tests when the underlying
     #               functionality is ported to OpenSSL.
     sources -= [
-      "cert/ct_objects_extractor_unittest.cc",
-      "cert/multi_log_ct_verifier_unittest.cc",
       "cert/nss_cert_database_unittest.cc",
-      "cert/nss_cert_database_chromeos_unittest.cc",
-      "cert/nss_profile_filter_chromeos_unittest.cc",
       "cert/x509_util_nss_unittest.cc",
       "quic/test_tools/crypto_test_utils_nss.cc",
     ]
+    if (is_chromeos) {
+      # These were already removed in the non-ChromeOS case.
+      sources -= [
+        "cert/nss_cert_database_chromeos_unittest.cc",
+        "cert/nss_profile_filter_chromeos_unittest.cc",
+      ]
+    }
   } else {
     sources -= [
       "cert/x509_util_openssl_unittest.cc",

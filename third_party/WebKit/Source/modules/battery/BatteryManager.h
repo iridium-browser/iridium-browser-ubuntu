@@ -16,12 +16,13 @@ namespace blink {
 
 class BatteryStatus;
 
-class BatteryManager FINAL : public RefCountedWillBeRefCountedGarbageCollected<BatteryManager>, public ActiveDOMObject, public PlatformEventController, public EventTargetWithInlineData {
-    REFCOUNTED_EVENT_TARGET(BatteryManager);
+class BatteryManager FINAL : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<BatteryManager>, public ActiveDOMObject, public PlatformEventController, public EventTargetWithInlineData {
+    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<BatteryManager>);
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(BatteryManager);
 public:
     virtual ~BatteryManager();
-    static PassRefPtrWillBeRawPtr<BatteryManager> create(ExecutionContext*);
+    static BatteryManager* create(ExecutionContext*);
 
     // Returns a promise object that will be resolved with this BatteryManager.
     ScriptPromise startRequest(ScriptState*);
@@ -65,10 +66,10 @@ private:
     explicit BatteryManager(ExecutionContext*);
 
     RefPtr<ScriptPromiseResolver> m_resolver;
-    RefPtrWillBeMember<BatteryStatus> m_batteryStatus;
+    Member<BatteryStatus> m_batteryStatus;
     State m_state;
 };
 
-}
+} // namespace blink
 
 #endif // BatteryManager_h

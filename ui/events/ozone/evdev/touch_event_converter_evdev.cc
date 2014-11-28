@@ -27,13 +27,8 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/event_switches.h"
 #include "ui/gfx/screen.h"
-#include "ui/ozone/public/event_factory_ozone.h"
 
 namespace {
-
-// Number is determined empirically.
-// TODO(rjkroege): Configure this per device.
-const float kFingerWidth = 25.f;
 
 struct TouchCalibration {
   int bezel_left;
@@ -69,6 +64,10 @@ float TuxelsToPixels(float val,
   return min_pixels + (val - min_tuxels) * num_pixels / num_tuxels;
 }
 
+float TuxelToPixelSize(float val, float num_tuxels, float num_pixels) {
+  return val * num_pixels / num_tuxels;
+}
+
 }  // namespace
 
 namespace ui {
@@ -78,12 +77,11 @@ TouchEventConverterEvdev::TouchEventConverterEvdev(
     base::FilePath path,
     const EventDeviceInfo& info,
     const EventDispatchCallback& callback)
-    : EventConverterEvdev(callback),
+    : EventConverterEvdev(fd, path),
+      callback_(callback),
       syn_dropped_(false),
       is_type_a_(false),
-      current_slot_(0),
-      fd_(fd),
-      path_(path) {
+      current_slot_(0) {
   Init(info);
 }
 
@@ -135,15 +133,6 @@ void TouchEventConverterEvdev::Init(const EventDeviceInfo& info) {
                                 cal.bezel_bottom);
 }
 
-void TouchEventConverterEvdev::Start() {
-  base::MessageLoopForUI::current()->WatchFileDescriptor(
-      fd_, true, base::MessagePumpLibevent::WATCH_READ, &controller_, this);
-}
-
-void TouchEventConverterEvdev::Stop() {
-  controller_.StopWatchingFileDescriptor();
-}
-
 bool TouchEventConverterEvdev::Reinitialize() {
   EventDeviceInfo info;
   if (info.Initialize(fd_)) {
@@ -151,11 +140,6 @@ bool TouchEventConverterEvdev::Reinitialize() {
     return true;
   }
   return false;
-}
-
-void TouchEventConverterEvdev::OnFileCanWriteWithoutBlocking(int /* fd */) {
-  // Read-only file-descriptors.
-  NOTREACHED();
 }
 
 void TouchEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
@@ -202,9 +186,17 @@ void TouchEventConverterEvdev::ProcessAbs(const input_event& input) {
   switch (input.code) {
     case ABS_MT_TOUCH_MAJOR:
       altered_slots_.set(current_slot_);
-      events_[current_slot_].major_ = input.value;
+      // TODO(spang): If we have all of major, minor, and orientation,
+      // we can scale the ellipse correctly. However on the Pixel we get
+      // neither minor nor orientation, so this is all we can do.
+      events_[current_slot_].radius_x_ =
+          TuxelToPixelSize(input.value, x_num_tuxels_, x_num_pixels_) / 2.0f;
       break;
-    case ABS_X:
+    case ABS_MT_TOUCH_MINOR:
+      altered_slots_.set(current_slot_);
+      events_[current_slot_].radius_y_ =
+          TuxelToPixelSize(input.value, y_num_tuxels_, y_num_pixels_) / 2.0f;
+      break;
     case ABS_MT_POSITION_X:
       altered_slots_.set(current_slot_);
       events_[current_slot_].x_ = TuxelsToPixels(input.value,
@@ -213,7 +205,6 @@ void TouchEventConverterEvdev::ProcessAbs(const input_event& input) {
                                                  x_min_pixels_,
                                                  x_num_pixels_);
       break;
-    case ABS_Y:
     case ABS_MT_POSITION_Y:
       altered_slots_.set(current_slot_);
       events_[current_slot_].y_ = TuxelsToPixels(input.value,
@@ -232,7 +223,6 @@ void TouchEventConverterEvdev::ProcessAbs(const input_event& input) {
       }
       break;
     case ABS_MT_PRESSURE:
-    case ABS_PRESSURE:
       altered_slots_.set(current_slot_);
       events_[current_slot_].pressure_ = input.value - pressure_min_;
       events_[current_slot_].pressure_ /= pressure_max_ - pressure_min_;
@@ -242,7 +232,7 @@ void TouchEventConverterEvdev::ProcessAbs(const input_event& input) {
       altered_slots_.set(current_slot_);
       break;
     default:
-      NOTIMPLEMENTED() << "invalid code for EV_ABS: " << input.code;
+      DVLOG(5) << "unhandled code for EV_ABS: " << input.code;
   }
 }
 
@@ -284,17 +274,16 @@ void TouchEventConverterEvdev::ReportEvents(base::TimeDelta delta) {
   for (int i = 0; i < MAX_FINGERS; i++) {
     if (altered_slots_[i]) {
       // TODO(rikroege): Support elliptical finger regions.
-      TouchEvent evt(
-          events_[i].type_,
-          gfx::PointF(events_[i].x_, events_[i].y_),
-          /* flags */ 0,
-          /* touch_id */ i,
-          delta,
-          events_[i].pressure_ * kFingerWidth,
-          events_[i].pressure_ * kFingerWidth,
-          /* angle */ 0.,
-          events_[i].pressure_);
-      DispatchEventToCallback(&evt);
+      TouchEvent evt(events_[i].type_,
+                     gfx::PointF(events_[i].x_, events_[i].y_),
+                     /* flags */ 0,
+                     /* touch_id */ i,
+                     delta,
+                     /* radius_x */ events_[i].radius_x_,
+                     /* radius_y */ events_[i].radius_y_,
+                     /* angle */ 0.,
+                     events_[i].pressure_);
+      callback_.Run(&evt);
 
       // Subsequent events for this finger will be touch-move until it
       // is released.

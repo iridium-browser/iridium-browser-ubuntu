@@ -16,6 +16,10 @@
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/bookmarks/common/android/bookmark_id.h"
 
+namespace bookmarks {
+class ScopedGroupBookmarkActions;
+}
+
 class Profile;
 
 // The delegate to fetch bookmarks information for the Android native
@@ -29,6 +33,10 @@ class BookmarksBridge : public BaseBookmarkModelObserver,
 
   static bool RegisterBookmarksBridge(JNIEnv* env);
 
+  bool IsDoingExtensiveChanges(JNIEnv* env, jobject obj);
+
+  void LoadEmptyPartnerBookmarkShimForTesting(JNIEnv* env, jobject obj);
+
   base::android::ScopedJavaLocalRef<jobject> GetBookmarkByID(
       JNIEnv* env,
       jobject obj,
@@ -38,6 +46,33 @@ class BookmarksBridge : public BaseBookmarkModelObserver,
   void GetPermanentNodeIDs(JNIEnv* env,
                            jobject obj,
                            jobject j_result_obj);
+
+  void GetTopLevelFolderParentIDs(JNIEnv* env,
+                                  jobject obj,
+                                  jobject j_result_obj);
+
+  void GetTopLevelFolderIDs(JNIEnv* env,
+                            jobject obj,
+                            jboolean get_special,
+                            jboolean get_normal,
+                            jobject j_result_obj);
+
+  void GetUncategorizedBookmarkIDs(JNIEnv* env,
+                                   jobject obj,
+                                   jobject j_result_obj);
+  void GetAllFoldersWithDepths(JNIEnv* env,
+                               jobject obj,
+                               jobject j_folders_obj,
+                               jobject j_depths_obj);
+
+  base::android::ScopedJavaLocalRef<jobject> GetMobileFolderId(JNIEnv* env,
+                                                               jobject obj);
+
+  base::android::ScopedJavaLocalRef<jobject> GetOtherFolderId(JNIEnv* env,
+                                                              jobject obj);
+
+  base::android::ScopedJavaLocalRef<jobject> GetDesktopFolderId(JNIEnv* env,
+                                                                jobject obj);
 
   void GetChildIDs(JNIEnv* env,
                    jobject obj,
@@ -77,15 +112,33 @@ class BookmarksBridge : public BaseBookmarkModelObserver,
                                  jobject j_callback_obj,
                                  jobject j_result_obj);
 
-  void DeleteBookmark(JNIEnv* env,
-                      jobject obj,
-                      jobject j_bookmark_id_obj);
+  base::android::ScopedJavaLocalRef<jobject> AddFolder(JNIEnv* env,
+                                                       jobject obj,
+                                                       jobject j_parent_id_obj,
+                                                       jint index,
+                                                       jstring j_title);
+
+  void DeleteBookmark(JNIEnv* env, jobject obj, jobject j_bookmark_id_obj);
 
   void MoveBookmark(JNIEnv* env,
                     jobject obj,
                     jobject j_bookmark_id_obj,
                     jobject j_parent_id_obj,
                     jint index);
+
+  base::android::ScopedJavaLocalRef<jobject> AddBookmark(
+      JNIEnv* env,
+      jobject obj,
+      jobject j_parent_id_obj,
+      jint index,
+      jstring j_title,
+      jstring j_url);
+
+  void Undo(JNIEnv* env, jobject obj);
+
+  void StartGroupingUndos(JNIEnv* env, jobject obj);
+
+  void EndGroupingUndos(JNIEnv* env, jobject obj);
 
  private:
   virtual ~BookmarksBridge();
@@ -146,6 +199,7 @@ class BookmarksBridge : public BaseBookmarkModelObserver,
   JavaObjectWeakGlobalRef weak_java_ref_;
   BookmarkModel* bookmark_model_;  // weak
   ChromeBookmarkClient* client_;   // weak
+  scoped_ptr<bookmarks::ScopedGroupBookmarkActions> grouped_bookmark_actions_;
 
   // Information about the Partner bookmarks (must check for IsLoaded()).
   // This is owned by profile.

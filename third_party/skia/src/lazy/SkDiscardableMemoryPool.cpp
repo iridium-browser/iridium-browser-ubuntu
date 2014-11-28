@@ -155,7 +155,7 @@ void DiscardableMemoryPool::dumpDownTo(size_t budget) {
     typedef SkTInternalLList<PoolDiscardableMemory>::Iter Iter;
     Iter iter;
     PoolDiscardableMemory* cur = iter.init(fList, Iter::kTail_IterStart);
-    while ((fUsed > budget) && (NULL != cur)) {
+    while ((fUsed > budget) && (cur)) {
         if (!cur->fLocked) {
             PoolDiscardableMemory* dm = cur;
             SkASSERT(dm->fPointer != NULL);
@@ -265,8 +265,4 @@ SkDiscardableMemoryPool* SkGetGlobalDiscardableMemoryPool() {
     return global.get();
 }
 
-// defined in SkImageGenerator.h
-void SkPurgeGlobalDiscardableMemoryPool() {
-    SkGetGlobalDiscardableMemoryPool()->dumpPool();
-}
 ////////////////////////////////////////////////////////////////////////////////

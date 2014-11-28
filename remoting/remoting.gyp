@@ -51,6 +51,7 @@
       }],
     ],
     'remoting_locales': [
+      # Note: list duplicated in GN build. See //remoting/resources/BUILD.gn
       'ar', 'bg', 'ca', 'cs', 'da', 'de', 'el', 'en', 'en-GB', 'es',
       'es-419', 'et', 'fi', 'fil', 'fr', 'he', 'hi', 'hr', 'hu', 'id',
       'it', 'ja', 'ko', 'lt', 'lv', 'nb', 'nl', 'pl', 'pt-BR', 'pt-PT',
@@ -149,6 +150,7 @@
     },  # end of target 'remoting_breakpad'
 
     {
+      # GN version: //remoting/resources
       'target_name': 'remoting_resources',
       'type': 'none',
       'dependencies': [
@@ -169,12 +171,14 @@
           'host/win/version.rc.jinja2',
           'resources/play_store_resources.cc',
           'webapp/background/background.js',
+          'webapp/background/it2me_helpee_channel.js',
           'webapp/butter_bar.js',
           'webapp/client_screen.js',
           'webapp/error.js',
           'webapp/host_list.js',
           'webapp/host_setup_dialog.js',
           'webapp/host_table_entry.js',
+          'webapp/options_menu.js',
           'webapp/manifest.json.jinja2',
           'webapp/paired_client_manager.js',
           'webapp/remoting.js',
@@ -183,6 +187,7 @@
       },
       'actions': [
         {
+          # GN version: //remoting/resources:verify_resources
           'action_name': 'verify_resources',
           'inputs': [
             'resources/remoting_strings.grd',
@@ -201,6 +206,7 @@
          ],
         },
         {
+          # GN version: //remoting/resources:strings
           'action_name': 'remoting_strings',
           'variables': {
             'grit_grd_file': 'resources/remoting_strings.grd',
@@ -208,6 +214,7 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
+          # GN version: //remoting/resources:copy_locales
           'action_name': 'copy_locales',
           'variables': {
             'copy_output_dir%': '<(PRODUCT_DIR)',
@@ -232,6 +239,7 @@
     },  # end of target 'remoting_resources'
 
     {
+      # GN version: //remoting/base
       'target_name': 'remoting_base',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
@@ -267,6 +275,7 @@
     },  # end of target 'remoting_base'
 
     {
+      # GN version: //remoting/protocol
       'target_name': 'remoting_protocol',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },

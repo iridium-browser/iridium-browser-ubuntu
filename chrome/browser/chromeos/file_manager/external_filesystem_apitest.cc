@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "chrome/browser/browser_process.h"
@@ -24,34 +24,34 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/test/result_catcher.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/test_util.h"
 #include "google_apis/drive/time_util.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/external_mount_points.h"
 
 // Tests for access to external file systems (as defined in
-// webkit/common/fileapi/file_system_types.h) from extensions with
-// fileBrowserPrivate and fileBrowserHandler extension permissions.
+// storage/common/fileapi/file_system_types.h) from extensions with
+// fileManagerPrivate and fileBrowserHandler extension permissions.
 // The tests cover following external file system types:
 // - local (kFileSystemTypeLocalNative): a local file system on which files are
 //   accessed using native local path.
 // - restricted (kFileSystemTypeRestrictedLocalNative): a *read-only* local file
 //   system which can only be accessed by extensions that have full access to
-//   external file systems (i.e. extensions with fileBrowserPrivate permission).
+//   external file systems (i.e. extensions with fileManagerPrivate permission).
 // - drive (kFileSystemTypeDrive): a file system that provides access to Google
 //   Drive.
 //
 // The tests cover following scenarios:
 // - Performing file system operations on external file systems from an
-//   extension with fileBrowserPrivate permission (i.e. a file browser
-//   extension).
+//   app with fileManagerPrivate permission (i.e. Files.app).
 // - Performing read/write operations from file handler extensions. These
 //   extensions need a file browser extension to give them permissions to access
 //   files. This also includes file handler extensions in filesystem API.
 // - Observing directory changes from a file browser extension (using
-//   fileBrowserPrivate API).
+//   fileManagerPrivate API).
 // - Doing searches on drive file system from file browser extension (using
-//   fileBrowserPrivate API).
+//   fileManagerPrivate API).
 
 using drive::DriveIntegrationServiceFactory;
 using extensions::Extension;
@@ -370,7 +370,7 @@ class FileSystemExtensionApiTestBase : public ExtensionApiTest {
       }
     }
 
-    ResultCatcher catcher;
+    extensions::ResultCatcher catcher;
 
     const Extension* file_browser = LoadExtensionAsComponentWithManifest(
         test_data_dir_.AppendASCII(filebrowser_path),
@@ -408,11 +408,11 @@ class LocalFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
 
   // FileSystemExtensionApiTestBase OVERRIDE.
   virtual void AddTestMountPoint() OVERRIDE {
-    EXPECT_TRUE(content::BrowserContext::GetMountPoints(browser()->profile())->
-        RegisterFileSystem(kLocalMountPointName,
-                           fileapi::kFileSystemTypeNativeLocal,
-                           fileapi::FileSystemMountOption(),
-                           mount_point_dir_));
+    EXPECT_TRUE(content::BrowserContext::GetMountPoints(browser()->profile())
+                    ->RegisterFileSystem(kLocalMountPointName,
+                                         storage::kFileSystemTypeNativeLocal,
+                                         storage::FileSystemMountOption(),
+                                         mount_point_dir_));
     VolumeManager::Get(browser()->profile())->AddVolumeInfoForTesting(
         mount_point_dir_, VOLUME_TYPE_TESTING, chromeos::DEVICE_TYPE_UNKNOWN);
   }
@@ -438,11 +438,12 @@ class RestrictedFileSystemExtensionApiTest
 
   // FileSystemExtensionApiTestBase OVERRIDE.
   virtual void AddTestMountPoint() OVERRIDE {
-    EXPECT_TRUE(content::BrowserContext::GetMountPoints(browser()->profile())->
-        RegisterFileSystem(kRestrictedMountPointName,
-                           fileapi::kFileSystemTypeRestrictedNativeLocal,
-                           fileapi::FileSystemMountOption(),
-                           mount_point_dir_));
+    EXPECT_TRUE(
+        content::BrowserContext::GetMountPoints(browser()->profile())
+            ->RegisterFileSystem(kRestrictedMountPointName,
+                                 storage::kFileSystemTypeRestrictedNativeLocal,
+                                 storage::FileSystemMountOption(),
+                                 mount_point_dir_));
     VolumeManager::Get(browser()->profile())->AddVolumeInfoForTesting(
         mount_point_dir_, VOLUME_TYPE_TESTING, chromeos::DEVICE_TYPE_UNKNOWN);
   }
@@ -627,8 +628,8 @@ class LocalAndDriveFileSystemExtensionApiTest
   virtual void AddTestMountPoint() OVERRIDE {
     EXPECT_TRUE(content::BrowserContext::GetMountPoints(browser()->profile())
                     ->RegisterFileSystem(kLocalMountPointName,
-                                         fileapi::kFileSystemTypeNativeLocal,
-                                         fileapi::FileSystemMountOption(),
+                                         storage::kFileSystemTypeNativeLocal,
+                                         storage::FileSystemMountOption(),
                                          local_mount_point_dir_));
     VolumeManager::Get(browser()->profile())
         ->AddVolumeInfoForTesting(local_mount_point_dir_,
@@ -770,6 +771,15 @@ IN_PROC_BROWSER_TEST_F(DriveFileSystemExtensionApiTest, AppFileHandler) {
       FILE_PATH_LITERAL("manifest.json"),
       "file_browser/app_file_handler",
       FLAGS_USE_FILE_HANDLER)) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(DriveFileSystemExtensionApiTest,
+                       FileSystemFileOriginURL) {
+  EXPECT_TRUE(RunFileSystemExtensionApiTest(
+      "file_browser/filesystem_file_origin_url",
+      FILE_PATH_LITERAL("manifest.json"),
+      "",
+      FLAGS_NONE)) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(MultiProfileDriveFileSystemExtensionApiTest,

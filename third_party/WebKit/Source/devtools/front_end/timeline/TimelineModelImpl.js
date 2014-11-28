@@ -55,7 +55,7 @@ WebInspector.TimelineModelImpl.prototype = {
 
         this._clientInitiatedRecording = true;
         var maxStackFrames = captureStacks ? 30 : 0;
-        var includeGPUEvents = WebInspector.experimentsSettings.gpuTimeline.isEnabled();
+        var includeGPUEvents = Runtime.experiments.isEnabled("gpuTimeline");
         var liveEvents = [ WebInspector.TimelineModel.RecordType.BeginFrame,
                            WebInspector.TimelineModel.RecordType.DrawFrame,
                            WebInspector.TimelineModel.RecordType.RequestMainThreadFrame,
@@ -496,7 +496,7 @@ WebInspector.TimelineModel.RecordImpl.prototype = {
     {
         if (!this._userObjects)
             this._userObjects = new StringMap();
-        this._userObjects.put(key, value);
+        this._userObjects.set(key, value);
     },
 
     /**

@@ -24,9 +24,6 @@ namespace content {
 // "Arab" to "My Arabic Font".
 typedef std::map<std::string, base::string16> ScriptFontFamilyMap;
 
-typedef std::vector<std::pair<std::string, std::string> >
-    WebInspectorPreferences;
-
 enum EditingBehavior {
   EDITING_BEHAVIOR_MAC,
   EDITING_BEHAVIOR_WIN,
@@ -72,7 +69,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool images_enabled;
   bool plugins_enabled;
   bool dom_paste_enabled;
-  WebInspectorPreferences inspector_settings;
   bool shrinks_standalone_images_to_fit;
   bool uses_universal_detector;
   bool text_areas_are_resizable;
@@ -137,7 +133,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool supports_multiple_windows;
   bool viewport_enabled;
   bool viewport_meta_enabled;
-  bool use_expanded_heuristics_for_gpu_rasterization;
   bool main_frame_resizes_are_orientation_changes;
   bool initialize_at_minimum_page_scale;
   bool smart_insert_delete_enabled;
@@ -147,6 +142,7 @@ struct CONTENT_EXPORT WebPreferences {
   bool use_solid_color_scrollbars;
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;
+  bool v8_script_streaming_enabled;
 
   // This flags corresponds to a Page's Settings' setCookieEnabled state. It
   // only controls whether or not the "document.cookie" field is properly

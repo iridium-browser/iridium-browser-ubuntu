@@ -61,7 +61,7 @@ class GestureTextSelectorTest : public testing::Test,
                                         base::TimeTicks event_time,
                                         float x,
                                         float y) {
-    return GestureEventData(GestureEventDetails(type, 0, 0),
+    return GestureEventData(GestureEventDetails(type),
                             0,
                             MotionEvent::TOOL_TYPE_FINGER,
                             event_time,
@@ -70,7 +70,8 @@ class GestureTextSelectorTest : public testing::Test,
                             x,
                             y,
                             1,
-                            gfx::RectF(0, 0, 0, 0));
+                            gfx::RectF(0, 0, 0, 0),
+                            0);
   }
 
   scoped_ptr<GestureTextSelector> selector_;

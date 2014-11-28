@@ -159,14 +159,9 @@ int SSL_get_ex_data_X509_STORE_CTX_idx(void)
 void ssl_cert_set_default_md(CERT *cert)
 	{
 	/* Set digest values to defaults */
-#ifndef OPENSSL_NO_DSA
-	cert->pkeys[SSL_PKEY_DSA_SIGN].digest = EVP_sha1();
-#endif
 	cert->pkeys[SSL_PKEY_RSA_SIGN].digest = EVP_sha1();
 	cert->pkeys[SSL_PKEY_RSA_ENC].digest = EVP_sha1();
-#ifndef OPENSSL_NO_ECDSA
 	cert->pkeys[SSL_PKEY_ECC].digest = EVP_sha1();
-#endif
 	}
 
 CERT *ssl_cert_new(void)
@@ -208,7 +203,6 @@ CERT *ssl_cert_dup(CERT *cert)
 	ret->mask_k = cert->mask_k;
 	ret->mask_a = cert->mask_a;
 
-#ifndef OPENSSL_NO_DH
 	if (cert->dh_tmp != NULL)
 		{
 		ret->dh_tmp = DHparams_dup(cert->dh_tmp);
@@ -239,9 +233,7 @@ CERT *ssl_cert_dup(CERT *cert)
 			}
 		}
 	ret->dh_tmp_cb = cert->dh_tmp_cb;
-#endif
 
-#ifndef OPENSSL_NO_ECDH
 	if (cert->ecdh_tmp)
 		{
 		ret->ecdh_tmp = EC_KEY_dup(cert->ecdh_tmp);
@@ -253,7 +245,6 @@ CERT *ssl_cert_dup(CERT *cert)
 		}
 	ret->ecdh_tmp_cb = cert->ecdh_tmp_cb;
 	ret->ecdh_tmp_auto = cert->ecdh_tmp_auto;
-#endif
 
 	for (i = 0; i < SSL_PKEY_NUM; i++)
 		{
@@ -281,15 +272,6 @@ CERT *ssl_cert_dup(CERT *cert)
 				/* We have an RSA key. */
 				break;
 				
-			case SSL_PKEY_DSA_SIGN:
-				/* We have a DSA key. */
-				break;
-				
-			case SSL_PKEY_DH_RSA:
-			case SSL_PKEY_DH_DSA:
-				/* We have a DH key. */
-				break;
-
 			case SSL_PKEY_ECC:
 				/* We have an ECC key */
 				break;
@@ -378,17 +360,11 @@ CERT *ssl_cert_dup(CERT *cert)
 
 	return(ret);
 	
-#if !defined(OPENSSL_NO_DH) || !defined(OPENSSL_NO_ECDH)
 err:
-#endif
-#ifndef OPENSSL_NO_DH
 	if (ret->dh_tmp != NULL)
 		DH_free(ret->dh_tmp);
-#endif
-#ifndef OPENSSL_NO_ECDH
 	if (ret->ecdh_tmp != NULL)
 		EC_KEY_free(ret->ecdh_tmp);
-#endif
 
 	ssl_cert_clear_certs(ret);
 
@@ -430,12 +406,8 @@ void ssl_cert_free(CERT *c)
 	if(c == NULL)
 	    return;
 
-#ifndef OPENSSL_NO_DH
 	if (c->dh_tmp) DH_free(c->dh_tmp);
-#endif
-#ifndef OPENSSL_NO_ECDH
 	if (c->ecdh_tmp) EC_KEY_free(c->ecdh_tmp);
-#endif
 
 	ssl_cert_clear_certs(c);
 	if (c->peer_sigalgs)
@@ -576,7 +548,6 @@ SESS_CERT *ssl_sess_cert_new(void)
 
 	memset(ret, 0 ,sizeof *ret);
 	ret->peer_key = &(ret->peer_pkeys[SSL_PKEY_RSA_ENC]);
-	ret->references = 1;
 
 	return ret;
 	}
@@ -588,21 +559,6 @@ void ssl_sess_cert_free(SESS_CERT *sc)
 	if (sc == NULL)
 		return;
 
-	i = CRYPTO_add(&sc->references, -1, CRYPTO_LOCK_SSL_SESS_CERT);
-#ifdef REF_PRINT
-	REF_PRINT("SESS_CERT", sc);
-#endif
-	if (i > 0)
-		return;
-#ifdef REF_CHECK
-	if (i < 0)
-		{
-		fprintf(stderr,"ssl_sess_cert_free, bad reference count\n");
-		abort(); /* ok */
-		}
-#endif
-
-	/* i == 0 */
 	if (sc->cert_chain != NULL)
 		sk_X509_pop_free(sc->cert_chain, X509_free);
 	for (i = 0; i < SSL_PKEY_NUM; i++)
@@ -619,14 +575,10 @@ void ssl_sess_cert_free(SESS_CERT *sc)
 
 	if (sc->peer_rsa_tmp != NULL)
 		RSA_free(sc->peer_rsa_tmp);
-#ifndef OPENSSL_NO_DH
 	if (sc->peer_dh_tmp != NULL)
 		DH_free(sc->peer_dh_tmp);
-#endif
-#ifndef OPENSSL_NO_ECDH
 	if (sc->peer_ecdh_tmp != NULL)
 		EC_KEY_free(sc->peer_ecdh_tmp);
-#endif
 
 	OPENSSL_free(sc);
 	}
@@ -658,8 +610,6 @@ int ssl_verify_cert_chain(SSL *s,STACK_OF(X509) *sk)
 		OPENSSL_PUT_ERROR(SSL, ssl_verify_cert_chain, ERR_R_X509_LIB);
 		return(0);
 		}
-	/* Set suite B flags if needed */
-	X509_STORE_CTX_set_flags(&ctx, tls1_suiteb(s));
 #if 0
 	if (SSL_get_verify_depth(s) >= 0)
 		X509_STORE_CTX_set_depth(&ctx, SSL_get_verify_depth(s));
@@ -1149,8 +1099,6 @@ int ssl_build_cert_chain(CERT *c, X509_STORE *chain_store, int flags)
 		OPENSSL_PUT_ERROR(SSL, ssl_build_cert_chain, ERR_R_X509_LIB);
 		goto err;
 		}
-	/* Set suite B flags if needed */
-	X509_STORE_CTX_set_flags(&xs_ctx, c->cert_flags & SSL_CERT_FLAG_SUITEB_128_LOS);
 
 	i = X509_verify_cert(&xs_ctx);
 	if (i <= 0 && flags & SSL_BUILD_CHAIN_FLAG_IGNORE_ERROR)

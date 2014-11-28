@@ -32,7 +32,6 @@ enum Source {
   SOURCE_MENU,
   SOURCE_SETTINGS,
   SOURCE_EXTENSION_INSTALL_BUBBLE,
-  SOURCE_WEBSTORE_INSTALL,
   SOURCE_APP_LAUNCHER,
   SOURCE_APPS_PAGE_LINK,
   SOURCE_BOOKMARK_BUBBLE,
@@ -41,6 +40,26 @@ enum Source {
   SOURCE_DEVICES_PAGE,
   SOURCE_REAUTH,
   SOURCE_UNKNOWN, // This must be last.
+};
+
+// Enum values used for Android signin promo actions.
+enum AndroidSigninPromoAction {
+  // The promo was enabled.
+  HISTOGRAM_ANDROID_SIGNIN_PROMO_ENABLED = 0,
+
+  // The promo was shown.
+  HISTOGRAM_ANDROID_SIGNIN_PROMO_SHOWN,
+
+  // The promo was declined.
+  HISTOGRAM_ANDROID_SIGNIN_PROMO_DECLINED,
+
+  // The promo was accepted.
+  HISTOGRAM_ANDROID_SIGNIN_PROMO_ACCEPTED,
+
+  // The promo was accepted and user clicked the settings link.
+  HISTOGRAM_ANDROID_SIGNIN_PROMO_ACCEPTED_WITH_ADVANCED,
+
+  HISTOGRAM_ANDROID_SIGNIN_PROMO_MAX,
 };
 
 // Returns true if the sign in promo should be visible.
@@ -68,13 +87,6 @@ GURL GetLandingURL(const char* option, int value);
 // by default.
 GURL GetPromoURL(Source source, bool auto_close);
 GURL GetPromoURL(Source source, bool auto_close, bool is_constrained);
-
-// As above, but also appends the |continue_url| as a parameter to the URL.
-// A |continue_url| may be set only when not using the web-based sign-in flow.
-GURL GetPromoURLWithContinueURL(Source source,
-                                bool auto_close,
-                                bool is_constrained,
-                                GURL continue_url);
 
 // Returns a sign in promo URL specifically for reauthenticating |account_id|.
 GURL GetReauthURL(Profile* profile, const std::string& account_id);

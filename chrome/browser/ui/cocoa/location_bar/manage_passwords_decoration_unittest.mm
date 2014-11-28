@@ -11,8 +11,8 @@
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/location_bar/manage_passwords_decoration.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -53,7 +53,8 @@ bool ImagesEqual(NSImage* left, NSImage* right) {
 class ManagePasswordsDecorationTest : public CocoaTest {
  public:
   ManagePasswordsDecorationTest()
-      : commandUpdater_(&commandDelegate_), decoration_(&commandUpdater_) {
+      : commandUpdater_(&commandDelegate_),
+        decoration_(&commandUpdater_, NULL) {
     commandUpdater_.UpdateCommandEnabled(IDC_MANAGE_PASSWORDS_FOR_PAGE, true);
   }
 
@@ -69,7 +70,7 @@ class ManagePasswordsDecorationTest : public CocoaTest {
 
 TEST_F(ManagePasswordsDecorationTest, ExecutesManagePasswordsCommandOnClick) {
   EXPECT_TRUE(decoration()->AcceptsMousePress());
-  EXPECT_TRUE(decoration()->OnMousePressed(NSRect(), NSPoint()));
+  EXPECT_FALSE(decoration()->OnMousePressed(NSRect(), NSPoint()));
   EXPECT_EQ(IDC_MANAGE_PASSWORDS_FOR_PAGE, commandDelegate()->id());
 }
 

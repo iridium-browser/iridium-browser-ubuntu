@@ -49,7 +49,7 @@ class CC_EXPORT ThreadProxy : public Proxy,
     ~BeginMainFrameAndCommitState();
 
     unsigned int begin_frame_id;
-    base::TimeTicks monotonic_frame_begin_time;
+    BeginFrameArgs begin_frame_args;
     scoped_ptr<ScrollAndScaleSet> scroll_info;
     size_t memory_allocation_limit_bytes;
     int memory_allocation_priority_cutoff;
@@ -152,6 +152,7 @@ class CC_EXPORT ThreadProxy : public Proxy,
   // Proxy implementation
   virtual void FinishAllRendering() OVERRIDE;
   virtual bool IsStarted() const OVERRIDE;
+  virtual void SetOutputSurface(scoped_ptr<OutputSurface>) OVERRIDE;
   virtual void SetLayerTreeHostClientReady() OVERRIDE;
   virtual void SetVisible(bool visible) OVERRIDE;
   virtual const RendererCapabilities& GetRendererCapabilities() const OVERRIDE;
@@ -245,7 +246,7 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void DidCompleteSwapBuffers();
   void SetAnimationEvents(scoped_ptr<AnimationEventsVector> queue);
   void DidLoseOutputSurface();
-  void CreateAndInitializeOutputSurface();
+  void RequestNewOutputSurface();
   void DidInitializeOutputSurface(bool success,
                                   const RendererCapabilities& capabilities);
   void SendCommitRequestToImplThreadIfNeeded();

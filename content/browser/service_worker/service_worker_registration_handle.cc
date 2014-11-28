@@ -25,7 +25,7 @@ ServiceWorkerRegistrationHandle::ServiceWorkerRegistrationHandle(
                          : kInvalidServiceWorkerRegistrationHandleId),
       ref_count_(1),
       registration_(registration) {
-  DCHECK(registration_);
+  DCHECK(registration_.get());
   SetVersionAttributes(registration->installing_version(),
                        registration->waiting_version(),
                        registration->active_version());
@@ -33,8 +33,33 @@ ServiceWorkerRegistrationHandle::ServiceWorkerRegistrationHandle(
 }
 
 ServiceWorkerRegistrationHandle::~ServiceWorkerRegistrationHandle() {
-  DCHECK(registration_);
+  DCHECK(registration_.get());
   registration_->RemoveListener(this);
+}
+
+ServiceWorkerRegistrationObjectInfo
+ServiceWorkerRegistrationHandle::GetObjectInfo() {
+  ServiceWorkerRegistrationObjectInfo info;
+  info.handle_id = handle_id_;
+  info.scope = registration_->pattern();
+  return info;
+}
+
+ServiceWorkerObjectInfo
+ServiceWorkerRegistrationHandle::CreateServiceWorkerHandleAndPass(
+    ServiceWorkerVersion* version) {
+  ServiceWorkerObjectInfo info;
+  if (context_ && version) {
+    scoped_ptr<ServiceWorkerHandle> handle =
+        ServiceWorkerHandle::Create(context_,
+                                    dispatcher_host_,
+                                    kDocumentMainThreadId,
+                                    provider_id_,
+                                    version);
+    info = handle->GetObjectInfo();
+    dispatcher_host_->RegisterServiceWorkerHandle(handle.Pass());
+  }
+  return info;
 }
 
 void ServiceWorkerRegistrationHandle::IncrementRefCount() {
@@ -63,21 +88,29 @@ void ServiceWorkerRegistrationHandle::OnRegistrationFailed(
   ClearVersionAttributes();
 }
 
+void ServiceWorkerRegistrationHandle::OnUpdateFound(
+    ServiceWorkerRegistration* registration) {
+  if (!dispatcher_host_)
+    return;  // Could be NULL in some tests.
+  dispatcher_host_->Send(new ServiceWorkerMsg_UpdateFound(
+      kDocumentMainThreadId, GetObjectInfo()));
+}
+
 void ServiceWorkerRegistrationHandle::SetVersionAttributes(
     ServiceWorkerVersion* installing_version,
     ServiceWorkerVersion* waiting_version,
     ServiceWorkerVersion* active_version) {
   ChangedVersionAttributesMask mask;
 
-  if (installing_version != installing_version_) {
+  if (installing_version != installing_version_.get()) {
     installing_version_ = installing_version;
     mask.add(ChangedVersionAttributesMask::INSTALLING_VERSION);
   }
-  if (waiting_version != waiting_version_) {
+  if (waiting_version != waiting_version_.get()) {
     waiting_version_ = waiting_version;
     mask.add(ChangedVersionAttributesMask::WAITING_VERSION);
   }
-  if (active_version != active_version_) {
+  if (active_version != active_version_.get()) {
     active_version_ = active_version;
     mask.add(ChangedVersionAttributesMask::ACTIVE_VERSION);
   }
@@ -108,23 +141,6 @@ void ServiceWorkerRegistrationHandle::SetVersionAttributes(
 
 void ServiceWorkerRegistrationHandle::ClearVersionAttributes() {
   SetVersionAttributes(NULL, NULL, NULL);
-}
-
-ServiceWorkerObjectInfo
-ServiceWorkerRegistrationHandle::CreateServiceWorkerHandleAndPass(
-    ServiceWorkerVersion* version) {
-  ServiceWorkerObjectInfo info;
-  if (context_ && version) {
-    scoped_ptr<ServiceWorkerHandle> handle =
-        ServiceWorkerHandle::Create(context_,
-                                    dispatcher_host_,
-                                    kDocumentMainThreadId,
-                                    provider_id_,
-                                    version);
-    info = handle->GetObjectInfo();
-    dispatcher_host_->RegisterServiceWorkerHandle(handle.Pass());
-  }
-  return info;
 }
 
 }  // namespace content

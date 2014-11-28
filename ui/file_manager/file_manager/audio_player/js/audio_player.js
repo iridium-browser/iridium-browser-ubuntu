@@ -44,7 +44,7 @@ function AudioPlayer(container) {
 
   this.errorString_ = '';
   this.offlineString_ = '';
-  chrome.fileBrowserPrivate.getStrings(function(strings) {
+  chrome.fileManagerPrivate.getStrings(function(strings) {
     container.ownerDocument.title = strings['AUDIO_PLAYER_TITLE'];
     this.errorString_ = strings['AUDIO_ERROR'];
     this.offlineString_ = strings['AUDIO_OFFLINE'];
@@ -117,18 +117,25 @@ AudioPlayer.prototype.load = function(playlist) {
         return;
 
       var newTracks = [];
+      var currentTracks = this.player_.tracks;
+      var unchanged = (currentTracks.length === this.entries_.length);
 
       for (var i = 0; i != this.entries_.length; i++) {
         var entry = this.entries_[i];
-        var onClick = this.select_.bind(this, i, false /* no restore */);
+        var onClick = this.select_.bind(this, i);
         newTracks.push(new AudioPlayer.TrackInfo(entry, onClick));
+
+        if (unchanged && entry.toURL() !== currentTracks[i].url)
+          unchanged = false;
       }
 
-      this.player_.tracks = newTracks;
+      if (!unchanged) {
+        this.player_.tracks = newTracks;
 
-      // Makes it sure that the handler of the track list is called, before the
-      // handler of the track index.
-      Platform.performMicrotaskCheckpoint();
+        // Makes it sure that the handler of the track list is called, before
+        // the handler of the track index.
+        Platform.performMicrotaskCheckpoint();
+      }
 
       this.select_(position, !!time);
 
@@ -191,13 +198,15 @@ AudioPlayer.prototype.onUnload = function() {
 /**
  * Selects a new track to play.
  * @param {number} newTrack New track number.
+ * @param {number} time New playback position (in second).
  * @private
  */
-AudioPlayer.prototype.select_ = function(newTrack) {
+AudioPlayer.prototype.select_ = function(newTrack, time) {
   if (this.currentTrackIndex_ == newTrack) return;
 
   this.currentTrackIndex_ = newTrack;
   this.player_.currentTrackIndex = this.currentTrackIndex_;
+  this.player_.audioController.time = time;
   Platform.performMicrotaskCheckpoint();
 
   if (!window.appReopen)
@@ -223,7 +232,7 @@ AudioPlayer.prototype.select_ = function(newTrack) {
  * @private
  */
 AudioPlayer.prototype.fetchMetadata_ = function(entry, callback) {
-  this.metadataCache_.getOne(entry, 'thumbnail|media|streaming',
+  this.metadataCache_.getOne(entry, 'thumbnail|media|external',
       function(generation, metadata) {
         // Do nothing if another load happened since the metadata request.
         if (this.playlistGeneration_ == generation)
@@ -243,7 +252,7 @@ AudioPlayer.prototype.onError_ = function() {
   this.fetchMetadata_(
       this.entries_[track],
       function(metadata) {
-        var error = (!navigator.onLine && metadata.streaming) ?
+        var error = (!navigator.onLine && !metadata.external.present) ?
             this.offlineString_ : this.errorString_;
         this.displayMetadata_(track, metadata, error);
         this.scheduleAutoAdvance_();
@@ -340,8 +349,8 @@ AudioPlayer.prototype.syncHeight_ = function() {
     if (!this.lastExpandedHeight_ ||
         this.lastExpandedHeight_ < AudioPlayer.EXPANDED_MODE_MIN_HEIGHT) {
       var expandedListHeight =
-        Math.min(this.entries_.length, AudioPlayer.DEFAULT_EXPANDED_ITEMS) *
-                                       AudioPlayer.TRACK_HEIGHT;
+          Math.min(this.entries_.length, AudioPlayer.DEFAULT_EXPANDED_ITEMS) *
+              AudioPlayer.TRACK_HEIGHT;
       targetHeight = AudioPlayer.CONTROLS_HEIGHT + expandedListHeight;
       this.lastExpandedHeight_ = targetHeight;
     } else {

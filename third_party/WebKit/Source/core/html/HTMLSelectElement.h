@@ -40,6 +40,7 @@ class HTMLOptionElement;
 class MouseEvent;
 
 class HTMLSelectElement FINAL : public HTMLFormControlElementWithState, public TypeAheadDataSource {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLSelectElement> create(Document&);
     static PassRefPtrWillBeRawPtr<HTMLSelectElement> create(Document&, HTMLFormElement*);
@@ -97,7 +98,7 @@ public:
     void setLength(unsigned, ExceptionState&);
 
     Element* namedItem(const AtomicString& name);
-    Element* item(unsigned index);
+    HTMLOptionElement* item(unsigned index);
 
     void scrollToSelection();
     void scrollTo(int listIndex);
@@ -113,7 +114,6 @@ public:
     int activeSelectionEndListIndex() const;
     void setActiveSelectionAnchorIndex(int);
     void setActiveSelectionEndIndex(int);
-    void updateListBoxSelection(bool deselectOtherOptions);
 
     // For use in the implementation of HTMLOptionElement.
     void optionSelectionStateChanged(HTMLOptionElement*, bool optionIsSelected);
@@ -189,6 +189,7 @@ private:
     void listBoxDefaultEventHandler(Event*);
     void setOptionsChangedOnRenderer();
     size_t searchOptionsForValue(const String&, size_t listIndexStart, size_t listIndexEnd) const;
+    void updateListBoxSelection(bool deselectOtherOptions, bool scroll = true);
 
     enum SkipDirection {
         SkipBackwards = -1,
@@ -229,6 +230,6 @@ private:
     int m_suggestedIndex;
 };
 
-} // namespace
+} // namespace blink
 
-#endif
+#endif // HTMLSelectElement_h

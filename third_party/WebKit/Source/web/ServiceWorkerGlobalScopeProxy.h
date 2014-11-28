@@ -41,7 +41,7 @@
 namespace blink {
 
 class ConsoleMessage;
-class ExecutionContext;
+class Document;
 class WebEmbeddedWorkerImpl;
 class WebServiceWorkerContextClient;
 class WebServiceWorkerRequest;
@@ -60,10 +60,10 @@ class WebServiceWorkerRequest;
 // WorkerGlobalScope.
 class ServiceWorkerGlobalScopeProxy FINAL
     : public WebServiceWorkerContextProxy
-    , public blink::WorkerReportingProxy {
+    , public WorkerReportingProxy {
     WTF_MAKE_NONCOPYABLE(ServiceWorkerGlobalScopeProxy);
 public:
-    static PassOwnPtr<ServiceWorkerGlobalScopeProxy> create(WebEmbeddedWorkerImpl&, blink::ExecutionContext&, WebServiceWorkerContextClient&);
+    static PassOwnPtr<ServiceWorkerGlobalScopeProxy> create(WebEmbeddedWorkerImpl&, Document&, WebServiceWorkerContextClient&);
     virtual ~ServiceWorkerGlobalScopeProxy();
 
     // WebServiceWorkerContextProxy overrides:
@@ -79,20 +79,20 @@ public:
     virtual void reportConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE;
     virtual void postMessageToPageInspector(const String&) OVERRIDE;
     virtual void updateInspectorStateCookie(const String&) OVERRIDE;
-    virtual void workerGlobalScopeStarted(blink::WorkerGlobalScope*) OVERRIDE;
+    virtual void workerGlobalScopeStarted(WorkerGlobalScope*) OVERRIDE;
     virtual void workerGlobalScopeClosed() OVERRIDE;
     virtual void willDestroyWorkerGlobalScope() OVERRIDE;
     virtual void workerThreadTerminated() OVERRIDE;
 
 private:
-    ServiceWorkerGlobalScopeProxy(WebEmbeddedWorkerImpl&, blink::ExecutionContext&, WebServiceWorkerContextClient&);
+    ServiceWorkerGlobalScopeProxy(WebEmbeddedWorkerImpl&, Document&, WebServiceWorkerContextClient&);
 
     WebEmbeddedWorkerImpl& m_embeddedWorker;
-    blink::ExecutionContext& m_executionContext;
+    Document& m_document;
 
     WebServiceWorkerContextClient& m_client;
 
-    blink::WorkerGlobalScope* m_workerGlobalScope;
+    WorkerGlobalScope* m_workerGlobalScope;
 };
 
 } // namespace blink

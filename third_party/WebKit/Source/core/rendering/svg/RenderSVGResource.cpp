@@ -35,19 +35,7 @@
 
 namespace blink {
 
-static inline bool inheritColorFromParentStyle(RenderObject* object, bool applyToFill, Color& color)
-{
-    if (!object->parent() || !object->parent()->style())
-        return false;
-    const SVGRenderStyle& parentSVGStyle = object->parent()->style()->svgStyle();
-    SVGPaintType paintType = applyToFill ? parentSVGStyle.fillPaintType() : parentSVGStyle.strokePaintType();
-    if (paintType != SVG_PAINTTYPE_RGBCOLOR && paintType != SVG_PAINTTYPE_RGBCOLOR_ICCCOLOR)
-        return false;
-    color = applyToFill ? parentSVGStyle.fillPaintColor() : parentSVGStyle.strokePaintColor();
-    return true;
-}
-
-static inline RenderSVGResource* requestPaintingResource(RenderSVGResourceMode mode, RenderObject* object, const RenderStyle* style, bool& hasFallback)
+RenderSVGResource* RenderSVGResource::requestPaintingResource(RenderSVGResourceMode mode, RenderObject* object, const RenderStyle* style, bool& hasFallback)
 {
     ASSERT(object);
     ASSERT(style);
@@ -86,10 +74,8 @@ static inline RenderSVGResource* requestPaintingResource(RenderSVGResourceMode m
     switch (paintType) {
     case SVG_PAINTTYPE_CURRENTCOLOR:
     case SVG_PAINTTYPE_RGBCOLOR:
-    case SVG_PAINTTYPE_RGBCOLOR_ICCCOLOR:
     case SVG_PAINTTYPE_URI_CURRENTCOLOR:
     case SVG_PAINTTYPE_URI_RGBCOLOR:
-    case SVG_PAINTTYPE_URI_RGBCOLOR_ICCCOLOR:
         color = applyToFill ? svgStyle.fillPaintColor() : svgStyle.strokePaintColor();
         hasColor = true;
     default:
@@ -111,27 +97,20 @@ static inline RenderSVGResource* requestPaintingResource(RenderSVGResourceMode m
     // If the primary resource is just a color, return immediately.
     RenderSVGResourceSolidColor* colorResource = RenderSVGResource::sharedSolidPaintingResource();
     if (paintType < SVG_PAINTTYPE_URI_NONE) {
-        if (!hasColor && !inheritColorFromParentStyle(object, applyToFill, color))
-            return 0;
-
+        // |paintType| will be either <current-color> or <rgb-color> here - both of which will have a color.
+        ASSERT(hasColor);
         colorResource->setColor(color);
         return colorResource;
     }
 
-    // If no resources are associated with the given renderer, return the color resource.
-    SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(object);
-    if (!resources) {
-        if (paintType == SVG_PAINTTYPE_URI_NONE || (!hasColor && !inheritColorFromParentStyle(object, applyToFill, color)))
-            return 0;
+    RenderSVGResource* uriResource = 0;
+    if (SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(object))
+        uriResource = applyToFill ? resources->fill() : resources->stroke();
 
-        colorResource->setColor(color);
-        return colorResource;
-    }
-
-    // If the requested resource is not available, return the color resource.
-    RenderSVGResource* uriResource = mode == ApplyToFillMode ? resources->fill() : resources->stroke();
+    // If the requested resource is not available, return the color resource or 'none'.
     if (!uriResource) {
-        if (!hasColor && !inheritColorFromParentStyle(object, applyToFill, color))
+        // The fallback is 'none'. (SVG2 say 'none' is implied when no fallback is specified.)
+        if (paintType == SVG_PAINTTYPE_URI_NONE || !hasColor)
             return 0;
 
         colorResource->setColor(color);
@@ -145,16 +124,6 @@ static inline RenderSVGResource* requestPaintingResource(RenderSVGResourceMode m
         hasFallback = true;
     }
     return uriResource;
-}
-
-RenderSVGResource* RenderSVGResource::fillPaintingResource(RenderObject* object, const RenderStyle* style, bool& hasFallback)
-{
-    return requestPaintingResource(ApplyToFillMode, object, style, hasFallback);
-}
-
-RenderSVGResource* RenderSVGResource::strokePaintingResource(RenderObject* object, const RenderStyle* style, bool& hasFallback)
-{
-    return requestPaintingResource(ApplyToStrokeMode, object, style, hasFallback);
 }
 
 RenderSVGResourceSolidColor* RenderSVGResource::sharedSolidPaintingResource()

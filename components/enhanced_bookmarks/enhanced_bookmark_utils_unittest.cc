@@ -9,6 +9,8 @@
 #include "components/enhanced_bookmarks/enhanced_bookmark_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using bookmarks::TestBookmarkClient;
+
 namespace {
 
 const GURL bookmark_url("http://example.com/index.html");
@@ -33,8 +35,8 @@ class EnhancedBookmarkUtilsTest : public testing::Test {
 };
 
 TEST_F(EnhancedBookmarkUtilsTest, TestBookmarkSearch) {
-  test::TestBookmarkClient bookmark_client;
-  scoped_ptr<BookmarkModel> bookmark_model(bookmark_client.CreateModel(false));
+  TestBookmarkClient bookmark_client;
+  scoped_ptr<BookmarkModel> bookmark_model(bookmark_client.CreateModel());
   const BookmarkNode* node1 = AddBookmark(bookmark_model.get(), "john hopkins");
   const BookmarkNode* node2 = AddBookmark(bookmark_model.get(), "JohN hopkins");
   const BookmarkNode* node3 = AddBookmark(bookmark_model.get(), "katy perry");
@@ -42,8 +44,7 @@ TEST_F(EnhancedBookmarkUtilsTest, TestBookmarkSearch) {
   const BookmarkNode* node5 = AddBookmark(bookmark_model.get(), "jo hn");
 
   std::vector<const BookmarkNode*> result =
-      enhanced_bookmark_utils::FindBookmarksWithQuery(bookmark_model.get(),
-                                                      "john");
+      enhanced_bookmarks::FindBookmarksWithQuery(bookmark_model.get(), "john");
   ASSERT_EQ(result.size(), 3u);
 
   CHECK(std::find(result.begin(), result.end(), node1) != result.end());

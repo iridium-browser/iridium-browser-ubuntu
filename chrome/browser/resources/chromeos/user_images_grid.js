@@ -26,9 +26,10 @@ cr.define('options', function() {
 
   /**
    * Creates a new user images grid item.
-   * @param {{url: string, title: string=, decorateFn: function=,
-   *     clickHandler: function=}} imageInfo User image URL, optional title,
-   *     decorator callback and click handler.
+   * @param {{url: string, title: (string|undefined),
+   *     decorateFn: (!Function|undefined),
+   *     clickHandler: (!Function|undefined)}} imageInfo User image URL,
+   *     optional title, decorator callback and click handler.
    * @constructor
    * @extends {cr.ui.GridItem}
    */
@@ -124,7 +125,9 @@ cr.define('options', function() {
     decorate: function() {
       Grid.prototype.decorate.call(this);
       this.dataModel = new ArrayDataModel([]);
-      this.itemConstructor = UserImagesGridItem;
+      this.itemConstructor =
+          /** @type {function(new:cr.ui.ListItem, Object)} */(
+              UserImagesGridItem);
       this.selectionModel = new ListSingleSelectionModel();
       this.inProgramSelection_ = false;
       this.addEventListener('dblclick', this.handleDblClick_.bind(this));
@@ -241,7 +244,7 @@ cr.define('options', function() {
      * Handles successful camera check.
      * @param {function(): boolean} onAvailable Callback to call. If it returns
      *     |true|, capture is started immediately.
-     * @param {MediaStream} stream Stream object as returned by getUserMedia.
+     * @param {!MediaStream} stream Stream object as returned by getUserMedia.
      * @private
      */
     handleCameraAvailable_: function(onAvailable, stream) {
@@ -312,7 +315,7 @@ cr.define('options', function() {
     /**
      * Current image captured from camera as data URL. Setting to null will
      * return to the live camera stream.
-     * @type {string=}
+     * @type {(string|undefined)}
      */
     get cameraImage() {
       return this.cameraImage_;
@@ -460,11 +463,14 @@ cr.define('options', function() {
     takePhoto: function() {
       if (!this.cameraOnline)
         return false;
-      var canvas = document.createElement('canvas');
+      var canvas = /** @type {HTMLCanvasElement} */(
+          document.createElement('canvas'));
       canvas.width = CAPTURE_SIZE.width;
       canvas.height = CAPTURE_SIZE.height;
       this.captureFrame_(
-          this.cameraVideo_, canvas.getContext('2d'), CAPTURE_SIZE);
+          this.cameraVideo_,
+          /** @type {CanvasRenderingContext2D} */(canvas.getContext('2d')),
+          CAPTURE_SIZE);
       // Preload image before displaying it.
       var previewImg = new Image();
       previewImg.addEventListener('load', function(e) {
@@ -536,12 +542,12 @@ cr.define('options', function() {
 
     /**
      * Adds new image to the user image grid.
-     * @param {string} src Image URL.
+     * @param {string} url Image URL.
      * @param {string=} opt_title Image tooltip.
-     * @param {function=} opt_clickHandler Image click handler.
+     * @param {Function=} opt_clickHandler Image click handler.
      * @param {number=} opt_position If given, inserts new image into
      *     that position (0-based) in image list.
-     * @param {function=} opt_decorateFn Function called with the list element
+     * @param {Function=} opt_decorateFn Function called with the list element
      *     as argument to do any final decoration.
      * @return {!Object} Image data inserted into the data model.
      */
@@ -591,7 +597,7 @@ cr.define('options', function() {
           imageIndex,
           imageInfo.decorateFn);
       // Update image data with the reset of the keys from the old data.
-      for (k in imageInfo) {
+      for (var k in imageInfo) {
         if (!(k in newInfo))
           newInfo[k] = imageInfo[k];
       }

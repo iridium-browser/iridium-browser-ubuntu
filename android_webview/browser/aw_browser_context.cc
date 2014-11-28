@@ -20,6 +20,7 @@
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
 #include "content/public/browser/browser_thread.h"
@@ -54,7 +55,7 @@ AwBrowserContext::AwBrowserContext(
     JniDependencyFactory* native_factory)
     : context_storage_path_(path),
       native_factory_(native_factory) {
-  DCHECK(g_browser_context == NULL);
+  DCHECK(!g_browser_context);
   g_browser_context = this;
 
   // This constructor is entered during the creation of ContentBrowserClient,
@@ -63,7 +64,7 @@ AwBrowserContext::AwBrowserContext(
 }
 
 AwBrowserContext::~AwBrowserContext() {
-  DCHECK(g_browser_context == this);
+  DCHECK_EQ(this, g_browser_context);
   g_browser_context = NULL;
 }
 
@@ -94,17 +95,19 @@ void AwBrowserContext::SetDataReductionProxyEnabled(bool enabled) {
       context->GetDataReductionProxySettings();
   if (proxy_settings == NULL)
     return;
+
+  context->CreateDataReductionProxyStatisticsIfNecessary();
+  proxy_settings->SetDataReductionProxyStatisticsPrefs(
+      context->data_reduction_proxy_statistics_.get());
   proxy_settings->SetDataReductionProxyEnabled(data_reduction_proxy_enabled_);
 }
 
 void AwBrowserContext::PreMainMessageLoopRun() {
   cookie_store_ = CreateCookieStore(this);
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
   data_reduction_proxy_settings_.reset(
       new DataReductionProxySettings(
           new data_reduction_proxy::DataReductionProxyParams(
               data_reduction_proxy::DataReductionProxyParams::kAllowed)));
-#endif
   scoped_ptr<DataReductionProxyConfigService>
       data_reduction_proxy_config_service(
           new DataReductionProxyConfigService(
@@ -181,6 +184,10 @@ DataReductionProxySettings* AwBrowserContext::GetDataReductionProxySettings() {
   return data_reduction_proxy_settings_.get();
 }
 
+AwURLRequestContextGetter* AwBrowserContext::GetAwURLRequestContext() {
+  return url_request_context_getter_.get();
+}
+
 // Create user pref service for autofill functionality.
 void AwBrowserContext::CreateUserPrefServiceIfNecessary() {
   if (user_pref_service_)
@@ -209,11 +216,9 @@ void AwBrowserContext::CreateUserPrefServiceIfNecessary() {
   if (data_reduction_proxy_settings_.get()) {
     data_reduction_proxy_settings_->InitDataReductionProxySettings(
         user_pref_service_.get(),
-        user_pref_service_.get(),
         GetRequestContext());
 
-    data_reduction_proxy_settings_->SetDataReductionProxyEnabled(
-        data_reduction_proxy_enabled_);
+    SetDataReductionProxyEnabled(data_reduction_proxy_enabled_);
   }
 }
 
@@ -271,7 +276,7 @@ content::BrowserPluginGuestManager* AwBrowserContext::GetGuestManager() {
   return NULL;
 }
 
-quota::SpecialStoragePolicy* AwBrowserContext::GetSpecialStoragePolicy() {
+storage::SpecialStoragePolicy* AwBrowserContext::GetSpecialStoragePolicy() {
   // Intentionally returning NULL as 'Extensions' and 'Apps' not supported.
   return NULL;
 }
@@ -291,6 +296,21 @@ void AwBrowserContext::RebuildTable(
   // can change in the lifetime of this WebView and may not yet be set here.
   // Therefore this initialization path is not used.
   enumerator->OnComplete(true);
+}
+
+void AwBrowserContext::CreateDataReductionProxyStatisticsIfNecessary() {
+  DCHECK(user_pref_service_.get());
+
+  if (!data_reduction_proxy_statistics_.get()) {
+    // We don't care about commit_delay for now. It is just a dummy value.
+    base::TimeDelta commit_delay = base::TimeDelta::FromMinutes(60);
+    data_reduction_proxy_statistics_ =
+        scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>(
+            new data_reduction_proxy::DataReductionProxyStatisticsPrefs(
+                user_pref_service_.get(),
+                base::MessageLoopProxy::current(),
+                commit_delay));
+  }
 }
 
 }  // namespace android_webview

@@ -51,8 +51,7 @@ WebInspector.AuditsPanel = function()
 
     this._constructCategories();
 
-    var target = /** @type {!WebInspector.Target} */ (WebInspector.targetManager.mainTarget());
-    this._auditController = new WebInspector.AuditController(target, this);
+    this._auditController = new WebInspector.AuditController(this);
     this._launcherView = new WebInspector.AuditLauncherView(this._auditController);
     for (var id in this.categoriesById)
         this._launcherView.addCategory(this.categoriesById[id]);
@@ -463,9 +462,13 @@ WebInspector.AuditsSidebarTreeElement.prototype = {
         WebInspector.SidebarTreeElement.prototype.onattach.call(this);
     },
 
+    /**
+     * @return {boolean}
+     */
     onselect: function()
     {
         this._panel.showLauncherView();
+        return true;
     },
 
     get selectable()
@@ -498,9 +501,13 @@ WebInspector.AuditResultSidebarTreeElement = function(panel, results, mainResour
 }
 
 WebInspector.AuditResultSidebarTreeElement.prototype = {
+    /**
+     * @return {boolean}
+     */
     onselect: function()
     {
         this._panel.showResults(this.results);
+        return true;
     },
 
     get selectable()

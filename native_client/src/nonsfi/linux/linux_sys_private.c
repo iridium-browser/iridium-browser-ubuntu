@@ -111,8 +111,8 @@ long int sysconf(int name) {
   return -1;
 }
 
-void *mmap(void *start, size_t length, int prot, int flags,
-           int fd, off_t offset) {
+static void *mmap_internal(void *start, size_t length, int prot, int flags,
+                           int fd, off_t offset) {
 #if defined(__i386__) || defined(__arm__)
   static const int kPageBits = 12;
   if (offset & ((1 << kPageBits) - 1)) {
@@ -130,14 +130,38 @@ void *mmap(void *start, size_t length, int prot, int flags,
 #endif
 }
 
+void *mmap(void *start, size_t length, int prot, int flags,
+           int fd, off_t offset) {
+  /*
+   * On Chrome OS and on Chrome's seccomp sandbox, mmap() with PROT_EXEC is
+   * prohibited. So, instead, mmap() the memory without PROT_EXEC first, and
+   * then give it the PROT_EXEC by mprotect.
+   */
+  void *result =
+      mmap_internal(start, length, (prot & ~PROT_EXEC), flags, fd, offset);
+  if (result != MAP_FAILED && (prot & PROT_EXEC) != 0) {
+    if (mprotect(result, length, prot) < 0) {
+      /*
+       * If mprotect failed, we cannot do much else other than abort(), because
+       * we cannot undo the mmap() (specifically, when MAP_FIXED is set).
+       */
+      static const char msg[] =
+          "mprotect() in mmap() to set PROT_EXEC failed.";
+      write(2, msg, sizeof(msg) - 1);
+      abort();
+    }
+  }
+  return result;
+}
+
 int munmap(void *start, size_t length) {
   return errno_value_call(
-      linux_syscall2(__NR_munmap, (uintptr_t ) start, length));
+      linux_syscall2(__NR_munmap, (uintptr_t) start, length));
 }
 
 int mprotect(void *start, size_t length, int prot) {
   return errno_value_call(
-      linux_syscall3(__NR_mprotect, (uintptr_t ) start, length, prot));
+      linux_syscall3(__NR_mprotect, (uintptr_t) start, length, prot));
 }
 
 int read(int fd, void *buf, size_t count) {
@@ -474,7 +498,40 @@ int linux_sigaction(int signum, const struct linux_sigaction *act,
                      (uintptr_t) act, (uintptr_t) oldact, kSigsetSize));
 }
 
+/*
+ * Obtain Linux signal number from portable signal number.
+ */
+static int nacl_signum_to_linux_signum(int signum) {
+  /* SIGSTKFLT is not defined in newlib, hence no mapping. */
+#define HANDLE_SIGNUM(SIGNUM) case SIGNUM: return LINUX_##SIGNUM;
+  switch(signum) {
+    HANDLE_SIGNUM(SIGHUP);
+    HANDLE_SIGNUM(SIGINT);
+    HANDLE_SIGNUM(SIGQUIT);
+    HANDLE_SIGNUM(SIGILL);
+    HANDLE_SIGNUM(SIGTRAP);
+    HANDLE_SIGNUM(SIGABRT);
+    HANDLE_SIGNUM(SIGBUS);
+    HANDLE_SIGNUM(SIGFPE);
+    HANDLE_SIGNUM(SIGKILL);
+    HANDLE_SIGNUM(SIGUSR1);
+    HANDLE_SIGNUM(SIGSEGV);
+    HANDLE_SIGNUM(SIGUSR2);
+    HANDLE_SIGNUM(SIGPIPE);
+    HANDLE_SIGNUM(SIGALRM);
+    HANDLE_SIGNUM(SIGTERM);
+    HANDLE_SIGNUM(SIGSYS);
+  }
+#undef HANDLE_SIGNUM
+  errno = EINVAL;
+  return -1;
+}
+
 sighandler_t signal(int signum, sighandler_t handler) {
+  int linux_signum = nacl_signum_to_linux_signum(signum);
+  if (linux_signum == -1)
+    return SIG_ERR;
+
   struct linux_sigaction sa;
   memset(&sa, 0, sizeof(sa));
   /*
@@ -484,9 +541,9 @@ sighandler_t signal(int signum, sighandler_t handler) {
   sa.sa_sigaction = (void (*)(int, linux_siginfo_t *, void *)) handler;
   sa.sa_flags = LINUX_SA_RESTART;
   sigemptyset(&sa.sa_mask);
-  sigaddset(&sa.sa_mask, signum);
+  sigaddset(&sa.sa_mask, linux_signum);
   struct linux_sigaction osa;
-  int result = linux_sigaction(signum, &sa, &osa);
+  int result = linux_sigaction(linux_signum, &sa, &osa);
   if (result != 0)
     return SIG_ERR;
   return (sighandler_t) osa.sa_sigaction;

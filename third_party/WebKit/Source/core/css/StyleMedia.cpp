@@ -37,7 +37,6 @@ namespace blink {
 StyleMedia::StyleMedia(LocalFrame* frame)
     : DOMWindowProperty(frame)
 {
-    ScriptWrappable::init(this);
 }
 
 AtomicString StyleMedia::type() const
@@ -66,6 +65,11 @@ bool StyleMedia::matchMedium(const String& query) const
 
     MediaQueryEvaluator screenEval(m_frame);
     return screenEval.eval(media.get());
+}
+
+void StyleMedia::trace(Visitor* visitor)
+{
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

@@ -17,6 +17,7 @@
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/browser/api/api_resource_manager.h"
 #include "extensions/common/api/cast_channel.h"
+#include "extensions/common/api/cast_channel/logging.pb.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -38,6 +39,7 @@ namespace cast_channel {
 class CastMessage;
 class Logger;
 struct LastErrors;
+class MessageFramer;
 
 // This class implements a channel between Chrome and a Cast device using a TCP
 // socket with SSL.  The channel may authenticate that the receiver is a genuine
@@ -45,11 +47,12 @@ struct LastErrors;
 //
 // NOTE: Not called "CastChannel" to reduce confusion with the generated API
 // code.
+// TODO(kmarshall): Inherit from CastSocket and rename to CastSocketImpl.
 class CastSocket : public ApiResource {
  public:
-  // Object to be informed of incoming messages and errors.  The CastSocket that
-  // owns the delegate must not be deleted by it, only by the ApiResourceManager
-  // or in the callback to Close().
+  // Object to be informed of incoming messages and errors.  The CastSocket
+  // that owns the delegate must not be deleted by it, only by the
+  // ApiResourceManager or in the callback to Close().
   class Delegate {
    public:
     // An error occurred on the channel. |last_errors| contains the last errors
@@ -124,60 +127,6 @@ class CastSocket : public ApiResource {
   //
   // It is fine to delete the CastSocket object in |callback|.
   virtual void Close(const net::CompletionCallback& callback);
-
-  // Internal connection states.
-  enum ConnectionState {
-    CONN_STATE_NONE,
-    CONN_STATE_TCP_CONNECT,
-    CONN_STATE_TCP_CONNECT_COMPLETE,
-    CONN_STATE_SSL_CONNECT,
-    CONN_STATE_SSL_CONNECT_COMPLETE,
-    CONN_STATE_AUTH_CHALLENGE_SEND,
-    CONN_STATE_AUTH_CHALLENGE_SEND_COMPLETE,
-    CONN_STATE_AUTH_CHALLENGE_REPLY_COMPLETE,
-  };
-
-  // Internal write states.
-  enum WriteState {
-    WRITE_STATE_NONE,
-    WRITE_STATE_WRITE,
-    WRITE_STATE_WRITE_COMPLETE,
-    WRITE_STATE_DO_CALLBACK,
-    WRITE_STATE_ERROR,
-  };
-
-  // Internal read states.
-  enum ReadState {
-    READ_STATE_NONE,
-    READ_STATE_READ,
-    READ_STATE_READ_COMPLETE,
-    READ_STATE_DO_CALLBACK,
-    READ_STATE_ERROR,
-  };
-
- protected:
-  // Message header struct. If fields are added, be sure to update
-  // header_size().  Protected to allow use of *_size() methods in unit tests.
-  struct MessageHeader {
-    MessageHeader();
-    // Sets the message size.
-    void SetMessageSize(size_t message_size);
-    // Prepends this header to |str|.
-    void PrependToString(std::string* str);
-    // Reads |header| from the beginning of |buffer|.
-    static void ReadFromIOBuffer(net::GrowableIOBuffer* buffer,
-                                 MessageHeader* header);
-    // Size (in bytes) of the message header.
-    static uint32 header_size() { return sizeof(uint32); }
-
-    // Maximum size (in bytes) of a message payload on the wire (does not
-    // include header).
-    static uint32 max_message_size() { return 65536; }
-
-    std::string ToString();
-    // The size of the following protocol message in bytes, in host byte order.
-    uint32 message_size;
-  };
 
  private:
   friend class ApiResourceManager<CastSocket>;
@@ -266,12 +215,6 @@ class CastSocket : public ApiResource {
   void PostTaskToStartConnectLoop(int result);
   void PostTaskToStartReadLoop();
   void StartReadLoop();
-  // Parses the contents of header_read_buffer_ and sets current_message_size_
-  // to the size of the body of the message.
-  bool ProcessHeader();
-  // Parses the contents of body_read_buffer_ and sets current_message_ to
-  // the message received.
-  bool ProcessBody();
   // Closes socket, signaling the delegate that |error| has occurred.
   void CloseWithError();
   // Frees resources and cancels pending callbacks.  |ready_state_| will be set
@@ -289,11 +232,11 @@ class CastSocket : public ApiResource {
 
   virtual base::Timer* GetTimer();
 
-  void SetConnectState(ConnectionState connect_state);
+  void SetConnectState(proto::ConnectionState connect_state);
   void SetReadyState(ReadyState ready_state);
   void SetErrorState(ChannelError error_state);
-  void SetReadState(ReadState read_state);
-  void SetWriteState(WriteState write_state);
+  void SetReadState(proto::ReadState read_state);
+  void SetWriteState(proto::WriteState write_state);
 
   base::ThreadChecker thread_checker_;
 
@@ -308,15 +251,8 @@ class CastSocket : public ApiResource {
   Delegate* delegate_;
 
   // IOBuffer for reading the message header.
-  scoped_refptr<net::GrowableIOBuffer> header_read_buffer_;
-  // IOBuffer for reading the message body.
-  scoped_refptr<net::GrowableIOBuffer> body_read_buffer_;
-  // IOBuffer to currently read into.
-  scoped_refptr<net::GrowableIOBuffer> current_read_buffer_;
-  // The number of bytes in the current message body.
-  uint32 current_message_size_;
-  // Last message received on the socket.
-  scoped_ptr<CastMessage> current_message_;
+  scoped_refptr<net::GrowableIOBuffer> read_buffer_;
+  scoped_ptr<MessageFramer> framer_;
 
   // The NetLog for this service.
   net::NetLog* net_log_;
@@ -355,12 +291,14 @@ class CastSocket : public ApiResource {
   // canceled.
   bool is_canceled_;
 
+  scoped_ptr<CastMessage> current_message_;
+
   // Connection flow state machine state.
-  ConnectionState connect_state_;
+  proto::ConnectionState connect_state_;
   // Write flow state machine state.
-  WriteState write_state_;
+  proto::WriteState write_state_;
   // Read flow state machine state.
-  ReadState read_state_;
+  proto::ReadState read_state_;
   // The last error encountered by the channel.
   ChannelError error_state_;
   // The current status of the channel.
@@ -400,7 +338,6 @@ class CastSocket : public ApiResource {
   FRIEND_TEST_ALL_PREFIXES(CastSocketTest, TestWriteErrorLargeMessage);
   DISALLOW_COPY_AND_ASSIGN(CastSocket);
 };
-
 }  // namespace cast_channel
 }  // namespace core_api
 }  // namespace extensions

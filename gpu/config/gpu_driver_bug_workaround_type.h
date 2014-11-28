@@ -42,6 +42,8 @@
          disable_oes_standard_derivatives)                   \
   GPU_OP(DISABLE_POST_SUB_BUFFERS_FOR_ONSCREEN_SURFACES,     \
          disable_post_sub_buffers_for_onscreen_surfaces)     \
+  GPU_OP(ETC1_POWER_OF_TWO_ONLY,                             \
+         etc1_power_of_two_only)                             \
   GPU_OP(EXIT_ON_CONTEXT_LOST,                               \
          exit_on_context_lost)                               \
   GPU_OP(FORCE_DISCRETE_GPU,                                 \
@@ -76,6 +78,8 @@
          needs_glsl_built_in_function_emulation)             \
   GPU_OP(NEEDS_OFFSCREEN_BUFFER_WORKAROUND,                  \
          needs_offscreen_buffer_workaround)                  \
+  GPU_OP(REGENERATE_STRUCT_NAMES,                            \
+         regenerate_struct_names)                            \
   GPU_OP(RELEASE_IMAGE_AFTER_USE,                            \
          release_image_after_use)                            \
   GPU_OP(RESTORE_SCISSOR_ON_FBO_CHANGE,                      \

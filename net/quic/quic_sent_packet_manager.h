@@ -5,10 +5,7 @@
 #ifndef NET_QUIC_QUIC_SENT_PACKET_MANAGER_H_
 #define NET_QUIC_QUIC_SENT_PACKET_MANAGER_H_
 
-#include <deque>
-#include <list>
 #include <map>
-#include <queue>
 #include <set>
 #include <utility>
 #include <vector>
@@ -21,6 +18,7 @@
 #include "net/quic/congestion_control/send_algorithm_interface.h"
 #include "net/quic/quic_ack_notifier_manager.h"
 #include "net/quic/quic_protocol.h"
+#include "net/quic/quic_sustained_bandwidth_recorder.h"
 #include "net/quic/quic_unacked_packet_map.h"
 
 namespace net {
@@ -56,7 +54,8 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
     virtual void OnSentPacket(
         QuicPacketSequenceNumber sequence_number,
         QuicTime sent_time,
-        QuicByteCount bytes) {}
+        QuicByteCount bytes,
+        TransmissionType transmission_type) {}
 
     virtual void OnRetransmittedPacket(
         QuicPacketSequenceNumber old_sequence_number,
@@ -70,6 +69,9 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
         QuicPacketSequenceNumber largest_observed,
         bool largest_observed_acked,
         QuicPacketSequenceNumber least_unacked_sent_packet) {}
+
+    virtual void OnSerializedPacket(
+        const SerializedPacket& packet) {}
   };
 
   // Interface which gets callbacks from the QuicSentPacketManager when
@@ -131,7 +133,7 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   bool IsUnacked(QuicPacketSequenceNumber sequence_number) const;
 
   // Requests retransmission of all unacked packets of |retransmission_type|.
-  void RetransmitUnackedPackets(RetransmissionType retransmission_type);
+  void RetransmitUnackedPackets(TransmissionType retransmission_type);
 
   // Retransmits the oldest pending packet there is still a tail loss probe
   // pending.  Invoked after OnRetransmissionTimeout.
@@ -156,8 +158,8 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   bool HasUnackedPackets() const;
 
   // Returns the smallest sequence number of a serialized packet which has not
-  // been acked by the peer.  If there are no unacked packets, returns 0.
-  QuicPacketSequenceNumber GetLeastUnackedSentPacket() const;
+  // been acked by the peer.
+  QuicPacketSequenceNumber GetLeastUnacked() const;
 
   // Called when a congestion feedback frame is received from peer.
   virtual void OnIncomingQuicCongestionFeedbackFrame(
@@ -197,8 +199,10 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   // Returns the estimated bandwidth calculated by the congestion algorithm.
   QuicBandwidth BandwidthEstimate() const;
 
-  // Returns true if the current bandwidth estimate is reliable.
+  // Returns true if the current instantaneous bandwidth estimate is reliable.
   bool HasReliableBandwidthEstimate() const;
+
+  const QuicSustainedBandwidthRecorder& SustainedBandwidthRecorder() const;
 
   // Returns the size of the current congestion window in bytes.  Note, this is
   // not the *available* window.  Some send algorithms may not use a congestion
@@ -210,9 +214,8 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   // threshold and will return 0.
   QuicByteCount GetSlowStartThreshold() const;
 
-  // Enables pacing if it has not already been enabled, and if
-  // FLAGS_enable_quic_pacing is set.
-  void MaybeEnablePacing();
+  // Enables pacing if it has not already been enabled.
+  void EnablePacing();
 
   bool using_pacing() const { return using_pacing_; }
 
@@ -221,13 +224,25 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   }
 
   QuicPacketSequenceNumber largest_observed() const {
-    return largest_observed_;
+    return unacked_packets_.largest_observed();
+  }
+
+  QuicPacketSequenceNumber least_packet_awaited_by_peer() {
+    return least_packet_awaited_by_peer_;
   }
 
   void set_network_change_visitor(NetworkChangeVisitor* visitor) {
     DCHECK(!network_change_visitor_);
     DCHECK(visitor);
     network_change_visitor_ = visitor;
+  }
+
+  size_t consecutive_rto_count() const {
+    return consecutive_rto_count_;
+  }
+
+  size_t consecutive_tlp_count() const {
+    return consecutive_tlp_count_;
   }
 
  private:
@@ -250,6 +265,9 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
   typedef linked_hash_map<QuicPacketSequenceNumber,
                           TransmissionType> PendingRetransmissionMap;
+
+  // Updates the least_packet_awaited_by_peer.
+  void UpdatePacketInformationReceivedByPeer(const QuicAckFrame& ack_frame);
 
   // Process the incoming ack looking for newly ack'd data packets.
   void HandleAckForSentPackets(const QuicAckFrame& ack_frame);
@@ -297,9 +315,9 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   // Removes the retransmittability and pending properties from the packet at
   // |it| due to receipt by the peer.  Returns an iterator to the next remaining
   // unacked packet.
-  QuicUnackedPacketMap::const_iterator MarkPacketHandled(
-      QuicUnackedPacketMap::const_iterator it,
-      QuicTime::Delta delta_largest_observed);
+  void MarkPacketHandled(QuicPacketSequenceNumber sequence_number,
+                         const TransmissionInfo& info,
+                         QuicTime::Delta delta_largest_observed);
 
   // Request that |sequence_number| be retransmitted after the other pending
   // retransmissions.  Does not add it to the retransmissions if it's already
@@ -309,7 +327,7 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
   // Notify observers about spurious retransmits.
   void RecordSpuriousRetransmissions(
-      const SequenceNumberSet& all_transmissions,
+      const SequenceNumberList& all_transmissions,
       QuicPacketSequenceNumber acked_sequence_number);
 
   // Newly serialized retransmittable and fec packets are added to this map,
@@ -341,9 +359,8 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   scoped_ptr<SendAlgorithmInterface> send_algorithm_;
   scoped_ptr<LossDetectionInterface> loss_algorithm_;
 
-  // The largest sequence number which we have sent and received an ACK for
-  // from the peer.
-  QuicPacketSequenceNumber largest_observed_;
+  // Least sequence number which the peer is still waiting for.
+  QuicPacketSequenceNumber least_packet_awaited_by_peer_;
 
   // Tracks the first RTO packet.  If any packet before that packet gets acked,
   // it indicates the RTO was spurious and should be reversed(F-RTO).
@@ -354,21 +371,25 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   size_t consecutive_tlp_count_;
   // Number of times the crypto handshake has been retransmitted.
   size_t consecutive_crypto_retransmission_count_;
-  // Whether a tlp packet can be sent even if the send algorithm says not to.
-  bool pending_tlp_transmission_;
+  // Number of pending transmissions of TLP or crypto packets.
+  size_t pending_timer_transmission_count_;
   // Maximum number of tail loss probes to send before firing an RTO.
   size_t max_tail_loss_probes_;
   bool using_pacing_;
 
-  // Sets of packets acked and lost as a result of the last congestion event.
-  SendAlgorithmInterface::CongestionMap packets_acked_;
-  SendAlgorithmInterface::CongestionMap packets_lost_;
+  // Vectors packets acked and lost as a result of the last congestion event.
+  SendAlgorithmInterface::CongestionVector packets_acked_;
+  SendAlgorithmInterface::CongestionVector packets_lost_;
 
   // Set to true after the crypto handshake has successfully completed. After
   // this is true we no longer use HANDSHAKE_MODE, and further frames sent on
   // the crypto stream (i.e. SCUP messages) are treated like normal
   // retransmittable frames.
   bool handshake_confirmed_;
+
+  // Records bandwidth from server to client in normal operation, over periods
+  // of time with no loss events.
+  QuicSustainedBandwidthRecorder sustained_bandwidth_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSentPacketManager);
 };

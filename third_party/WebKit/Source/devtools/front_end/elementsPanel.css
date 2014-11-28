@@ -49,6 +49,10 @@
     -webkit-transform: translateZ(0);
 }
 
+.elements-tree-outline.pick-node-mode {
+    cursor: pointer;
+}
+
 #elements-content .editing {
     margin-left: 8px;
 }
@@ -69,7 +73,7 @@
 }
 
 #elements-content .CodeMirror {
-    /* Consistent with the .editing class in inspector.css */
+    /* Consistent with the .editing class in inspectorStyle.css */
     box-shadow: rgba(0, 0, 0, .5) 3px 3px 4px;
     outline: 1px solid rgb(66%, 66%, 66%) !important;
     background-color: white;
@@ -754,4 +758,38 @@ li.child-editing .styles-clipboard-only {
 
 .crumbs .crumb:hover {
     background-color: rgb(216, 216, 216);
+}
+
+.elements-tree-element-pick-node-1 {
+    border-radius: 3px;
+    padding: 1px 0 1px 0;
+    -webkit-animation: elements-tree-element-pick-node-animation-1 0.5s 1;
+}
+
+.elements-tree-element-pick-node-2 {
+    border-radius: 3px;
+    padding: 1px 0 1px 0;
+    -webkit-animation: elements-tree-element-pick-node-animation-2 0.5s 1;
+}
+
+@-webkit-keyframes elements-tree-element-pick-node-animation-1 {
+    from { background-color: rgb(255, 210, 126); }
+    to { background-color: inherit; }
+}
+
+@-webkit-keyframes elements-tree-element-pick-node-animation-2 {
+    from { background-color: rgb(255, 210, 126); }
+    to { background-color: inherit; }
+}
+
+.sidebar-separator {
+    background-color: rgb(230, 230, 230);
+    padding: 0 5px;
+    border-top: 1px solid rgb(189, 189, 189);
+    border-bottom: 1px solid rgb(189, 189, 189);
+    color: rgb(50, 50, 50);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    line-height: 16px;
 }

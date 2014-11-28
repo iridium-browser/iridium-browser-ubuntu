@@ -21,9 +21,9 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/memory/ref_counted_memory.h"
@@ -260,6 +260,7 @@ void DeleteShortcutInApplicationsMenu(
   LaunchXdgUtility(argv, &exit_code);
 }
 
+#if defined(USE_GLIB)
 // Quote a string such that it appears as one verbatim argument for the Exec
 // key in a desktop file.
 std::string QuoteArgForDesktopFileExec(const std::string& arg) {
@@ -310,6 +311,7 @@ std::string QuoteCommandLineForDesktopFileExec(
 const char kDesktopEntry[] = "Desktop Entry";
 
 const char kXdgOpenShebang[] = "#!/usr/bin/env xdg-open";
+#endif
 
 const char kXdgSettings[] = "xdg-settings";
 const char kXdgSettingsDefaultBrowser[] = "default-web-browser";

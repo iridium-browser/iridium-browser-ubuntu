@@ -39,8 +39,6 @@
 #include "core/loader/ThreadableLoader.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerThreadStartupData.h"
-#include "modules/CachePolyfill.h"
-#include "modules/CacheStoragePolyfill.h"
 #include "modules/EventTargetModules.h"
 #include "modules/serviceworkers/CacheStorage.h"
 #include "modules/serviceworkers/FetchManager.h"
@@ -57,12 +55,9 @@ namespace blink {
 
 PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::create(ServiceWorkerThread* thread, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData)
 {
-    RefPtrWillBeRawPtr<ServiceWorkerGlobalScope> context = adoptRefWillBeRefCountedGarbageCollected(new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), startupData->m_workerClients.release()));
+    RefPtrWillBeRawPtr<ServiceWorkerGlobalScope> context = adoptRefWillBeNoop(new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), startupData->m_workerClients.release()));
 
     context->applyContentSecurityPolicyFromString(startupData->m_contentSecurityPolicy, startupData->m_contentSecurityPolicyType);
-
-    context->script()->evaluate(String(cachePolyfillJs, sizeof(cachePolyfillJs)));
-    context->script()->evaluate(String(cacheStoragePolyfillJs, sizeof(cacheStoragePolyfillJs)));
 
     return context.release();
 }
@@ -71,7 +66,6 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(const KURL& url, const String
     : WorkerGlobalScope(url, userAgent, thread, timeOrigin, workerClients)
     , m_fetchManager(adoptPtr(new FetchManager(this)))
 {
-    ScriptWrappable::init(this);
 }
 
 ServiceWorkerGlobalScope::~ServiceWorkerGlobalScope()
@@ -88,7 +82,7 @@ String ServiceWorkerGlobalScope::scope(ExecutionContext* context)
     return ServiceWorkerGlobalScopeClient::from(context)->scope().string();
 }
 
-PassRefPtrWillBeRawPtr<CacheStorage> ServiceWorkerGlobalScope::caches(ExecutionContext* context)
+CacheStorage* ServiceWorkerGlobalScope::caches(ExecutionContext* context)
 {
     if (!m_caches)
         m_caches = CacheStorage::create(ServiceWorkerGlobalScopeClient::from(context)->cacheStorage());
@@ -103,7 +97,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request*
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
     TrackExceptionState exceptionState;
-    RefPtrWillBeRawPtr<Request> r = Request::create(this, request, exceptionState);
+    Request* r = Request::create(this, request, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
@@ -119,7 +113,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request*
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
     TrackExceptionState exceptionState;
-    RefPtrWillBeRawPtr<Request> r = Request::create(this, request, requestInit, exceptionState);
+    Request* r = Request::create(this, request, requestInit, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
@@ -135,7 +129,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const St
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
     TrackExceptionState exceptionState;
-    RefPtrWillBeRawPtr<Request> r = Request::create(this, urlstring, exceptionState);
+    Request* r = Request::create(this, urlstring, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
@@ -151,7 +145,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const St
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
     TrackExceptionState exceptionState;
-    RefPtrWillBeRawPtr<Request> r = Request::create(this, urlstring, requestInit, exceptionState);
+    Request* r = Request::create(this, urlstring, requestInit, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
@@ -159,11 +153,16 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const St
     return m_fetchManager->fetch(scriptState, r->request());
 }
 
-PassRefPtrWillBeRawPtr<ServiceWorkerClients> ServiceWorkerGlobalScope::clients()
+ServiceWorkerClients* ServiceWorkerGlobalScope::clients()
 {
     if (!m_clients)
         m_clients = ServiceWorkerClients::create();
     return m_clients;
+}
+
+void ServiceWorkerGlobalScope::close(ExceptionState& exceptionState)
+{
+    exceptionState.throwDOMException(InvalidAccessError, "Not supported.");
 }
 
 const AtomicString& ServiceWorkerGlobalScope::interfaceName() const
@@ -188,10 +187,11 @@ void ServiceWorkerGlobalScope::importScripts(const Vector<String>& urls, Excepti
     WorkerGlobalScope::importScripts(urls, exceptionState);
 }
 
-void ServiceWorkerGlobalScope::logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
+void ServiceWorkerGlobalScope::logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
 {
-    WorkerGlobalScope::logExceptionToConsole(errorMessage, sourceURL, lineNumber, columnNumber, callStack);
+    WorkerGlobalScope::logExceptionToConsole(errorMessage, scriptId, sourceURL, lineNumber, columnNumber, callStack);
     RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage, sourceURL, lineNumber);
+    consoleMessage->setScriptId(scriptId);
     consoleMessage->setCallStack(callStack);
     addMessageToWorkerConsole(consoleMessage.release());
 }

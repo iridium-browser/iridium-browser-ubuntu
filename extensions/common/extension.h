@@ -166,6 +166,12 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     // custodian of a supervised user.
     WAS_INSTALLED_BY_CUSTODIAN = 1 << 11,
 
+    // |MAY_BE_UNTRUSTED| indicates that this extension came from a potentially
+    // unsafe source (e.g., sideloaded from a local CRX file via the Windows
+    // registry). Such extensions may be subjected to additional constraints
+    // before they are fully installed and enabled.
+    MAY_BE_UNTRUSTED = 1 << 12,
+
     // When adding new flags, make sure to update kInitFromValueFlagBits.
   };
 
@@ -195,9 +201,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // The mimetype used for extensions.
   static const char kMimeType[];
-
-  // Checks to see if the extension has a valid ID.
-  static bool IdIsValid(const std::string& id);
 
   // See Type definition in Manifest.
   Manifest::Type GetType() const;

@@ -10,11 +10,11 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/printing/print_view_manager.h"
-#include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/cocoa/applescript/apple_event_util.h"
 #include "chrome/browser/ui/cocoa/applescript/error_applescript.h"
 #include "chrome/common/url_constants.h"
+#include "components/sessions/session_id.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
@@ -147,7 +147,7 @@ void ResumeAppleEventAndSendReply(NSAppleEventManagerSuspensionID suspension_id,
       url,
       content::Referrer(previousURL, blink::WebReferrerPolicyDefault),
       CURRENT_TAB,
-      content::PAGE_TRANSITION_TYPED,
+      ui::PAGE_TRANSITION_TYPED,
       false));
 }
 
@@ -208,15 +208,7 @@ void ResumeAppleEventAndSendReply(NSAppleEventManagerSuspensionID suspension_id,
 }
 
 - (void)handlesStopScriptCommand:(NSScriptCommand*)command {
-  RenderViewHost* view = webContents_->GetRenderViewHost();
-  if (!view) {
-    // We tolerate Stop being called even before a view has been created.
-    // So just log a warning instead of a NOTREACHED().
-    DLOG(WARNING) << "Stop: no view for handle ";
-    return;
-  }
-
-  view->Stop();
+  webContents_->Stop();
 }
 
 - (void)handlesPrintScriptCommand:(NSScriptCommand*)command {
@@ -275,7 +267,7 @@ void ResumeAppleEventAndSendReply(NSAppleEventManagerSuspensionID suspension_id,
                            entry->GetURL().spec()),
                       Referrer(),
                       NEW_FOREGROUND_TAB,
-                      content::PAGE_TRANSITION_LINK,
+                      ui::PAGE_TRANSITION_LINK,
                       false));
   }
 }

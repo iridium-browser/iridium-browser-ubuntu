@@ -51,15 +51,17 @@ struct GrCachedLayer {
 public:
     // For SkTDynamicHash
     struct Key {
-        Key(uint32_t pictureID, int start, int stop, const SkMatrix& ctm) 
+        Key(uint32_t pictureID, int start, int stop, const SkIPoint& offset, const SkMatrix& ctm) 
         : fPictureID(pictureID)
         , fStart(start)
         , fStop(stop)
+        , fOffset(offset)
         , fCTM(ctm) {
             fCTM.getType(); // force initialization of type so hashes match
 
             // Key needs to be tightly packed.
             GR_STATIC_ASSERT(sizeof(Key) == sizeof(uint32_t) + 2 * sizeof(int) + 
+                                            2 * sizeof(int32_t) +
                                             9 * sizeof(SkScalar) + sizeof(uint32_t));
         }
 
@@ -67,12 +69,14 @@ public:
             return fPictureID == other.fPictureID &&
                    fStart == other.fStart &&
                    fStop == other.fStop &&
+                   fOffset == other.fOffset &&
                    fCTM.cheapEqualTo(other.fCTM);
         }
 
         uint32_t pictureID() const { return fPictureID; }
         int start() const { return fStart; }
         int stop() const { return fStop; }
+        const SkIPoint& offset() const { return fOffset; }
         const SkMatrix& ctm() const { return fCTM; }
 
     private:
@@ -81,6 +85,8 @@ public:
         // The range of commands in the picture this layer represents
         const int      fStart;
         const int      fStop;
+        // The offset of the layer in device space
+        const SkIPoint fOffset;
         // The CTM applied to this layer in the picture
         SkMatrix       fCTM;
     };
@@ -91,8 +97,11 @@ public:
     }
 
     // GrCachedLayer proper
-    GrCachedLayer(uint32_t pictureID, int start, int stop, const SkMatrix& ctm) 
-        : fKey(pictureID, start, stop, ctm)
+    GrCachedLayer(uint32_t pictureID, int start, int stop,
+                  const SkIPoint& offset, const SkMatrix& ctm,
+                  const SkPaint* paint)
+        : fKey(pictureID, start, stop, offset, ctm)
+        , fPaint(paint ? SkNEW_ARGS(SkPaint, (*paint)) : NULL)
         , fTexture(NULL)
         , fRect(GrIRect16::MakeEmpty())
         , fPlot(NULL)
@@ -102,11 +111,13 @@ public:
 
     ~GrCachedLayer() {
         SkSafeUnref(fTexture);
+        SkDELETE(fPaint);
     }
 
     uint32_t pictureID() const { return fKey.pictureID(); }
     int start() const { return fKey.start(); }
     int stop() const { return fKey.stop(); }
+    const SkIPoint& offset() const { return fKey.offset(); }
     const SkMatrix& ctm() const { return fKey.ctm(); }
 
     void setTexture(GrTexture* texture, const GrIRect16& rect) {
@@ -114,15 +125,16 @@ public:
         fRect = rect;
     }
     GrTexture* texture() { return fTexture; }
+    const SkPaint* paint() const { return fPaint; }
     const GrIRect16& rect() const { return fRect; }
 
     void setPlot(GrPlot* plot) {
-        SkASSERT(NULL == fPlot);
+        SkASSERT(NULL == plot || NULL == fPlot);
         fPlot = plot;
     }
     GrPlot* plot() { return fPlot; }
 
-    bool isAtlased() const { return NULL != fPlot; }
+    bool isAtlased() const { return SkToBool(fPlot); }
 
     void setLocked(bool locked) { fLocked = locked; }
     bool locked() const { return fLocked; }
@@ -132,6 +144,10 @@ public:
 
 private:
     const Key       fKey;
+
+    // The paint used when dropping the layer down into the owning canvas.
+    // Can be NULL. This class makes a copy for itself.
+    const SkPaint*  fPaint;
 
     // fTexture is a ref on the atlasing texture for atlased layers and a
     // ref on a GrTexture for non-atlased textures.
@@ -146,7 +162,7 @@ private:
     // It is always NULL for non-atlased layers.
     GrPlot*         fPlot;
 
-    // For non-atlased layers 'fLocked' should always match "NULL != fTexture".
+    // For non-atlased layers 'fLocked' should always match "fTexture".
     // (i.e., if there is a texture it is locked).
     // For atlased layers, 'fLocked' is true if the layer is in a plot and
     // actively required for rendering. If the layer is in a plot but not
@@ -171,16 +187,18 @@ public:
     // elements by the GrContext
     void freeAll();
 
-    GrCachedLayer* findLayer(const SkPicture* picture, int start, int stop, const SkMatrix& ctm);
-    GrCachedLayer* findLayerOrCreate(const SkPicture* picture, 
+    GrCachedLayer* findLayer(uint32_t pictureID, int start, int stop, 
+                             const SkIPoint& offset, const SkMatrix& ctm);
+    GrCachedLayer* findLayerOrCreate(uint32_t pictureID,
                                      int start, int stop, 
-                                     const SkMatrix& ctm);
-    
-    // Inform the cache that layer's cached image is now required. Return true
-    // if it was found in the ResourceCache and doesn't need to be regenerated.
-    // If false is returned the caller should (re)render the layer into the
-    // newly acquired texture.
-    bool lock(GrCachedLayer* layer, const GrTextureDesc& desc);
+                                     const SkIPoint& offset,
+                                     const SkMatrix& ctm,
+                                     const SkPaint* paint);
+
+    // Inform the cache that layer's cached image is now required. 
+    // Return true if the layer must be re-rendered. Return false if the
+    // layer was found in the cache and can be reused.
+    bool lock(GrCachedLayer* layer, const GrTextureDesc& desc, bool dontAtlas);
 
     // Inform the cache that layer's cached image is not currently required
     void unlock(GrCachedLayer* layer);
@@ -228,7 +246,11 @@ private:
     int fPlotLocks[kNumPlotsX * kNumPlotsY];
 
     void initAtlas();
-    GrCachedLayer* createLayer(const SkPicture* picture, int start, int stop, const SkMatrix& ctm);
+    GrCachedLayer* createLayer(uint32_t pictureID, int start, int stop, 
+                               const SkIPoint& offset, const SkMatrix& ctm,
+                               const SkPaint* paint);
+
+    void purgeAll();
 
     // Remove all the layers (and unlock any resources) associated with 'pictureID'
     void purge(uint32_t pictureID);
@@ -236,6 +258,8 @@ private:
     static bool PlausiblyAtlasable(int width, int height) {
         return width <= kPlotWidth && height <= kPlotHeight;
     }
+
+    void purgePlot(GrPlot* plot);
 
     // Try to find a purgeable plot and clear it out. Return true if a plot
     // was purged; false otherwise.

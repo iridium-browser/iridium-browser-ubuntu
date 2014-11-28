@@ -26,30 +26,18 @@
 #include "config.h"
 #include "modules/indexeddb/IDBPendingTransactionMonitor.h"
 
-#include "core/dom/ExecutionContext.h"
+#include "modules/indexeddb/IDBCursor.h"
+#include "modules/indexeddb/IDBRequest.h"
 #include "modules/indexeddb/IDBTransaction.h"
 
 namespace blink {
 
-DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(IDBPendingTransactionMonitor)
-
-const char* IDBPendingTransactionMonitor::supplementName()
-{
-    return "IDBPendingTransactionMonitor";
-}
-
-inline IDBPendingTransactionMonitor::IDBPendingTransactionMonitor()
+IDBPendingTransactionMonitor::IDBPendingTransactionMonitor()
 {
 }
 
-IDBPendingTransactionMonitor& IDBPendingTransactionMonitor::from(WillBeHeapSupplementable<ExecutionContext>& context)
+IDBPendingTransactionMonitor::~IDBPendingTransactionMonitor()
 {
-    IDBPendingTransactionMonitor* supplement = static_cast<IDBPendingTransactionMonitor*>(WillBeHeapSupplement<ExecutionContext>::from(context, supplementName()));
-    if (!supplement) {
-        supplement = new IDBPendingTransactionMonitor();
-        provideTo(context, supplementName(), adoptPtrWillBeNoop(supplement));
-    }
-    return *supplement;
 }
 
 void IDBPendingTransactionMonitor::addNewTransaction(IDBTransaction& transaction)
@@ -65,12 +53,99 @@ void IDBPendingTransactionMonitor::deactivateNewTransactions()
     m_transactions.clear();
 }
 
-void IDBPendingTransactionMonitor::trace(Visitor* visitor)
+// IDBDisposerDispatcher should be RefCounted because it should outlive all of
+// target objects.
+class IDBDisposerDispatcher: public RefCounted<IDBDisposerDispatcher> {
+public:
+    static PassRefPtr<IDBDisposerDispatcher> create() { return adoptRef(new IDBDisposerDispatcher()); }
+
+private:
+    IDBDisposerDispatcher() { }
+
+    template<typename Owner, typename Target>
+    class Disposer {
+    public:
+        static PassOwnPtr<Disposer> create(Owner& owner, Target& target) { return adoptPtr(new Disposer(owner, target)); }
+        ~Disposer()
+        {
+            if (!m_isDisabled)
+                m_target.dispose();
+        }
+        void setDisabled() { m_isDisabled = true; }
+
+    private:
+        Disposer(Owner& owner, Target& target)
+            : m_owner(owner)
+            , m_target(target)
+            , m_isDisabled(false)
+        {
+        }
+
+        RefPtr<Owner> m_owner;
+        Target& m_target;
+        bool m_isDisabled;
+    };
+
+    template<typename Target>
+    class DisposerMap {
+        DISALLOW_ALLOCATION();
+    public:
+        void registerTarget(IDBDisposerDispatcher& dispatcher, Target& target)
+        {
+            ASSERT(!m_disposerMap.contains(&target));
+            m_disposerMap.add(&target, Disposer<IDBDisposerDispatcher, Target>::create(dispatcher, target));
+        }
+
+        void unregisterTarget(IDBDisposerDispatcher& dispatcher, Target& target)
+        {
+            // Skip this function if this is called in Target::dispose().
+            if (ThreadState::current()->isSweepInProgress())
+                return;
+            auto it = m_disposerMap.find(&target);
+            ASSERT(it != m_disposerMap.end());
+            if (it == m_disposerMap.end())
+                return;
+            // m_disposerMap.remove() will trigger ~Disposer. We should not call
+            // Target::dispose() in ~Disposer in this case.
+            it->value->setDisabled();
+            m_disposerMap.remove(it);
+        }
+
+    private:
+        PersistentHeapHashMap<WeakMember<Target>, OwnPtr<Disposer<IDBDisposerDispatcher, Target>>> m_disposerMap;
+    };
+
+    DisposerMap<IDBRequest> m_requests;
+    DisposerMap<IDBCursor> m_cursors;
+    friend class IDBPendingTransactionMonitor;
+};
+
+void IDBPendingTransactionMonitor::registerRequest(IDBRequest& request)
 {
-#if ENABLE(OILPAN)
-    visitor->trace(m_transactions);
-#endif
-    WillBeHeapSupplement<ExecutionContext>::trace(visitor);
+    if (!m_dispatcher)
+        m_dispatcher = IDBDisposerDispatcher::create();
+    m_dispatcher->m_requests.registerTarget(*m_dispatcher, request);
+}
+
+void IDBPendingTransactionMonitor::unregisterRequest(IDBRequest& request)
+{
+    // We should not unregister without registeration.
+    ASSERT(m_dispatcher);
+    m_dispatcher->m_requests.unregisterTarget(*m_dispatcher, request);
+}
+
+void IDBPendingTransactionMonitor::registerCursor(IDBCursor& cursor)
+{
+    if (!m_dispatcher)
+        m_dispatcher = IDBDisposerDispatcher::create();
+    m_dispatcher->m_cursors.registerTarget(*m_dispatcher, cursor);
+}
+
+void IDBPendingTransactionMonitor::unregisterCursor(IDBCursor& cursor)
+{
+    // We should not unregister without registeration.
+    ASSERT(m_dispatcher);
+    m_dispatcher->m_cursors.unregisterTarget(*m_dispatcher, cursor);
 }
 
 } // namespace blink

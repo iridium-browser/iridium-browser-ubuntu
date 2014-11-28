@@ -130,7 +130,8 @@ void PermissionsData::UpdateTabSpecificPermissions(
   if (iter == tab_specific_permissions_.end())
     tab_specific_permissions_[tab_id] = permissions;
   else
-    iter->second = PermissionSet::CreateUnion(iter->second, permissions);
+    iter->second =
+        PermissionSet::CreateUnion(iter->second.get(), permissions.get());
 }
 
 void PermissionsData::ClearTabSpecificPermissions(int tab_id) const {
@@ -186,7 +187,7 @@ PermissionMessages PermissionsData::GetPermissionMessages() const {
     return PermissionMessages();
   } else {
     return PermissionMessageProvider::Get()->GetPermissionMessages(
-        active_permissions(), manifest_type_);
+        active_permissions().get(), manifest_type_);
   }
 }
 
@@ -195,7 +196,7 @@ std::vector<base::string16> PermissionsData::GetPermissionMessageStrings()
   if (ShouldSkipPermissionWarnings(extension_id_))
     return std::vector<base::string16>();
   return PermissionMessageProvider::Get()->GetWarningMessages(
-      active_permissions(), manifest_type_);
+      active_permissions().get(), manifest_type_);
 }
 
 std::vector<base::string16>
@@ -203,7 +204,7 @@ PermissionsData::GetPermissionMessageDetailsStrings() const {
   if (ShouldSkipPermissionWarnings(extension_id_))
     return std::vector<base::string16>();
   return PermissionMessageProvider::Get()->GetWarningMessagesDetails(
-      active_permissions(), manifest_type_);
+      active_permissions().get(), manifest_type_);
 }
 
 bool PermissionsData::HasWithheldImpliedAllHosts() const {
@@ -294,7 +295,7 @@ bool PermissionsData::CanCaptureVisiblePage(int tab_id,
   if (tab_id >= 0) {
     scoped_refptr<const PermissionSet> tab_permissions =
         GetTabSpecificPermissions(tab_id);
-    if (tab_permissions &&
+    if (tab_permissions.get() &&
         tab_permissions->HasAPIPermission(APIPermission::kTab)) {
       return true;
     }

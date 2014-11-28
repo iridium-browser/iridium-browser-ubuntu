@@ -21,6 +21,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/ime/component_extension_ime_manager.h"
 #include "chromeos/ime/extension_ime_util.h"
 #include "chromeos/ime/input_method_manager.h"
@@ -31,8 +33,6 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using base::UserMetricsAction;
@@ -90,7 +90,7 @@ void CrosLanguageOptionsHandler::GetLocalizedValues(
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::Get();
   input_method::InputMethodDescriptors ext_ime_descriptors;
-  manager->GetInputMethodExtensions(&ext_ime_descriptors);
+  manager->GetActiveIMEState()->GetInputMethodExtensions(&ext_ime_descriptors);
 
   base::ListValue* ext_ime_list = ConvertInputMethodDescriptorsToIMEList(
       ext_ime_descriptors);
@@ -229,8 +229,9 @@ void CrosLanguageOptionsHandler::InputMethodOptionsOpenCallback(
     return;
 
   const input_method::InputMethodDescriptor* ime =
-      input_method::InputMethodManager::Get()->GetInputMethodFromId(
-          input_method_id);
+      input_method::InputMethodManager::Get()
+          ->GetActiveIMEState()
+          ->GetInputMethodFromId(input_method_id);
   if (!ime)
     return;
 
@@ -239,13 +240,9 @@ void CrosLanguageOptionsHandler::InputMethodOptionsOpenCallback(
   content::OpenURLParams params(ime->options_page_url(),
       content::Referrer(),
       SINGLETON_TAB,
-      content::PAGE_TRANSITION_LINK,
+      ui::PAGE_TRANSITION_LINK,
       false);
   browser->OpenURL(params);
-  browser->window()->Show();
-  content::WebContents* web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
-  web_contents->GetDelegate()->ActivateContents(web_contents);
 }
 
 void CrosLanguageOptionsHandler::AddImeProvider(base::ListValue* list) {

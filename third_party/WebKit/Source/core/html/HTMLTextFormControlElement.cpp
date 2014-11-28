@@ -186,10 +186,7 @@ void HTMLTextFormControlElement::setSelectionDirection(const String& direction)
 void HTMLTextFormControlElement::select()
 {
     document().updateLayoutIgnorePendingStylesheets();
-    RefPtrWillBeRawPtr<HTMLTextFormControlElement> protector(this);
-    if (isFocusable())
-        document().page()->focusController().setFocusedElement(this, document().frame());
-    setSelectionRange(0, std::numeric_limits<int>::max(), SelectionHasNoDirection, ChangeSelection);
+    setSelectionRange(0, std::numeric_limits<int>::max(), SelectionHasNoDirection, isFocusable() ? ChangeSelectionAndFocus : NotChangeSelection);
 }
 
 bool HTMLTextFormControlElement::shouldDispatchFormControlChangeEvent(String& oldValue, String& newValue)
@@ -359,12 +356,12 @@ void HTMLTextFormControlElement::setSelectionRange(int start, int end, TextField
     start = std::min(std::max(start, 0), end);
     cacheSelection(start, end, direction);
 
+    if (selectionOption == NotChangeSelection || (selectionOption == ChangeSelectionIfFocused && document().focusedElement() != this))
+        return;
+
     LocalFrame* frame = document().frame();
     HTMLElement* innerEditor = innerEditorElement();
     if (!frame || !innerEditor)
-        return;
-
-    if (selectionOption == NotChangeSelection && document().focusedElement() != this)
         return;
 
     Position startPosition = positionForIndex(innerEditor, start);
@@ -386,18 +383,20 @@ void HTMLTextFormControlElement::setSelectionRange(int start, int end, TextField
         newSelection.setWithoutValidation(startPosition, endPosition);
     newSelection.setIsDirectional(direction != SelectionHasNoDirection);
 
-    frame->selection().setSelection(newSelection, FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | FrameSelection::DoNotSetFocus);
+    frame->selection().setSelection(newSelection, FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | (selectionOption == ChangeSelectionAndFocus ? 0 : FrameSelection::DoNotSetFocus));
 }
 
 VisiblePosition HTMLTextFormControlElement::visiblePositionForIndex(int index) const
 {
     if (index <= 0)
         return VisiblePosition(firstPositionInNode(innerEditorElement()), DOWNSTREAM);
-    RefPtrWillBeRawPtr<Range> range = Range::create(document());
-    range->selectNodeContents(innerEditorElement(), ASSERT_NO_EXCEPTION);
-    CharacterIterator it(range.get());
+    Position start, end;
+    bool selected = Range::selectNodeContents(innerEditorElement(), start, end);
+    if (!selected)
+        return VisiblePosition();
+    CharacterIterator it(start, end);
     it.advance(index - 1);
-    return VisiblePosition(it.range()->endPosition(), UPSTREAM);
+    return VisiblePosition(it.endPosition(), UPSTREAM);
 }
 
 int HTMLTextFormControlElement::indexForVisiblePosition(const VisiblePosition& pos) const
@@ -700,19 +699,9 @@ HTMLTextFormControlElement* enclosingTextFormControl(Node* container)
     return ancestor && isHTMLTextFormControlElement(*ancestor) && container->containingShadowRoot()->type() == ShadowRoot::UserAgentShadowRoot ? toHTMLTextFormControlElement(ancestor) : 0;
 }
 
-static const HTMLElement* parentHTMLElement(const Element* element)
-{
-    while (element) {
-        element = element->parentElement();
-        if (element && element->isHTMLElement())
-            return toHTMLElement(element);
-    }
-    return 0;
-}
-
 String HTMLTextFormControlElement::directionForFormData() const
 {
-    for (const HTMLElement* element = this; element; element = parentHTMLElement(element)) {
+    for (const HTMLElement* element = this; element; element = Traversal<HTMLElement>::firstAncestor(*element)) {
         const AtomicString& dirAttributeValue = element->fastGetAttribute(dirAttr);
         if (dirAttributeValue.isNull())
             continue;
@@ -974,4 +963,4 @@ Position HTMLTextFormControlElement::endOfSentence(const Position& position)
     return endOfInnerText(textFormControl);
 }
 
-} // namespace Webcore
+} // namespace blink

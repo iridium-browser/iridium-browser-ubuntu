@@ -49,6 +49,7 @@ class InternalSettings FINAL : public InternalSettingsGenerated, public HeapSupp
 #else
 class InternalSettings FINAL : public InternalSettingsGenerated {
 #endif
+    DEFINE_WRAPPERTYPEINFO();
 public:
     class Backup {
     public:
@@ -121,6 +122,11 @@ public:
 
     virtual void trace(Visitor*) OVERRIDE;
 
+    void setAvailablePointerTypes(const String&, ExceptionState&);
+    void setPrimaryPointerType(const String&, ExceptionState&);
+    void setAvailableHoverTypes(const String&, ExceptionState&);
+    void setPrimaryHoverType(const String&, ExceptionState&);
+
 private:
     explicit InternalSettings(Page&);
 
@@ -134,4 +140,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // InternalSettings_h

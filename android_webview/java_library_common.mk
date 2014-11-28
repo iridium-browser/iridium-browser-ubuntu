@@ -39,24 +39,24 @@ LOCAL_SRC_FILES += \
 # Java files generated from .template rules. This list should match list of java dependencies in
 # android_webview/android_webview.gyp
 LOCAL_GENERATED_SOURCES := \
+$(call intermediates-dir-for,GYP,shared)/enums/window_open_disposition_java/org/chromium/ui/WindowOpenDisposition.java \
+$(call intermediates-dir-for,GYP,shared)/enums/bitmap_format_java/org/chromium/ui/gfx/BitmapFormat.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/base/ApplicationState.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/base/MemoryPressureLevelList.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/GestureEventType.java \
-$(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/PageTransitionTypes.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/SpeechRecognitionError.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/input/CanonicalAxisIndex.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/input/CanonicalButtonIndex.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/input/PopupItemType.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/browser/input/SelectionEventType.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/common/ResultCodes.java \
-$(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content/common/ScreenOrientationValues.java \
+$(call intermediates-dir-for,GYP,shared)/templates/org/chromium/content_public/common/ScreenOrientationValues.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/media/ImageFormat.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/net/CertificateMimeType.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/net/CertVerifyStatusAndroid.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/net/NetError.java \
 $(call intermediates-dir-for,GYP,shared)/templates/org/chromium/net/PrivateKeyType.java \
-$(call intermediates-dir-for,GYP,shared)/templates/org/chromium/ui/WindowOpenDisposition.java \
-$(call intermediates-dir-for,GYP,shared)/templates/org/chromium/ui/gfx/BitmapFormat.java \
+$(call intermediates-dir-for,GYP,shared)/templates/org/chromium/ui/base/PageTransitionTypes.java \
 
 # content dependencies on java components that are provided by the system on
 # android

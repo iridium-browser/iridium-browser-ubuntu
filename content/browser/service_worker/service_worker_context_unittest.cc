@@ -62,7 +62,7 @@ void ExpectRegisteredWorkers(
     const scoped_refptr<ServiceWorkerRegistration>& registration) {
   ASSERT_EQ(expect_status, status);
   if (status != SERVICE_WORKER_OK) {
-    EXPECT_FALSE(registration);
+    EXPECT_FALSE(registration.get());
     return;
   }
 
@@ -144,7 +144,6 @@ TEST_F(ServiceWorkerContextTest, Register) {
   context()->RegisterServiceWorker(
       GURL("http://www.example.com/"),
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &registration_id, &version_id));
 
@@ -187,7 +186,6 @@ TEST_F(ServiceWorkerContextTest, Register_RejectInstall) {
   context()->RegisterServiceWorker(
       GURL("http://www.example.com/"),
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &registration_id, &version_id));
 
@@ -230,7 +228,6 @@ TEST_F(ServiceWorkerContextTest, Register_RejectActivate) {
   context()->RegisterServiceWorker(
       GURL("http://www.example.com/"),
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &registration_id, &version_id));
 
@@ -271,7 +268,6 @@ TEST_F(ServiceWorkerContextTest, Unregister) {
   context()->RegisterServiceWorker(
       pattern,
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &registration_id, &version_id));
 
@@ -300,8 +296,8 @@ TEST_F(ServiceWorkerContextTest, Unregister) {
   base::RunLoop().RunUntilIdle();
 }
 
-// Make sure that when a new registration replaces an existing
-// registration, that the old one is cleaned up.
+// Make sure registering a new script creates a new version and shares an
+// existing registration.
 TEST_F(ServiceWorkerContextTest, RegisterNewScript) {
   GURL pattern("http://www.example.com/");
 
@@ -311,7 +307,6 @@ TEST_F(ServiceWorkerContextTest, RegisterNewScript) {
   context()->RegisterServiceWorker(
       pattern,
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &old_registration_id, &old_version_id));
 
@@ -327,7 +322,6 @@ TEST_F(ServiceWorkerContextTest, RegisterNewScript) {
   context()->RegisterServiceWorker(
       pattern,
       GURL("http://www.example.com/service_worker_new.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &new_registration_id, &new_version_id));
 
@@ -335,11 +329,9 @@ TEST_F(ServiceWorkerContextTest, RegisterNewScript) {
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
 
-  // Returned IDs should be valid, and should differ from the values
-  // returned for the previous registration.
   EXPECT_NE(kInvalidServiceWorkerRegistrationId, new_registration_id);
   EXPECT_NE(kInvalidServiceWorkerVersionId, new_version_id);
-  EXPECT_NE(old_registration_id, new_registration_id);
+  EXPECT_EQ(old_registration_id, new_registration_id);
   EXPECT_NE(old_version_id, new_version_id);
 }
 
@@ -355,7 +347,6 @@ TEST_F(ServiceWorkerContextTest, RegisterDuplicateScript) {
   context()->RegisterServiceWorker(
       pattern,
       script_url,
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &old_registration_id, &old_version_id));
 
@@ -371,7 +362,6 @@ TEST_F(ServiceWorkerContextTest, RegisterDuplicateScript) {
   context()->RegisterServiceWorker(
       pattern,
       script_url,
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &new_registration_id, &new_version_id));
 
@@ -390,7 +380,6 @@ TEST_F(ServiceWorkerContextTest, DeleteAndStartOver) {
   context()->RegisterServiceWorker(
       GURL("http://www.example.com/"),
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &registration_id, &version_id));
 
@@ -438,7 +427,6 @@ TEST_F(ServiceWorkerContextTest, DeleteAndStartOver) {
   context()->RegisterServiceWorker(
       GURL("http://www.example.com/"),
       GURL("http://www.example.com/service_worker.js"),
-      render_process_id_,
       NULL,
       MakeRegisteredCallback(&called, &registration_id, &version_id));
 

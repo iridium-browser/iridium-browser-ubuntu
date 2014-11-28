@@ -19,17 +19,20 @@ var remoting = remoting || {};
  * @param {Element} shrinkToFit
  * @param {Element} newConnection
  * @param {Element?} fullscreen
+ * @param {Element?} startStopRecording
  * @constructor
  */
 remoting.OptionsMenu = function(sendCtrlAltDel, sendPrtScrn,
                                 resizeToClient, shrinkToFit,
-                                newConnection, fullscreen) {
+                                newConnection, fullscreen,
+                                startStopRecording) {
   this.sendCtrlAltDel_ = sendCtrlAltDel;
   this.sendPrtScrn_ = sendPrtScrn;
   this.resizeToClient_ = resizeToClient;
   this.shrinkToFit_ = shrinkToFit;
   this.newConnection_ = newConnection;
   this.fullscreen_ = fullscreen;
+  this.startStopRecording_ = startStopRecording;
   /**
    * @type {remoting.ClientSession}
    * @private
@@ -50,6 +53,10 @@ remoting.OptionsMenu = function(sendCtrlAltDel, sendPrtScrn,
     this.fullscreen_.addEventListener(
         'click', this.onFullscreen_.bind(this), false);
   }
+  if (this.startStopRecording_) {
+    this.startStopRecording_.addEventListener(
+        'click', this.onStartStopRecording_.bind(this), false);
+  }
 };
 
 /**
@@ -62,6 +69,8 @@ remoting.OptionsMenu.prototype.setClientSession = function(clientSession) {
 
 remoting.OptionsMenu.prototype.onShow = function() {
   if (this.clientSession_) {
+    this.resizeToClient_.hidden =
+        this.clientSession_.getMode() == remoting.ClientSession.Mode.IT2ME;
     remoting.MenuButton.select(
         this.resizeToClient_, this.clientSession_.getResizeToClient());
     remoting.MenuButton.select(
@@ -69,6 +78,16 @@ remoting.OptionsMenu.prototype.onShow = function() {
     if (this.fullscreen_) {
       remoting.MenuButton.select(
           this.fullscreen_, remoting.fullscreen.isActive());
+    }
+    if (this.startStopRecording_) {
+      this.startStopRecording_.hidden = !this.clientSession_.canRecordVideo();
+      if (this.clientSession_.isRecordingVideo()) {
+        l10n.localizeElementFromTag(this.startStopRecording_,
+                                    /*i18n-content*/'STOP_RECORDING');
+      } else {
+        l10n.localizeElementFromTag(this.startStopRecording_,
+                                    /*i18n-content*/'START_RECORDING');
+      }
     }
   }
 };
@@ -110,3 +129,14 @@ remoting.OptionsMenu.prototype.onNewConnection_ = function() {
 remoting.OptionsMenu.prototype.onFullscreen_ = function() {
   remoting.fullscreen.toggle();
 };
+
+remoting.OptionsMenu.prototype.onStartStopRecording_ = function() {
+  if (this.clientSession_) {
+    this.clientSession_.startStopRecording();
+  }
+}
+
+/**
+ * @type {remoting.OptionsMenu}
+ */
+remoting.optionsMenu = null;

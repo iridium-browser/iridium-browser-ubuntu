@@ -19,6 +19,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.TextView.OnEditorActionListener;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.chrome.browser.EmptyTabObserver;
 import org.chromium.chrome.browser.Tab;
@@ -41,6 +42,20 @@ public class ChromeShellToolbar extends LinearLayout {
         }
     };
 
+    private final Runnable mUpdateProgressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            mProgressDrawable.setLevel(100 * mProgress);
+            if (mLoading) {
+                mStopReloadButton.setImageResource(R.drawable.btn_stop_normal);
+            } else {
+                mStopReloadButton.setImageResource(R.drawable.btn_reload_normal);
+                ApiCompatibilityUtils.postOnAnimationDelayed(ChromeShellToolbar.this,
+                        mClearProgressRunnable, COMPLETED_PROGRESS_TIMEOUT_MS);
+            }
+        }
+    };
+
     private EditText mUrlTextView;
     private ClipDrawable mProgressDrawable;
 
@@ -51,6 +66,10 @@ public class ChromeShellToolbar extends LinearLayout {
     private AppMenuButtonHelper mAppMenuButtonHelper;
 
     private SuggestionPopup mSuggestionPopup;
+
+    private ImageButton mStopReloadButton;
+    private int mProgress = 0;
+    private boolean mLoading = true;
 
     /**
      * @param context The Context the view is running in.
@@ -77,7 +96,7 @@ public class ChromeShellToolbar extends LinearLayout {
         if (mTab != null) mTab.removeObserver(mTabObserver);
         mTab = tab;
         mTab.addObserver(mTabObserver);
-        mUrlTextView.setText(mTab.getContentViewCore().getUrl());
+        mUrlTextView.setText(mTab.getWebContents().getUrl());
     }
 
     private void onUpdateUrl(String url) {
@@ -86,8 +105,10 @@ public class ChromeShellToolbar extends LinearLayout {
 
     private void onLoadProgressChanged(int progress) {
         removeCallbacks(mClearProgressRunnable);
-        mProgressDrawable.setLevel(100 * progress);
-        if (progress == 100) postDelayed(mClearProgressRunnable, COMPLETED_PROGRESS_TIMEOUT_MS);
+        removeCallbacks(mUpdateProgressRunnable);
+        mProgress = progress;
+        mLoading = progress != 100;
+        ApiCompatibilityUtils.postOnAnimation(this, mUpdateProgressRunnable);
     }
 
     /**
@@ -104,6 +125,7 @@ public class ChromeShellToolbar extends LinearLayout {
         mProgressDrawable = (ClipDrawable) findViewById(R.id.toolbar).getBackground();
         initializeUrlField();
         initializeMenuButton();
+        initializeStopReloadButton();
     }
 
     void setMenuHandler(AppMenuHandler menuHandler) {
@@ -135,9 +157,22 @@ public class ChromeShellToolbar extends LinearLayout {
             public void onFocusChange(View v, boolean hasFocus) {
                 setKeyboardVisibilityForUrl(hasFocus);
                 if (!hasFocus) {
-                    mUrlTextView.setText(mTab.getContentViewCore().getUrl());
+                    mUrlTextView.setText(mTab.getWebContents().getUrl());
                     mSuggestionPopup.dismissPopup();
                 }
+            }
+        });
+        mUrlTextView.setOnKeyListener(new OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_BACK) {
+                    mUrlTextView.clearFocus();
+                    if (mTab != null) {
+                        mTab.getView().requestFocus();
+                    }
+                    return true;
+                }
+                return false;
             }
         });
 
@@ -157,6 +192,20 @@ public class ChromeShellToolbar extends LinearLayout {
             @Override
             public boolean onTouch(View view, MotionEvent event) {
                 return mAppMenuButtonHelper != null && mAppMenuButtonHelper.onTouch(view, event);
+            }
+        });
+    }
+
+    private void initializeStopReloadButton() {
+        mStopReloadButton = (ImageButton) findViewById(R.id.stop_reload_button);
+        mStopReloadButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mLoading) {
+                    mTab.getWebContents().stop();
+                } else {
+                    mTab.getWebContents().getNavigationController().reload(true);
+                }
             }
         });
     }

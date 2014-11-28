@@ -26,7 +26,7 @@
 #include "config.h"
 #include "web/ColorChooserUIController.h"
 
-#include "platform/ColorChooserClient.h"
+#include "core/html/forms/ColorChooserClient.h"
 #include "platform/graphics/Color.h"
 #include "public/platform/WebColor.h"
 #include "public/web/WebColorChooser.h"
@@ -62,6 +62,11 @@ void ColorChooserUIController::endChooser()
 {
     if (m_chooser)
         m_chooser->endChooser();
+}
+
+AXObject* ColorChooserUIController::rootAXObject()
+{
+    return 0;
 }
 
 void ColorChooserUIController::didChooseColor(const WebColor& color)

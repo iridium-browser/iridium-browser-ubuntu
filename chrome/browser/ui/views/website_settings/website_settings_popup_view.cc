@@ -11,7 +11,6 @@
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/collected_cookies_views.h"
@@ -19,14 +18,13 @@
 #include "chrome/browser/ui/website_settings/website_settings.h"
 #include "chrome/browser/ui/website_settings/website_settings_utils.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -34,6 +32,7 @@
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/insets.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
@@ -382,12 +381,8 @@ void WebsiteSettingsPopupView::OnWidgetDestroying(views::Widget* widget) {
 
 void WebsiteSettingsPopupView::ButtonPressed(views::Button* button,
                                              const ui::Event& event) {
-  if (button == reset_decisions_button_) {
-    ChromeSSLHostStateDelegate* delegate =
-        presenter_->chrome_ssl_host_state_delegate();
-    DCHECK(delegate);
-    delegate->RevokeUserDecisionsHard(presenter_->site_url().host());
-  }
+  if (button == reset_decisions_button_)
+    presenter_->OnRevokeSSLErrorBypassButtonPressed();
   GetWidget()->Close();
 }
 
@@ -410,7 +405,7 @@ void WebsiteSettingsPopupView::LinkClicked(views::Link* source,
         content::OpenURLParams(GURL(chrome::kPageInfoHelpCenterURL),
                                content::Referrer(),
                                NEW_FOREGROUND_TAB,
-                               content::PAGE_TRANSITION_LINK,
+                               ui::PAGE_TRANSITION_LINK,
                                false));
   }
 }

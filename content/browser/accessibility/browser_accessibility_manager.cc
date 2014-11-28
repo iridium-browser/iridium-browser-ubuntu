@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/common/accessibility_messages.h"
+#include "ui/accessibility/ax_tree_serializer.h"
 
 namespace content {
 
@@ -67,7 +68,7 @@ BrowserAccessibilityManager::BrowserAccessibilityManager(
     BrowserAccessibilityFactory* factory)
     : delegate_(delegate),
       factory_(factory),
-      tree_(new ui::AXTree()),
+      tree_(new ui::AXSerializableTree()),
       focus_(NULL),
       osk_state_(OSK_ALLOWED) {
   tree_->SetDelegate(this);
@@ -79,7 +80,7 @@ BrowserAccessibilityManager::BrowserAccessibilityManager(
     BrowserAccessibilityFactory* factory)
     : delegate_(delegate),
       factory_(factory),
-      tree_(new ui::AXTree()),
+      tree_(new ui::AXSerializableTree()),
       focus_(NULL),
       osk_state_(OSK_ALLOWED) {
   tree_->SetDelegate(this);
@@ -361,6 +362,15 @@ void BrowserAccessibilityManager::OnNodeCreationFinished(ui::AXNode* node) {
 
 void BrowserAccessibilityManager::OnNodeChangeFinished(ui::AXNode* node) {
   GetFromAXNode(node)->OnUpdateFinished();
+}
+
+ui::AXTreeUpdate BrowserAccessibilityManager::SnapshotAXTreeForTesting() {
+  scoped_ptr<ui::AXTreeSource<const ui::AXNode*> > tree_source(
+      tree_->CreateTreeSource());
+  ui::AXTreeSerializer<const ui::AXNode*> serializer(tree_source.get());
+  ui::AXTreeUpdate update;
+  serializer.SerializeChanges(tree_->GetRoot(), &update);
+  return update;
 }
 
 }  // namespace content

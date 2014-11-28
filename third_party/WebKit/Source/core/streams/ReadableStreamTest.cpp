@@ -10,6 +10,7 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "core/dom/DOMException.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/streams/ReadableStreamImpl.h"
 #include "core/streams/UnderlyingSource.h"
@@ -31,9 +32,17 @@ typedef ReadableStreamImpl<ReadableStreamChunkTypeTraits<String> > StringStream;
 
 class StringCapturingFunction : public ScriptFunction {
 public:
-    static PassOwnPtr<StringCapturingFunction> create(v8::Isolate* isolate, String* value)
+    static v8::Handle<v8::Function> createFunction(ScriptState* scriptState, String* value)
     {
-        return adoptPtr(new StringCapturingFunction(isolate, value));
+        StringCapturingFunction* self = new StringCapturingFunction(scriptState, value);
+        return self->bindToV8Function();
+    }
+
+private:
+    StringCapturingFunction(ScriptState* scriptState, String* value)
+        : ScriptFunction(scriptState)
+        , m_value(value)
+    {
     }
 
     virtual ScriptValue call(ScriptValue value) OVERRIDE
@@ -43,17 +52,14 @@ public:
         return value;
     }
 
-private:
-    StringCapturingFunction(v8::Isolate* isolate, String* value) : ScriptFunction(isolate), m_value(value) { }
-
     String* m_value;
 };
 
-class MockUnderlyingSource : public UnderlyingSource {
+class MockUnderlyingSource : public GarbageCollectedFinalized<MockUnderlyingSource>, public UnderlyingSource {
+    USING_GARBAGE_COLLECTED_MIXIN(MockUnderlyingSource);
 public:
     virtual ~MockUnderlyingSource() { }
 
-    MOCK_METHOD1(startSource, ScriptPromise(ExceptionState*));
     MOCK_METHOD0(pullSource, void());
     MOCK_METHOD2(cancelSource, ScriptPromise(ScriptState*, ScriptValue));
 };
@@ -91,21 +97,15 @@ public:
     ScriptState* scriptState() { return ScriptState::forMainWorld(m_page->document().frame()); }
     v8::Isolate* isolate() { return scriptState()->isolate(); }
 
-    PassOwnPtr<StringCapturingFunction> createCaptor(String* value)
+    v8::Handle<v8::Function> createCaptor(String* value)
     {
-        return StringCapturingFunction::create(isolate(), value);
+        return StringCapturingFunction::createFunction(scriptState(), value);
     }
 
-    // Note: This function calls RunMicrotasks.
     StringStream* construct()
     {
-        RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState());
-        ScriptPromise promise = resolver->promise();
-        resolver->resolve();
-        EXPECT_CALL(*m_underlyingSource, startSource(&m_exceptionState)).WillOnce(Return(promise));
-
-        StringStream* stream = new StringStream(scriptState(), m_underlyingSource, &m_exceptionState);
-        isolate()->RunMicrotasks();
+        StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource);
+        stream->didSourceStart();
         return stream;
     }
 
@@ -115,27 +115,16 @@ public:
     ExceptionState m_exceptionState;
 };
 
-TEST_F(ReadableStreamTest, Construct)
+TEST_F(ReadableStreamTest, Start)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState());
-    ScriptPromise promise = resolver->promise();
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, startSource(&m_exceptionState)).WillOnce(Return(promise));
-    }
-    StringStream* stream = new StringStream(scriptState(), m_underlyingSource, &m_exceptionState);
+    StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource);
     EXPECT_FALSE(m_exceptionState.hadException());
     EXPECT_FALSE(stream->isStarted());
     EXPECT_FALSE(stream->isDraining());
     EXPECT_FALSE(stream->isPulling());
     EXPECT_EQ(stream->state(), ReadableStream::Waiting);
 
-    isolate()->RunMicrotasks();
-
-    EXPECT_FALSE(stream->isStarted());
-
-    resolver->resolve();
-    isolate()->RunMicrotasks();
+    stream->didSourceStart();
 
     EXPECT_TRUE(stream->isStarted());
     EXPECT_FALSE(stream->isDraining());
@@ -143,42 +132,16 @@ TEST_F(ReadableStreamTest, Construct)
     EXPECT_EQ(stream->state(), ReadableStream::Waiting);
 }
 
-TEST_F(ReadableStreamTest, ConstructError)
+TEST_F(ReadableStreamTest, StartFail)
 {
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, startSource(&m_exceptionState))
-            .WillOnce(DoAll(Invoke(ThrowError("hello")), Return(ScriptPromise())));
-    }
-    new StringStream(scriptState(), m_underlyingSource, &m_exceptionState);
-    EXPECT_TRUE(m_exceptionState.hadException());
-}
-
-TEST_F(ReadableStreamTest, StartFailAsynchronously)
-{
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState());
-    ScriptPromise promise = resolver->promise();
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, startSource(&m_exceptionState)).WillOnce(Return(promise));
-    }
-    StringStream* stream = new StringStream(scriptState(), m_underlyingSource, &m_exceptionState);
+    StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource);
     EXPECT_FALSE(m_exceptionState.hadException());
     EXPECT_FALSE(stream->isStarted());
     EXPECT_FALSE(stream->isDraining());
     EXPECT_FALSE(stream->isPulling());
     EXPECT_EQ(stream->state(), ReadableStream::Waiting);
 
-    isolate()->RunMicrotasks();
-
-    EXPECT_FALSE(stream->isStarted());
-    EXPECT_FALSE(stream->isDraining());
-    EXPECT_FALSE(stream->isPulling());
-    EXPECT_EQ(stream->state(), ReadableStream::Waiting);
-
-    resolver->reject();
     stream->error(DOMException::create(NotFoundError));
-    isolate()->RunMicrotasks();
 
     EXPECT_FALSE(stream->isStarted());
     EXPECT_FALSE(stream->isDraining());
@@ -214,13 +177,7 @@ TEST_F(ReadableStreamTest, WaitOnWaiting)
 
 TEST_F(ReadableStreamTest, WaitDuringStarting)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState());
-    ScriptPromise promise = resolver->promise();
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, startSource(&m_exceptionState)).WillOnce(Return(promise));
-    }
-    StringStream* stream = new StringStream(scriptState(), m_underlyingSource, &m_exceptionState);
+    StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource);
     Checkpoint checkpoint;
 
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
@@ -240,8 +197,7 @@ TEST_F(ReadableStreamTest, WaitDuringStarting)
 
     EXPECT_TRUE(stream->isPulling());
 
-    resolver->resolve();
-    isolate()->RunMicrotasks();
+    stream->didSourceStart();
 
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
     EXPECT_TRUE(stream->isPulling());
@@ -442,7 +398,7 @@ TEST_F(ReadableStreamTest, ReadWhenWaiting)
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
     EXPECT_FALSE(m_exceptionState.hadException());
 
-    stream->read(scriptState(), &m_exceptionState);
+    stream->read(scriptState(), m_exceptionState);
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
     EXPECT_TRUE(m_exceptionState.hadException());
     EXPECT_EQ(V8TypeError, m_exceptionState.code());
@@ -457,7 +413,7 @@ TEST_F(ReadableStreamTest, ReadWhenClosed)
     EXPECT_EQ(ReadableStream::Closed, stream->state());
     EXPECT_FALSE(m_exceptionState.hadException());
 
-    stream->read(scriptState(), &m_exceptionState);
+    stream->read(scriptState(), m_exceptionState);
     EXPECT_EQ(ReadableStream::Closed, stream->state());
     EXPECT_TRUE(m_exceptionState.hadException());
     EXPECT_EQ(V8TypeError, m_exceptionState.code());
@@ -475,7 +431,7 @@ TEST_F(ReadableStreamTest, ReadWhenErrored)
     EXPECT_EQ(ReadableStream::Errored, stream->state());
     EXPECT_FALSE(m_exceptionState.hadException());
 
-    stream->read(scriptState(), &m_exceptionState);
+    stream->read(scriptState(), m_exceptionState);
     EXPECT_EQ(ReadableStream::Errored, stream->state());
     EXPECT_TRUE(m_exceptionState.hadException());
     EXPECT_EQ(notFoundExceptionCode, m_exceptionState.code());
@@ -502,7 +458,7 @@ TEST_F(ReadableStreamTest, EnqueuedAndRead)
 
     checkpoint.Call(0);
     String chunk;
-    EXPECT_TRUE(stream->read(scriptState(), &m_exceptionState).toString(chunk));
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
     checkpoint.Call(1);
     EXPECT_FALSE(m_exceptionState.hadException());
     EXPECT_EQ("hello", chunk);
@@ -537,7 +493,7 @@ TEST_F(ReadableStreamTest, EnqueTwiceAndRead)
 
     checkpoint.Call(0);
     String chunk;
-    EXPECT_TRUE(stream->read(scriptState(), &m_exceptionState).toString(chunk));
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
     checkpoint.Call(1);
     EXPECT_FALSE(m_exceptionState.hadException());
     EXPECT_EQ("hello", chunk);
@@ -567,7 +523,7 @@ TEST_F(ReadableStreamTest, CloseWhenReadable)
     EXPECT_TRUE(stream->isDraining());
 
     String chunk;
-    EXPECT_TRUE(stream->read(scriptState(), &m_exceptionState).toString(chunk));
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
     EXPECT_EQ("hello", chunk);
     EXPECT_EQ(promise, stream->wait(scriptState()));
 
@@ -577,7 +533,7 @@ TEST_F(ReadableStreamTest, CloseWhenReadable)
     EXPECT_FALSE(stream->isPulling());
     EXPECT_TRUE(stream->isDraining());
 
-    EXPECT_TRUE(stream->read(scriptState(), &m_exceptionState).toString(chunk));
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
     EXPECT_EQ("bye", chunk);
     EXPECT_FALSE(m_exceptionState.hadException());
 
@@ -698,12 +654,7 @@ TEST_F(ReadableStreamTest, CancelWhenReadable)
 TEST_F(ReadableStreamTest, ReadableArrayBufferCompileTest)
 {
     // This test tests if ReadableStreamImpl<ArrayBuffer> can be instantiated.
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, startSource(&m_exceptionState)).WillOnce(Return(ScriptPromise()));
-    }
-
-    new ReadableStreamImpl<ReadableStreamChunkTypeTraits<ArrayBuffer> >(scriptState(), m_underlyingSource, &m_exceptionState);
+    new ReadableStreamImpl<ReadableStreamChunkTypeTraits<ArrayBuffer> >(scriptState()->executionContext(), m_underlyingSource);
 }
 
 } // namespace blink

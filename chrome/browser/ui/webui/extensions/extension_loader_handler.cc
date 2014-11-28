@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/webui/extensions/extension_loader_handler.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/zipfile_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -27,7 +28,6 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
-#include "grit/generated_resources.h"
 #include "third_party/re2/re2/re2.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -219,27 +219,14 @@ void ExtensionLoaderHandler::HandleDisplayFailures(
 
 void ExtensionLoaderHandler::LoadUnpackedExtensionImpl(
     const base::FilePath& file_path) {
-  if (EndsWith(file_path.AsUTF16Unsafe(),
-               base::ASCIIToUTF16(".zip"),
-               false /* case insensitive */)) {
-    scoped_refptr<ZipFileInstaller> installer = ZipFileInstaller::Create(
-        ExtensionSystem::Get(profile_)->extension_service());
+  scoped_refptr<UnpackedInstaller> installer = UnpackedInstaller::Create(
+      ExtensionSystem::Get(profile_)->extension_service());
 
-    // We do our own error handling, so we don't want a load failure to trigger
-    // a dialog.
-    installer->set_be_noisy_on_failure(false);
+  // We do our own error handling, so we don't want a load failure to trigger
+  // a dialog.
+  installer->set_be_noisy_on_failure(false);
 
-    installer->LoadFromZipFile(file_path);
-  } else {
-    scoped_refptr<UnpackedInstaller> installer = UnpackedInstaller::Create(
-        ExtensionSystem::Get(profile_)->extension_service());
-
-    // We do our own error handling, so we don't want a load failure to trigger
-    // a dialog.
-    installer->set_be_noisy_on_failure(false);
-
-    installer->Load(file_path);
-  }
+  installer->Load(file_path);
 }
 
 void ExtensionLoaderHandler::OnLoadFailure(

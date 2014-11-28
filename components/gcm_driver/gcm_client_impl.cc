@@ -14,6 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/default_clock.h"
+#include "components/gcm_driver/gcm_backoff_policy.h"
 #include "google_apis/gcm/base/encryptor.h"
 #include "google_apis/gcm/base/mcs_message.h"
 #include "google_apis/gcm/base/mcs_util.h"
@@ -31,38 +32,6 @@
 namespace gcm {
 
 namespace {
-
-// Backoff policy. Shared across reconnection logic and checkin/(un)registration
-// retries.
-// Note: In order to ensure a minimum of 20 seconds between server errors (for
-// server reasons), we have a 30s +- 10s (33%) jitter initial backoff.
-// TODO(zea): consider sharing/synchronizing the scheduling of backoff retries
-// themselves.
-const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
-  // Number of initial errors (in sequence) to ignore before applying
-  // exponential back-off rules.
-  0,
-
-  // Initial delay for exponential back-off in ms.
-  30 * 1000,  // 30 seconds.
-
-  // Factor by which the waiting time will be multiplied.
-  2,
-
-  // Fuzzing percentage. ex: 10% will spread requests randomly
-  // between 90%-100% of the calculated time.
-  0.33,  // 33%.
-
-  // Maximum amount of time we are willing to delay our request in ms.
-  10 * 60 * 1000, // 10 minutes.
-
-  // Time to keep an entry from being discarded even when it
-  // has no significant state, -1 to never discard.
-  -1,
-
-  // Don't use initial delay unless the last request was an error.
-  false,
-};
 
 // Indicates a message type of the received message.
 enum MessageType {
@@ -199,14 +168,10 @@ void RecordOutgoingMessageToUMA(
     ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_HOUR;
   else if (message.time_to_live <= 24 * 60 * 60)
     ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_DAY;
-  else if (message.time_to_live <= 7 * 24 * 60 * 60)
-    ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_WEEK;
-  else if (message.time_to_live < gcm::GCMClient::OutgoingMessage::kMaximumTTL)
-    ttl_category = TTL_MORE_THAN_ONE_WEEK;
   else
     ttl_category = TTL_MAXIMUM;
 
-  UMA_HISTOGRAM_ENUMERATION("GCM.GCMOutgoingMessageTTLCategory",
+  UMA_HISTOGRAM_ENUMERATION("GCM.OutgoingMessageTTL",
                             ttl_category,
                             TTL_CATEGORY_COUNT);
 }
@@ -300,7 +265,7 @@ void GCMClientImpl::Initialize(
     scoped_ptr<Encryptor> encryptor,
     GCMClient::Delegate* delegate) {
   DCHECK_EQ(UNINITIALIZED, state_);
-  DCHECK(url_request_context_getter);
+  DCHECK(url_request_context_getter.get());
   DCHECK(delegate);
 
   url_request_context_getter_ = url_request_context_getter;
@@ -352,11 +317,16 @@ void GCMClientImpl::OnLoadCompleted(scoped_ptr<GCMStore::LoadResult> result) {
     device_checkin_info_.accounts_set = true;
   last_checkin_time_ = result->last_checkin_time;
   gservices_settings_.UpdateFromLoadResult(*result);
+  // Taking over the value of account_mappings before passing the ownership of
+  // load result to InitializeMCSClient.
+  std::vector<AccountMapping> account_mappings;
+  account_mappings.swap(result->account_mappings);
+
   InitializeMCSClient(result.Pass());
 
   if (device_checkin_info_.IsValid()) {
     SchedulePeriodicCheckin();
-    OnReady();
+    OnReady(account_mappings);
     return;
   }
 
@@ -372,7 +342,7 @@ void GCMClientImpl::InitializeMCSClient(
   endpoints.push_back(gservices_settings_.GetMCSFallbackEndpoint());
   connection_factory_ = internals_builder_->BuildConnectionFactory(
       endpoints,
-      kDefaultBackoffPolicy,
+      GetGCMBackoffPolicy(),
       network_session_,
       url_request_context_getter_->GetURLRequestContext()
           ->http_transaction_factory()
@@ -410,14 +380,15 @@ void GCMClientImpl::OnFirstTimeDeviceCheckinCompleted(
       base::Bind(&GCMClientImpl::SetDeviceCredentialsCallback,
                  weak_ptr_factory_.GetWeakPtr()));
 
-  OnReady();
+  OnReady(std::vector<AccountMapping>());
 }
 
-void GCMClientImpl::OnReady() {
+void GCMClientImpl::OnReady(
+    const std::vector<AccountMapping>& account_mappings) {
   state_ = READY;
   StartMCSLogin();
 
-  delegate_->OnGCMReady();
+  delegate_->OnGCMReady(account_mappings);
 }
 
 void GCMClientImpl::StartMCSLogin() {
@@ -469,6 +440,20 @@ void GCMClientImpl::SetAccountsForCheckin(
   }
 }
 
+void GCMClientImpl::UpdateAccountMapping(
+    const AccountMapping& account_mapping) {
+  gcm_store_->AddAccountMapping(account_mapping,
+                                base::Bind(&GCMClientImpl::DefaultStoreCallback,
+                                           weak_ptr_factory_.GetWeakPtr()));
+}
+
+void GCMClientImpl::RemoveAccountMapping(const std::string& account_id) {
+  gcm_store_->RemoveAccountMapping(
+      account_id,
+      base::Bind(&GCMClientImpl::DefaultStoreCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
 void GCMClientImpl::StartCheckin() {
   // Make sure no checkin is in progress.
   if (checkin_request_.get())
@@ -484,10 +469,10 @@ void GCMClientImpl::StartCheckin() {
   checkin_request_.reset(
       new CheckinRequest(gservices_settings_.GetCheckinURL(),
                          request_info,
-                         kDefaultBackoffPolicy,
+                         GetGCMBackoffPolicy(),
                          base::Bind(&GCMClientImpl::OnCheckinCompleted,
                                     weak_ptr_factory_.GetWeakPtr()),
-                         url_request_context_getter_,
+                         url_request_context_getter_.get(),
                          &recorder_));
   // Taking a snapshot of the accounts count here, as there might be an asynch
   // update of the account tokens while checkin is in progress.
@@ -584,6 +569,10 @@ void GCMClientImpl::UpdateRegistrationCallback(bool success) {
   DCHECK(success);
 }
 
+void GCMClientImpl::DefaultStoreCallback(bool success) {
+  DCHECK(success);
+}
+
 void GCMClientImpl::Stop() {
   weak_ptr_factory_.InvalidateWeakPtrs();
   device_checkin_info_.Reset();
@@ -627,7 +616,7 @@ void GCMClientImpl::Register(const std::string& app_id,
   RegistrationRequest* registration_request =
       new RegistrationRequest(gservices_settings_.GetRegistrationURL(),
                               request_info,
-                              kDefaultBackoffPolicy,
+                              GetGCMBackoffPolicy(),
                               base::Bind(&GCMClientImpl::OnRegisterCompleted,
                                          weak_ptr_factory_.GetWeakPtr(),
                                          app_id,
@@ -702,7 +691,7 @@ void GCMClientImpl::Unregister(const std::string& app_id) {
   UnregistrationRequest* unregistration_request = new UnregistrationRequest(
       gservices_settings_.GetRegistrationURL(),
       request_info,
-      kDefaultBackoffPolicy,
+      GetGCMBackoffPolicy(),
       base::Bind(&GCMClientImpl::OnUnregisterCompleted,
                  weak_ptr_factory_.GetWeakPtr(),
                  app_id),

@@ -93,7 +93,8 @@ class WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
   }
 
   void StopTracing() {
-    CHECK(message_loop_runner_ == NULL) << "Calling StopTracing more than once";
+    CHECK(message_loop_runner_.get() == NULL)
+        << "Calling StopTracing more than once";
     trace_log_->SetDisabled();
     message_loop_runner_ = new MessageLoopRunner;
     trace_log_->Flush(base::Bind(
@@ -438,8 +439,16 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest, TwoGetUserMediaAndStop) {
       "twoGetUserMediaAndStop({video: true, audio: true});");
 }
 
+#if defined(OS_WIN) && !defined(NDEBUG)
+// Flaky on Webkit Win7 Debug bot: http://crbug.com/417756
+#define MAYBE_TwoGetUserMediaWithEqualConstraints \
+    DISABLED_TwoGetUserMediaWithEqualConstraints
+#else
+#define MAYBE_TwoGetUserMediaWithEqualConstraints \
+    TwoGetUserMediaWithEqualConstraints
+#endif
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       TwoGetUserMediaWithEqualConstraints) {
+                       MAYBE_TwoGetUserMediaWithEqualConstraints) {
   std::string constraints1 = "{video: true, audio: true}";
   const std::string& constraints2 = constraints1;
   std::string expected_result = "w=640:h=480-w=640:h=480";
@@ -457,8 +466,16 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                                                   expected_result);
 }
 
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(NDEBUG))
+// Flaky on Windows and on Linux Debug: http://crbug.com/417756
+#define MAYBE_TwoGetUserMediaWithFirstHdSecondVga \
+    DISABLED_TwoGetUserMediaWithFirstHdSecondVga
+#else
+#define MAYBE_TwoGetUserMediaWithFirstHdSecondVga \
+    TwoGetUserMediaWithFirstHdSecondVga
+#endif
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       TwoGetUserMediaWithFirstHdSecondVga) {
+                       MAYBE_TwoGetUserMediaWithFirstHdSecondVga) {
   std::string constraints1 =
       "{video: {mandatory: {minWidth:1280 , minHeight: 720}}}";
   std::string constraints2 =

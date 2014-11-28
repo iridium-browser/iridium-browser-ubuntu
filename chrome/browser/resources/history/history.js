@@ -38,11 +38,44 @@ var activeVisit = null;
  * supervised_user_url_filter.h.
  * @enum {number}
  */
-SupervisedUserFilteringBehavior = {
+var SupervisedUserFilteringBehavior = {
   ALLOW: 0,
   WARN: 1,
   BLOCK: 2
 };
+
+/**
+ * The type of the history result object. The definition is based on
+ * chrome/browser/ui/webui/history_ui.cc:
+ *     BrowsingHistoryHandler::HistoryEntry::ToValue()
+ * @typedef {{allTimestamps: Array.<number>,
+ *            blockedVisit: (boolean|undefined),
+ *            dateRelativeDay: (string|undefined),
+ *            dateShort: string,
+ *            dateTimeOfDay: (string|undefined),
+ *            deviceName: string,
+ *            deviceType: string,
+ *            domain: string,
+ *            hostFilteringBehavior: (number|undefined),
+ *            snippet: (string|undefined),
+ *            starred: boolean,
+ *            time: number,
+ *            title: string,
+ *            url: string}}
+ */
+var HistoryEntry;
+
+/**
+ * The type of the history results info object. The definition is based on
+ * chrome/browser/ui/webui/history_ui.cc:
+ *     BrowsingHistoryHandler::QueryComplete()
+ * @typedef {{finished: boolean,
+ *            hasSyncedResults: (boolean|undefined),
+ *            queryEndTime: string,
+ *            queryStartTime: string,
+ *            term: string}}
+ */
+var HistoryQuery;
 
 MenuButton.createDropDownArrows();
 
@@ -66,8 +99,8 @@ function recordUmaAction(actionDesc) {
  * Record a histogram value in UMA. If specified value is larger than the max
  * bucket value, record the value in the largest bucket.
  * @param {string} histogram The name of the histogram to be recorded in.
- * @param {integer} maxBucketValue The max value for the last histogram bucket.
- * @param {integer} value The value to record in the histogram.
+ * @param {number} maxBucketValue The max value for the last histogram bucket.
+ * @param {number} value The value to record in the histogram.
  */
 function recordUmaHistogram(histogram, maxBucketValue, value) {
   chrome.send('metricsHandler:recordInHistogram',
@@ -81,7 +114,7 @@ function recordUmaHistogram(histogram, maxBucketValue, value) {
 
 /**
  * Class to hold all the information about an entry in our model.
- * @param {Object} result An object containing the visit's data.
+ * @param {HistoryEntry} result An object containing the visit's data.
  * @param {boolean} continued Whether this visit is on the same day as the
  *     visit before it.
  * @param {HistoryModel} model The model object this entry belongs to.
@@ -150,8 +183,8 @@ Visit.prototype.getResultDOM = function(propertyBag) {
   var useMonthDate = propertyBag.useMonthDate || false;
   var focusless = propertyBag.focusless || false;
   var node = createElementWithClassName('li', 'entry');
-  var time = createElementWithClassName('div', 'time');
-  var entryBox = createElementWithClassName('label', 'entry-box');
+  var time = createElementWithClassName('label', 'time');
+  var entryBox = createElementWithClassName('div', 'entry-box');
   var domain = createElementWithClassName('div', 'domain');
 
   this.id_ = this.model_.nextVisitId_++;
@@ -165,16 +198,19 @@ Visit.prototype.getResultDOM = function(propertyBag) {
     checkbox.id = 'checkbox-' + this.id_;
     checkbox.time = this.date.getTime();
     checkbox.addEventListener('click', checkboxClicked);
+    time.setAttribute('for', checkbox.id);
     entryBox.appendChild(checkbox);
 
     if (focusless)
       checkbox.tabIndex = -1;
 
-    // Clicking anywhere in the entryBox will check/uncheck the checkbox.
-    entryBox.setAttribute('for', checkbox.id);
-    entryBox.addEventListener('mousedown', entryBoxMousedown);
-    entryBox.addEventListener('click', entryBoxClick);
-    entryBox.addEventListener('keydown', this.handleKeydown_.bind(this));
+    if (!isMobileVersion()) {
+      // Clicking anywhere in the entryBox will check/uncheck the checkbox.
+      entryBox.setAttribute('for', checkbox.id);
+      entryBox.addEventListener('mousedown', entryBoxMousedown);
+      entryBox.addEventListener('click', entryBoxClick);
+      entryBox.addEventListener('keydown', this.handleKeydown_.bind(this));
+    }
   }
 
   // Keep track of the drop down that triggered the menu, so we know
@@ -190,21 +226,27 @@ Visit.prototype.getResultDOM = function(propertyBag) {
 
   entryBox.appendChild(time);
 
-  var bookmarkSection = createElementWithClassName('div', 'bookmark-section');
+  var bookmarkSection = createElementWithClassName(
+      'button', 'bookmark-section custom-appearance');
   if (this.starred_) {
     bookmarkSection.title = loadTimeData.getString('removeBookmark');
     bookmarkSection.classList.add('starred');
     bookmarkSection.addEventListener('click', function f(e) {
       recordUmaAction('HistoryPage_BookmarkStarClicked');
-      bookmarkSection.classList.remove('starred');
       chrome.send('removeBookmark', [self.url_]);
+
+      this.model_.getView().onBeforeUnstarred(this);
+      bookmarkSection.classList.remove('starred');
+      this.model_.getView().onAfterUnstarred(this);
+
       bookmarkSection.removeEventListener('click', f);
       e.preventDefault();
-    });
+    }.bind(this));
   }
   entryBox.appendChild(bookmarkSection);
 
-  var visitEntryWrapper = entryBox.appendChild(document.createElement('div'));
+  var visitEntryWrapper = /** @type {HTMLElement} */(
+      entryBox.appendChild(document.createElement('div')));
   if (addTitleFavicon || this.blockedVisit)
     visitEntryWrapper.classList.add('visit-entry');
   if (this.blockedVisit) {
@@ -299,26 +341,28 @@ Visit.prototype.removeFromHistory = function() {
   }.bind(this));
 };
 
+// Closure Compiler doesn't support Object.defineProperty().
+// https://github.com/google/closure-compiler/issues/302
 Object.defineProperty(Visit.prototype, 'checkBox', {
-  get: function() {
+  get: /** @this {Visit} */function() {
     return this.domNode_.querySelector('input[type=checkbox]');
   },
 });
 
 Object.defineProperty(Visit.prototype, 'bookmarkStar', {
-  get: function() {
+  get: /** @this {Visit} */function() {
     return this.domNode_.querySelector('.bookmark-section.starred');
   },
 });
 
 Object.defineProperty(Visit.prototype, 'titleLink', {
-  get: function() {
+  get: /** @this {Visit} */function() {
     return this.domNode_.querySelector('.title a');
   },
 });
 
 Object.defineProperty(Visit.prototype, 'dropDown', {
-  get: function() {
+  get: /** @this {Visit} */function() {
     return this.domNode_.querySelector('button.drop-down');
   },
 });
@@ -560,8 +604,8 @@ HistoryModel.prototype.requestPage = function(page) {
 
 /**
  * Receiver for history query.
- * @param {Object} info An object containing information about the query.
- * @param {Array} results A list of results.
+ * @param {HistoryQuery} info An object containing information about the query.
+ * @param {Array.<HistoryEntry>} results A list of results.
  */
 HistoryModel.prototype.addResults = function(info, results) {
   // If no requests are in flight then this was an old request so we drop the
@@ -623,7 +667,7 @@ HistoryModel.prototype.hasMoreResults = function() {
 /**
  * Removes a list of visits from the history, and calls |callback| when the
  * removal has successfully completed.
- * @param {Array<Visit>} visits The visits to remove.
+ * @param {Array.<Visit>} visits The visits to remove.
  * @param {Function} callback The function to call after removal succeeds.
  */
 HistoryModel.prototype.removeVisitsFromHistory = function(visits, callback) {
@@ -657,10 +701,10 @@ HistoryModel.prototype.deleteComplete = function() {
 
 // Getter and setter for HistoryModel.rangeInDays_.
 Object.defineProperty(HistoryModel.prototype, 'rangeInDays', {
-  get: function() {
+  get: /** @this {HistoryModel} */function() {
     return this.rangeInDays_;
   },
-  set: function(range) {
+  set: /** @this {HistoryModel} */function(range) {
     this.rangeInDays_ = range;
   }
 });
@@ -673,17 +717,17 @@ Object.defineProperty(HistoryModel.prototype, 'rangeInDays', {
  * calendar month, 1 to the previous one, etc.
  */
 Object.defineProperty(HistoryModel.prototype, 'offset', {
-  get: function() {
+  get: /** @this {HistoryModel} */function() {
     return this.offset_;
   },
-  set: function(offset) {
+  set: /** @this {HistoryModel} */function(offset) {
     this.offset_ = offset;
   }
 });
 
 // Setter for HistoryModel.requestedPage_.
 Object.defineProperty(HistoryModel.prototype, 'requestedPage', {
-  set: function(page) {
+  set: /** @this {HistoryModel} */function(page) {
     this.requestedPage_ = page;
   }
 });
@@ -802,15 +846,6 @@ HistoryModel.prototype.canFillPage_ = function(page) {
 };
 
 /**
- * Enables or disables grouping by domain.
- * @param {boolean} groupByDomain New groupByDomain_ value.
- */
-HistoryModel.prototype.setGroupByDomain = function(groupByDomain) {
-  this.groupByDomain_ = groupByDomain;
-  this.offset_ = 0;
-};
-
-/**
  * Gets whether we are grouped by domain.
  * @return {boolean} Whether the results are grouped by domain.
  */
@@ -821,7 +856,10 @@ HistoryModel.prototype.getGroupByDomain = function() {
 ///////////////////////////////////////////////////////////////////////////////
 // HistoryFocusObserver:
 
-/** @implements {cr.ui.FocusRow.Observer} */
+/**
+ * @constructor
+ * @implements {cr.ui.FocusRow.Observer}
+ */
 function HistoryFocusObserver() {}
 
 HistoryFocusObserver.prototype = {
@@ -831,7 +869,7 @@ HistoryFocusObserver.prototype = {
   },
 
   /** @override */
-  onDeactivate: function(row, el) {
+  onDeactivate: function(row) {
     this.getActiveRowElement_(row).classList.remove('active');
   },
 
@@ -897,7 +935,8 @@ function HistoryView(model) {
 
   var handleRangeChange = function(e) {
     // Update the results and save the last state.
-    self.setRangeInDays(parseInt(e.target.value, 10));
+    var value = parseInt(e.target.value, 10);
+    self.setRangeInDays(/** @type {HistoryModel.Range.<number>} */(value));
   };
 
   // Add handlers for the range options.
@@ -995,7 +1034,8 @@ HistoryView.prototype.getPage = function() {
 
 /**
  * Set the current range for grouped results.
- * @param {string} range The number of days to which the range should be set.
+ * @param {HistoryModel.Range} range The number of days to which the range
+ *     should be set.
  */
 HistoryView.prototype.setRangeInDays = function(range) {
   // Set the range, offset and reset the page.
@@ -1004,7 +1044,7 @@ HistoryView.prototype.setRangeInDays = function(range) {
 
 /**
  * Get the current range in days.
- * @return {number} Current range in days from the model.
+ * @return {HistoryModel.Range} Current range in days from the model.
  */
 HistoryView.prototype.getRangeInDays = function() {
   return this.model_.rangeInDays;
@@ -1105,6 +1145,21 @@ HistoryView.prototype.onBeforeRemove = function(visit) {
             this.focusGrid_.rows[pos.row - 1];
   if (row)
     row.focusIndex(Math.min(pos.col, row.items.length - 1));
+};
+
+/** @param {Visit} visit The visit about to be unstarred. */
+HistoryView.prototype.onBeforeUnstarred = function(visit) {
+  assert(this.currentVisits_.indexOf(visit) >= 0);
+  assert(visit.bookmarkStar == document.activeElement);
+
+  var pos = this.focusGrid_.getPositionForTarget(document.activeElement);
+  var row = this.focusGrid_.rows[pos.row];
+  row.focusIndex(Math.min(pos.col + 1, row.items.length - 1));
+};
+
+/** @param {Visit} visit The visit that was just unstarred. */
+HistoryView.prototype.onAfterUnstarred = function(visit) {
+  this.updateFocusGrid_();
 };
 
 /**
@@ -1250,6 +1305,7 @@ HistoryView.prototype.getGroupedVisitsDOM_ = function(
     siteDomainCheckbox.type = 'checkbox';
     siteDomainCheckbox.addEventListener('click', domainCheckboxClicked);
     siteDomainCheckbox.domain_ = domain;
+    siteDomainCheckbox.setAttribute('aria-label', domain);
     siteDomainRow.appendChild(siteDomainCheckbox);
   }
 
@@ -1285,6 +1341,7 @@ HistoryView.prototype.getGroupedVisitsDOM_ = function(
 
   // Collapse until it gets toggled.
   resultsList.style.height = 0;
+  resultsList.setAttribute('aria-hidden', 'true');
 
   // Add the results for each of the domain.
   var isMonthGroupedResult = this.getRangeInDays() == HistoryModel.Range.MONTH;
@@ -1362,15 +1419,15 @@ HistoryView.prototype.groupVisitsByDomain_ = function(visits, results) {
 /**
  * Adds the results for a month.
  * @param {Array} visits Visits returned by the query.
- * @param {Element} parentElement Element to which to add the results to.
+ * @param {Node} parentNode Node to which to add the results to.
  * @private
  */
-HistoryView.prototype.addMonthResults_ = function(visits, parentElement) {
+HistoryView.prototype.addMonthResults_ = function(visits, parentNode) {
   if (visits.length == 0)
     return;
 
-  var monthResults = parentElement.appendChild(
-      createElementWithClassName('ol', 'month-results'));
+  var monthResults = /** @type {HTMLOListElement} */(parentNode.appendChild(
+      createElementWithClassName('ol', 'month-results')));
   // Don't add checkboxes if entries can not be edited.
   if (!this.model_.editingEntriesAllowed)
     monthResults.classList.add('no-checkboxes');
@@ -1382,22 +1439,22 @@ HistoryView.prototype.addMonthResults_ = function(visits, parentElement) {
  * Adds the results for a certain day. This includes a title with the day of
  * the results and the results themselves, grouped or not.
  * @param {Array} visits Visits returned by the query.
- * @param {Element} parentElement Element to which to add the results to.
+ * @param {Node} parentNode Node to which to add the results to.
  * @private
  */
-HistoryView.prototype.addDayResults_ = function(visits, parentElement) {
+HistoryView.prototype.addDayResults_ = function(visits, parentNode) {
   if (visits.length == 0)
     return;
 
   var firstVisit = visits[0];
-  var day = parentElement.appendChild(createElementWithClassName('h3', 'day'));
+  var day = parentNode.appendChild(createElementWithClassName('h3', 'day'));
   day.appendChild(document.createTextNode(firstVisit.dateRelativeDay));
   if (firstVisit.continued) {
     day.appendChild(document.createTextNode(' ' +
                                             loadTimeData.getString('cont')));
   }
-  var dayResults = parentElement.appendChild(
-      createElementWithClassName('ol', 'day-results'));
+  var dayResults = /** @type {HTMLElement} */(parentNode.appendChild(
+      createElementWithClassName('ol', 'day-results')));
 
   // Don't add checkboxes if entries can not be edited.
   if (!this.model_.editingEntriesAllowed)
@@ -1426,7 +1483,7 @@ HistoryView.prototype.addDayResults_ = function(visits, parentElement) {
 /**
  * Adds the text that shows the current interval, used for week and month
  * results.
- * @param {Element} resultsFragment The element to which the interval will be
+ * @param {Node} resultsFragment The element to which the interval will be
  *     added to.
  * @private
  */
@@ -1526,7 +1583,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
           ++dayEnd;
 
         this.addDayResults_(
-            results.slice(dayStart, dayEnd), resultsFragment, groupByDomain);
+            results.slice(dayStart, dayEnd), resultsFragment);
       }
     }
 
@@ -1535,7 +1592,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
   }
   // After the results have been added to the DOM, determine the size of the
   // time column.
-  this.setTimeColumnWidth_(this.resultDiv_);
+  this.setTimeColumnWidth_();
 };
 
 var focusGridRowSelector = [
@@ -1629,16 +1686,19 @@ HistoryView.prototype.setTimeColumnWidth_ = function() {
 
 /**
  * Toggles an element in the grouped history.
- * @param {Element} e The element which was clicked on.
+ * @param {Event} e The event with element |e.target| which was clicked on.
  * @private
  */
 HistoryView.prototype.toggleGroupedVisits_ = function(e) {
-  var entry = findAncestorByClass(e.target, 'site-entry');
+  var entry = findAncestorByClass(/** @type {Element} */(e.target),
+                                  'site-entry');
   var innerResultList = entry.querySelector('.site-results');
 
   if (entry.classList.contains('expand')) {
     innerResultList.style.height = 0;
+    innerResultList.setAttribute('aria-hidden', 'true');
   } else {
+    innerResultList.setAttribute('aria-hidden', 'false');
     innerResultList.style.height = 'auto';
     // -webkit-transition does not work on height:auto elements so first set
     // the height to auto so that it is computed and then set it to the
@@ -1703,7 +1763,6 @@ PageState.prototype.getHashData = function() {
   var result = {
     q: '',
     page: 0,
-    grouped: false,
     range: 0,
     offset: 0
   };
@@ -1714,9 +1773,8 @@ PageState.prototype.getHashData = function() {
   var hashSplit = window.location.hash.substr(1).split('&');
   for (var i = 0; i < hashSplit.length; i++) {
     var pair = hashSplit[i].split('=');
-    if (pair.length > 1) {
+    if (pair.length > 1)
       result[pair[0]] = decodeURIComponent(pair[1].replace(/\+/g, ' '));
-    }
   }
 
   return result;
@@ -1784,9 +1842,9 @@ function load() {
 
   // Create default view.
   var hashData = pageState.getHashData();
-  var grouped = (hashData.grouped == 'true') || historyModel.getGroupByDomain();
   var page = parseInt(hashData.page, 10) || historyView.getPage();
-  var range = parseInt(hashData.range, 10) || historyView.getRangeInDays();
+  var range = /** @type {HistoryModel.Range} */(parseInt(hashData.range, 10)) ||
+      historyView.getRangeInDays();
   var offset = parseInt(hashData.offset, 10) || historyView.getOffset();
   historyView.setPageState(hashData.q, page, range, offset);
 
@@ -1860,6 +1918,7 @@ function load() {
     $('history-page').appendChild($('clear-browsing-data'));
   } else {
     window.addEventListener('message', function(e) {
+      e = /** @type {!MessageEvent.<!{method: string}>} */(e);
       if (e.data.method == 'frameSelected')
         searchField.focus();
     });
@@ -1918,7 +1977,13 @@ function openClearBrowsingData(e) {
 function showConfirmationOverlay() {
   $('alertOverlay').classList.add('showing');
   $('overlay').hidden = false;
+  $('history-page').setAttribute('aria-hidden', 'true');
   uber.invokeMethodOnParent('beginInterceptingEvents');
+
+  // If an element is focused behind the confirm overlay, blur it so focus
+  // doesn't accidentally get stuck behind it.
+  if ($('history-page').contains(document.activeElement))
+    document.activeElement.blur();
 }
 
 /**
@@ -1927,25 +1992,26 @@ function showConfirmationOverlay() {
 function hideConfirmationOverlay() {
   $('alertOverlay').classList.remove('showing');
   $('overlay').hidden = true;
+  $('history-page').removeAttribute('aria-hidden');
   uber.invokeMethodOnParent('stopInterceptingEvents');
 }
 
 /**
  * Shows the confirmation alert for history deletions and permits browser tests
  * to override the dialog.
- * @param {function=} okCallback A function to be called when the user presses
+ * @param {function()=} okCallback A function to be called when the user presses
  *     the ok button.
- * @param {function=} cancelCallback A function to be called when the user
+ * @param {function()=} cancelCallback A function to be called when the user
  *     presses the cancel button.
  */
 function confirmDeletion(okCallback, cancelCallback) {
   alertOverlay.setValues(
       loadTimeData.getString('removeSelected'),
       loadTimeData.getString('deleteWarning'),
-      loadTimeData.getString('cancel'),
       loadTimeData.getString('deleteConfirm'),
-      cancelCallback,
-      okCallback);
+      loadTimeData.getString('cancel'),
+      okCallback,
+      cancelCallback);
   showConfirmationOverlay();
 }
 
@@ -2021,7 +2087,8 @@ function removeItems() {
  * @param {Event} e The click event.
  */
 function checkboxClicked(e) {
-  handleCheckboxStateChange(e.currentTarget, e.shiftKey);
+  handleCheckboxStateChange(/** @type {!HTMLInputElement} */(e.currentTarget),
+                            e.shiftKey);
 }
 
 /**
@@ -2041,10 +2108,10 @@ function handleCheckboxStateChange(checkbox, shiftKey) {
     var begin = Math.min(id, selectionAnchor);
     var end = Math.max(id, selectionAnchor);
     for (var i = begin; i <= end; i++) {
-      var checkbox = document.querySelector('#checkbox-' + i);
-      if (checkbox) {
-        checkbox.checked = checked;
-        updateParentCheckbox(checkbox);
+      var ithCheckbox = document.querySelector('#checkbox-' + i);
+      if (ithCheckbox) {
+        ithCheckbox.checked = checked;
+        updateParentCheckbox(ithCheckbox);
       }
     }
   }
@@ -2059,7 +2126,8 @@ function handleCheckboxStateChange(checkbox, shiftKey) {
  * @param {Event} e The click event.
  */
 function domainCheckboxClicked(e) {
-  var siteEntry = findAncestorByClass(e.currentTarget, 'site-entry');
+  var siteEntry = findAncestorByClass(/** @type {Element} */(e.currentTarget),
+                                      'site-entry');
   var checkboxes =
       siteEntry.querySelectorAll('.site-results input[type=checkbox]');
   for (var i = 0; i < checkboxes.length; i++)
@@ -2095,10 +2163,11 @@ function entryBoxMousedown(event) {
 }
 
 /**
- * Handle click event for entryBox labels.
- * @param {!MouseEvent} event A click event.
+ * Handle click event for entryBoxes.
+ * @param {!Event} event A click event.
  */
 function entryBoxClick(event) {
+  event = /** @type {!MouseEvent} */(event);
   // Do nothing if a bookmark star is clicked.
   if (event.defaultPrevented)
     return;
@@ -2112,7 +2181,8 @@ function entryBoxClick(event) {
         return;
     }
   }
-  var checkbox = event.currentTarget.control;
+  var checkbox = assertInstanceof($(event.currentTarget.getAttribute('for')),
+                                  HTMLInputElement);
   checkbox.checked = !checkbox.checked;
   handleCheckboxStateChange(checkbox, event.shiftKey);
   // We don't want to focus on the checkbox.
@@ -2173,8 +2243,8 @@ function getFilteringStatusDOM(filteringBehavior) {
 
 /**
  * Our history system calls this function with results from searches.
- * @param {Object} info An object containing information about the query.
- * @param {Array} results A list of results.
+ * @param {HistoryQuery} info An object containing information about the query.
+ * @param {Array.<HistoryEntry>} results A list of results.
  */
 function historyResult(info, results) {
   historyModel.addResults(info, results);

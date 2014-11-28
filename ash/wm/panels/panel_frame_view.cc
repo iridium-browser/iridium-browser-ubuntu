@@ -43,12 +43,13 @@ void PanelFrameView::InitHeaderPainter() {
       FrameCaptionButtonContainerView::MINIMIZE_ALLOWED);
   AddChildView(caption_button_container_);
 
+  header_painter_->Init(frame_, this, caption_button_container_);
+
   if (frame_->widget_delegate()->ShouldShowWindowIcon()) {
     window_icon_ = new views::ImageView();
     AddChildView(window_icon_);
+    header_painter_->UpdateLeftHeaderView(window_icon_);
   }
-
-  header_painter_->Init(frame_, this, window_icon_, caption_button_container_);
 }
 
 int PanelFrameView::NonClientTopBorderHeight() const {
@@ -94,6 +95,9 @@ void PanelFrameView::UpdateWindowTitle() {
   if (!header_painter_)
     return;
   header_painter_->SchedulePaintForTitle();
+}
+
+void PanelFrameView::SizeConstraintsChanged() {
 }
 
 int PanelFrameView::NonClientHitTest(const gfx::Point& point) {

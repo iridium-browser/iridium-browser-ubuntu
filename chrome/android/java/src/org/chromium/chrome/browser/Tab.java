@@ -14,6 +14,7 @@ import android.view.View;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.banners.AppBannerManager;
 import org.chromium.chrome.browser.contextmenu.ChromeContextMenuItemDelegate;
 import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
@@ -29,10 +30,10 @@ import org.chromium.chrome.browser.ui.toolbar.ToolbarModelSecurityLevel;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.NavigationClient;
-import org.chromium.content.browser.NavigationHistory;
 import org.chromium.content.browser.WebContentsObserverAndroid;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.WindowAndroid;
@@ -213,12 +214,12 @@ public class Tab implements NavigationClient {
                     new Runnable() {
                         @Override
                         public void run() {
-                            contentViewCore.cancelPendingReload();
+                            getWebContents().getNavigationController().cancelPendingReload();
                         }
                     }, new Runnable() {
                         @Override
                         public void run() {
-                            contentViewCore.continuePendingReload();
+                            getWebContents().getNavigationController().continuePendingReload();
                         }
                     });
             Activity activity = (Activity) mContext;
@@ -292,6 +293,17 @@ public class Tab implements NavigationClient {
         }
 
         @Override
+        public void didNavigateMainFrame(String url, String baseUrl,
+                boolean isNavigationToDifferentPage, boolean isFragmentNavigation, int statusCode) {
+            for (TabObserver observer : mObservers) {
+                observer.onDidNavigateMainFrame(
+                        Tab.this, url, baseUrl, isNavigationToDifferentPage,
+                        isFragmentNavigation, statusCode);
+
+            }
+        }
+
+        @Override
         public void didChangeThemeColor(int color) {
             for (TabObserver observer : mObservers) {
                 observer.onDidChangeThemeColor(color);
@@ -305,6 +317,7 @@ public class Tab implements NavigationClient {
      * @param context   An instance of a {@link Context}.
      * @param window    An instance of a {@link WindowAndroid}.
      */
+    @VisibleForTesting
     public Tab(boolean incognito, Context context, WindowAndroid window) {
         this(INVALID_TAB_ID, incognito, context, window);
     }
@@ -361,34 +374,36 @@ public class Tab implements NavigationClient {
      * @return Whether or not this tab has a previous navigation entry.
      */
     public boolean canGoBack() {
-        return mContentViewCore != null && mContentViewCore.canGoBack();
+        return getWebContents() != null && getWebContents().getNavigationController().canGoBack();
     }
 
     /**
      * @return Whether or not this tab has a navigation entry after the current one.
      */
     public boolean canGoForward() {
-        return mContentViewCore != null && mContentViewCore.canGoForward();
+        return getWebContents() != null && getWebContents().getNavigationController()
+                .canGoForward();
     }
 
     /**
      * Goes to the navigation entry before the current one.
      */
     public void goBack() {
-        if (mContentViewCore != null) mContentViewCore.goBack();
+        if (getWebContents() != null) getWebContents().getNavigationController().goBack();
     }
 
     /**
      * Goes to the navigation entry after the current one.
      */
     public void goForward() {
-        if (mContentViewCore != null) mContentViewCore.goForward();
+        if (getWebContents() != null) getWebContents().getNavigationController().goForward();
     }
 
     @Override
     public NavigationHistory getDirectedNavigationHistory(boolean isForward, int itemLimit) {
-        if (mContentViewCore != null) {
-            return mContentViewCore.getDirectedNavigationHistory(isForward, itemLimit);
+        if (getWebContents() != null) {
+            return getWebContents().getNavigationController()
+                    .getDirectedNavigationHistory(isForward, itemLimit);
         } else {
             return new NavigationHistory();
         }
@@ -396,21 +411,25 @@ public class Tab implements NavigationClient {
 
     @Override
     public void goToNavigationIndex(int index) {
-        if (mContentViewCore != null) mContentViewCore.goToNavigationIndex(index);
+        if (getWebContents() != null) {
+            getWebContents().getNavigationController().goToNavigationIndex(index);
+        }
     }
 
     /**
      * Loads the current navigation if there is a pending lazy load (after tab restore).
      */
     public void loadIfNecessary() {
-        if (mContentViewCore != null) mContentViewCore.loadIfNecessary();
+        if (getWebContents() != null) getWebContents().getNavigationController().loadIfNecessary();
     }
 
     /**
      * Requests the current navigation to be loaded upon the next call to loadIfNecessary().
      */
     protected void requestRestoreLoad() {
-        if (mContentViewCore != null) mContentViewCore.requestRestoreLoad();
+        if (getWebContents() != null) {
+            getWebContents().getNavigationController().requestRestoreLoad();
+        }
     }
 
     /**
@@ -452,8 +471,7 @@ public class Tab implements NavigationClient {
      *         a bad HTTPS page.
      */
     public boolean isShowingInterstitialPage() {
-        ContentViewCore contentViewCore = getContentViewCore();
-        return contentViewCore != null && contentViewCore.isShowingInterstitialPage();
+        return getWebContents() != null && getWebContents().isShowingInterstitialPage();
     }
 
     /**
@@ -531,7 +549,7 @@ public class Tab implements NavigationClient {
      */
     public void reload() {
         // TODO(dtrainor): Should we try to rebuild the ContentView if it's frozen?
-        if (mContentViewCore != null) mContentViewCore.reload(true);
+        if (getWebContents() != null) getWebContents().getNavigationController().reload(true);
     }
 
     /**
@@ -539,12 +557,14 @@ public class Tab implements NavigationClient {
      * This version ignores the cache and reloads from the network.
      */
     public void reloadIgnoringCache() {
-        if (mContentViewCore != null) mContentViewCore.reloadIgnoringCache(true);
+        if (getWebContents() != null) {
+            getWebContents().getNavigationController().reloadIgnoringCache(true);
+        }
     }
 
     /** Stop the current navigation. */
     public void stopLoading() {
-        if (mContentViewCore != null) mContentViewCore.stopLoading();
+        if (getWebContents() != null) getWebContents().stop();
     }
 
     /**
@@ -552,7 +572,7 @@ public class Tab implements NavigationClient {
      */
     public int getBackgroundColor() {
         if (mNativePage != null) return mNativePage.getBackgroundColor();
-        if (mContentViewCore != null) return mContentViewCore.getBackgroundColor();
+        if (getWebContents() != null) return getWebContents().getBackgroundColor();
         return Color.WHITE;
     }
 
@@ -560,8 +580,7 @@ public class Tab implements NavigationClient {
      * @return The web contents associated with this tab.
      */
     public WebContents getWebContents() {
-        if (mNativeTabAndroid == 0) return null;
-        return nativeGetWebContents(mNativeTabAndroid);
+        return mContentViewCore != null ? mContentViewCore.getWebContents() : null;
     }
 
     /**
@@ -620,8 +639,9 @@ public class Tab implements NavigationClient {
      * @param reloadOnChange Reload the page if the user agent has changed.
      */
     public void setUseDesktopUserAgent(boolean useDesktop, boolean reloadOnChange) {
-        if (mContentViewCore != null) {
-            mContentViewCore.setUseDesktopUserAgent(useDesktop, reloadOnChange);
+        if (getWebContents() != null) {
+            getWebContents().getNavigationController()
+                    .setUseDesktopUserAgent(useDesktop, reloadOnChange);
         }
     }
 
@@ -629,7 +649,8 @@ public class Tab implements NavigationClient {
      * @return Whether or not the {@link ContentViewCore} is using a desktop user agent.
      */
     public boolean getUseDesktopUserAgent() {
-        return mContentViewCore != null && mContentViewCore.getUseDesktopUserAgent();
+        return getWebContents() != null && getWebContents().getNavigationController()
+                .getUseDesktopUserAgent();
     }
 
     /**
@@ -878,7 +899,7 @@ public class Tab implements NavigationClient {
      */
     @CalledByNative
     public String getUrl() {
-        return mContentViewCore != null ? mContentViewCore.getUrl() : "";
+        return getWebContents() != null ? getWebContents().getUrl() : "";
     }
 
     /**
@@ -887,7 +908,7 @@ public class Tab implements NavigationClient {
     @CalledByNative
     public String getTitle() {
         if (mNativePage != null) return mNativePage.getTitle();
-        if (mContentViewCore != null) return mContentViewCore.getTitle();
+        if (getWebContents() != null) return getWebContents().getTitle();
         return "";
     }
 
@@ -896,19 +917,35 @@ public class Tab implements NavigationClient {
      *         is specified or it requires the default favicon.
      */
     public Bitmap getFavicon() {
-        if (mContentViewCore != null) {
-            if (mFavicon == null || !mContentViewCore.getUrl().equals(mFaviconUrl)) {
-                if (mNativeTabAndroid == 0) return null;
-                mFavicon = nativeGetFavicon(mNativeTabAndroid);
-                mFaviconUrl = mContentViewCore.getUrl();
-            }
+        String url = getUrl();
+        // Invalidate our cached values if necessary.
+        if (url == null || !url.equals(mFaviconUrl)) {
+            mFavicon = null;
+            mFaviconUrl = null;
         }
+
+        if (mFavicon == null) {
+            // If we have no content return null.
+            if (getNativePage() == null && getContentViewCore() == null) return null;
+
+            Bitmap favicon = nativeGetFavicon(mNativeTabAndroid);
+
+            // If the favicon is not yet valid (i.e. it's either blank or a placeholder), then do
+            // not cache the results.  We still return this though so we have something to show.
+            if (favicon != null && nativeIsFaviconValid(mNativeTabAndroid)) {
+                mFavicon = favicon;
+                mFaviconUrl = url;
+            }
+
+            return favicon;
+        }
+
         return mFavicon;
     }
 
     /**
      * Loads the tab if it's not loaded (e.g. because it was killed in background).
-     * @return true iff tab load was triggered
+     * @return true iff the Tab handled the request.
      */
     @CalledByNative
     public boolean loadIfNeeded() {
@@ -1173,7 +1210,6 @@ public class Tab implements NavigationClient {
             ContentViewCore contentViewCore, ChromeWebContentsDelegateAndroid delegate,
             ContextMenuPopulator contextMenuPopulator);
     private native void nativeDestroyWebContents(long nativeTabAndroid, boolean deleteNative);
-    private native WebContents nativeGetWebContents(long nativeTabAndroid);
     private native Profile nativeGetProfileAndroid(long nativeTabAndroid);
     private native int nativeLoadUrl(long nativeTabAndroid, String url, String extraHeaders,
             byte[] postData, int transition, String referrerUrl, int referrerPolicy,
@@ -1183,4 +1219,5 @@ public class Tab implements NavigationClient {
             String title);
     private native boolean nativePrint(long nativeTabAndroid);
     private native Bitmap nativeGetFavicon(long nativeTabAndroid);
+    private native boolean nativeIsFaviconValid(long nativeTabAndroid);
 }

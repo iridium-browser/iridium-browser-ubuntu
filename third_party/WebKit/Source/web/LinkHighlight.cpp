@@ -40,7 +40,7 @@
 #include "core/rendering/style/ShadowData.h"
 #include "platform/graphics/Color.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebAnimationCurve.h"
+#include "public/platform/WebCompositorAnimationCurve.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebFloatAnimationCurve.h"
 #include "public/platform/WebFloatPoint.h"
@@ -179,25 +179,19 @@ static void addQuadToPath(const FloatQuad& quad, Path& path)
     path.closeSubpath();
 }
 
-void LinkHighlight::computeQuads(Node* node, Vector<FloatQuad>& outQuads) const
+void LinkHighlight::computeQuads(RenderObject& renderer, Vector<FloatQuad>& outQuads) const
 {
-    if (!node || !node->renderer())
-        return;
-
-    RenderObject* renderer = node->renderer();
-
     // For inline elements, absoluteQuads will return a line box based on the line-height
     // and font metrics, which is technically incorrect as replaced elements like images
     // should use their intristic height and expand the linebox  as needed. To get an
     // appropriately sized highlight we descend into the children and have them add their
     // boxes.
-    if (renderer->isRenderInline()) {
-        for (Node* child = node->firstChild(); child; child = child->nextSibling())
-            computeQuads(child, outQuads);
+    if (renderer.isRenderInline()) {
+        for (RenderObject* child = renderer.slowFirstChild(); child; child = child->nextSibling())
+            computeQuads(*child, outQuads);
     } else {
-        renderer->absoluteQuads(outQuads);
+        renderer.absoluteQuads(outQuads);
     }
-
 }
 
 bool LinkHighlight::computeHighlightLayerPathAndPosition(RenderLayer* compositingLayer)
@@ -209,7 +203,7 @@ bool LinkHighlight::computeHighlightLayerPathAndPosition(RenderLayer* compositin
 
     // Get quads for node in absolute coordinates.
     Vector<FloatQuad> quads;
-    computeQuads(m_node.get(), quads);
+    computeQuads(*m_node->renderer(), quads);
     ASSERT(quads.size());
 
     // Adjust for offset between target graphics layer and the node's renderer.
@@ -250,8 +244,7 @@ bool LinkHighlight::computeHighlightLayerPathAndPosition(RenderLayer* compositin
     return pathHasChanged;
 }
 
-void LinkHighlight::paintContents(WebCanvas* canvas, const WebRect& webClipRect, bool, WebFloatRect&,
-    WebContentLayerClient::GraphicsContextStatus contextStatus)
+void LinkHighlight::paintContents(WebCanvas* canvas, const WebRect& webClipRect, bool, WebContentLayerClient::GraphicsContextStatus contextStatus)
 {
     if (!m_node || !m_node->renderer())
         return;
@@ -287,9 +280,9 @@ void LinkHighlight::startHighlightAnimationIfNeeded()
     if (extraDurationRequired)
         curve->add(WebFloatKeyframe(extraDurationRequired, startOpacity));
     // For layout tests we don't fade out.
-    curve->add(WebFloatKeyframe(fadeDuration + extraDurationRequired, blink::layoutTestMode() ? startOpacity : 0));
+    curve->add(WebFloatKeyframe(fadeDuration + extraDurationRequired, layoutTestMode() ? startOpacity : 0));
 
-    OwnPtr<WebAnimation> animation = adoptPtr(compositorSupport->createAnimation(*curve, WebAnimation::TargetPropertyOpacity));
+    OwnPtr<WebCompositorAnimation> animation = adoptPtr(compositorSupport->createAnimation(*curve, WebCompositorAnimation::TargetPropertyOpacity));
 
     m_contentLayer->layer()->setDrawsContent(true);
     m_contentLayer->layer()->addAnimation(animation.leakPtr());
@@ -306,11 +299,11 @@ void LinkHighlight::clearGraphicsLayerLinkHighlightPointer()
     }
 }
 
-void LinkHighlight::notifyAnimationStarted(double, blink::WebAnimation::TargetProperty)
+void LinkHighlight::notifyAnimationStarted(double, WebCompositorAnimation::TargetProperty)
 {
 }
 
-void LinkHighlight::notifyAnimationFinished(double, blink::WebAnimation::TargetProperty)
+void LinkHighlight::notifyAnimationFinished(double, WebCompositorAnimation::TargetProperty)
 {
     // Since WebViewImpl may hang on to us for a while, make sure we
     // release resources as soon as possible.

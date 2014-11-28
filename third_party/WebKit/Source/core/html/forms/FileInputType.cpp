@@ -160,7 +160,7 @@ void FileInputType::handleDOMActivateEvent(Event* event)
         settings.acceptMIMETypes = input.acceptMIMETypes();
         settings.acceptFileExtensions = input.acceptFileExtensions();
         settings.selectedFiles = m_fileList->pathsForUserVisibleFiles();
-        settings.useMediaCapture = RuntimeEnabledFeatures::mediaCaptureEnabled() && input.isFileUpload() && input.fastHasAttribute(captureAttr);
+        settings.useMediaCapture = RuntimeEnabledFeatures::mediaCaptureEnabled() && input.fastHasAttribute(captureAttr);
         chrome->runOpenPanel(input.document().frame(), newFileChooser(settings));
     }
     event->setDefaultHandled();
@@ -250,11 +250,6 @@ PassRefPtrWillBeRawPtr<FileList> FileInputType::createFileList(const Vector<File
     return fileList;
 }
 
-bool FileInputType::isFileUpload() const
-{
-    return true;
-}
-
 void FileInputType::createShadowSubtree()
 {
     ASSERT(element().shadow());
@@ -304,7 +299,7 @@ void FileInputType::setFiles(PassRefPtrWillBeRawPtr<FileList> files)
     input->setNeedsValidityCheck();
 
     if (input->renderer())
-        input->renderer()->paintInvalidationForWholeRenderer();
+        input->renderer()->setShouldDoFullPaintInvalidation(true);
 
     if (pathsChanged) {
         // This call may cause destruction of this instance.

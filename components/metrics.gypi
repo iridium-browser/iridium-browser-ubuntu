@@ -18,12 +18,16 @@
         'variations',
       ],
       'sources': [
+        'metrics/clean_exit_beacon.cc',
+        'metrics/clean_exit_beacon.h',
         'metrics/client_info.cc',
         'metrics/client_info.h',
         'metrics/cloned_install_detector.cc',
         'metrics/cloned_install_detector.h',
         'metrics/compression_utils.cc',
         'metrics/compression_utils.h',
+        'metrics/daily_event.cc',
+        'metrics/daily_event.h',
         'metrics/machine_id_provider.h',
         'metrics/machine_id_provider_stub.cc',
         'metrics/machine_id_provider_win.cc',
@@ -37,14 +41,14 @@
         'metrics/metrics_log_uploader.h',
         'metrics/metrics_pref_names.cc',
         'metrics/metrics_pref_names.h',
+        'metrics/metrics_provider.cc',
         'metrics/metrics_provider.h',
         'metrics/metrics_reporting_scheduler.cc',
         'metrics/metrics_reporting_scheduler.h',
         'metrics/metrics_service.cc',
         'metrics/metrics_service.h',
+        'metrics/metrics_service_client.cc',
         'metrics/metrics_service_client.h',
-        'metrics/metrics_service_observer.cc',
-        'metrics/metrics_service_observer.h',
         'metrics/metrics_state_manager.cc',
         'metrics/metrics_state_manager.h',
         'metrics/metrics_switches.cc',
@@ -66,6 +70,22 @@
       ],
     },
     {
+      # GN version: //components/metrics:gpu
+      'target_name': 'metrics_gpu',
+      'type': 'static_library',
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        'component_metrics_proto',
+        'metrics',
+      ],
+      'sources': [
+        'metrics/gpu/gpu_metrics_provider.cc',
+        'metrics/gpu/gpu_metrics_provider.h',
+      ],
+    },
+    {
       # GN version: //components/metrics:net
       'target_name': 'metrics_net',
       'type': 'static_library',
@@ -74,11 +94,38 @@
       ],
       'dependencies': [
         '../net/net.gyp:net',
+        'component_metrics_proto',
         'metrics',
       ],
       'sources': [
+        'metrics/net/network_metrics_provider.cc',
+        'metrics/net/network_metrics_provider.h',
         'metrics/net/net_metrics_log_uploader.cc',
         'metrics/net/net_metrics_log_uploader.h',
+        'metrics/net/wifi_access_point_info_provider.cc',
+        'metrics/net/wifi_access_point_info_provider.h',
+        'metrics/net/wifi_access_point_info_provider_chromeos.cc',
+        'metrics/net/wifi_access_point_info_provider_chromeos.h',
+      ],
+    },
+    {
+      # GN version: //components/metrics:profiler
+      'target_name': 'metrics_profiler',
+      'type': 'static_library',
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        '../content/content.gyp:content_browser',
+        'component_metrics_proto',
+        'metrics',
+      ],
+      'sources': [
+        'metrics/profiler/profiler_metrics_provider.cc',
+        'metrics/profiler/profiler_metrics_provider.h',
+        'metrics/profiler/tracking_synchronizer.cc',
+        'metrics/profiler/tracking_synchronizer.h',
+        'metrics/profiler/tracking_synchronizer_observer.h',
       ],
     },
     {

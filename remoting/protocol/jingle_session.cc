@@ -18,10 +18,13 @@
 #include "remoting/protocol/content_description.h"
 #include "remoting/protocol/jingle_messages.h"
 #include "remoting/protocol/jingle_session_manager.h"
+#include "remoting/protocol/pseudotcp_channel_factory.h"
+#include "remoting/protocol/secure_channel_factory.h"
 #include "remoting/protocol/session_config.h"
+#include "remoting/protocol/stream_channel_factory.h"
 #include "remoting/signaling/iq_sender.h"
 #include "third_party/libjingle/source/talk/p2p/base/candidate.h"
-#include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
 
 using buzz::XmlElement;
 
@@ -81,7 +84,9 @@ JingleSession::~JingleSession() {
                              pending_requests_.end());
   STLDeleteContainerPointers(transport_info_requests_.begin(),
                              transport_info_requests_.end());
-  STLDeleteContainerPairSecondPointers(channels_.begin(), channels_.end());
+
+  DCHECK(channels_.empty());
+
   session_manager_->SessionDestroyed(this);
 }
 
@@ -187,7 +192,7 @@ void JingleSession::ContinueAcceptIncomingConnection() {
   SetState(CONNECTED);
 
   if (authenticator_->state() == Authenticator::ACCEPTED) {
-    SetState(AUTHENTICATED);
+    OnAuthenticated();
   } else {
     DCHECK_EQ(authenticator_->state(), Authenticator::WAITING_MESSAGE);
     if (authenticator_->started()) {
@@ -218,15 +223,17 @@ void JingleSession::set_config(const SessionConfig& config) {
   config_is_set_ = true;
 }
 
-ChannelFactory* JingleSession::GetTransportChannelFactory() {
+StreamChannelFactory* JingleSession::GetTransportChannelFactory() {
   DCHECK(CalledOnValidThread());
-  return this;
+  return secure_channel_factory_.get();
 }
 
-ChannelFactory* JingleSession::GetMultiplexedChannelFactory() {
+StreamChannelFactory* JingleSession::GetMultiplexedChannelFactory() {
   DCHECK(CalledOnValidThread());
-  if (!channel_multiplexer_.get())
-    channel_multiplexer_.reset(new ChannelMultiplexer(this, kMuxChannelName));
+  if (!channel_multiplexer_.get()) {
+    channel_multiplexer_.reset(
+        new ChannelMultiplexer(GetTransportChannelFactory(), kMuxChannelName));
+  }
   return channel_multiplexer_.get();
 }
 
@@ -250,41 +257,23 @@ void JingleSession::AddPendingRemoteCandidates(Transport* channel,
   }
 }
 
-void JingleSession::CreateStreamChannel(
-      const std::string& name,
-      const StreamChannelCallback& callback) {
+void JingleSession::CreateChannel(const std::string& name,
+                                  const ChannelCreatedCallback& callback) {
   DCHECK(!channels_[name]);
 
-  scoped_ptr<ChannelAuthenticator> channel_authenticator =
-      authenticator_->CreateChannelAuthenticator();
-  scoped_ptr<StreamTransport> channel =
-      session_manager_->transport_factory_->CreateStreamTransport();
-  channel->Initialize(name, this, channel_authenticator.Pass());
-  channel->Connect(callback);
-  AddPendingRemoteCandidates(channel.get(), name);
-  channels_[name] = channel.release();
-}
-
-void JingleSession::CreateDatagramChannel(
-    const std::string& name,
-    const DatagramChannelCallback& callback) {
-  DCHECK(!channels_[name]);
-
-  scoped_ptr<ChannelAuthenticator> channel_authenticator =
-      authenticator_->CreateChannelAuthenticator();
-  scoped_ptr<DatagramTransport> channel =
-      session_manager_->transport_factory_->CreateDatagramTransport();
-  channel->Initialize(name, this, channel_authenticator.Pass());
-  channel->Connect(callback);
+  scoped_ptr<Transport> channel =
+      session_manager_->transport_factory_->CreateTransport();
+  channel->Connect(name, this, callback);
   AddPendingRemoteCandidates(channel.get(), name);
   channels_[name] = channel.release();
 }
 
 void JingleSession::CancelChannelCreation(const std::string& name) {
   ChannelsMap::iterator it = channels_.find(name);
-  if (it != channels_.end() && !it->second->is_connected()) {
+  if (it != channels_.end()) {
+    DCHECK(!it->second->is_connected());
     delete it->second;
-    DCHECK(!channels_[name]);
+    DCHECK(channels_.find(name) == channels_.end());
   }
 }
 
@@ -343,11 +332,15 @@ void JingleSession::OnMessageResponse(
     JingleMessage::ActionType request_type,
     IqRequest* request,
     const buzz::XmlElement* response) {
-  std::string type_str = JingleMessage::GetActionName(request_type);
-
   // Delete the request from the list of pending requests.
   pending_requests_.erase(request);
   delete request;
+
+  // Ignore all responses after session was closed.
+  if (state_ == CLOSED || state_ == FAILED)
+    return;
+
+  std::string type_str = JingleMessage::GetActionName(request_type);
 
   // |response| will be NULL if the request timed out.
   if (!response) {
@@ -362,18 +355,9 @@ void JingleSession::OnMessageResponse(
                  << " message: \"" << response->Str()
                  << "\". Terminating the session.";
 
-      switch (request_type) {
-        case JingleMessage::SESSION_INFO:
-          // session-info is used for the new authentication protocol,
-          // and wasn't previously supported.
-          CloseInternal(INCOMPATIBLE_PROTOCOL);
-          break;
-
-        default:
-          // TODO(sergeyu): There may be different reasons for error
-          // here. Parse the response stanza to find failure reason.
-          CloseInternal(PEER_IS_OFFLINE);
-      }
+      // TODO(sergeyu): There may be different reasons for error
+      // here. Parse the response stanza to find failure reason.
+      CloseInternal(PEER_IS_OFFLINE);
     }
   }
 }
@@ -619,11 +603,20 @@ void JingleSession::ProcessAuthenticationStep() {
 
 void JingleSession::ContinueAuthenticationStep() {
   if (authenticator_->state() == Authenticator::ACCEPTED) {
-    SetState(AUTHENTICATED);
+    OnAuthenticated();
   } else if (authenticator_->state() == Authenticator::REJECTED) {
     CloseInternal(AuthRejectionReasonToErrorCode(
         authenticator_->rejection_reason()));
   }
+}
+
+void JingleSession::OnAuthenticated() {
+  pseudotcp_channel_factory_.reset(new PseudoTcpChannelFactory(this));
+  secure_channel_factory_.reset(
+      new SecureChannelFactory(pseudotcp_channel_factory_.get(),
+                               authenticator_.get()));
+
+  SetState(AUTHENTICATED);
 }
 
 void JingleSession::CloseInternal(ErrorCode error) {

@@ -45,6 +45,9 @@ class ExtensionsClient {
   virtual const PermissionMessageProvider& GetPermissionMessageProvider()
       const = 0;
 
+  // Returns the application name. For example, "Chromium" or "app_shell".
+  virtual const std::string GetProductName() = 0;
+
   // Create a FeatureProvider for a specific feature type, e.g. "permission".
   virtual scoped_ptr<FeatureProvider> CreateFeatureProvider(
       const std::string& name) const = 0;
@@ -93,6 +96,16 @@ class ExtensionsClient {
   // Determines if certain fatal extensions errors should be surpressed
   // (i.e., only logged) or allowed (i.e., logged before crashing).
   virtual bool ShouldSuppressFatalErrors() const = 0;
+
+  // Returns the base webstore URL prefix.
+  virtual std::string GetWebstoreBaseURL() const = 0;
+
+  // Returns the URL to use for update manifest queries.
+  virtual std::string GetWebstoreUpdateURL() const = 0;
+
+  // Returns a flag indicating whether or not a given URL is a valid
+  // extension blacklist URL.
+  virtual bool IsBlacklistUpdateURL(const GURL& url) const = 0;
 
   // Return the extensions client.
   static ExtensionsClient* Get();

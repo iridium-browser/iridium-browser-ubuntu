@@ -188,7 +188,7 @@ static String encodeSubprotocolString(const String& protocol)
         if (protocol[i] < 0x20 || protocol[i] > 0x7E)
             builder.append(String::format("\\u%04X", protocol[i]));
         else if (protocol[i] == 0x5c)
-            builder.append("\\\\");
+            builder.appendLiteral("\\\\");
         else
             builder.append(protocol[i]);
     }
@@ -235,7 +235,6 @@ DOMWebSocket::DOMWebSocket(ExecutionContext* context)
     , m_eventQueue(EventQueue::create(this))
     , m_bufferedAmountConsumeTimer(this, &DOMWebSocket::reflectBufferedAmountConsumption)
 {
-    ScriptWrappable::init(this);
 }
 
 DOMWebSocket::~DOMWebSocket()

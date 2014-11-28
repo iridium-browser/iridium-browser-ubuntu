@@ -81,12 +81,13 @@ remoting.HostInstaller.prototype.isInstalled = function() {
 /**
  * @throws {Error}  Throws if there is no matching host binary for the current
  *     platform.
- * @private
  */
-remoting.HostInstaller.prototype.download_ = function() {
+remoting.HostInstaller.prototype.download = function() {
   /** @type {Object.<string,string>} */
   var hostDownloadUrls = {
     'Win32' : 'http://dl.google.com/dl/edgedl/chrome-remote-desktop/' +
+        'chromeremotedesktophost.msi',
+    'Win64' : 'http://dl.google.com/dl/edgedl/chrome-remote-desktop/' +
         'chromeremotedesktophost.msi',
     'MacIntel' : 'https://dl.google.com/chrome-remote-desktop/' +
         'chromeremotedesktop.dmg',
@@ -102,7 +103,7 @@ remoting.HostInstaller.prototype.download_ = function() {
   }
 
   // Start downloading the package.
-  if (remoting.isAppsV2) {
+  if (base.isAppsV2()) {
     // TODO(jamiewalch): Use chrome.downloads when it is available to
     // apps v2 (http://crbug.com/174046)
     window.open(hostPackageUrl);
@@ -131,7 +132,7 @@ remoting.HostInstaller.prototype.downloadAndWaitForInstall = function() {
       that.downloadAndWaitForInstallPromise_ = new Promise(
         /** @param {Function} resolve */
         function(resolve){
-          that.download_();
+          that.download();
           that.checkInstallIntervalId_ = window.setInterval(function() {
             /** @param {boolean} installed */
             that.isInstalled().then(function(installed) {

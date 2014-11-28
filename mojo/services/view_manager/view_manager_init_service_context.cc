@@ -6,7 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "mojo/services/view_manager/root_node_manager.h"
+#include "mojo/services/view_manager/connection_manager.h"
 #include "mojo/services/view_manager/view_manager_init_service_impl.h"
 
 namespace mojo {
@@ -17,8 +17,8 @@ ViewManagerInitServiceContext::ConnectParams::ConnectParams() {}
 ViewManagerInitServiceContext::ConnectParams::~ConnectParams() {}
 
 ViewManagerInitServiceContext::ViewManagerInitServiceContext()
-    : is_tree_host_ready_(false),
-      deleting_connection_(false) {}
+    : deleting_connection_(false) {
+}
 ViewManagerInitServiceContext::~ViewManagerInitServiceContext() {}
 
 void ViewManagerInitServiceContext::AddConnection(
@@ -38,18 +38,17 @@ void ViewManagerInitServiceContext::RemoveConnection(
   }
 
   // This object is owned by an object that outlives the current thread's
-  // message loop, so we need to destroy the RootNodeManager earlier, as it may
-  // attempt to post tasks during its destruction.
+  // message loop, so we need to destroy the ConnectionManager earlier, as it
+  // may attempt to post tasks during its destruction.
   if (connections_.empty())
-    root_node_manager_.reset();
+    connection_manager_.reset();
 }
 
 void ViewManagerInitServiceContext::ConfigureIncomingConnection(
     ApplicationConnection* connection) {
-  if (!root_node_manager_.get()) {
-    root_node_manager_.reset(new RootNodeManager(
+  if (!connection_manager_.get()) {
+    connection_manager_.reset(new ConnectionManager(
         connection,
-        this,
         base::Bind(&ViewManagerInitServiceContext::OnNativeViewportDeleted,
                    base::Unretained(this))));
   }
@@ -59,18 +58,8 @@ void ViewManagerInitServiceContext::Embed(
     const String& url,
     ServiceProviderPtr service_provider,
     const Callback<void(bool)>& callback) {
-  ConnectParams* params = new ConnectParams;
-  params->url = url.To<std::string>();
-  params->callback = callback;
-  params->service_provider.Bind(service_provider.PassMessagePipe());
-  connect_params_.push_back(params);
-  MaybeEmbed();
-}
-
-void ViewManagerInitServiceContext::OnRootViewManagerWindowTreeHostCreated() {
-  DCHECK(!is_tree_host_ready_);
-  is_tree_host_ready_ = true;
-  MaybeEmbed();
+  connection_manager_->EmbedRoot(url, Get(&service_provider));
+  callback.Run(true);
 }
 
 void ViewManagerInitServiceContext::OnNativeViewportDeleted() {
@@ -82,19 +71,7 @@ void ViewManagerInitServiceContext::OnNativeViewportDeleted() {
     delete *it;
   }
   connections_.clear();
-  root_node_manager_.reset();
-}
-
-void ViewManagerInitServiceContext::MaybeEmbed() {
-  if (!is_tree_host_ready_)
-    return;
-
-  for (ScopedVector<ConnectParams>::const_iterator it = connect_params_.begin();
-       it != connect_params_.end(); ++it) {
-    root_node_manager_->EmbedRoot((*it)->url, (*it)->service_provider.Pass());
-    (*it)->callback.Run(true);
-  }
-  connect_params_.clear();
+  connection_manager_.reset();
 }
 
 }  // namespace service

@@ -16,18 +16,18 @@
 
 package com.google.ipc.invalidation.ticl.android2;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.common.ObjectIdDigestUtils.Sha1DigestFunction;
 import com.google.ipc.invalidation.external.client.SystemResources;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidTiclState;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidTiclState.Metadata;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidTiclStateWithDigest;
-import com.google.protos.ipc.invalidation.ClientProtocol.ApplicationClientIdP;
-import com.google.protos.ipc.invalidation.ClientProtocol.ClientConfigP;
-import com.google.protos.ipc.invalidation.JavaClient.InvalidationClientState;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidTiclState;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidTiclState.Metadata;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidTiclStateWithDigest;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ApplicationClientIdP;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ClientConfigP;
+import com.google.ipc.invalidation.util.Bytes;
+import com.google.ipc.invalidation.util.Preconditions;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
+import com.google.ipc.invalidation.util.TypedUtil;
 
 import android.content.Context;
 
@@ -44,8 +44,7 @@ import java.util.Random;
  * Class to save and restore instances of {@code InvalidationClient} to and from stable storage.
  *
  */
-
-public class TiclStateManager {
+class TiclStateManager {
   /** Name of the file to which Ticl state will be persisted. */
   private static final String TICL_STATE_FILENAME = "android_ticl_service_state.bin";
 
@@ -115,9 +114,6 @@ public class TiclStateManager {
 
       // Create a protobuf with the Ticl state and a digest over it.
       AndroidTiclStateWithDigest digestedState = createDigestedState(ticl);
-      AndroidIntentProtocolValidator validator = new AndroidIntentProtocolValidator(logger);
-      Preconditions.checkState(validator.isTiclStateValid(digestedState),
-          "Produced invalid digested state: %s", digestedState);
 
       // Write the protobuf to storage.
       outputStream = openStateFileForWriting(context);
@@ -142,7 +138,6 @@ public class TiclStateManager {
    * Reads and returns the Android Ticl state from persistent storage. If the state was missing
    * or invalid, returns {@code null}.
    */
-  
   static AndroidTiclState readTiclState(Context context, Logger logger) {
     FileInputStream inputStream = null;
     try {
@@ -157,25 +152,18 @@ public class TiclStateManager {
         byte[] fileData = new byte[(int) fileSizeBytes];
         input.readFully(fileData);
         AndroidTiclStateWithDigest androidState = AndroidTiclStateWithDigest.parseFrom(fileData);
-        AndroidIntentProtocolValidator validator = new AndroidIntentProtocolValidator(logger);
 
-        // Check the structure of the message (required fields set).
-        if (!validator.isTiclStateValid(androidState)) {
-          logger.warning("Read AndroidTiclStateWithDigest with invalid structure: %s",
-              androidState);
-          return null;
-        }
         // Validate the digest in the method.
         if (isDigestValid(androidState, logger)) {
-          InvalidationClientState state = androidState.getState().getTiclState();
-          return androidState.getState();
+          return Preconditions.checkNotNull(androidState.getState(),
+              "validator ensures that state is set");
         } else {
           logger.warning("Android Ticl state failed digest check: %s", androidState);
         }
       }
     } catch (FileNotFoundException exception) {
       logger.info("Ticl state file does not exist: %s", TICL_STATE_FILENAME);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.warning("Could not read Ticl state: %s", exception);
     } catch (IOException exception) {
       logger.warning("Could not read Ticl state: %s", exception);
@@ -199,21 +187,13 @@ public class TiclStateManager {
       AndroidInvalidationClientImpl ticl) {
     Sha1DigestFunction digester = new Sha1DigestFunction();
     ApplicationClientIdP ticlAppId = ticl.getApplicationClientIdP();
-    Metadata metaData = Metadata.newBuilder()
-         .setClientConfig(ticl.getConfig())
-         .setClientName(ticlAppId.getClientName())
-         .setClientType(ticlAppId.getClientType())
-         .setTiclId(ticl.getSchedulingId())
-         .build();
-    AndroidTiclState state = AndroidTiclState.newBuilder()
-        .setMetadata(metaData)
-        .setTiclState(ticl.marshal())
-        .setVersion(ProtocolIntents.ANDROID_PROTOCOL_VERSION_VALUE).build();
+    Metadata metadata = Metadata.create(ticlAppId.getClientType(), ticlAppId.getClientName(),
+        ticl.getSchedulingId(), ticl.getConfig());
+    AndroidTiclState state = AndroidTiclState.create(ProtocolIntents.ANDROID_PROTOCOL_VERSION_VALUE,
+        ticl.marshal(), metadata);
     digester.update(state.toByteArray());
-    AndroidTiclStateWithDigest verifiedState = AndroidTiclStateWithDigest.newBuilder()
-        .setState(state)
-        .setDigest(ByteString.copyFrom(digester.getDigest()))
-        .build();
+    AndroidTiclStateWithDigest verifiedState =
+        AndroidTiclStateWithDigest.create(state, new Bytes(digester.getDigest()));
     return verifiedState;
   }
 
@@ -221,9 +201,9 @@ public class TiclStateManager {
   private static boolean isDigestValid(AndroidTiclStateWithDigest state, Logger logger) {
     Sha1DigestFunction digester = new Sha1DigestFunction();
     digester.update(state.getState().toByteArray());
-    ByteString computedDigest = ByteString.copyFrom(digester.getDigest());
-    if (!computedDigest.equals(state.getDigest())) {
-      logger.warning("Android Ticl state digest mismatch; computed %s for %s",
+    byte[] computedDigest = digester.getDigest();
+    if (!TypedUtil.<Bytes>equals(new Bytes(computedDigest), state.getDigest())) {
+      logger.warning("Android TICL state digest mismatch; computed %s for %s",
           computedDigest, state);
       return false;
     }
@@ -243,7 +223,6 @@ public class TiclStateManager {
   }
 
   /** Deletes {@link #TICL_STATE_FILENAME}. */
-  
   public static void deleteStateFile(Context context) {
     context.deleteFile(TICL_STATE_FILENAME);
   }

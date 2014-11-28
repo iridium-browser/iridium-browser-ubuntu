@@ -45,7 +45,7 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual int GetRoutingID() = 0;
 
   // Returns the associated WebFrame.
-  virtual blink::WebFrame* GetWebFrame() = 0;
+  virtual blink::WebLocalFrame* GetWebFrame() = 0;
 
    // Gets WebKit related preferences associated with this frame.
   virtual WebPreferences& GetWebkitPreferences() = 0;
@@ -94,6 +94,10 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
 
   // Returns true if this frame is a FTP directory listing.
   virtual bool IsFTPDirectoryListing() = 0;
+
+  // Attaches the browser plugin identified by |element_instance_id| to guest
+  // content created by the embedder.
+  virtual void AttachGuest(int element_instance_id) = 0;
 
  protected:
   virtual ~RenderFrame() {}

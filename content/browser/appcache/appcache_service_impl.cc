@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "content/browser/appcache/appcache.h"
 #include "content/browser/appcache/appcache_backend_impl.h"
@@ -23,7 +24,7 @@
 #include "content/browser/appcache/appcache_storage_impl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
-#include "webkit/browser/quota/special_storage_policy.h"
+#include "storage/browser/quota/special_storage_policy.h"
 
 namespace content {
 
@@ -441,9 +442,11 @@ AppCacheStorageReference::~AppCacheStorageReference() {}
 
 // AppCacheServiceImpl -------
 
-AppCacheServiceImpl::AppCacheServiceImpl(quota::QuotaManagerProxy*
-    quota_manager_proxy)
-    : appcache_policy_(NULL), quota_client_(NULL), handler_factory_(NULL),
+AppCacheServiceImpl::AppCacheServiceImpl(
+    storage::QuotaManagerProxy* quota_manager_proxy)
+    : appcache_policy_(NULL),
+      quota_client_(NULL),
+      handler_factory_(NULL),
       quota_manager_proxy_(quota_manager_proxy),
       request_context_(NULL),
       force_keep_session_state_(false) {
@@ -467,9 +470,10 @@ AppCacheServiceImpl::~AppCacheServiceImpl() {
   storage_.reset();
 }
 
-void AppCacheServiceImpl::Initialize(const base::FilePath& cache_directory,
-                                 base::MessageLoopProxy* db_thread,
-                                 base::MessageLoopProxy* cache_thread) {
+void AppCacheServiceImpl::Initialize(
+    const base::FilePath& cache_directory,
+    const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread) {
   DCHECK(!storage_.get());
   cache_directory_ = cache_directory;
   db_thread_ = db_thread;
@@ -559,7 +563,7 @@ void AppCacheServiceImpl::CheckAppCacheResponse(const GURL& manifest_url,
 }
 
 void AppCacheServiceImpl::set_special_storage_policy(
-    quota::SpecialStoragePolicy* policy) {
+    storage::SpecialStoragePolicy* policy) {
   special_storage_policy_ = policy;
 }
 

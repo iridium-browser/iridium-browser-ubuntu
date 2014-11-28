@@ -4,6 +4,8 @@
 
 """Module containing the generic stages."""
 
+from __future__ import print_function
+
 import contextlib
 import fnmatch
 import json
@@ -26,12 +28,13 @@ from chromite.cbuildbot import commands
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import constants
-from chromite.cbuildbot import portage_utilities
 from chromite.cbuildbot import repository
+from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import portage_util
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
@@ -106,7 +109,7 @@ class BuilderStage(object):
 
     # USE and enviroment variable settings.
     self._portage_extra_env = {}
-    useflags = []
+    useflags = self._run.config.useflags[:]
 
     if self._run.options.clobber:
       self._portage_extra_env['IGNORE_PREFLIGHT_BINHOST'] = '1'
@@ -144,9 +147,9 @@ class BuilderStage(object):
 
   def _ExtractOverlays(self):
     """Extracts list of overlays into class."""
-    overlays = portage_utilities.FindOverlays(
+    overlays = portage_util.FindOverlays(
         self._run.config.overlays, buildroot=self._build_root)
-    push_overlays = portage_utilities.FindOverlays(
+    push_overlays = portage_util.FindOverlays(
         self._run.config.push_overlays, buildroot=self._build_root)
 
     # Sanity checks.
@@ -172,7 +175,7 @@ class BuilderStage(object):
   def _Print(self, msg):
     """Prints a msg to stderr."""
     sys.stdout.flush()
-    print >> sys.stderr, msg
+    print(msg, file=sys.stderr)
     sys.stderr.flush()
 
   def _PrintLoudly(self, msg):
@@ -182,7 +185,7 @@ class BuilderStage(object):
     edge = '*' * 2
 
     sys.stdout.flush()
-    print >> sys.stderr, border_line
+    print(border_line, file=sys.stderr)
 
     msg_lines = msg.split('\n')
 
@@ -191,9 +194,9 @@ class BuilderStage(object):
       del msg_lines[-1]
 
     for msg_line in msg_lines:
-      print >> sys.stderr, '%s %s' % (edge, msg_line)
+      print('%s %s' % (edge, msg_line), file=sys.stderr)
 
-    print >> sys.stderr, border_line
+    print(border_line, file=sys.stderr)
     sys.stderr.flush()
 
   def _GetPortageEnvVar(self, envvar, board):
@@ -697,7 +700,7 @@ class ArchivingStageMixin(object):
     if (not self._IsInUploadBlacklist(filename) and
         (hasattr(self, '_current_board') or board)):
       board = board or self._current_board
-      custom_artifacts_file = portage_utilities.ReadOverlayFile(
+      custom_artifacts_file = portage_util.ReadOverlayFile(
           'scripts/artifacts.json', board=board)
       if custom_artifacts_file is not None:
         json_file = json.loads(custom_artifacts_file)
@@ -737,12 +740,15 @@ class ArchivingStageMixin(object):
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def UploadMetadata(self, upload_queue=None, filename=None):
-    """Create and upload JSON file of the builder run's metadata.
+    """Create and upload JSON file of the builder run's metadata, and to cidb.
 
     This uses the existing metadata stored in the builder run. The default
     metadata.json file should only be uploaded once, at the end of the run,
     and considered immutable. During the build, intermediate metadata snapshots
     can be uploaded to other files, such as partial-metadata.json.
+
+    This method also updates the metadata in the cidb database, if there is a
+    valid cidb connection set up.
 
     Args:
       upload_queue: If specified then put the artifact file to upload on
@@ -766,3 +772,13 @@ class ArchivingStageMixin(object):
     else:
       cros_build_lib.Info('Uploading metadata file %s now.', metadata_json)
       self.UploadArtifact(filename, archive=False)
+
+    if cidb.CIDBConnectionFactory.IsCIDBSetup():
+      db = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
+      if db:
+        build_id = self._run.attrs.metadata.GetValue('build_id')
+        cros_build_lib.Info('Writing updated metadata to database for build_id '
+                            '%s.', build_id)
+        db.UpdateMetadata(build_id, self._run.attrs.metadata)
+      else:
+        cros_build_lib.Info('Skipping database update.')

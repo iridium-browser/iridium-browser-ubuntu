@@ -5,6 +5,7 @@
 #include "tools/gn/builder.h"
 
 #include "tools/gn/config.h"
+#include "tools/gn/deps_iterator.h"
 #include "tools/gn/err.h"
 #include "tools/gn/loader.h"
 #include "tools/gn/scheduler.h"
@@ -208,7 +209,7 @@ bool Builder::CheckForBadItems(Err* err) const {
     if (depstring.empty()) {
       // Something's very wrong, just dump out the bad nodes.
       depstring = "I have no idea what went wrong, but these are unresolved, "
-          "possible due to an\ninternal error:";
+          "possibly due to an\ninternal error:";
       for (size_t i = 0; i < bad_records.size(); i++) {
         depstring += "\n\"" +
             bad_records[i]->label().GetUserVisibleName(false) + "\"";
@@ -226,11 +227,12 @@ bool Builder::CheckForBadItems(Err* err) const {
 bool Builder::TargetDefined(BuilderRecord* record, Err* err) {
   Target* target = record->item()->AsTarget();
 
-  if (!AddDeps(record, target->deps(), err) ||
-      !AddDeps(record, target->datadeps(), err) ||
+  if (!AddDeps(record, target->public_deps(), err) ||
+      !AddDeps(record, target->private_deps(), err) ||
+      !AddDeps(record, target->data_deps(), err) ||
       !AddDeps(record, target->configs().vector(), err) ||
       !AddDeps(record, target->all_dependent_configs(), err) ||
-      !AddDeps(record, target->direct_dependent_configs(), err) ||
+      !AddDeps(record, target->public_configs(), err) ||
       !AddToolchainDep(record, target, err))
     return false;
 
@@ -403,12 +405,14 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
 
   if (record->type() == BuilderRecord::ITEM_TARGET) {
     Target* target = record->item()->AsTarget();
-    if (!ResolveDeps(&target->deps(), err) ||
-        !ResolveDeps(&target->datadeps(), err) ||
+    if (!ResolveDeps(&target->public_deps(), err) ||
+        !ResolveDeps(&target->private_deps(), err) ||
+        !ResolveDeps(&target->data_deps(), err) ||
         !ResolveConfigs(&target->configs(), err) ||
         !ResolveConfigs(&target->all_dependent_configs(), err) ||
-        !ResolveConfigs(&target->direct_dependent_configs(), err) ||
-        !ResolveForwardDependentConfigs(target, err))
+        !ResolveConfigs(&target->public_configs(), err) ||
+        !ResolveForwardDependentConfigs(target, err) ||
+        !ResolveToolchain(target, err))
       return false;
   } else if (record->type() == BuilderRecord::ITEM_TOOLCHAIN) {
     Toolchain* toolchain = record->item()->AsToolchain();
@@ -417,7 +421,9 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
   }
 
   record->set_resolved(true);
-  record->item()->OnResolved();
+
+  if (!record->item()->OnResolved(err))
+    return false;
   if (!resolved_callback_.is_null())
     resolved_callback_.Run(record);
 
@@ -470,19 +476,19 @@ bool Builder::ResolveConfigs(UniqueVector<LabelConfigPair>* configs, Err* err) {
 // "Forward dependent configs" should refer to targets in the deps that should
 // have their configs forwarded.
 bool Builder::ResolveForwardDependentConfigs(Target* target, Err* err) {
-  const LabelTargetVector& deps = target->deps();
   const UniqueVector<LabelTargetPair>& configs =
       target->forward_dependent_configs();
 
   // Assume that the lists are small so that brute-force n^2 is appropriate.
   for (size_t config_i = 0; config_i < configs.size(); config_i++) {
-    for (size_t dep_i = 0; dep_i < deps.size(); dep_i++) {
-      if (configs[config_i].label == deps[dep_i].label) {
-        DCHECK(deps[dep_i].ptr);  // Should already be resolved.
+    for (DepsIterator dep_iter(target, DepsIterator::LINKED_ONLY);
+         !dep_iter.done(); dep_iter.Advance()) {
+      if (configs[config_i].label == dep_iter.label()) {
+        DCHECK(dep_iter.target());  // Should already be resolved.
         // UniqueVector's contents are constant so uniqueness is preserved, but
         // we want to update this pointer which doesn't change uniqueness
         // (uniqueness in this vector is determined by the label only).
-        const_cast<LabelTargetPair&>(configs[config_i]).ptr = deps[dep_i].ptr;
+        const_cast<LabelTargetPair&>(configs[config_i]).ptr = dep_iter.target();
         break;
       }
     }
@@ -499,18 +505,36 @@ bool Builder::ResolveForwardDependentConfigs(Target* target, Err* err) {
   return true;
 }
 
+bool Builder::ResolveToolchain(Target* target, Err* err) {
+  BuilderRecord* record = GetResolvedRecordOfType(
+      target->settings()->toolchain_label(), target->defined_from(),
+      BuilderRecord::ITEM_TOOLCHAIN, err);
+  if (!record) {
+    *err = Err(target->defined_from(),
+        "Toolchain for target not defined.",
+        "I was hoping to find a toolchain " +
+        target->settings()->toolchain_label().GetUserVisibleName(false));
+    return false;
+  }
+
+  if (!target->SetToolchain(record->item()->AsToolchain(), err))
+    return false;
+
+  return true;
+}
+
 std::string Builder::CheckForCircularDependencies(
     const std::vector<const BuilderRecord*>& bad_records) const {
   std::vector<const BuilderRecord*> cycle;
   if (!RecursiveFindCycle(bad_records[0], &cycle))
     return std::string();  // Didn't find a cycle, something else is wrong.
 
-  // Walk backwards since the dependency arrows point in the reverse direction.
   std::string ret;
-  for (int i = static_cast<int>(cycle.size()) - 1; i >= 0; i--) {
+  for (size_t i = 0; i < cycle.size(); i++) {
     ret += "  " + cycle[i]->label().GetUserVisibleName(false);
-    if (i != 0)
-      ret += " ->\n";
+    if (i != cycle.size() - 1)
+      ret += " ->";
+    ret += "\n";
   }
 
   return ret;

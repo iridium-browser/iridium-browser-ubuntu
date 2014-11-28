@@ -5,11 +5,14 @@
 #include "base/basictypes.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "mojo/application/application_runner_chromium.h"
 #include "mojo/examples/keyboard/keyboard.mojom.h"
 #include "mojo/examples/keyboard/keyboard_delegate.h"
 #include "mojo/examples/keyboard/keyboard_view.h"
+#include "mojo/public/c/system/main.h"
 #include "mojo/public/cpp/application/application_connection.h"
 #include "mojo/public/cpp/application/application_delegate.h"
+#include "mojo/public/cpp/application/application_impl.h"
 #include "mojo/public/cpp/application/interface_factory_impl.h"
 #include "mojo/services/public/cpp/view_manager/view.h"
 #include "mojo/services/public/cpp/view_manager/view_manager.h"
@@ -50,7 +53,6 @@ class Keyboard : public ApplicationDelegate,
   Keyboard()
       : keyboard_service_factory_(this),
         view_manager_(NULL),
-        view_manager_client_factory_(this),
         keyboard_service_(NULL),
         target_(0) {}
 
@@ -65,10 +67,15 @@ class Keyboard : public ApplicationDelegate,
 
  private:
   // Overridden from ApplicationDelegate:
+  virtual void Initialize(ApplicationImpl* app) MOJO_OVERRIDE {
+    view_manager_client_factory_.reset(
+        new ViewManagerClientFactory(app->shell(), this));
+  }
+
   virtual bool ConfigureIncomingConnection(ApplicationConnection* connection)
       MOJO_OVERRIDE {
     views_init_.reset(new ViewsInit);
-    connection->AddService(&view_manager_client_factory_);
+    connection->AddService(view_manager_client_factory_.get());
     connection->AddService(&keyboard_service_factory_);
     return true;
   }
@@ -118,7 +125,7 @@ class Keyboard : public ApplicationDelegate,
   scoped_ptr<ViewsInit> views_init_;
 
   ViewManager* view_manager_;
-  ViewManagerClientFactory view_manager_client_factory_;
+  scoped_ptr<ViewManagerClientFactory> view_manager_client_factory_;
 
   KeyboardServiceImpl* keyboard_service_;
 
@@ -137,10 +144,9 @@ void KeyboardServiceImpl::SetTarget(uint32_t view_id) {
 }
 
 }  // namespace examples
-
-// static
-ApplicationDelegate* ApplicationDelegate::Create() {
-  return new examples::Keyboard;
-}
-
 }  // namespace mojo
+
+MojoResult MojoMain(MojoHandle shell_handle) {
+  mojo::ApplicationRunnerChromium runner(new mojo::examples::Keyboard);
+  return runner.Run(shell_handle);
+}

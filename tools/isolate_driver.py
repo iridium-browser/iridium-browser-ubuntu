@@ -19,11 +19,12 @@ WARNING: The target to use for build.ninja analysis is the base name of the
 'foo_test_run' analysed.
 """
 
-import StringIO
 import glob
+import json
 import logging
 import os
 import posixpath
+import StringIO
 import subprocess
 import sys
 import time
@@ -175,11 +176,19 @@ def post_process_deps(build_dir, dependencies):
       return i[:-4]
     return i
 
-  # Check for execute access. This gets rid of all the phony rules.
-  return [
-    i for i in map(filter_item, dependencies)
-    if os.access(os.path.join(build_dir, i), os.X_OK)
-  ]
+  def f(i):
+    # This script is only for adding new binaries that are created as part of
+    # the component build.
+    ext = os.path.splitext(i)[1]
+    if ext not in ['.dll', '.nexe', '.so', '.dylib']:
+      return False
+
+    # Check for execute access and strip directories. This gets rid of all the
+    # phony rules.
+    p = os.path.join(build_dir, i)
+    return os.access(p, os.X_OK) and not os.path.isdir(p)
+
+  return filter(f, map(filter_item, dependencies))
 
 
 def create_wrapper(args, isolate_index, isolated_index):
@@ -248,9 +257,23 @@ def create_wrapper(args, isolate_index, isolated_index):
   args[isolate_index] = temp_isolate
 
 
+def prepare_isolate_call(args, output):
+  """Gathers all information required to run isolate.py later.
+
+  Dumps it as JSON to |output| file.
+  """
+  with open(output, 'wb') as f:
+    json.dump({
+      'args': args,
+      'dir': os.getcwd(),
+      'version': 1,
+    }, f, indent=2, sort_keys=True)
+
+
 def main():
   logging.basicConfig(level=logging.ERROR, format='%(levelname)7s %(message)s')
   args = sys.argv[1:]
+  mode = args[0] if args else None
   isolate = None
   isolated = None
   is_component = False
@@ -261,12 +284,18 @@ def main():
       isolated = i + 1
     if arg == 'component=shared_library':
       is_component = True
-  if isolate is None or isolated is None:
+  if isolate is None or isolated is None or not mode:
     print >> sys.stderr, 'Internal failure'
     return 1
 
   if is_component:
     create_wrapper(args, isolate, isolated)
+
+  # In 'prepare' mode just collect all required information for postponed
+  # isolated.py invocation later, store it in *.isolated.gen.json file.
+  if mode == 'prepare':
+    prepare_isolate_call(args[1:], args[isolated] + '.gen.json')
+    return 0
 
   swarming_client = os.path.join(SRC_DIR, 'tools', 'swarming_client')
   sys.stdout.flush()

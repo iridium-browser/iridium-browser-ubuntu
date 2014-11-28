@@ -10,6 +10,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/futex.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -32,9 +33,11 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/sys_info.h"
+#include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "sandbox/linux/seccomp-bpf-helpers/sigsys_handlers.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
+#include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 #include "third_party/lss/linux_syscall_support.h"  // for MAKE_PROCESS_CPUCLOCK
@@ -306,6 +309,38 @@ BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
   fcntl(0, F_DUPFD_CLOEXEC);
 }
 
+BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
+                 FutexWithRequeuePriorityInheritence,
+                 DEATH_MESSAGE(sandbox::GetFutexErrorMessageContentForTests()),
+                 nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
+  syscall(__NR_futex, NULL, FUTEX_CMP_REQUEUE_PI, 0, NULL, NULL, 0);
+  _exit(1);
+}
+
+BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
+                 FutexWithRequeuePriorityInheritencePrivate,
+                 DEATH_MESSAGE(sandbox::GetFutexErrorMessageContentForTests()),
+                 nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
+  syscall(__NR_futex, NULL, FUTEX_CMP_REQUEUE_PI_PRIVATE, 0, NULL, NULL, 0);
+  _exit(1);
+}
+
+BPF_TEST_C(NaClNonSfiSandboxTest,
+           StartingAndJoiningThreadWorks,
+           nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
+  base::Thread thread("sandbox_tests");
+  BPF_ASSERT(thread.Start());
+  // |thread|'s destructor will join the thread.
+}
+
+BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
+                 FutexWithUnlockPIPrivate,
+                 DEATH_MESSAGE(sandbox::GetFutexErrorMessageContentForTests()),
+                 nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
+  syscall(__NR_futex, NULL, FUTEX_UNLOCK_PI_PRIVATE, 0, NULL, NULL, 0);
+  _exit(1);
+}
+
 void* DoAllowedAnonymousMmap() {
   return mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE,
               MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -397,6 +432,10 @@ BPF_TEST_C(NaClNonSfiSandboxTest,
   BPF_ASSERT_EQ(ENOMEM, errno);
 }
 
+// clockid restrictions are mostly tested in sandbox/ with the
+// RestrictClockID() unittests. Some basic tests are duplicated here as
+// a precaution.
+
 void CheckClock(clockid_t clockid) {
   struct timespec ts;
   ts.tv_sec = ts.tv_nsec = -1;
@@ -420,67 +459,6 @@ BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
                  nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-}
-
-#if defined(OS_CHROMEOS)
-
-// A custom BPF tester delegate to run IsRunningOnChromeOS() before
-// the sandbox is enabled because we cannot run it with non-SFI BPF
-// sandbox enabled.
-class ClockSystemTesterDelegate : public sandbox::BPFTesterDelegate {
- public:
-  ClockSystemTesterDelegate()
-      : is_running_on_chromeos_(base::SysInfo::IsRunningOnChromeOS()) {}
-  virtual ~ClockSystemTesterDelegate() {}
-
-  virtual scoped_ptr<sandbox::SandboxBPFPolicy> GetSandboxBPFPolicy() OVERRIDE {
-    return scoped_ptr<sandbox::SandboxBPFPolicy>(
-        new nacl::nonsfi::NaClNonSfiBPFSandboxPolicy());
-  }
-  virtual void RunTestFunction() OVERRIDE {
-    if (is_running_on_chromeos_) {
-      CheckClock(base::TimeTicks::kClockSystemTrace);
-    } else {
-      struct timespec ts;
-      // kClockSystemTrace is 11, which is CLOCK_THREAD_CPUTIME_ID of
-      // the init process (pid=1). If kernel supports this feature,
-      // this may succeed even if this is not running on Chrome OS. We
-      // just check this clock_gettime call does not crash.
-      clock_gettime(base::TimeTicks::kClockSystemTrace, &ts);
-    }
-  }
-
- private:
-  const bool is_running_on_chromeos_;
-  DISALLOW_COPY_AND_ASSIGN(ClockSystemTesterDelegate);
-};
-
-BPF_TEST_D(BPFTest, BPFTestWithDelegateClass, ClockSystemTesterDelegate);
-
-#else
-
-BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
-                 clock_gettime_crash_system_trace,
-                 DEATH_MESSAGE(sandbox::GetErrorMessageContentForTests()),
-                 nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
-  struct timespec ts;
-  clock_gettime(base::TimeTicks::kClockSystemTrace, &ts);
-}
-
-#endif  // defined(OS_CHROMEOS)
-
-BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
-                 clock_gettime_crash_cpu_clock,
-                 DEATH_MESSAGE(sandbox::GetErrorMessageContentForTests()),
-                 nacl::nonsfi::NaClNonSfiBPFSandboxPolicy) {
-  // We can't use clock_getcpuclockid() because it's not implemented in newlib,
-  // and it might not work inside the sandbox anyway.
-  const pid_t kInitPID = 1;
-  const clockid_t kInitCPUClockID =
-      MAKE_PROCESS_CPUCLOCK(kInitPID, CPUCLOCK_SCHED);
-
-  struct timespec ts;
-  clock_gettime(kInitCPUClockID, &ts);
 }
 
 BPF_DEATH_TEST_C(NaClNonSfiSandboxTest,
@@ -514,6 +492,7 @@ RESTRICT_SYSCALL_EPERM_TEST(getgid);
 RESTRICT_SYSCALL_EPERM_TEST(getuid);
 RESTRICT_SYSCALL_EPERM_TEST(madvise);
 RESTRICT_SYSCALL_EPERM_TEST(open);
+RESTRICT_SYSCALL_EPERM_TEST(openat);
 RESTRICT_SYSCALL_EPERM_TEST(ptrace);
 RESTRICT_SYSCALL_EPERM_TEST(set_robust_list);
 #if defined(__i386__) || defined(__x86_64__)

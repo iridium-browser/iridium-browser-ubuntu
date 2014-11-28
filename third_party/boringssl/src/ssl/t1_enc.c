@@ -496,7 +496,7 @@ int tls1_change_cipher_state(SSL *s, int which)
 	const unsigned char *key_data;
 
 	/* Reset sequence number to zero. */
-	if (s->version != DTLS1_VERSION)
+	if (!SSL_IS_DTLS(s))
 		memset(is_read ? s->s3->read_sequence : s->s3->write_sequence, 0, 8);
 
 	/* key_arg is used for SSLv2. We don't need it for TLS. */
@@ -521,11 +521,7 @@ int tls1_change_cipher_state(SSL *s, int which)
 	else
 		{
 		key_len = EVP_CIPHER_key_length(cipher);
-
-		if (EVP_CIPHER_mode(cipher) == EVP_CIPH_GCM_MODE)
-			iv_len = EVP_GCM_TLS_FIXED_IV_LEN;
-		else
-			iv_len = EVP_CIPHER_iv_length(cipher);
+		iv_len = EVP_CIPHER_iv_length(cipher);
 		}
 
 	key_data = s->s3->tmp.key_block;
@@ -600,7 +596,9 @@ int tls1_setup_key_block(SSL *s)
 			goto cipher_unavailable_err;
 		key_len = EVP_AEAD_key_length(aead);
 		iv_len = SSL_CIPHER_AEAD_FIXED_NONCE_LEN(s->session->cipher);
-		if (!ssl_cipher_get_mac(s->session, &hash, &mac_type, &mac_secret_size))
+		if ((s->session->cipher->algorithm2 &
+				SSL_CIPHER_ALGORITHM2_STATEFUL_AEAD) &&
+			!ssl_cipher_get_mac(s->session, &hash, &mac_type, &mac_secret_size))
 			goto cipher_unavailable_err;
 		/* For "stateful" AEADs (i.e. compatibility with pre-AEAD
 		 * cipher suites) the key length reported by
@@ -617,11 +615,7 @@ int tls1_setup_key_block(SSL *s)
 		if (!ssl_cipher_get_evp(s->session,&c,&hash,&mac_type,&mac_secret_size))
 			goto cipher_unavailable_err;
 		key_len = EVP_CIPHER_key_length(c);
-
-		if (EVP_CIPHER_mode(c) == EVP_CIPH_GCM_MODE)
-			iv_len = EVP_GCM_TLS_FIXED_IV_LEN;
-		else
-			iv_len = EVP_CIPHER_iv_length(c);
+		iv_len = EVP_CIPHER_iv_length(c);
 		}
 
 	s->s3->tmp.new_aead=aead;
@@ -675,13 +669,8 @@ printf("\nkey block\n");
 
 		if (s->session->cipher != NULL)
 			{
-			if (s->session->cipher->algorithm_enc == SSL_eNULL)
-				s->s3->need_record_splitting = 0;
-			
-#ifndef OPENSSL_NO_RC4
 			if (s->session->cipher->algorithm_enc == SSL_RC4)
 				s->s3->need_record_splitting = 0;
-#endif
 			}
 		}
 		
@@ -735,7 +724,7 @@ int tls1_enc(SSL *s, int send)
 
 		seq = send ? s->s3->write_sequence : s->s3->read_sequence;
 
-		if (s->version == DTLS1_VERSION || s->version == DTLS1_BAD_VER)
+		if (SSL_IS_DTLS(s))
 			{
 			unsigned char dtlsseq[9], *p = dtlsseq;
 
@@ -916,11 +905,6 @@ int tls1_enc(SSL *s, int send)
 
 			/* we need to add 'i' padding bytes of value j */
 			j=i-1;
-			if (s->options & SSL_OP_TLS_BLOCK_PADDING_BUG)
-				{
-				if (s->s3->flags & TLS1_FLAGS_TLS_PADDING_BUG)
-					j++;
-				}
 			for (k=(int)l; k<(int)(l+i); k++)
 				rec->input[k]=j;
 			l+=i;
@@ -956,12 +940,6 @@ int tls1_enc(SSL *s, int send)
 						?(i<0)
 						:(i==0))
 			return -1;	/* AEAD can fail to verify MAC */
-		if (EVP_CIPHER_mode(enc) == EVP_CIPH_GCM_MODE && !send)
-			{
-			rec->data += EVP_GCM_TLS_EXPLICIT_IV_LEN;
-			rec->input += EVP_GCM_TLS_EXPLICIT_IV_LEN;
-			rec->length -= EVP_GCM_TLS_EXPLICIT_IV_LEN;
-			}
 
 #ifdef KSSL_DEBUG
 		{

@@ -60,6 +60,20 @@ def KillNamedProcess(process_path):
   return os.system('taskkill /f /im %s' % os.path.basename(process_path)) == 0
 
 
+def QuitChrome(chrome_path):
+  """ Tries to quit chrome in a safe way. If there is still an open instance
+      after a timeout delay, the process is killed the hard way.
+
+  Args:
+    chrome_path: The path to chrome.exe.
+  """
+  if not CloseWindows(chrome_path):
+    # TODO(robertshield): Investigate why Chrome occasionally doesn't shut down.
+    sys.stderr.write('Warning: Chrome not responding to window closure. '
+                     'Killing all processes belonging to %s\n' % chrome_path)
+    KillNamedProcess(chrome_path)
+
+
 def main():
   usage = 'usage: %prog chrome_path'
   parser = optparse.OptionParser(usage, description='Quit Chrome.')
@@ -68,10 +82,7 @@ def main():
     parser.error('Incorrect number of arguments.')
   chrome_path = args[0]
 
-  if not CloseWindows(chrome_path):
-    # TODO(robertshield): Investigate why Chrome occasionally doesn't shut down.
-    print 'Warning: Chrome not responding to window closure. Killing process...'
-    KillNamedProcess(chrome_path)
+  QuitChrome(chrome_path)
   return 0
 
 

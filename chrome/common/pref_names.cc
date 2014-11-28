@@ -280,7 +280,6 @@ const char kWebKitWebSecurityEnabled[] = "webkit.webprefs.web_security_enabled";
 const char kWebKitDomPasteEnabled[] = "webkit.webprefs.dom_paste_enabled";
 const char kWebKitShrinksStandaloneImagesToFit[] =
     "webkit.webprefs.shrinks_standalone_images_to_fit";
-const char kWebKitInspectorSettings[] = "webkit.webprefs.inspector_settings";
 const char kWebKitUsesUniversalDetector[] =
     "webkit.webprefs.uses_universal_detector";
 const char kWebKitTextAreasAreResizable[] =
@@ -324,19 +323,9 @@ const char kWebKitPluginsEnabled[] = "webkit.webprefs.plugins_enabled";
 // Boolean that is true when SafeBrowsing is enabled.
 const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
 
-// Boolean that tell us whether malicious download feedback is enabled.
+// Boolean that tell us whether Safe Browsing extended reporting is enabled.
 const char kSafeBrowsingExtendedReportingEnabled[] =
     "safebrowsing.extended_reporting_enabled";
-
-// Boolean that tell us whether malicious download feedback is enabled.
-// TODO(felt): Deprecate. crbug.com/383866
-const char kSafeBrowsingDownloadFeedbackEnabled[] =
-    "safebrowsing.download_feedback_enabled";
-
-// Boolean that is true when SafeBrowsing Malware Report is enabled.
-// TODO(felt): Deprecate. crbug.com/383866
-const char kSafeBrowsingReportingEnabled[] =
-    "safebrowsing.reporting_enabled";
 
 // Boolean that is true when the SafeBrowsing interstitial should not allow
 // users to proceed anyway.
@@ -680,6 +669,10 @@ const char kDisplayProperties[] = "settings.display.properties";
 // layout/offset information.
 const char kSecondaryDisplays[] = "settings.display.secondary_displays";
 
+// A dictionary pref that specifies the state of the rotation lock, and the
+// display orientation, for the internal display.
+const char kDisplayRotationLock[] = "settings.display.rotation_lock";
+
 // A boolean pref indicating whether user activity has been observed in the
 // current session already. The pref is used to restore information about user
 // activity after browser crashes.
@@ -997,6 +990,11 @@ const char kUseCustomChromeFrame[] = "browser.custom_chrome_frame";
 // Dictionary of content settings applied to all hosts by default.
 const char kDefaultContentSettings[] = "profile.default_content_settings";
 
+// Dictionary of content settings that can globally disallow all hosts by
+// default. If a value is set, it means the setting is globally disallowed.
+// If a value is not set, it means the setting is allowed.
+const char kOverrideContentSettings[] = "profile.override_content_settings";
+
 // Boolean indicating whether the clear on exit pref was migrated to content
 // settings yet.
 const char kContentSettingsClearOnExitMigrated[] =
@@ -1010,10 +1008,6 @@ const char kContentSettingsVersion[] = "profile.content_settings.pref_version";
 // format used is defined by kContentSettingsVersion.
 const char kContentSettingsPatternPairs[] =
     "profile.content_settings.pattern_pairs";
-
-// Version of the content settings whitelist.
-const char kContentSettingsDefaultWhitelistVersion[] =
-    "profile.content_settings.whitelist_version";
 
 #if !defined(OS_ANDROID)
 // Which plugins have been whitelisted manually by the user.
@@ -1114,6 +1108,10 @@ const char kGLRendererString[] = "gl_renderer_string";
 // GL_VERSION string.
 const char kGLVersionString[] = "gl_version_string";
 
+// Boolean that specifies whether to import the form data for autofill from the
+// default browser on first run.
+const char kImportAutofillFormData[] = "import_autofill_form_data";
+
 // Boolean that specifies whether to import bookmarks from the default browser
 // on first run.
 const char kImportBookmarks[] = "import_bookmarks";
@@ -1126,13 +1124,13 @@ const char kImportHistory[] = "import_history";
 // browser on first run.
 const char kImportHomepage[] = "import_home_page";
 
-// Boolean that specifies whether to import the search engine from the default
-// browser on first run.
-const char kImportSearchEngine[] = "import_search_engine";
-
 // Boolean that specifies whether to import the saved passwords from the default
 // browser on first run.
 const char kImportSavedPasswords[] = "import_saved_passwords";
+
+// Boolean that specifies whether to import the search engine from the default
+// browser on first run.
+const char kImportSearchEngine[] = "import_search_engine";
 
 // Profile avatar and name
 const char kProfileAvatarIndex[] = "profile.avatar_index";
@@ -1185,6 +1183,11 @@ const char kSupervisedUserCreationAllowed[] =
 
 // List pref containing the users supervised by this user.
 const char kSupervisedUsers[] = "profile.managed_users";
+
+// String that indicates that the profile reset prompt has already been shown to
+// the user (profile).
+const char kProfileResetPromptMementoInProfilePrefs[] =
+    "profile.reset_prompt_memento";
 
 // List pref containing the extension ids which are not allowed to send
 // notifications to the message center.
@@ -1282,12 +1285,21 @@ const char kProfileCreatedByVersion[] = "profile.created_by_version";
 // them.
 const char kProfileInfoCache[] = "profile.info_cache";
 
+// Dictionary that maps profile keys to strings that indicate that the profile
+// reset prompt has already been shown to the corresponding user (profile).
+// This is semantically similar to kProfileResetPromptMementoInProfilePrefs, see
+// chrome/browser/profile_resetter/automatic_profile_resetter_mementos.h for an
+// explanation of why this redundancy is needed.
+const char kProfileResetPromptMementosInLocalState[] =
+    "profile.reset_prompt_mementos";
+
 // Prefs for SSLConfigServicePref.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
 const char kCertRevocationCheckingRequiredLocalAnchors[] =
     "ssl.rev_checking.required_for_local_anchors";
 const char kSSLVersionMin[] = "ssl.version_min";
 const char kSSLVersionMax[] = "ssl.version_max";
+const char kSSLVersionFallbackMin[] = "ssl.version_fallback_min";
 const char kCipherSuiteBlacklist[] = "ssl.cipher_suites.blacklist";
 const char kDisableSSLRecordSplitting[] = "ssl.ssl_record_splitting.disabled";
 
@@ -1427,13 +1439,9 @@ const char kBrowserWindowPlacementPopup[] = "browser.window_placement_popup";
 // manager window to restore on startup.
 const char kTaskManagerWindowPlacement[] = "task_manager.window_placement";
 
-// A collection of position, size, and other data relating to the keyword
-// editor window to restore on startup.
-const char kKeywordEditorWindowPlacement[] = "keyword_editor.window_placement";
-
-// A collection of position, size, and other data relating to the preferences
-// window to restore on startup.
-const char kPreferencesWindowPlacement[] = "preferences.window_placement";
+// A collection of position, size, and other data relating to app windows to
+// restore on startup.
+const char kAppWindowPlacement[] = "browser.app_window_placement";
 
 // An integer specifying the total number of bytes to be used by the
 // renderer's in-memory cache of objects.
@@ -1935,11 +1943,11 @@ const char kCustomizationDefaultWallpaperURL[] =
 // This is saved to file and cleared after chrome process starts.
 const char kLogoutStartedLast[] = "chromeos.logout-started";
 
-// An integer pref of the current consumer management enrollment state. The
-// meaning of the value is defined in the enum EnrollmentState in:
+// An integer pref of the current consumer management enrollment stage. The
+// meaning of the value is defined in the enum EnrollmentStage in:
 //   chrome/browser/chromeos/policy/consumer_management_service.h
-const char kConsumerManagementEnrollmentState[] =
-    "consumer_management.enrollment_state";
+const char kConsumerManagementEnrollmentStage[] =
+    "consumer_management.enrollment_stage";
 #endif
 
 // Whether there is a Flash version installed that supports clearing LSO data.
@@ -1973,10 +1981,6 @@ const char kTabStripStackedLayout[] = "tab-strip-stacked-layout";
 
 // Indicates that factory reset was requested from options page or reset screen.
 const char kFactoryResetRequested[] = "FactoryResetRequested";
-
-// Indicates that rollback was requested alongside with factory reset.
-// Makes sense only if kFactoryResetRequested is true.
-const char kRollbackRequested[] = "RollbackRequested";
 
 // Boolean recording whether we have showed a balloon that calls out the message
 // center for desktop notifications.
@@ -2201,20 +2205,6 @@ const char kSemiLongPressTimeInSeconds[] =
     "gesture.semi_long_press_time_in_seconds";
 const char kTabScrubActivationDelayInMS[] =
     "gesture.tab_scrub_activation_delay_in_ms";
-const char kFlingAccelerationCurveCoefficient0[] =
-    "gesture.fling_acceleration_curve_coefficient_0";
-const char kFlingAccelerationCurveCoefficient1[] =
-    "gesture.fling_acceleration_curve_coefficient_1";
-const char kFlingAccelerationCurveCoefficient2[] =
-    "gesture.fling_acceleration_curve_coefficient_2";
-const char kFlingAccelerationCurveCoefficient3[] =
-    "gesture.fling_acceleration_curve_coefficient_3";
-const char kFlingCurveTouchpadAlpha[] = "flingcurve.touchpad_alpha";
-const char kFlingCurveTouchpadBeta[] = "flingcurve.touchpad_beta";
-const char kFlingCurveTouchpadGamma[] = "flingcurve.touchpad_gamma";
-const char kFlingCurveTouchscreenAlpha[] = "flingcurve.touchscreen_alpha";
-const char kFlingCurveTouchscreenBeta[] = "flingcurve.touchscreen_beta";
-const char kFlingCurveTouchscreenGamma[] = "flingcurve.touchscreen_gamma";
 const char kFlingMaxCancelToDownTimeInMs[] =
     "gesture.fling_max_cancel_to_down_time_in_ms";
 const char kFlingMaxTapGapTimeInMs[] =
@@ -2341,5 +2331,11 @@ const char kQuickCheckEnabled[] = "proxy.quick_check_enabled";
 
 // Whether Guest Mode is enabled within the browser.
 const char kBrowserGuestModeEnabled[] = "profile.browser_guest_enabled";
+
+// Whether Adding a new Person is enabled within the user manager.
+const char kBrowserAddPersonEnabled[] = "profile.add_person_enabled";
+
+// A dictionary that maps user id to hardlock state.
+const char kEasyUnlockHardlockState[] = "easy_unlock.hardlock_state";
 
 }  // namespace prefs

@@ -45,7 +45,9 @@ struct DocumentTiming;
 class LocalFrame;
 class ResourceLoadTiming;
 
-class PerformanceTiming FINAL : public RefCountedWillBeGarbageCollectedFinalized<PerformanceTiming>, public ScriptWrappable, public DOMWindowProperty {
+class PerformanceTiming FINAL : public RefCountedWillBeGarbageCollected<PerformanceTiming>, public ScriptWrappable, public DOMWindowProperty {
+    DEFINE_WRAPPERTYPEINFO();
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PerformanceTiming);
 public:
     static PassRefPtrWillBeRawPtr<PerformanceTiming> create(LocalFrame* frame)
     {
@@ -74,7 +76,7 @@ public:
     unsigned long long loadEventStart() const;
     unsigned long long loadEventEnd() const;
 
-    void trace(Visitor*) { }
+    virtual void trace(Visitor*) OVERRIDE;
 
 private:
     explicit PerformanceTiming(LocalFrame*);
@@ -87,6 +89,6 @@ private:
     unsigned long long monotonicTimeToIntegerMilliseconds(double) const;
 };
 
-}
+} // namespace blink
 
-#endif // !defined(PerformanceTiming_h)
+#endif // PerformanceTiming_h

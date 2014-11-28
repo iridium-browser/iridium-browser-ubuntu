@@ -28,8 +28,8 @@ component("printing") {
     "image_linux.cc",
     "image_mac.cc",
     "image_win.cc",
+    "metafile.cc",
     "metafile.h",
-    "metafile_impl.h",
     "metafile_skia_wrapper.cc",
     "metafile_skia_wrapper.h",
     "page_number.cc",
@@ -43,8 +43,6 @@ component("printing") {
     "pdf_metafile_cg_mac.h",
     "pdf_metafile_skia.cc",
     "pdf_metafile_skia.h",
-    "print_destination_interface.h",
-    "print_destination_none.cc",
     "print_dialog_gtk_interface.h",
     "print_job_constants.cc",
     "print_job_constants.h",
@@ -87,7 +85,7 @@ component("printing") {
   ]
 
   if (use_aura) {
-    # deps += [ "//ui/aura" ]  TODO(GYP)
+    deps += [ "//ui/aura" ]
   }
 
   if (is_mac) {
@@ -125,12 +123,12 @@ component("printing") {
   }
 
   if (use_cups) {
-    cups_version = exec_script("cups_config_helper.py", [ "--api-version" ],
-                               "trim string")
-
     configs += [ ":cups" ]
 
     if (is_linux) {
+      cups_version = exec_script("cups_config_helper.py", [ "--api-version" ],
+                                 "trim string")
+
       if (cups_version == "1.6" || cups_version == "1.7") {
         cflags += [
           # CUPS 1.6 deprecated the PPD APIs, but we will stay with this

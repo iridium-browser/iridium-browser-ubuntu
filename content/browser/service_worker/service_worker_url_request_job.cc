@@ -9,16 +9,24 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/guid.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "content/browser/service_worker/service_worker_fetch_dispatcher.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
+#include "content/common/resource_request_body.h"
+#include "content/common/service_worker/service_worker_types.h"
+#include "content/public/browser/blob_handle.h"
+#include "content/public/browser/resource_request_info.h"
+#include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
-#include "webkit/browser/blob/blob_data_handle.h"
-#include "webkit/browser/blob/blob_storage_context.h"
-#include "webkit/browser/blob/blob_url_request_job_factory.h"
+#include "storage/browser/blob/blob_data_handle.h"
+#include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/blob/blob_url_request_job_factory.h"
+#include "ui/base/page_transition_types.h"
 
 namespace content {
 
@@ -26,12 +34,14 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate,
     base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-    base::WeakPtr<webkit_blob::BlobStorageContext> blob_storage_context)
+    base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
+    scoped_refptr<ResourceRequestBody> body)
     : net::URLRequestJob(request, network_delegate),
       provider_host_(provider_host),
       response_type_(NOT_DETERMINED),
       is_started_(false),
       blob_storage_context_(blob_storage_context),
+      body_(body),
       weak_factory_(this) {
 }
 
@@ -80,6 +90,12 @@ void ServiceWorkerURLRequestJob::GetResponseInfo(net::HttpResponseInfo* info) {
   if (!http_info())
     return;
   *info = *http_info();
+  info->response_time = response_time_;
+}
+
+void ServiceWorkerURLRequestJob::GetLoadTimingInfo(
+    net::LoadTimingInfo* load_timing_info) const {
+  *load_timing_info = load_timing_info_;
 }
 
 int ServiceWorkerURLRequestJob::GetResponseCode() const {
@@ -151,6 +167,7 @@ void ServiceWorkerURLRequestJob::OnBeforeNetworkStart(net::URLRequest* request,
 void ServiceWorkerURLRequestJob::OnResponseStarted(net::URLRequest* request) {
   // TODO(falken): Add Content-Length, Content-Type if they were not provided in
   // the ServiceWorkerResponse.
+  response_time_ = base::Time::Now();
   CommitResponseHeader();
 }
 
@@ -176,7 +193,10 @@ const net::HttpResponseInfo* ServiceWorkerURLRequestJob::http_info() const {
 
 void ServiceWorkerURLRequestJob::GetExtraResponseInfo(
     bool* was_fetched_via_service_worker,
-    GURL* original_url_via_service_worker) const {
+    GURL* original_url_via_service_worker,
+    base::TimeTicks* fetch_start_time,
+    base::TimeTicks* fetch_ready_time,
+    base::TimeTicks* fetch_end_time) const {
   if (response_type_ != FORWARD_TO_SERVICE_WORKER) {
     *was_fetched_via_service_worker = false;
     *original_url_via_service_worker = GURL();
@@ -184,6 +204,9 @@ void ServiceWorkerURLRequestJob::GetExtraResponseInfo(
   }
   *was_fetched_via_service_worker = true;
   *original_url_via_service_worker = response_url_;
+  *fetch_start_time = fetch_start_time_;
+  *fetch_ready_time = fetch_ready_time_;
+  *fetch_end_time = fetch_end_time_;
 }
 
 
@@ -216,18 +239,114 @@ void ServiceWorkerURLRequestJob::StartRequest() {
     case FORWARD_TO_SERVICE_WORKER:
       DCHECK(provider_host_ && provider_host_->active_version());
       DCHECK(!fetch_dispatcher_);
-
       // Send a fetch event to the ServiceWorker associated to the
       // provider_host.
       fetch_dispatcher_.reset(new ServiceWorkerFetchDispatcher(
-          request(), provider_host_->active_version(),
+          CreateFetchRequest(),
+          provider_host_->active_version(),
+          base::Bind(&ServiceWorkerURLRequestJob::DidPrepareFetchEvent,
+                     weak_factory_.GetWeakPtr()),
           base::Bind(&ServiceWorkerURLRequestJob::DidDispatchFetchEvent,
                      weak_factory_.GetWeakPtr())));
+      fetch_start_time_ = base::TimeTicks::Now();
+      load_timing_info_.send_start = fetch_start_time_;
       fetch_dispatcher_->Run();
       return;
   }
 
   NOTREACHED();
+}
+
+scoped_ptr<ServiceWorkerFetchRequest>
+ServiceWorkerURLRequestJob::CreateFetchRequest() {
+  std::string blob_uuid;
+  uint64 blob_size = 0;
+  CreateRequestBodyBlob(&blob_uuid, &blob_size);
+  scoped_ptr<ServiceWorkerFetchRequest> request(
+      new ServiceWorkerFetchRequest());
+
+  request->url = request_->url();
+  request->method = request_->method();
+  const net::HttpRequestHeaders& headers = request_->extra_request_headers();
+  for (net::HttpRequestHeaders::Iterator it(headers); it.GetNext();)
+    request->headers[it.name()] = it.value();
+  request->blob_uuid = blob_uuid;
+  request->blob_size = blob_size;
+  request->referrer = GURL(request_->referrer());
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request_);
+  if (info) {
+    request->is_reload = ui::PageTransitionCoreTypeIs(
+        info->GetPageTransition(), ui::PAGE_TRANSITION_RELOAD);
+  }
+  return request.Pass();
+}
+
+bool ServiceWorkerURLRequestJob::CreateRequestBodyBlob(std::string* blob_uuid,
+                                                       uint64* blob_size) {
+  if (!body_.get() || !blob_storage_context_)
+    return false;
+
+  std::vector<const ResourceRequestBody::Element*> resolved_elements;
+  for (size_t i = 0; i < body_->elements()->size(); ++i) {
+    const ResourceRequestBody::Element& element = (*body_->elements())[i];
+    if (element.type() != ResourceRequestBody::Element::TYPE_BLOB) {
+      resolved_elements.push_back(&element);
+      continue;
+    }
+    scoped_ptr<storage::BlobDataHandle> handle =
+        blob_storage_context_->GetBlobDataFromUUID(element.blob_uuid());
+    if (handle->data()->items().empty())
+      continue;
+    for (size_t i = 0; i < handle->data()->items().size(); ++i) {
+      const storage::BlobData::Item& item = handle->data()->items().at(i);
+      DCHECK_NE(storage::BlobData::Item::TYPE_BLOB, item.type());
+      resolved_elements.push_back(&item);
+    }
+  }
+
+  const std::string uuid(base::GenerateGUID());
+  uint64 total_size = 0;
+  scoped_refptr<storage::BlobData> blob_data = new storage::BlobData(uuid);
+  for (size_t i = 0; i < resolved_elements.size(); ++i) {
+    const ResourceRequestBody::Element& element = *resolved_elements[i];
+    if (total_size != kuint64max && element.length() != kuint64max)
+      total_size += element.length();
+    else
+      total_size = kuint64max;
+    switch (element.type()) {
+      case ResourceRequestBody::Element::TYPE_BYTES:
+        blob_data->AppendData(element.bytes(), element.length());
+        break;
+      case ResourceRequestBody::Element::TYPE_FILE:
+        blob_data->AppendFile(element.path(),
+                              element.offset(),
+                              element.length(),
+                              element.expected_modification_time());
+        break;
+      case ResourceRequestBody::Element::TYPE_BLOB:
+        // Blob elements should be resolved beforehand.
+        NOTREACHED();
+        break;
+      case ResourceRequestBody::Element::TYPE_FILE_FILESYSTEM:
+        blob_data->AppendFileSystemFile(element.filesystem_url(),
+                                        element.offset(),
+                                        element.length(),
+                                        element.expected_modification_time());
+        break;
+      default:
+        NOTIMPLEMENTED();
+    }
+  }
+
+  request_body_blob_data_handle_ =
+      blob_storage_context_->AddFinishedBlob(blob_data.get());
+  *blob_uuid = uuid;
+  *blob_size = total_size;
+  return true;
+}
+
+void ServiceWorkerURLRequestJob::DidPrepareFetchEvent() {
+  fetch_ready_time_ = base::TimeTicks::Now();
 }
 
 void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
@@ -262,16 +381,26 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   // We should have a response now.
   DCHECK_EQ(SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE, fetch_result);
 
+  // Treat a response whose status is 0 as a Network Error.
+  if (response.status_code == 0) {
+    NotifyDone(
+        net::URLRequestStatus(net::URLRequestStatus::FAILED, net::ERR_FAILED));
+    return;
+  }
+
+  fetch_end_time_ = base::TimeTicks::Now();
+  load_timing_info_.send_end = fetch_end_time_;
+
   // Set up a request for reading the blob.
   if (!response.blob_uuid.empty() && blob_storage_context_) {
-    scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle =
+    scoped_ptr<storage::BlobDataHandle> blob_data_handle =
         blob_storage_context_->GetBlobDataFromUUID(response.blob_uuid);
     if (!blob_data_handle) {
       // The renderer gave us a bad blob UUID.
       DeliverErrorResponse();
       return;
     }
-    blob_request_ = webkit_blob::BlobProtocolHandler::CreateBlobRequest(
+    blob_request_ = storage::BlobProtocolHandler::CreateBlobRequest(
         blob_data_handle.Pass(), request()->context(), this);
     blob_request_->Start();
   }
@@ -279,6 +408,7 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   response_url_ = response.url;
   CreateResponseHeader(
       response.status_code, response.status_text, response.headers);
+  load_timing_info_.receive_headers_end = base::TimeTicks::Now();
   if (!blob_request_)
     CommitResponseHeader();
 }
@@ -286,14 +416,14 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
 void ServiceWorkerURLRequestJob::CreateResponseHeader(
     int status_code,
     const std::string& status_text,
-    const std::map<std::string, std::string>& headers) {
+    const ServiceWorkerHeaderMap& headers) {
   // TODO(kinuko): If the response has an identifier to on-disk cache entry,
   // pull response header from the disk.
   std::string status_line(
       base::StringPrintf("HTTP/1.1 %d %s", status_code, status_text.c_str()));
   status_line.push_back('\0');
   http_response_headers_ = new net::HttpResponseHeaders(status_line);
-  for (std::map<std::string, std::string>::const_iterator it = headers.begin();
+  for (ServiceWorkerHeaderMap::const_iterator it = headers.begin();
        it != headers.end();
        ++it) {
     std::string header;
@@ -314,9 +444,8 @@ void ServiceWorkerURLRequestJob::CommitResponseHeader() {
 void ServiceWorkerURLRequestJob::DeliverErrorResponse() {
   // TODO(falken): Print an error to the console of the ServiceWorker and of
   // the requesting page.
-  CreateResponseHeader(500,
-                       "Service Worker Response Error",
-                       std::map<std::string, std::string>());
+  CreateResponseHeader(
+      500, "Service Worker Response Error", ServiceWorkerHeaderMap());
   CommitResponseHeader();
 }
 

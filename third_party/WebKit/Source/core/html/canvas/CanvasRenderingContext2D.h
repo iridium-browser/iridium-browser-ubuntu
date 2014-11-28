@@ -60,6 +60,7 @@ class GraphicsContext;
 class HTMLCanvasElement;
 class HTMLImageElement;
 class HTMLVideoElement;
+class HitRegionOptions;
 class ImageBitmap;
 class ImageData;
 class TextMetrics;
@@ -67,6 +68,7 @@ class TextMetrics;
 typedef WillBeHeapHashMap<String, RefPtrWillBeMember<MutableStylePropertySet> > MutableStylePropertyMap;
 
 class CanvasRenderingContext2D FINAL: public CanvasRenderingContext, public ScriptWrappable, public CanvasPathMethods {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2D> create(HTMLCanvasElement* canvas, const Canvas2DContextAttributes* attrs, bool usesCSSCompatibilityParseMode)
     {
@@ -211,6 +213,9 @@ public:
     String textBaseline() const;
     void setTextBaseline(const String&);
 
+    String direction() const;
+    void setDirection(const String&);
+
     void fillText(const String& text, float x, float y);
     void fillText(const String& text, float x, float y, float maxWidth);
     void strokeText(const String& text, float x, float y);
@@ -228,8 +233,7 @@ public:
     void drawFocusIfNeeded(Element*);
     void drawFocusIfNeeded(Path2D*, Element*);
 
-    void addHitRegion(ExceptionState&);
-    void addHitRegion(const Dictionary&, ExceptionState&);
+    void addHitRegion(const HitRegionOptions&, ExceptionState&);
     void removeHitRegion(const String& id);
     void clearHitRegions();
     HitRegion* hitRegionAtPoint(const LayoutPoint&);
@@ -241,6 +245,12 @@ public:
     virtual void trace(Visitor*) OVERRIDE;
 
 private:
+    enum Direction {
+        DirectionInherit,
+        DirectionRTL,
+        DirectionLTR
+    };
+
     class State FINAL : public CSSFontSelectorClient {
     public:
         State();
@@ -279,6 +289,7 @@ private:
         // Text state.
         TextAlign m_textAlign;
         TextBaseline m_textBaseline;
+        Direction m_direction;
 
         String m_unparsedFont;
         Font m_font;
@@ -308,12 +319,12 @@ private:
     GraphicsContext* drawingContext() const;
 
     void unwindStateStack();
-    void realizeSaves();
+    void realizeSaves(GraphicsContext*);
 
     void applyStrokePattern();
     void applyFillPattern();
 
-    void drawImageInternal(CanvasImageSource*, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, ExceptionState&, CompositeOperator, blink::WebBlendMode);
+    void drawImageInternal(CanvasImageSource*, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, ExceptionState&, CompositeOperator, blink::WebBlendMode, GraphicsContext* = 0);
     void drawVideo(HTMLVideoElement*, FloatRect srcRect, FloatRect dstRect);
 
     void fillInternal(const Path&, const String& windingRuleString);
@@ -343,7 +354,7 @@ private:
     bool focusRingCallIsValid(const Path&, Element*);
     void drawFocusRing(const Path&);
 
-    void addHitRegionInternal(const HitRegionOptions&, ExceptionState&);
+    void addHitRegionInternal(const HitRegionOptionsInternal&, ExceptionState&);
     bool hasClip() { return state().m_hasClip; }
 
     void validateStateStack();
@@ -351,10 +362,12 @@ private:
     virtual bool is2d() const OVERRIDE { return true; }
     virtual bool isAccelerated() const OVERRIDE;
     virtual bool hasAlpha() const OVERRIDE { return m_hasAlpha; }
+    virtual void setIsHidden(bool) OVERRIDE;
 
     virtual bool isTransformInvertible() const OVERRIDE { return state().m_invertibleCTM; }
 
     virtual blink::WebLayer* platformLayer() const OVERRIDE;
+    TextDirection toTextDirection(Direction, RenderStyle** computedStyle = nullptr) const;
 
     WillBeHeapVector<OwnPtrWillBeMember<State> > m_stateStack;
     OwnPtrWillBeMember<HitRegionManager> m_hitRegionManager;
@@ -374,4 +387,4 @@ DEFINE_TYPE_CASTS(CanvasRenderingContext2D, CanvasRenderingContext, context, con
 
 } // namespace blink
 
-#endif
+#endif // CanvasRenderingContext2D_h

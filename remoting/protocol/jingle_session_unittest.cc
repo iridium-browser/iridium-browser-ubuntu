@@ -22,6 +22,7 @@
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
 #include "remoting/protocol/network_settings.h"
+#include "remoting/protocol/stream_channel_factory.h"
 #include "remoting/signaling/fake_signal_strategy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -84,7 +85,7 @@ class MockSessionEventHandler : public Session::EventHandler {
                                           const TransportRoute& route));
 };
 
-class MockStreamChannelCallback {
+class MockChannelCreatedCallback {
  public:
   MOCK_METHOD1(OnDone, void(net::StreamSocket* socket));
 };
@@ -139,7 +140,7 @@ class JingleSessionTest : public testing::Test {
   }
 
   void CreateSessionManagers(int auth_round_trips, int messages_till_start,
-                        FakeAuthenticator::Action auth_action) {
+                             FakeAuthenticator::Action auth_action) {
     host_signal_strategy_.reset(new FakeSignalStrategy(kHostJid));
     client_signal_strategy_.reset(new FakeSignalStrategy(kClientJid));
     FakeSignalStrategy::Connect(host_signal_strategy_.get(),
@@ -262,10 +263,10 @@ class JingleSessionTest : public testing::Test {
   }
 
   void CreateChannel() {
-    client_session_->GetTransportChannelFactory()->CreateStreamChannel(
+    client_session_->GetTransportChannelFactory()->CreateChannel(
         kChannelName, base::Bind(&JingleSessionTest::OnClientChannelCreated,
                                  base::Unretained(this)));
-    host_session_->GetTransportChannelFactory()->CreateStreamChannel(
+    host_session_->GetTransportChannelFactory()->CreateChannel(
         kChannelName, base::Bind(&JingleSessionTest::OnHostChannelCreated,
                                  base::Unretained(this)));
 
@@ -305,8 +306,8 @@ class JingleSessionTest : public testing::Test {
   scoped_ptr<Session> client_session_;
   MockSessionEventHandler client_session_event_handler_;
 
-  MockStreamChannelCallback client_channel_callback_;
-  MockStreamChannelCallback host_channel_callback_;
+  MockChannelCreatedCallback client_channel_callback_;
+  MockChannelCreatedCallback host_channel_callback_;
 
   scoped_ptr<net::StreamSocket> client_socket_;
   scoped_ptr<net::StreamSocket> host_socket_;
@@ -453,10 +454,10 @@ TEST_F(JingleSessionTest, TestMuxStreamChannel) {
   ASSERT_NO_FATAL_FAILURE(
       InitiateConnection(1, FakeAuthenticator::ACCEPT, false));
 
-  client_session_->GetMultiplexedChannelFactory()->CreateStreamChannel(
+  client_session_->GetMultiplexedChannelFactory()->CreateChannel(
       kChannelName, base::Bind(&JingleSessionTest::OnClientChannelCreated,
                                base::Unretained(this)));
-  host_session_->GetMultiplexedChannelFactory()->CreateStreamChannel(
+  host_session_->GetMultiplexedChannelFactory()->CreateChannel(
       kChannelName, base::Bind(&JingleSessionTest::OnHostChannelCreated,
                                base::Unretained(this)));
 
@@ -499,10 +500,10 @@ TEST_F(JingleSessionTest, TestFailedChannelAuth) {
   ASSERT_NO_FATAL_FAILURE(
       InitiateConnection(1, FakeAuthenticator::ACCEPT, false));
 
-  client_session_->GetTransportChannelFactory()->CreateStreamChannel(
+  client_session_->GetTransportChannelFactory()->CreateChannel(
       kChannelName, base::Bind(&JingleSessionTest::OnClientChannelCreated,
                                base::Unretained(this)));
-  host_session_->GetTransportChannelFactory()->CreateStreamChannel(
+  host_session_->GetTransportChannelFactory()->CreateChannel(
       kChannelName, base::Bind(&JingleSessionTest::OnHostChannelCreated,
                                base::Unretained(this)));
 
@@ -510,13 +511,28 @@ TEST_F(JingleSessionTest, TestFailedChannelAuth) {
   // from the host.
   EXPECT_CALL(host_channel_callback_, OnDone(NULL))
       .WillOnce(QuitThread());
-  EXPECT_CALL(client_channel_callback_, OnDone(_))
-      .Times(AtMost(1));
   ExpectRouteChange(kChannelName);
 
   message_loop_->Run();
 
+  client_session_->GetTransportChannelFactory()->CancelChannelCreation(
+      kChannelName);
+
   EXPECT_TRUE(!host_socket_.get());
+}
+
+TEST_F(JingleSessionTest, TestCancelChannelCreation) {
+  CreateSessionManagers(1, FakeAuthenticator::REJECT_CHANNEL);
+  ASSERT_NO_FATAL_FAILURE(
+      InitiateConnection(1, FakeAuthenticator::ACCEPT, false));
+
+  client_session_->GetTransportChannelFactory()->CreateChannel(
+      kChannelName, base::Bind(&JingleSessionTest::OnClientChannelCreated,
+                               base::Unretained(this)));
+  client_session_->GetTransportChannelFactory()->CancelChannelCreation(
+      kChannelName);
+
+  EXPECT_TRUE(!client_socket_.get());
 }
 
 }  // namespace protocol

@@ -1651,7 +1651,12 @@ const SkBlitRow::Proc sk_blitrow_platform_565_procs_arm_neon[] = {
     S32_D565_Opaque_neon,
     S32_D565_Blend_neon,
     S32A_D565_Opaque_neon,
+#if 0
     S32A_D565_Blend_neon,
+#else
+    NULL,   // https://code.google.com/p/skia/issues/detail?id=2845
+            // https://code.google.com/p/skia/issues/detail?id=2797
+#endif
 
     // dither
     S32_D565_Opaque_Dither_neon,

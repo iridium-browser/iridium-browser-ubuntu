@@ -120,7 +120,7 @@ void ChannelManager::Construct(MediaEngineInterface* me,
   audio_options_ = media_engine_->GetAudioOptions();
   audio_in_device_ = DeviceManagerInterface::kDefaultDeviceName;
   audio_out_device_ = DeviceManagerInterface::kDefaultDeviceName;
-  audio_delay_offset_ = MediaEngineInterface::kDefaultAudioDelayOffset;
+  audio_delay_offset_ = kDefaultAudioDelayOffset;
   audio_output_volume_ = kNotSetOutputVolume;
   local_renderer_ = NULL;
   capturing_ = false;
@@ -137,6 +137,12 @@ void ChannelManager::Construct(MediaEngineInterface* me,
       this, &ChannelManager::OnVideoCaptureStateChange);
   capture_manager_->SignalCapturerStateChange.connect(
       this, &ChannelManager::OnVideoCaptureStateChange);
+
+  if (worker_thread_ != rtc::Thread::Current()) {
+    // Do not allow invoking calls to other threads on the worker thread.
+    worker_thread_->Invoke<bool>(
+        rtc::Bind(&rtc::Thread::SetAllowBlockingCalls, worker_thread_, false));
+  }
 }
 
 ChannelManager::~ChannelManager() {
@@ -276,10 +282,6 @@ bool ChannelManager::Init() {
       // Now apply the default video codec that has been set earlier.
       if (default_video_encoder_config_.max_codec.id != 0) {
         SetDefaultVideoEncoderConfig(default_video_encoder_config_);
-      }
-      // And the local renderer.
-      if (local_renderer_) {
-        SetLocalRenderer(local_renderer_);
       }
     }
   }
@@ -746,19 +748,6 @@ bool ChannelManager::SetLocalMonitor(bool enable) {
            media_engine_.get(), enable));
   if (ret) {
     monitoring_ = enable;
-  }
-  return ret;
-}
-
-bool ChannelManager::SetLocalRenderer(VideoRenderer* renderer) {
-  bool ret = true;
-  if (initialized_) {
-    ret = worker_thread_->Invoke<bool>(
-        Bind(&MediaEngineInterface::SetLocalRenderer,
-             media_engine_.get(), renderer));
-  }
-  if (ret) {
-    local_renderer_ = renderer;
   }
   return ret;
 }

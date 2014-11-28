@@ -29,9 +29,11 @@
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeRareData.h"
 #include "core/html/DocumentNameCollection.h"
+#include "core/html/HTMLDataListOptionsCollection.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLObjectElement.h"
 #include "core/html/HTMLOptionElement.h"
+#include "core/html/HTMLOptionsCollection.h"
 #include "core/html/HTMLTagCollection.h"
 #include "core/html/WindowNameCollection.h"
 #include "wtf/HashSet.h"
@@ -166,7 +168,6 @@ HTMLCollection::HTMLCollection(ContainerNode& ownerNode, CollectionType type, It
     , m_overridesItemAfter(itemAfterOverrideType == OverridesItemAfter)
     , m_shouldOnlyIncludeDirectChildren(shouldTypeOnlyIncludeDirectChildren(type))
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<HTMLCollection> HTMLCollection::create(ContainerNode& base, CollectionType type)
@@ -187,18 +188,18 @@ HTMLCollection::~HTMLCollection()
 
 void HTMLCollection::invalidateCache(Document* oldDocument) const
 {
-    m_collectionIndexCache.invalidate();
+    m_collectionItemsCache.invalidate();
     invalidateIdNameCacheMaps(oldDocument);
 }
 
 unsigned HTMLCollection::length() const
 {
-    return m_collectionIndexCache.nodeCount(*this);
+    return m_collectionItemsCache.nodeCount(*this);
 }
 
 Element* HTMLCollection::item(unsigned offset) const
 {
-    return m_collectionIndexCache.nodeAt(*this, offset);
+    return m_collectionItemsCache.nodeAt(*this, offset);
 }
 
 static inline bool isMatchingHTMLElement(const HTMLCollection& htmlCollection, const HTMLElement& element)
@@ -210,6 +211,8 @@ static inline bool isMatchingHTMLElement(const HTMLCollection& htmlCollection, c
         return element.hasTagName(scriptTag);
     case DocForms:
         return element.hasTagName(formTag);
+    case DocumentNamedItems:
+        return toDocumentNameCollection(htmlCollection).elementMatches(element);
     case TableTBodies:
         return element.hasTagName(tbodyTag);
     case TRCells:
@@ -217,16 +220,11 @@ static inline bool isMatchingHTMLElement(const HTMLCollection& htmlCollection, c
     case TSectionRows:
         return element.hasTagName(trTag);
     case SelectOptions:
-        return element.hasTagName(optionTag);
+        return toHTMLOptionsCollection(htmlCollection).elementMatches(element);
     case SelectedOptions:
         return isHTMLOptionElement(element) && toHTMLOptionElement(element).selected();
     case DataListOptions:
-        if (isHTMLOptionElement(element)) {
-            const HTMLOptionElement& option = toHTMLOptionElement(element);
-            if (!option.isDisabledFormControl() && !option.value().isEmpty())
-                return true;
-        }
-        return false;
+        return toHTMLDataListOptionsCollection(htmlCollection).elementMatches(element);
     case MapAreas:
         return element.hasTagName(areaTag);
     case DocApplets:
@@ -243,7 +241,6 @@ static inline bool isMatchingHTMLElement(const HTMLCollection& htmlCollection, c
     case DocAll:
     case NodeChildren:
     case FormControls:
-    case DocumentNamedItems:
     case TableRows:
     case WindowNamedItems:
     case NameNodeListType:
@@ -268,8 +265,6 @@ inline bool HTMLCollection::elementMatches(const Element& element) const
         return toTagCollection(*this).elementMatches(element);
     case HTMLTagCollectionType:
         return toHTMLTagCollection(*this).elementMatches(element);
-    case DocumentNamedItems:
-        return toDocumentNameCollection(*this).elementMatches(element);
     case WindowNamedItems:
         return toWindowNameCollection(*this).elementMatches(element);
     default:
@@ -328,7 +323,7 @@ static inline bool nameShouldBeVisibleInDocumentAll(const HTMLElement& element)
         || element.hasTagName(selectTag);
 }
 
-Element* HTMLCollection::traverseToFirstElement() const
+Element* HTMLCollection::traverseToFirst() const
 {
     switch (type()) {
     case HTMLTagCollectionType:
@@ -344,7 +339,7 @@ Element* HTMLCollection::traverseToFirstElement() const
     }
 }
 
-Element* HTMLCollection::traverseToLastElement() const
+Element* HTMLCollection::traverseToLast() const
 {
     ASSERT(canTraverseBackward());
     if (shouldOnlyIncludeDirectChildren())
@@ -505,7 +500,7 @@ HTMLCollection::NamedItemCache::NamedItemCache()
 void HTMLCollection::trace(Visitor* visitor)
 {
     visitor->trace(m_namedItemCache);
-    visitor->trace(m_collectionIndexCache);
+    visitor->trace(m_collectionItemsCache);
     LiveNodeListBase::trace(visitor);
 }
 

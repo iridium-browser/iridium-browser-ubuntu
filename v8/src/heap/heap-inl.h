@@ -15,6 +15,7 @@
 #include "src/heap-profiler.h"
 #include "src/isolate.h"
 #include "src/list-inl.h"
+#include "src/msan.h"
 #include "src/objects.h"
 
 namespace v8 {
@@ -52,7 +53,6 @@ void PromotionQueue::insert(HeapObject* target, int size) {
 template <>
 bool inline Heap::IsOneByte(Vector<const char> str, int chars) {
   // TODO(dcarney): incorporate Latin-1 check when Latin-1 is supported?
-  // ASCII only check.
   return chars == str.length();
 }
 
@@ -87,7 +87,7 @@ AllocationResult Heap::AllocateOneByteInternalizedString(
     Vector<const uint8_t> str, uint32_t hash_field) {
   CHECK_GE(String::kMaxLength, str.length());
   // Compute map and object size.
-  Map* map = ascii_internalized_string_map();
+  Map* map = one_byte_internalized_string_map();
   int size = SeqOneByteString::SizeFor(str.length());
   AllocationSpace space = SelectSpace(size, OLD_DATA_SPACE, TENURED);
 
@@ -448,8 +448,7 @@ bool Heap::AllowedToBeMigrated(HeapObject* obj, AllocationSpace dst) {
       return dst == src || dst == TargetSpaceId(type);
     case OLD_POINTER_SPACE:
       return dst == src && (dst == TargetSpaceId(type) || obj->IsFiller() ||
-                            (obj->IsExternalString() &&
-                             ExternalString::cast(obj)->is_short()));
+                            obj->IsExternalString());
     case OLD_DATA_SPACE:
       return dst == src && dst == TargetSpaceId(type);
     case CODE_SPACE:
@@ -497,7 +496,7 @@ void Heap::ScavengePointer(HeapObject** p) { ScavengeObject(p, *p); }
 
 AllocationMemento* Heap::FindAllocationMemento(HeapObject* object) {
   // Check if there is potentially a memento behind the object. If
-  // the last word of the momento is on another page we return
+  // the last word of the memento is on another page we return
   // immediately.
   Address object_address = object->address();
   Address memento_address = object_address + object->Size();
@@ -507,7 +506,12 @@ AllocationMemento* Heap::FindAllocationMemento(HeapObject* object) {
   }
 
   HeapObject* candidate = HeapObject::FromAddress(memento_address);
-  if (candidate->map() != allocation_memento_map()) return NULL;
+  Map* candidate_map = candidate->map();
+  // This fast check may peek at an uninitialized word. However, the slow check
+  // below (memento_address == top) ensures that this is safe. Mark the word as
+  // initialized to silence MemorySanitizer warnings.
+  MSAN_MEMORY_IS_INITIALIZED(&candidate_map, sizeof(candidate_map));
+  if (candidate_map != allocation_memento_map()) return NULL;
 
   // Either the object is the last object in the new space, or there is another
   // object of at least word size (the header map word) following it, so

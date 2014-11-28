@@ -84,7 +84,7 @@ ShellURLRequestContextGetter::ShellURLRequestContextGetter(
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
     proxy_config_service_.reset(
         net::ProxyService::CreateSystemProxyConfigService(
-            io_loop_->message_loop_proxy().get(), file_loop_));
+            io_loop_->message_loop_proxy(), file_loop_->message_loop_proxy()));
   }
 }
 
@@ -149,8 +149,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 #endif
             cache_path,
             0,
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
-                .get());
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
 
     net::HttpNetworkSession::Params network_session_params;
     network_session_params.cert_verifier =

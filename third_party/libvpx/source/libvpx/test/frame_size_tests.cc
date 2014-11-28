@@ -7,13 +7,9 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include <climits>
-#include <vector>
 #include "third_party/googletest/src/include/gtest/gtest.h"
 #include "test/codec_factory.h"
-#include "test/encode_test_driver.h"
-#include "test/i420_video_source.h"
-#include "test/util.h"
+#include "test/video_source.h"
 
 namespace {
 
@@ -31,12 +27,9 @@ class VP9FrameSizeTestsLarge
   }
 
   virtual bool HandleDecodeResult(const vpx_codec_err_t res_dec,
-                                  const libvpx_test::VideoSource &video,
+                                  const libvpx_test::VideoSource& /*video*/,
                                   libvpx_test::Decoder *decoder) {
-    EXPECT_EQ(expected_res_, res_dec)
-        << "Expected " << expected_res_
-        << "but got " << res_dec;
-
+    EXPECT_EQ(expected_res_, res_dec) << decoder->DecodeError();
     return !::testing::Test::HasFailure();
   }
 
@@ -62,16 +55,6 @@ TEST_F(VP9FrameSizeTestsLarge, TestInvalidSizes) {
   video.set_limit(2);
   expected_res_ = VPX_CODEC_CORRUPT_FRAME;
   ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
-#else
-  // If we are on a 32 bit platform we can't possibly allocate enough memory
-  // for the largest video frame size (64kx64k). This test checks that we
-  // properly return a memory error.
-  if (sizeof(size_t) == 4) {
-    video.SetSize(65535, 65535);
-    video.set_limit(2);
-    expected_res_ = VPX_CODEC_MEM_ERROR;
-    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
-  }
 #endif
 }
 
@@ -89,8 +72,13 @@ TEST_F(VP9FrameSizeTestsLarge, ValidSizes) {
   // one for each lag in frames (for 2 pass), and then one for each possible
   // reference buffer (8) - we can end up with up to 30 buffers of roughly this
   // size or almost 1 gig of memory.
-  // TODO(jzern): restore this to at least 4096x4096 after issue #828 is fixed.
-  video.SetSize(4096, 2160);
+  // In total the allocations will exceed 2GiB which may cause a failure with
+  // mingw + wine, use a smaller size in that case.
+#if defined(_WIN32) && !defined(_WIN64)
+  video.SetSize(4096, 3072);
+#else
+  video.SetSize(4096, 4096);
+#endif
   video.set_limit(2);
   expected_res_ = VPX_CODEC_OK;
   ASSERT_NO_FATAL_FAILURE(RunLoop(&video));

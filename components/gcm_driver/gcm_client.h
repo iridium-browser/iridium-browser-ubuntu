@@ -30,6 +30,7 @@ class URLRequestContextGetter;
 namespace gcm {
 
 class Encryptor;
+struct AccountMapping;
 
 // Interface that encapsulates the network communications with the Google Cloud
 // Messaging server. This interface is not supposed to be thread-safe.
@@ -98,7 +99,7 @@ class GCMClient {
     int time_to_live;
     MessageData data;
 
-    static const int kMaximumTTL = 4 * 7 * 24 * 60 * 60;  // 4 weeks.
+    static const int kMaximumTTL;
   };
 
   // Message being received from the other party.
@@ -138,6 +139,13 @@ class GCMClient {
     int resend_queue_size;
 
     RecordedActivities recorded_activities;
+  };
+
+  // Information about account.
+  struct AccountTokenInfo {
+    std::string account_id;
+    std::string email;
+    std::string access_token;
   };
 
   // A delegate interface that allows the GCMClient instance to interact with
@@ -193,7 +201,10 @@ class GCMClient {
     // Called when the GCM becomes ready. To get to this state, GCMClient
     // finished loading from the GCM store and retrieved the device check-in
     // from the server if it hadn't yet.
-    virtual void OnGCMReady() = 0;
+    // |account_mappings|: a persisted list of accounts mapped to this GCM
+    //                     client.
+    virtual void OnGCMReady(
+        const std::vector<AccountMapping>& account_mappings) = 0;
 
     // Called when activities are being recorded and a new activity has just
     // been recorded.
@@ -276,6 +287,13 @@ class GCMClient {
   // |account_tokens| maps email addresses to OAuth2 access tokens.
   virtual void SetAccountsForCheckin(
       const std::map<std::string, std::string>& account_tokens) = 0;
+
+  // Persists the |account_mapping| in the store.
+  virtual void UpdateAccountMapping(const AccountMapping& account_mapping) = 0;
+
+  // Removes the account mapping related to |account_id| from the persistent
+  // store.
+  virtual void RemoveAccountMapping(const std::string& account_id) = 0;
 };
 
 }  // namespace gcm

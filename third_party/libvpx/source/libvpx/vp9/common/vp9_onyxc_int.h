@@ -84,6 +84,10 @@ typedef struct VP9Common {
   int subsampling_x;
   int subsampling_y;
 
+#if CONFIG_VP9_HIGHBITDEPTH
+  int use_highbitdepth;  // Marks if we need to use 16bit frame buffers.
+#endif
+
   YV12_BUFFER_CONFIG *frame_to_show;
 
   RefCntBuffer frame_bufs[FRAME_BUFFERS];
@@ -146,11 +150,6 @@ typedef struct VP9Common {
   MODE_INFO *prev_mip; /* MODE_INFO array 'mip' from last decoded frame */
   MODE_INFO *prev_mi;  /* 'mi' from last frame (points into prev_mip) */
 
-  MODE_INFO **mi_grid_base;
-  MODE_INFO **mi_grid_visible;
-  MODE_INFO **prev_mi_grid_base;
-  MODE_INFO **prev_mi_grid_visible;
-
   // Persistent mb segment id map used in prediction.
   unsigned char *last_frame_seg_map;
 
@@ -179,8 +178,8 @@ typedef struct VP9Common {
   unsigned int current_video_frame;
   BITSTREAM_PROFILE profile;
 
-  // BITS_8 in versions 0 and 1, BITS_10 or BITS_12 in version 2
-  BIT_DEPTH bit_depth;
+  // VPX_BITS_8 in profile 0 or 1, VPX_BITS_10 or VPX_BITS_12 in profile 2 or 3.
+  vpx_bit_depth_t bit_depth;
 
 #if CONFIG_VP9_POSTPROC
   struct postproc_state  postproc_state;
@@ -188,11 +187,6 @@ typedef struct VP9Common {
 
   int error_resilient_mode;
   int frame_parallel_decoding_mode;
-
-  // Flag indicates if prev_mi can be used in coding:
-  //   0: encoder assumes decoder does not have prev_mi
-  //   1: encoder assumes decoder has and uses prev_mi
-  unsigned int coding_use_prev_mi;
 
   int log2_tile_cols, log2_tile_rows;
 
@@ -207,6 +201,15 @@ typedef struct VP9Common {
   PARTITION_CONTEXT *above_seg_context;
   ENTROPY_CONTEXT *above_context;
 } VP9_COMMON;
+
+static INLINE YV12_BUFFER_CONFIG *get_ref_frame(VP9_COMMON *cm, int index) {
+  if (index < 0 || index >= REF_FRAMES)
+    return NULL;
+  if (cm->ref_frame_map[index] < 0)
+    return NULL;
+  assert(cm->ref_frame_map[index] < FRAME_BUFFERS);
+  return &cm->frame_bufs[cm->ref_frame_map[index]].buf;
+}
 
 static INLINE YV12_BUFFER_CONFIG *get_frame_new_buffer(VP9_COMMON *cm) {
   return &cm->frame_bufs[cm->new_fb_idx].buf;

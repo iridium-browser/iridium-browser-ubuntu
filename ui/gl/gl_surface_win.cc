@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/win/windows_version.h"
-#include "third_party/mesa/src/include/GL/osmesa.h"
 #include "ui/gfx/frame_time.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_bindings.h"
@@ -25,6 +24,15 @@
 #if !defined(EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE)
 #define EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE \
   reinterpret_cast<EGLNativeDisplayType>(-2)
+#endif
+#if !defined(EGL_PLATFORM_ANGLE_ANGLE)
+#define EGL_PLATFORM_ANGLE_ANGLE 0x3201
+#endif
+#if !defined(EGL_PLATFORM_ANGLE_TYPE_ANGLE)
+#define EGL_PLATFORM_ANGLE_TYPE_ANGLE 0x3202
+#endif
+#if !defined(EGL_PLATFORM_ANGLE_TYPE_D3D11_WARP_ANGLE)
+#define EGL_PLATFORM_ANGLE_TYPE_D3D11_WARP_ANGLE 0x3206
 #endif
 
 namespace gfx {
@@ -112,9 +120,9 @@ bool GLSurface::InitializeOneOffInternal() {
 
 NativeViewGLSurfaceOSMesa::NativeViewGLSurfaceOSMesa(
     gfx::AcceleratedWidget window)
-  : GLSurfaceOSMesa(OSMESA_RGBA, gfx::Size(1, 1)),
-    window_(window),
-    device_context_(NULL) {
+    : GLSurfaceOSMesa(OSMesaSurfaceFormatRGBA, gfx::Size(1, 1)),
+      window_(window),
+      device_context_(NULL) {
   DCHECK(window);
 }
 
@@ -265,8 +273,8 @@ scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
   TRACE_EVENT0("gpu", "GLSurface::CreateOffscreenGLSurface");
   switch (GetGLImplementation()) {
     case kGLImplementationOSMesaGL: {
-      scoped_refptr<GLSurface> surface(new GLSurfaceOSMesa(OSMESA_RGBA,
-                                                           size));
+      scoped_refptr<GLSurface> surface(
+          new GLSurfaceOSMesa(OSMesaSurfaceFormatRGBA, size));
       if (!surface->Initialize())
         return NULL;
 
@@ -295,10 +303,10 @@ scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
 }
 
 EGLNativeDisplayType GetPlatformDefaultEGLNativeDisplay() {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableD3D11))
-    return EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE;
-
-  return EGL_DEFAULT_DISPLAY;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableD3D11) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseWarp))
+    return GetDC(NULL);
+  return EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE;
 }
 
 }  // namespace gfx

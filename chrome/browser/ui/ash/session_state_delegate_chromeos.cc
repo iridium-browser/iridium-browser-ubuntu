@@ -6,6 +6,9 @@
 
 #include "ash/multi_profile_uma.h"
 #include "ash/session/session_state_observer.h"
+#include "ash/system/chromeos/multi_user/user_switch_util.h"
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
@@ -52,7 +55,7 @@ content::BrowserContext* SessionStateDelegateChromeos::GetBrowserContextByIndex(
   DCHECK_LT(index, NumberOfLoggedInUsers());
   user_manager::User* user =
       user_manager::UserManager::Get()->GetLRULoggedInUsers()[index];
-  DCHECK(user);
+  CHECK(user);
   return chromeos::ProfileHelper::Get()->GetProfileByUserUnsafe(user);
 }
 
@@ -78,6 +81,18 @@ int SessionStateDelegateChromeos::GetMaximumNumberOfLoggedInUsers() const {
 
 int SessionStateDelegateChromeos::NumberOfLoggedInUsers() const {
   return user_manager::UserManager::Get()->GetLoggedInUsers().size();
+}
+
+bool SessionStateDelegateChromeos::CanAddUserToMultiProfile(
+    AddUserError* error) const {
+  if (user_manager::UserManager::Get()
+          ->GetUsersAdmittedForMultiProfile()
+          .size() == 0) {
+    if (error)
+      *error = ADD_USER_ERROR_OUT_OF_USERS;
+    return false;
+  }
+  return SessionStateDelegate::CanAddUserToMultiProfile(error);
 }
 
 bool SessionStateDelegateChromeos::IsActiveUserSessionStarted() const {
@@ -164,7 +179,7 @@ void SessionStateDelegateChromeos::SwitchActiveUser(
             gaia::CanonicalizeEmail(gaia::SanitizeEmail(user_id)));
   if (user_id == user_manager::UserManager::Get()->GetActiveUser()->email())
     return;
-  user_manager::UserManager::Get()->SwitchActiveUser(user_id);
+  TryToSwitchUser(user_id);
 }
 
 void SessionStateDelegateChromeos::CycleActiveUser(CycleUser cycle_user) {
@@ -207,7 +222,7 @@ void SessionStateDelegateChromeos::CycleActiveUser(CycleUser cycle_user) {
   }
 
   // Switch using the transformed |user_id|.
-  user_manager::UserManager::Get()->SwitchActiveUser(user_id);
+  TryToSwitchUser(user_id);
 }
 
 bool SessionStateDelegateChromeos::IsMultiProfileAllowedByPrimaryUserPolicy()
@@ -266,4 +281,13 @@ void SessionStateDelegateChromeos::NotifySessionStateChanged() {
   FOR_EACH_OBSERVER(ash::SessionStateObserver,
                     session_state_observer_list_,
                     SessionStateChanged(session_state_));
+}
+
+void DoSwitchUser(const std::string& user_id) {
+  user_manager::UserManager::Get()->SwitchActiveUser(user_id);
+}
+
+void SessionStateDelegateChromeos::TryToSwitchUser(
+    const std::string& user_id) {
+  ash::TrySwitchingActiveUser(base::Bind(&DoSwitchUser, user_id));
 }

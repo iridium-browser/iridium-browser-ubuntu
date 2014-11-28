@@ -17,7 +17,7 @@
         '../interface',
       ],
       'dependencies': [
-        '../../base/base.gyp:webrtc_base',
+        '../../base/base.gyp:rtc_base_approved',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -54,7 +54,6 @@
         '../interface/static_instance.h',
         '../interface/stl_util.h',
         '../interface/stringize_macros.h',
-        '../interface/thread_annotations.h',
         '../interface/thread_wrapper.h',
         '../interface/tick_util.h',
         '../interface/timestamp_extrapolator.h',

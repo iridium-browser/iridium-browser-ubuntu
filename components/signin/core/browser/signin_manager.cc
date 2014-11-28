@@ -63,9 +63,9 @@ SigninManager::SigninManager(SigninClient* client,
     : SigninManagerBase(client),
       prohibit_signout_(false),
       type_(SIGNIN_TYPE_NONE),
-      weak_pointer_factory_(this),
       client_(client),
-      token_service_(token_service) {}
+      token_service_(token_service),
+      weak_pointer_factory_(this) {}
 
 void SigninManager::AddMergeSessionObserver(
     MergeSessionHelper::Observer* observer) {
@@ -131,7 +131,7 @@ void SigninManager::StartSignInWithRefreshToken(
     const std::string& username,
     const std::string& password,
     const OAuthTokenFetchedCallback& callback) {
-  DCHECK(GetAuthenticatedUsername().empty() ||
+  DCHECK(!IsAuthenticated() ||
          gaia::AreEmailsSame(username, GetAuthenticatedUsername()));
 
   if (!PrepareForSignin(SIGNIN_TYPE_WITH_REFRESH_TOKEN, username, password))
@@ -178,7 +178,7 @@ void SigninManager::SignOut(
   DCHECK(IsInitialized());
 
   signin_metrics::LogSignout(signout_source_metric);
-  if (GetAuthenticatedUsername().empty()) {
+  if (!IsAuthenticated()) {
     if (AuthInProgress()) {
       // If the user is in the process of signing in, then treat a call to
       // SignOut as a cancellation request.
@@ -201,6 +201,7 @@ void SigninManager::SignOut(
 
   ClearTransientSigninData();
 
+  const std::string account_id = GetAuthenticatedAccountId();
   const std::string username = GetAuthenticatedUsername();
   const base::Time signin_time =
       base::Time::FromInternalValue(
@@ -227,7 +228,9 @@ void SigninManager::SignOut(
                << "IsSigninAllowed: " << IsSigninAllowed();
   token_service_->RevokeAllCredentials();
 
-  FOR_EACH_OBSERVER(Observer, observer_list_, GoogleSignedOut(username));
+  FOR_EACH_OBSERVER(Observer,
+                    observer_list_,
+                    GoogleSignedOut(account_id, username));
 }
 
 void SigninManager::Initialize(PrefService* local_state) {
@@ -269,7 +272,7 @@ void SigninManager::Shutdown() {
 }
 
 void SigninManager::OnGoogleServicesUsernamePatternChanged() {
-  if (!GetAuthenticatedUsername().empty() &&
+  if (IsAuthenticated() &&
       !IsAllowedUsername(GetAuthenticatedUsername())) {
     // Signed in user is invalid according to the current policy so sign
     // the user out.
@@ -351,7 +354,7 @@ void SigninManager::CompletePendingSignin() {
   }
 
   DCHECK(!temp_refresh_token_.empty());
-  DCHECK(!GetAuthenticatedUsername().empty());
+  DCHECK(IsAuthenticated());
   token_service_->UpdateCredentials(GetAuthenticatedUsername(),
                                     temp_refresh_token_);
   temp_refresh_token_.clear();
@@ -373,9 +376,13 @@ void SigninManager::OnSignedIn(const std::string& username) {
   FOR_EACH_OBSERVER(
       Observer,
       observer_list_,
-      GoogleSigninSucceeded(GetAuthenticatedUsername(), password_));
+      GoogleSigninSucceeded(GetAuthenticatedAccountId(),
+                            GetAuthenticatedUsername(),
+                            password_));
 
-  client_->GoogleSigninSucceeded(GetAuthenticatedUsername(), password_);
+  client_->GoogleSigninSucceeded(GetAuthenticatedAccountId(),
+                                 GetAuthenticatedUsername(),
+                                 password_);
 
   signin_metrics::LogSigninProfile(client_->IsFirstRun(),
                                    client_->GetInstallDate());

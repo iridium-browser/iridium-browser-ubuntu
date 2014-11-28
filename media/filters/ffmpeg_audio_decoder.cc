@@ -143,6 +143,10 @@ FFmpegAudioDecoder::~FFmpegAudioDecoder() {
   }
 }
 
+std::string FFmpegAudioDecoder::GetDisplayName() const {
+  return "FFmpegAudioDecoder";
+}
+
 void FFmpegAudioDecoder::Initialize(const AudioDecoderConfig& config,
                                     const PipelineStatusCB& status_cb,
                                     const OutputCB& output_cb) {
@@ -202,7 +206,7 @@ void FFmpegAudioDecoder::DecodeBuffer(
   DCHECK_NE(state_, kUninitialized);
   DCHECK_NE(state_, kDecodeFinished);
   DCHECK_NE(state_, kError);
-  DCHECK(buffer);
+  DCHECK(buffer.get());
 
   // Make sure we are notified if http://crbug.com/49709 returns.  Issue also
   // occurs with some damaged files.

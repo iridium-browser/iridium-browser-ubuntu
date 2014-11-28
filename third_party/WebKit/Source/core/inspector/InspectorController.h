@@ -83,11 +83,12 @@ public:
     // Settings overrides.
     void setTextAutosizingEnabled(bool);
     void setDeviceScaleAdjustment(float);
+    void setPreferCompositingToLCDTextEnabled(bool);
 
     void willBeDestroyed();
     void registerModuleAgent(PassOwnPtrWillBeRawPtr<InspectorAgent>);
 
-    void setInspectorFrontendClient(PassOwnPtrWillBeRawPtr<InspectorFrontendClient>);
+    void setInspectorFrontendClient(InspectorFrontendClient*);
     void didClearDocumentOfWindowObject(LocalFrame*);
     void setInjectedScriptForOrigin(const String& origin, const String& source);
     void showContextMenu(float x, float y, PassRefPtr<ContextMenuProvider>);
@@ -111,6 +112,7 @@ public:
 
     void deviceOrPageScaleFactorChanged();
     bool deviceEmulationEnabled();
+    bool screencastEnabled();
 
     bool isUnderTest();
     void evaluateForTestInFrontend(long callId, const String& script);
@@ -156,8 +158,8 @@ private:
     RawPtrWillBeMember<InspectorLayerTreeAgent> m_layerTreeAgent;
     RawPtrWillBeMember<InspectorTracingAgent> m_tracingAgent;
 
-    RefPtr<InspectorBackendDispatcher> m_inspectorBackendDispatcher;
-    OwnPtrWillBeMember<InspectorFrontendClient> m_inspectorFrontendClient;
+    RefPtrWillBeMember<InspectorBackendDispatcher> m_inspectorBackendDispatcher;
+    InspectorFrontendClient* m_inspectorFrontendClient;
     OwnPtr<InspectorFrontend> m_inspectorFrontend;
     RawPtrWillBeMember<Page> m_page;
     InspectorClient* m_inspectorClient;

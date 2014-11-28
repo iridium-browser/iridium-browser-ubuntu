@@ -619,6 +619,7 @@ button {
   top: 200px;
   left: 0;
   width: 100%;
+  z-index: 2;
 }
 
 .dialog-screen {
@@ -629,6 +630,7 @@ button {
   height: 100%;
   background-color: #fff;
   opacity: 0.75;
+  z-index: 1;
 }
 
 /* TODO(jamiewalch): crbug.com/252796: Remove these once crbug.com/240772
@@ -644,7 +646,6 @@ button {
 html.apps-v2.scrollable {
   overflow: scroll;
 }
-
 
 /* TODO(jamiewalch): Reinstate this if we're able to get translations for
  *     "Why is this safe?" that don't overflow in any language.
@@ -745,6 +746,12 @@ html.apps-v2.scrollable {
   top: 0;
   left: 0;
   width: 100%;
+}
+
+/* Override full-height class until connected, otherwise it takes up 100% of
+ * the window height in addition to the home-screen UI. */
+body:not(.connected) #session-mode {
+  height: auto;
 }
 
 /* video-container needs relative position so that mediasource-video-output can

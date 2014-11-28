@@ -28,10 +28,10 @@ _EXCLUDED_PATHS = (
     r"^chrome[\\\/]browser[\\\/]resources[\\\/]pdf[\\\/]index.js"
 )
 
-# TestRunner and NetscapePlugIn library is temporarily excluded from pan-project
-# checks until it's transitioned to chromium coding style.
+# The NetscapePlugIn library is excluded from pan-project as it will soon
+# be deleted together with the rest of the NPAPI and it's not worthwhile to
+# update the coding style until then.
 _TESTRUNNER_PATHS = (
-    r"^content[\\\/]shell[\\\/]renderer[\\\/]test_runner[\\\/].*",
     r"^content[\\\/]shell[\\\/]tools[\\\/]plugin[\\\/].*",
 )
 
@@ -42,20 +42,20 @@ _IMPLEMENTATION_EXTENSIONS = r'\.(cc|cpp|cxx|mm)$'
 # Regular expression that matches code only used for test binaries
 # (best effort).
 _TEST_CODE_EXCLUDED_PATHS = (
-    r'.*[/\\](fake_|test_|mock_).+%s' % _IMPLEMENTATION_EXTENSIONS,
+    r'.*[\\\/](fake_|test_|mock_).+%s' % _IMPLEMENTATION_EXTENSIONS,
     r'.+_test_(base|support|util)%s' % _IMPLEMENTATION_EXTENSIONS,
     r'.+_(api|browser|kif|perf|pixel|unit|ui)?test(_[a-z]+)?%s' %
         _IMPLEMENTATION_EXTENSIONS,
     r'.+profile_sync_service_harness%s' % _IMPLEMENTATION_EXTENSIONS,
-    r'.*[/\\](test|tool(s)?)[/\\].*',
+    r'.*[\\\/](test|tool(s)?)[\\\/].*',
     # content_shell is used for running layout tests.
-    r'content[/\\]shell[/\\].*',
+    r'content[\\\/]shell[\\\/].*',
     # At request of folks maintaining this folder.
-    r'chrome[/\\]browser[/\\]automation[/\\].*',
+    r'chrome[\\\/]browser[\\\/]automation[\\\/].*',
     # Non-production example code.
-    r'mojo[/\\]examples[/\\].*',
+    r'mojo[\\\/]examples[\\\/].*',
     # Launcher for running iOS tests on the simulator.
-    r'testing[/\\]iossim[/\\]iossim\.mm$',
+    r'testing[\\\/]iossim[\\\/]iossim\.mm$',
 )
 
 _TEST_ONLY_WARNING = (
@@ -167,8 +167,9 @@ _BANNED_CPP_FUNCTIONS = (
       ),
       True,
       (
+        r"^base[\\\/]process[\\\/]process_metrics_linux\.cc$",
         r"^chrome[\\\/]browser[\\\/]chromeos[\\\/]boot_times_loader\.cc$",
-        r"^components[\\\/]breakpad[\\\/]app[\\\/]breakpad_mac\.mm$",
+        r"^components[\\\/]crash[\\\/]app[\\\/]breakpad_mac\.mm$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_browser_main\.cc$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_message_filter\.cc$",
         r"^mojo[\\\/]system[\\\/]raw_shared_buffer_posix\.cc$",
@@ -245,10 +246,14 @@ _BANNED_CPP_FUNCTIONS = (
       ),
       True,
       (
-        r'extensions[/\\]renderer[/\\]safe_builtins\.*',
+        r'extensions[\\\/]renderer[\\\/]safe_builtins\.*',
       ),
     ),
 )
+
+_IPC_ENUM_TRAITS_DEPRECATED = (
+    'You are using IPC_ENUM_TRAITS() in your code. It has been deprecated.\n'
+    'See http://www.chromium.org/Home/chromium-security/education/security-tips-for-ipc')
 
 
 _VALID_OS_MACROS = (
@@ -389,6 +394,21 @@ def _CheckNoDEPSGIT(input_api, output_api):
       'See https://sites.google.com/a/chromium.org/dev/developers/how-tos/get-the-code#Rolling_DEPS\n'
       'for more information')]
   return []
+
+
+def _CheckValidHostsInDEPS(input_api, output_api):
+  """Checks that DEPS file deps are from allowed_hosts."""
+  # Run only if DEPS file has been modified to annoy fewer bystanders.
+  if all(f.LocalPath() != 'DEPS' for f in input_api.AffectedFiles()):
+    return []
+  # Outsource work to gclient verify
+  try:
+    input_api.subprocess.check_output(['gclient', 'verify'])
+    return []
+  except input_api.subprocess.CalledProcessError, error:
+    return [output_api.PresubmitError(
+        'DEPS file must have only git dependencies.',
+        long_text=error.output)]
 
 
 def _CheckNoBannedFunctions(input_api, output_api):
@@ -930,13 +950,16 @@ def _CheckSpamLogging(input_api, output_api):
                  r"^cloud_print[\\\/]",
                  r"^content[\\\/]common[\\\/]gpu[\\\/]client[\\\/]"
                      r"gl_helper_benchmark\.cc$",
+                 r"^courgette[\\\/]courgette_tool\.cc$",
                  r"^extensions[\\\/]renderer[\\\/]logging_native_handler\.cc$",
                  r"^native_client_sdk[\\\/]",
                  r"^remoting[\\\/]base[\\\/]logging\.h$",
                  r"^remoting[\\\/]host[\\\/].*",
                  r"^sandbox[\\\/]linux[\\\/].*",
                  r"^tools[\\\/]",
-                 r"^ui[\\\/]aura[\\\/]bench[\\\/]bench_main\.cc$",))
+                 r"^ui[\\\/]aura[\\\/]bench[\\\/]bench_main\.cc$",
+                 r"^webkit[\\\/]browser[\\\/]fileapi[\\\/]" +
+                     r"dump_file_system.cc$",))
   source_file_filter = lambda x: input_api.FilterSourceFile(
       x, white_list=(file_inclusion_pattern,), black_list=black_list)
 
@@ -1118,17 +1141,17 @@ def _CheckParseErrors(input_api, output_api):
   }
   # These paths contain test data and other known invalid JSON files.
   excluded_patterns = [
-    'test/data/',
-    '^components/policy/resources/policy_templates.json$',
+    r'test[\\\/]data[\\\/]',
+    r'^components[\\\/]policy[\\\/]resources[\\\/]policy_templates\.json$',
   ]
   # Most JSON files are preprocessed and support comments, but these do not.
   json_no_comments_patterns = [
-    '^testing/',
+    r'^testing[\\\/]',
   ]
   # Only run IDL checker on files in these directories.
   idl_included_patterns = [
-    '^chrome/common/extensions/api/',
-    '^extensions/common/api/',
+    r'^chrome[\\\/]common[\\\/]extensions[\\\/]api[\\\/]',
+    r'^extensions[\\\/]common[\\\/]api[\\\/]',
   ]
 
   def get_action(affected_file):
@@ -1272,6 +1295,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckUserActionUpdate(input_api, output_api))
   results.extend(_CheckNoDeprecatedCSS(input_api, output_api))
   results.extend(_CheckParseErrors(input_api, output_api))
+  results.extend(_CheckForIPCRules(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1279,50 +1303,6 @@ def _CommonChecks(input_api, output_api):
         input_api.PresubmitLocalPath(),
         whitelist=[r'^PRESUBMIT_test\.py$']))
   return results
-
-
-def _CheckSubversionConfig(input_api, output_api):
-  """Verifies the subversion config file is correctly setup.
-
-  Checks that autoprops are enabled, returns an error otherwise.
-  """
-  join = input_api.os_path.join
-  if input_api.platform == 'win32':
-    appdata = input_api.environ.get('APPDATA', '')
-    if not appdata:
-      return [output_api.PresubmitError('%APPDATA% is not configured.')]
-    path = join(appdata, 'Subversion', 'config')
-  else:
-    home = input_api.environ.get('HOME', '')
-    if not home:
-      return [output_api.PresubmitError('$HOME is not configured.')]
-    path = join(home, '.subversion', 'config')
-
-  error_msg = (
-      'Please look at http://dev.chromium.org/developers/coding-style to\n'
-      'configure your subversion configuration file. This enables automatic\n'
-      'properties to simplify the project maintenance.\n'
-      'Pro-tip: just download and install\n'
-      'http://src.chromium.org/viewvc/chrome/trunk/tools/build/slave/config\n')
-
-  try:
-    lines = open(path, 'r').read().splitlines()
-    # Make sure auto-props is enabled and check for 2 Chromium standard
-    # auto-prop.
-    if (not '*.cc = svn:eol-style=LF' in lines or
-        not '*.pdf = svn:mime-type=application/pdf' in lines or
-        not 'enable-auto-props = yes' in lines):
-      return [
-          output_api.PresubmitNotifyResult(
-              'It looks like you have not configured your subversion config '
-              'file or it is not up-to-date.\n' + error_msg)
-      ]
-  except (OSError, IOError):
-    return [
-        output_api.PresubmitNotifyResult(
-            'Can\'t find your subversion config file.\n' + error_msg)
-    ]
-  return []
 
 
 def _CheckAuthorizedAuthor(input_api, output_api):
@@ -1413,10 +1393,35 @@ def _CheckForInvalidOSMacros(input_api, output_api):
       'Possibly invalid OS macro[s] found. Please fix your code\n'
       'or add your macro to src/PRESUBMIT.py.', bad_macros)]
 
+def _CheckForIPCRules(input_api, output_api):
+  """Check for same IPC rules described in
+  http://www.chromium.org/Home/chromium-security/education/security-tips-for-ipc
+  """
+  base_pattern = r'IPC_ENUM_TRAITS\('
+  inclusion_pattern = input_api.re.compile(r'(%s)' % base_pattern)
+  comment_pattern = input_api.re.compile(r'//.*(%s)' % base_pattern)
+
+  problems = []
+  for f in input_api.AffectedSourceFiles(None):
+    local_path = f.LocalPath()
+    if not local_path.endswith('.h'):
+      continue
+    for line_number, line in f.ChangedContents():
+      if inclusion_pattern.search(line) and not comment_pattern.search(line):
+        problems.append(
+          '%s:%d\n    %s' % (local_path, line_number, line.strip()))
+
+  if problems:
+    return [output_api.PresubmitPromptWarning(
+        _IPC_ENUM_TRAITS_DEPRECATED, problems)]
+  else:
+    return []
+
 
 def CheckChangeOnUpload(input_api, output_api):
   results = []
   results.extend(_CommonChecks(input_api, output_api))
+  results.extend(_CheckValidHostsInDEPS(input_api, output_api))
   results.extend(_CheckJavaStyle(input_api, output_api))
   return results
 
@@ -1493,9 +1498,12 @@ def GetDefaultTryConfigs(bots=None):
       # TODO(maruel): An option would be to run 'sizes' but not count a failure
       # of this step as a try job failure.
       'android_aosp': ['compile'],
+      'android_arm64_dbg_recipe': ['slave_steps'],
+      'android_chromium_gn_compile_dbg': ['compile'],
       'android_chromium_gn_compile_rel': ['compile'],
       'android_clang_dbg': ['slave_steps'],
-      'android_dbg': ['slave_steps'],
+      'android_clang_dbg_recipe': ['slave_steps'],
+      'android_dbg_tests_recipe': ['slave_steps'],
       'cros_x86': ['defaulttests'],
       'ios_dbg_simulator': [
           'compile',
@@ -1508,6 +1516,7 @@ def GetDefaultTryConfigs(bots=None):
           'ui_unittests',
       ],
       'ios_rel_device': ['compile'],
+      'ios_rel_device_ninja': ['compile'],
       'linux_asan': ['compile'],
       'mac_asan': ['compile'],
       #TODO(stip): Change the name of this builder to reflect that it's release.
@@ -1516,6 +1525,7 @@ def GetDefaultTryConfigs(bots=None):
       'linux_chromium_chromeos_clang_dbg': ['defaulttests'],
       'linux_chromium_chromeos_rel_swarming': ['defaulttests'],
       'linux_chromium_compile_dbg': ['defaulttests'],
+      'linux_chromium_gn_dbg': ['compile'],
       'linux_chromium_gn_rel': ['defaulttests'],
       'linux_chromium_rel_swarming': ['defaulttests'],
       'linux_chromium_clang_dbg': ['defaulttests'],
@@ -1528,9 +1538,10 @@ def GetDefaultTryConfigs(bots=None):
       'win_chromium_compile_dbg': ['defaulttests'],
       'win_chromium_dbg': ['defaulttests'],
       'win_chromium_rel_swarming': ['defaulttests'],
-      'win_chromium_x64_rel': ['defaulttests'],
+      'win_chromium_x64_rel_swarming': ['defaulttests'],
       'win_gpu': ['defaulttests'],
       'win_nacl_sdk_build': ['compile'],
+      'win8_chromium_rel': ['defaulttests'],
   }
 
   if bots:
@@ -1564,17 +1575,16 @@ def CheckChangeOnCommit(input_api, output_api):
       input_api, output_api))
   results.extend(input_api.canned_checks.CheckChangeHasDescription(
       input_api, output_api))
-  results.extend(_CheckSubversionConfig(input_api, output_api))
   return results
 
 
 def GetPreferredTryMasters(project, change):
   files = change.LocalPaths()
 
-  if not files or all(re.search(r'[\\/]OWNERS$', f) for f in files):
+  if not files or all(re.search(r'[\\\/]OWNERS$', f) for f in files):
     return {}
 
-  if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
+  if all(re.search(r'\.(m|mm)$|(^|[\\\/_])mac[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'mac_chromium_compile_dbg',
         'mac_chromium_rel_swarming',
@@ -1583,24 +1593,30 @@ def GetPreferredTryMasters(project, change):
     return GetDefaultTryConfigs([
         'win_chromium_dbg',
         'win_chromium_rel_swarming',
+        'win8_chromium_rel',
     ])
-  if all(re.search('(^|[/_])android[/_.]', f) for f in files):
+  if all(re.search(r'(^|[\\\/_])android[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'android_aosp',
         'android_clang_dbg',
-        'android_dbg',
+        'android_dbg_tests_recipe',
     ])
-  if all(re.search('[/_]ios[/_.]', f) for f in files):
+  if all(re.search(r'[\\\/_]ios[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
 
   builders = [
+      'android_arm64_dbg_recipe',
       'android_chromium_gn_compile_rel',
+      'android_chromium_gn_compile_dbg',
       'android_clang_dbg',
-      'android_dbg',
+      'android_clang_dbg_recipe',
+      'android_dbg_tests_recipe',
       'ios_dbg_simulator',
       'ios_rel_device',
+      'ios_rel_device_ninja',
       'linux_chromium_chromeos_rel_swarming',
       'linux_chromium_clang_dbg',
+      'linux_chromium_gn_dbg',
       'linux_chromium_gn_rel',
       'linux_chromium_rel_swarming',
       'linux_gpu',
@@ -1609,13 +1625,14 @@ def GetPreferredTryMasters(project, change):
       'mac_gpu',
       'win_chromium_compile_dbg',
       'win_chromium_rel_swarming',
-      'win_chromium_x64_rel',
+      'win_chromium_x64_rel_swarming',
       'win_gpu',
+      'win8_chromium_rel',
   ]
 
   # Match things like path/aura/file.cc and path/file_aura.cc.
   # Same for chromeos.
-  if any(re.search('[/_](aura|chromeos)', f) for f in files):
+  if any(re.search(r'[\\\/_](aura|chromeos)', f) for f in files):
     builders.extend([
         'linux_chromeos_asan',
         'linux_chromium_chromeos_clang_dbg'

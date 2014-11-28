@@ -34,8 +34,7 @@ class AndroidForwarderFactory(forwarders.ForwarderFactory):
 
   def Create(self, port_pairs):
     if self._rndis_configurator:
-      return AndroidRndisForwarder(self._adb, self.host_ip,
-                                   self._rndis_configurator.device_iface,
+      return AndroidRndisForwarder(self._adb, self._rndis_configurator,
                                    port_pairs)
     return AndroidForwarder(self._adb, port_pairs)
 
@@ -68,16 +67,20 @@ class AndroidForwarder(forwarders.Forwarder):
 class AndroidRndisForwarder(forwarders.Forwarder):
   """Forwards traffic using RNDIS. Assumes the device has root access."""
 
-  def __init__(self, adb, host_ip, device_iface, port_pairs):
+  def __init__(self, adb, rndis_configurator, port_pairs):
     super(AndroidRndisForwarder, self).__init__(port_pairs)
 
     self._adb = adb
-    self._device_iface = device_iface
-    self._host_ip = host_ip
+    self._rndis_configurator = rndis_configurator
+    self._device_iface = rndis_configurator.device_iface
+    self._host_ip = rndis_configurator.host_ip
     self._original_dns = None, None, None
     self._RedirectPorts(port_pairs)
     if port_pairs.dns:
       self._OverrideDns()
+      # Need to override routing policy again since call to setifdns
+      # sometimes resets policy table
+      self._rndis_configurator.OverrideRoutingPolicy()
     # TODO(tonyg): Verify that each port can connect to host.
 
   @property
@@ -85,6 +88,7 @@ class AndroidRndisForwarder(forwarders.Forwarder):
     return self._host_ip
 
   def Close(self):
+    self._rndis_configurator.RestoreRoutingPolicy()
     self._SetDns(*self._original_dns)
     super(AndroidRndisForwarder, self).Close()
 
@@ -128,10 +132,10 @@ class AndroidRndisForwarder(forwarders.Forwarder):
       self._adb.device().SetProp('net.dnschange', int(dnschange) + 1)
     # Since commit 8b47b3601f82f299bb8c135af0639b72b67230e6 to frameworks/base
     # the net.dns1 properties have been replaced with explicit commands for netd
-    self._adb.RunShellCommand('ndc netd resolver setifdns %s %s %s' %
+    self._adb.RunShellCommand('netd resolver setifdns %s %s %s' %
                               (iface, dns1, dns2))
     # TODO(szym): if we know the package UID, we could setifaceforuidrange
-    self._adb.RunShellCommand('ndc netd resolver setdefaultif %s' % iface)
+    self._adb.RunShellCommand('netd resolver setdefaultif %s' % iface)
 
   def _GetCurrentDns(self):
     """Returns current gateway, dns1, and dns2."""
@@ -397,7 +401,7 @@ doit &
             subprocess.call(['sudo', '/bin/chmod', '755', interface_conf_dir])
           interface_conf = '\n'.join([
               '# Added by Telemetry for RNDIS forwarding.',
-              'auto %s' % host_iface,
+              'allow-hotplug %s' % host_iface,
               'iface %s inet static' % host_iface,
               '  address 192.168.123.1',
               '  netmask 255.255.255.0',
@@ -456,13 +460,30 @@ doit &
       return subprocess.call(['ping', '-q', '-c1', '-W1', self._device_ip],
                              stdout=devnull) == 0
 
+  def OverrideRoutingPolicy(self):
+    """Override any routing policy that could prevent
+    packets from reaching the rndis interface
+    """
+    policies = self._device.RunShellCommand('ip rule')
+    if len(policies) > 1 and not ('lookup main' in policies[1]):
+      self._device.RunShellCommand('ip rule add prio 1 from all table main')
+      self._device.RunShellCommand('ip route flush cache')
+
+  def RestoreRoutingPolicy(self):
+    policies = self._device.RunShellCommand('ip rule')
+    if len(policies) > 1 and re.match("^1:.*lookup main", policies[1]):
+      self._device.RunShellCommand('ip rule del prio 1')
+      self._device.RunShellCommand('ip route flush cache')
+
   def _CheckConfigureNetwork(self):
     """Enables RNDIS and configures it, retrying until we have connectivity."""
     force = False
     for _ in range(3):
       device_iface, host_iface = self._CheckEnableRndis(force)
       self._ConfigureNetwork(device_iface, host_iface)
+      self.OverrideRoutingPolicy()
       if self._TestConnectivity():
         return
       force = True
+    self.RestoreRoutingPolicy()
     raise Exception('No connectivity, giving up.')

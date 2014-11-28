@@ -939,7 +939,8 @@ TEST_F(BookmarkBarControllerTest, Display) {
   [[bar_ view] display];
 }
 
-// Test that middle clicking on a bookmark button results in an open action.
+// Test that middle clicking on a bookmark button results in an open action,
+// except for offTheSideButton, as it just opens its folder menu.
 TEST_F(BookmarkBarControllerTest, MiddleClick) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   GURL gurl1("http://www.google.com/");
@@ -953,6 +954,37 @@ TEST_F(BookmarkBarControllerTest, MiddleClick) {
   [first otherMouseUp:
       cocoa_test_event_utils::MouseEventWithType(NSOtherMouseUp, 0)];
   EXPECT_EQ(noOpenBar()->urls_.size(), 1U);
+
+  // Test for offTheSideButton.
+  // Add more bookmarks so that offTheSideButton is visible.
+  const BookmarkNode* parent = model->bookmark_bar_node();
+  for (int i = 0; i < 20; i++) {
+    model->AddURL(parent, parent->child_count(),
+                  ASCIIToUTF16("super duper wide title"),
+                  GURL("http://superfriends.hall-of-justice.edu"));
+  }
+  EXPECT_FALSE([bar_ offTheSideButtonIsHidden]);
+
+  NSButton* offTheSideButton = [bar_ offTheSideButton];
+  EXPECT_TRUE(offTheSideButton);
+  [offTheSideButton otherMouseUp:
+      cocoa_test_event_utils::MouseEventWithType(NSOtherMouseUp, 0)];
+
+  // Middle click on offTheSideButton should not open any bookmarks under it,
+  // therefore urls size should still be 1.
+  EXPECT_EQ(noOpenBar()->urls_.size(), 1U);
+
+  // Check that folderController should not be NULL since offTheSideButton
+  // folder is currently open.
+  BookmarkBarFolderController* bbfc = [bar_ folderController];
+  EXPECT_TRUE(bbfc);
+  EXPECT_TRUE([bbfc parentButton] == offTheSideButton);
+
+  // Middle clicking again on it should close the folder.
+  [offTheSideButton otherMouseUp:
+      cocoa_test_event_utils::MouseEventWithType(NSOtherMouseUp, 0)];
+  bbfc = [bar_ folderController];
+  EXPECT_FALSE(bbfc);
 }
 
 TEST_F(BookmarkBarControllerTest, DisplaysHelpMessageOnEmpty) {
@@ -1534,8 +1566,8 @@ TEST_F(BookmarkBarControllerTest, ShrinkOrHideView) {
 
 TEST_F(BookmarkBarControllerTest, LastBookmarkResizeBehavior) {
   // Hide the apps shortcut.
-  profile()->GetPrefs()->SetBoolean(prefs::kShowAppsShortcutInBookmarkBar,
-                                    false);
+  profile()->GetPrefs()->SetBoolean(
+      bookmarks::prefs::kShowAppsShortcutInBookmarkBar, false);
   ASSERT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
 
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -1583,8 +1615,8 @@ TEST_F(BookmarkBarControllerTest, BookmarksWithAppsPageShortcut) {
   }
 
   // Removing the Apps button should move every bookmark to the left.
-  profile()->GetPrefs()->SetBoolean(prefs::kShowAppsShortcutInBookmarkBar,
-                                    false);
+  profile()->GetPrefs()->SetBoolean(
+      bookmarks::prefs::kShowAppsShortcutInBookmarkBar, false);
   ASSERT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
   EXPECT_GT(apps_button_right, NSMinX([[buttons objectAtIndex:0] frame]));
   for (size_t i = 1; i < [buttons count]; ++i) {
@@ -1603,8 +1635,8 @@ TEST_F(BookmarkBarControllerTest, BookmarksWithoutAppsPageShortcut) {
             NSMinX([[[bar_ buttonView] importBookmarksButton] frame]));
 
   // Removing the Apps button should move the no item containers to the left.
-  profile()->GetPrefs()->SetBoolean(prefs::kShowAppsShortcutInBookmarkBar,
-                                    false);
+  profile()->GetPrefs()->SetBoolean(
+      bookmarks::prefs::kShowAppsShortcutInBookmarkBar, false);
   ASSERT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
   EXPECT_GT(apps_button_right,
             NSMinX([[[bar_ buttonView] noItemTextfield] frame]));
@@ -1615,17 +1647,17 @@ TEST_F(BookmarkBarControllerTest, BookmarksWithoutAppsPageShortcut) {
 TEST_F(BookmarkBarControllerTest, ManagedShowAppsShortcutInBookmarksBar) {
   // By default the pref is not managed and the apps shortcut is shown.
   TestingPrefServiceSyncable* prefs = profile()->GetTestingPrefService();
-  EXPECT_FALSE(
-      prefs->IsManagedPreference(prefs::kShowAppsShortcutInBookmarkBar));
+  EXPECT_FALSE(prefs->IsManagedPreference(
+      bookmarks::prefs::kShowAppsShortcutInBookmarkBar));
   EXPECT_FALSE([bar_ appsPageShortcutButtonIsHidden]);
 
   // Hide the apps shortcut by policy, via the managed pref.
-  prefs->SetManagedPref(prefs::kShowAppsShortcutInBookmarkBar,
+  prefs->SetManagedPref(bookmarks::prefs::kShowAppsShortcutInBookmarkBar,
                         new base::FundamentalValue(false));
   EXPECT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
 
   // And try showing it via policy too.
-  prefs->SetManagedPref(prefs::kShowAppsShortcutInBookmarkBar,
+  prefs->SetManagedPref(bookmarks::prefs::kShowAppsShortcutInBookmarkBar,
                         new base::FundamentalValue(true));
   EXPECT_FALSE([bar_ appsPageShortcutButtonIsHidden]);
 }
@@ -2003,8 +2035,8 @@ TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
   test::AddNodesFromModelString(model, root, model_string);
 
   // Hide the apps shortcut.
-  profile()->GetPrefs()->SetBoolean(prefs::kShowAppsShortcutInBookmarkBar,
-                                    false);
+  profile()->GetPrefs()->SetBoolean(
+      bookmarks::prefs::kShowAppsShortcutInBookmarkBar, false);
   ASSERT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
 
   // Validate initial model.

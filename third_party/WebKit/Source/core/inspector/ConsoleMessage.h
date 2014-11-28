@@ -7,6 +7,7 @@
 
 #include "bindings/core/v8/ScriptState.h"
 #include "core/frame/ConsoleTypes.h"
+#include "core/inspector/ConsoleAPITypes.h"
 #include "core/inspector/ScriptCallStack.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -16,6 +17,7 @@
 
 namespace blink {
 
+class ScriptArguments;
 class ScriptCallStack;
 class ScriptState;
 class WorkerGlobalScopeProxy;
@@ -26,42 +28,57 @@ public:
     {
         return adoptRefWillBeNoop(new ConsoleMessage(source, level, message, url, lineNumber, columnNumber));
     }
-
     ~ConsoleMessage();
 
-    PassRefPtrWillBeRawPtr<ScriptCallStack> callStack() const;
-    void setCallStack(PassRefPtrWillBeRawPtr<ScriptCallStack>);
-    ScriptState* scriptState() const;
-    void setScriptState(ScriptState*);
-    unsigned long requestIdentifier() const;
-    void setRequestIdentifier(unsigned long);
+    MessageType type() const;
+    void setType(MessageType);
+    int scriptId() const;
+    void setScriptId(int);
     const String& url() const;
     void setURL(const String&);
     unsigned lineNumber() const;
     void setLineNumber(unsigned);
+    PassRefPtrWillBeRawPtr<ScriptCallStack> callStack() const;
+    void setCallStack(PassRefPtrWillBeRawPtr<ScriptCallStack>);
+    ScriptState* scriptState() const;
+    void setScriptState(ScriptState*);
+    PassRefPtrWillBeRawPtr<ScriptArguments> scriptArguments() const;
+    void setScriptArguments(PassRefPtrWillBeRawPtr<ScriptArguments>);
+    unsigned long requestIdentifier() const;
+    void setRequestIdentifier(unsigned long);
+    double timestamp() const;
+    void setTimestamp(double);
+    WorkerGlobalScopeProxy* workerGlobalScopeProxy() { return m_workerProxy; }
+    void setWorkerGlobalScopeProxy(WorkerGlobalScopeProxy* proxy) { m_workerProxy = proxy; }
 
     MessageSource source() const;
     MessageLevel level() const;
     const String& message() const;
     unsigned columnNumber() const;
-    void setWorkerId(WorkerGlobalScopeProxy* proxy) { m_workerProxy = proxy; }
-    WorkerGlobalScopeProxy* workerId() { return m_workerProxy; }
+
+    void frameWindowDiscarded(LocalDOMWindow*);
+    unsigned argumentCount();
+
+    void collectCallStack();
 
     void trace(Visitor*);
 
 private:
-    ConsoleMessage();
     ConsoleMessage(MessageSource, MessageLevel, const String& message, const String& url = String(), unsigned lineNumber = 0, unsigned columnNumber = 0);
 
     MessageSource m_source;
     MessageLevel m_level;
+    MessageType m_type;
     String m_message;
+    int m_scriptId;
     String m_url;
     unsigned m_lineNumber;
     unsigned m_columnNumber;
     RefPtrWillBeMember<ScriptCallStack> m_callStack;
-    ScriptState* m_scriptState;
+    OwnPtr<ScriptStateProtectingContext> m_scriptState;
+    RefPtrWillBeMember<ScriptArguments> m_scriptArguments;
     unsigned long m_requestIdentifier;
+    double m_timestamp;
     WorkerGlobalScopeProxy* m_workerProxy;
 };
 

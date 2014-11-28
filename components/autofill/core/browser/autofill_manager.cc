@@ -225,6 +225,10 @@ void AutofillManager::RegisterProfilePrefs(
       prefs::kAutofillUseMacAddressBook,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kAutofillMacAddressBookShowedCount,
+      0,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 }
 
@@ -280,11 +284,15 @@ void AutofillManager::ShowAutofillSettings() {
 bool AutofillManager::ShouldShowAccessAddressBookSuggestion(
     const FormData& form,
     const FormFieldData& field) {
-  if (!personal_data_)
+  if (!personal_data_ || !field.should_autocomplete)
     return false;
+
   FormStructure* form_structure = NULL;
   AutofillField* autofill_field = NULL;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
+    return false;
+
+  if (!form_structure->IsAutofillable())
     return false;
 
   return personal_data_->ShouldShowAccessAddressBookSuggestion(
@@ -295,6 +303,18 @@ bool AutofillManager::AccessAddressBook() {
   if (!personal_data_)
     return false;
   return personal_data_->AccessAddressBook();
+}
+
+void AutofillManager::ShowedAccessAddressBookPrompt() {
+  if (!personal_data_)
+    return;
+  return personal_data_->ShowedAccessAddressBookPrompt();
+}
+
+int AutofillManager::AccessAddressBookPromptCount() {
+  if (!personal_data_)
+    return 0;
+  return personal_data_->AccessAddressBookPromptCount();
 }
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
@@ -455,8 +475,13 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
       GetCreditCardSuggestions(
           field, type, &values, &labels, &icons, &unique_ids);
     } else {
-      GetProfileSuggestions(
-          form_structure, field, type, &values, &labels, &icons, &unique_ids);
+      GetProfileSuggestions(*form_structure,
+                            field,
+                            *autofill_field,
+                            &values,
+                            &labels,
+                            &icons,
+                            &unique_ids);
     }
 
     DCHECK_EQ(values.size(), labels.size());
@@ -468,9 +493,7 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
       // provide credit card suggestions for non-HTTPS pages. However, provide a
       // warning to the user in these cases.
       int warning = 0;
-      if (!form_structure->IsAutofillable())
-        warning = IDS_AUTOFILL_WARNING_FORM_DISABLED;
-      else if (is_filling_credit_card && !FormIsHTTPS(*form_structure))
+      if (is_filling_credit_card && !FormIsHTTPS(*form_structure))
         warning = IDS_AUTOFILL_WARNING_INSECURE_CONNECTION;
       if (warning) {
         values.assign(1, l10n_util::GetStringUTF16(warning));
@@ -688,6 +711,7 @@ void AutofillManager::OnHidePopup() {
   if (!IsAutofillEnabled())
     return;
 
+  autocomplete_history_manager_->CancelPendingQuery();
   client_->HideAutofillPopup();
 }
 
@@ -1059,23 +1083,31 @@ bool AutofillManager::UpdateCachedForm(const FormData& live_form,
 }
 
 void AutofillManager::GetProfileSuggestions(
-    FormStructure* form,
+    const FormStructure& form,
     const FormFieldData& field,
-    const AutofillType& type,
+    const AutofillField& autofill_field,
     std::vector<base::string16>* values,
     std::vector<base::string16>* labels,
     std::vector<base::string16>* icons,
     std::vector<int>* unique_ids) const {
-  std::vector<ServerFieldType> field_types(form->field_count());
-  for (size_t i = 0; i < form->field_count(); ++i) {
-    field_types.push_back(form->field(i)->Type().GetStorableType());
+  std::vector<ServerFieldType> field_types(form.field_count());
+  for (size_t i = 0; i < form.field_count(); ++i) {
+    field_types.push_back(form.field(i)->Type().GetStorableType());
   }
   std::vector<GUIDPair> guid_pairs;
 
   personal_data_->GetProfileSuggestions(
-      type, field.value, field.is_autofilled, field_types,
+      autofill_field.Type(), field.value, field.is_autofilled, field_types,
       base::Callback<bool(const AutofillProfile&)>(),
       values, labels, icons, &guid_pairs);
+
+  // Adjust phone number to display in prefix/suffix case.
+  if (autofill_field.Type().GetStorableType() == PHONE_HOME_NUMBER) {
+    for (size_t i = 0; i < values->size(); ++i) {
+      (*values)[i] = AutofillField::GetPhoneNumberValue(
+          autofill_field, (*values)[i], field);
+    }
+  }
 
   for (size_t i = 0; i < guid_pairs.size(); ++i) {
     unique_ids->push_back(PackGUIDs(GUIDPair(std::string(), 0),

@@ -6,6 +6,7 @@
 
 #include "extensions/common/api/generated_schemas.h"
 #include "extensions/common/common_manifest_handlers.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/features/api_feature.h"
 #include "extensions/common/features/base_feature_provider.h"
 #include "extensions/common/features/feature_provider.h"
@@ -13,6 +14,8 @@
 #include "extensions/common/features/manifest_feature.h"
 #include "extensions/common/features/permission_feature.h"
 #include "extensions/common/manifest_handler.h"
+#include "extensions/common/permissions/extensions_api_permissions.h"
+#include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/url_pattern_set.h"
 #include "extensions/test/test_permission_message_provider.h"
 #include "grit/extensions_resources.h"
@@ -41,12 +44,20 @@ void TestExtensionsClient::Initialize() {
     RegisterCommonManifestHandlers();
     ManifestHandler::FinalizeRegistration();
   }
+
+  // Allow the core API permissions.
+  static ExtensionsAPIPermissions extensions_api_permissions;
+  PermissionsInfo::GetInstance()->AddProvider(extensions_api_permissions);
 }
 
 const PermissionMessageProvider&
 TestExtensionsClient::GetPermissionMessageProvider() const {
   static TestPermissionMessageProvider provider;
   return provider;
+}
+
+const std::string TestExtensionsClient::GetProductName() {
+  return "extensions_test";
 }
 
 scoped_ptr<FeatureProvider> TestExtensionsClient::CreateFeatureProvider(
@@ -129,6 +140,18 @@ void TestExtensionsClient::RegisterAPISchemaResources(ExtensionAPI* api) const {
 }
 
 bool TestExtensionsClient::ShouldSuppressFatalErrors() const {
+  return true;
+}
+
+std::string TestExtensionsClient::GetWebstoreBaseURL() const {
+  return extension_urls::kChromeWebstoreBaseURL;
+}
+
+std::string TestExtensionsClient::GetWebstoreUpdateURL() const {
+  return extension_urls::kChromeWebstoreUpdateURL;
+}
+
+bool TestExtensionsClient::IsBlacklistUpdateURL(const GURL& url) const {
   return true;
 }
 

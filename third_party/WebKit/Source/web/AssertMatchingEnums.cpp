@@ -52,6 +52,7 @@
 #include "core/loader/appcache/ApplicationCacheHost.h"
 #include "core/page/InjectedStyleSheets.h"
 #include "core/page/PageVisibilityState.h"
+#include "core/rendering/compositing/CompositedSelectionBound.h"
 #include "core/rendering/style/RenderStyleConstants.h"
 #include "modules/geolocation/GeolocationError.h"
 #include "modules/geolocation/GeolocationPosition.h"
@@ -99,6 +100,7 @@
 #include "public/platform/WebReferrerPolicy.h"
 #include "public/platform/WebScrollbar.h"
 #include "public/platform/WebScrollbarBehavior.h"
+#include "public/platform/WebSelectionBound.h"
 #include "public/platform/WebStorageQuotaError.h"
 #include "public/platform/WebStorageQuotaType.h"
 #include "public/platform/WebURLRequest.h"
@@ -190,6 +192,7 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleContentInfo, ContentInfoRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDefinition, DefinitionRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDescriptionListDetail, DescriptionListDetailRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDescriptionListTerm, DescriptionListTermRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDetails, DetailsRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDialog, DialogRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDirectory, DirectoryRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDisclosureTriangle, DisclosureTriangleRole);
@@ -198,6 +201,8 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDocument, DocumentRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDrawer, DrawerRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleEditableText, EditableTextRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleEmbeddedObject, EmbeddedObjectRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleFigcaption, FigcaptionRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleFigure, FigureRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleFooter, FooterRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleForm, FormRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleGrid, GridRole);
@@ -233,6 +238,7 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuListOption, MenuListOptionRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuListPopup, MenuListPopupRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenu, MenuRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleNavigation, NavigationRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleNone, NoneRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleNote, NoteRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleOutline, OutlineRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleParagraph, ParagraphRole);
@@ -582,7 +588,6 @@ COMPILE_ASSERT_MATCHING_ENUM(WebURLRequest::PriorityVeryHigh, ResourceLoadPriori
 
 COMPILE_ASSERT_MATCHING_ENUM(WebNavigationPolicyIgnore, NavigationPolicyIgnore);
 COMPILE_ASSERT_MATCHING_ENUM(WebNavigationPolicyDownload, NavigationPolicyDownload);
-COMPILE_ASSERT_MATCHING_ENUM(WebNavigationPolicyDownloadTo, NavigationPolicyDownloadTo);
 COMPILE_ASSERT_MATCHING_ENUM(WebNavigationPolicyCurrentTab, NavigationPolicyCurrentTab);
 COMPILE_ASSERT_MATCHING_ENUM(WebNavigationPolicyNewBackgroundTab, NavigationPolicyNewBackgroundTab);
 COMPILE_ASSERT_MATCHING_ENUM(WebNavigationPolicyNewForegroundTab, NavigationPolicyNewForegroundTab);
@@ -613,9 +618,20 @@ COMPILE_ASSERT_MATCHING_ENUM(WebTouchActionPanX, TouchActionPanX);
 COMPILE_ASSERT_MATCHING_ENUM(WebTouchActionPanY, TouchActionPanY);
 COMPILE_ASSERT_MATCHING_ENUM(WebTouchActionPinchZoom, TouchActionPinchZoom);
 
+COMPILE_ASSERT_MATCHING_ENUM(WebSelectionBound::Caret, CompositedSelectionBound::Caret);
+COMPILE_ASSERT_MATCHING_ENUM(WebSelectionBound::SelectionLeft, CompositedSelectionBound::SelectionLeft);
+COMPILE_ASSERT_MATCHING_ENUM(WebSelectionBound::SelectionRight, CompositedSelectionBound::SelectionRight);
+
 COMPILE_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsOff, V8CacheOptionsOff);
 COMPILE_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsParse, V8CacheOptionsParse);
 COMPILE_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsCode, V8CacheOptionsCode);
+
+COMPILE_ASSERT_MATCHING_ENUM(WebSettings::PointerTypeNone, PointerTypeNone);
+COMPILE_ASSERT_MATCHING_ENUM(WebSettings::PointerTypeCoarse, PointerTypeCoarse);
+COMPILE_ASSERT_MATCHING_ENUM(WebSettings::PointerTypeFine, PointerTypeFine);
+COMPILE_ASSERT_MATCHING_ENUM(WebSettings::HoverTypeNone, HoverTypeNone);
+COMPILE_ASSERT_MATCHING_ENUM(WebSettings::HoverTypeOnDemand, HoverTypeOnDemand);
+COMPILE_ASSERT_MATCHING_ENUM(WebSettings::HoverTypeHover, HoverTypeHover);
 
 COMPILE_ASSERT_MATCHING_UINT64(kSerializedScriptValueVersion, SerializedScriptValue::wireFormatVersion);
 

@@ -9,7 +9,6 @@ namespace onc {
 
 const char kAugmentationActiveSetting[] = "Active";
 const char kAugmentationEffectiveSetting[] = "Effective";
-const char kAugmentationUnmanaged[] = "Unmanaged";
 const char kAugmentationUserPolicy[] = "UserPolicy";
 const char kAugmentationDevicePolicy[] = "DevicePolicy";
 const char kAugmentationUserSetting[] = "UserSetting";
@@ -34,21 +33,32 @@ const char kUnencryptedConfiguration[] = "UnencryptedConfiguration";
 // Network Configuration
 namespace network_config {
 const char kCellular[] = "Cellular";
+const char kConnectable[] = "Connectable";
+const char kConnectionState[] = "ConnectionState";
 const char kDevice[] = "Device";
+const char kErrorState[] = "ErrorState";
 const char kEthernet[] = "Ethernet";
 const char kGUID[] = "GUID";
 const char kIPConfigs[] = "IPConfigs";
 const char kMacAddress[] = "MacAddress";
-const char kName[] = "Name";
 const char kNameServers[] = "NameServers";
+const char kName[] = "Name";
+const char kPriority[] = "Priority";
 const char kProxySettings[] = "ProxySettings";
+const char kRestrictedConnectivity[] = "RestrictedConnectivity";
+const char kSavedIPConfig[] = "SavedIPConfig";
 const char kSearchDomains[] = "SearchDomains";
-const char kConnectionState[] = "ConnectionState";
-const char kConnectable[] = "Connectable";
-const char kErrorState[] = "ErrorState";
+const char kSourceDevice[] = "Device";
+const char kSourceDevicePolicy[] = "DevicePolicy";
+const char kSourceNone[] = "None";
+const char kSourceUser[] = "User";
+const char kSourceUserPolicy[] = "UserPolicy";
+const char kSource[] = "Source";
+const char kStaticIPConfig[] = "StaticIPConfig";
 const char kType[] = "Type";
 const char kVPN[] = "VPN";
 const char kWiFi[] = "WiFi";
+const char kWimax[] = "WiMAX";
 
 std::string CellularProperty(const std::string& property) {
   return std::string(kCellular) + "." + property;
@@ -70,12 +80,16 @@ const char kCellular[] = "Cellular";
 const char kEthernet[] = "Ethernet";
 const char kVPN[] = "VPN";
 const char kWiFi[] = "WiFi";
-const char kWimax[] = "Wimax";
+const char kWimax[] = "WiMAX";
 const char kWireless[] = "Wireless";
 }  // namespace network_type
 
 namespace cellular {
 const char kActivationState[] = "ActivationState";
+const char kActivated[] = "Activated";
+const char kActivating[] = "Activating";
+const char kNotActivated[] = "NotActivated";
+const char kPartiallyActivated[] = "PartiallyActivated";
 const char kActivationType[] = "ActivationType";
 const char kAllowRoaming[] = "AllowRoaming";
 const char kAPN[] = "APN";
@@ -90,6 +104,7 @@ const char kHomeProvider[] = "HomeProvider";
 const char kICCID[] = "ICCID";
 const char kIMEI[] = "IMEI";
 const char kIMSI[] = "IMSI";
+const char kLastGoodAPN[] = "LastGoodAPN";
 const char kManufacturer[] = "Manufacturer";
 const char kMDN[] = "MDN";
 const char kMEID[] = "MEID";
@@ -99,7 +114,8 @@ const char kNetworkTechnology[] = "NetworkTechnology";
 const char kPRLVersion[] = "PRLVersion";
 const char kProviderRequiresRoaming[] = "ProviderRequiresRoaming";
 const char kRoamingState[] = "RoamingState";
-const char kSelectedNetwork[] = "SelectedNetwork";
+const char kHome[] = "Home";
+const char kRoaming[] = "Roaming";
 const char kServingOperator[] = "ServingOperator";
 const char kSIMLockStatus[] = "SIMLockStatus";
 const char kSIMPresent[] = "SIMPresent";
@@ -114,6 +130,7 @@ const char kName[] = "Name";
 }  // namespace cellular_provider
 
 namespace cellular_apn {
+const char kAccessPointName[] = "AccessPointName";
 const char kName[] = "Name";
 const char kUsername[] = "Username";
 const char kPassword[] = "Password";
@@ -156,6 +173,7 @@ const char kIPv6[] = "IPv6";
 const char kNameServers[] = "NameServers";
 const char kRoutingPrefix[] = "RoutingPrefix";
 const char kType[] = "Type";
+const char kWebProxyAutoDiscoveryUrl[] = "WebProxyAutoDiscoveryUrl";
 }  // namespace ipconfig
 
 namespace wifi {
@@ -166,7 +184,6 @@ const char kFrequency[] = "Frequency";
 const char kFrequencyList[] = "FrequencyList";
 const char kHiddenSSID[] = "HiddenSSID";
 const char kPassphrase[] = "Passphrase";
-const char kProxyURL[] = "ProxyURL";
 const char kSSID[] = "SSID";
 const char kSecurity[] = "Security";
 const char kSecurityNone[] = "None";
@@ -177,6 +194,12 @@ const char kWPA_EAP[] = "WPA-EAP";
 const char kWPA_PSK[] = "WPA-PSK";
 const char kWPA2_PSK[] = "WPA2-PSK";
 }  // namespace wifi
+
+namespace wimax {
+const char kAutoConnect[] = "AutoConnect";
+const char kEAP[] = "EAP";
+const char kSignalStrength[] = "SignalStrength";
+}  // namespace wimax
 
 namespace client_cert {
 const char kClientCertPattern[] = "ClientCertPattern";

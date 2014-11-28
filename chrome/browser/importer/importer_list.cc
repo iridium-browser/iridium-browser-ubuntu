@@ -9,8 +9,8 @@
 #include "chrome/common/importer/firefox_importer_utils.h"
 #include "chrome/common/importer/importer_bridge.h"
 #include "chrome/common/importer/importer_data_types.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_MACOSX)
@@ -93,7 +93,8 @@ void DetectFirefoxProfiles(const std::string locale,
   if (firefox->app_path.empty())
     firefox->app_path = app_path;
   firefox->services_supported = importer::HISTORY | importer::FAVORITES |
-      importer::PASSWORDS | importer::SEARCH_ENGINES;
+                                importer::PASSWORDS | importer::SEARCH_ENGINES |
+                                importer::AUTOFILL_FORM_DATA;
   firefox->locale = locale;
   profiles->push_back(firefox);
 }

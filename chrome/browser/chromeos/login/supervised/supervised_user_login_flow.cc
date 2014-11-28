@@ -47,6 +47,10 @@ bool SupervisedUserLoginFlow::ShouldSkipPostLoginScreens() {
   return true;
 }
 
+bool SupervisedUserLoginFlow::SupportsEarlyRestartToApplyFlags() {
+  return false;
+}
+
 bool SupervisedUserLoginFlow::HandleLoginFailure(const AuthFailure& failure) {
   return false;
 }
@@ -135,7 +139,7 @@ void SupervisedUserLoginFlow::OnPasswordChangeDataLoaded(
                                 kCryptohomeSupervisedUserKeyLabel,
                                 kCryptohomeSupervisedUserKeyPrivileges);
 
-  authenticator_ = new ExtendedAuthenticator(this);
+  authenticator_ = ExtendedAuthenticator::Create(this);
   SupervisedUserAuthentication::Schema current_schema =
       auth->GetPasswordSchema(user_id());
 

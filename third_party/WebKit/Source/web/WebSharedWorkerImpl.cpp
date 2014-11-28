@@ -46,9 +46,9 @@
 #include "core/workers/SharedWorkerThread.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerGlobalScope.h"
+#include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerScriptLoader.h"
 #include "core/workers/WorkerThreadStartupData.h"
-#include "modules/webdatabase/DatabaseTask.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
@@ -64,7 +64,6 @@
 #include "public/web/WebSettings.h"
 #include "public/web/WebView.h"
 #include "public/web/WebWorkerPermissionClientProxy.h"
-#include "web/DatabaseClientImpl.h"
 #include "web/LocalFileSystemClient.h"
 #include "web/WebDataSourceImpl.h"
 #include "web/WebLocalFrameImpl.h"
@@ -154,6 +153,7 @@ WebSharedWorkerImpl::WebSharedWorkerImpl(WebSharedWorkerClient* client)
     : m_webView(0)
     , m_mainFrame(0)
     , m_askedToTerminate(false)
+    , m_workerInspectorProxy(WorkerInspectorProxy::create())
     , m_client(WeakReference<WebSharedWorkerClient>::create(client))
     , m_clientWeakPtr(WeakPtr<WebSharedWorkerClient>(m_client))
     , m_pauseWorkerContextOnStart(false)
@@ -187,6 +187,7 @@ void WebSharedWorkerImpl::stopWorkerThread()
     }
     if (m_workerThread)
         m_workerThread->stop();
+    m_workerInspectorProxy->workerThreadTerminated();
 }
 
 void WebSharedWorkerImpl::initializeLoader(const WebURL& url)
@@ -254,6 +255,16 @@ void WebSharedWorkerImpl::postMessageToPageInspector(const String& message)
     // before the copy in the closure is used on the main thread.
     const Closure& boundFunction = bind(&WebSharedWorkerClient::dispatchDevToolsMessage, m_clientWeakPtr, message.isolatedCopy());
     callOnMainThread(boundFunction);
+    toWebLocalFrameImpl(m_mainFrame)->frame()->document()->postInspectorTask(createCrossThreadTask(&WebSharedWorkerImpl::postMessageToPageInspectorOnMainThread, this, message));
+}
+
+void WebSharedWorkerImpl::postMessageToPageInspectorOnMainThread(const String& message)
+{
+    WorkerInspectorProxy::PageInspector* pageInspector = m_workerInspectorProxy->pageInspector();
+    if (!pageInspector)
+        return;
+    pageInspector->dispatchMessageFromWorker(message);
+
 }
 
 void WebSharedWorkerImpl::updateInspectorStateCookie(const String& cookie)
@@ -364,7 +375,6 @@ void WebSharedWorkerImpl::onScriptLoaderFinished()
     WorkerThreadStartMode startMode = m_pauseWorkerContextOnStart ? PauseWorkerGlobalScopeOnStart : DontPauseWorkerGlobalScopeOnStart;
     OwnPtrWillBeRawPtr<WorkerClients> workerClients = WorkerClients::create();
     provideLocalFileSystemToWorker(workerClients.get(), LocalFileSystemClient::create());
-    provideDatabaseClientToWorker(workerClients.get(), DatabaseClientImpl::create());
     WebSecurityOrigin webSecurityOrigin(m_loadingDocument->securityOrigin());
     providePermissionClientToWorker(workerClients.get(), adoptPtr(client()->createWorkerPermissionClientProxy(webSecurityOrigin)));
     OwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData = WorkerThreadStartupData::create(m_url, m_loadingDocument->userAgent(m_url), m_mainScriptLoader->script(), startMode, m_contentSecurityPolicy, static_cast<ContentSecurityPolicyHeaderType>(m_policyType), workerClients.release());
@@ -376,8 +386,11 @@ void WebSharedWorkerImpl::onScriptLoaderFinished()
         workerThread()->postDebuggerTask(createCrossThreadTask(connectToWorkerContextInspectorTask, true));
 
     workerThread()->start();
-    if (client())
+    m_workerInspectorProxy->workerThreadCreated(m_loadingDocument.get(), workerThread(), m_url);
+    if (client()) {
         client()->workerScriptLoaded();
+        client()->workerReadyForInspection();
+    }
 }
 
 void WebSharedWorkerImpl::terminateWorkerContext()
@@ -415,6 +428,11 @@ void WebSharedWorkerImpl::attachDevTools()
         m_attachDevToolsOnStart = true;
 }
 
+void WebSharedWorkerImpl::attachDevTools(const WebString& hostId)
+{
+    attachDevTools();
+}
+
 static void reconnectToWorkerContextInspectorTask(ExecutionContext* context, const String& savedState)
 {
     WorkerInspectorController* ic = toWorkerGlobalScope(context)->workerInspectorController();
@@ -425,6 +443,11 @@ static void reconnectToWorkerContextInspectorTask(ExecutionContext* context, con
 void WebSharedWorkerImpl::reattachDevTools(const WebString& savedState)
 {
     workerThread()->postDebuggerTask(createCrossThreadTask(reconnectToWorkerContextInspectorTask, String(savedState)));
+}
+
+void WebSharedWorkerImpl::reattachDevTools(const WebString& hostId, const WebString& savedState)
+{
+    reattachDevTools(savedState);
 }
 
 static void disconnectFromWorkerContextInspectorTask(ExecutionContext* context, bool)

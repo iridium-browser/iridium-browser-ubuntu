@@ -2,26 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
+#include "components/crx_file/id_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/options_page_info.h"
+#include "extensions/common/switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
 
+namespace {
+
+// The ID of test manifests requiring whitelisting.
+const char kWhitelistID[] = "lmadimbbgapmngbiclpjjngmdickadpl";
+
+}  // namespace
+
 namespace errors = manifest_errors;
 namespace keys = manifest_keys;
 
-class InitValueManifestTest : public ExtensionManifestTest {
+class InitValueManifestTest : public ChromeManifestTest {
 };
 
 TEST_F(InitValueManifestTest, InitFromValueInvalid) {
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      extensions::switches::kWhitelistedExtensionID, kWhitelistID);
   Testcase testcases[] = {
     Testcase("init_invalid_version_missing.json", errors::kInvalidVersion),
     Testcase("init_invalid_version_invalid.json", errors::kInvalidVersion),
@@ -31,6 +43,12 @@ TEST_F(InitValueManifestTest, InitFromValueInvalid) {
              errors::kInvalidDescription),
     Testcase("init_invalid_icons_invalid.json", errors::kInvalidIcons),
     Testcase("init_invalid_icons_path_invalid.json", errors::kInvalidIconPath),
+    Testcase("init_invalid_launcher_page_invalid.json",
+             errors::kInvalidLauncherPage),
+    Testcase("init_invalid_launcher_page_page_missing.json",
+             errors::kLauncherPagePageRequired),
+    Testcase("init_invalid_launcher_page_page_invalid.json",
+             errors::kInvalidLauncherPagePage),
     Testcase("init_invalid_script_invalid.json",
              errors::kInvalidContentScriptsList),
     Testcase("init_invalid_script_item_invalid.json",
@@ -85,7 +103,7 @@ TEST_F(InitValueManifestTest, InitFromValueValid) {
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions");
 
-  EXPECT_TRUE(Extension::IdIsValid(extension->id()));
+  EXPECT_TRUE(crx_file::id_util::IdIsValid(extension->id()));
   EXPECT_EQ("1.0.0.0", extension->VersionString());
   EXPECT_EQ("my extension", extension->name());
   EXPECT_EQ(extension->name(), extension->short_name());
@@ -101,9 +119,9 @@ TEST_F(InitValueManifestTest, InitFromValueValid) {
   // Test with an options page.
   extension = LoadAndExpectSuccess("init_valid_options.json");
   EXPECT_EQ("chrome-extension",
-            ManifestURL::GetOptionsPage(extension.get()).scheme());
+            OptionsPageInfo::GetOptionsPage(extension.get()).scheme());
   EXPECT_EQ("/options.html",
-            ManifestURL::GetOptionsPage(extension.get()).path());
+            OptionsPageInfo::GetOptionsPage(extension.get()).path());
 
   // Test optional short_name field.
   extension = LoadAndExpectSuccess("init_valid_short_name.json");

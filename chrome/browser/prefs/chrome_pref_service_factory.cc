@@ -25,6 +25,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/browser_ui_prefs_migrator.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/pref_hash_filter.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
@@ -38,6 +39,9 @@
 #include "chrome/browser/ui/profile_error_dialog.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/component_updater/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/search_engines_pref_names.h"
@@ -45,8 +49,6 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -152,6 +154,11 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
     PrefHashFilter::ENFORCE_ON_LOAD,
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC
   },
+  {
+    13, prefs::kProfileResetPromptMementoInProfilePrefs,
+    PrefHashFilter::ENFORCE_ON_LOAD,
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+  },
 #endif
   {
     14, DefaultSearchManager::kDefaultSearchProviderDataPrefName,
@@ -188,6 +195,18 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
     PrefHashFilter::ENFORCE_ON_LOAD,
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC
   },
+#if defined(OS_WIN)
+  {
+    19, prefs::kSwReporterPromptVersion,
+    PrefHashFilter::ENFORCE_ON_LOAD,
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+  },
+  {
+    20, prefs::kSwReporterPromptReason,
+    PrefHashFilter::ENFORCE_ON_LOAD,
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+  },
+#endif
 };
 
 // One more than the last tracked preferences ID above.
@@ -307,7 +326,6 @@ GetTrackingConfiguration() {
   return result;
 }
 
-
 // Shows notifications which correspond to PersistentPrefStore's reading errors.
 void HandleReadError(PersistentPrefStore::PrefReadError error) {
   // Sample the histogram also for the successful case in order to get a
@@ -337,6 +355,13 @@ void HandleReadError(PersistentPrefStore::PrefReadError error) {
 #else
     // On ChromeOS error screen with message about broken local state
     // will be displayed.
+
+    // A supplementary error message about broken local state - is included
+    // in logs and user feedbacks.
+    if (error != PersistentPrefStore::PREF_READ_ERROR_NONE &&
+        error != PersistentPrefStore::PREF_READ_ERROR_NO_FILE) {
+      LOG(ERROR) << "An error happened during prefs loading: " << error;
+    }
 #endif
   }
 }
@@ -463,14 +488,18 @@ scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
                  syncer::PREFERENCES);
 
   PrefServiceSyncableFactory factory;
+  scoped_refptr<PersistentPrefStore> user_pref_store(
+      CreateProfilePrefStoreManager(profile_path)
+          ->CreateProfilePrefStore(pref_io_task_runner,
+                                   start_sync_flare_for_prefs,
+                                   validation_delegate));
+  // BrowserUIPrefsMigrator unregisters and deletes itself after it is done.
+  user_pref_store->AddObserver(
+      new BrowserUIPrefsMigrator(user_pref_store.get()));
   PrepareFactory(&factory,
                  policy_service,
                  supervised_user_settings,
-                 scoped_refptr<PersistentPrefStore>(
-                     CreateProfilePrefStoreManager(profile_path)
-                         ->CreateProfilePrefStore(pref_io_task_runner,
-                                                  start_sync_flare_for_prefs,
-                                                  validation_delegate)),
+                 user_pref_store,
                  extension_prefs,
                  async);
   scoped_ptr<PrefServiceSyncable> pref_service =

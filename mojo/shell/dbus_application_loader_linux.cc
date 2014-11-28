@@ -21,7 +21,6 @@
 #include "mojo/embedder/platform_channel_pair.h"
 #include "mojo/shell/context.h"
 #include "mojo/shell/external_service.mojom.h"
-#include "mojo/shell/keep_alive.h"
 
 namespace mojo {
 namespace shell {
@@ -41,8 +40,7 @@ class DBusApplicationLoader::LoadContext {
         bus_(bus),
         service_dbus_proxy_(NULL),
         url_(url),
-        service_provider_handle_(service_provider_handle.Pass()),
-        keep_alive_(loader->context_) {
+        service_provider_handle_(service_provider_handle.Pass()) {
     base::PostTaskAndReplyWithResult(
         loader_->context_->task_runners()->io_runner(),
         FROM_HERE,
@@ -131,7 +129,6 @@ class DBusApplicationLoader::LoadContext {
   dbus::ObjectProxy* service_dbus_proxy_;  // Owned by bus_;
   const GURL url_;
   ScopedMessagePipeHandle service_provider_handle_;
-  KeepAlive keep_alive_;
   scoped_ptr<embedder::ChannelInit> channel_init_;
   ExternalServicePtr external_service_;
 
@@ -165,8 +162,8 @@ void DBusApplicationLoader::Load(ApplicationManager* manager,
       new LoadContext(this, bus_, url, shell_handle.Pass());
 }
 
-void DBusApplicationLoader::OnServiceError(ApplicationManager* manager,
-                                           const GURL& url) {
+void DBusApplicationLoader::OnApplicationError(ApplicationManager* manager,
+                                               const GURL& url) {
   // TODO(cmasone): Anything at all in this method here.
 }
 

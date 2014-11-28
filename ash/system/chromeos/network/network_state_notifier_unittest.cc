@@ -41,7 +41,7 @@ class NetworkStateNotifierTest : public AshTestBase {
   virtual ~NetworkStateNotifierTest() {}
 
   virtual void SetUp() OVERRIDE {
-    DBusThreadManager::InitializeWithStub();
+    DBusThreadManager::Initialize();
     chromeos::LoginState::Initialize();
     SetupDefaultShillState();
     chromeos::NetworkHandler::Initialize();
@@ -93,7 +93,7 @@ class NetworkStateNotifierTest : public AshTestBase {
 
 TEST_F(NetworkStateNotifierTest, ConnectionFailure) {
   EXPECT_FALSE(GetSystemTray()->HasNotificationBubble());
-  ash::network_connect::ConnectToNetwork("wifi1", NULL /* owning_window */);
+  ash::network_connect::ConnectToNetwork("wifi1");
   RunAllPendingInMessageLoop();
   // Failure should spawn a notification.
   message_center::MessageCenter* message_center =

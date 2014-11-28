@@ -28,7 +28,7 @@
 #include "web/ExternalDateTimeChooser.h"
 
 #include "core/InputTypeNames.h"
-#include "platform/DateTimeChooserClient.h"
+#include "core/html/forms/DateTimeChooserClient.h"
 #include "public/web/WebDateTimeChooserCompletion.h"
 #include "public/web/WebDateTimeChooserParams.h"
 #include "public/web/WebViewClient.h"
@@ -63,7 +63,7 @@ private:
         delete this;
     }
 
-    RefPtrWillBePersistent<ExternalDateTimeChooser> m_chooser;
+    RefPtr<ExternalDateTimeChooser> m_chooser;
 };
 
 ExternalDateTimeChooser::~ExternalDateTimeChooser()
@@ -164,6 +164,11 @@ void ExternalDateTimeChooser::endChooser()
     DateTimeChooserClient* client = m_client;
     m_client = 0;
     client->didEndChooser();
+}
+
+AXObject* ExternalDateTimeChooser::rootAXObject()
+{
+    return 0;
 }
 
 } // namespace blink

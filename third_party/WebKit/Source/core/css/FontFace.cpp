@@ -31,7 +31,6 @@
 #include "config.h"
 #include "core/css/FontFace.h"
 
-#include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/CSSValueKeywords.h"
@@ -42,17 +41,19 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSUnicodeRangeValue.h"
 #include "core/css/CSSValueList.h"
+#include "core/css/FontFaceDescriptors.h"
 #include "core/css/LocalFontFaceSource.h"
 #include "core/css/RemoteFontFaceSource.h"
 #include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
-#include "core/css/parser/BisonCSSParser.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/StyleEngine.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/svg/SVGFontFaceElement.h"
 #include "core/svg/SVGFontFaceSource.h"
 #include "core/svg/SVGRemoteFontFaceSource.h"
@@ -63,14 +64,11 @@ namespace blink {
 
 static PassRefPtrWillBeRawPtr<CSSValue> parseCSSValue(const Document* document, const String& s, CSSPropertyID propertyID)
 {
-    if (s.isEmpty())
-        return nullptr;
-    RefPtrWillBeRawPtr<MutableStylePropertySet> parsedStyle = MutableStylePropertySet::create();
-    BisonCSSParser::parseValue(parsedStyle.get(), propertyID, s, true, *document);
-    return parsedStyle->getPropertyCSSValue(propertyID);
+    CSSParserContext context(*document, UseCounter::getFrom(document));
+    return CSSParser::parseSingleValue(propertyID, s, context);
 }
 
-PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, const AtomicString& family, const String& source, const Dictionary& descriptors)
+PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, const AtomicString& family, const String& source, const FontFaceDescriptors& descriptors)
 {
     RefPtrWillBeRawPtr<FontFace> fontFace = adoptRefWillBeNoop(new FontFace(context, family, descriptors));
 
@@ -82,14 +80,14 @@ PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, con
     return fontFace.release();
 }
 
-PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, const AtomicString& family, PassRefPtr<ArrayBuffer> source, const Dictionary& descriptors)
+PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, const AtomicString& family, PassRefPtr<ArrayBuffer> source, const FontFaceDescriptors& descriptors)
 {
     RefPtrWillBeRawPtr<FontFace> fontFace = adoptRefWillBeNoop(new FontFace(context, family, descriptors));
     fontFace->initCSSFontFace(static_cast<const unsigned char*>(source->data()), source->byteLength());
     return fontFace.release();
 }
 
-PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, const AtomicString& family, PassRefPtr<ArrayBufferView> source, const Dictionary& descriptors)
+PassRefPtrWillBeRawPtr<FontFace> FontFace::create(ExecutionContext* context, const AtomicString& family, PassRefPtr<ArrayBufferView> source, const FontFaceDescriptors& descriptors)
 {
     RefPtrWillBeRawPtr<FontFace> fontFace = adoptRefWillBeNoop(new FontFace(context, family, descriptors));
     fontFace->initCSSFontFace(static_cast<const unsigned char*>(source->baseAddress()), source->byteLength());
@@ -129,31 +127,21 @@ FontFace::FontFace(ExecutionContext* context)
     : ActiveDOMObject(context)
     , m_status(Unloaded)
 {
-    ScriptWrappable::init(this);
     suspendIfNeeded();
 }
 
-FontFace::FontFace(ExecutionContext* context, const AtomicString& family, const Dictionary& descriptors)
+FontFace::FontFace(ExecutionContext* context, const AtomicString& family, const FontFaceDescriptors& descriptors)
     : ActiveDOMObject(context)
     , m_family(family)
     , m_status(Unloaded)
 {
-    ScriptWrappable::init(this);
-
     Document* document = toDocument(context);
-    String value;
-    if (DictionaryHelper::get(descriptors, "style", value))
-        setPropertyFromString(document, value, CSSPropertyFontStyle);
-    if (DictionaryHelper::get(descriptors, "weight", value))
-        setPropertyFromString(document, value, CSSPropertyFontWeight);
-    if (DictionaryHelper::get(descriptors, "stretch", value))
-        setPropertyFromString(document, value, CSSPropertyFontStretch);
-    if (DictionaryHelper::get(descriptors, "unicodeRange", value))
-        setPropertyFromString(document, value, CSSPropertyUnicodeRange);
-    if (DictionaryHelper::get(descriptors, "variant", value))
-        setPropertyFromString(document, value, CSSPropertyFontVariant);
-    if (DictionaryHelper::get(descriptors, "featureSettings", value))
-        setPropertyFromString(document, value, CSSPropertyWebkitFontFeatureSettings);
+    setPropertyFromString(document, descriptors.style(), CSSPropertyFontStyle);
+    setPropertyFromString(document, descriptors.weight(), CSSPropertyFontWeight);
+    // FIXME: we don't implement 'font-strech' property yet so we can't set the property.
+    setPropertyFromString(document, descriptors.unicodeRange(), CSSPropertyUnicodeRange);
+    setPropertyFromString(document, descriptors.variant(), CSSPropertyFontVariant);
+    setPropertyFromString(document, descriptors.featureSettings(), CSSPropertyWebkitFontFeatureSettings);
 
     suspendIfNeeded();
 }
@@ -448,9 +436,13 @@ FontTraits FontFace::traits() const
         case CSSValue200:
             weight = FontWeight200;
             break;
-        case CSSValueLighter:
         case CSSValue100:
             weight = FontWeight100;
+            break;
+        // Although 'lighter' and 'bolder' are valid keywords for font-weights, they are invalid
+        // inside font-face rules so they are ignored. Reference: http://www.w3.org/TR/css3-fonts/#descdef-font-weight.
+        case CSSValueLighter:
+        case CSSValueBolder:
             break;
         default:
             ASSERT_NOT_REACHED();

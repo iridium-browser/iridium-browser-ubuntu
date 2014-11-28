@@ -19,6 +19,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -35,11 +36,17 @@
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_delegate.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_protocol.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
@@ -49,7 +56,9 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/cert/multi_threaded_cert_verifier.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_cache.h"
@@ -88,21 +97,9 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #endif
 
-#if !defined(USE_OPENSSL)
-#include "net/cert/ct_log_verifier.h"
-#include "net/cert/multi_log_ct_verifier.h"
-#endif
-
 #if defined(USE_NSS) || defined(OS_IOS)
 #include "net/ocsp/nss_ocsp.h"
 #endif
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_protocol.h"
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/net/cert_verify_proc_chromeos.h"
@@ -117,6 +114,9 @@ class SafeBrowsingURLRequestContext;
 // Quit task, so base::Bind() calls are not refcounted.
 
 namespace {
+
+const char kTCPFastOpenFieldTrialName[] = "TCPFastOpen";
+const char kTCPFastOpenHttpsEnabledGroupName[] = "HttpsEnabled";
 
 const char kQuicFieldTrialName[] = "QUIC";
 const char kQuicFieldTrialEnabledGroupName[] = "Enabled";
@@ -134,9 +134,10 @@ const char kQuicFieldTrialTimeBasedLossDetectionSuffix[] =
 //  * A SPDY/4 experiment, for SPDY/4 (aka HTTP/2) vs SPDY/3.1 comparisons and
 //  eventual SPDY/4 deployment.
 const char kSpdyFieldTrialName[] = "SPDY";
-const char kSpdyFieldTrialHoldbackGroupName[] = "SpdyDisabled";
+const char kSpdyFieldTrialHoldbackGroupNamePrefix[] = "SpdyDisabled";
 const char kSpdyFieldTrialHoldbackControlGroupName[] = "Control";
-const char kSpdyFieldTrialSpdy4GroupName[] = "Spdy4Enabled";
+const char kSpdyFieldTrialSpdy31GroupNamePrefix[] = "Spdy31Enabled";
+const char kSpdyFieldTrialSpdy4GroupNamePrefix[] = "Spdy4Enabled";
 const char kSpdyFieldTrialSpdy4ControlGroupName[] = "Spdy4Control";
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -448,8 +449,8 @@ IOThread::IOThread(
 #endif
       globals_(NULL),
       is_spdy_disabled_by_policy_(false),
-      weak_factory_(this),
-      creation_time_(base::TimeTicks::Now()) {
+      creation_time_(base::TimeTicks::Now()),
+      weak_factory_(this) {
   auth_schemes_ = local_state->GetString(prefs::kAuthSchemes);
   negotiate_disable_cname_lookup_ = local_state->GetBoolean(
       prefs::kDisableAuthNegotiateCnameLookup);
@@ -593,10 +594,8 @@ void IOThread::InitAsync() {
       net::CertVerifyProc::CreateDefault()));
 #endif
 
-    globals_->transport_security_state.reset(new net::TransportSecurityState());
-#if !defined(USE_OPENSSL)
-  // For now, Certificate Transparency is only implemented for platforms
-  // that use NSS.
+  globals_->transport_security_state.reset(new net::TransportSecurityState());
+
   net::MultiLogCTVerifier* ct_verifier = new net::MultiLogCTVerifier();
   globals_->cert_transparency_verifier.reset(ct_verifier);
 
@@ -628,49 +627,10 @@ void IOThread::InitAsync() {
       ct_verifier->AddLog(external_log_verifier.Pass());
     }
   }
-#else
-  if (command_line.HasSwitch(switches::kCertificateTransparencyLog)) {
-    LOG(DFATAL) << "Certificate Transparency is not yet supported in Chrome "
-                   "builds using OpenSSL.";
-  }
-#endif
+
   globals_->ssl_config_service = GetSSLConfigService();
 
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  int drp_flags = 0;
-  if (data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInFieldTrial()) {
-    drp_flags |=
-        (data_reduction_proxy::DataReductionProxyParams::kAllowed |
-         data_reduction_proxy::DataReductionProxyParams::kFallbackAllowed);
-  }
-  if (data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInAlternativeFieldTrial()) {
-    drp_flags |=
-        data_reduction_proxy::DataReductionProxyParams::kAlternativeAllowed;
-  }
-  if (data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInPromoFieldTrial())
-    drp_flags |= data_reduction_proxy::DataReductionProxyParams::kPromoAllowed;
-  if (data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInHoldbackFieldTrial())
-    drp_flags |= data_reduction_proxy::DataReductionProxyParams::kHoldback;
-  globals_->data_reduction_proxy_params.reset(
-      new data_reduction_proxy::DataReductionProxyParams(drp_flags));
-  globals_->data_reduction_proxy_auth_request_handler.reset(
-      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-          DataReductionProxyChromeSettings::GetClient(),
-          globals_->data_reduction_proxy_params.get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
-  // This is the same as in ProfileImplIOData except that we do not collect
-  // usage stats.
-  network_delegate->set_data_reduction_proxy_params(
-      globals_->data_reduction_proxy_params.get());
-  network_delegate->set_data_reduction_proxy_auth_request_handler(
-      globals_->data_reduction_proxy_auth_request_handler.get());
-  network_delegate->set_on_resolve_proxy_handler(
-      base::Bind(data_reduction_proxy::OnResolveProxyHandler));
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
+  SetupDataReductionProxy(network_delegate);
 
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
@@ -848,24 +808,41 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
       globals_->enable_websocket_over_spdy.set(true);
   }
 
+  ConfigureTCPFastOpen(command_line);
+
   // TODO(rch): Make the client socket factory a per-network session
   // instance, constructed from a NetworkSession::Params, to allow us
   // to move this option to IOThread::Globals &
   // HttpNetworkSession::Params.
-  if (command_line.HasSwitch(switches::kEnableTcpFastOpen))
-    net::SetTCPFastOpenEnabled(true);
 }
 
-void IOThread::ConfigureSpdyFromTrial(const std::string& spdy_trial_group,
+void IOThread::ConfigureTCPFastOpen(const CommandLine& command_line) {
+  const std::string trial_group =
+      base::FieldTrialList::FindFullName(kTCPFastOpenFieldTrialName);
+  if (trial_group == kTCPFastOpenHttpsEnabledGroupName)
+    globals_->enable_tcp_fast_open_for_ssl.set(true);
+  bool always_enable_if_supported =
+      command_line.HasSwitch(switches::kEnableTcpFastOpen);
+  // Check for OS support of TCP FastOpen, and turn it on for all connections
+  // if indicated by user.
+  net::CheckSupportAndMaybeEnableTCPFastOpen(always_enable_if_supported);
+}
+
+void IOThread::ConfigureSpdyFromTrial(base::StringPiece spdy_trial_group,
                                       Globals* globals) {
-  if (spdy_trial_group == kSpdyFieldTrialHoldbackGroupName) {
+  if (spdy_trial_group.starts_with(kSpdyFieldTrialHoldbackGroupNamePrefix)) {
     // TODO(jgraettinger): Use net::NextProtosHttpOnly() instead?
     net::HttpStreamFactory::set_spdy_enabled(false);
   } else if (spdy_trial_group == kSpdyFieldTrialHoldbackControlGroupName) {
     // Use the current SPDY default (SPDY/3.1).
     globals->next_protos = net::NextProtosSpdy31();
     globals->use_alternate_protocols.set(true);
-  } else if (spdy_trial_group == kSpdyFieldTrialSpdy4GroupName) {
+  } else if (spdy_trial_group.starts_with(
+                 kSpdyFieldTrialSpdy31GroupNamePrefix)) {
+    globals->next_protos = net::NextProtosSpdy4Http2();
+    globals->use_alternate_protocols.set(true);
+  } else if (spdy_trial_group.starts_with(
+                 kSpdyFieldTrialSpdy4GroupNamePrefix)) {
     globals->next_protos = net::NextProtosSpdy4Http2();
     globals->use_alternate_protocols.set(true);
   } else if (spdy_trial_group == kSpdyFieldTrialSpdy4ControlGroupName) {
@@ -1019,6 +996,8 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
   params->ignore_certificate_errors = globals.ignore_certificate_errors;
   params->testing_fixed_http_port = globals.testing_fixed_http_port;
   params->testing_fixed_https_port = globals.testing_fixed_https_port;
+  globals.enable_tcp_fast_open_for_ssl.CopyToIfSet(
+      &params->enable_tcp_fast_open_for_ssl);
 
   globals.initial_max_spdy_concurrent_streams.CopyToIfSet(
       &params->spdy_initial_max_concurrent_streams);
@@ -1047,6 +1026,8 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->enable_quic_time_based_loss_detection);
   globals.quic_always_require_handshake_confirmation.CopyToIfSet(
       &params->quic_always_require_handshake_confirmation);
+  globals.quic_disable_connection_pooling.CopyToIfSet(
+      &params->quic_disable_connection_pooling);
   globals.enable_quic_port_selection.CopyToIfSet(
       &params->enable_quic_port_selection);
   globals.quic_max_packet_length.CopyToIfSet(&params->quic_max_packet_length);
@@ -1059,6 +1040,7 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->origin_to_force_quic_on);
   params->enable_user_alternate_protocol_ports =
       globals.enable_user_alternate_protocol_ports;
+  params->proxy_delegate = globals.data_reduction_proxy_delegate.get();
 }
 
 base::TimeTicks IOThread::creation_time() const {
@@ -1111,6 +1093,7 @@ void IOThread::InitSystemRequestContextOnIOThread() {
           system_proxy_config_service_.release(),
           command_line,
           quick_check_enabled_.GetValue()));
+  DCHECK(globals_->data_reduction_proxy_params);
 
   net::HttpNetworkSession::Params system_params;
   InitializeNetworkSessionParams(&system_params);
@@ -1125,7 +1108,7 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   globals_->system_request_context.reset(
       ConstructSystemRequestContext(globals_, net_log_));
   globals_->system_request_context->set_ssl_config_service(
-      globals_->ssl_config_service);
+      globals_->ssl_config_service.get());
   globals_->system_request_context->set_http_server_properties(
       globals_->http_server_properties->GetWeakPtr());
 }
@@ -1148,6 +1131,42 @@ void IOThread::ConfigureQuic(const CommandLine& command_line) {
   ConfigureQuicGlobals(command_line, group, params, globals_);
 }
 
+void IOThread::SetupDataReductionProxy(
+    ChromeNetworkDelegate* network_delegate) {
+  // TODO(kundaji): Move flags initialization to DataReductionProxyParams and
+  // merge with flag initialization in
+  // data_reduction_proxy_chrome_settings_factory.cc.
+  int flags = data_reduction_proxy::DataReductionProxyParams::kAllowed |
+      data_reduction_proxy::DataReductionProxyParams::kFallbackAllowed |
+      data_reduction_proxy::DataReductionProxyParams::kAlternativeAllowed;
+  if (data_reduction_proxy::DataReductionProxyParams::
+      IsIncludedInPromoFieldTrial()) {
+    flags |= data_reduction_proxy::DataReductionProxyParams::kPromoAllowed;
+  }
+  if (data_reduction_proxy::DataReductionProxyParams::
+      IsIncludedInHoldbackFieldTrial()) {
+    flags |= data_reduction_proxy::DataReductionProxyParams::kHoldback;
+  }
+  globals_->data_reduction_proxy_params.reset(
+      new data_reduction_proxy::DataReductionProxyParams(flags));
+  globals_->data_reduction_proxy_auth_request_handler.reset(
+      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
+          DataReductionProxyChromeSettings::GetClient(),
+          globals_->data_reduction_proxy_params.get(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+  globals_->data_reduction_proxy_delegate.reset(
+      new data_reduction_proxy::DataReductionProxyDelegate(
+          globals_->data_reduction_proxy_auth_request_handler.get()));
+  // This is the same as in ProfileImplIOData except that we do not collect
+  // usage stats.
+  network_delegate->set_data_reduction_proxy_params(
+      globals_->data_reduction_proxy_params.get());
+  network_delegate->set_data_reduction_proxy_auth_request_handler(
+      globals_->data_reduction_proxy_auth_request_handler.get());
+  network_delegate->set_on_resolve_proxy_handler(
+      base::Bind(data_reduction_proxy::OnResolveProxyHandler));
+}
+
 // static
 void IOThread::ConfigureQuicGlobals(
     const base::CommandLine& command_line,
@@ -1162,6 +1181,8 @@ void IOThread::ConfigureQuicGlobals(
                                                quic_trial_params));
     globals->quic_always_require_handshake_confirmation.set(
         ShouldQuicAlwaysRequireHandshakeConfirmation(quic_trial_params));
+    globals->quic_disable_connection_pooling.set(
+        ShouldQuicDisableConnectionPooling(quic_trial_params));
     globals->enable_quic_port_selection.set(
         ShouldEnableQuicPortSelection(command_line));
     globals->quic_connection_options =
@@ -1307,6 +1328,9 @@ double IOThread::GetAlternateProtocolProbabilityThreshold(
       return value;
     }
   }
+  if (command_line.HasSwitch(switches::kEnableQuic)) {
+    return 0;
+  }
   if (base::StringToDouble(
           GetVariationParam(quic_trial_params,
                             "alternate_protocol_probability_threshold"),
@@ -1342,6 +1366,14 @@ bool IOThread::ShouldQuicAlwaysRequireHandshakeConfirmation(
   return LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params,
                         "always_require_handshake_confirmation"),
+      "true");
+}
+
+// static
+bool IOThread::ShouldQuicDisableConnectionPooling(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "disable_connection_pooling"),
       "true");
 }
 

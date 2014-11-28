@@ -105,7 +105,7 @@
 
 .network-timing-row {
     position: relative;
-    height: 16px;
+    height: 15px;
 }
 
 .network-timing-bar {
@@ -118,7 +118,8 @@
 .network-timing-bar-title {
     position: absolute;
     color: #222;
-    top: 1px;
+    padding: 0 3px;
+    line-height: 15px;
 }
 
 .network-timing-bar.blocking,
@@ -131,7 +132,8 @@
 }
 
 .network-timing-bar.connecting,
-.network-timing-bar.ssl {
+.network-timing-bar.ssl,
+.network-timing-bar.serviceworker {
     background-color: rgb(229, 130, 38);
 }
 

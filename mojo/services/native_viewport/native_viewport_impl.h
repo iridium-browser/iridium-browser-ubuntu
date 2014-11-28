@@ -6,30 +6,34 @@
 #define MOJO_SERVICES_NATIVE_VIEWPORT_IMPL_H_
 
 #include "base/memory/weak_ptr.h"
-#include "mojo/services/gles2/command_buffer_impl.h"
+#include "cc/surfaces/surface_id.h"
 #include "mojo/services/native_viewport/platform_viewport.h"
+#include "mojo/services/public/interfaces/gpu/gpu.mojom.h"
 #include "mojo/services/public/interfaces/native_viewport/native_viewport.mojom.h"
+#include "mojo/services/public/interfaces/surfaces/surfaces_service.mojom.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 class Event;
 }
 
 namespace mojo {
+class ApplicationImpl;
+class ViewportSurface;
 
 class NativeViewportImpl : public InterfaceImpl<NativeViewport>,
                            public PlatformViewport::Delegate {
  public:
-  NativeViewportImpl();
+  NativeViewportImpl(ApplicationImpl* app, bool is_headless);
   virtual ~NativeViewportImpl();
 
   // InterfaceImpl<NativeViewport> implementation.
-  virtual void Create(RectPtr bounds) OVERRIDE;
+  virtual void Create(SizePtr bounds) OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual void SetBounds(RectPtr bounds) OVERRIDE;
-  virtual void CreateGLES2Context(
-      InterfaceRequest<CommandBuffer> command_buffer_request) OVERRIDE;
+  virtual void SetBounds(SizePtr bounds) OVERRIDE;
+  virtual void SubmittedFrame(SurfaceIdPtr surface_id) OVERRIDE;
 
   // PlatformViewport::Delegate implementation.
   virtual void OnBoundsChanged(const gfx::Rect& bounds) OVERRIDE;
@@ -39,17 +43,20 @@ class NativeViewportImpl : public InterfaceImpl<NativeViewport>,
   virtual void OnDestroyed() OVERRIDE;
 
   void AckEvent();
-  void CreateCommandBufferIfNeeded();
 
  private:
-  void AckDestroyed();
-
-  gfx::AcceleratedWidget widget_;
+  bool is_headless_;
   scoped_ptr<PlatformViewport> platform_viewport_;
-  InterfaceRequest<CommandBuffer> command_buffer_request_;
-  scoped_ptr<CommandBufferImpl> command_buffer_;
+  scoped_ptr<ViewportSurface> viewport_surface_;
+  uint64_t widget_id_;
+  gfx::Rect bounds_;
+  GpuPtr gpu_service_;
+  SurfacesServicePtr surfaces_service_;
+  cc::SurfaceId child_surface_id_;
   bool waiting_for_event_ack_;
   base::WeakPtrFactory<NativeViewportImpl> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(NativeViewportImpl);
 };
 
 }  // namespace mojo

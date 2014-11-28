@@ -17,6 +17,7 @@
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/browser/service_worker/service_worker_url_request_job.h"
 #include "content/browser/service_worker/service_worker_version.h"
+#include "content/common/resource_request_body.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/public/browser/blob_handle.h"
 #include "content/public/test/test_browser_context.h"
@@ -27,11 +28,11 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/blob/blob_url_request_job.h"
+#include "storage/browser/blob/blob_url_request_job_factory.h"
+#include "storage/common/blob/blob_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/blob/blob_storage_context.h"
-#include "webkit/browser/blob/blob_url_request_job.h"
-#include "webkit/browser/blob/blob_url_request_job_factory.h"
-#include "webkit/common/blob/blob_data.h"
 
 namespace content {
 
@@ -48,7 +49,7 @@ class MockHttpProtocolHandler
  public:
   MockHttpProtocolHandler(
       base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-      base::WeakPtr<webkit_blob::BlobStorageContext> blob_storage_context)
+      base::WeakPtr<storage::BlobStorageContext> blob_storage_context)
       : provider_host_(provider_host),
         blob_storage_context_(blob_storage_context) {}
   virtual ~MockHttpProtocolHandler() {}
@@ -56,24 +57,28 @@ class MockHttpProtocolHandler
   virtual net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate) const OVERRIDE {
-    ServiceWorkerURLRequestJob* job = new ServiceWorkerURLRequestJob(
-        request, network_delegate, provider_host_, blob_storage_context_);
+    ServiceWorkerURLRequestJob* job =
+        new ServiceWorkerURLRequestJob(request,
+                                       network_delegate,
+                                       provider_host_,
+                                       blob_storage_context_,
+                                       scoped_refptr<ResourceRequestBody>());
     job->ForwardToServiceWorker();
     return job;
   }
 
  private:
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
-  base::WeakPtr<webkit_blob::BlobStorageContext> blob_storage_context_;
+  base::WeakPtr<storage::BlobStorageContext> blob_storage_context_;
 };
 
 // Returns a BlobProtocolHandler that uses |blob_storage_context|. Caller owns
 // the memory.
-webkit_blob::BlobProtocolHandler* CreateMockBlobProtocolHandler(
-    webkit_blob::BlobStorageContext* blob_storage_context) {
+storage::BlobProtocolHandler* CreateMockBlobProtocolHandler(
+    storage::BlobStorageContext* blob_storage_context) {
   // The FileSystemContext and MessageLoopProxy are not actually used but a
   // MessageLoopProxy is needed to avoid a DCHECK in BlobURLRequestJob ctor.
-  return new webkit_blob::BlobProtocolHandler(
+  return new storage::BlobProtocolHandler(
       blob_storage_context, NULL, base::MessageLoopProxy::current().get());
 }
 
@@ -83,7 +88,7 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
  protected:
   ServiceWorkerURLRequestJobTest()
       : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
-        blob_data_(new webkit_blob::BlobData("blob-id:myblob")) {}
+        blob_data_(new storage::BlobData("blob-id:myblob")) {}
   virtual ~ServiceWorkerURLRequestJobTest() {}
 
   virtual void SetUp() OVERRIDE {
@@ -96,23 +101,25 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
 
     registration_ = new ServiceWorkerRegistration(
         GURL("http://example.com/"),
-        GURL("http://example.com/service_worker.js"),
         1L,
         helper_->context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(
-        registration_, 1L, helper_->context()->AsWeakPtr());
+        registration_.get(),
+        GURL("http://example.com/service_worker.js"),
+        1L,
+        helper_->context()->AsWeakPtr());
 
     scoped_ptr<ServiceWorkerProviderHost> provider_host(
         new ServiceWorkerProviderHost(
             kProcessID, kProviderID, helper_->context()->AsWeakPtr(), NULL));
-    provider_host->AssociateRegistration(registration_);
+    provider_host->AssociateRegistration(registration_.get());
     registration_->SetActiveVersion(version_.get());
 
     ChromeBlobStorageContext* chrome_blob_storage_context =
         ChromeBlobStorageContext::GetFor(browser_context_.get());
     // Wait for chrome_blob_storage_context to finish initializing.
     base::RunLoop().RunUntilIdle();
-    webkit_blob::BlobStorageContext* blob_storage_context =
+    storage::BlobStorageContext* blob_storage_context =
         chrome_blob_storage_context->context();
 
     url_request_job_factory_.reset(new net::URLRequestJobFactoryImpl);
@@ -165,7 +172,7 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
   MockURLRequestDelegate url_request_delegate_;
   scoped_ptr<net::URLRequest> request_;
 
-  scoped_refptr<webkit_blob::BlobData> blob_data_;
+  scoped_refptr<storage::BlobData> blob_data_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerURLRequestJobTest);
@@ -192,11 +199,8 @@ class BlobResponder : public EmbeddedWorkerTestHelper {
         embedded_worker_id,
         request_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
-        ServiceWorkerResponse(GURL(""),
-                              200,
-                              "OK",
-                              std::map<std::string, std::string>(),
-                              blob_uuid_)));
+        ServiceWorkerResponse(
+            GURL(""), 200, "OK", ServiceWorkerHeaderMap(), blob_uuid_)));
   }
 
   std::string blob_uuid_;
@@ -213,8 +217,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, BlobResponse) {
     blob_data_->AppendData(kTestData);
     expected_response += kTestData;
   }
-  scoped_ptr<webkit_blob::BlobDataHandle> blob_handle =
-      blob_storage_context->context()->AddFinishedBlob(blob_data_);
+  scoped_ptr<storage::BlobDataHandle> blob_handle =
+      blob_storage_context->context()->AddFinishedBlob(blob_data_.get());
   SetUpWithHelper(new BlobResponder(kProcessID, blob_handle->uuid()));
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);

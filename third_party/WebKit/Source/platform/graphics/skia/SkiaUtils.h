@@ -43,16 +43,12 @@
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/transforms/AffineTransform.h"
 #include "wtf/MathExtras.h"
-#include "wtf/PassRefPtr.h"
-
-class SkCanvas;
-class SkRegion;
 
 namespace blink {
 
 class GraphicsContext;
 
-PassRefPtr<SkXfermode> WebCoreCompositeToSkiaComposite(CompositeOperator, WebBlendMode = WebBlendModeNormal);
+SkXfermode::Mode PLATFORM_EXPORT WebCoreCompositeToSkiaComposite(CompositeOperator, WebBlendMode = WebBlendModeNormal);
 
 // move this guy into SkColor.h
 SkColor SkPMColorToColor(SkPMColor);

@@ -2,10 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/features.gni")
+import("//build/config/ui.gni")
+
 # Collection of all components. You wouldn't link to this, but this is rather
 # to reference the files so they can be compiled by the build system.
 group("all_components") {
-  visibility = "//:*"  # Only for the root targets to bring in.
+  testonly = true  # You shouldn't actually link to this.
+  visibility = [ "//:*" ]  # Only for the root targets to bring in.
 
   deps = [
     "//components/auto_login_parser",
@@ -15,14 +19,17 @@ group("all_components") {
     "//components/bookmarks/browser",
     "//components/bookmarks/common",
     "//components/bookmarks/test",
-    "//components/breakpad/app",
-    "//components/breakpad/browser",
     "//components/captive_portal",
     "//components/cdm/browser",
     "//components/cdm/common",
     "//components/cdm/renderer",
     "//components/cloud_devices/common",
     "//components/component_updater",
+    "//components/content_settings/core/browser",
+    "//components/content_settings/core/common",
+    "//components/crash/app",
+    "//components/crash/browser",
+    "//components/crx_file",
     "//components/data_reduction_proxy/browser",
     "//components/data_reduction_proxy/common",
     "//components/dom_distiller/core",
@@ -44,6 +51,7 @@ group("all_components") {
     "//components/language_usage_metrics",
     "//components/leveldb_proto",
     "//components/metrics",
+    "//components/native_app_window",
     "//components/navigation_interception",
     "//components/navigation_metrics",
     "//components/network_time",
@@ -55,14 +63,19 @@ group("all_components") {
     "//components/password_manager/content/browser",
     "//components/password_manager/core/browser",
     "//components/password_manager/core/common",
+    "//components/pdf/browser",
+    "//components/pdf/common",
+    "//components/pdf/renderer",
     "//components/plugins/renderer",
     "//components/policy",
     "//components/power",
     "//components/precache/core",
     "//components/precache/content",
     "//components/pref_registry",
+    "//components/proximity_auth",
     "//components/query_parser",
     "//components/rappor",
+    "//components/renderer_context_menu",
     "//components/resources:components_resources",
     "//components/search",
     "//components/search_engines",
@@ -80,13 +93,15 @@ group("all_components") {
     "//components/translate/core/common",
     "//components/url_fixer",
     "//components/url_matcher",
-    "//components/usb_service",
     "//components/user_manager",
     "//components/user_prefs",
     "//components/variations",
     "//components/visitedlink/browser",
     "//components/visitedlink/common",
     "//components/visitedlink/renderer",
+    "//components/web_cache/browser",
+    "//components/web_cache/common",
+    "//components/web_cache/renderer",
     "//components/web_modal",
     "//components/webdata/common",
     "//components/wifi",
@@ -98,9 +113,20 @@ group("all_components") {
   if (!is_chromeos) {
     deps -= [ "//components/pairing" ]
   }
+  if (!toolkit_views) {
+    deps -= [ "//components/native_app_window" ]
+  }
 
   if (is_ios) {
     deps -= [ "//components/keyed_service/content" ]
+  }
+
+  if (!enable_plugins) {
+    deps -= [
+      "//components/pdf/browser",
+      "//components/pdf/common",
+      "//components/pdf/renderer",
+    ]
   }
 
   if (is_android) {
@@ -108,8 +134,8 @@ group("all_components") {
       "//components/autofill/content/browser",  # Blocked on content/blink.
       "//components/autofill/content/common",  # Blocked on content.
       "//components/autofill/content/renderer",  # Blocked on content/blink.
-      "//components/breakpad/app",  # Should work, needs checking.
-      "//components/breakpad/browser",  # Should work, needs checking.
+      "//components/crash/app",  # Should work, needs checking.
+      "//components/crash/browser",  # Should work, needs checking.
       "//components/captive_portal",  # Should work, needs checking.
       "//components/cloud_devices/common",  # Should work, needs checking.
       "//components/cdm/browser",  # Blocked on content.
@@ -143,6 +169,7 @@ group("all_components") {
       "//components/precache/content",  # Blocked on content.
       "//components/precache/core",  # Should work, needs checking.
       "//components/rappor",  # Should work, needs checking.
+      "//components/renderer_context_menu",  # Blocked on content.
       "//components/search_engines",  # Should work, needs checking.
       "//components/search_provider_logos",  # Should work, needs checking.
       "//components/sessions",  # Blocked on content.
@@ -150,11 +177,12 @@ group("all_components") {
       "//components/translate/content/browser",  # Blocked on content.
       "//components/translate/content/common",  # Blocked on content.
       "//components/translate/content/renderer",  # Blocked on content.
-      "//components/usb_service",  # Blocked on content.
       "//components/user_prefs",  # Blocked on content.
       "//components/visitedlink/browser",  # Blocked on content.
       "//components/visitedlink/common",  # Blocked on content.
       "//components/visitedlink/renderer",  # Blocked on blink
+      "//components/web_cache/browser",  # Blocked on content and blink.
+      "//components/web_cache/renderer",  # Blocked on content and blink.
       "//components/web_modal",  # Blocked on content.
     ]
   }
@@ -190,11 +218,17 @@ test("components_unittests") {
     "//components/bookmarks/browser:unit_tests",
     "//components/captive_portal:unit_tests",
     "//components/cloud_devices/common:unit_tests",
+    "//components/component_updater:unit_tests",
+    "//components/content_settings/core/browser:unit_tests",
+    "//components/content_settings/core/common:unit_tests",
+    "//components/crx_file:unit_tests",
     "//components/data_reduction_proxy/browser:unit_tests",
     "//components/data_reduction_proxy/common:unit_tests",
     "//components/dom_distiller/core:unit_tests",
     "//components/domain_reliability:unit_tests",
     "//components/omnibox:unit_tests",
+    "//components/ownership:unit_tests",
+    "//components/proximity_auth:unit_tests",
   ]
 
   # TODO(GYP) need this target.

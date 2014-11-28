@@ -21,9 +21,10 @@ enum UninstallReason {
   // uninstall the corresponding extension id.
   UNINSTALL_REASON_ORPHANED_EXTERNAL_EXTENSION,
   UNINSTALL_REASON_ORPHANED_SHARED_MODULE,
-  UNINSTALL_REASON_INTERNAL_MANAGEMENT  // Internal extensions (see usages)
+  UNINSTALL_REASON_INTERNAL_MANAGEMENT,  // Internal extensions (see usages)
+  UNINSTALL_REASON_REINSTALL
 };
 
-}  // extensions
+}  // namespace extensions
 
 #endif  // EXTENSIONS_BROWSER_UNINSTALL_REASON_H_

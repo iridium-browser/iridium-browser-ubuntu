@@ -54,6 +54,7 @@
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/ui/focus_ring_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -94,6 +95,11 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/window_animations.h"
 #include "url/gurl.h"
+
+#if defined(USE_ATHENA)
+#include "athena/screen/public/screen_manager.h"
+#include "athena/util/container_priorities.h"
+#endif
 
 namespace {
 
@@ -277,10 +283,10 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
       crash_count_(0),
       restore_path_(RESTORE_UNKNOWN),
       finalize_animation_type_(ANIMATION_WORKSPACE),
-      animation_weak_ptr_factory_(this),
       startup_sound_played_(false),
       startup_sound_honors_spoken_feedback_(false),
-      is_observing_keyboard_(false) {
+      is_observing_keyboard_(false),
+      animation_weak_ptr_factory_(this) {
   DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
   CrasAudioHandler::Get()->AddAudioObserver(this);
   if (keyboard::KeyboardController::GetInstance()) {
@@ -288,8 +294,10 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
     is_observing_keyboard_ = true;
   }
 
+#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->delegate()->AddVirtualKeyboardStateObserver(this);
   ash::Shell::GetScreen()->AddObserver(this);
+#endif
 
   // We need to listen to CLOSE_ALL_BROWSERS_REQUEST but not APP_TERMINATING
   // because/ APP_TERMINATING will never be fired as long as this keeps
@@ -324,6 +332,12 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
 
   waiting_for_wallpaper_load_ = !zero_delay_enabled &&
                                 (!is_registered || !disable_boot_animation);
+
+#if defined(USE_ATHENA)
+  // TODO(dpolukhin): remove #ifdef when Athena supports wallpaper manager.
+  // crbug.com/408734
+  waiting_for_wallpaper_load_ = false;
+#endif
 
   // For slower hardware we have boot animation disabled so
   // we'll be initializing WebUI hidden, waiting for user pods to load and then
@@ -390,9 +404,11 @@ LoginDisplayHostImpl::~LoginDisplayHostImpl() {
     is_observing_keyboard_ = false;
   }
 
+#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->delegate()->
       RemoveVirtualKeyboardStateObserver(this);
   ash::Shell::GetScreen()->RemoveObserver(this);
+#endif
 
   if (login_view_ && login_window_)
     login_window_->RemoveRemovalsObserver(this);
@@ -778,10 +794,12 @@ void LoginDisplayHostImpl::Observe(
                       content::NotificationService::AllSources());
   } else if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED &&
              user_manager::UserManager::Get()->IsCurrentUserNew()) {
+#if !defined(USE_ATHENA)
     // For new user, move desktop to locker container so that windows created
     // during the user image picker step are below it.
     ash::Shell::GetInstance()->
         desktop_background_controller()->MoveDesktopToLockedContainer();
+#endif
     registrar_.Remove(this,
                       chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                       content::NotificationService::AllSources());
@@ -1027,9 +1045,11 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
 
   if (system::InputDeviceSettings::Get()->ForceKeyboardDrivenUINavigation()) {
     views::FocusManager::set_arrow_key_traversal_enabled(true);
-
+#if !defined(USE_ATHENA)
+    // crbug.com/405859
     focus_ring_controller_.reset(new FocusRingController);
     focus_ring_controller_->SetVisible(true);
+#endif
 
     keyboard_driven_oobe_key_handler_.reset(new KeyboardDrivenOobeKeyHandler);
   }
@@ -1039,10 +1059,18 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
   params.bounds = background_bounds();
   params.show_state = ui::SHOW_STATE_FULLSCREEN;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+#if defined(USE_ATHENA)
+  athena::ScreenManager::ContainerParams container_params(
+      "LoginScreen", athena::CP_LOGIN_SCREEN);
+  container_params.can_activate_children = true;
+  login_screen_container_.reset(
+      athena::ScreenManager::Get()->CreateContainer(container_params));
+  params.parent = login_screen_container_.get();
+#else
   params.parent =
       ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
                                ash::kShellWindowId_LockScreenContainer);
-
+#endif
   login_window_ = new views::Widget;
   params.delegate = new LoginWidgetDelegate(login_window_);
   login_window_->Init(params);
@@ -1094,7 +1122,7 @@ void LoginDisplayHostImpl::SetOobeProgressBarVisible(bool visible) {
 
 void LoginDisplayHostImpl::TryToPlayStartupSound() {
   if (startup_sound_played_ || login_prompt_visible_time_.is_null() ||
-      !CrasAudioHandler::Get()->GetActiveOutputNode()) {
+      !CrasAudioHandler::Get()->GetPrimaryActiveOutputNode()) {
     return;
   }
 
@@ -1114,11 +1142,14 @@ void LoginDisplayHostImpl::TryToPlayStartupSound() {
     return;
   }
 
+#if !defined(USE_ATHENA)
+  // crbug.com/408733
   if (startup_sound_honors_spoken_feedback_ &&
       !ash::PlaySystemSoundIfSpokenFeedback(SOUND_STARTUP)) {
     EnableSystemSoundsForAccessibility();
     return;
   }
+#endif
 
   base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
@@ -1144,13 +1175,15 @@ void ShowLoginWizard(const std::string& first_screen_name) {
 
   VLOG(1) << "Showing OOBE screen: " << first_screen_name;
 
+#if !defined(USE_ATHENA)
+  // TODO(dpolukhin): crbug.com/407579
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
 
   // Set up keyboards. For example, when |locale| is "en-US", enable US qwerty
   // and US dvorak keyboard layouts.
   if (g_browser_process && g_browser_process->local_state()) {
-    manager->SetInputMethodLoginDefault();
+    manager->GetActiveIMEState()->SetInputMethodLoginDefault();
 
     PrefService* prefs = g_browser_process->local_state();
     // Apply owner preferences for tap-to-click and mouse buttons swap for
@@ -1163,6 +1196,7 @@ void ShowLoginWizard(const std::string& first_screen_name) {
   system::InputDeviceSettings::Get()->SetNaturalScroll(
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNaturalScrollDefault));
+#endif
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
 
@@ -1233,9 +1267,12 @@ void ShowLoginWizard(const std::string& first_screen_name) {
   const std::string& layout = startup_manifest->keyboard_layout();
   VLOG(1) << "Initial locale: " << locale << "keyboard layout " << layout;
 
+#if !defined(USE_ATHENA)
   // Determine keyboard layout from OEM customization (if provided) or
   // initial locale and save it in preferences.
-  manager->SetInputMethodLoginDefaultFromVPD(locale, layout);
+  manager->GetActiveIMEState()->SetInputMethodLoginDefaultFromVPD(locale,
+                                                                  layout);
+#endif
 
   if (!current_locale.empty() || locale.empty()) {
     ShowLoginWizardFinish(first_screen_name, startup_manifest, display_host);

@@ -44,7 +44,6 @@
 #include "content/browser/loader/sync_resource_handler.h"
 #include "content/browser/loader/throttling_resource_handler.h"
 #include "content/browser/loader/upload_data_stream_builder.h"
-#include "content/browser/plugin_service_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/resource_context_impl.h"
@@ -86,19 +85,23 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
+#include "storage/browser/blob/blob_data_handle.h"
+#include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/blob/blob_url_request_job_factory.h"
+#include "storage/browser/fileapi/file_permission_policy.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/common/blob/blob_data.h"
+#include "storage/common/blob/shareable_file_reference.h"
 #include "url/url_constants.h"
-#include "webkit/common/blob/blob_data.h"
-#include "webkit/browser/blob/blob_data_handle.h"
-#include "webkit/browser/blob/blob_storage_context.h"
-#include "webkit/browser/blob/blob_url_request_job_factory.h"
-#include "webkit/browser/fileapi/file_permission_policy.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/common/blob/shareable_file_reference.h"
+
+#if defined(ENABLE_PLUGINS)
+#include "content/browser/plugin_service_impl.h"
+#endif
 
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
-using webkit_blob::ShareableFileReference;
+using storage::ShareableFileReference;
 
 // ----------------------------------------------------------------------------
 
@@ -134,6 +137,60 @@ const double kMaxRequestsPerProcessRatio = 0.45;
 // should be and once we stop blocking multiple simultaneous requests for the
 // same resource (see bugs 46104 and 31014).
 const int kDefaultDetachableCancelDelayMs = 30000;
+
+enum SHA1HistogramTypes {
+  // SHA-1 is not present in the certificate chain.
+  SHA1_NOT_PRESENT = 0,
+  // SHA-1 is present in the certificate chain, and the leaf expires on or
+  // after January 1, 2017.
+  SHA1_EXPIRES_AFTER_JANUARY_2017 = 1,
+  // SHA-1 is present in the certificate chain, and the leaf expires on or
+  // after June 1, 2016.
+  SHA1_EXPIRES_AFTER_JUNE_2016 = 2,
+  // SHA-1 is present in the certificate chain, and the leaf expires on or
+  // after January 1, 2016.
+  SHA1_EXPIRES_AFTER_JANUARY_2016 = 3,
+  // SHA-1 is present in the certificate chain, but the leaf expires before
+  // January 1, 2016
+  SHA1_PRESENT = 4,
+  // Always keep this at the end.
+  SHA1_HISTOGRAM_TYPES_MAX,
+};
+
+void RecordCertificateHistograms(const net::SSLInfo& ssl_info,
+                                 ResourceType resource_type) {
+  // The internal representation of the dates for UI treatment of SHA-1.
+  // See http://crbug.com/401365 for details
+  static const int64_t kJanuary2017 = INT64_C(13127702400000000);
+  static const int64_t kJune2016 = INT64_C(13109213000000000);
+  static const int64_t kJanuary2016 = INT64_C(13096080000000000);
+
+  SHA1HistogramTypes sha1_histogram = SHA1_NOT_PRESENT;
+  if (ssl_info.cert_status & net::CERT_STATUS_SHA1_SIGNATURE_PRESENT) {
+    DCHECK(ssl_info.cert.get());
+    if (ssl_info.cert->valid_expiry() >=
+        base::Time::FromInternalValue(kJanuary2017)) {
+      sha1_histogram = SHA1_EXPIRES_AFTER_JANUARY_2017;
+    } else if (ssl_info.cert->valid_expiry() >=
+               base::Time::FromInternalValue(kJune2016)) {
+      sha1_histogram = SHA1_EXPIRES_AFTER_JUNE_2016;
+    } else if (ssl_info.cert->valid_expiry() >=
+               base::Time::FromInternalValue(kJanuary2016)) {
+      sha1_histogram = SHA1_EXPIRES_AFTER_JANUARY_2016;
+    } else {
+      sha1_histogram = SHA1_PRESENT;
+    }
+  }
+  if (resource_type == RESOURCE_TYPE_MAIN_FRAME) {
+    UMA_HISTOGRAM_ENUMERATION("Net.Certificate.SHA1.MainFrame",
+                              sha1_histogram,
+                              SHA1_HISTOGRAM_TYPES_MAX);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Net.Certificate.SHA1.Subresource",
+                              sha1_histogram,
+                              SHA1_HISTOGRAM_TYPES_MAX);
+  }
+}
 
 bool IsDetachableResourceType(ResourceType type) {
   switch (type) {
@@ -200,7 +257,7 @@ void SetReferrerForRequest(net::URLRequest* request, const Referrer& referrer) {
 bool ShouldServiceRequest(int process_type,
                           int child_id,
                           const ResourceHostMsg_Request& request_data,
-                          fileapi::FileSystemContext* file_system_context)  {
+                          storage::FileSystemContext* file_system_context) {
   if (process_type == PROCESS_TYPE_PLUGIN)
     return true;
 
@@ -227,7 +284,7 @@ bool ShouldServiceRequest(int process_type,
         return false;
       }
       if (iter->type() == ResourceRequestBody::Element::TYPE_FILE_FILESYSTEM) {
-        fileapi::FileSystemURL url =
+        storage::FileSystemURL url =
             file_system_context->CrackURL(iter->filesystem_url());
         if (!policy->CanReadFileSystemFile(child_id, url)) {
           NOTREACHED() << "Denied unauthorized upload of "
@@ -299,11 +356,31 @@ bool IsValidatedSCT(
   return sct_status.status == net::ct::SCT_STATUS_OK;
 }
 
-webkit_blob::BlobStorageContext* GetBlobStorageContext(
+storage::BlobStorageContext* GetBlobStorageContext(
     ResourceMessageFilter* filter) {
   if (!filter->blob_storage_context())
     return NULL;
   return filter->blob_storage_context()->context();
+}
+
+void AttachRequestBodyBlobDataHandles(
+    ResourceRequestBody* body,
+    storage::BlobStorageContext* blob_context) {
+  DCHECK(blob_context);
+  for (size_t i = 0; i < body->elements()->size(); ++i) {
+    const ResourceRequestBody::Element& element = (*body->elements())[i];
+    if (element.type() != ResourceRequestBody::Element::TYPE_BLOB)
+      continue;
+    scoped_ptr<storage::BlobDataHandle> handle =
+        blob_context->GetBlobDataFromUUID(element.blob_uuid());
+    DCHECK(handle);
+    if (!handle)
+      continue;
+    // Ensure the blob and any attached shareable files survive until
+    // upload completion. The |body| takes ownership of |handle|.
+    const void* key = handle.get();
+    body->SetUserData(key, handle.release());
+  }
 }
 
 }  // namespace
@@ -552,7 +629,7 @@ DownloadInterruptReason ResourceDispatcherHostImpl::BeginDownload(
   if (request->url().SchemeIs(url::kBlobScheme)) {
     ChromeBlobStorageContext* blob_context =
         GetChromeBlobStorageContextForResourceContext(context);
-    webkit_blob::BlobProtocolHandler::SetRequestedBlobDataHandle(
+    storage::BlobProtocolHandler::SetRequestedBlobDataHandle(
         request.get(),
         blob_context->context()->GetBlobDataFromPublicURL(request->url()));
   }
@@ -722,7 +799,7 @@ void ResourceDispatcherHostImpl::DidReceiveResponse(ResourceLoader* loader) {
 
   if (loader->request()->was_fetched_via_proxy() &&
       loader->request()->was_fetched_via_spdy() &&
-      loader->request()->url().SchemeIs("http")) {
+      loader->request()->url().SchemeIs(url::kHttpScheme)) {
     scheduler_->OnReceivedSpdyProxiedHttpResponse(
         info->GetChildID(), info->GetRouteID());
   }
@@ -776,6 +853,11 @@ void ResourceDispatcherHostImpl::DidFinishLoading(ResourceLoader* loader) {
     UMA_HISTOGRAM_SPARSE_SLOWLY(
         "Net.ErrorCodesForSubresources2",
         -loader->request()->status().error());
+  }
+
+  if (loader->request()->url().SchemeIsSecure()) {
+    RecordCertificateHistograms(loader->request()->ssl_info(),
+                                info->GetResourceType());
   }
 
   if (delegate_)
@@ -1008,9 +1090,7 @@ void ResourceDispatcherHostImpl::BeginRequest(
   }
 
   // Allow the observer to block/handle the request.
-  if (delegate_ && !delegate_->ShouldBeginRequest(child_id,
-                                                  route_id,
-                                                  request_data.method,
+  if (delegate_ && !delegate_->ShouldBeginRequest(request_data.method,
                                                   request_data.url,
                                                   request_data.resource_type,
                                                   resource_context)) {
@@ -1059,11 +1139,19 @@ void ResourceDispatcherHostImpl::BeginRequest(
 
   new_request->SetLoadFlags(load_flags);
 
+  storage::BlobStorageContext* blob_context =
+      GetBlobStorageContext(filter_);
   // Resolve elements from request_body and prepare upload data.
   if (request_data.request_body.get()) {
+    // Attaches the BlobDataHandles to request_body not to free the blobs and
+    // any attached shareable files until upload completion. These data will be
+    // used in UploadDataStream and ServiceWorkerURLRequestJob.
+    AttachRequestBodyBlobDataHandles(
+        request_data.request_body.get(),
+        blob_context);
     new_request->set_upload(UploadDataStreamBuilder::Build(
         request_data.request_body.get(),
-        GetBlobStorageContext(filter_),
+        blob_context,
         filter_->file_system_context(),
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)
             .get()));
@@ -1103,20 +1191,22 @@ void ResourceDispatcherHostImpl::BeginRequest(
   if (new_request->url().SchemeIs(url::kBlobScheme)) {
     // Hang on to a reference to ensure the blob is not released prior
     // to the job being started.
-    webkit_blob::BlobProtocolHandler::SetRequestedBlobDataHandle(
+    storage::BlobProtocolHandler::SetRequestedBlobDataHandle(
         new_request.get(),
-        filter_->blob_storage_context()->context()->
-            GetBlobDataFromPublicURL(new_request->url()));
+        filter_->blob_storage_context()->context()->GetBlobDataFromPublicURL(
+            new_request->url()));
   }
 
   // Initialize the service worker handler for the request.
   ServiceWorkerRequestHandler::InitializeHandler(
       new_request.get(),
       filter_->service_worker_context(),
-      GetBlobStorageContext(filter_),
+      blob_context,
       child_id,
       request_data.service_worker_provider_id,
-      request_data.resource_type);
+      request_data.skip_service_worker,
+      request_data.resource_type,
+      request_data.request_body);
 
   // Have the appcache associate its extra info with the request.
   AppCacheInterceptor::SetExtraRequestInfo(
@@ -1195,8 +1285,6 @@ scoped_ptr<ResourceHandler> ResourceDispatcherHostImpl::CreateResourceHandler(
                                 resource_context,
                                 filter_->appcache_service(),
                                 request_data.resource_type,
-                                child_id,
-                                route_id,
                                 &throttles);
   }
 
@@ -1226,7 +1314,7 @@ void ResourceDispatcherHostImpl::RegisterDownloadedTempFile(
     int child_id, int request_id, const base::FilePath& file_path) {
   scoped_refptr<ShareableFileReference> reference =
       ShareableFileReference::Get(file_path);
-  DCHECK(reference);
+  DCHECK(reference.get());
 
   registered_temp_files_[child_id][request_id] = reference;
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFile(
@@ -1307,7 +1395,7 @@ ResourceRequestInfoImpl* ResourceDispatcherHostImpl::CreateRequestInfo(
       false,     // parent_is_main_frame
       -1,        // parent_render_frame_id
       RESOURCE_TYPE_SUB_RESOURCE,
-      PAGE_TRANSITION_LINK,
+      ui::PAGE_TRANSITION_LINK,
       false,     // should_replace_current_entry
       download,  // is_download
       false,     // is_stream
@@ -1323,8 +1411,9 @@ ResourceRequestInfoImpl* ResourceDispatcherHostImpl::CreateRequestInfo(
 
 void ResourceDispatcherHostImpl::OnRenderViewHostCreated(
     int child_id,
-    int route_id) {
-  scheduler_->OnClientCreated(child_id, route_id);
+    int route_id,
+    bool is_visible) {
+  scheduler_->OnClientCreated(child_id, route_id, is_visible);
 }
 
 void ResourceDispatcherHostImpl::OnRenderViewHostDeleted(
@@ -1332,6 +1421,24 @@ void ResourceDispatcherHostImpl::OnRenderViewHostDeleted(
     int route_id) {
   scheduler_->OnClientDeleted(child_id, route_id);
   CancelRequestsForRoute(child_id, route_id);
+}
+
+void ResourceDispatcherHostImpl::OnRenderViewHostSetIsLoading(int child_id,
+                                                              int route_id,
+                                                              bool is_loading) {
+  scheduler_->OnLoadingStateChanged(child_id, route_id, !is_loading);
+}
+
+void ResourceDispatcherHostImpl::OnRenderViewHostWasHidden(
+    int child_id,
+    int route_id) {
+  scheduler_->OnVisibilityChanged(child_id, route_id, false);
+}
+
+void ResourceDispatcherHostImpl::OnRenderViewHostWasShown(
+    int child_id,
+    int route_id) {
+  scheduler_->OnVisibilityChanged(child_id, route_id, true);
 }
 
 // This function is only used for saving feature.
@@ -1407,12 +1514,9 @@ void ResourceDispatcherHostImpl::CancelTransferringNavigation(
 void ResourceDispatcherHostImpl::ResumeDeferredNavigation(
     const GlobalRequestID& id) {
   ResourceLoader* loader = GetLoader(id);
-  if (loader) {
-    // The response we were meant to resume could have already been canceled.
-    ResourceRequestInfoImpl* info = loader->GetRequestInfo();
-    if (info->cross_site_handler())
-      info->cross_site_handler()->ResumeResponse();
-  }
+  // The response we were meant to resume could have already been canceled.
+  if (loader)
+    loader->CompleteTransfer();
 }
 
 // The object died, so cancel and detach all requests associated with it except
@@ -1616,9 +1720,16 @@ void ResourceDispatcherHostImpl::FinishedWithResourcesForRequest(
   IncrementOutstandingRequestsCount(-1, *info);
 }
 
-void ResourceDispatcherHostImpl::NavigationRequest(
+void ResourceDispatcherHostImpl::StartNavigationRequest(
     const NavigationRequestInfo& info,
     scoped_refptr<ResourceRequestBody> request_body,
+    int64 navigation_request_id,
+    int64 frame_node_id) {
+  NOTIMPLEMENTED();
+}
+
+void ResourceDispatcherHostImpl::CancelNavigationRequest(
+    int64 navigation_request_id,
     int64 frame_node_id) {
   NOTIMPLEMENTED();
 }

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_GUEST_VIEW_WEB_VIEW_CHROME_WEB_VIEW_PERMISSION_HELPER_DELEGATE_H_
 #define CHROME_BROWSER_GUEST_VIEW_WEB_VIEW_CHROME_WEB_VIEW_PERMISSION_HELPER_DELEGATE_H_
 
-#include "chrome/browser/guest_view/web_view/web_view_permission_helper.h"
+#include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper_delegate.h"
 
 namespace extensions {
@@ -20,10 +20,6 @@ class ChromeWebViewPermissionHelperDelegate :
   virtual ~ChromeWebViewPermissionHelperDelegate();
 
   // WebViewPermissionHelperDelegate implementation.
-  virtual void RequestMediaAccessPermission(
-      content::WebContents* source,
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE;
   virtual void CanDownload(
       content::RenderViewHost* render_view_host,
       const GURL& url,
@@ -96,12 +92,6 @@ class ChromeWebViewPermissionHelperDelegate :
       bool allow,
       const std::string& user_input);
 
-  void OnMediaPermissionResponse(
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback,
-      bool allow,
-      const std::string& user_input);
-
   void OnDownloadPermissionResponse(
       const base::Callback<void(bool)>& callback,
       bool allow,
@@ -130,10 +120,8 @@ class ChromeWebViewPermissionHelperDelegate :
                                       bool allowed);
 
   extensions::WebViewGuest* web_view_guest() {
-    return web_view_permission_helper_->web_view_guest();
+    return web_view_permission_helper()->web_view_guest();
   }
-
-  extensions::WebViewPermissionHelper* web_view_permission_helper_;
 
   std::map<int, int> bridge_id_to_request_id_map_;
 

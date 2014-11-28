@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "apps/ui/native_app_window.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/test/base/interactive_test_utils.h"
+#include "extensions/browser/app_window/native_app_window.h"
+#include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/result_catcher.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 #include "base/mac/mac_util.h"
@@ -20,7 +21,8 @@
 #include "ui/views/win/hwnd_util.h"
 #endif
 
-using apps::NativeAppWindow;
+using extensions::AppWindow;
+using extensions::NativeAppWindow;
 
 // Helper class that has to be created in the stack to check if the fullscreen
 // setting of a NativeWindow has changed since the creation of the object.
@@ -48,7 +50,7 @@ class AppWindowInteractiveTest : public extensions::PlatformAppBrowserTest {
     ExtensionTestMessageListener launched_listener("Launched", true);
     LoadAndLaunchPlatformApp("window_api_interactive", &launched_listener);
 
-    ResultCatcher catcher;
+    extensions::ResultCatcher catcher;
     launched_listener.Reply(testName);
 
     if (!catcher.GetNextResult()) {
@@ -126,7 +128,13 @@ IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, ESCLeavesFullscreenWindow) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, ESCLeavesFullscreenDOM) {
+#if defined(OS_MACOSX)
+// http://crbug.com/406009
+#define MAYBE_ESCLeavesFullscreenDOM DISABLED_ESCLeavesFullscreenDOM
+#else
+#define MAYBE_ESCLeavesFullscreenDOM ESCLeavesFullscreenDOM
+#endif
+IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, MAYBE_ESCLeavesFullscreenDOM) {
 // This test is flaky on MacOS 10.6.
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   if (base::mac::IsOSSnowLeopard())
@@ -176,8 +184,14 @@ IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, ESCLeavesFullscreenDOM) {
   }
 }
 
+#if defined(OS_MACOSX)
+// http://crbug.com/406009
+#define MAYBE_ESCDoesNotLeaveFullscreenWindow DISABLED_ESCDoesNotLeaveFullscreenWindow
+#else
+#define MAYBE_ESCDoesNotLeaveFullscreenWindow ESCDoesNotLeaveFullscreenWindow
+#endif
 IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest,
-                       ESCDoesNotLeaveFullscreenWindow) {
+                       MAYBE_ESCDoesNotLeaveFullscreenWindow) {
 // This test is flaky on MacOS 10.6.
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   if (base::mac::IsOSSnowLeopard())
@@ -330,7 +344,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest,
   EXPECT_TRUE(GetFirstAppWindow()->GetBaseWindow()->IsFullscreen());
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_WIN)
 // http://crbug.com/404081
 #define MAYBE_TestInnerBounds DISABLED_TestInnerBounds
 #else
@@ -350,7 +364,7 @@ void AppWindowInteractiveTest::TestOuterBoundsHelper(
   launched_listener.Reset();
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 
-  apps::AppWindow* window = GetFirstAppWindowForApp(app->id());
+  AppWindow* window = GetFirstAppWindowForApp(app->id());
   gfx::Rect window_bounds;
   gfx::Size min_size, max_size;
 
@@ -438,4 +452,8 @@ IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, MAYBE_TestCreate) {
 
 IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, MAYBE_TestShow) {
   ASSERT_TRUE(RunAppWindowInteractiveTest("testShow")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AppWindowInteractiveTest, TestDrawAttention) {
+  ASSERT_TRUE(RunAppWindowInteractiveTest("testDrawAttention")) << message_;
 }

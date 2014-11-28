@@ -13,17 +13,18 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
@@ -40,19 +41,26 @@ AutoApproveForTest g_auto_approve_for_test = DO_NOT_SKIP;
 
 // Creates a dummy extension and sets the manifest's name to the item's
 // localized name.
-scoped_refptr<Extension> CreateDummyExtension(const BundleInstaller::Item& item,
-                                              base::DictionaryValue* manifest) {
+scoped_refptr<Extension> CreateDummyExtension(
+    const BundleInstaller::Item& item,
+    base::DictionaryValue* manifest,
+    content::BrowserContext* browser_context) {
   // We require localized names so we can have nice error messages when we can't
   // parse an extension manifest.
   CHECK(!item.localized_name.empty());
 
   std::string error;
-  return Extension::Create(base::FilePath(),
-                           Manifest::INTERNAL,
-                           *manifest,
-                           Extension::NO_FLAGS,
-                           item.id,
-                           &error);
+  scoped_refptr<Extension> extension = Extension::Create(base::FilePath(),
+                                                         Manifest::INTERNAL,
+                                                         *manifest,
+                                                         Extension::NO_FLAGS,
+                                                         item.id,
+                                                         &error);
+  // Initialize permissions so that withheld permissions are displayed properly
+  // in the install prompt.
+  PermissionsUpdater(browser_context, PermissionsUpdater::INIT_FLAG_TRANSIENT)
+      .InitializePermissions(extension.get());
+  return extension;
 }
 
 bool IsAppPredicate(scoped_refptr<const Extension> extension) {
@@ -258,7 +266,7 @@ void BundleInstaller::ShowPrompt() {
   for (size_t i = 0; i < dummy_extensions_.size(); ++i) {
     permissions = PermissionSet::CreateUnion(
         permissions.get(),
-        dummy_extensions_[i]->permissions_data()->active_permissions());
+        dummy_extensions_[i]->permissions_data()->active_permissions().get());
   }
 
   if (g_auto_approve_for_test == PROCEED) {
@@ -295,7 +303,8 @@ void BundleInstaller::OnWebstoreParseSuccess(
     const std::string& id,
     const SkBitmap& icon,
     base::DictionaryValue* manifest) {
-  dummy_extensions_.push_back(CreateDummyExtension(items_[id], manifest));
+  dummy_extensions_.push_back(
+      CreateDummyExtension(items_[id], manifest, profile_));
   parsed_manifests_[id] = linked_ptr<base::DictionaryValue>(manifest);
 
   ShowPromptIfDoneParsing();

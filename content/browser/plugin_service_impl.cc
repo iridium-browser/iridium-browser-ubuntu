@@ -634,7 +634,7 @@ void PluginServiceImpl::GetPluginsOnIOThread(
   // If we switch back to loading plugins in process, then we need to make
   // sure g_thread_init() gets called since plugins may call glib at load.
 
-  if (!plugin_loader_)
+  if (!plugin_loader_.get())
     plugin_loader_ = new PluginLoaderPosix;
 
   plugin_loader_->GetPlugins(
@@ -841,10 +841,15 @@ bool PluginServiceImpl::GetPluginInfoFromWindow(
   if (!IsPluginWindow(window))
     return false;
 
-  GetPluginPropertyFromWindow(
-          window, kPluginNameAtomProperty, plugin_name);
-  GetPluginPropertyFromWindow(
-          window, kPluginVersionAtomProperty, plugin_version);
+
+  DWORD process_id = 0;
+  GetWindowThreadProcessId(window, &process_id);
+  WebPluginInfo info;
+  if (!PluginProcessHost::GetWebPluginInfoFromPluginPid(process_id, &info))
+    return false;
+
+  *plugin_name = info.name;
+  *plugin_version = info.version;
   return true;
 }
 

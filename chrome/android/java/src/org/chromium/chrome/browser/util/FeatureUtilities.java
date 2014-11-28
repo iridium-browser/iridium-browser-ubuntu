@@ -15,9 +15,8 @@ import android.os.Bundle;
 import android.os.UserManager;
 import android.speech.RecognizerIntent;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.sync.signin.AccountManagerHelper;
 
 import java.util.List;
@@ -85,4 +84,14 @@ public class FeatureUtilities {
         Bundle userRestrictions = manager.getUserRestrictions();
         return !userRestrictions.getBoolean(UserManager.DISALLOW_MODIFY_ACCOUNTS, false);
     }
+
+    /**
+     * Records the current document mode state with native-side feature utilities.
+     * @param enabled Whether the document mode is enabled.
+     */
+    public static void setDocumentModeEnabled(boolean enabled) {
+        nativeSetDocumentModeEnabled(enabled);
+    }
+
+    private static native void nativeSetDocumentModeEnabled(boolean enabled);
 }

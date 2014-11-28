@@ -40,34 +40,11 @@ _ISOLATE_FILE_PATHS = {
     'media_unittests': 'media/media_unittests.isolate',
     'net_unittests': 'net/net_unittests.isolate',
     'sql_unittests': 'sql/sql_unittests.isolate',
-    'ui_unittests': 'ui/ui_unittests.isolate',
+    'ui_unittests': 'ui/base/ui_base_tests.isolate',
     'unit_tests': 'chrome/unit_tests.isolate',
     'webkit_unit_tests':
       'third_party/WebKit/Source/web/WebKitUnitTests.isolate',
 }
-
-# Paths relative to third_party/webrtc/ (kept separate for readability).
-_WEBRTC_ISOLATE_FILE_PATHS = {
-    'audio_decoder_unittests':
-      'modules/audio_coding/neteq/audio_decoder_unittests.isolate',
-    'common_audio_unittests': 'common_audio/common_audio_unittests.isolate',
-    'common_video_unittests': 'common_video/common_video_unittests.isolate',
-    'modules_tests': 'modules/modules_tests.isolate',
-    'modules_unittests': 'modules/modules_unittests.isolate',
-    'system_wrappers_unittests':
-      'system_wrappers/source/system_wrappers_unittests.isolate',
-    'test_support_unittests': 'test/test_support_unittests.isolate',
-    'tools_unittests': 'tools/tools_unittests.isolate',
-    'video_engine_tests': 'video_engine_tests.isolate',
-    'video_engine_core_unittests':
-      'video_engine/video_engine_core_unittests.isolate',
-    'voice_engine_unittests': 'voice_engine/voice_engine_unittests.isolate',
-    'webrtc_perf_tests': 'webrtc_perf_tests.isolate',
-}
-
-# Append the WebRTC tests with the full path from Chromium's src/ root.
-for webrtc_test, isolate_path in _WEBRTC_ISOLATE_FILE_PATHS.items():
-  _ISOLATE_FILE_PATHS[webrtc_test] = 'third_party/webrtc/%s' % isolate_path
 
 # Used for filtering large data deps at a finer grain than what's allowed in
 # isolate files since pushing deps to devices is expensive.
@@ -121,7 +98,7 @@ def _GenerateDepsDirUsingIsolate(suite_name, isolate_file_path=None):
 
   isolated_abs_path = os.path.join(
       constants.GetOutDirectory(), '%s.isolated' % suite_name)
-  assert os.path.exists(isolate_abs_path)
+  assert os.path.exists(isolate_abs_path), 'Cannot find %s' % isolate_abs_path
   # This needs to be kept in sync with the cmd line options for isolate.py
   # in src/build/isolate.gypi.
   isolate_cmd = [
@@ -136,12 +113,15 @@ def _GenerateDepsDirUsingIsolate(suite_name, isolate_file_path=None):
 
       '--config-variable', 'OS', 'android',
       '--config-variable', 'CONFIGURATION_NAME', constants.GetBuildType(),
+      '--config-variable', 'asan', '0',
       '--config-variable', 'chromeos', '0',
       '--config-variable', 'component', 'static_library',
+      '--config-variable', 'fastbuild', '0',
       '--config-variable', 'icu_use_data_file_flag', '1',
       # TODO(maruel): This may not be always true.
       '--config-variable', 'target_arch', 'arm',
       '--config-variable', 'use_openssl', '0',
+      '--config-variable', 'use_ozone', '0',
   ]
   assert not cmd_helper.RunCmd(isolate_cmd)
 
@@ -236,6 +216,11 @@ def _GetTests(test_options, test_package, devices):
   """
   def TestListerRunnerFactory(device, _shard_index):
     class TestListerRunner(test_runner.TestRunner):
+      #override
+      def PushDataDeps(self):
+        pass
+
+      #override
       def RunTest(self, _test):
         result = base_test_result.BaseTestResult(
             'gtest_list_tests', base_test_result.ResultType.PASS)
@@ -317,12 +302,16 @@ def Setup(test_options, devices):
   """
   test_package = test_package_apk.TestPackageApk(test_options.suite_name)
   if not os.path.exists(test_package.suite_path):
-    test_package = test_package_exe.TestPackageExecutable(
+    exe_test_package = test_package_exe.TestPackageExecutable(
         test_options.suite_name)
-    if not os.path.exists(test_package.suite_path):
+    if not os.path.exists(exe_test_package.suite_path):
       raise Exception(
-          'Did not find %s target. Ensure it has been built.'
-          % test_options.suite_name)
+          'Did not find %s target. Ensure it has been built.\n'
+          '(not found at %s or %s)'
+          % (test_options.suite_name,
+             test_package.suite_path,
+             exe_test_package.suite_path))
+    test_package = exe_test_package
   logging.warning('Found target %s', test_package.suite_path)
 
   _GenerateDepsDirUsingIsolate(test_options.suite_name,

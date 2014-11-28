@@ -21,7 +21,7 @@ class ChromeNativeAppWindowViewsWin : public ChromeNativeAppWindowViews {
 
   GlassAppWindowFrameViewWin* glass_frame_view() {
     return glass_frame_view_;
-  };
+  }
 
  private:
   void ActivateParentDesktopIfNecessary();
@@ -37,17 +37,15 @@ class ChromeNativeAppWindowViewsWin : public ChromeNativeAppWindowViews {
   virtual void OnBeforeWidgetInit(views::Widget::InitParams* init_params,
                                   views::Widget* widget) OVERRIDE;
   virtual void InitializeDefaultWindow(
-      const apps::AppWindow::CreateParams& create_params) OVERRIDE;
+      const extensions::AppWindow::CreateParams& create_params) OVERRIDE;
   virtual views::NonClientFrameView* CreateStandardDesktopAppFrame() OVERRIDE;
 
   // Overridden from ui::BaseWindow:
   virtual void Show() OVERRIDE;
   virtual void Activate() OVERRIDE;
 
-  // Overridden from apps::NativeAppWindow:
+  // Overridden from extensions::NativeAppWindow:
   virtual void UpdateShelfMenu() OVERRIDE;
-
-  base::WeakPtrFactory<ChromeNativeAppWindowViewsWin> weak_ptr_factory_;
 
   // Populated if there is a glass frame, which provides special information
   // to the native widget implementation. This will be NULL if there is no
@@ -56,7 +54,10 @@ class ChromeNativeAppWindowViewsWin : public ChromeNativeAppWindowViews {
   GlassAppWindowFrameViewWin* glass_frame_view_;
 
   // The Windows Application User Model ID identifying the app.
+  // Not set for windows running inside Ash.
   base::string16 app_model_id_;
+
+  base::WeakPtrFactory<ChromeNativeAppWindowViewsWin> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNativeAppWindowViewsWin);
 };

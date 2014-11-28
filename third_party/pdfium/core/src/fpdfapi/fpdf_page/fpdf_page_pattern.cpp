@@ -8,19 +8,14 @@
 #include "pageint.h"
 
 CPDF_Pattern::CPDF_Pattern(const CFX_AffineMatrix* pParentMatrix) :
-    m_pPatternObj(NULL), m_PatternType(PATTERN_TILING), m_pDocument(NULL), m_pColor(NULL)
+    m_pPatternObj(NULL), m_PatternType(PATTERN_TILING), m_pDocument(NULL), m_bForceClear(FALSE)
 {
     if (pParentMatrix) {
         m_ParentMatrix = *pParentMatrix;
     }
 }
-
 CPDF_Pattern::~CPDF_Pattern()
 {
-    if (m_pColor) {
-        m_pColor->SetValue(NULL, NULL, 0);
-        m_pColor = NULL;
-    }
 }
 CPDF_TilingPattern::CPDF_TilingPattern(CPDF_Document* pDoc, CPDF_Object* pPatternObj, const CFX_AffineMatrix* parentMatrix) :
     CPDF_Pattern(parentMatrix)
@@ -88,6 +83,7 @@ CPDF_ShadingPattern::CPDF_ShadingPattern(CPDF_Document* pDoc, CPDF_Object* pPatt
     for (int i = 0; i < 4; i ++) {
         m_pFunctions[i] = NULL;
     }
+    m_pCountedCS = NULL;
 }
 CPDF_ShadingPattern::~CPDF_ShadingPattern()
 {
@@ -101,12 +97,13 @@ void CPDF_ShadingPattern::Clear()
         }
         m_pFunctions[i] = NULL;
     }
-    CPDF_ColorSpace* pCS = m_pCS;
+    CPDF_ColorSpace* pCS = m_pCountedCS ? m_pCountedCS->m_Obj : NULL;
     if (pCS && m_pDocument) {
         m_pDocument->GetPageData()->ReleaseColorSpace(pCS->GetArray());
     }
     m_ShadingType = 0;
     m_pCS = NULL;
+    m_pCountedCS = NULL;
     m_nFuncs = 0;
 }
 FX_BOOL CPDF_ShadingPattern::Load()
@@ -146,6 +143,9 @@ FX_BOOL CPDF_ShadingPattern::Load()
     }
     CPDF_DocPageData* pDocPageData = m_pDocument->GetPageData();
     m_pCS = pDocPageData->GetColorSpace(pCSObj, NULL);
+    if (m_pCS) {
+        m_pCountedCS = pDocPageData->FindColorSpacePtr(m_pCS->GetArray());
+    }
     m_ShadingType = pShadingDict->GetInteger(FX_BSTRC("ShadingType"));
     return TRUE;
 }

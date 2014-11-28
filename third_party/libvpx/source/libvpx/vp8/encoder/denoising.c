@@ -8,6 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <limits.h>
+
 #include "denoising.h"
 
 #include "vp8/common/reconinter.h"
@@ -66,6 +68,10 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
     int adj_val[3] = {3, 4, 6};
     int shift_inc1 = 0;
     int shift_inc2 = 1;
+    int col_sum[16] = {0, 0, 0, 0,
+                       0, 0, 0, 0,
+                       0, 0, 0, 0,
+                       0, 0, 0, 0};
     /* If motion_magnitude is small, making the denoiser more aggressive by
      * increasing the adjustment for each level. Add another increment for
      * blocks that are labeled for increase denoising. */
@@ -96,11 +102,11 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
             if (absdiff <= 3 + shift_inc1)
             {
                 running_avg_y[c] = mc_running_avg_y[c];
-                sum_diff += diff;
+                col_sum[c] += diff;
             }
             else
             {
-                if (absdiff >= 4 && absdiff <= 7)
+                if (absdiff >= 4 + shift_inc1 && absdiff <= 7)
                     adjustment = adj_val[0];
                 else if (absdiff >= 8 && absdiff <= 15)
                     adjustment = adj_val[1];
@@ -114,7 +120,7 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
                     else
                         running_avg_y[c] = sig[c] + adjustment;
 
-                    sum_diff += adjustment;
+                    col_sum[c] += adjustment;
                 }
                 else
                 {
@@ -123,7 +129,7 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
                     else
                         running_avg_y[c] = sig[c] - adjustment;
 
-                    sum_diff -= adjustment;
+                    col_sum[c] -= adjustment;
                 }
             }
         }
@@ -132,6 +138,23 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
         sig += sig_stride;
         mc_running_avg_y += mc_avg_y_stride;
         running_avg_y += avg_y_stride;
+    }
+
+    for (c = 0; c < 16; ++c) {
+      // Below we clip the value in the same way which SSE code use.
+      // When adopting aggressive denoiser, the adj_val for each pixel
+      // could be at most 8 (this is current max adjustment of the map).
+      // In SSE code, we calculate the sum of adj_val for
+      // the columns, so the sum could be upto 128(16 rows). However,
+      // the range of the value is -128 ~ 127 in SSE code, that's why
+      // we do this change in C code.
+      // We don't do this for UV denoiser, since there are only 8 rows,
+      // and max adjustments <= 8, so the sum of the columns will not
+      // exceed 64.
+      if (col_sum[c] >= 128) {
+        col_sum[c] = 127;
+      }
+      sum_diff += col_sum[c];
     }
 
     sum_diff_thresh= SUM_DIFF_THRESHOLD;
@@ -164,14 +187,14 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
                 running_avg_y[c] = 0;
               else
                 running_avg_y[c] = running_avg_y[c] - adjustment;
-              sum_diff -= adjustment;
+              col_sum[c] -= adjustment;
             } else if (diff < 0) {
               // Bring denoised signal up.
               if (running_avg_y[c] + adjustment > 255)
                 running_avg_y[c] = 255;
               else
                 running_avg_y[c] = running_avg_y[c] + adjustment;
-              sum_diff += adjustment;
+              col_sum[c] += adjustment;
             }
           }
           // TODO(marpan): Check here if abs(sum_diff) has gone below the
@@ -180,6 +203,15 @@ int vp8_denoiser_filter_c(unsigned char *mc_running_avg_y, int mc_avg_y_stride,
           mc_running_avg_y += mc_avg_y_stride;
           running_avg_y += avg_y_stride;
         }
+
+        sum_diff = 0;
+        for (c = 0; c < 16; ++c) {
+          if (col_sum[c] >= 128) {
+            col_sum[c] = 127;
+          }
+          sum_diff += col_sum[c];
+        }
+
         if (abs(sum_diff) > sum_diff_thresh)
           return COPY_BLOCK;
       } else {
@@ -333,8 +365,40 @@ int vp8_denoiser_filter_uv_c(unsigned char *mc_running_avg_uv,
     return FILTER_BLOCK;
 }
 
+void vp8_denoiser_set_parameters(VP8_DENOISER *denoiser, int mode) {
+  assert(mode > 0);  // Denoiser is allocated only if mode > 0.
+  if (mode == 1) {
+    denoiser->denoiser_mode = kDenoiserOnYOnly;
+  } else if (mode == 2) {
+    denoiser->denoiser_mode = kDenoiserOnYUV;
+  } else if (mode == 3) {
+    denoiser->denoiser_mode = kDenoiserOnYUVAggressive;
+  } else {
+    denoiser->denoiser_mode = kDenoiserOnAdaptive;
+  }
+  if (denoiser->denoiser_mode != kDenoiserOnYUVAggressive) {
+    denoiser->denoise_pars.scale_sse_thresh = 1;
+    denoiser->denoise_pars.scale_motion_thresh = 8;
+    denoiser->denoise_pars.scale_increase_filter = 0;
+    denoiser->denoise_pars.denoise_mv_bias = 95;
+    denoiser->denoise_pars.pickmode_mv_bias = 100;
+    denoiser->denoise_pars.qp_thresh = 0;
+    denoiser->denoise_pars.consec_zerolast = UINT_MAX;
+    denoiser->denoise_pars.spatial_blur = 0;
+  } else {
+    denoiser->denoise_pars.scale_sse_thresh = 2;
+    denoiser->denoise_pars.scale_motion_thresh = 16;
+    denoiser->denoise_pars.scale_increase_filter = 1;
+    denoiser->denoise_pars.denoise_mv_bias = 60;
+    denoiser->denoise_pars.pickmode_mv_bias = 60;
+    denoiser->denoise_pars.qp_thresh = 100;
+    denoiser->denoise_pars.consec_zerolast = 10;
+    denoiser->denoise_pars.spatial_blur = 20;
+  }
+}
+
 int vp8_denoiser_allocate(VP8_DENOISER *denoiser, int width, int height,
-                          int num_mb_rows, int num_mb_cols)
+                          int num_mb_rows, int num_mb_cols, int mode)
 {
     int i;
     assert(denoiser);
@@ -367,11 +431,43 @@ int vp8_denoiser_allocate(VP8_DENOISER *denoiser, int width, int height,
     vpx_memset(denoiser->yv12_mc_running_avg.buffer_alloc, 0,
                denoiser->yv12_mc_running_avg.frame_size);
 
+    if (vp8_yv12_alloc_frame_buffer(&denoiser->yv12_last_source, width,
+                                    height, VP8BORDERINPIXELS) < 0) {
+      vp8_denoiser_free(denoiser);
+      return 1;
+    }
+    vpx_memset(denoiser->yv12_last_source.buffer_alloc, 0,
+               denoiser->yv12_last_source.frame_size);
+
     denoiser->denoise_state = vpx_calloc((num_mb_rows * num_mb_cols), 1);
     vpx_memset(denoiser->denoise_state, 0, (num_mb_rows * num_mb_cols));
-
+    vp8_denoiser_set_parameters(denoiser, mode);
+    denoiser->nmse_source_diff = 0;
+    denoiser->nmse_source_diff_count = 0;
+    denoiser->qp_avg = 0;
+    // QP threshold below which we can go up to aggressive mode.
+    denoiser->qp_threshold_up = 80;
+    // QP threshold above which we can go back down to normal mode.
+    // For now keep this second threshold high, so not used currently.
+    denoiser->qp_threshold_down = 128;
+    // Bitrate thresholds and noise metric (nmse) thresholds for switching to
+    // aggressive mode.
+    // TODO(marpan): Adjust thresholds, including effect on resolution.
+    denoiser->bitrate_threshold = 200000;  // (bits/sec).
+    denoiser->threshold_aggressive_mode = 35;
+    if (width * height > 640 * 480) {
+      denoiser->bitrate_threshold = 500000;
+      denoiser->threshold_aggressive_mode = 100;
+    } else if (width * height > 960 * 540) {
+      denoiser->bitrate_threshold = 800000;
+      denoiser->threshold_aggressive_mode = 150;
+    } else if (width * height > 1280 * 720) {
+      denoiser->bitrate_threshold = 2000000;
+      denoiser->threshold_aggressive_mode = 1400;
+    }
     return 0;
 }
+
 
 void vp8_denoiser_free(VP8_DENOISER *denoiser)
 {
@@ -383,6 +479,7 @@ void vp8_denoiser_free(VP8_DENOISER *denoiser)
         vp8_yv12_de_alloc_frame_buffer(&denoiser->yv12_running_avg[i]);
     }
     vp8_yv12_de_alloc_frame_buffer(&denoiser->yv12_mc_running_avg);
+    vp8_yv12_de_alloc_frame_buffer(&denoiser->yv12_last_source);
     vpx_free(denoiser->denoise_state);
 }
 
@@ -396,11 +493,12 @@ void vp8_denoiser_denoise_mb(VP8_DENOISER *denoiser,
                              loop_filter_info_n *lfi_n,
                              int mb_row,
                              int mb_col,
-                             int block_index,
-                             int uv_denoise)
+                             int block_index)
+
 {
     int mv_row;
     int mv_col;
+    unsigned int motion_threshold;
     unsigned int motion_magnitude2;
     unsigned int sse_thresh;
     int sse_diff_thresh = 0;
@@ -424,7 +522,7 @@ void vp8_denoiser_denoise_mb(VP8_DENOISER *denoiser,
         MB_MODE_INFO *mbmi = &filter_xd->mode_info_context->mbmi;
         int sse_diff = 0;
         // Bias on zero motion vector sse.
-        int zero_bias = 95;
+        const int zero_bias = denoiser->denoise_pars.denoise_mv_bias;
         zero_mv_sse = (unsigned int)((int64_t)zero_mv_sse * zero_bias / 100);
         sse_diff = zero_mv_sse - best_sse;
 
@@ -502,14 +600,19 @@ void vp8_denoiser_denoise_mb(VP8_DENOISER *denoiser,
     mv_row = x->best_sse_mv.as_mv.row;
     mv_col = x->best_sse_mv.as_mv.col;
     motion_magnitude2 = mv_row * mv_row + mv_col * mv_col;
-    sse_thresh = SSE_THRESHOLD;
-    if (x->increase_denoising) sse_thresh = SSE_THRESHOLD_HIGH;
+    motion_threshold = denoiser->denoise_pars.scale_motion_thresh *
+        NOISE_MOTION_THRESHOLD;
 
-    if (best_sse > sse_thresh || motion_magnitude2
-           > 8 * NOISE_MOTION_THRESHOLD)
-    {
-        decision = COPY_BLOCK;
-    }
+    if (motion_magnitude2 <
+        denoiser->denoise_pars.scale_increase_filter * NOISE_MOTION_THRESHOLD)
+      x->increase_denoising = 1;
+
+    sse_thresh = denoiser->denoise_pars.scale_sse_thresh * SSE_THRESHOLD;
+    if (x->increase_denoising)
+      sse_thresh = denoiser->denoise_pars.scale_sse_thresh * SSE_THRESHOLD_HIGH;
+
+    if (best_sse > sse_thresh || motion_magnitude2 > motion_threshold)
+      decision = COPY_BLOCK;
 
     if (decision == FILTER_BLOCK)
     {
@@ -528,7 +631,7 @@ void vp8_denoiser_denoise_mb(VP8_DENOISER *denoiser,
         denoiser->denoise_state[block_index] = motion_magnitude2 > 0 ?
             kFilterNonZeroMV : kFilterZeroMV;
         // Only denoise UV for zero motion, and if y channel was denoised.
-        if (uv_denoise &&
+        if (denoiser->denoiser_mode != kDenoiserOnYOnly &&
             motion_magnitude2 == 0 &&
             decision == FILTER_BLOCK) {
           unsigned char *mc_running_avg_u =
@@ -565,7 +668,7 @@ void vp8_denoiser_denoise_mb(VP8_DENOISER *denoiser,
                 denoiser->yv12_running_avg[INTRA_FRAME].y_stride);
         denoiser->denoise_state[block_index] = kNoFilter;
     }
-    if (uv_denoise) {
+    if (denoiser->denoiser_mode != kDenoiserOnYOnly) {
       if (decision_u == COPY_BLOCK) {
         vp8_copy_mem8x8(
             x->block[16].src + *x->block[16].base_src, x->block[16].src_stride,

@@ -28,6 +28,7 @@
 #include "core/css/parser/BisonCSSParser.h"
 
 #include "core/CSSValueKeywords.h"
+#include "core/MediaTypeNames.h"
 #include "core/StylePropertyShorthand.h"
 #include "core/css/CSSAspectRatioValue.h"
 #include "core/css/CSSBasicShapes.h"
@@ -217,9 +218,8 @@ static inline bool isColorPropertyID(CSSPropertyID propertyId)
     case CSSPropertyWebkitTextEmphasisColor:
     case CSSPropertyWebkitTextFillColor:
     case CSSPropertyWebkitTextStrokeColor:
-        return true;
     case CSSPropertyTextDecorationColor:
-        return RuntimeEnabledFeatures::css3TextDecorationsEnabled();
+        return true;
     default:
         return false;
     }
@@ -361,6 +361,8 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
         return false;
 
     switch (propertyId) {
+    case CSSPropertyAll:
+        return valueID == CSSValueUnset;
     case CSSPropertyBackgroundRepeatX: // repeat | no-repeat
     case CSSPropertyBackgroundRepeatY: // repeat | no-repeat
         return valueID == CSSValueRepeat || valueID == CSSValueNoRepeat;
@@ -398,12 +400,12 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
     case CSSPropertyFontStyle: // normal | italic | oblique
         return valueID == CSSValueNormal || valueID == CSSValueItalic || valueID == CSSValueOblique;
     case CSSPropertyFontStretch: // normal | ultra-condensed | extra-condensed | condensed | semi-condensed | semi-expanded | expanded | extra-expanded | ultra-expanded
-        return valueID == CSSValueNormal || valueID == CSSValueUltraCondensed || valueID == CSSValueExtraCondensed || valueID == CSSValueCondensed || valueID == CSSValueSemiCondensed || valueID == CSSValueSemiExpanded || valueID == CSSValueExpanded || valueID == CSSValueExtraExpanded || valueID == CSSValueUltraExpanded;
+        return valueID == CSSValueNormal || (valueID >= CSSValueUltraCondensed && valueID <= CSSValueUltraExpanded);
     case CSSPropertyImageRendering: // auto | optimizeContrast | pixelated
         return valueID == CSSValueAuto || valueID == CSSValueWebkitOptimizeContrast || (RuntimeEnabledFeatures::imageRenderingPixelatedEnabled() && valueID == CSSValuePixelated);
     case CSSPropertyIsolation: // auto | isolate
-        return RuntimeEnabledFeatures::cssCompositingEnabled()
-            && (valueID == CSSValueAuto || valueID == CSSValueIsolate);
+        ASSERT(RuntimeEnabledFeatures::cssCompositingEnabled());
+        return valueID == CSSValueAuto || valueID == CSSValueIsolate;
     case CSSPropertyListStylePosition: // inside | outside
         return valueID == CSSValueInside || valueID == CSSValueOutside;
     case CSSPropertyListStyleType:
@@ -411,8 +413,7 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
         // for the list of supported list-style-types.
         return (valueID >= CSSValueDisc && valueID <= CSSValueKatakanaIroha) || valueID == CSSValueNone;
     case CSSPropertyObjectFit:
-        return RuntimeEnabledFeatures::objectFitPositionEnabled()
-            && (valueID == CSSValueFill || valueID == CSSValueContain || valueID == CSSValueCover || valueID == CSSValueNone || valueID == CSSValueScaleDown);
+        return valueID == CSSValueFill || valueID == CSSValueContain || valueID == CSSValueCover || valueID == CSSValueNone || valueID == CSSValueScaleDown;
     case CSSPropertyOutlineStyle: // (<border-style> except hidden) | auto
         return valueID == CSSValueAuto || valueID == CSSValueNone || (valueID >= CSSValueInset && valueID <= CSSValueDouble);
     case CSSPropertyOverflowWrap: // normal | break-word
@@ -439,29 +440,37 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
     case CSSPropertyResize: // none | both | horizontal | vertical | auto
         return valueID == CSSValueNone || valueID == CSSValueBoth || valueID == CSSValueHorizontal || valueID == CSSValueVertical || valueID == CSSValueAuto;
     case CSSPropertyScrollBehavior: // instant | smooth
-        return RuntimeEnabledFeatures::cssomSmoothScrollEnabled()
-            && (valueID == CSSValueInstant || valueID == CSSValueSmooth);
+        ASSERT(RuntimeEnabledFeatures::cssomSmoothScrollEnabled());
+        return valueID == CSSValueInstant || valueID == CSSValueSmooth;
     case CSSPropertySpeak: // none | normal | spell-out | digits | literal-punctuation | no-punctuation
         return valueID == CSSValueNone || valueID == CSSValueNormal || valueID == CSSValueSpellOut || valueID == CSSValueDigits || valueID == CSSValueLiteralPunctuation || valueID == CSSValueNoPunctuation;
     case CSSPropertyTableLayout: // auto | fixed
         return valueID == CSSValueAuto || valueID == CSSValueFixed;
     case CSSPropertyTextAlignLast:
         // auto | start | end | left | right | center | justify
-        return RuntimeEnabledFeatures::css3TextEnabled()
-            && ((valueID >= CSSValueLeft && valueID <= CSSValueJustify) || valueID == CSSValueStart || valueID == CSSValueEnd || valueID == CSSValueAuto);
+        ASSERT(RuntimeEnabledFeatures::css3TextEnabled());
+        return (valueID >= CSSValueLeft && valueID <= CSSValueJustify) || valueID == CSSValueStart || valueID == CSSValueEnd || valueID == CSSValueAuto;
+    case CSSPropertyTextDecorationStyle:
+        // solid | double | dotted | dashed | wavy
+        ASSERT(RuntimeEnabledFeatures::css3TextDecorationsEnabled());
+        return valueID == CSSValueSolid || valueID == CSSValueDouble || valueID == CSSValueDotted || valueID == CSSValueDashed || valueID == CSSValueWavy;
     case CSSPropertyTextJustify:
         // auto | none | inter-word | distribute
-        return RuntimeEnabledFeatures::css3TextEnabled()
-            && (valueID == CSSValueInterWord || valueID == CSSValueDistribute || valueID == CSSValueAuto || valueID == CSSValueNone);
+        ASSERT(RuntimeEnabledFeatures::css3TextEnabled());
+        return valueID == CSSValueInterWord || valueID == CSSValueDistribute || valueID == CSSValueAuto || valueID == CSSValueNone;
     case CSSPropertyTextOverflow: // clip | ellipsis
         return valueID == CSSValueClip || valueID == CSSValueEllipsis;
     case CSSPropertyTextRendering: // auto | optimizeSpeed | optimizeLegibility | geometricPrecision
         return valueID == CSSValueAuto || valueID == CSSValueOptimizespeed || valueID == CSSValueOptimizelegibility || valueID == CSSValueGeometricprecision;
     case CSSPropertyTextTransform: // capitalize | uppercase | lowercase | none
         return (valueID >= CSSValueCapitalize && valueID <= CSSValueLowercase) || valueID == CSSValueNone;
+    case CSSPropertyUnicodeBidi:
+        return valueID == CSSValueNormal || valueID == CSSValueEmbed
+            || valueID == CSSValueBidiOverride || valueID == CSSValueWebkitIsolate
+            || valueID == CSSValueWebkitIsolateOverride || valueID == CSSValueWebkitPlaintext;
     case CSSPropertyTouchActionDelay: // none | script
-        return RuntimeEnabledFeatures::cssTouchActionDelayEnabled()
-            && (valueID == CSSValueScript || valueID == CSSValueNone);
+        ASSERT(RuntimeEnabledFeatures::cssTouchActionDelayEnabled());
+        return valueID == CSSValueScript || valueID == CSSValueNone;
     case CSSPropertyVisibility: // visible | hidden | collapse
         return valueID == CSSValueVisible || valueID == CSSValueHidden || valueID == CSSValueCollapse;
     case CSSPropertyWebkitAppearance:
@@ -470,11 +479,11 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
     case CSSPropertyWebkitBackfaceVisibility:
         return valueID == CSSValueVisible || valueID == CSSValueHidden;
     case CSSPropertyMixBlendMode:
-        return RuntimeEnabledFeatures::cssCompositingEnabled()
-            && (valueID == CSSValueNormal || valueID == CSSValueMultiply || valueID == CSSValueScreen || valueID == CSSValueOverlay
+        ASSERT(RuntimeEnabledFeatures::cssCompositingEnabled());
+        return valueID == CSSValueNormal || valueID == CSSValueMultiply || valueID == CSSValueScreen || valueID == CSSValueOverlay
             || valueID == CSSValueDarken || valueID == CSSValueLighten || valueID == CSSValueColorDodge || valueID == CSSValueColorBurn
             || valueID == CSSValueHardLight || valueID == CSSValueSoftLight || valueID == CSSValueDifference || valueID == CSSValueExclusion
-            || valueID == CSSValueHue || valueID == CSSValueSaturation || valueID == CSSValueColor || valueID == CSSValueLuminosity);
+            || valueID == CSSValueHue || valueID == CSSValueSaturation || valueID == CSSValueColor || valueID == CSSValueLuminosity;
     case CSSPropertyWebkitBorderFit:
         return valueID == CSSValueBorder || valueID == CSSValueLines;
     case CSSPropertyWebkitBoxAlign:
@@ -489,12 +498,9 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
         return valueID == CSSValueHorizontal || valueID == CSSValueVertical || valueID == CSSValueInlineAxis || valueID == CSSValueBlockAxis;
     case CSSPropertyWebkitBoxPack:
         return valueID == CSSValueStart || valueID == CSSValueEnd || valueID == CSSValueCenter || valueID == CSSValueJustify;
-    case CSSPropertyInternalCallback:
-        // This property is only injected programmatically, not parsed from stylesheets.
-        return false;
     case CSSPropertyColumnFill:
-        return RuntimeEnabledFeatures::regionBasedColumnsEnabled()
-            && (valueID == CSSValueAuto || valueID == CSSValueBalance);
+        ASSERT(RuntimeEnabledFeatures::regionBasedColumnsEnabled());
+        return valueID == CSSValueAuto || valueID == CSSValueBalance;
     case CSSPropertyAlignContent:
         // FIXME: Per CSS alignment, this property should accept an optional <overflow-position>. We should share this parsing code with 'justify-self'.
         return valueID == CSSValueFlexStart || valueID == CSSValueFlexEnd || valueID == CSSValueCenter || valueID == CSSValueSpaceBetween || valueID == CSSValueSpaceAround || valueID == CSSValueStretch;
@@ -564,6 +570,7 @@ bool isValidKeywordPropertyAndValue(CSSPropertyID propertyId, CSSValueID valueID
 bool isKeywordPropertyID(CSSPropertyID propertyId)
 {
     switch (propertyId) {
+    case CSSPropertyAll:
     case CSSPropertyMixBlendMode:
     case CSSPropertyIsolation:
     case CSSPropertyBackgroundRepeatX:
@@ -600,11 +607,13 @@ bool isKeywordPropertyID(CSSPropertyID propertyId)
     case CSSPropertySpeak:
     case CSSPropertyTableLayout:
     case CSSPropertyTextAlignLast:
+    case CSSPropertyTextDecorationStyle:
     case CSSPropertyTextJustify:
     case CSSPropertyTextOverflow:
     case CSSPropertyTextRendering:
     case CSSPropertyTextTransform:
     case CSSPropertyTouchActionDelay:
+    case CSSPropertyUnicodeBidi:
     case CSSPropertyVisibility:
     case CSSPropertyWebkitAppearance:
     case CSSPropertyBackfaceVisibility:
@@ -620,7 +629,6 @@ bool isKeywordPropertyID(CSSPropertyID propertyId)
     case CSSPropertyWebkitBoxLines:
     case CSSPropertyWebkitBoxOrient:
     case CSSPropertyWebkitBoxPack:
-    case CSSPropertyInternalCallback:
     case CSSPropertyWebkitColumnBreakAfter:
     case CSSPropertyWebkitColumnBreakBefore:
     case CSSPropertyWebkitColumnBreakInside:
@@ -869,43 +877,9 @@ static bool parseSimpleTransform(MutableStylePropertySet* properties, CSSPropert
     return true;
 }
 
-PassRefPtrWillBeRawPtr<CSSValueList> BisonCSSParser::parseFontFaceValue(const AtomicString& string)
-{
-    if (string.isEmpty())
-        return nullptr;
-    RefPtrWillBeRawPtr<MutableStylePropertySet> dummyStyle = MutableStylePropertySet::create();
-    if (!parseValue(dummyStyle.get(), CSSPropertyFontFamily, string, false, HTMLQuirksMode, 0))
-        return nullptr;
-
-    RefPtrWillBeRawPtr<CSSValue> fontFamily = dummyStyle->getPropertyCSSValue(CSSPropertyFontFamily);
-    if (!fontFamily->isValueList())
-        return nullptr;
-
-    return toCSSValueList(dummyStyle->getPropertyCSSValue(CSSPropertyFontFamily).get());
-}
-
-PassRefPtrWillBeRawPtr<CSSValue> BisonCSSParser::parseAnimationTimingFunctionValue(const String& string)
-{
-    if (string.isEmpty())
-        return nullptr;
-    RefPtrWillBeRawPtr<MutableStylePropertySet> style = MutableStylePropertySet::create();
-    if (!parseValue(style.get(), CSSPropertyTransitionTimingFunction, string, false, HTMLStandardMode, 0))
-        return nullptr;
-
-    RefPtrWillBeRawPtr<CSSValue> value = style->getPropertyCSSValue(CSSPropertyTransitionTimingFunction);
-    if (!value || value->isInitialValue() || value->isInheritedValue())
-        return nullptr;
-    CSSValueList* valueList = toCSSValueList(value.get());
-    if (valueList->length() > 1)
-        return nullptr;
-    return valueList->item(0);
-}
-
-bool BisonCSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropertyID propertyID, const String& string, bool important, const Document& document)
+bool BisonCSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropertyID propertyID, const String& string, bool important, const CSSParserContext& context)
 {
     ASSERT(!string.isEmpty());
-
-    CSSParserContext context(document, UseCounter::getFrom(&document));
 
     if (parseSimpleLengthValue(declaration, propertyID, string, important, context.mode()))
         return true;
@@ -943,8 +917,6 @@ bool BisonCSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropert
 
 bool BisonCSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropertyID propertyID, const String& string, bool important, StyleSheetContents* contextStyleSheet)
 {
-    // FIXME: Check RuntimeCSSEnabled::isPropertyEnabled or isValueEnabledForProperty.
-
     if (m_context.useCounter())
         m_context.useCounter()->count(m_context, propertyID);
 
@@ -1097,19 +1069,6 @@ bool BisonCSSParser::parseDeclaration(MutableStylePropertySet* declaration, cons
     return ok;
 }
 
-PassRefPtrWillBeRawPtr<MediaQuerySet> BisonCSSParser::parseMediaQueryList(const String& string)
-{
-    ASSERT(!m_mediaList);
-
-    // can't use { because tokenizer state switches from mediaquery to initial state when it sees { token.
-    // instead insert one " " (which is caught by maybe_space in CSSGrammar.y)
-    setupParser("@-internal-medialist ", string, "");
-    cssyyparse(this);
-
-    ASSERT(m_mediaList);
-    return m_mediaList.release();
-}
-
 bool BisonCSSParser::parseAttributeMatchType(CSSSelector::AttributeMatchType& matchType, const String& string)
 {
     if (!RuntimeEnabledFeatures::cssAttributeCaseSensitivityEnabled() && !isUASheetBehavior(m_context.mode()))
@@ -1173,8 +1132,7 @@ void BisonCSSParser::setCurrentProperty(CSSPropertyID propId)
 
 bool BisonCSSParser::parseValue(CSSPropertyID propId, bool important)
 {
-    CSSPropertyParser parser(m_valueList, m_context, m_inViewport, m_important, m_parsedProperties, m_ruleHeaderType);
-    return parser.parseValue(propId, important);
+    return CSSPropertyParser::parseValue(propId, important, m_valueList.get(), m_context, m_inViewport, m_parsedProperties, m_ruleHeaderType);
 }
 
 
@@ -1189,7 +1147,7 @@ public:
         const UChar* characters;
         unsigned nameLength = name.length();
 
-        const unsigned longestNameLength = 12;
+        const unsigned longestNameLength = 11;
         UChar characterBuffer[longestNameLength];
         if (name.is8Bit()) {
             unsigned length = std::min(longestNameLength, nameLength);
@@ -1201,97 +1159,97 @@ public:
             characters = name.characters16();
 
         SWITCH(characters, nameLength) {
-            CASE("skew(") {
+            CASE("skew") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::SkewTransformOperation;
                 m_allowSingleArgument = true;
                 m_argCount = 3;
             }
-            CASE("scale(") {
+            CASE("scale") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::ScaleTransformOperation;
                 m_allowSingleArgument = true;
                 m_argCount = 3;
             }
-            CASE("skewx(") {
+            CASE("skewx") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::SkewXTransformOperation;
             }
-            CASE("skewy(") {
+            CASE("skewy") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::SkewYTransformOperation;
             }
-            CASE("matrix(") {
+            CASE("matrix") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::MatrixTransformOperation;
                 m_argCount = 11;
             }
-            CASE("rotate(") {
+            CASE("rotate") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::RotateTransformOperation;
             }
-            CASE("scalex(") {
+            CASE("scalex") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::ScaleXTransformOperation;
             }
-            CASE("scaley(") {
+            CASE("scaley") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::ScaleYTransformOperation;
             }
-            CASE("scalez(") {
+            CASE("scalez") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::ScaleZTransformOperation;
             }
-            CASE("scale3d(") {
+            CASE("scale3d") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::Scale3DTransformOperation;
                 m_argCount = 5;
             }
-            CASE("rotatex(") {
+            CASE("rotatex") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::RotateXTransformOperation;
             }
-            CASE("rotatey(") {
+            CASE("rotatey") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::RotateYTransformOperation;
             }
-            CASE("rotatez(") {
+            CASE("rotatez") {
                 m_unit = CSSPropertyParser::FAngle;
                 m_type = CSSTransformValue::RotateZTransformOperation;
             }
-            CASE("matrix3d(") {
+            CASE("matrix3d") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::Matrix3DTransformOperation;
                 m_argCount = 31;
             }
-            CASE("rotate3d(") {
+            CASE("rotate3d") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::Rotate3DTransformOperation;
                 m_argCount = 7;
             }
-            CASE("translate(") {
+            CASE("translate") {
                 m_unit = CSSPropertyParser::FLength | CSSPropertyParser::FPercent;
                 m_type = CSSTransformValue::TranslateTransformOperation;
                 m_allowSingleArgument = true;
                 m_argCount = 3;
             }
-            CASE("translatex(") {
+            CASE("translatex") {
                 m_unit = CSSPropertyParser::FLength | CSSPropertyParser::FPercent;
                 m_type = CSSTransformValue::TranslateXTransformOperation;
             }
-            CASE("translatey(") {
+            CASE("translatey") {
                 m_unit = CSSPropertyParser::FLength | CSSPropertyParser::FPercent;
                 m_type = CSSTransformValue::TranslateYTransformOperation;
             }
-            CASE("translatez(") {
+            CASE("translatez") {
                 m_unit = CSSPropertyParser::FLength | CSSPropertyParser::FPercent;
                 m_type = CSSTransformValue::TranslateZTransformOperation;
             }
-            CASE("perspective(") {
+            CASE("perspective") {
                 m_unit = CSSPropertyParser::FNumber;
                 m_type = CSSTransformValue::PerspectiveTransformOperation;
             }
-            CASE("translate3d(") {
+            CASE("translate3d") {
                 m_unit = CSSPropertyParser::FLength | CSSPropertyParser::FPercent;
                 m_type = CSSTransformValue::Translate3DTransformOperation;
                 m_argCount = 5;
@@ -1528,12 +1486,12 @@ MediaQuery* BisonCSSParser::createFloatingMediaQuery(MediaQuery::Restrictor rest
 
 MediaQuery* BisonCSSParser::createFloatingMediaQuery(PassOwnPtrWillBeRawPtr<WillBeHeapVector<OwnPtrWillBeMember<MediaQueryExp> > > expressions)
 {
-    return createFloatingMediaQuery(MediaQuery::None, AtomicString("all", AtomicString::ConstructFromLiteral), expressions);
+    return createFloatingMediaQuery(MediaQuery::None, MediaTypeNames::all, expressions);
 }
 
 MediaQuery* BisonCSSParser::createFloatingNotAllQuery()
 {
-    return createFloatingMediaQuery(MediaQuery::Not, AtomicString("all", AtomicString::ConstructFromLiteral), sinkFloatingMediaQueryExpList(createFloatingMediaQueryExpList()));
+    return createFloatingMediaQuery(MediaQuery::Not, MediaTypeNames::all, sinkFloatingMediaQueryExpList(createFloatingMediaQueryExpList()));
 }
 
 PassOwnPtrWillBeRawPtr<MediaQuery> BisonCSSParser::sinkFloatingMediaQuery(MediaQuery* query)
@@ -2084,12 +2042,6 @@ void BisonCSSParser::endProperty(bool isImportantFound, bool isPropertyParsed, C
     m_id = CSSPropertyInvalid;
     if (m_observer)
         m_observer->endProperty(isImportantFound, isPropertyParsed, m_tokenizer.safeUserStringTokenOffset(), errorType);
-}
-
-void BisonCSSParser::startEndUnknownRule()
-{
-    if (m_observer)
-        m_observer->startEndUnknownRule();
 }
 
 StyleRuleBase* BisonCSSParser::createViewportRule()

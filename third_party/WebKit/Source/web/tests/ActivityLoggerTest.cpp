@@ -6,6 +6,7 @@
 
 #include "FrameTestHelpers.h"
 #include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMActivityLogger.h"
 #include "web/WebLocalFrameImpl.h"
 #include "wtf/Forward.h"
@@ -13,14 +14,11 @@
 #include <gtest/gtest.h>
 #include <v8.h>
 
-using blink::ScriptController;
-using blink::ScriptSourceCode;
-using blink::V8DOMActivityLogger;
-using blink::toCoreStringWithUndefinedOrNullCheck;
+namespace {
+
 using blink::FrameTestHelpers::WebViewHelper;
 using blink::FrameTestHelpers::pumpPendingRequestsDoNotUse;
-
-namespace {
+using namespace blink;
 
 class TestActivityLogger : public V8DOMActivityLogger {
 public:
@@ -34,11 +32,6 @@ public:
     void logSetter(const String& apiName, const v8::Handle<v8::Value>& newValue) OVERRIDE
     {
         m_loggedActivities.append(apiName + " | " + toCoreStringWithUndefinedOrNullCheck(newValue));
-    }
-
-    void logSetter(const String& apiName, const v8::Handle<v8::Value>& newValue, const v8::Handle<v8::Value>& oldValue) OVERRIDE
-    {
-        m_loggedActivities.append(apiName + " | " + toCoreStringWithUndefinedOrNullCheck(oldValue) + " | " + toCoreStringWithUndefinedOrNullCheck(newValue));
     }
 
     void logMethod(const String& apiName, int argc, const v8::Handle<v8::Value>* argv) OVERRIDE

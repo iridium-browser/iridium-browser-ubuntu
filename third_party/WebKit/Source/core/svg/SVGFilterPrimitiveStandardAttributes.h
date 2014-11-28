@@ -35,6 +35,9 @@ class FilterEffect;
 class SVGFilterBuilder;
 
 class SVGFilterPrimitiveStandardAttributes : public SVGElement {
+    // No DEFINE_WRAPPERTYPEINFO() here because a) this class is never
+    // instantiated, and b) we don't generate corresponding V8T.h or V8T.cpp.
+    // The subclasses must write DEFINE_WRAPPERTYPEINFO().
 public:
     void setStandardAttributes(FilterEffect*) const;
 
@@ -82,4 +85,4 @@ void invalidateFilterPrimitiveParent(SVGElement*);
 
 } // namespace blink
 
-#endif
+#endif // SVGFilterPrimitiveStandardAttributes_h

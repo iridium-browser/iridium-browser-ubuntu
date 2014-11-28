@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -618,7 +618,7 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
     base::FilePath device_policy_path =
         owner_key_path.DirName().AppendASCII("stub_device_policy");
     base::PostTaskAndReplyWithResult(
-        base::WorkerPool::GetTaskRunner(false),
+        base::WorkerPool::GetTaskRunner(false).get(),
         FROM_HERE,
         base::Bind(&GetFileContent, device_policy_path),
         callback);
@@ -627,7 +627,7 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
       const std::string& username,
       const RetrievePolicyCallback& callback) OVERRIDE {
     base::PostTaskAndReplyWithResult(
-        base::WorkerPool::GetTaskRunner(false),
+        base::WorkerPool::GetTaskRunner(false).get(),
         FROM_HERE,
         base::Bind(&GetFileContent, GetUserFilePath(username, "stub_policy")),
         callback);

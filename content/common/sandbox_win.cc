@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "base/debug/profiler.h"
 #include "base/debug/trace_event.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/hash.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
@@ -18,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/win/iat_patch_function.h"
+#include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/windows_version.h"
@@ -481,7 +482,7 @@ BOOL WINAPI DuplicateHandlePatch(HANDLE source_process_handle,
                                         PROCESS_QUERY_INFORMATION,
                                         FALSE, 0));
       base::win::ScopedHandle process(temp_handle);
-      CHECK(::IsProcessInJob(process, NULL, &is_in_job));
+      CHECK(::IsProcessInJob(process.Get(), NULL, &is_in_job));
     }
   }
 
@@ -497,7 +498,7 @@ BOOL WINAPI DuplicateHandlePatch(HANDLE source_process_handle,
     base::win::ScopedHandle handle(temp_handle);
 
     // Callers use CHECK macro to make sure we get the right stack.
-    CheckDuplicateHandle(handle);
+    CheckDuplicateHandle(handle.Get());
   }
 
   return TRUE;
@@ -602,6 +603,20 @@ bool ShouldUseDirectWrite() {
   if (gfx::GetDPIScale() > 1.0f)
     return true;
 #endif
+
+  // We have logic in renderer_font_platform_win.cc for falling back to safe
+  // font list if machine has more than 1750 fonts installed. Users have
+  // complained about this as safe font list is usually not sufficient.
+  // We now disable direct write (gdi) if we encounter more number
+  // of fonts than a threshold (currently 1750).
+  // Refer: crbug.com/421305
+  const wchar_t kWindowsFontsRegistryKey[] =
+      L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
+  base::win::RegistryValueIterator reg_iterator(HKEY_LOCAL_MACHINE,
+                                                kWindowsFontsRegistryKey);
+  const DWORD kMaxAllowedFontsBeforeFallbackToGDI = 1750;
+  if (reg_iterator.ValueCount() >= kMaxAllowedFontsBeforeFallbackToGDI)
+    return false;
 
   // Otherwise, check the field trial.
   const std::string group_name =
@@ -784,7 +799,7 @@ bool BrokerDuplicateHandle(HANDLE source_handle,
                                     target_process_id));
   if (target_process.IsValid()) {
     return !!::DuplicateHandle(::GetCurrentProcess(), source_handle,
-                                target_process, target_handle,
+                                target_process.Get(), target_handle,
                                 desired_access, FALSE, options);
   }
 

@@ -229,6 +229,13 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     path = self.path if sep == -1 else self.path[:sep]
     if path == '/externalpolicydata':
       http_response, raw_reply = self.HandleExternalPolicyDataRequest()
+    elif path == '/configuration/test/exit':
+      # This is not part of the standard DM server protocol.
+      # This extension is added to make the test server exit gracefully
+      # when the test is complete.
+      self.server.stop = True
+      http_response = 200
+      raw_reply = 'OK'
     else:
       http_response = 404
       raw_reply = 'Invalid path'
@@ -278,8 +285,7 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     # device_management_backend.proto.
     if (self.GetUniqueParam('devicetype') != '2' or
         self.GetUniqueParam('apptype') != 'Chrome' or
-        len(self.GetUniqueParam('deviceid')) >= 64 or
-        len(self.GetUniqueParam('agent')) >= 64):
+        len(self.GetUniqueParam('deviceid')) >= 64):
       return (400, 'Invalid request parameter')
     if request_type == 'register':
       response = self.ProcessRegister(rmsg.register_request)

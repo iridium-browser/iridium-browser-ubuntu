@@ -82,13 +82,17 @@ class AURA_EXPORT WindowObserver {
   virtual void OnWindowTransforming(Window* window) {}
   virtual void OnWindowTransformed(Window* window) {}
 
+  // Invoked when SetTransform() is invoked on an ancestor of the window being
+  // observed (including the window itself).
+  virtual void OnAncestorWindowTransformed(Window* source, Window* window) {}
+
   // Invoked when |window|'s position among its siblings in the stacking order
   // has changed.
   virtual void OnWindowStackingChanged(Window* window) {}
 
-  // Invoked when a region of |window| is scheduled to be redrawn.
-  virtual void OnWindowPaintScheduled(Window* window,
-                                      const gfx::Rect& region) {}
+  // Invoked when a region of |window| has damage from a new delegated frame.
+  virtual void OnDelegatedFrameDamage(Window* window,
+                                      const gfx::Rect& damage_rect_in_dip) {}
 
   // Invoked when the Window is being destroyed (i.e. from the start of its
   // destructor). This is called before the window is removed from its parent.

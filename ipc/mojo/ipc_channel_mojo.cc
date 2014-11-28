@@ -8,6 +8,8 @@
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "ipc/ipc_listener.h"
+#include "ipc/mojo/ipc_channel_mojo_readers.h"
+#include "ipc/mojo/ipc_mojo_bootstrap.h"
 #include "mojo/embedder/embedder.h"
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
@@ -18,432 +20,29 @@ namespace IPC {
 
 namespace {
 
-// IPC::Listener for bootstrap channels.
-// It should never receive any message.
-class NullListener : public Listener {
- public:
-  virtual bool OnMessageReceived(const Message&) OVERRIDE {
-    NOTREACHED();
-    return false;
-  }
-
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE {
-    NOTREACHED();
-  }
-
-  virtual void OnChannelError() OVERRIDE {
-    NOTREACHED();
-  }
-
-  virtual void OnBadMessageReceived(const Message& message) OVERRIDE {
-    NOTREACHED();
-  }
-};
-
-base::LazyInstance<NullListener> g_null_listener = LAZY_INSTANCE_INITIALIZER;
-
 class MojoChannelFactory : public ChannelFactory {
  public:
-  MojoChannelFactory(
-      ChannelHandle channel_handle,
-      Channel::Mode mode,
-      scoped_refptr<base::TaskRunner> io_thread_task_runner)
-      : channel_handle_(channel_handle),
-        mode_(mode),
-        io_thread_task_runner_(io_thread_task_runner) {
-  }
+  MojoChannelFactory(ChannelMojo::Delegate* delegate,
+                     ChannelHandle channel_handle,
+                     Channel::Mode mode)
+      : delegate_(delegate), channel_handle_(channel_handle), mode_(mode) {}
 
   virtual std::string GetName() const OVERRIDE {
     return channel_handle_.name;
   }
 
   virtual scoped_ptr<Channel> BuildChannel(Listener* listener) OVERRIDE {
-    return ChannelMojo::Create(
-        channel_handle_,
-        mode_,
-        listener,
-        io_thread_task_runner_).PassAs<Channel>();
+    return ChannelMojo::Create(delegate_, channel_handle_, mode_, listener)
+        .PassAs<Channel>();
   }
 
  private:
+  ChannelMojo::Delegate* delegate_;
   ChannelHandle channel_handle_;
   Channel::Mode mode_;
-  scoped_refptr<base::TaskRunner> io_thread_task_runner_;
 };
-
-mojo::embedder::PlatformHandle ToPlatformHandle(
-    const ChannelHandle& handle) {
-#if defined(OS_POSIX) && !defined(OS_NACL)
-  return mojo::embedder::PlatformHandle(handle.socket.fd);
-#elif defined(OS_WIN)
-  return mojo::embedder::PlatformHandle(handle.pipe.handle);
-#else
-#error "Unsupported Platform!"
-#endif
-}
-
-//------------------------------------------------------------------------------
-
-// TODO(morrita): This should be built using higher-level Mojo construct
-// for clarity and extensibility.
-class HelloMessage {
- public:
-  static Pickle CreateRequest(int32 pid) {
-    Pickle request;
-    request.WriteString(kHelloRequestMagic);
-    request.WriteInt(pid);
-    return request;
-  }
-
-  static bool ReadRequest(Pickle& pickle, int32* pid) {
-    PickleIterator iter(pickle);
-    std::string hello;
-    if (!iter.ReadString(&hello)) {
-      DLOG(WARNING) << "Failed to Read magic string.";
-      return false;
-    }
-
-    if (hello != kHelloRequestMagic) {
-      DLOG(WARNING) << "Magic mismatch:" << hello;
-      return false;
-    }
-
-    int read_pid;
-    if (!iter.ReadInt(&read_pid)) {
-      DLOG(WARNING) << "Failed to Read PID.";
-      return false;
-    }
-
-    *pid = read_pid;
-    return true;
-  }
-
-  static Pickle CreateResponse(int32 pid) {
-    Pickle request;
-    request.WriteString(kHelloResponseMagic);
-    request.WriteInt(pid);
-    return request;
-  }
-
-  static bool ReadResponse(Pickle& pickle, int32* pid) {
-    PickleIterator iter(pickle);
-    std::string hello;
-    if (!iter.ReadString(&hello)) {
-      DLOG(WARNING) << "Failed to read magic string.";
-      return false;
-    }
-
-    if (hello != kHelloResponseMagic) {
-      DLOG(WARNING) << "Magic mismatch:" << hello;
-      return false;
-    }
-
-    int read_pid;
-    if (!iter.ReadInt(&read_pid)) {
-      DLOG(WARNING) << "Failed to read PID.";
-      return false;
-    }
-
-    *pid = read_pid;
-    return true;
-  }
-
- private:
-  static const char* kHelloRequestMagic;
-  static const char* kHelloResponseMagic;
-};
-
-const char* HelloMessage::kHelloRequestMagic = "MREQ";
-const char* HelloMessage::kHelloResponseMagic = "MRES";
 
 } // namespace
-
-//------------------------------------------------------------------------------
-
-// A MessagePipeReader implemenation for IPC::Message communication.
-class ChannelMojo::MessageReader : public internal::MessagePipeReader {
- public:
-  MessageReader(mojo::ScopedMessagePipeHandle pipe, ChannelMojo* owner)
-      : internal::MessagePipeReader(pipe.Pass()),
-        owner_(owner) {}
-
-  bool Send(scoped_ptr<Message> message);
-  virtual void OnMessageReceived() OVERRIDE;
-  virtual void OnPipeClosed() OVERRIDE;
-  virtual void OnPipeError(MojoResult error) OVERRIDE;
-
- private:
-  ChannelMojo* owner_;
-};
-
-void ChannelMojo::MessageReader::OnMessageReceived() {
-  Message message(data_buffer().empty() ? "" : &data_buffer()[0],
-                  static_cast<uint32>(data_buffer().size()));
-
-  std::vector<MojoHandle> handle_buffer;
-  TakeHandleBuffer(&handle_buffer);
-#if defined(OS_POSIX) && !defined(OS_NACL)
-  for (size_t i = 0; i < handle_buffer.size(); ++i) {
-    mojo::embedder::ScopedPlatformHandle platform_handle;
-    MojoResult unwrap_result = mojo::embedder::PassWrappedPlatformHandle(
-        handle_buffer[i], &platform_handle);
-    if (unwrap_result != MOJO_RESULT_OK) {
-      DLOG(WARNING) << "Pipe failed to covert handles. Closing: "
-                    << unwrap_result;
-      CloseWithError(unwrap_result);
-      return;
-    }
-
-    bool ok = message.file_descriptor_set()->Add(platform_handle.release().fd);
-    DCHECK(ok);
-  }
-#else
-  DCHECK(handle_buffer.empty());
-#endif
-
-  message.TraceMessageEnd();
-  owner_->OnMessageReceived(message);
-}
-
-void ChannelMojo::MessageReader::OnPipeClosed() {
-  if (!owner_)
-    return;
-  owner_->OnPipeClosed(this);
-  owner_ = NULL;
-}
-
-void ChannelMojo::MessageReader::OnPipeError(MojoResult error) {
-  if (!owner_)
-    return;
-  owner_->OnPipeError(this);
-}
-
-bool ChannelMojo::MessageReader::Send(scoped_ptr<Message> message) {
-  DCHECK(IsValid());
-
-  message->TraceMessageBegin();
-  std::vector<MojoHandle> handles;
-#if defined(OS_POSIX) && !defined(OS_NACL)
-  // We dup() the handles in IPC::Message to transmit.
-  // IPC::FileDescriptorSet has intricate lifecycle semantics
-  // of FDs, so just to dup()-and-own them is the safest option.
-  if (message->HasFileDescriptors()) {
-    FileDescriptorSet* fdset = message->file_descriptor_set();
-    for (size_t i = 0; i < fdset->size(); ++i) {
-      int fd_to_send = dup(fdset->GetDescriptorAt(i));
-      if (-1 == fd_to_send) {
-        DPLOG(WARNING) << "Failed to dup FD to transmit.";
-        std::for_each(handles.begin(), handles.end(), &MojoClose);
-        CloseWithError(MOJO_RESULT_UNKNOWN);
-        return false;
-      }
-
-      MojoHandle wrapped_handle;
-      MojoResult wrap_result = CreatePlatformHandleWrapper(
-          mojo::embedder::ScopedPlatformHandle(
-              mojo::embedder::PlatformHandle(fd_to_send)),
-          &wrapped_handle);
-      if (MOJO_RESULT_OK != wrap_result) {
-        DLOG(WARNING) << "Pipe failed to wrap handles. Closing: "
-                      << wrap_result;
-        std::for_each(handles.begin(), handles.end(), &MojoClose);
-        CloseWithError(wrap_result);
-        return false;
-      }
-
-      handles.push_back(wrapped_handle);
-    }
-  }
-#endif
-  MojoResult write_result = MojoWriteMessage(
-      handle(),
-      message->data(), static_cast<uint32>(message->size()),
-      handles.empty() ? NULL : &handles[0],
-      static_cast<uint32>(handles.size()),
-      MOJO_WRITE_MESSAGE_FLAG_NONE);
-  if (MOJO_RESULT_OK != write_result) {
-    std::for_each(handles.begin(), handles.end(), &MojoClose);
-    CloseWithError(write_result);
-    return false;
-  }
-
-  return true;
-}
-
-//------------------------------------------------------------------------------
-
-// MessagePipeReader implementation for control messages.
-// Actual message handling is implemented by sublcasses.
-class ChannelMojo::ControlReader : public internal::MessagePipeReader {
- public:
-  ControlReader(mojo::ScopedMessagePipeHandle pipe, ChannelMojo* owner)
-      : internal::MessagePipeReader(pipe.Pass()),
-        owner_(owner) {}
-
-  virtual bool Connect() { return true; }
-  virtual void OnPipeClosed() OVERRIDE;
-  virtual void OnPipeError(MojoResult error) OVERRIDE;
-
- protected:
-  ChannelMojo* owner_;
-};
-
-void ChannelMojo::ControlReader::OnPipeClosed() {
-  if (!owner_)
-    return;
-  owner_->OnPipeClosed(this);
-  owner_ = NULL;
-}
-
-void ChannelMojo::ControlReader::OnPipeError(MojoResult error) {
-  if (!owner_)
-    return;
-  owner_->OnPipeError(this);
-}
-
-//------------------------------------------------------------------------------
-
-// ControlReader for server-side ChannelMojo.
-class ChannelMojo::ServerControlReader : public ChannelMojo::ControlReader {
- public:
-  ServerControlReader(mojo::ScopedMessagePipeHandle pipe, ChannelMojo* owner)
-      : ControlReader(pipe.Pass(), owner) { }
-
-  virtual bool Connect() OVERRIDE;
-  virtual void OnMessageReceived() OVERRIDE;
-
- private:
-  MojoResult SendHelloRequest();
-  MojoResult RespondHelloResponse();
-
-  mojo::ScopedMessagePipeHandle message_pipe_;
-};
-
-bool ChannelMojo::ServerControlReader::Connect() {
-  MojoResult result = SendHelloRequest();
-  if (result != MOJO_RESULT_OK) {
-    CloseWithError(result);
-    return false;
-  }
-
-  return true;
-}
-
-MojoResult ChannelMojo::ServerControlReader::SendHelloRequest() {
-  DCHECK(IsValid());
-  DCHECK(!message_pipe_.is_valid());
-
-  mojo::ScopedMessagePipeHandle self;
-  mojo::ScopedMessagePipeHandle peer;
-  MojoResult create_result = mojo::CreateMessagePipe(
-      NULL, &message_pipe_, &peer);
-  if (MOJO_RESULT_OK != create_result) {
-    DLOG(WARNING) << "mojo::CreateMessagePipe failed: " << create_result;
-    return create_result;
-  }
-
-  MojoHandle peer_to_send = peer.get().value();
-  Pickle request = HelloMessage::CreateRequest(owner_->GetSelfPID());
-  MojoResult write_result = MojoWriteMessage(
-      handle(),
-      request.data(), static_cast<uint32>(request.size()),
-      &peer_to_send, 1,
-      MOJO_WRITE_MESSAGE_FLAG_NONE);
-  if (MOJO_RESULT_OK != write_result) {
-    DLOG(WARNING) << "Writing Hello request failed: " << create_result;
-    return write_result;
-  }
-
-  // |peer| is sent and no longer owned by |this|.
-  (void)peer.release();
-  return MOJO_RESULT_OK;
-}
-
-MojoResult ChannelMojo::ServerControlReader::RespondHelloResponse() {
-  Pickle request(data_buffer().empty() ? "" : &data_buffer()[0],
-                 static_cast<uint32>(data_buffer().size()));
-
-  int32 read_pid = 0;
-  if (!HelloMessage::ReadResponse(request, &read_pid)) {
-    DLOG(ERROR) << "Failed to parse Hello response.";
-    return MOJO_RESULT_UNKNOWN;
-  }
-
-  base::ProcessId pid = static_cast<base::ProcessId>(read_pid);
-  owner_->set_peer_pid(pid);
-  owner_->OnConnected(message_pipe_.Pass());
-  return MOJO_RESULT_OK;
-}
-
-void ChannelMojo::ServerControlReader::OnMessageReceived() {
-  MojoResult result = RespondHelloResponse();
-  if (result != MOJO_RESULT_OK)
-    CloseWithError(result);
-}
-
-//------------------------------------------------------------------------------
-
-// ControlReader for client-side ChannelMojo.
-class ChannelMojo::ClientControlReader : public ChannelMojo::ControlReader {
- public:
-  ClientControlReader(mojo::ScopedMessagePipeHandle pipe, ChannelMojo* owner)
-      : ControlReader(pipe.Pass(), owner) {}
-
-  virtual void OnMessageReceived() OVERRIDE;
-
- private:
-  MojoResult RespondHelloRequest(MojoHandle message_channel);
-};
-
-MojoResult ChannelMojo::ClientControlReader::RespondHelloRequest(
-    MojoHandle message_channel) {
-  DCHECK(IsValid());
-
-  mojo::ScopedMessagePipeHandle received_pipe(
-      (mojo::MessagePipeHandle(message_channel)));
-
-  int32 read_request = 0;
-  Pickle request(data_buffer().empty() ? "" : &data_buffer()[0],
-                 static_cast<uint32>(data_buffer().size()));
-  if (!HelloMessage::ReadRequest(request, &read_request)) {
-    DLOG(ERROR) << "Hello request has wrong magic.";
-    return MOJO_RESULT_UNKNOWN;
-  }
-
-  base::ProcessId pid = read_request;
-  Pickle response = HelloMessage::CreateResponse(owner_->GetSelfPID());
-  MojoResult write_result = MojoWriteMessage(
-      handle(),
-      response.data(), static_cast<uint32>(response.size()),
-      NULL, 0,
-      MOJO_WRITE_MESSAGE_FLAG_NONE);
-  if (MOJO_RESULT_OK != write_result) {
-    DLOG(ERROR) << "Writing Hello response failed: " << write_result;
-    return write_result;
-  }
-
-  owner_->set_peer_pid(pid);
-  owner_->OnConnected(received_pipe.Pass());
-  return MOJO_RESULT_OK;
-}
-
-void ChannelMojo::ClientControlReader::OnMessageReceived() {
-  std::vector<MojoHandle> handle_buffer;
-  TakeHandleBuffer(&handle_buffer);
-  if (handle_buffer.size() != 1) {
-    DLOG(ERROR) << "Hello request doesn't contains required handle: "
-                << handle_buffer.size();
-    CloseWithError(MOJO_RESULT_UNKNOWN);
-    return;
-  }
-
-  MojoResult result = RespondHelloRequest(handle_buffer[0]);
-  if (result != MOJO_RESULT_OK) {
-    DLOG(ERROR) << "Failed to respond Hello request. Closing: "
-                << result;
-    CloseWithError(result);
-  }
-}
 
 //------------------------------------------------------------------------------
 
@@ -455,45 +54,52 @@ void ChannelMojo::ChannelInfoDeleter::operator()(
 //------------------------------------------------------------------------------
 
 // static
-scoped_ptr<ChannelMojo> ChannelMojo::Create(
-    scoped_ptr<Channel> bootstrap, Mode mode, Listener* listener,
-    scoped_refptr<base::TaskRunner> io_thread_task_runner) {
-  return make_scoped_ptr(new ChannelMojo(
-      bootstrap.Pass(), mode, listener, io_thread_task_runner));
-}
-
-// static
-scoped_ptr<ChannelMojo> ChannelMojo::Create(
-    const ChannelHandle &channel_handle, Mode mode, Listener* listener,
-    scoped_refptr<base::TaskRunner> io_thread_task_runner) {
-  return Create(
-      Channel::Create(channel_handle, mode, g_null_listener.Pointer()),
-      mode, listener, io_thread_task_runner);
-}
-
-// static
-scoped_ptr<ChannelFactory> ChannelMojo::CreateFactory(
-    const ChannelHandle &channel_handle, Mode mode,
-    scoped_refptr<base::TaskRunner> io_thread_task_runner) {
+scoped_ptr<ChannelMojo> ChannelMojo::Create(ChannelMojo::Delegate* delegate,
+                                            const ChannelHandle& channel_handle,
+                                            Mode mode,
+                                            Listener* listener) {
   return make_scoped_ptr(
-      new MojoChannelFactory(
-          channel_handle, mode,
-          io_thread_task_runner)).PassAs<ChannelFactory>();
+      new ChannelMojo(delegate, channel_handle, mode, listener));
 }
 
-ChannelMojo::ChannelMojo(
-    scoped_ptr<Channel> bootstrap, Mode mode, Listener* listener,
-    scoped_refptr<base::TaskRunner> io_thread_task_runner)
-    : weak_factory_(this),
-      bootstrap_(bootstrap.Pass()),
-      mode_(mode), listener_(listener),
-      peer_pid_(base::kNullProcessId) {
-  if (base::MessageLoopProxy::current() == io_thread_task_runner) {
-    InitOnIOThread();
-  } else {
-    io_thread_task_runner->PostTask(FROM_HERE,
-                                    base::Bind(&ChannelMojo::InitOnIOThread,
-                                               weak_factory_.GetWeakPtr()));
+// static
+scoped_ptr<ChannelFactory> ChannelMojo::CreateServerFactory(
+    ChannelMojo::Delegate* delegate,
+    const ChannelHandle& channel_handle) {
+  return make_scoped_ptr(new MojoChannelFactory(
+                             delegate, channel_handle, Channel::MODE_SERVER))
+      .PassAs<ChannelFactory>();
+}
+
+// static
+scoped_ptr<ChannelFactory> ChannelMojo::CreateClientFactory(
+    const ChannelHandle& channel_handle) {
+  return make_scoped_ptr(
+             new MojoChannelFactory(NULL, channel_handle, Channel::MODE_CLIENT))
+      .PassAs<ChannelFactory>();
+}
+
+ChannelMojo::ChannelMojo(ChannelMojo::Delegate* delegate,
+                         const ChannelHandle& handle,
+                         Mode mode,
+                         Listener* listener)
+    : mode_(mode),
+      listener_(listener),
+      peer_pid_(base::kNullProcessId),
+      weak_factory_(this) {
+  // Create MojoBootstrap after all members are set as it touches
+  // ChannelMojo from a different thread.
+  bootstrap_ = MojoBootstrap::Create(handle, mode, this);
+  if (delegate) {
+    if (delegate->GetIOTaskRunner() ==
+        base::MessageLoop::current()->message_loop_proxy()) {
+      InitDelegate(delegate);
+    } else {
+      delegate->GetIOTaskRunner()->PostTask(
+          FROM_HERE,
+          base::Bind(
+              &ChannelMojo::InitDelegate, base::Unretained(this), delegate));
+    }
   }
 }
 
@@ -501,21 +107,27 @@ ChannelMojo::~ChannelMojo() {
   Close();
 }
 
-void ChannelMojo::InitOnIOThread() {
+void ChannelMojo::InitDelegate(ChannelMojo::Delegate* delegate) {
+  delegate_ = delegate->ToWeakPtr();
+  delegate_->OnChannelCreated(weak_factory_.GetWeakPtr());
+}
+
+void ChannelMojo::InitControlReader(
+    mojo::embedder::ScopedPlatformHandle handle) {
+  DCHECK(base::MessageLoopForIO::IsCurrent());
   mojo::embedder::ChannelInfo* channel_info;
   mojo::ScopedMessagePipeHandle control_pipe =
-      mojo::embedder::CreateChannelOnIOThread(
-          mojo::embedder::ScopedPlatformHandle(
-              ToPlatformHandle(bootstrap_->TakePipeHandle())),
-          &channel_info);
+      mojo::embedder::CreateChannelOnIOThread(handle.Pass(), &channel_info);
   channel_info_.reset(channel_info);
 
   switch (mode_) {
     case MODE_SERVER:
-      control_reader_.reset(new ServerControlReader(control_pipe.Pass(), this));
+      control_reader_.reset(
+          new internal::ServerControlReader(control_pipe.Pass(), this));
       break;
     case MODE_CLIENT:
-      control_reader_.reset(new ClientControlReader(control_pipe.Pass(), this));
+      control_reader_.reset(
+          new internal::ClientControlReader(control_pipe.Pass(), this));
       break;
     default:
       NOTREACHED();
@@ -525,7 +137,8 @@ void ChannelMojo::InitOnIOThread() {
 
 bool ChannelMojo::Connect() {
   DCHECK(!message_reader_);
-  return control_reader_->Connect();
+  DCHECK(!control_reader_);
+  return bootstrap_->Connect();
 }
 
 void ChannelMojo::Close() {
@@ -534,12 +147,27 @@ void ChannelMojo::Close() {
   channel_info_.reset();
 }
 
+void ChannelMojo::OnPipeAvailable(mojo::embedder::ScopedPlatformHandle handle) {
+  InitControlReader(handle.Pass());
+  control_reader_->Connect();
+}
+
+void ChannelMojo::OnBootstrapError() {
+  listener_->OnChannelError();
+}
+
 void ChannelMojo::OnConnected(mojo::ScopedMessagePipeHandle pipe) {
-  message_reader_ = make_scoped_ptr(new MessageReader(pipe.Pass(), this));
+  message_reader_ =
+      make_scoped_ptr(new internal::MessageReader(pipe.Pass(), this));
 
   for (size_t i = 0; i < pending_messages_.size(); ++i) {
-    message_reader_->Send(make_scoped_ptr(pending_messages_[i]));
+    bool sent = message_reader_->Send(make_scoped_ptr(pending_messages_[i]));
     pending_messages_[i] = NULL;
+    if (!sent) {
+      pending_messages_.clear();
+      listener_->OnChannelError();
+      return;
+    }
   }
 
   pending_messages_.clear();
@@ -570,11 +198,11 @@ base::ProcessId ChannelMojo::GetPeerPID() const {
 }
 
 base::ProcessId ChannelMojo::GetSelfPID() const {
-  return bootstrap_->GetSelfPID();
+  return base::GetCurrentProcId();
 }
 
-ChannelHandle ChannelMojo::TakePipeHandle() {
-  return bootstrap_->TakePipeHandle();
+void ChannelMojo::OnClientLaunched(base::ProcessHandle handle) {
+  bootstrap_->OnClientLaunched(handle);
 }
 
 void ChannelMojo::OnMessageReceived(Message& message) {
@@ -591,6 +219,69 @@ int ChannelMojo::GetClientFileDescriptor() const {
 int ChannelMojo::TakeClientFileDescriptor() {
   return bootstrap_->TakeClientFileDescriptor();
 }
+
+// static
+MojoResult ChannelMojo::WriteToFileDescriptorSet(
+    const std::vector<MojoHandle>& handle_buffer,
+    Message* message) {
+  for (size_t i = 0; i < handle_buffer.size(); ++i) {
+    mojo::embedder::ScopedPlatformHandle platform_handle;
+    MojoResult unwrap_result = mojo::embedder::PassWrappedPlatformHandle(
+        handle_buffer[i], &platform_handle);
+    if (unwrap_result != MOJO_RESULT_OK) {
+      DLOG(WARNING) << "Pipe failed to covert handles. Closing: "
+                    << unwrap_result;
+      return unwrap_result;
+    }
+
+    bool ok = message->file_descriptor_set()->AddToOwn(
+        base::ScopedFD(platform_handle.release().fd));
+    DCHECK(ok);
+  }
+
+  return MOJO_RESULT_OK;
+}
+
+// static
+MojoResult ChannelMojo::ReadFromFileDescriptorSet(
+    Message* message,
+    std::vector<MojoHandle>* handles) {
+  // We dup() the handles in IPC::Message to transmit.
+  // IPC::FileDescriptorSet has intricate lifecycle semantics
+  // of FDs, so just to dup()-and-own them is the safest option.
+  if (message->HasFileDescriptors()) {
+    FileDescriptorSet* fdset = message->file_descriptor_set();
+    std::vector<base::PlatformFile> fds_to_send(fdset->size());
+    fdset->PeekDescriptors(&fds_to_send[0]);
+    for (size_t i = 0; i < fds_to_send.size(); ++i) {
+      int fd_to_send = dup(fds_to_send[i]);
+      if (-1 == fd_to_send) {
+        DPLOG(WARNING) << "Failed to dup FD to transmit.";
+        fdset->CommitAll();
+        return MOJO_RESULT_UNKNOWN;
+      }
+
+      MojoHandle wrapped_handle;
+      MojoResult wrap_result = CreatePlatformHandleWrapper(
+          mojo::embedder::ScopedPlatformHandle(
+              mojo::embedder::PlatformHandle(fd_to_send)),
+          &wrapped_handle);
+      if (MOJO_RESULT_OK != wrap_result) {
+        DLOG(WARNING) << "Pipe failed to wrap handles. Closing: "
+                      << wrap_result;
+        fdset->CommitAll();
+        return wrap_result;
+      }
+
+      handles->push_back(wrapped_handle);
+    }
+
+    fdset->CommitAll();
+  }
+
+  return MOJO_RESULT_OK;
+}
+
 #endif  // defined(OS_POSIX) && !defined(OS_NACL)
 
 }  // namespace IPC

@@ -16,7 +16,7 @@ namespace operations {
 CloseFile::CloseFile(extensions::EventRouter* event_router,
                      const ProvidedFileSystemInfo& file_system_info,
                      int open_request_id,
-                     const fileapi::AsyncFileUtil::StatusCallback& callback)
+                     const storage::AsyncFileUtil::StatusCallback& callback)
     : Operation(event_router, file_system_info),
       open_request_id_(open_request_id),
       callback_(callback) {
@@ -26,13 +26,18 @@ CloseFile::~CloseFile() {
 }
 
 bool CloseFile::Execute(int request_id) {
-  scoped_ptr<base::DictionaryValue> values(new base::DictionaryValue);
-  values->SetInteger("openRequestId", open_request_id_);
+  using extensions::api::file_system_provider::CloseFileRequestedOptions;
+
+  CloseFileRequestedOptions options;
+  options.file_system_id = file_system_info_.file_system_id();
+  options.request_id = request_id;
+  options.open_request_id = open_request_id_;
 
   return SendEvent(
       request_id,
       extensions::api::file_system_provider::OnCloseFileRequested::kEventName,
-      values.Pass());
+      extensions::api::file_system_provider::OnCloseFileRequested::Create(
+          options));
 }
 
 void CloseFile::OnSuccess(int /* request_id */,

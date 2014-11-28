@@ -7,14 +7,16 @@
 enum ResponseType { "basic", "cors", "default", "error", "opaque" };
 
 [
-    // FIXME: Add ctors for ArrayBuffer, ArrayBufferView, FormData,
-    // and URLSearchParams response bodies.
+    // FIXME: Add ctors for FormData and URLSearchParams response bodies.
     Constructor(ScalarValueString body, optional Dictionary responseInitDict),
     Constructor(Blob? body, optional Dictionary responseInitDict),
+    Constructor(ArrayBuffer input, optional Dictionary requestInitDict),
+    Constructor(ArrayBufferView input, optional Dictionary requestInitDict),
+    ConstructorCallWith=ExecutionContext,
     RuntimeEnabled=ServiceWorker,
     Exposed=ServiceWorker,
     RaisesException=Constructor,
-    WillBeGarbageCollected,
+    GarbageCollected,
 ] interface Response {
     // FIXME: Implement redirect().
     readonly attribute ResponseType type;
@@ -22,5 +24,8 @@ enum ResponseType { "basic", "cors", "default", "error", "opaque" };
     readonly attribute unsigned short status;
     readonly attribute ByteString statusText;
     readonly attribute Headers headers;
-    [CallWith=ExecutionContext] readonly attribute FetchBodyStream body;    
+
+    Response clone();
 };
+
+Response implements Body;

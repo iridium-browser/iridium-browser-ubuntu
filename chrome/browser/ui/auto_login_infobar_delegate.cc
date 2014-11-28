@@ -19,6 +19,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/infobars/core/infobar.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -30,8 +31,6 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/ubertoken_fetcher.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request.h"
@@ -119,7 +118,7 @@ void AutoLoginRedirector::RedirectToMergeSession(const std::string& token) {
   web_contents()->GetController().LoadURL(
       GaiaUrls::GetInstance()->merge_session_url().Resolve(
           "?source=chrome&uberauth=" + token + "&" + args_),
-      content::Referrer(), content::PAGE_TRANSITION_AUTO_BOOKMARK,
+      content::Referrer(), ui::PAGE_TRANSITION_AUTO_BOOKMARK,
       std::string());
 }
 
@@ -233,6 +232,8 @@ bool AutoLoginInfoBarDelegate::Cancel() {
   return true;
 }
 
-void AutoLoginInfoBarDelegate::GoogleSignedOut(const std::string& username) {
+void AutoLoginInfoBarDelegate::GoogleSignedOut(
+    const std::string& account_id,
+    const std::string& username) {
   infobar()->RemoveSelf();
 }

@@ -21,8 +21,8 @@ class FuseFs : public Filesystem {
   virtual void Destroy();
 
  public:
-  virtual Error Access(const Path& path, int a_mode);
-  virtual Error Open(const Path& path, int mode, ScopedNode* out_node);
+  virtual Error OpenWithMode(const Path& path, int open_flags, mode_t mode,
+                             ScopedNode* out_node);
   virtual Error Unlink(const Path& path);
   virtual Error Mkdir(const Path& path, int perm);
   virtual Error Rmdir(const Path& path);
@@ -54,6 +54,8 @@ class FuseFsNode : public Node {
   virtual Error Tcsetattr(int optional_actions,
                           const struct termios* termios_p);
   virtual Error GetSize(off_t* out_size);
+  virtual Error Futimens(const struct timespec times[2]);
+  virtual Error Fchmod(mode_t mode);
 
  protected:
   struct fuse_operations* fuse_ops_;

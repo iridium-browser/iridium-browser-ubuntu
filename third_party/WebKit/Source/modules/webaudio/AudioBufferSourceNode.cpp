@@ -47,9 +47,9 @@ const double DefaultGrainDuration = 0.020; // 20ms
 // to minimize linear interpolation aliasing.
 const double MaxRate = 1024;
 
-PassRefPtrWillBeRawPtr<AudioBufferSourceNode> AudioBufferSourceNode::create(AudioContext* context, float sampleRate)
+AudioBufferSourceNode* AudioBufferSourceNode::create(AudioContext* context, float sampleRate)
 {
-    return adoptRefWillBeNoop(new AudioBufferSourceNode(context, sampleRate));
+    return adoptRefCountedGarbageCollectedWillBeNoop(new AudioBufferSourceNode(context, sampleRate));
 }
 
 AudioBufferSourceNode::AudioBufferSourceNode(AudioContext* context, float sampleRate)
@@ -63,7 +63,6 @@ AudioBufferSourceNode::AudioBufferSourceNode(AudioContext* context, float sample
     , m_grainOffset(0.0)
     , m_grainDuration(DefaultGrainDuration)
 {
-    ScriptWrappable::init(this);
     setNodeType(NodeTypeAudioBufferSource);
 
     m_playbackRate = AudioParam::create(context, 1.0);
@@ -389,6 +388,27 @@ void AudioBufferSourceNode::start(double when, double grainOffset, double grainD
         return;
     }
 
+    if (!std::isfinite(when) || (when < 0)) {
+        exceptionState.throwDOMException(
+            InvalidStateError,
+            "Start time must be a finite non-negative number: " + String::number(when));
+        return;
+    }
+
+    if (!std::isfinite(grainOffset) || (grainOffset < 0)) {
+        exceptionState.throwDOMException(
+            InvalidStateError,
+            "Offset must be a finite non-negative number: " + String::number(grainOffset));
+        return;
+    }
+
+    if (!std::isfinite(grainDuration) || (grainDuration < 0)) {
+        exceptionState.throwDOMException(
+            InvalidStateError,
+            "Duration must be a finite non-negative number: " + String::number(grainDuration));
+        return;
+    }
+
     if (!buffer())
         return;
 
@@ -455,7 +475,7 @@ bool AudioBufferSourceNode::propagatesSilence() const
 void AudioBufferSourceNode::setPannerNode(PannerNode* pannerNode)
 {
     if (m_pannerNode != pannerNode && !hasFinished()) {
-        RefPtrWillBeRawPtr<PannerNode> oldPannerNode(m_pannerNode.release());
+        PannerNode* oldPannerNode(m_pannerNode.release());
         m_pannerNode = pannerNode;
         if (pannerNode)
             pannerNode->makeConnection();

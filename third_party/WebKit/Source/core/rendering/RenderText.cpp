@@ -108,11 +108,11 @@ static void makeCapitalized(String* string, UChar previous)
         CRASH();
 
     StringBuffer<UChar> stringWithPrevious(length + 1);
-    stringWithPrevious[0] = previous == noBreakSpace ? ' ' : previous;
+    stringWithPrevious[0] = previous == noBreakSpace ? space : previous;
     for (unsigned i = 1; i < length + 1; i++) {
         // Replace &nbsp with a real space since ICU no longer treats &nbsp as a word separator.
         if (input[i - 1] == noBreakSpace)
-            stringWithPrevious[i] = ' ';
+            stringWithPrevious[i] = space;
         else
             stringWithPrevious[i] = input[i - 1];
     }
@@ -190,12 +190,12 @@ bool RenderText::isWordBreak() const
 
 void RenderText::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
-    // There is no need to ever schedule repaints from a style change of a text run, since
+    // There is no need to ever schedule paint invalidations from a style change of a text run, since
     // we already did this for the parent of the text run.
     // We do have to schedule layouts, though, since a style change can force us to
     // need to relayout.
     if (diff.needsFullLayout()) {
-        setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+        setNeedsLayoutAndPrefWidthsRecalc();
         m_knownToHaveNoOverflowAndNoFallbackFonts = false;
     }
 
@@ -318,7 +318,7 @@ String RenderText::plainText() const
         String text = m_text.substring(textBox->start(), textBox->len()).simplifyWhiteSpace(WTF::DoNotStripWhiteSpace);
         plainTextBuilder.append(text);
         if (textBox->nextTextBox() && textBox->nextTextBox()->start() > textBox->end() && text.length() && !text.right(1).containsOnlyWhitespace())
-            plainTextBuilder.append(" ");
+            plainTextBuilder.append(space);
     }
     return plainTextBuilder.toString();
 }
@@ -694,6 +694,12 @@ LayoutRect RenderText::localCaretRect(InlineBox* inlineBox, int caretOffset, Lay
         break;
     }
 
+    // for dir=auto, use inlineBoxBidiLevel() to test the correct direction for the cursor.
+    if (rightAligned && (node() && node()->selfOrAncestorHasDirAutoAttribute())) {
+        if (inlineBox->bidiLevel()%2 != 1)
+            rightAligned = false;
+    }
+
     if (rightAligned) {
         left = std::max(left, leftEdge);
         left = std::min(left, rootRight - caretWidth);
@@ -721,11 +727,11 @@ ALWAYS_INLINE float RenderText::widthFromCache(const Font& f, int start, int len
         StringImpl& text = *m_text.impl();
         for (int i = start; i < start + len; i++) {
             char c = text[i];
-            if (c <= ' ') {
-                if (c == ' ' || c == '\n') {
+            if (c <= space) {
+                if (c == space || c == newlineCharacter) {
                     w += monospaceCharacterWidth;
                     isSpace = true;
-                } else if (c == '\t') {
+                } else if (c == characterTabulation) {
                     if (style()->collapseWhiteSpace()) {
                         w += monospaceCharacterWidth;
                         isSpace = true;
@@ -798,11 +804,11 @@ void RenderText::trimmedPrefWidths(float leadWidth,
 
     ASSERT(m_text);
     StringImpl& text = *m_text.impl();
-    if (text[0] == ' ' || (text[0] == '\n' && !style()->preserveNewline()) || text[0] == '\t') {
+    if (text[0] == space || (text[0] == newlineCharacter && !style()->preserveNewline()) || text[0] == characterTabulation) {
         const Font& font = style()->font(); // FIXME: This ignores first-line.
         if (stripFrontSpaces) {
-            const UChar space = ' ';
-            float spaceWidth = font.width(constructTextRun(this, font, &space, 1, style(), direction));
+            const UChar spaceChar = space;
+            float spaceWidth = font.width(constructTextRun(this, font, &spaceChar, 1, style(), direction));
             maxWidth -= spaceWidth;
         } else {
             maxWidth += font.fontDescription().wordSpacing();
@@ -822,7 +828,7 @@ void RenderText::trimmedPrefWidths(float leadWidth,
         lastLineMaxWidth = maxWidth;
         for (int i = 0; i < len; i++) {
             int linelen = 0;
-            while (i + linelen < len && text[i + linelen] != '\n')
+            while (i + linelen < len && text[i + linelen] != newlineCharacter)
                 linelen++;
 
             if (linelen) {
@@ -922,7 +928,6 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
 
     TextRun textRun(text());
     BidiResolver<TextRunIterator, BidiCharacterRun> bidiResolver;
-
     BidiCharacterRun* run;
     TextDirection textDirection = styleToUse->direction();
     if (isOverride(styleToUse->unicodeBidi())) {
@@ -955,21 +960,22 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
 
         bool previousCharacterIsSpace = isSpace;
         bool isNewline = false;
-        if (c == '\n') {
+        if (c == newlineCharacter) {
             if (styleToUse->preserveNewline()) {
                 m_hasBreak = true;
                 isNewline = true;
                 isSpace = false;
             } else
                 isSpace = true;
-        } else if (c == '\t') {
+        } else if (c == characterTabulation) {
             if (!styleToUse->collapseWhiteSpace()) {
                 m_hasTab = true;
                 isSpace = false;
             } else
                 isSpace = true;
-        } else
-            isSpace = c == ' ';
+        } else {
+            isSpace = c == space;
+        }
 
         bool isBreakableLocation = isNewline || (isSpace && styleToUse->autoWrap());
         if (!i)
@@ -1001,7 +1007,7 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
         bool hasBreak = breakAll || isBreakable(breakIterator, i, nextBreakable);
         bool betweenWords = true;
         int j = i;
-        while (c != '\n' && c != ' ' && c != '\t' && (c != softHyphen)) {
+        while (c != newlineCharacter && c != space && c != characterTabulation && (c != softHyphen)) {
             j++;
             if (j == len)
                 break;
@@ -1019,7 +1025,7 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             j = std::min(j, run->stop() + 1);
         int wordLen = j - i;
         if (wordLen) {
-            bool isSpace = (j < len) && c == ' ';
+            bool isSpace = (j < len) && c == space;
 
             // Non-zero only when kerning is enabled, in which case we measure words with their trailing
             // space, then subtract its width.
@@ -1100,6 +1106,7 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             } else {
                 TextRun run = constructTextRun(this, f, this, i, 1, styleToUse, textDirection);
                 run.setCharactersLength(len - i);
+                run.setUseComplexCodePath(!canUseSimpleFontCodePath());
                 ASSERT(run.charactersLength() >= run.length());
                 run.setTabSize(!style()->collapseWhiteSpace(), style()->tabSize());
                 run.setXPos(leadWidth + currMaxWidth);
@@ -1159,8 +1166,8 @@ bool RenderText::containsOnlyWhitespace(unsigned from, unsigned len) const
     StringImpl& text = *m_text.impl();
     unsigned currPos;
     for (currPos = from;
-         currPos < from + len && (text[currPos] == '\n' || text[currPos] == ' ' || text[currPos] == '\t');
-         currPos++) { }
+    currPos < from + len && (text[currPos] == newlineCharacter || text[currPos] == space || text[currPos] == characterTabulation);
+    currPos++) { }
     return currPos >= (from + len);
 }
 
@@ -1314,7 +1321,7 @@ UChar RenderText::previousCharacter() const
     for (; previousText; previousText = previousText->previousInPreOrder())
         if (!isInlineFlowOrEmptyText(previousText))
             break;
-    UChar prev = ' ';
+    UChar prev = space;
     if (previousText && previousText->isText())
         if (StringImpl* previousString = toRenderText(previousText)->text().impl())
             prev = (*previousString)[previousString->length() - 1];
@@ -1371,7 +1378,7 @@ void RenderText::setTextInternal(PassRefPtr<StringImpl> text)
     }
 
     ASSERT(m_text);
-    ASSERT(!isBR() || (textLength() == 1 && m_text[0] == '\n'));
+    ASSERT(!isBR() || (textLength() == 1 && m_text[0] == newlineCharacter));
 
     m_isAllASCII = m_text.containsOnlyASCII();
     m_canUseSimpleFontCodePath = computeCanUseSimpleFontCodePath();
@@ -1411,7 +1418,7 @@ void RenderText::setText(PassRefPtr<StringImpl> text, bool force)
     // insertChildNode() fails to set true to owner. To avoid that, we call
     // setNeedsLayoutAndPrefWidthsRecalc() only if this RenderText has parent.
     if (parent())
-        setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+        setNeedsLayoutAndPrefWidthsRecalc();
     m_knownToHaveNoOverflowAndNoFallbackFonts = false;
 
     if (AXObjectCache* cache = document().existingAXObjectCache())
@@ -1575,21 +1582,12 @@ LayoutRect RenderText::linesVisualOverflowBoundingBox() const
 
 LayoutRect RenderText::clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
 {
-    RenderObject* rendererToRepaint = containingBlock();
-
-    // Do not cross self-painting layer boundaries.
-    RenderObject* enclosingLayerRenderer = enclosingLayer()->renderer();
-    if (enclosingLayerRenderer != rendererToRepaint && !rendererToRepaint->isDescendantOf(enclosingLayerRenderer))
-        rendererToRepaint = enclosingLayerRenderer;
-
-    // The renderer we chose to repaint may be an ancestor of paintInvalidationContainer, but we need to do a paintInvalidationContainer-relative repaint.
-    if (paintInvalidationContainer && paintInvalidationContainer != rendererToRepaint && !rendererToRepaint->isDescendantOf(paintInvalidationContainer))
-        return paintInvalidationContainer->clippedOverflowRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationState);
-
-    return rendererToRepaint->clippedOverflowRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationState);
+    // This method doesn't support paintInvalidationState, but invalidateTreeIfNeeded() never reaches RenderText.
+    ASSERT(!paintInvalidationState);
+    return parent()->clippedOverflowRectForPaintInvalidation(paintInvalidationContainer);
 }
 
-LayoutRect RenderText::selectionRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, bool clipToVisibleContent)
+LayoutRect RenderText::selectionRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer) const
 {
     ASSERT(!needsLayout());
 
@@ -1623,15 +1621,7 @@ LayoutRect RenderText::selectionRectForPaintInvalidation(const RenderLayerModelO
         rect.unite(ellipsisRectForBox(box, startPos, endPos));
     }
 
-    if (clipToVisibleContent) {
-        mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, IsNotFixedPosition, 0);
-    } else {
-        if (cb->hasColumns())
-            cb->adjustRectForColumns(rect);
-
-        rect = localToContainerQuad(FloatRect(rect), paintInvalidationContainer).enclosingBoundingBox();
-    }
-
+    mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
     return rect;
 }
 

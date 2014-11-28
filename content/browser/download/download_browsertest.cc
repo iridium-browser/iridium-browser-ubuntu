@@ -6,9 +6,10 @@
 // in a pure content context.  Over time tests should be migrated here.
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ref_counted.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
@@ -19,7 +20,6 @@
 #include "content/browser/download/download_item_impl.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_resource_handler.h"
-#include "content/browser/plugin_service_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/power_save_blocker.h"
 #include "content/public/common/content_switches.h"
@@ -34,15 +34,19 @@
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
 #include "content/shell/browser/shell_network_delegate.h"
-#include "content/test/net/url_request_mock_http_job.h"
 #include "content/test/net/url_request_slow_download_job.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+
+#if defined(ENABLE_PLUGINS)
+#include "content/browser/plugin_service_impl.h"
+#endif
 
 using ::net::test_server::EmbeddedTestServer;
 using ::testing::AllOf;
@@ -585,8 +589,12 @@ class DownloadContentTest : public ContentBrowserTest {
         base::Bind(&URLRequestSlowDownloadJob::AddUrlHandler));
     base::FilePath mock_base(GetTestFilePath("download", ""));
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&URLRequestMockHTTPJob::AddUrlHandler, mock_base));
+        BrowserThread::IO,
+        FROM_HERE,
+        base::Bind(
+            &net::URLRequestMockHTTPJob::AddUrlHandler,
+            mock_base,
+            make_scoped_refptr(content::BrowserThread::GetBlockingPool())));
   }
 
   TestShellDownloadManagerDelegate* GetDownloadManagerDelegate() {
@@ -798,7 +806,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, MultiDownload) {
 
   // Start the second download and wait until it's done.
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+  GURL url(net::URLRequestMockHTTPJob::GetMockUrl(file));
   // Download the file and wait.
   NavigateToURLAndWaitForDownload(shell(), url, DownloadItem::COMPLETE);
 
@@ -853,7 +861,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadOctetStream) {
   PluginServiceImpl::GetInstance()->RegisterInternalPlugin(plugin_info, false);
 
   // The following is served with a Content-Type of application/octet-stream.
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(base::FilePath(kTestFilePath)));
+  GURL url(
+      net::URLRequestMockHTTPJob::GetMockUrl(base::FilePath(kTestFilePath)));
   NavigateToURLAndWaitForDownload(shell(), url, DownloadItem::COMPLETE);
 }
 #endif
@@ -870,7 +879,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, CancelAtFinalRename) {
 
   // Create a download
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  NavigateToURL(shell(), URLRequestMockHTTPJob::GetMockUrl(file));
+  NavigateToURL(shell(), net::URLRequestMockHTTPJob::GetMockUrl(file));
 
   // Wait until the first (intermediate file) rename and execute the callback.
   file_factory->WaitForSomeCallback();
@@ -919,7 +928,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, CancelAtRelease) {
 
   // Create a download
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  NavigateToURL(shell(), URLRequestMockHTTPJob::GetMockUrl(file));
+  NavigateToURL(shell(), net::URLRequestMockHTTPJob::GetMockUrl(file));
 
   // Wait until the first (intermediate file) rename and execute the callback.
   file_factory->WaitForSomeCallback();
@@ -1029,7 +1038,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ShutdownAtRelease) {
 
   // Create a download
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  NavigateToURL(shell(), URLRequestMockHTTPJob::GetMockUrl(file));
+  NavigateToURL(shell(), net::URLRequestMockHTTPJob::GetMockUrl(file));
 
   // Wait until the first (intermediate file) rename and execute the callback.
   file_factory->WaitForSomeCallback();
@@ -1336,7 +1345,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeWithFileInitError) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+  GURL url(net::URLRequestMockHTTPJob::GetMockUrl(file));
 
   // Setup the error injector.
   scoped_refptr<TestFileErrorInjector> injector(
@@ -1387,7 +1396,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+  GURL url(net::URLRequestMockHTTPJob::GetMockUrl(file));
 
   // Setup the error injector.
   scoped_refptr<TestFileErrorInjector> injector(
@@ -1439,7 +1448,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeWithFileFinalRenameError) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   base::FilePath file(FILE_PATH_LITERAL("download-test.lib"));
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+  GURL url(net::URLRequestMockHTTPJob::GetMockUrl(file));
 
   // Setup the error injector.
   scoped_refptr<TestFileErrorInjector> injector(
@@ -1554,7 +1563,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, RemoveDownload) {
   {
     // Start the second download and wait until it's done.
     base::FilePath file2(FILE_PATH_LITERAL("download-test.lib"));
-    GURL url2(URLRequestMockHTTPJob::GetMockUrl(file2));
+    GURL url2(net::URLRequestMockHTTPJob::GetMockUrl(file2));
     scoped_ptr<DownloadTestObserver> completion_observer(
         CreateWaiter(shell(), 1));
     DownloadItem* download(StartDownloadAndReturnItem(url2));

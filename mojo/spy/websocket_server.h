@@ -38,6 +38,7 @@ class WebSocketServer : public net::HttpServer::Delegate,
 
  protected:
   // Overridden from net::HttpServer::Delegate.
+  virtual void OnConnect(int connection_id) OVERRIDE {}
   virtual void OnHttpRequest(
       int connection_id,
       const net::HttpServerRequestInfo& info) OVERRIDE;
@@ -66,7 +67,7 @@ class WebSocketServer : public net::HttpServer::Delegate,
  private:
   int port_;
   int connection_id_;
-  scoped_refptr<net::HttpServer> web_server_;
+  scoped_ptr<net::HttpServer> web_server_;
   spy_api::SpyServerPtr spy_server_;
 
   DISALLOW_COPY_AND_ASSIGN(WebSocketServer);

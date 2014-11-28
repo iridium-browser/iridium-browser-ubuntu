@@ -20,6 +20,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPicture.h"
@@ -42,6 +43,7 @@ const int64 kFallbackTickTimeoutInMilliseconds = 100;
 const size_t kMemoryMultiplier = 20;
 const size_t kBytesPerPixel = 4;
 const size_t kMemoryAllocationStep = 5 * 1024 * 1024;
+uint64 g_memory_override_in_bytes = 0u;
 
 // Used to calculate tile allocation. Determined experimentally.
 const size_t kTileMultiplier = 12;
@@ -75,17 +77,31 @@ class TracedValue : public base::debug::ConvertableToTraceFormat {
 
 // static
 void BrowserViewRenderer::CalculateTileMemoryPolicy(bool use_zero_copy) {
+  CommandLine* cl = CommandLine::ForCurrentProcess();
+
+  // If the value was overridden on the command line, use the specified value.
+  bool client_hard_limit_bytes_overridden =
+      cl->HasSwitch(switches::kForceGpuMemAvailableMb);
+  if (client_hard_limit_bytes_overridden) {
+    base::StringToUint64(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kForceGpuMemAvailableMb),
+        &g_memory_override_in_bytes);
+    g_memory_override_in_bytes *= 1024 * 1024;
+  }
+
   if (!use_zero_copy) {
     // Use chrome's default tile size, which varies from 256 to 512.
     // Be conservative here and use the smallest tile size possible.
     g_tile_area = 256 * 256;
 
     // Also use a high tile limit since there are no file descriptor issues.
-    GlobalTileManager::GetInstance()->SetTileLimit(1000);
+    // There is no need to limit number of tiles, so use an effectively
+    // unlimited value as the limit.
+    GlobalTileManager::GetInstance()->SetTileLimit(10 * 1000 * 1000);
     return;
   }
 
-  CommandLine* cl = CommandLine::ForCurrentProcess();
   const char kDefaultTileSize[] = "384";
 
   if (!cl->HasSwitch(switches::kDefaultTileWidth))
@@ -119,11 +135,11 @@ BrowserViewRenderer::BrowserViewRenderer(
       on_new_picture_enable_(false),
       clear_view_(false),
       compositor_needs_continuous_invalidate_(false),
+      invalidate_after_composite_(false),
       block_invalidates_(false),
+      fallback_tick_pending_(false),
       width_(0),
-      height_(0),
-      num_tiles_(0u),
-      num_bytes_(0u) {
+      height_(0) {
   CHECK(web_contents_);
   content::SynchronousCompositor::SetClientForWebContents(web_contents_, this);
 
@@ -164,6 +180,8 @@ void BrowserViewRenderer::TrimMemory(const int level, const bool visible) {
     return;
 
   TRACE_EVENT0("android_webview", "BrowserViewRenderer::TrimMemory");
+  DCHECK(hardware_enabled_);
+  DCHECK(compositor_);
 
   RequestMemoryPolicy(zero_policy);
   EnforceMemoryPolicyImmediately(zero_policy);
@@ -179,6 +197,9 @@ BrowserViewRenderer::CalculateDesiredMemoryPolicy() {
   policy.bytes_limit =
       (policy.bytes_limit / kMemoryAllocationStep + 1) * kMemoryAllocationStep;
 
+  if (g_memory_override_in_bytes)
+    policy.bytes_limit = static_cast<size_t>(g_memory_override_in_bytes);
+
   size_t tiles = width * height * kTileMultiplier / g_tile_area;
   // Round up to a multiple of kTileAllocationStep. The minimum number of tiles
   // is also kTileAllocationStep.
@@ -191,22 +212,17 @@ BrowserViewRenderer::CalculateDesiredMemoryPolicy() {
 // well as the tile resource allocation in GlobalTileManager.
 void BrowserViewRenderer::RequestMemoryPolicy(
     SynchronousCompositorMemoryPolicy& new_policy) {
-  // This will be used in SetNumTiles.
-  num_bytes_ = new_policy.bytes_limit;
-
+  DCHECK(compositor_);
   GlobalTileManager* manager = GlobalTileManager::GetInstance();
 
-  // The following line will call BrowserViewRenderer::SetTilesNum().
-  manager->RequestTiles(new_policy.num_resources_limit, tile_manager_key_);
+  // The following line will call BrowserViewRenderer::SetMemoryPolicy().
+  manager->RequestTiles(new_policy, tile_manager_key_);
 }
 
-void BrowserViewRenderer::SetNumTiles(size_t num_tiles,
-                                      bool effective_immediately) {
-  num_tiles_ = num_tiles;
-
-  memory_policy_.num_resources_limit = num_tiles_;
-  memory_policy_.bytes_limit = num_bytes_;
-
+void BrowserViewRenderer::SetMemoryPolicy(
+    SynchronousCompositorMemoryPolicy new_policy,
+    bool effective_immediately) {
+  memory_policy_ = new_policy;
   if (effective_immediately)
     EnforceMemoryPolicyImmediately(memory_policy_);
 }
@@ -217,8 +233,8 @@ void BrowserViewRenderer::EnforceMemoryPolicyImmediately(
   ForceFakeCompositeSW();
 }
 
-size_t BrowserViewRenderer::GetNumTiles() const {
-  return memory_policy_.num_resources_limit;
+SynchronousCompositorMemoryPolicy BrowserViewRenderer::GetMemoryPolicy() const {
+  return memory_policy_;
 }
 
 bool BrowserViewRenderer::OnDraw(jobject java_canvas,
@@ -241,35 +257,52 @@ bool BrowserViewRenderer::OnDraw(jobject java_canvas,
 }
 
 bool BrowserViewRenderer::OnDrawHardware(jobject java_canvas) {
+  TRACE_EVENT0("android_webview", "BrowserViewRenderer::OnDrawHardware");
   if (!compositor_)
     return false;
 
-  if (last_on_draw_global_visible_rect_.IsEmpty()) {
-    shared_renderer_state_->SetForceInvalidateOnNextDrawGL(true);
-    return client_->RequestDrawGL(java_canvas, false);
-  }
+  shared_renderer_state_->SetScrollOffset(last_on_draw_scroll_offset_);
 
   if (!hardware_enabled_) {
     hardware_enabled_ = compositor_->InitializeHwDraw();
     if (hardware_enabled_) {
       tile_manager_key_ = GlobalTileManager::GetInstance()->PushBack(this);
-      gpu::GLInProcessContext* share_context = compositor_->GetShareContext();
-      DCHECK(share_context);
-      shared_renderer_state_->SetSharedContext(share_context);
     }
   }
   if (!hardware_enabled_)
     return false;
 
+  if (last_on_draw_global_visible_rect_.IsEmpty() &&
+      parent_draw_constraints_.surface_rect.IsEmpty()) {
+    TRACE_EVENT_INSTANT0("android_webview",
+                         "EarlyOut_EmptyVisibleRect",
+                         TRACE_EVENT_SCOPE_THREAD);
+    shared_renderer_state_->SetForceInvalidateOnNextDrawGL(true);
+    return client_->RequestDrawGL(java_canvas, false);
+  }
+
   ReturnResourceFromParent();
+  if (shared_renderer_state_->HasCompositorFrame()) {
+    TRACE_EVENT_INSTANT0("android_webview",
+                         "EarlyOut_PreviousFrameUnconsumed",
+                         TRACE_EVENT_SCOPE_THREAD);
+    DidSkipCompositeInDraw();
+    return client_->RequestDrawGL(java_canvas, false);
+  }
+
+  scoped_ptr<cc::CompositorFrame> frame = CompositeHw();
+  if (!frame.get())
+    return false;
+
+  shared_renderer_state_->SetCompositorFrame(frame.Pass(), false);
+  GlobalTileManager::GetInstance()->DidUse(tile_manager_key_);
+  return client_->RequestDrawGL(java_canvas, false);
+}
+
+scoped_ptr<cc::CompositorFrame> BrowserViewRenderer::CompositeHw() {
   SynchronousCompositorMemoryPolicy new_policy = CalculateDesiredMemoryPolicy();
   RequestMemoryPolicy(new_policy);
   compositor_->SetMemoryPolicy(memory_policy_);
-
-  scoped_ptr<DrawGLInput> draw_gl_input(new DrawGLInput);
-  draw_gl_input->scroll_offset = last_on_draw_scroll_offset_;
-  draw_gl_input->width = width_;
-  draw_gl_input->height = height_;
 
   parent_draw_constraints_ = shared_renderer_state_->ParentDrawConstraints();
   gfx::Size surface_size(width_, height_);
@@ -282,10 +315,12 @@ bool BrowserViewRenderer::OnDrawHardware(jobject java_canvas) {
   // applied onto the layer so global visible rect does not make sense here.
   // In this case, just use the surface rect for tiling.
   gfx::Rect viewport_rect_for_tile_priority;
-  if (parent_draw_constraints_.is_layer)
+  if (parent_draw_constraints_.is_layer ||
+      last_on_draw_global_visible_rect_.IsEmpty()) {
     viewport_rect_for_tile_priority = parent_draw_constraints_.surface_rect;
-  else
+  } else {
     viewport_rect_for_tile_priority = last_on_draw_global_visible_rect_;
+  }
 
   scoped_ptr<cc::CompositorFrame> frame =
       compositor_->DemandDrawHw(surface_size,
@@ -294,47 +329,47 @@ bool BrowserViewRenderer::OnDrawHardware(jobject java_canvas) {
                                 clip,
                                 viewport_rect_for_tile_priority,
                                 transform_for_tile_priority);
-  if (!frame.get())
-    return false;
-
-  GlobalTileManager::GetInstance()->DidUse(tile_manager_key_);
-
-  frame->AssignTo(&draw_gl_input->frame);
-  ReturnUnusedResource(shared_renderer_state_->PassDrawGLInput());
-  shared_renderer_state_->SetDrawGLInput(draw_gl_input.Pass());
-  DidComposite();
-  return client_->RequestDrawGL(java_canvas, false);
+  if (frame.get())
+    DidComposite();
+  return frame.Pass();
 }
 
 void BrowserViewRenderer::UpdateParentDrawConstraints() {
   // Post an invalidate if the parent draw constraints are stale and there is
   // no pending invalidate.
-  if (shared_renderer_state_->NeedsForceInvalidateOnNextDrawGL() ||
+  bool needs_force_invalidate =
+      shared_renderer_state_->NeedsForceInvalidateOnNextDrawGL();
+  if (needs_force_invalidate ||
       !parent_draw_constraints_.Equals(
-        shared_renderer_state_->ParentDrawConstraints())) {
+          shared_renderer_state_->ParentDrawConstraints())) {
     shared_renderer_state_->SetForceInvalidateOnNextDrawGL(false);
-    EnsureContinuousInvalidation(true);
+    EnsureContinuousInvalidation(true, needs_force_invalidate);
   }
 }
 
-void BrowserViewRenderer::ReturnUnusedResource(scoped_ptr<DrawGLInput> input) {
-  if (!input.get())
+void BrowserViewRenderer::ReturnUnusedResource(
+    scoped_ptr<cc::CompositorFrame> frame) {
+  if (!frame.get())
     return;
 
   cc::CompositorFrameAck frame_ack;
   cc::TransferableResource::ReturnResources(
-      input->frame.delegated_frame_data->resource_list,
-      &frame_ack.resources);
-  if (!frame_ack.resources.empty())
+      frame->delegated_frame_data->resource_list, &frame_ack.resources);
+  if (compositor_ && !frame_ack.resources.empty())
     compositor_->ReturnResources(frame_ack);
 }
 
 void BrowserViewRenderer::ReturnResourceFromParent() {
   cc::CompositorFrameAck frame_ack;
   shared_renderer_state_->SwapReturnedResources(&frame_ack.resources);
-  if (!frame_ack.resources.empty()) {
+  if (compositor_ && !frame_ack.resources.empty()) {
     compositor_->ReturnResources(frame_ack);
   }
+}
+
+void BrowserViewRenderer::DidSkipCommitFrame() {
+  // Treat it the same way as skipping onDraw.
+  DidSkipCompositeInDraw();
 }
 
 bool BrowserViewRenderer::OnDrawSoftware(jobject java_canvas) {
@@ -395,7 +430,7 @@ void BrowserViewRenderer::ClearView() {
 
   clear_view_ = true;
   // Always invalidate ignoring the compositor to actually clear the webview.
-  EnsureContinuousInvalidation(true);
+  EnsureContinuousInvalidation(true, false);
 }
 
 void BrowserViewRenderer::SetIsPaused(bool paused) {
@@ -405,7 +440,7 @@ void BrowserViewRenderer::SetIsPaused(bool paused) {
                        "paused",
                        paused);
   is_paused_ = paused;
-  EnsureContinuousInvalidation(false);
+  EnsureContinuousInvalidation(false, false);
 }
 
 void BrowserViewRenderer::SetViewVisibility(bool view_visible) {
@@ -424,7 +459,7 @@ void BrowserViewRenderer::SetWindowVisibility(bool window_visible) {
                        "window_visible",
                        window_visible);
   window_visible_ = window_visible;
-  EnsureContinuousInvalidation(false);
+  EnsureContinuousInvalidation(false, false);
 }
 
 void BrowserViewRenderer::OnSizeChanged(int width, int height) {
@@ -459,16 +494,17 @@ void BrowserViewRenderer::OnDetachedFromWindow() {
 
 void BrowserViewRenderer::ReleaseHardware() {
   DCHECK(hardware_enabled_);
-  ReturnUnusedResource(shared_renderer_state_->PassDrawGLInput());
+  ReturnUnusedResource(shared_renderer_state_->PassCompositorFrame());
   ReturnResourceFromParent();
   DCHECK(shared_renderer_state_->ReturnedResourcesEmpty());
 
-  compositor_->ReleaseHwDraw();
-  shared_renderer_state_->SetSharedContext(NULL);
-  hardware_enabled_ = false;
+  if (compositor_) {
+    compositor_->ReleaseHwDraw();
+    SynchronousCompositorMemoryPolicy zero_policy;
+    RequestMemoryPolicy(zero_policy);
+  }
 
-  SynchronousCompositorMemoryPolicy zero_policy;
-  RequestMemoryPolicy(zero_policy);
+  hardware_enabled_ = false;
   GlobalTileManager::GetInstance()->Remove(tile_manager_key_);
 }
 
@@ -494,9 +530,12 @@ void BrowserViewRenderer::DidDestroyCompositor(
     content::SynchronousCompositor* compositor) {
   TRACE_EVENT0("android_webview", "BrowserViewRenderer::DidDestroyCompositor");
   DCHECK(compositor_);
-  compositor_ = NULL;
   SynchronousCompositorMemoryPolicy zero_policy;
+  if (hardware_enabled_) {
+    RequestMemoryPolicy(zero_policy);
+  }
   DCHECK(memory_policy_ == zero_policy);
+  compositor_ = NULL;
 }
 
 void BrowserViewRenderer::SetContinuousInvalidate(bool invalidate) {
@@ -510,12 +549,12 @@ void BrowserViewRenderer::SetContinuousInvalidate(bool invalidate) {
                        invalidate);
   compositor_needs_continuous_invalidate_ = invalidate;
 
-  EnsureContinuousInvalidation(false);
+  EnsureContinuousInvalidation(false, false);
 }
 
 void BrowserViewRenderer::SetDipScale(float dip_scale) {
   dip_scale_ = dip_scale;
-  CHECK(dip_scale_ > 0);
+  CHECK_GT(dip_scale_, 0);
 }
 
 gfx::Vector2d BrowserViewRenderer::max_scroll_offset() const {
@@ -594,10 +633,10 @@ void BrowserViewRenderer::SetTotalRootLayerScrollOffset(
                         max_scroll_offset_dip_.y());
   }
 
-  DCHECK(0 <= scroll_offset.x());
-  DCHECK(0 <= scroll_offset.y());
-  DCHECK(scroll_offset.x() <= max_offset.x());
-  DCHECK(scroll_offset.y() <= max_offset.y());
+  DCHECK_LE(0, scroll_offset.x());
+  DCHECK_LE(0, scroll_offset.y());
+  DCHECK_LE(scroll_offset.x(), max_offset.x());
+  DCHECK_LE(scroll_offset.y(), max_offset.y());
 
   client_->ScrollContainerViewTo(scroll_offset);
 }
@@ -676,12 +715,20 @@ void BrowserViewRenderer::DidOverscroll(gfx::Vector2dF accumulated_overscroll,
   client_->DidOverscroll(rounded_overscroll_delta);
 }
 
-void BrowserViewRenderer::EnsureContinuousInvalidation(bool force_invalidate) {
+void BrowserViewRenderer::EnsureContinuousInvalidation(
+    bool force_invalidate,
+    bool skip_reschedule_tick) {
+  if (force_invalidate)
+    invalidate_after_composite_ = true;
+
   // This method should be called again when any of these conditions change.
   bool need_invalidate =
-      compositor_needs_continuous_invalidate_ || force_invalidate;
+      compositor_needs_continuous_invalidate_ || invalidate_after_composite_;
   if (!need_invalidate || block_invalidates_)
     return;
+
+  if (!compositor_needs_continuous_invalidate_ && invalidate_after_composite_)
+    invalidate_after_composite_ = false;
 
   // Always call view invalidate. We rely the Android framework to ignore the
   // invalidate when it's not needed such as when view is not visible.
@@ -699,18 +746,23 @@ void BrowserViewRenderer::EnsureContinuousInvalidation(bool force_invalidate) {
     return;
 
   block_invalidates_ = compositor_needs_continuous_invalidate_;
+  if (skip_reschedule_tick && fallback_tick_pending_)
+    return;
 
   // Unretained here is safe because the callbacks are cancelled when
   // they are destroyed.
   post_fallback_tick_.Reset(base::Bind(&BrowserViewRenderer::PostFallbackTick,
                                        base::Unretained(this)));
   fallback_tick_fired_.Cancel();
+  fallback_tick_pending_ = false;
 
   // No need to reschedule fallback tick if compositor does not need to be
   // ticked. This can happen if this is reached because force_invalidate is
   // true.
-  if (compositor_needs_continuous_invalidate_)
+  if (compositor_needs_continuous_invalidate_) {
+    fallback_tick_pending_ = true;
     ui_task_runner_->PostTask(FROM_HERE, post_fallback_tick_.callback());
+  }
 }
 
 void BrowserViewRenderer::PostFallbackTick() {
@@ -737,8 +789,18 @@ void BrowserViewRenderer::FallbackTickFired() {
   // This should only be called if OnDraw or DrawGL did not come in time, which
   // means block_invalidates_ must still be true.
   DCHECK(block_invalidates_);
+  fallback_tick_pending_ = false;
   if (compositor_needs_continuous_invalidate_ && compositor_) {
-    ForceFakeCompositeSW();
+    if (hardware_enabled_) {
+      ReturnResourceFromParent();
+      ReturnUnusedResource(shared_renderer_state_->PassCompositorFrame());
+      scoped_ptr<cc::CompositorFrame> frame = CompositeHw();
+      if (frame.get()) {
+        shared_renderer_state_->SetCompositorFrame(frame.Pass(), true);
+      }
+    } else {
+      ForceFakeCompositeSW();
+    }
   } else {
     // Pretend we just composited to unblock further invalidates.
     DidComposite();
@@ -766,7 +828,13 @@ void BrowserViewRenderer::DidComposite() {
   block_invalidates_ = false;
   post_fallback_tick_.Cancel();
   fallback_tick_fired_.Cancel();
-  EnsureContinuousInvalidation(false);
+  fallback_tick_pending_ = false;
+  EnsureContinuousInvalidation(false, false);
+}
+
+void BrowserViewRenderer::DidSkipCompositeInDraw() {
+  block_invalidates_ = false;
+  EnsureContinuousInvalidation(true, true);
 }
 
 std::string BrowserViewRenderer::ToString(AwDrawGLInfo* draw_info) const {

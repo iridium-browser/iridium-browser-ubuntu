@@ -259,9 +259,16 @@
       <structure type="chrome_scaled_image" name="IDR_DEFAULT_FAVICON" file="common/default_favicon.png" />
       <structure type="chrome_scaled_image" name="IDR_DEFAULT_FAVICON_32" file="common/default_favicon_32.png" />
       <structure type="chrome_scaled_image" name="IDR_DEFAULT_FAVICON_64" file="common/default_favicon_64.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_HARDLOCKED" file="common/easy_unlock_hardlocked.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_HARDLOCKED_HOVER" file="common/easy_unlock_hardlocked_hover.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_HARDLOCKED_PRESSED" file="common/easy_unlock_hardlocked_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_LOCKED" file="common/easy_unlock_locked.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_LOCKED_HOVER" file="common/easy_unlock_locked_hover.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_LOCKED_PRESSED" file="common/easy_unlock_locked_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_SPINNER" file="common/easy_unlock_spinner.png" />
       <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_UNLOCKED" file="common/easy_unlock_unlocked.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_UNLOCKED_HOVER" file="common/easy_unlock_unlocked_hover.png" />
+      <structure type="chrome_scaled_image" name="IDR_EASY_UNLOCK_UNLOCKED_PRESSED" file="common/easy_unlock_unlocked_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_FOLDER_CLOSED" file="common/folder_closed.png" />
       <structure type="chrome_scaled_image" name="IDR_FOLDER_CLOSED_RTL" file="common/folder_closed_rtl.png" />
       <if expr="toolkit_views">
@@ -351,6 +358,10 @@
         <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_SETTINGS_HOVER" file="common/notification_settings_hover.png"/>
         <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_SETTINGS_PRESSED" file="common/notification_settings_pressed.png"/>
       </if>
+      <!-- TODO(calamity): The 1x local ntp resources require a proper version.
+           See crbug.com/363519. -->
+      <structure type="chrome_scaled_image" name="IDR_LOCAL_NTP_IMAGES_LOGO_PNG" file="common/ntp_google_logo.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOCAL_NTP_IMAGES_WHITE_LOGO_PNG" file="common/ntp_white_google_logo.png" />
       <if expr="not is_android and not is_ios">
         <structure type="chrome_scaled_image" name="IDR_NTP_DEFAULT_FAVICON" file="common/ntp_default_favicon.png" />
       </if>

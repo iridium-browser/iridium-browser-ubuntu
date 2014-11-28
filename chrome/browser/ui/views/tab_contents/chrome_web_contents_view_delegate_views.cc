@@ -4,13 +4,13 @@
 
 #include "chrome/browser/ui/views/tab_contents/chrome_web_contents_view_delegate_views.h"
 
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/ui/aura/tab_contents/web_drag_bookmark_handler_aura.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/views/renderer_context_menu/render_view_context_menu_views.h"
 #include "chrome/browser/ui/views/sad_tab_view.h"
-#include "chrome/common/chrome_switches.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/popup_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -22,7 +22,9 @@
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/widget/widget.h"
 
-using web_modal::WebContentsModalDialogManager;
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/link_disambiguation/link_disambiguation_popup.h"
+#endif
 
 ChromeWebContentsViewDelegateViews::ChromeWebContentsViewDelegateViews(
     content::WebContents* web_contents)
@@ -60,17 +62,10 @@ bool ChromeWebContentsViewDelegateViews::Focus() {
     }
   }
 
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  if (web_contents_modal_dialog_manager) {
-    // TODO(erg): WebContents used to own web contents modal dialogs, which is
-    // why this is here. Eventually this should be ported to a containing view
-    // specializing in web contents modal dialog management.
-    if (web_contents_modal_dialog_manager->IsDialogActive()) {
-      web_contents_modal_dialog_manager->FocusTopmostDialog();
-      return true;
-    }
-  }
+  web_modal::PopupManager* popup_manager =
+      web_modal::PopupManager::FromWebContents(web_contents_);
+  if (popup_manager)
+    popup_manager->WasFocused(web_contents_);
 
   return false;
 }
@@ -174,6 +169,26 @@ void ChromeWebContentsViewDelegateViews::ShowContextMenu(
   ShowMenu(
       BuildMenu(content::WebContents::FromRenderFrameHost(render_frame_host),
                 params));
+}
+
+void ChromeWebContentsViewDelegateViews::ShowDisambiguationPopup(
+    const gfx::Rect& target_rect,
+    const SkBitmap& zoomed_bitmap,
+    const gfx::NativeView content,
+    const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
+    const base::Callback<void(ui::MouseEvent*)>& mouse_cb) {
+#if defined(USE_AURA)
+  if (!browser_defaults::kShowLinkDisambiguationPopup)
+    return;
+
+  link_disambiguation_popup_.reset(new LinkDisambiguationPopup);
+  link_disambiguation_popup_->Show(
+      zoomed_bitmap, target_rect, content, gesture_cb, mouse_cb);
+#endif
+}
+
+void ChromeWebContentsViewDelegateViews::HideDisambiguationPopup() {
+  link_disambiguation_popup_.reset();
 }
 
 void ChromeWebContentsViewDelegateViews::SizeChanged(const gfx::Size& size) {

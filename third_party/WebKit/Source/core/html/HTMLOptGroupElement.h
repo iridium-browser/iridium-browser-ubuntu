@@ -32,6 +32,7 @@ class HTMLSelectElement;
 class HTMLDivElement;
 
 class HTMLOptGroupElement FINAL : public HTMLElement {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLOptGroupElement> create(Document&);
 
@@ -39,6 +40,7 @@ public:
     HTMLSelectElement* ownerSelectElement() const;
 
     String groupLabelText() const;
+    HTMLDivElement& optGroupLabelElement() const;
 
 private:
     explicit HTMLOptGroupElement(Document&);
@@ -58,11 +60,10 @@ private:
 
     void updateGroupLabel();
     void recalcSelectOptions();
-    HTMLDivElement& optGroupLabelElement() const;
 
     RefPtr<RenderStyle> m_style;
 };
 
-} //namespace
+} // namespace blink
 
-#endif
+#endif // HTMLOptGroupElement_h

@@ -10,14 +10,14 @@
 #include "chrome/browser/sync_file_system/local/syncable_file_operation_runner.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "net/url_request/url_request.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_operation.h"
-#include "webkit/browser/fileapi/file_system_operation_context.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/fileapi/file_writer_delegate.h"
-#include "webkit/common/blob/shareable_file_reference.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_operation.h"
+#include "storage/browser/fileapi/file_system_operation_context.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/fileapi/file_writer_delegate.h"
+#include "storage/common/blob/shareable_file_reference.h"
 
-using fileapi::FileSystemURL;
+using storage::FileSystemURL;
 
 namespace sync_file_system {
 
@@ -102,10 +102,6 @@ void SyncableFileSystemOperation::CreateDirectory(
   DCHECK(CalledOnValidThread());
   if (!operation_runner_.get()) {
     callback.Run(base::File::FILE_ERROR_NOT_FOUND);
-    return;
-  }
-  if (!is_directory_operation_enabled_) {
-    callback.Run(base::File::FILE_ERROR_INVALID_OPERATION);
     return;
   }
   DCHECK(operation_runner_.get());
@@ -219,7 +215,7 @@ void SyncableFileSystemOperation::Remove(
 
 void SyncableFileSystemOperation::Write(
     const FileSystemURL& url,
-    scoped_ptr<fileapi::FileWriterDelegate> writer_delegate,
+    scoped_ptr<storage::FileWriterDelegate> writer_delegate,
     scoped_ptr<net::URLRequest> blob_request,
     const WriteCallback& callback) {
   DCHECK(CalledOnValidThread());
@@ -353,10 +349,9 @@ base::File::Error SyncableFileSystemOperation::SyncGetPlatformPath(
 
 SyncableFileSystemOperation::SyncableFileSystemOperation(
     const FileSystemURL& url,
-    fileapi::FileSystemContext* file_system_context,
-    scoped_ptr<fileapi::FileSystemOperationContext> operation_context)
-    : url_(url),
-      weak_factory_(this) {
+    storage::FileSystemContext* file_system_context,
+    scoped_ptr<storage::FileSystemOperationContext> operation_context)
+    : url_(url), weak_factory_(this) {
   DCHECK(file_system_context);
   SyncFileSystemBackend* backend =
       SyncFileSystemBackend::GetBackend(file_system_context);
@@ -367,10 +362,9 @@ SyncableFileSystemOperation::SyncableFileSystemOperation(
     // Returning here to leave operation_runner_ as NULL.
     return;
   }
-  impl_.reset(fileapi::FileSystemOperation::Create(
+  impl_.reset(storage::FileSystemOperation::Create(
       url_, file_system_context, operation_context.Pass()));
   operation_runner_ = backend->sync_context()->operation_runner();
-  is_directory_operation_enabled_ = IsV2EnabledForOrigin(url.origin());
 }
 
 void SyncableFileSystemOperation::DidFinish(base::File::Error status) {

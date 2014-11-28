@@ -107,7 +107,7 @@ WebInspector.NavigatorView.prototype = {
         var projectNode = this._projectNode(uiSourceCode.project());
         var folderNode = this._folderNode(projectNode, uiSourceCode.parentPath());
         var uiSourceCodeNode = new WebInspector.NavigatorUISourceCodeTreeNode(this, uiSourceCode);
-        this._uiSourceCodeNodes.put(uiSourceCode, uiSourceCodeNode);
+        this._uiSourceCodeNodes.set(uiSourceCode, uiSourceCodeNode);
         folderNode.appendChild(uiSourceCodeNode);
     },
 
@@ -135,6 +135,7 @@ WebInspector.NavigatorView.prototype = {
     _projectRemoved: function(event)
     {
         var project = /** @type {!WebInspector.Project} */ (event.data);
+        project.removeEventListener(WebInspector.Project.Events.DisplayNameUpdated, this._updateProjectNodeTitle, this);
         var uiSourceCodes = project.uiSourceCodes();
         for (var i = 0; i < uiSourceCodes.length; ++i)
             this._removeUISourceCode(uiSourceCodes[i]);
@@ -151,11 +152,34 @@ WebInspector.NavigatorView.prototype = {
 
         var projectNode = this._rootNode.child(project.id());
         if (!projectNode) {
-            var type = project.type() === WebInspector.projectTypes.FileSystem ? WebInspector.NavigatorTreeOutline.Types.FileSystem : WebInspector.NavigatorTreeOutline.Types.Domain;
-            projectNode = new WebInspector.NavigatorFolderTreeNode(this, project, project.id(), type, "", project.displayName());
+            projectNode = this._createProjectNode(project);
             this._rootNode.appendChild(projectNode);
         }
         return projectNode;
+    },
+
+    /**
+     * @param {!WebInspector.Project} project
+     * @return {!WebInspector.NavigatorTreeNode}
+     */
+    _createProjectNode: function(project)
+    {
+        var type = project.type() === WebInspector.projectTypes.FileSystem ? WebInspector.NavigatorTreeOutline.Types.FileSystem : WebInspector.NavigatorTreeOutline.Types.Domain;
+        var projectNode = new WebInspector.NavigatorFolderTreeNode(this, project, project.id(), type, "", project.displayName());
+        project.addEventListener(WebInspector.Project.Events.DisplayNameUpdated, this._updateProjectNodeTitle, this);
+        return projectNode;
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _updateProjectNodeTitle: function(event)
+    {
+        var project = /** @type {!WebInspector.Project} */(event.target);
+        var projectNode = this._rootNode.child(project.id());
+        if (!projectNode)
+            return;
+        projectNode.treeElement().titleText = project.displayName();
     },
 
     /**
@@ -171,7 +195,7 @@ WebInspector.NavigatorView.prototype = {
         var subfolderNodes = this._subfolderNodes.get(projectNode);
         if (!subfolderNodes) {
             subfolderNodes = /** @type {!StringMap.<!WebInspector.NavigatorFolderTreeNode>} */ (new StringMap());
-            this._subfolderNodes.put(projectNode, subfolderNodes);
+            this._subfolderNodes.set(projectNode, subfolderNodes);
         }
 
         var folderNode = subfolderNodes.get(folderPath);
@@ -185,7 +209,7 @@ WebInspector.NavigatorView.prototype = {
 
         var name = folderPath.substring(index + 1);
         folderNode = new WebInspector.NavigatorFolderTreeNode(this, null, name, WebInspector.NavigatorTreeOutline.Types.Folder, folderPath, name);
-        subfolderNodes.put(folderPath, folderNode);
+        subfolderNodes.set(folderPath, folderNode);
         parentNode.appendChild(folderNode);
         return folderNode;
     },
@@ -499,7 +523,7 @@ WebInspector.NavigatorView.prototype = {
 WebInspector.SourcesNavigatorView = function()
 {
     WebInspector.NavigatorView.call(this);
-    WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.InspectedURLChanged, this._inspectedURLChanged, this);
+    WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.InspectedURLChanged, this._inspectedURLChanged, this);
 }
 
 WebInspector.SourcesNavigatorView.prototype = {
@@ -524,7 +548,8 @@ WebInspector.SourcesNavigatorView.prototype = {
        var nodes = this._uiSourceCodeNodes.values();
        for (var i = 0; i < nodes.length; ++i) {
            var uiSourceCode = nodes[i].uiSourceCode();
-           if (WebInspector.resourceTreeModel.inspectedPageURL() && uiSourceCode.url === WebInspector.resourceTreeModel.inspectedPageURL())
+           var inspectedPageURL = WebInspector.targetManager.inspectedPageURL();
+           if (inspectedPageURL && uiSourceCode.url === inspectedPageURL)
               this.revealUISourceCode(uiSourceCode, true);
        }
     },
@@ -535,7 +560,8 @@ WebInspector.SourcesNavigatorView.prototype = {
     _addUISourceCode: function(uiSourceCode)
     {
         WebInspector.NavigatorView.prototype._addUISourceCode.call(this, uiSourceCode);
-        if (uiSourceCode.url === WebInspector.resourceTreeModel.inspectedPageURL())
+        var inspectedPageURL = WebInspector.targetManager.inspectedPageURL();
+        if (inspectedPageURL && uiSourceCode.url === inspectedPageURL)
             this.revealUISourceCode(uiSourceCode, true);
      },
 
@@ -600,7 +626,7 @@ WebInspector.NavigatorTreeOutline._treeElementsCompare = function compare(treeEl
     {
         var type = treeElement.type();
         if (type === WebInspector.NavigatorTreeOutline.Types.Domain) {
-            if (treeElement.titleText === WebInspector.resourceTreeModel.inspectedPageDomain())
+            if (treeElement.titleText === WebInspector.targetManager.inspectedPageDomain())
                 return 1;
             return 2;
         }
@@ -679,7 +705,7 @@ WebInspector.BaseNavigatorTreeElement.prototype = {
             this.imageElement = this.listItemElement.createChild("img", "icon");
 
         this.titleElement = this.listItemElement.createChild("div", "base-navigator-tree-element-title");
-        this.titleElement.textContent = this._titleText
+        this.titleElement.textContent = this._titleText;
     },
 
     /**
@@ -713,8 +739,10 @@ WebInspector.BaseNavigatorTreeElement.prototype = {
         if (this._titleText === titleText)
             return;
         this._titleText = titleText || "";
-        if (this.titleElement)
+        if (this.titleElement) {
             this.titleElement.textContent = this._titleText;
+            this.titleElement.title = this._titleText;
+        }
     },
 
     /**
@@ -1022,7 +1050,7 @@ WebInspector.NavigatorTreeNode.prototype = {
      */
     isEmpty: function()
     {
-        return !this._children.size();
+        return !this._children.size;
     },
 
     /**
@@ -1047,7 +1075,7 @@ WebInspector.NavigatorTreeNode.prototype = {
      */
     appendChild: function(node)
     {
-        this._children.put(node.id, node);
+        this._children.set(node.id, node);
         node.parent = this;
         this.didAddChild(node);
     },

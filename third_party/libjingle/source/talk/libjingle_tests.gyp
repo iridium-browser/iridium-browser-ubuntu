@@ -33,7 +33,7 @@
       'type': 'static_library',
       'dependencies': [
         '<(DEPTH)/third_party/libyuv/libyuv.gyp:libyuv',
-        '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
+        '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
         '<@(libjingle_tests_additional_deps)',
       ],
       'direct_dependent_settings': {
@@ -74,18 +74,13 @@
       'type': 'executable',
       'includes': [ 'build/ios_tests.gypi', ],
       'dependencies': [
-        '<(webrtc_root)/base/base.gyp:webrtc_base',
-        '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
+        '<(webrtc_root)/base/base.gyp:rtc_base',
+        '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
+        '<(webrtc_root)/libjingle/xmllite/xmllite.gyp:rtc_xmllite',
         'libjingle.gyp:libjingle',
         'libjingle_unittest_main',
       ],
       'sources': [
-        'xmllite/qname_unittest.cc',
-        'xmllite/xmlbuilder_unittest.cc',
-        'xmllite/xmlelement_unittest.cc',
-        'xmllite/xmlnsstack_unittest.cc',
-        'xmllite/xmlparser_unittest.cc',
-        'xmllite/xmlprinter_unittest.cc',
         'xmpp/fakexmppclient.h',
         'xmpp/hangoutpubsubclient_unittest.cc',
         'xmpp/jid_unittest.cc',
@@ -104,22 +99,10 @@
       ],  # sources
     },  # target libjingle_unittest
     {
-      'target_name': 'libjingle_sound_unittest',
-      'type': 'executable',
-      'dependencies': [
-        '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
-        'libjingle.gyp:libjingle_sound',
-        'libjingle_unittest_main',
-      ],
-      'sources': [
-        'sound/automaticallychosensoundsystem_unittest.cc',
-      ],
-    },  # target libjingle_sound_unittest
-    {
       'target_name': 'libjingle_media_unittest',
       'type': 'executable',
       'dependencies': [
-        '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
+        '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
         'libjingle.gyp:libjingle_media',
         'libjingle_unittest_main',
       ],
@@ -157,9 +140,8 @@
         'media/sctp/sctpdataengine_unittest.cc',
         'media/webrtc/webrtcpassthroughrender_unittest.cc',
         'media/webrtc/webrtcvideocapturer_unittest.cc',
-        # Omitted because depends on non-open-source testdata files.
-        # 'media/base/videoframe_unittest.h',
-        # 'media/webrtc/webrtcvideoframe_unittest.cc',
+        'media/base/videoframe_unittest.h',
+        'media/webrtc/webrtcvideoframe_unittest.cc',
 
         # Disabled because some tests fail.
         # TODO(ronghuawu): Reenable these tests.
@@ -171,6 +153,11 @@
       ],
       'conditions': [
         ['OS=="win"', {
+          'dependencies': [
+            '<(DEPTH)/net/third_party/nss/ssl.gyp:libssl',
+            '<(DEPTH)/third_party/nss/nss.gyp:nspr',
+            '<(DEPTH)/third_party/nss/nss.gyp:nss',
+          ],
           'msvs_settings': {
             'VCLinkerTool': {
               'AdditionalDependencies': [
@@ -194,7 +181,7 @@
       'type': 'executable',
       'dependencies': [
         '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
-        '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
+        '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
         'libjingle.gyp:libjingle',
         'libjingle.gyp:libjingle_p2p',
         'libjingle_unittest_main',
@@ -253,7 +240,7 @@
       'type': 'executable',
       'dependencies': [
         '<(DEPTH)/testing/gmock.gyp:gmock',
-        '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
+        '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
         'libjingle.gyp:libjingle',
         'libjingle.gyp:libjingle_p2p',
         'libjingle.gyp:libjingle_peerconnection',
@@ -386,7 +373,7 @@
           'type': 'executable',
           'includes': [ 'build/ios_tests.gypi', ],
           'dependencies': [
-            '<(webrtc_root)/base/base_tests.gyp:webrtc_base_tests_utils',
+            '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
             'libjingle.gyp:libjingle_peerconnection_objc',
           ],
           'sources': [
@@ -483,20 +470,6 @@
           ],
           'sources': [
             'libjingle_peerconnection_unittest.isolate',
-          ],
-        },
-        {
-          'target_name': 'libjingle_sound_unittest_run',
-          'type': 'none',
-          'dependencies': [
-            'libjingle_sound_unittest',
-          ],
-          'includes': [
-            'build/isolate.gypi',
-            'libjingle_sound_unittest.isolate',
-          ],
-          'sources': [
-            'libjingle_sound_unittest.isolate',
           ],
         },
         {

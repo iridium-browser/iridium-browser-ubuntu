@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/threading/thread.h"
@@ -42,12 +42,6 @@ class ShellBrowserContext::ShellResourceContext : public ResourceContext {
   virtual net::URLRequestContext* GetRequestContext() OVERRIDE {
     CHECK(getter_);
     return getter_->GetURLRequestContext();
-  }
-  virtual bool AllowMicAccess(const GURL& origin) OVERRIDE {
-    return false;
-  }
-  virtual bool AllowCameraAccess(const GURL& origin) OVERRIDE {
-    return false;
   }
 
   void set_url_request_context_getter(ShellURLRequestContextGetter* getter) {
@@ -196,7 +190,7 @@ BrowserPluginGuestManager* ShellBrowserContext::GetGuestManager() {
   return guest_manager_;
 }
 
-quota::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {
+storage::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {
   return NULL;
 }
 

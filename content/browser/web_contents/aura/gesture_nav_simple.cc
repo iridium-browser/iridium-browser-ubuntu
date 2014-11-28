@@ -12,7 +12,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/overscroll_configuration.h"
 #include "content/public/common/content_client.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -21,6 +20,7 @@
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
+#include "ui/resources/grit/ui_resources.h"
 
 namespace content {
 
@@ -98,6 +98,9 @@ class ArrowLayerDelegate : public ui::LayerDelegate {
                          left_arrow_ ? 0 : kArrowWidth - image_.Width(),
                          (kArrowHeight - image_.Height()) / 2);
   }
+
+  virtual void OnDelegatedFrameDamage(
+      const gfx::Rect& damage_rect_in_dip) OVERRIDE {}
 
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
 

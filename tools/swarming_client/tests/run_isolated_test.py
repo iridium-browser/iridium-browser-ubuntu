@@ -22,6 +22,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party'))
 
+import isolated_format
 import run_isolated
 import test_utils
 from depot_tools import auto_stub
@@ -257,6 +258,7 @@ class RunIsolatedTest(auto_stub.TestCase):
         isolated_hash,
         StorageFake(files),
         run_isolated.isolateserver.MemoryCache(),
+        False,
         [])
     self.assertEqual(0, ret)
     return subprocess_call, make_tree_call
@@ -408,7 +410,7 @@ class RunIsolatedTest(auto_stub.TestCase):
               's': len(script),
             },
           },
-          'version': run_isolated.isolateserver.ISOLATED_FILE_VERSION,
+          'version': isolated_format.ISOLATED_FILE_VERSION,
         })
     isolated_hash = ALGO(isolated).hexdigest()
     contents = {
@@ -427,6 +429,7 @@ class RunIsolatedTest(auto_stub.TestCase):
         isolated_hash,
         store,
         run_isolated.isolateserver.MemoryCache(),
+        False,
         [])
     self.assertEqual(0, ret)
 
@@ -445,7 +448,7 @@ class RunIsolatedTest(auto_stub.TestCase):
               's': 3,
             },
           },
-          'version': run_isolated.isolateserver.ISOLATED_FILE_VERSION,
+          'version': isolated_format.ISOLATED_FILE_VERSION,
         })
     uploaded_hash = ALGO(uploaded).hexdigest()
     hashes.add(uploaded_hash)

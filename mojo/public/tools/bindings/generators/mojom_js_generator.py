@@ -31,22 +31,28 @@ _kind_to_javascript_default_value = {
   mojom.INT64:                 "0",
   mojom.UINT64:                "0",
   mojom.DOUBLE:                "0",
-  mojom.STRING:                '""',
-  mojom.NULLABLE_STRING:       '""'
+  mojom.STRING:                "null",
+  mojom.NULLABLE_STRING:       "null"
 }
+
+
+def JavaScriptType(kind):
+  if kind.imported_from:
+    return kind.imported_from["unique_name"] + "." + kind.name
+  return kind.name
 
 
 def JavaScriptDefaultValue(field):
   if field.default:
     if mojom.IsStructKind(field.kind):
       assert field.default == "default"
-      return "new %s()" % JavascriptType(field.kind)
+      return "new %s()" % JavaScriptType(field.kind)
     return ExpressionToText(field.default)
   if field.kind in mojom.PRIMITIVES:
     return _kind_to_javascript_default_value[field.kind]
   if mojom.IsStructKind(field.kind):
     return "null"
-  if mojom.IsArrayKind(field.kind):
+  if mojom.IsAnyArrayKind(field.kind):
     return "null"
   if mojom.IsInterfaceKind(field.kind) or \
      mojom.IsInterfaceRequestKind(field.kind):
@@ -79,16 +85,16 @@ _kind_to_codec_type = {
   mojom.DPPIPE:                "codec.Handle",
   mojom.MSGPIPE:               "codec.Handle",
   mojom.SHAREDBUFFER:          "codec.Handle",
-  mojom.NULLABLE_HANDLE:       "codec.Handle",
-  mojom.NULLABLE_DCPIPE:       "codec.Handle",
-  mojom.NULLABLE_DPPIPE:       "codec.Handle",
-  mojom.NULLABLE_MSGPIPE:      "codec.Handle",
-  mojom.NULLABLE_SHAREDBUFFER: "codec.Handle",
+  mojom.NULLABLE_HANDLE:       "codec.NullableHandle",
+  mojom.NULLABLE_DCPIPE:       "codec.NullableHandle",
+  mojom.NULLABLE_DPPIPE:       "codec.NullableHandle",
+  mojom.NULLABLE_MSGPIPE:      "codec.NullableHandle",
+  mojom.NULLABLE_SHAREDBUFFER: "codec.NullableHandle",
   mojom.INT64:                 "codec.Int64",
   mojom.UINT64:                "codec.Uint64",
   mojom.DOUBLE:                "codec.Double",
   mojom.STRING:                "codec.String",
-  mojom.NULLABLE_STRING:       "codec.String",
+  mojom.NULLABLE_STRING:       "codec.NullableString",
 }
 
 
@@ -96,11 +102,14 @@ def CodecType(kind):
   if kind in mojom.PRIMITIVES:
     return _kind_to_codec_type[kind]
   if mojom.IsStructKind(kind):
-    return "new codec.PointerTo(%s)" % CodecType(kind.name)
-  if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
-    return "new codec.ArrayOf(new codec.ArrayOf(codec.PackedBool))"
-  if mojom.IsArrayKind(kind):
-    return "new codec.ArrayOf(%s)" % CodecType(kind.kind)
+    pointer_type = "NullablePointerTo" if mojom.IsNullableKind(kind) \
+        else "PointerTo"
+    return "new codec.%s(%s)" % (pointer_type, JavaScriptType(kind))
+  if mojom.IsAnyArrayKind(kind):
+    array_type = "NullableArrayOf" if mojom.IsNullableKind(kind) else "ArrayOf"
+    element_type = "codec.PackedBool" if mojom.IsBoolKind(kind.kind) \
+        else CodecType(kind.kind)
+    return "new codec.%s(%s)" % (array_type, element_type)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return CodecType(mojom.MSGPIPE)
   if mojom.IsEnumKind(kind):
@@ -112,10 +121,10 @@ def JavaScriptDecodeSnippet(kind):
   if kind in mojom.PRIMITIVES:
     return "decodeStruct(%s)" % CodecType(kind)
   if mojom.IsStructKind(kind):
-    return "decodeStructPointer(%s)" % CodecType(kind.name)
-  if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
-    return "decodeArrayPointer(new codec.ArrayOf(codec.PackedBool))"
-  if mojom.IsArrayKind(kind):
+    return "decodeStructPointer(%s)" % JavaScriptType(kind)
+  if mojom.IsAnyArrayKind(kind) and mojom.IsBoolKind(kind.kind):
+    return "decodeArrayPointer(codec.PackedBool)"
+  if mojom.IsAnyArrayKind(kind):
     return "decodeArrayPointer(%s)" % CodecType(kind.kind)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return JavaScriptDecodeSnippet(mojom.MSGPIPE)
@@ -127,15 +136,53 @@ def JavaScriptEncodeSnippet(kind):
   if kind in mojom.PRIMITIVES:
     return "encodeStruct(%s, " % CodecType(kind)
   if mojom.IsStructKind(kind):
-    return "encodeStructPointer(%s, " % CodecType(kind.name)
-  if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
-    return "encodeArrayPointer(new codec.ArrayOf(codec.PackedBool), ";
+    return "encodeStructPointer(%s, " % JavaScriptType(kind)
+  if mojom.IsAnyArrayKind(kind) and mojom.IsBoolKind(kind.kind):
+    return "encodeArrayPointer(codec.PackedBool, ";
   if mojom.IsAnyArrayKind(kind):
     return "encodeArrayPointer(%s, " % CodecType(kind.kind)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return JavaScriptEncodeSnippet(mojom.MSGPIPE)
   if mojom.IsEnumKind(kind):
     return JavaScriptEncodeSnippet(mojom.INT32)
+
+
+def JavaScriptFieldOffset(packed_field):
+  return "offset + codec.kStructHeaderSize + %s" % packed_field.offset
+
+
+def JavaScriptNullableParam(packed_field):
+  return "true" if mojom.IsNullableKind(packed_field.field.kind) else "false"
+
+
+def JavaScriptValidateArrayParams(packed_field):
+  nullable = JavaScriptNullableParam(packed_field)
+  field_offset = JavaScriptFieldOffset(packed_field)
+  element_kind = packed_field.field.kind.kind
+  element_size = pack.PackedField.GetSizeForKind(element_kind)
+  element_count = generator.ExpectedArraySize(packed_field.field.kind)
+  element_type = "codec.PackedBool" if mojom.IsBoolKind(element_kind) \
+      else CodecType(element_kind)
+  return "%s, %s, %s, %s, %s" % \
+      (field_offset, element_size, element_count, element_type, nullable)
+
+
+def JavaScriptValidateStructParams(packed_field):
+  nullable = JavaScriptNullableParam(packed_field)
+  field_offset = JavaScriptFieldOffset(packed_field)
+  struct_type = JavaScriptType(packed_field.field.kind)
+  return "%s, %s, %s" % (field_offset, struct_type, nullable)
+
+
+def JavaScriptValidateStringParams(packed_field):
+  nullable = JavaScriptNullableParam(packed_field)
+  return "%s, %s" % (JavaScriptFieldOffset(packed_field), nullable)
+
+
+def JavaScriptValidateHandleParams(packed_field):
+  nullable = JavaScriptNullableParam(packed_field)
+  field_offset = JavaScriptFieldOffset(packed_field)
+  return "%s, %s" % (field_offset, nullable)
 
 
 def TranslateConstants(token):
@@ -148,9 +195,19 @@ def TranslateConstants(token):
     if token.parent_kind:
       name.append(token.parent_kind.name)
     if isinstance(token, mojom.EnumValue):
-      name.append(token.enum_name)
+      name.append(token.enum.name)
     name.append(token.name)
     return ".".join(name)
+
+  if isinstance(token, mojom.BuiltinValue):
+    if token.value == "double.INFINITY" or token.value == "float.INFINITY":
+      return "Infinity";
+    if token.value == "double.NEGATIVE_INFINITY" or \
+       token.value == "float.NEGATIVE_INFINITY":
+      return "-Infinity";
+    if token.value == "double.NAN" or token.value == "float.NAN":
+      return "NaN";
+
   return token
 
 
@@ -158,10 +215,17 @@ def ExpressionToText(value):
   return TranslateConstants(value)
 
 
-def JavascriptType(kind):
-  if kind.imported_from:
-    return kind.imported_from["unique_name"] + "." + kind.name
-  return kind.name
+def IsArrayPointerField(field):
+  return mojom.IsAnyArrayKind(field.kind)
+
+def IsStringPointerField(field):
+  return mojom.IsStringKind(field.kind)
+
+def IsStructPointerField(field):
+  return mojom.IsStructKind(field.kind)
+
+def IsHandleField(field):
+  return mojom.IsAnyHandleKind(field.kind)
 
 
 class Generator(generator.Generator):
@@ -172,8 +236,18 @@ class Generator(generator.Generator):
     "decode_snippet": JavaScriptDecodeSnippet,
     "encode_snippet": JavaScriptEncodeSnippet,
     "expression_to_text": ExpressionToText,
-    "js_type": JavascriptType,
+    "field_offset": JavaScriptFieldOffset,
+    "has_callbacks": mojom.HasCallbacks,
+    "is_array_pointer_field": IsArrayPointerField,
+    "is_struct_pointer_field": IsStructPointerField,
+    "is_string_pointer_field": IsStringPointerField,
+    "is_handle_field": IsHandleField,
+    "js_type": JavaScriptType,
     "stylize_method": generator.StudlyCapsToCamel,
+    "validate_array_params": JavaScriptValidateArrayParams,
+    "validate_handle_params": JavaScriptValidateHandleParams,
+    "validate_string_params": JavaScriptValidateStringParams,
+    "validate_struct_params": JavaScriptValidateStructParams,
   }
 
   @UseJinja("js_templates/module.js.tmpl", filters=js_filters)

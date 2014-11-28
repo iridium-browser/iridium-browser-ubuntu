@@ -79,6 +79,7 @@ InspectorController::InspectorController(Page* page, InspectorClient* inspectorC
     , m_cssAgent(nullptr)
     , m_resourceAgent(nullptr)
     , m_layerTreeAgent(nullptr)
+    , m_inspectorFrontendClient(nullptr)
     , m_page(page)
     , m_inspectorClient(inspectorClient)
     , m_agents(m_instrumentingAgents.get(), m_state.get())
@@ -118,9 +119,9 @@ InspectorController::InspectorController(Page* page, InspectorClient* inspectorC
 
     PageScriptDebugServer* pageScriptDebugServer = &PageScriptDebugServer::shared();
 
-    m_agents.append(PageRuntimeAgent::create(injectedScriptManager, pageScriptDebugServer, m_page, m_pageAgent));
+    m_agents.append(PageRuntimeAgent::create(injectedScriptManager, inspectorClient, pageScriptDebugServer, m_page, m_pageAgent));
 
-    m_agents.append(PageConsoleAgent::create(injectedScriptManager, m_domAgent, m_timelineAgent, m_tracingAgent));
+    m_agents.append(PageConsoleAgent::create(injectedScriptManager, m_domAgent, m_timelineAgent, m_page));
 
     ASSERT_ARG(inspectorClient, inspectorClient);
     m_injectedScriptManager->injectedScriptHost()->init(m_instrumentingAgents.get(), pageScriptDebugServer);
@@ -142,7 +143,7 @@ void InspectorController::trace(Visitor* visitor)
     visitor->trace(m_resourceAgent);
     visitor->trace(m_layerTreeAgent);
     visitor->trace(m_tracingAgent);
-    visitor->trace(m_inspectorFrontendClient);
+    visitor->trace(m_inspectorBackendDispatcher);
     visitor->trace(m_page);
     visitor->trace(m_agents);
 }
@@ -160,6 +161,11 @@ void InspectorController::setTextAutosizingEnabled(bool enabled)
 void InspectorController::setDeviceScaleAdjustment(float deviceScaleAdjustment)
 {
     m_pageAgent->setDeviceScaleAdjustment(deviceScaleAdjustment);
+}
+
+void InspectorController::setPreferCompositingToLCDTextEnabled(bool enabled)
+{
+    m_pageAgent->setPreferCompositingToLCDTextEnabled(enabled);
 }
 
 void InspectorController::initializeDeferredAgents()
@@ -204,6 +210,12 @@ void InspectorController::initializeDeferredAgents()
 
 void InspectorController::willBeDestroyed()
 {
+#if ENABLE(ASSERT)
+    ASSERT(m_page->mainFrame());
+    if (m_page->mainFrame()->isLocalFrame())
+        ASSERT(m_page->deprecatedLocalMainFrame()->view());
+#endif
+
     disconnectFrontend();
     m_injectedScriptManager->disconnect();
     m_inspectorClient = 0;
@@ -219,7 +231,7 @@ void InspectorController::registerModuleAgent(PassOwnPtrWillBeRawPtr<InspectorAg
     m_agents.append(agent);
 }
 
-void InspectorController::setInspectorFrontendClient(PassOwnPtrWillBeRawPtr<InspectorFrontendClient> inspectorFrontendClient)
+void InspectorController::setInspectorFrontendClient(InspectorFrontendClient* inspectorFrontendClient)
 {
     m_inspectorFrontendClient = inspectorFrontendClient;
 }
@@ -411,9 +423,12 @@ void InspectorController::deviceOrPageScaleFactorChanged()
 
 bool InspectorController::deviceEmulationEnabled()
 {
-    if (InspectorPageAgent* pageAgent = m_instrumentingAgents->inspectorPageAgent())
-        return pageAgent->deviceMetricsOverrideEnabled();
-    return false;
+    return m_pageAgent->deviceMetricsOverrideEnabled();
+}
+
+bool InspectorController::screencastEnabled()
+{
+    return m_pageAgent->screencastEnabled();
 }
 
 void InspectorController::resume()

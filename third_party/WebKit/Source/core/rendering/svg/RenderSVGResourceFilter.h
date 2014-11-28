@@ -34,22 +34,17 @@ namespace blink {
 struct FilterData {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    enum FilterDataState { PaintingSource, Applying, Built, CycleDetected, MarkedForRemoval };
+    enum FilterDataState { PaintingSource, Applying, Built, CycleDetected };
 
     FilterData()
-        : savedContext(0)
-        , state(PaintingSource)
+        : state(PaintingSource)
     {
     }
 
     RefPtr<SVGFilter> filter;
     RefPtr<SVGFilterBuilder> builder;
-    OwnPtr<ImageBuffer> sourceGraphicBuffer;
-    GraphicsContext* savedContext;
-    AffineTransform shearFreeAbsoluteTransform;
     FloatRect boundaries;
     FloatRect drawingRegion;
-    FloatSize scale;
     FilterDataState state;
 };
 
@@ -59,6 +54,7 @@ class RenderSVGResourceFilter FINAL : public RenderSVGResourceContainer {
 public:
     explicit RenderSVGResourceFilter(SVGFilterElement*);
     virtual ~RenderSVGResourceFilter();
+    virtual void destroy() OVERRIDE;
 
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const OVERRIDE;
 
@@ -69,7 +65,7 @@ public:
     virtual void removeClientFromCache(RenderObject*, bool markForInvalidation = true) OVERRIDE;
 
     virtual bool applyResource(RenderObject*, RenderStyle*, GraphicsContext*&, unsigned short resourceMode) OVERRIDE;
-    virtual void postApplyResource(RenderObject*, GraphicsContext*&, unsigned short resourceMode, const Path*, const RenderSVGShape*) OVERRIDE;
+    virtual void postApplyResource(RenderObject*, GraphicsContext*&) OVERRIDE;
 
     FloatRect resourceBoundingBox(const RenderObject*);
 
@@ -85,8 +81,6 @@ public:
 
     FloatRect drawingRegion(RenderObject*) const;
 private:
-    void adjustScaleForMaximumImageSize(const FloatSize&, FloatSize&);
-
     typedef HashMap<RenderObject*, OwnPtr<FilterData> > FilterMap;
     FilterMap m_filter;
 };

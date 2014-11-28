@@ -15,10 +15,10 @@
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/child_process_security_policy.h"
-#include "grit/generated_resources.h"
 #include "net/base/network_delegate.h"
 #include "net/url_request/url_request_redirect_job.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -533,6 +533,17 @@ bool ProtocolHandlerRegistry::IsRegistered(
       handlers->end();
 }
 
+bool ProtocolHandlerRegistry::IsRegisteredByUser(
+    const ProtocolHandler& handler) {
+  return HandlerExists(handler, &user_protocol_handlers_);
+}
+
+bool ProtocolHandlerRegistry::HasPolicyRegisteredHandler(
+    const std::string& scheme) {
+  return (policy_protocol_handlers_.find(scheme) !=
+          policy_protocol_handlers_.end());
+}
+
 bool ProtocolHandlerRegistry::IsIgnored(const ProtocolHandler& handler) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   ProtocolHandlerList::const_iterator i;
@@ -605,10 +616,9 @@ void ProtocolHandlerRegistry::RemoveHandler(
   if (HandlerExists(handler, handlers) &&
       HandlerExists(handler, &user_protocol_handlers_)) {
     EraseHandler(handler, &user_protocol_handlers_);
-    if (!HandlerExists(handler, &policy_protocol_handlers_)) {
-      erase_success = true;
+    erase_success = true;
+    if (!HandlerExists(handler, &policy_protocol_handlers_))
       EraseHandler(handler, &protocol_handlers_);
-    }
   }
   ProtocolHandlerMap::iterator q = default_handlers_.find(handler.protocol());
   if (erase_success && q != default_handlers_.end() && q->second == handler) {

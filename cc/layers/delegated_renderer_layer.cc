@@ -7,7 +7,6 @@
 #include "cc/layers/delegated_renderer_layer_impl.h"
 #include "cc/output/delegated_frame_data.h"
 #include "cc/quads/render_pass_draw_quad.h"
-#include "cc/trees/blocking_task_runner.h"
 #include "cc/trees/layer_tree_host.h"
 
 namespace cc {
@@ -24,7 +23,6 @@ DelegatedRendererLayer::DelegatedRendererLayer(
       frame_provider_(frame_provider),
       should_collect_new_frame_(true),
       frame_data_(NULL),
-      main_thread_runner_(BlockingTaskRunner::current()),
       weak_ptrs_(this) {
   frame_provider_->AddObserver(this);
 }

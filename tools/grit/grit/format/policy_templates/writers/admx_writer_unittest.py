@@ -219,6 +219,46 @@ class AdmxWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
 
     self.AssertXMLEquals(output, expected_output)
 
+  def testRecommendedOnlyPolicy(self):
+    main_policy = {
+      'name': 'DummyMainPolicy',
+      'type': 'main',
+      'features': {
+        'can_be_recommended': True,
+        'can_be_mandatory': False,
+      }
+    }
+
+    policy_group = {
+      'name': 'PolicyGroup',
+      'policies': [main_policy],
+    }
+    self.writer.BeginTemplate()
+    self.writer.BeginRecommendedPolicyGroup(policy_group)
+
+    self.writer.WritePolicy(main_policy)
+    self.writer.WriteRecommendedPolicy(main_policy)
+
+    output = self.GetXMLOfChildren(self._GetPoliciesElement(self.writer._doc))
+    expected_output = (
+        '<policy class="TestClass" displayName="$(string.DummyMainPolicy)"'
+        ' explainText="$(string.DummyMainPolicy_Explain)"'
+        ' key="Software\\Policies\\Test\\Recommended"'
+        ' name="DummyMainPolicy_recommended"'
+        ' presentation="$(presentation.DummyMainPolicy)"'
+        ' valueName="DummyMainPolicy">\n'
+        '  <parentCategory ref="PolicyGroup_recommended"/>\n'
+        '  <supportedOn ref="SUPPORTED_TESTOS"/>\n'
+        '  <enabledValue>\n'
+        '    <decimal value="1"/>\n'
+        '  </enabledValue>\n'
+        '  <disabledValue>\n'
+        '    <decimal value="0"/>\n'
+        '  </disabledValue>\n'
+        '</policy>')
+
+    self.AssertXMLEquals(output, expected_output)
+
   def testStringPolicy(self):
     string_policy = {
       'name': 'SampleStringPolicy',

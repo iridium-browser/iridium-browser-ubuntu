@@ -22,8 +22,8 @@
 #include "net/ssl/channel_id_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/browser/database/database_tracker.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
+#include "storage/browser/database/database_tracker.h"
+#include "storage/browser/fileapi/external_mount_points.h"
 #endif // !OS_IOS
 
 using base::UserDataAdapter;
@@ -125,7 +125,7 @@ DownloadManager* BrowserContext::GetDownloadManager(
 }
 
 // static
-fileapi::ExternalMountPoints* BrowserContext::GetMountPoints(
+storage::ExternalMountPoints* BrowserContext::GetMountPoints(
     BrowserContext* context) {
   // Ensure that these methods are called on the UI thread, except for
   // unittests where a UI thread might not have been created.
@@ -134,15 +134,15 @@ fileapi::ExternalMountPoints* BrowserContext::GetMountPoints(
 
 #if defined(OS_CHROMEOS)
   if (!context->GetUserData(kMountPointsKey)) {
-    scoped_refptr<fileapi::ExternalMountPoints> mount_points =
-        fileapi::ExternalMountPoints::CreateRefCounted();
+    scoped_refptr<storage::ExternalMountPoints> mount_points =
+        storage::ExternalMountPoints::CreateRefCounted();
     context->SetUserData(
         kMountPointsKey,
-        new UserDataAdapter<fileapi::ExternalMountPoints>(mount_points.get()));
+        new UserDataAdapter<storage::ExternalMountPoints>(mount_points.get()));
   }
 
-  return UserDataAdapter<fileapi::ExternalMountPoints>::Get(
-      context, kMountPointsKey);
+  return UserDataAdapter<storage::ExternalMountPoints>::Get(context,
+                                                            kMountPointsKey);
 #else
   return NULL;
 #endif

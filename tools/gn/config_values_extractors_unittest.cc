@@ -28,6 +28,7 @@ struct IncludeWriter {
 
 TEST(ConfigValuesExtractors, IncludeOrdering) {
   TestWithScope setup;
+  Err err;
 
   // Construct a chain of dependencies: target -> dep1 -> dep2
   // Add representative values: cflags (opaque, always copied) and include_dirs
@@ -45,8 +46,10 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
 
   Target dep2(setup.settings(), Label(SourceDir("//dep2/"), "dep2"));
   dep2.set_output_type(Target::SOURCE_SET);
+  dep2.visibility().SetPublic();
+  dep2.SetToolchain(setup.toolchain());
   dep2.all_dependent_configs().push_back(LabelConfigPair(&dep2_all));
-  dep2.direct_dependent_configs().push_back(LabelConfigPair(&dep2_direct));
+  dep2.public_configs().push_back(LabelConfigPair(&dep2_direct));
 
   // Set up dep1, direct and all dependent configs.
   Config dep1_all(setup.settings(), Label(SourceDir("//dep1/"), "all"));
@@ -60,9 +63,11 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
 
   Target dep1(setup.settings(), Label(SourceDir("//dep1/"), "dep1"));
   dep1.set_output_type(Target::SOURCE_SET);
+  dep1.visibility().SetPublic();
+  dep1.SetToolchain(setup.toolchain());
   dep1.all_dependent_configs().push_back(LabelConfigPair(&dep1_all));
-  dep1.direct_dependent_configs().push_back(LabelConfigPair(&dep1_direct));
-  dep1.deps().push_back(LabelTargetPair(&dep2));
+  dep1.public_configs().push_back(LabelConfigPair(&dep1_direct));
+  dep1.private_deps().push_back(LabelTargetPair(&dep2));
 
   // Set up target, direct and all dependent configs.
   Config target_all(setup.settings(), Label(SourceDir("//target/"), "all"));
@@ -85,10 +90,11 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
 
   Target target(setup.settings(), Label(SourceDir("//target/"), "target"));
   target.set_output_type(Target::SOURCE_SET);
+  target.SetToolchain(setup.toolchain());
   target.all_dependent_configs().push_back(LabelConfigPair(&target_all));
-  target.direct_dependent_configs().push_back(LabelConfigPair(&target_direct));
+  target.public_configs().push_back(LabelConfigPair(&target_direct));
   target.configs().push_back(LabelConfigPair(&target_config));
-  target.deps().push_back(LabelTargetPair(&dep1));
+  target.private_deps().push_back(LabelTargetPair(&dep1));
 
 
   // Additionally add some values directly on "target".
@@ -97,9 +103,9 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
       SourceDir("//target/"));
 
   // Mark targets resolved. This should push dependent configs.
-  dep2.OnResolved();
-  dep1.OnResolved();
-  target.OnResolved();
+  ASSERT_TRUE(dep2.OnResolved(&err));
+  ASSERT_TRUE(dep1.OnResolved(&err));
+  ASSERT_TRUE(target.OnResolved(&err));
 
   // Verify cflags by serializing.
   std::ostringstream flag_out;

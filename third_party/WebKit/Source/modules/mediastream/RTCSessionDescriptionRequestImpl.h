@@ -46,7 +46,7 @@ class WebRTCSessionDescription;
 
 class RTCSessionDescriptionRequestImpl FINAL : public RTCSessionDescriptionRequest, public ActiveDOMObject {
 public:
-    static PassRefPtr<RTCSessionDescriptionRequestImpl> create(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<RTCSessionDescriptionCallback>, PassOwnPtr<RTCErrorCallback>);
+    static RTCSessionDescriptionRequestImpl* create(ExecutionContext*, RTCPeerConnection*, RTCSessionDescriptionCallback*, RTCErrorCallback*);
     virtual ~RTCSessionDescriptionRequestImpl();
 
     virtual void requestSucceeded(const WebRTCSessionDescription&) OVERRIDE;
@@ -55,15 +55,16 @@ public:
     // ActiveDOMObject
     virtual void stop() OVERRIDE;
 
+    virtual void trace(Visitor*) OVERRIDE;
+
 private:
-    RTCSessionDescriptionRequestImpl(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<RTCSessionDescriptionCallback>, PassOwnPtr<RTCErrorCallback>);
+    RTCSessionDescriptionRequestImpl(ExecutionContext*, RTCPeerConnection*, RTCSessionDescriptionCallback*, RTCErrorCallback*);
 
     void clear();
 
-    OwnPtr<RTCSessionDescriptionCallback> m_successCallback;
-    OwnPtr<RTCErrorCallback> m_errorCallback;
-
-    Persistent<RTCPeerConnection> m_requester;
+    Member<RTCSessionDescriptionCallback> m_successCallback;
+    Member<RTCErrorCallback> m_errorCallback;
+    Member<RTCPeerConnection> m_requester;
 };
 
 } // namespace blink

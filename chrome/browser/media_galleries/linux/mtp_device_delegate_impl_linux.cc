@@ -342,7 +342,7 @@ void MTPDeviceDelegateImplLinux::GetFileInfo(
   if (it != file_info_cache_.end()) {
     // TODO(thestig): This code is repeated in several places. Combine them.
     // e.g. c/b/media_galleries/win/mtp_device_operations_util.cc
-    const fileapi::DirectoryEntry& cached_file_entry = it->second;
+    const storage::DirectoryEntry& cached_file_entry = it->second;
     base::File::Info info;
     info.size = cached_file_entry.size;
     info.is_directory = cached_file_entry.is_directory;
@@ -410,7 +410,9 @@ bool MTPDeviceDelegateImplLinux::IsStreaming() {
 
 void MTPDeviceDelegateImplLinux::ReadBytes(
     const base::FilePath& device_file_path,
-    net::IOBuffer* buf, int64 offset, int buf_len,
+    const scoped_refptr<net::IOBuffer>& buf,
+    int64 offset,
+    int buf_len,
     const ReadBytesSuccessCallback& success_callback,
     const ErrorCallback& error_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
@@ -419,7 +421,7 @@ void MTPDeviceDelegateImplLinux::ReadBytes(
       base::Bind(&MTPDeviceDelegateImplLinux::ReadBytesInternal,
                  weak_ptr_factory_.GetWeakPtr(),
                  device_file_path,
-                 make_scoped_refptr(buf),
+                 buf,
                  offset,
                  buf_len,
                  success_callback,
@@ -750,7 +752,7 @@ void MTPDeviceDelegateImplLinux::OnDidGetFileInfoToCreateSnapshotFile(
 void MTPDeviceDelegateImplLinux::OnDidReadDirectory(
     uint32 dir_id,
     const ReadDirectorySuccessCallback& success_callback,
-    const fileapi::AsyncFileUtil::EntryList& file_list,
+    const storage::AsyncFileUtil::EntryList& file_list,
     bool has_more) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
@@ -769,10 +771,10 @@ void MTPDeviceDelegateImplLinux::OnDidReadDirectory(
   for (size_t i = 0; i < dir_path_parts.size(); ++i)
     dir_path = dir_path.Append(dir_path_parts[i]);
 
-  fileapi::AsyncFileUtil::EntryList normalized_file_list;
+  storage::AsyncFileUtil::EntryList normalized_file_list;
   for (size_t i = 0; i < file_list.size(); ++i) {
     normalized_file_list.push_back(file_list[i]);
-    fileapi::DirectoryEntry& entry = normalized_file_list.back();
+    storage::DirectoryEntry& entry = normalized_file_list.back();
 
     // |entry.name| has the file id encoded in it. Decode here.
     size_t separator_idx = entry.name.find_last_of(',');
@@ -834,7 +836,7 @@ void MTPDeviceDelegateImplLinux::OnDidReadBytes(
 
 void MTPDeviceDelegateImplLinux::OnDidFillFileCache(
     const base::FilePath& path,
-    const fileapi::AsyncFileUtil::EntryList& /* file_list */,
+    const storage::AsyncFileUtil::EntryList& /* file_list */,
     bool has_more) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK(path.IsParent(pending_tasks_.front().path));

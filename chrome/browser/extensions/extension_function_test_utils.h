@@ -23,6 +23,10 @@ namespace extensions {
 class Extension;
 }
 
+// TODO(ckehoe): Accept args as scoped_ptr<base::Value>,
+// and migrate existing users to the new API.
+// This file is DEPRECATED. New tests should use the versions in
+// extensions/browser/api_test_utils.h.
 namespace extension_function_test_utils {
 
 // Parse JSON and return as the specified type, or NULL if the JSON is invalid
@@ -44,23 +48,10 @@ base::DictionaryValue* ToDictionary(base::Value* val);
 // If |val| is a list, return it as one, otherwise NULL.
 base::ListValue* ToList(base::Value* val);
 
-// Creates an extension instance that can be attached to an ExtensionFunction
-// before running it.
-scoped_refptr<extensions::Extension> CreateEmptyExtension();
-
 // Creates an extension instance with a specified location that can be attached
 // to an ExtensionFunction before running.
 scoped_refptr<extensions::Extension> CreateEmptyExtensionWithLocation(
     extensions::Manifest::Location location);
-
-// Creates an empty extension with a variable ID, for tests that require
-// multiple extensions side-by-side having distinct IDs. If not empty, then
-// id_input is passed directly to Extension::CreateId() and thus has the same
-// behavior as that method. If id_input is empty, then Extension::Create()
-// receives an empty explicit ID and generates an appropriate ID for a blank
-// extension.
-scoped_refptr<extensions::Extension> CreateEmptyExtension(
-    const std::string& id_input);
 
 scoped_refptr<extensions::Extension> CreateExtension(
     extensions::Manifest::Location location,
@@ -117,6 +108,10 @@ base::Value* RunFunctionAndReturnSingleResult(
 // we can refactor when we see what is needed.
 bool RunFunction(UIThreadExtensionFunction* function,
                  const std::string& args,
+                 Browser* browser,
+                 RunFunctionFlags flags);
+bool RunFunction(UIThreadExtensionFunction* function,
+                 scoped_ptr<base::ListValue> args,
                  Browser* browser,
                  RunFunctionFlags flags);
 

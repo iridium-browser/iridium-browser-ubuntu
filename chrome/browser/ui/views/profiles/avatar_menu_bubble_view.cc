@@ -22,11 +22,11 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -517,6 +517,7 @@ AvatarMenuBubbleView::AvatarMenuBubbleView(
       buttons_view_(NULL),
       supervised_user_info_(NULL),
       separator_switch_users_(NULL),
+      switch_profile_link_(nullptr),
       expanded_(false) {
   avatar_menu_.reset(new AvatarMenu(
       &g_browser_process->profile_manager()->GetProfileInfoCache(),
@@ -757,6 +758,7 @@ void AvatarMenuBubbleView::InitSupervisedUserContents(
                        ui::ResourceBundle::GetSharedInstance().GetFontList(
                            ui::ResourceBundle::SmallFont));
   supervised_user_info_->SetMultiLine(true);
+  supervised_user_info_->SetAllowCharacterBreak(true);
   supervised_user_info_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   supervised_user_info_->SetBackgroundColor(color());
   AddChildView(supervised_user_info_);

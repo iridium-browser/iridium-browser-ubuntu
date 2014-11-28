@@ -8,6 +8,7 @@ Eventually, this will be based on adb_wrapper.
 """
 # pylint: disable=W0613
 
+import pipes
 import sys
 import time
 
@@ -364,20 +365,20 @@ class DeviceUtils(object):
       CommandTimeoutError on timeout.
       DeviceUnreachableError on missing device.
     """
-    pids = self.old_interface.ExtractPid(process_name)
-    if len(pids) == 0:
+    pids = self._GetPidsImpl(process_name)
+    if not pids:
       raise device_errors.CommandFailedError(
           'No process "%s"' % process_name, device=str(self))
 
+    cmd = 'kill -%d %s' % (signum, ' '.join(pids.values()))
+    self._RunShellCommandImpl(cmd, as_root=as_root)
+
     if blocking:
-      total_killed = self.old_interface.KillAllBlocking(
-          process_name, signum=signum, with_su=as_root, timeout_sec=timeout)
-    else:
-      total_killed = self.old_interface.KillAll(
-          process_name, signum=signum, with_su=as_root)
-    if total_killed == 0:
-      raise device_errors.CommandFailedError(
-          'Failed to kill "%s"' % process_name, device=str(self))
+      wait_period = 0.1
+      while self._GetPidsImpl(process_name):
+        time.sleep(wait_period)
+
+    return len(pids)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def StartActivity(self, intent, blocking=False, trace_file_name=None,
@@ -635,6 +636,31 @@ class DeviceUtils(object):
       self.old_interface.SetFileContents(device_path, contents)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
+  def WriteTextFile(self, device_path, text, as_root=False, timeout=None,
+                    retries=None):
+    """Writes |text| to a file on the device.
+
+    Assuming that |text| is a small string, this is typically more efficient
+    than |WriteFile|, as no files are pushed into the device.
+
+    Args:
+      device_path: A string containing the absolute path to the file to write
+                   on the device.
+      text: A short string of text to write to the file on the device.
+      as_root: A boolean indicating whether the write should be executed with
+               root privileges.
+      timeout: timeout in seconds
+      retries: number of retries
+
+    Raises:
+      CommandFailedError if the file could not be written on the device.
+      CommandTimeoutError on timeout.
+      DeviceUnreachableError on missing device.
+    """
+    self._RunShellCommandImpl('echo {1} > {0}'.format(device_path,
+        pipes.quote(text)), check_return=True, as_root=as_root)
+
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def Ls(self, device_path, timeout=None, retries=None):
     """Lists the contents of a directory on the device.
 
@@ -663,10 +689,14 @@ class DeviceUtils(object):
       timeout: timeout in seconds
       retries: number of retries
 
+    Returns:
+      True if the device-side property changed and a restart is required as a
+      result, False otherwise.
+
     Raises:
       CommandTimeoutError on timeout.
     """
-    self.old_interface.SetJavaAssertsEnabled(enabled)
+    return self.old_interface.SetJavaAssertsEnabled(enabled)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def GetProp(self, property_name, timeout=None, retries=None):
@@ -720,6 +750,24 @@ class DeviceUtils(object):
 
     Raises:
       CommandTimeoutError on timeout.
+      DeviceUnreachableError on missing device.
+    """
+    return self._GetPidsImpl(process_name)
+
+  def _GetPidsImpl(self, process_name):
+    """Implementation of GetPids.
+
+    This is split from GetPids to allow other DeviceUtils methods to call
+    GetPids without spawning a new timeout thread.
+
+    Args:
+      process_name: A string containing the process name to get the PIDs for.
+
+    Returns:
+      A dict mapping process name to PID for each process that contained the
+      provided |process_name|.
+
+    Raises:
       DeviceUnreachableError on missing device.
     """
     procs_pids = {}

@@ -13,11 +13,11 @@
     'auto_login_parser.gypi',
     'autofill.gypi',
     'bookmarks.gypi',
-    'breakpad.gypi',
     'captive_portal.gypi',
     'cloud_devices.gypi',
     'component_updater.gypi',
     'content_settings.gypi',
+    'crash.gypi',
     'cronet.gypi',
     'crx_file.gypi',
     'data_reduction_proxy.gypi',
@@ -39,6 +39,7 @@
     'omaha_query_params.gypi',
     'onc.gypi',
     'os_crypt.gypi',
+    'ownership.gypi',
     'password_manager.gypi',
     'policy.gypi',
     'precache.gypi',
@@ -66,6 +67,7 @@
         'power.gypi',
         'sessions.gypi',
         'visitedlink.gypi',
+        'web_cache.gypi',
         'web_contents_delegate_android.gypi',
         'web_modal.gypi',
       ],
@@ -78,8 +80,8 @@
     ['OS != "ios" and OS != "android"', {
       'includes': [
         'copresence.gypi',
+        'proximity_auth.gypi',
         'storage_monitor.gypi',
-        'usb_service.gypi',
       ]
     }],
     ['chromeos == 1', {
@@ -108,6 +110,16 @@
         'search_engines.gypi',
         'sync_driver.gypi',
         'invalidation.gypi',
+      ],
+    }],
+    ['toolkit_views==1', {
+      'includes': [
+        'native_app_window.gypi',
+      ],
+    }],
+    ['enable_plugins==1', {
+      'includes': [
+        'pdf.gypi',
       ],
     }],
   ],

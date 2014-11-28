@@ -17,6 +17,7 @@
 #include <crazy_linker.h>
 #include <jni.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 // Set this to 1 to enable debug traces to the Android log.
@@ -452,6 +453,7 @@ static bool PostForLaterExecution(crazy_callback_t* callback_request,
            __FUNCTION__, callback->handler, callback->opaque);
 
   jlong arg = static_cast<jlong>(reinterpret_cast<uintptr_t>(callback));
+
   env->CallStaticVoidMethod(
       s_java_callback_bindings.clazz, s_java_callback_bindings.method_id, arg);
 
@@ -560,10 +562,16 @@ jboolean CanUseSharedRelro(JNIEnv* env, jclass clazz) {
   return crazy_system_can_share_relro();
 }
 
-jlong GetPageSize(JNIEnv* env, jclass clazz) {
-  jlong result = static_cast<jlong>(sysconf(_SC_PAGESIZE));
-  LOG_INFO("%s: System page size is %lld bytes\n", __FUNCTION__, result);
-  return result;
+jlong GetRandomBaseLoadAddress(JNIEnv* env, jclass clazz, jlong bytes) {
+  void* address =
+      mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (address == MAP_FAILED) {
+    LOG_INFO("%s: Random base load address not determinable\n", __FUNCTION__);
+    return 0;
+  }
+  munmap(address, bytes);
+  LOG_INFO("%s: Random base load address is %p\n", __FUNCTION__, address);
+  return static_cast<jlong>(reinterpret_cast<uintptr_t>(address));
 }
 
 const JNINativeMethod kNativeMethods[] = {
@@ -610,11 +618,12 @@ const JNINativeMethod kNativeMethods[] = {
      ")"
      "Z",
      reinterpret_cast<void*>(&CanUseSharedRelro)},
-    {"nativeGetPageSize",
+    {"nativeGetRandomBaseLoadAddress",
      "("
+     "J"
      ")"
      "J",
-     reinterpret_cast<void*>(&GetPageSize)}, };
+     reinterpret_cast<void*>(&GetRandomBaseLoadAddress)}, };
 
 }  // namespace
 

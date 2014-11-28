@@ -4,13 +4,6 @@
 
 import("//tools/grit/grit_rule.gni")
 
-# The list of files in libaddressinput.gypi.
-gypi_values = exec_script(
-    "//build/gypi_to_gn.py",
-    [ rebase_path("src/cpp/libaddressinput.gypi") ],
-    "scope",
-    [ "src/cpp/libaddressinput.gypi" ])
-
 libaddressinput_util_files = [
   "src/cpp/src/address_data.cc",
   "src/cpp/src/address_field.cc",
@@ -119,7 +112,7 @@ static_library("util") {
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
 
-  direct_dependent_configs = [ ":libaddressinput_config" ]
+  public_configs = [ ":libaddressinput_config" ]
 
   include_dirs = [ "$root_gen_dir/third_party/libaddressinput" ]
 
@@ -131,6 +124,16 @@ static_library("util") {
     "//third_party/re2",
   ]
 }
+
+if (!is_android) {
+
+# The list of files in libaddressinput.gypi.
+gypi_values = exec_script(
+    "//build/gypi_to_gn.py",
+    [ rebase_path("src/cpp/libaddressinput.gypi") ],
+    "scope",
+    [ "src/cpp/libaddressinput.gypi" ])
+
 
 # This target provides more complicated functionality like pinging servers
 # for validation rules.
@@ -154,7 +157,7 @@ static_library("libaddressinput") {
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
 
-  direct_dependent_configs = [ ":libaddressinput_config" ]
+  public_configs = [ ":libaddressinput_config" ]
 
   deps = [
     ":strings",
@@ -199,3 +202,5 @@ test("libaddressinput_unittests") {
     "//testing/gtest",
   ]
 }
+
+}  # !is_android

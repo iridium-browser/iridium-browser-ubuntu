@@ -21,6 +21,7 @@
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/scheduler/delay_based_time_source.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "ui/gfx/frame_time.h"
@@ -31,13 +32,21 @@ using std::set;
 using std::string;
 using std::vector;
 
+namespace {
+
+const size_t kGpuLatencyHistorySize = 60;
+const double kGpuLatencyEstimationPercentile = 90.0;
+}
+
 namespace cc {
 
-OutputSurface::OutputSurface(scoped_refptr<ContextProvider> context_provider)
+OutputSurface::OutputSurface(
+    const scoped_refptr<ContextProvider>& context_provider)
     : client_(NULL),
       context_provider_(context_provider),
       device_scale_factor_(-1),
       external_stencil_test_enabled_(false),
+      gpu_latency_history_(kGpuLatencyHistorySize),
       weak_ptr_factory_(this) {
 }
 
@@ -46,16 +55,19 @@ OutputSurface::OutputSurface(scoped_ptr<SoftwareOutputDevice> software_device)
       software_device_(software_device.Pass()),
       device_scale_factor_(-1),
       external_stencil_test_enabled_(false),
+      gpu_latency_history_(kGpuLatencyHistorySize),
       weak_ptr_factory_(this) {
 }
 
-OutputSurface::OutputSurface(scoped_refptr<ContextProvider> context_provider,
-                             scoped_ptr<SoftwareOutputDevice> software_device)
+OutputSurface::OutputSurface(
+    const scoped_refptr<ContextProvider>& context_provider,
+    scoped_ptr<SoftwareOutputDevice> software_device)
     : client_(NULL),
       context_provider_(context_provider),
       software_device_(software_device.Pass()),
       device_scale_factor_(-1),
       external_stencil_test_enabled_(false),
+      gpu_latency_history_(kGpuLatencyHistorySize),
       weak_ptr_factory_(this) {
 }
 
@@ -82,6 +94,8 @@ void OutputSurface::ReclaimResources(const CompositorFrameAck* ack) {
 
 void OutputSurface::DidLoseOutputSurface() {
   TRACE_EVENT0("cc", "OutputSurface::DidLoseOutputSurface");
+  pending_gpu_latency_query_ids_.clear();
+  available_gpu_latency_query_ids_.clear();
   client_->DidLoseOutputSurface();
 }
 
@@ -117,7 +131,7 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
   client_ = client;
   bool success = true;
 
-  if (context_provider_) {
+  if (context_provider_.get()) {
     success = context_provider_->BindToCurrentThread();
     if (success)
       SetUpContext3d();
@@ -131,8 +145,8 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
 
 bool OutputSurface::InitializeAndSetContext3d(
     scoped_refptr<ContextProvider> context_provider) {
-  DCHECK(!context_provider_);
-  DCHECK(context_provider);
+  DCHECK(!context_provider_.get());
+  DCHECK(context_provider.get());
   DCHECK(client_);
 
   bool success = false;
@@ -151,13 +165,13 @@ bool OutputSurface::InitializeAndSetContext3d(
 
 void OutputSurface::ReleaseGL() {
   DCHECK(client_);
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   client_->ReleaseGL();
-  DCHECK(!context_provider_);
+  DCHECK(!context_provider_.get());
 }
 
 void OutputSurface::SetUpContext3d() {
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   DCHECK(client_);
 
   context_provider_->SetLostContextCallback(
@@ -173,12 +187,22 @@ void OutputSurface::SetUpContext3d() {
 
 void OutputSurface::ReleaseContextProvider() {
   DCHECK(client_);
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   ResetContext3d();
 }
 
 void OutputSurface::ResetContext3d() {
   if (context_provider_.get()) {
+    while (!pending_gpu_latency_query_ids_.empty()) {
+      unsigned query_id = pending_gpu_latency_query_ids_.front();
+      pending_gpu_latency_query_ids_.pop_front();
+      context_provider_->ContextGL()->DeleteQueriesEXT(1, &query_id);
+    }
+    while (!available_gpu_latency_query_ids_.empty()) {
+      unsigned query_id = available_gpu_latency_query_ids_.front();
+      available_gpu_latency_query_ids_.pop_front();
+      context_provider_->ContextGL()->DeleteQueriesEXT(1, &query_id);
+    }
     context_provider_->SetLostContextCallback(
         ContextProvider::LostContextCallback());
     context_provider_->SetMemoryPolicyChangedCallback(
@@ -195,7 +219,7 @@ void OutputSurface::EnsureBackbuffer() {
 }
 
 void OutputSurface::DiscardBackbuffer() {
-  if (context_provider_)
+  if (context_provider_.get())
     context_provider_->ContextGL()->DiscardBackbufferCHROMIUM();
   if (software_device_)
     software_device_->DiscardBackbuffer();
@@ -207,7 +231,7 @@ void OutputSurface::Reshape(const gfx::Size& size, float scale_factor) {
 
   surface_size_ = size;
   device_scale_factor_ = scale_factor;
-  if (context_provider_) {
+  if (context_provider_.get()) {
     context_provider_->ContextGL()->ResizeCHROMIUM(
         size.width(), size.height(), scale_factor);
   }
@@ -220,7 +244,7 @@ gfx::Size OutputSurface::SurfaceSize() const {
 }
 
 void OutputSurface::BindFramebuffer() {
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   context_provider_->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -231,9 +255,10 @@ void OutputSurface::SwapBuffers(CompositorFrame* frame) {
     return;
   }
 
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   DCHECK(frame->gl_frame_data);
 
+  UpdateAndMeasureGpuLatency();
   if (frame->gl_frame_data->sub_buffer_rect ==
       gfx::Rect(frame->gl_frame_data->size)) {
     context_provider_->ContextSupport()->Swap();
@@ -243,6 +268,79 @@ void OutputSurface::SwapBuffers(CompositorFrame* frame) {
   }
 
   client_->DidSwapBuffers();
+}
+
+base::TimeDelta OutputSurface::GpuLatencyEstimate() {
+  if (context_provider_.get() && !capabilities_.adjust_deadline_for_parent)
+    return gpu_latency_history_.Percentile(kGpuLatencyEstimationPercentile);
+  else
+    return base::TimeDelta();
+}
+
+void OutputSurface::UpdateAndMeasureGpuLatency() {
+  // We only care about GPU latency for surfaces that do not have a parent
+  // compositor, since surfaces that do have a parent compositor can use
+  // mailboxes or delegated rendering to send frames to their parent without
+  // incurring GPU latency.
+  if (capabilities_.adjust_deadline_for_parent)
+    return;
+
+  // Try to collect pending queries which may have completed
+  while (pending_gpu_latency_query_ids_.size()) {
+    unsigned query_id = pending_gpu_latency_query_ids_.front();
+    unsigned query_complete = 1;
+    context_provider_->ContextGL()->GetQueryObjectuivEXT(
+        query_id, GL_QUERY_RESULT_AVAILABLE_EXT, &query_complete);
+    if (!query_complete)
+      break;
+
+    unsigned value = 0;
+    context_provider_->ContextGL()->GetQueryObjectuivEXT(
+        query_id, GL_QUERY_RESULT_EXT, &value);
+    pending_gpu_latency_query_ids_.pop_front();
+    available_gpu_latency_query_ids_.push_back(query_id);
+
+    base::TimeDelta latency = base::TimeDelta::FromMicroseconds(value);
+    base::TimeDelta latency_estimate = GpuLatencyEstimate();
+    gpu_latency_history_.InsertSample(latency);
+
+    base::TimeDelta latency_overestimate;
+    base::TimeDelta latency_underestimate;
+    if (latency > latency_estimate)
+      latency_underestimate = latency - latency_estimate;
+    else
+      latency_overestimate = latency_estimate - latency;
+    UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.GpuLatency",
+                               latency,
+                               base::TimeDelta::FromMilliseconds(1),
+                               base::TimeDelta::FromMilliseconds(100),
+                               50);
+    UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.GpuLatencyUnderestimate",
+                               latency_underestimate,
+                               base::TimeDelta::FromMilliseconds(1),
+                               base::TimeDelta::FromMilliseconds(100),
+                               50);
+    UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.GpuLatencyOverestimate",
+                               latency_overestimate,
+                               base::TimeDelta::FromMilliseconds(1),
+                               base::TimeDelta::FromMilliseconds(100),
+                               50);
+  }
+
+  // Generate new query id or use a previous id which has completed
+  unsigned gpu_latency_query_id;
+  if (available_gpu_latency_query_ids_.size()) {
+    gpu_latency_query_id = available_gpu_latency_query_ids_.front();
+    available_gpu_latency_query_ids_.pop_front();
+  } else {
+    context_provider_->ContextGL()->GenQueriesEXT(1, &gpu_latency_query_id);
+  }
+
+  // Send new latency query
+  context_provider_->ContextGL()->BeginQueryEXT(GL_LATENCY_QUERY_CHROMIUM,
+                                                gpu_latency_query_id);
+  context_provider_->ContextGL()->EndQueryEXT(GL_LATENCY_QUERY_CHROMIUM);
+  pending_gpu_latency_query_ids_.push_back(gpu_latency_query_id);
 }
 
 void OutputSurface::PostSwapBuffersComplete() {

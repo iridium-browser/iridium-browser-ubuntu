@@ -33,6 +33,7 @@ class ExceptionState;
 class VisibleSelection;
 
 class HTMLTextAreaElement FINAL : public HTMLTextFormControlElement {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLTextAreaElement> create(Document&, HTMLFormElement*);
 
@@ -65,6 +66,10 @@ private:
     HTMLTextAreaElement(Document&, HTMLFormElement*);
 
     enum WrapMethod { NoWrap, SoftWrap, HardWrap };
+    enum SetValueCommonOption {
+        NotSetSelection,
+        SetSeletion
+    };
 
     virtual void didAddUserAgentShadowRoot(ShadowRoot&) OVERRIDE;
     // FIXME: Author shadows should be allowed
@@ -76,7 +81,7 @@ private:
     void updateValue() const;
     virtual void setInnerEditorValue(const String&) OVERRIDE;
     void setNonDirtyValue(const String&);
-    void setValueCommon(const String&, TextFieldEventBehavior, SelectionOption = NotChangeSelection);
+    void setValueCommon(const String&, TextFieldEventBehavior, SetValueCommonOption = NotSetSelection);
 
     virtual bool supportsPlaceholder() const OVERRIDE { return true; }
     virtual void updatePlaceholderText() OVERRIDE;
@@ -120,8 +125,9 @@ private:
     virtual bool matchesReadOnlyPseudoClass() const OVERRIDE;
     virtual bool matchesReadWritePseudoClass() const OVERRIDE;
 
-    bool valueMissing(const String& value) const { return isRequiredFormControl() && !isDisabledOrReadOnly() && value.isEmpty(); }
-    bool tooLong(const String&, NeedsToCheckDirtyFlag) const;
+    // If the String* argument is 0, apply this->value().
+    bool valueMissing(const String*) const;
+    bool tooLong(const String*, NeedsToCheckDirtyFlag) const;
 
     int m_rows;
     int m_cols;
@@ -132,6 +138,6 @@ private:
     String m_suggestedValue;
 };
 
-} //namespace
+} // namespace blink
 
-#endif
+#endif // HTMLTextAreaElement_h

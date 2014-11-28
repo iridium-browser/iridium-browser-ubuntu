@@ -27,6 +27,7 @@
 #define CanvasPattern_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/svg/SVGMatrixTearOff.h"
 #include "platform/graphics/Pattern.h"
 #include "wtf/Forward.h"
 #include "wtf/PassRefPtr.h"
@@ -38,6 +39,7 @@ class ExceptionState;
 class Image;
 
 class CanvasPattern FINAL : public RefCountedWillBeGarbageCollectedFinalized<CanvasPattern>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static Pattern::RepeatMode parseRepetitionType(const String&, ExceptionState&);
 
@@ -53,6 +55,8 @@ public:
 
     void trace(Visitor*) { }
 
+    void setTransform(SVGMatrixTearOff*);
+
 private:
     CanvasPattern(PassRefPtr<Image>, Pattern::RepeatMode, bool originClean);
 
@@ -62,4 +66,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // CanvasPattern_h

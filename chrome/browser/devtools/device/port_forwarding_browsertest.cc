@@ -7,7 +7,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/devtools/browser_list_tabcontents_provider.h"
-#include "chrome/browser/devtools/device/port_forwarding_controller.h"
+#include "chrome/browser/devtools/device/devtools_android_bridge.h"
 #include "chrome/browser/devtools/device/self_device_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,28 +35,34 @@ class PortForwardingTest: public InProcessBrowserTest {
   }
 
  protected:
-  class Listener : public PortForwardingController::Listener {
+  class Listener : public DevToolsAndroidBridge::PortForwardingListener {
    public:
     explicit Listener(Profile* profile)
-        : profile_(profile) {
-      PortForwardingController::Factory::GetForProfile(profile_)->
-          AddListener(this);
+        : profile_(profile),
+          skip_empty_devices_(true) {
+      DevToolsAndroidBridge::Factory::GetForProfile(profile_)->
+          AddPortForwardingListener(this);
     }
 
     virtual ~Listener() {
-      PortForwardingController::Factory::GetForProfile(profile_)->
-          RemoveListener(this);
+      DevToolsAndroidBridge::Factory::GetForProfile(profile_)->
+          RemovePortForwardingListener(this);
     }
 
     virtual void PortStatusChanged(const DevicesStatus& status) OVERRIDE {
-      if (status.empty())
+      if (status.empty() && skip_empty_devices_)
         return;
       base::MessageLoop::current()->PostTask(
           FROM_HERE, base::MessageLoop::QuitClosure());
     }
 
+    void set_skip_empty_devices(bool skip_empty_devices) {
+      skip_empty_devices_ = skip_empty_devices;
+    }
+
    private:
     Profile* profile_;
+    bool skip_empty_devices_;
   };
 };
 
@@ -115,4 +121,9 @@ IN_PROC_BROWSER_TEST_F(PortForwardingTest,
           "window.domAutomationController.send(getBodyMarginLeft())",
           &result));
   ASSERT_EQ("100px", result) << "CSS has not loaded.";
+
+  // Test that disabling port forwarding is handled normally.
+  wait_for_port_forwarding.set_skip_empty_devices(false);
+  prefs->SetBoolean(prefs::kDevToolsPortForwardingEnabled, false);
+  content::RunMessageLoop();
 }

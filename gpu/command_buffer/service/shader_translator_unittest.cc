@@ -7,15 +7,6 @@
 #include "gpu/command_buffer/service/shader_translator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-// The ANGLE shader translator now uses native GLenums
-// TODO(jmadill): delete these defines when the ANGLE
-//   roll reliably passes translator version 126
-#if (ANGLE_SH_VERSION >= 126)
-#define SH_VERTEX_SHADER GL_VERTEX_SHADER
-#define SH_FRAGMENT_SHADER GL_FRAGMENT_SHADER
-#define SH_FLOAT_VEC4 GL_FLOAT_VEC4
-#endif
-
 namespace gpu {
 namespace gles2 {
 
@@ -38,24 +29,13 @@ class ShaderTranslatorTest : public testing::Test {
     fragment_translator_ = new ShaderTranslator();
 
     ASSERT_TRUE(vertex_translator_->Init(
-        SH_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
+        GL_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
         ShaderTranslatorInterface::kGlsl,
         SH_EMULATE_BUILT_IN_FUNCTIONS));
     ASSERT_TRUE(fragment_translator_->Init(
-        SH_FRAGMENT_SHADER, SH_GLES2_SPEC, &resources,
+        GL_FRAGMENT_SHADER, SH_GLES2_SPEC, &resources,
         ShaderTranslatorInterface::kGlsl,
         static_cast<ShCompileOptions>(0)));
-    // Post-init the results must be empty.
-    // Vertex translator results.
-    EXPECT_TRUE(vertex_translator_->translated_shader() == NULL);
-    EXPECT_TRUE(vertex_translator_->info_log() == NULL);
-    EXPECT_TRUE(vertex_translator_->attrib_map().empty());
-    EXPECT_TRUE(vertex_translator_->uniform_map().empty());
-    // Fragment translator results.
-    EXPECT_TRUE(fragment_translator_->translated_shader() == NULL);
-    EXPECT_TRUE(fragment_translator_->info_log() == NULL);
-    EXPECT_TRUE(fragment_translator_->attrib_map().empty());
-    EXPECT_TRUE(fragment_translator_->uniform_map().empty());
   }
   virtual void TearDown() {
     vertex_translator_ = NULL;
@@ -73,15 +53,26 @@ TEST_F(ShaderTranslatorTest, ValidVertexShader) {
       "}";
 
   // A valid shader should be successfully translated.
-  EXPECT_TRUE(vertex_translator_->Translate(shader));
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
+  EXPECT_TRUE(vertex_translator_->Translate(shader,
+                                            &info_log,
+                                            &translated_source,
+                                            &attrib_map,
+                                            &uniform_map,
+                                            &varying_map,
+                                            &name_map));
   // Info log must be NULL.
-  EXPECT_TRUE(vertex_translator_->info_log() == NULL);
+  EXPECT_TRUE(info_log.empty());
   // Translated shader must be valid and non-empty.
-  ASSERT_TRUE(vertex_translator_->translated_shader() != NULL);
-  EXPECT_GT(strlen(vertex_translator_->translated_shader()), 0u);
-  // There should be no attributes or uniforms.
-  EXPECT_TRUE(vertex_translator_->attrib_map().empty());
-  EXPECT_TRUE(vertex_translator_->uniform_map().empty());
+  ASSERT_FALSE(translated_source.empty());
+  // There should be no attributes, uniforms, varyings.
+  EXPECT_TRUE(attrib_map.empty());
+  EXPECT_TRUE(uniform_map.empty());
+  EXPECT_TRUE(varying_map.empty());
+  // There should be no name mapping.
+  EXPECT_TRUE(name_map.empty());
 }
 
 TEST_F(ShaderTranslatorTest, InvalidVertexShader) {
@@ -92,21 +83,37 @@ TEST_F(ShaderTranslatorTest, InvalidVertexShader) {
       "}";
 
   // An invalid shader should fail.
-  EXPECT_FALSE(vertex_translator_->Translate(bad_shader));
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
+  EXPECT_FALSE(vertex_translator_->Translate(bad_shader,
+                                             &info_log,
+                                             &translated_source,
+                                             &attrib_map,
+                                             &uniform_map,
+                                             &varying_map,
+                                             &name_map));
   // Info log must be valid and non-empty.
-  ASSERT_TRUE(vertex_translator_->info_log() != NULL);
-  EXPECT_GT(strlen(vertex_translator_->info_log()), 0u);
+  ASSERT_FALSE(info_log.empty());
   // Translated shader must be NULL.
-  EXPECT_TRUE(vertex_translator_->translated_shader() == NULL);
-  // There should be no attributes or uniforms.
-  EXPECT_TRUE(vertex_translator_->attrib_map().empty());
-  EXPECT_TRUE(vertex_translator_->uniform_map().empty());
+  EXPECT_TRUE(translated_source.empty());
+  // There should be no attributes, uniforms, varyings, or name mapping.
+  EXPECT_TRUE(attrib_map.empty());
+  EXPECT_TRUE(uniform_map.empty());
+  EXPECT_TRUE(varying_map.empty());
+  EXPECT_TRUE(name_map.empty());
 
   // Try a good shader after bad.
-  EXPECT_TRUE(vertex_translator_->Translate(good_shader));
-  EXPECT_TRUE(vertex_translator_->info_log() == NULL);
-  ASSERT_TRUE(vertex_translator_->translated_shader() != NULL);
-  EXPECT_GT(strlen(vertex_translator_->translated_shader()), 0u);
+  info_log.clear();
+  EXPECT_TRUE(vertex_translator_->Translate(good_shader,
+                                            &info_log,
+                                            &translated_source,
+                                            &attrib_map,
+                                            &uniform_map,
+                                            &varying_map,
+                                            &name_map));
+  EXPECT_TRUE(info_log.empty());
+  EXPECT_FALSE(translated_source.empty());
 }
 
 TEST_F(ShaderTranslatorTest, ValidFragmentShader) {
@@ -116,30 +123,50 @@ TEST_F(ShaderTranslatorTest, ValidFragmentShader) {
       "}";
 
   // A valid shader should be successfully translated.
-  EXPECT_TRUE(fragment_translator_->Translate(shader));
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
+  EXPECT_TRUE(fragment_translator_->Translate(shader,
+                                              &info_log,
+                                              &translated_source,
+                                              &attrib_map,
+                                              &uniform_map,
+                                              &varying_map,
+                                              &name_map));
   // Info log must be NULL.
-  EXPECT_TRUE(fragment_translator_->info_log() == NULL);
+  EXPECT_TRUE(info_log.empty());
   // Translated shader must be valid and non-empty.
-  ASSERT_TRUE(fragment_translator_->translated_shader() != NULL);
-  EXPECT_GT(strlen(fragment_translator_->translated_shader()), 0u);
-  // There should be no attributes or uniforms.
-  EXPECT_TRUE(fragment_translator_->attrib_map().empty());
-  EXPECT_TRUE(fragment_translator_->uniform_map().empty());
+  ASSERT_FALSE(translated_source.empty());
+  // There should be no attributes, uniforms, varyings, or name mapping.
+  EXPECT_TRUE(attrib_map.empty());
+  EXPECT_TRUE(uniform_map.empty());
+  EXPECT_TRUE(varying_map.empty());
+  EXPECT_TRUE(name_map.empty());
 }
 
 TEST_F(ShaderTranslatorTest, InvalidFragmentShader) {
   const char* shader = "foo-bar";
 
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
   // An invalid shader should fail.
-  EXPECT_FALSE(fragment_translator_->Translate(shader));
+  EXPECT_FALSE(fragment_translator_->Translate(shader,
+                                               &info_log,
+                                               &translated_source,
+                                               &attrib_map,
+                                               &uniform_map,
+                                               &varying_map,
+                                               &name_map));
   // Info log must be valid and non-empty.
-  ASSERT_TRUE(fragment_translator_->info_log() != NULL);
-  EXPECT_GT(strlen(fragment_translator_->info_log()), 0u);
+  EXPECT_FALSE(info_log.empty());
   // Translated shader must be NULL.
-  EXPECT_TRUE(fragment_translator_->translated_shader() == NULL);
+  EXPECT_TRUE(translated_source.empty());
   // There should be no attributes or uniforms.
-  EXPECT_TRUE(fragment_translator_->attrib_map().empty());
-  EXPECT_TRUE(fragment_translator_->uniform_map().empty());
+  EXPECT_TRUE(attrib_map.empty());
+  EXPECT_TRUE(uniform_map.empty());
+  EXPECT_TRUE(varying_map.empty());
+  EXPECT_TRUE(name_map.empty());
 }
 
 TEST_F(ShaderTranslatorTest, GetAttributes) {
@@ -149,23 +176,29 @@ TEST_F(ShaderTranslatorTest, GetAttributes) {
       "  gl_Position = vPosition;\n"
       "}";
 
-  EXPECT_TRUE(vertex_translator_->Translate(shader));
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
+  EXPECT_TRUE(vertex_translator_->Translate(shader,
+                                            &info_log,
+                                            &translated_source,
+                                            &attrib_map,
+                                            &uniform_map,
+                                            &varying_map,
+                                            &name_map));
   // Info log must be NULL.
-  EXPECT_TRUE(vertex_translator_->info_log() == NULL);
+  EXPECT_TRUE(info_log.empty());
   // Translated shader must be valid and non-empty.
-  ASSERT_TRUE(vertex_translator_->translated_shader() != NULL);
-  EXPECT_GT(strlen(vertex_translator_->translated_shader()), 0u);
+  EXPECT_FALSE(translated_source.empty());
   // There should be no uniforms.
-  EXPECT_TRUE(vertex_translator_->uniform_map().empty());
+  EXPECT_TRUE(uniform_map.empty());
   // There should be one attribute with following characteristics:
-  // name:vPosition type:SH_FLOAT_VEC4 size:1.
-  const ShaderTranslator::VariableMap& attrib_map =
-      vertex_translator_->attrib_map();
+  // name:vPosition type:GL_FLOAT_VEC4 size:1.
   EXPECT_EQ(1u, attrib_map.size());
   ShaderTranslator::VariableMap::const_iterator iter =
       attrib_map.find("vPosition");
   EXPECT_TRUE(iter != attrib_map.end());
-  EXPECT_EQ(SH_FLOAT_VEC4, iter->second.type);
+  EXPECT_EQ(GL_FLOAT_VEC4, iter->second.type);
   EXPECT_EQ(1, iter->second.size);
   EXPECT_EQ("vPosition", iter->second.name);
 }
@@ -184,31 +217,37 @@ TEST_F(ShaderTranslatorTest, GetUniforms) {
       "  gl_FragColor = bar[0].foo.color[0] + bar[1].foo.color[0];\n"
       "}";
 
-  EXPECT_TRUE(fragment_translator_->Translate(shader));
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
+  EXPECT_TRUE(fragment_translator_->Translate(shader,
+                                              &info_log,
+                                              &translated_source,
+                                              &attrib_map,
+                                              &uniform_map,
+                                              &varying_map,
+                                              &name_map));
   // Info log must be NULL.
-  EXPECT_TRUE(fragment_translator_->info_log() == NULL);
+  EXPECT_TRUE(info_log.empty());
   // Translated shader must be valid and non-empty.
-  ASSERT_TRUE(fragment_translator_->translated_shader() != NULL);
-  EXPECT_GT(strlen(fragment_translator_->translated_shader()), 0u);
+  EXPECT_FALSE(translated_source.empty());
   // There should be no attributes.
-  EXPECT_TRUE(fragment_translator_->attrib_map().empty());
+  EXPECT_TRUE(attrib_map.empty());
   // There should be two uniforms with following characteristics:
-  // 1. name:bar[0].foo.color[0] type:SH_FLOAT_VEC4 size:1
-  // 2. name:bar[1].foo.color[0] type:SH_FLOAT_VEC4 size:1
-  const ShaderTranslator::VariableMap& uniform_map =
-      fragment_translator_->uniform_map();
+  // 1. name:bar[0].foo.color[0] type:GL_FLOAT_VEC4 size:1
+  // 2. name:bar[1].foo.color[0] type:GL_FLOAT_VEC4 size:1
   EXPECT_EQ(2u, uniform_map.size());
   // First uniform.
   ShaderTranslator::VariableMap::const_iterator iter =
       uniform_map.find("bar[0].foo.color[0]");
   EXPECT_TRUE(iter != uniform_map.end());
-  EXPECT_EQ(SH_FLOAT_VEC4, iter->second.type);
+  EXPECT_EQ(GL_FLOAT_VEC4, iter->second.type);
   EXPECT_EQ(1, iter->second.size);
   EXPECT_EQ("bar[0].foo.color[0]", iter->second.name);
   // Second uniform.
   iter = uniform_map.find("bar[1].foo.color[0]");
   EXPECT_TRUE(iter != uniform_map.end());
-  EXPECT_EQ(SH_FLOAT_VEC4, iter->second.type);
+  EXPECT_EQ(GL_FLOAT_VEC4, iter->second.type);
   EXPECT_EQ(1, iter->second.size);
   EXPECT_EQ("bar[1].foo.color[0]", iter->second.name);
 }
@@ -223,12 +262,21 @@ TEST_F(ShaderTranslatorTest, BuiltInFunctionEmulation) {
       "  gl_Position = vec4(dot(1.0, 1.0), 1.0, 1.0, 1.0);\n"
       "}";
 
-  EXPECT_TRUE(vertex_translator_->Translate(shader));
+  std::string info_log, translated_source;
+  ShaderTranslatorInterface::VariableMap attrib_map, uniform_map, varying_map;
+  ShaderTranslatorInterface::NameMap name_map;
+  EXPECT_TRUE(vertex_translator_->Translate(shader,
+                                            &info_log,
+                                            &translated_source,
+                                            &attrib_map,
+                                            &uniform_map,
+                                            &varying_map,
+                                            &name_map));
   // Info log must be NULL.
-  EXPECT_TRUE(vertex_translator_->info_log() == NULL);
+  EXPECT_TRUE(info_log.empty());
   // Translated shader must be valid and non-empty.
-  ASSERT_TRUE(vertex_translator_->translated_shader() != NULL);
-  EXPECT_TRUE(strstr(vertex_translator_->translated_shader(),
+  ASSERT_FALSE(translated_source.empty());
+  EXPECT_TRUE(strstr(translated_source.c_str(),
                      "webgl_dot_emu") != NULL);
 }
 #endif
@@ -242,16 +290,16 @@ TEST_F(ShaderTranslatorTest, OptionsString) {
   ShInitBuiltInResources(&resources);
 
   ASSERT_TRUE(translator_1->Init(
-      SH_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
+      GL_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
       ShaderTranslatorInterface::kGlsl,
       SH_EMULATE_BUILT_IN_FUNCTIONS));
   ASSERT_TRUE(translator_2->Init(
-      SH_FRAGMENT_SHADER, SH_GLES2_SPEC, &resources,
+      GL_FRAGMENT_SHADER, SH_GLES2_SPEC, &resources,
       ShaderTranslatorInterface::kGlsl,
       static_cast<ShCompileOptions>(0)));
   resources.EXT_draw_buffers = 1;
   ASSERT_TRUE(translator_3->Init(
-      SH_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
+      GL_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
       ShaderTranslatorInterface::kGlsl,
       SH_EMULATE_BUILT_IN_FUNCTIONS));
 

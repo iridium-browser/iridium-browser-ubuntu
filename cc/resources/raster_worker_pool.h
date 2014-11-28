@@ -6,6 +6,7 @@
 #define CC_RESOURCES_RASTER_WORKER_POOL_H_
 
 #include "cc/resources/rasterizer.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -15,10 +16,8 @@ namespace cc {
 
 class CC_EXPORT RasterWorkerPool {
  public:
-  static unsigned kOnDemandRasterTaskPriority;
   static unsigned kBenchmarkRasterTaskPriority;
   static unsigned kRasterFinishedTaskPriority;
-  static unsigned kRasterRequiredForActivationFinishedTaskPriority;
   static unsigned kRasterTaskPriorityBase;
 
   RasterWorkerPool();
@@ -35,23 +34,11 @@ class CC_EXPORT RasterWorkerPool {
   // Returns a pointer to the global TaskGraphRunner instance.
   static TaskGraphRunner* GetTaskGraphRunner();
 
-  // Returns a unique clone index for the current thread. Guaranteed to be a
-  // value between 0 and GetNumRasterThreads() - 1.
-  static size_t GetPictureCloneIndexForCurrentThread();
-
   // Utility function that can be used to create a "raster finished" task that
   // posts |callback| to |task_runner| when run.
   static scoped_refptr<RasterizerTask> CreateRasterFinishedTask(
       base::SequencedTaskRunner* task_runner,
       const base::Closure& callback);
-
-  // Utility function that can be used to create a "raster required for
-  // activation finished" task that posts |callback| to |task_runner| when run.
-  static scoped_refptr<RasterizerTask>
-      CreateRasterRequiredForActivationFinishedTask(
-          size_t tasks_required_for_activation_count,
-          base::SequencedTaskRunner* task_runner,
-          const base::Closure& callback);
 
   // Utility function that can be used to call ::ScheduleOnOriginThread() for
   // each task in |graph|.
@@ -73,6 +60,17 @@ class CC_EXPORT RasterWorkerPool {
       RasterTask* task,
       const ImageDecodeTask::Vector& decode_tasks,
       unsigned priority);
+
+  // Utility functions that transparently create a temporary bitmap and copy
+  // pixels to buffer when necessary.
+  static void AcquireBitmapForBuffer(SkBitmap* bitmap,
+                                     uint8_t* buffer,
+                                     ResourceFormat format,
+                                     const gfx::Size& size,
+                                     int stride);
+  static void ReleaseBitmapForBuffer(SkBitmap* bitmap,
+                                     uint8_t* buffer,
+                                     ResourceFormat format);
 
   // Type-checking downcast routine.
   virtual Rasterizer* AsRasterizer() = 0;

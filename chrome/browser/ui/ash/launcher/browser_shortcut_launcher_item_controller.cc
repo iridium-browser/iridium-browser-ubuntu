@@ -27,35 +27,17 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "grit/ash_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event.h"
 #include "ui/gfx/image/image.h"
 #include "ui/wm/core/window_animations.h"
-
-namespace {
-
-bool IsSettingsBrowser(Browser* browser) {
-  // Normally this test is sufficient. TODO(stevenjb): Replace this with a
-  // better mechanism (Settings WebUI or Browser type).
-  if (chrome::IsTrustedPopupWindowWithScheme(browser, content::kChromeUIScheme))
-    return true;
-  // If a settings window navigates away from a kChromeUIScheme (e.g. after a
-  // crash), the above may not be true, so also test against the known list
-  // of settings browsers (which will not be valid during chrome::Navigate
-  // which is why we still need the above test).
-  if (chrome::SettingsWindowManager::GetInstance()->IsSettingsBrowser(browser))
-    return true;
-  return false;
-}
-
-}  // namespace
 
 BrowserShortcutLauncherItemController::BrowserShortcutLauncherItemController(
     ChromeLauncherController* launcher_controller)
@@ -127,7 +109,7 @@ void BrowserShortcutLauncherItemController::SetShelfIDForBrowserWindowContents(
   if (!browser ||
       !launcher_controller()->IsBrowserFromActiveUser(browser) ||
       browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH ||
-      IsSettingsBrowser(browser))
+      chrome::IsTrustedPopupWindowWithScheme(browser, content::kChromeUIScheme))
     return;
 
   ash::SetShelfIDForWindow(
@@ -367,8 +349,8 @@ bool BrowserShortcutLauncherItemController::IsBrowserRepresentedInBrowserList(
           web_app::GetExtensionIdFromApplicationName(browser->app_name())) > 0)
     return false;
 
-  // Settings browsers have their own icon.
-  if (IsSettingsBrowser(browser))
+  // Stand-alone chrome:// windows (e.g. settings) have their own icon.
+  if (chrome::IsTrustedPopupWindowWithScheme(browser, content::kChromeUIScheme))
     return false;
 
   // Tabbed browser and other popup windows are all represented.

@@ -20,7 +20,6 @@
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_renderer_host.h"
 #include "net/base/request_priority.h"
@@ -121,15 +120,16 @@ class TestIOThreadState {
                     RedirectMode redirect_mode,
                     MockInterceptCallbackReceiver* callback_receiver)
       : resource_context_(&test_url_request_context_),
-        request_(url,
-                 net::DEFAULT_PRIORITY,
-                 NULL,
-                 resource_context_.GetRequestContext()) {
+        request_(resource_context_.GetRequestContext()->CreateRequest(
+                     url,
+                     net::DEFAULT_PRIORITY,
+                     NULL /* delegate */,
+                     NULL /* cookie_store */)) {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
     if (render_process_id != MSG_ROUTING_NONE &&
         render_frame_id != MSG_ROUTING_NONE) {
       content::ResourceRequestInfo::AllocateForTesting(
-          &request_,
+          request_.get(),
           content::RESOURCE_TYPE_MAIN_FRAME,
           &resource_context_,
           render_process_id,
@@ -138,15 +138,15 @@ class TestIOThreadState {
           false);
     }
     throttle_.reset(new InterceptNavigationResourceThrottle(
-        &request_,
+        request_.get(),
         base::Bind(&MockInterceptCallbackReceiver::ShouldIgnoreNavigation,
                    base::Unretained(callback_receiver))));
     throttle_->set_controller_for_testing(&throttle_controller_);
-    request_.set_method(request_method);
+    request_->set_method(request_method);
 
     if (redirect_mode == REDIRECT_MODE_302) {
       net::HttpResponseInfo& response_info =
-          const_cast<net::HttpResponseInfo&>(request_.response_info());
+          const_cast<net::HttpResponseInfo&>(request_->response_info());
       response_info.headers = new net::HttpResponseHeaders(
           "Status: 302 Found\0\0");
     }
@@ -175,7 +175,7 @@ class TestIOThreadState {
  private:
   net::TestURLRequestContext test_url_request_context_;
   content::MockResourceContext resource_context_;
-  net::URLRequest request_;
+  scoped_ptr<net::URLRequest> request_;
   scoped_ptr<InterceptNavigationResourceThrottle> throttle_;
   MockResourceController throttle_controller_;
 };

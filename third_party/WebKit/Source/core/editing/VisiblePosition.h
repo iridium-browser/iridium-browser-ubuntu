@@ -47,7 +47,6 @@ namespace blink {
 #define VP_UPSTREAM_IF_POSSIBLE UPSTREAM
 
 class InlineBox;
-class Node;
 class Range;
 
 class VisiblePosition FINAL {
@@ -66,6 +65,7 @@ public:
     bool isOrphan() const { return m_deepPosition.isOrphan(); }
 
     Position deepEquivalent() const { return m_deepPosition; }
+    Position toParentAnchoredPosition() const { return deepEquivalent().parentAnchoredEquivalent(); }
     EAffinity affinity() const { ASSERT(m_affinity == UPSTREAM || m_affinity == DOWNSTREAM); return m_affinity; }
     void setAffinity(EAffinity affinity) { m_affinity = affinity; }
 

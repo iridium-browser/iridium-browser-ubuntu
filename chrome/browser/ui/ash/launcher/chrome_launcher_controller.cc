@@ -65,6 +65,7 @@
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -73,20 +74,19 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/url_pattern.h"
 #include "grit/ash_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "net/base/url_util.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/wm/core/window_animations.h"
 
 #if defined(OS_CHROMEOS)
@@ -424,15 +424,6 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
     item_delegate_manager_ =
         ash::Shell::GetInstance()->shelf_item_delegate_manager();
   }
-
-  notification_registrar_.Add(
-      this,
-      extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
-      content::Source<Profile>(profile_));
-  notification_registrar_.Add(
-      this,
-      extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-      content::Source<Profile>(profile_));
 }
 
 ChromeLauncherController::~ChromeLauncherController() {
@@ -738,7 +729,7 @@ void ChromeLauncherController::LaunchApp(const std::string& app_id,
                          event_flags,
                          chrome::HOST_DESKTOP_TYPE_ASH);
   if (source != ash::LAUNCH_FROM_UNKNOWN &&
-      app_id == extension_misc::kWebStoreAppId) {
+      app_id == extensions::kWebStoreAppId) {
     // Get the corresponding source string.
     std::string source_value = GetSourceFromAppListSource(source);
 
@@ -1177,46 +1168,41 @@ void ChromeLauncherController::AdditionalUserAddedToSession(Profile* profile) {
   app_window_controller_->AdditionalUserAddedToSession(profile);
 }
 
-void ChromeLauncherController::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
-      const Extension* extension =
-          content::Details<const Extension>(details).ptr();
-      if (IsAppPinned(extension->id())) {
-        // Clear and re-fetch to ensure icon is up-to-date.
-        app_icon_loader_->ClearImage(extension->id());
-        app_icon_loader_->FetchImage(extension->id());
-      }
+void ChromeLauncherController::OnExtensionLoaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension) {
+  if (IsAppPinned(extension->id())) {
+    // Clear and re-fetch to ensure icon is up-to-date.
+    app_icon_loader_->ClearImage(extension->id());
+    app_icon_loader_->FetchImage(extension->id());
+  }
 
-      UpdateAppLaunchersFromPref();
-      break;
-    }
-    case extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
-      const content::Details<UnloadedExtensionInfo>& unload_info(details);
-      const Extension* extension = unload_info->extension;
-      const std::string& id = extension->id();
-      // Since we might have windowed apps of this type which might have
-      // outstanding locks which needs to be removed.
-      if (GetShelfIDForAppID(id) &&
-          unload_info->reason == UnloadedExtensionInfo::REASON_UNINSTALL) {
-        CloseWindowedAppsFromRemovedExtension(id);
-      }
+  UpdateAppLaunchersFromPref();
+}
 
-      if (IsAppPinned(id)) {
-        if (unload_info->reason == UnloadedExtensionInfo::REASON_UNINSTALL) {
-          DoUnpinAppWithID(id);
-          app_icon_loader_->ClearImage(id);
-        } else {
-          app_icon_loader_->UpdateImage(id);
-        }
+void ChromeLauncherController::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    UnloadedExtensionInfo::Reason reason) {
+  const std::string& id = extension->id();
+  const Profile* profile = Profile::FromBrowserContext(browser_context);
+
+  // Since we might have windowed apps of this type which might have
+  // outstanding locks which needs to be removed.
+  if (GetShelfIDForAppID(id) &&
+      reason == UnloadedExtensionInfo::REASON_UNINSTALL) {
+    CloseWindowedAppsFromRemovedExtension(id, profile);
+  }
+
+  if (IsAppPinned(id)) {
+    if (reason == UnloadedExtensionInfo::REASON_UNINSTALL) {
+      if (profile == profile_) {
+        DoUnpinAppWithID(id);
       }
-      break;
+      app_icon_loader_->ClearImage(id);
+    } else {
+      app_icon_loader_->UpdateImage(id);
     }
-    default:
-      NOTREACHED() << "Unexpected notification type=" << type;
   }
 }
 
@@ -1754,15 +1740,21 @@ void ChromeLauncherController::SetShelfBehaviorsFromPrefs() {
 #if defined(OS_CHROMEOS)
 void ChromeLauncherController::SetVirtualKeyboardBehaviorFromPrefs() {
   const PrefService* service = profile_->GetPrefs();
+  const bool was_enabled = keyboard::IsKeyboardEnabled();
   if (!service->HasPrefPath(prefs::kTouchVirtualKeyboardEnabled)) {
     keyboard::SetKeyboardShowOverride(keyboard::KEYBOARD_SHOW_OVERRIDE_NONE);
   } else {
-    const bool enabled = service->GetBoolean(
+    const bool enable = service->GetBoolean(
         prefs::kTouchVirtualKeyboardEnabled);
     keyboard::SetKeyboardShowOverride(
-        enabled ? keyboard::KEYBOARD_SHOW_OVERRIDE_ENABLED
+        enable ? keyboard::KEYBOARD_SHOW_OVERRIDE_ENABLED
                 : keyboard::KEYBOARD_SHOW_OVERRIDE_DISABLED);
   }
+  const bool is_enabled = keyboard::IsKeyboardEnabled();
+  if (was_enabled && !is_enabled)
+    ash::Shell::GetInstance()->DeactivateKeyboard();
+  else if (is_enabled && !was_enabled)
+    ash::Shell::GetInstance()->CreateKeyboard();
 }
 #endif //  defined(OS_CHROMEOS)
 
@@ -2017,7 +2009,8 @@ bool ChromeLauncherController::IsIncognito(
 }
 
 void ChromeLauncherController::CloseWindowedAppsFromRemovedExtension(
-    const std::string& app_id) {
+    const std::string& app_id,
+    const Profile* profile) {
   // This function cannot rely on the controller's enumeration functionality
   // since the extension has already be unloaded.
   const BrowserList* ash_browser_list =
@@ -2027,11 +2020,11 @@ void ChromeLauncherController::CloseWindowedAppsFromRemovedExtension(
            it = ash_browser_list->begin_last_active();
        it != ash_browser_list->end_last_active(); ++it) {
     Browser* browser = *it;
-    if (!browser->is_type_tabbed() &&
-        browser->is_type_popup() &&
+    if (!browser->is_type_tabbed() && browser->is_type_popup() &&
         browser->is_app() &&
-        app_id == web_app::GetExtensionIdFromApplicationName(
-            browser->app_name())) {
+        app_id ==
+            web_app::GetExtensionIdFromApplicationName(browser->app_name()) &&
+        profile == browser->profile()) {
       browser_to_close.push_back(browser);
     }
   }
@@ -2092,11 +2085,15 @@ void ChromeLauncherController::AttachProfile(Profile* profile) {
       base::Bind(&ChromeLauncherController::SetVirtualKeyboardBehaviorFromPrefs,
                  base::Unretained(this)));
 #endif  // defined(OS_CHROMEOS)
+
+  extensions::ExtensionRegistry::Get(profile_)->AddObserver(this);
 }
 
 void ChromeLauncherController::ReleaseProfile() {
   if (app_sync_ui_state_)
     app_sync_ui_state_->RemoveObserver(this);
+
+  extensions::ExtensionRegistry::Get(profile_)->RemoveObserver(this);
 
   PrefServiceSyncable::FromProfile(profile_)->RemoveObserver(this);
 

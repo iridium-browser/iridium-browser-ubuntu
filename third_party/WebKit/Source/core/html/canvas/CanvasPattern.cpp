@@ -55,7 +55,11 @@ CanvasPattern::CanvasPattern(PassRefPtr<Image> image, Pattern::RepeatMode repeat
     : m_pattern(Pattern::createBitmapPattern(image, repeat))
     , m_originClean(originClean)
 {
-    ScriptWrappable::init(this);
+}
+
+void CanvasPattern::setTransform(SVGMatrixTearOff* transform)
+{
+    pattern()->setPatternSpaceTransform(transform ? transform->value() : AffineTransform(1, 0, 0, 1, 0, 0));
 }
 
 }

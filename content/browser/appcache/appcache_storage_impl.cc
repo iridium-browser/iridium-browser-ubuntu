@@ -11,9 +11,10 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "content/browser/appcache/appcache.h"
@@ -28,10 +29,10 @@
 #include "net/base/net_errors.h"
 #include "sql/connection.h"
 #include "sql/transaction.h"
-#include "webkit/browser/quota/quota_client.h"
-#include "webkit/browser/quota/quota_manager.h"
-#include "webkit/browser/quota/quota_manager_proxy.h"
-#include "webkit/browser/quota/special_storage_policy.h"
+#include "storage/browser/quota/quota_client.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
+#include "storage/browser/quota/special_storage_policy.h"
 
 namespace content {
 
@@ -72,7 +73,7 @@ bool DeleteGroupAndRelatedRecords(AppCacheDatabase* database,
 // (|force_keep_session_state| is false), deletes session-only appcache data.
 void ClearSessionOnlyOrigins(
     AppCacheDatabase* database,
-    scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy,
+    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
     bool force_keep_session_state) {
   scoped_ptr<AppCacheDatabase> database_to_delete(database);
 
@@ -81,7 +82,7 @@ void ClearSessionOnlyOrigins(
     return;
 
   bool has_session_only_appcaches =
-      special_storage_policy &&
+      special_storage_policy.get() &&
       special_storage_policy->HasSessionOnlyOrigins();
 
   // Clearning only session-only databases, and there are none.
@@ -100,7 +101,7 @@ void ClearSessionOnlyOrigins(
   }
 
   std::set<GURL>::const_iterator origin;
-  DCHECK(special_storage_policy);
+  DCHECK(special_storage_policy.get());
   for (origin = origins.begin(); origin != origins.end(); ++origin) {
     if (!special_storage_policy->IsStorageSessionOnly(*origin))
       continue;
@@ -186,8 +187,8 @@ void AppCacheStorageImpl::DatabaseTask::Schedule() {
     return;
 
   if (storage_->db_thread_->PostTask(
-      FROM_HERE,
-      base::Bind(&DatabaseTask::CallRun, this, base::TimeTicks::Now()))) {
+          FROM_HERE,
+          base::Bind(&DatabaseTask::CallRun, this, base::TimeTicks::Now()))) {
     storage_->scheduled_database_tasks_.push_back(this);
   } else {
     NOTREACHED() << "Thread for database tasks is not running.";
@@ -590,8 +591,9 @@ class AppCacheStorageImpl::StoreGroupAndCacheTask : public StoreOrLoadTask {
                          AppCache* newest_cache);
 
   void GetQuotaThenSchedule();
-  void OnQuotaCallback(
-      quota::QuotaStatusCode status, int64 usage, int64 quota);
+  void OnQuotaCallback(storage::QuotaStatusCode status,
+                       int64 usage,
+                       int64 quota);
 
   // DatabaseTask:
   virtual void Run() OVERRIDE;
@@ -628,7 +630,7 @@ AppCacheStorageImpl::StoreGroupAndCacheTask::StoreGroupAndCacheTask(
 }
 
 void AppCacheStorageImpl::StoreGroupAndCacheTask::GetQuotaThenSchedule() {
-  quota::QuotaManager* quota_manager = NULL;
+  storage::QuotaManager* quota_manager = NULL;
   if (storage_->service()->quota_manager_proxy()) {
     quota_manager =
         storage_->service()->quota_manager_proxy()->quota_manager();
@@ -646,14 +648,17 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::GetQuotaThenSchedule() {
   // We have to ask the quota manager for the value.
   storage_->pending_quota_queries_.insert(this);
   quota_manager->GetUsageAndQuota(
-      group_record_.origin, quota::kStorageTypeTemporary,
+      group_record_.origin,
+      storage::kStorageTypeTemporary,
       base::Bind(&StoreGroupAndCacheTask::OnQuotaCallback, this));
 }
 
 void AppCacheStorageImpl::StoreGroupAndCacheTask::OnQuotaCallback(
-    quota::QuotaStatusCode status, int64 usage, int64 quota) {
+    storage::QuotaStatusCode status,
+    int64 usage,
+    int64 quota) {
   if (storage_) {
-    if (status == quota::kQuotaStatusOk)
+    if (status == storage::kQuotaStatusOk)
       space_available_ = std::max(static_cast<int64>(0), quota - usage);
     else
       space_available_ = 0;
@@ -1333,7 +1338,8 @@ AppCacheStorageImpl::~AppCacheStorageImpl() {
   if (database_ &&
       !db_thread_->PostTask(
           FROM_HERE,
-          base::Bind(&ClearSessionOnlyOrigins, database_,
+          base::Bind(&ClearSessionOnlyOrigins,
+                     database_,
                      make_scoped_refptr(service_->special_storage_policy()),
                      service()->force_keep_session_state()))) {
     delete database_;
@@ -1341,10 +1347,11 @@ AppCacheStorageImpl::~AppCacheStorageImpl() {
   database_ = NULL;  // So no further database tasks can be scheduled.
 }
 
-void AppCacheStorageImpl::Initialize(const base::FilePath& cache_directory,
-                                     base::MessageLoopProxy* db_thread,
-                                     base::MessageLoopProxy* cache_thread) {
-  DCHECK(db_thread);
+void AppCacheStorageImpl::Initialize(
+    const base::FilePath& cache_directory,
+    const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread) {
+  DCHECK(db_thread.get());
 
   cache_directory_ = cache_directory;
   is_incognito_ = cache_directory_.empty();
@@ -1846,10 +1853,9 @@ void AppCacheStorageImpl::DeleteAndStartOver() {
 void AppCacheStorageImpl::DeleteAndStartOverPart2() {
   db_thread_->PostTaskAndReply(
       FROM_HERE,
-      base::Bind(base::IgnoreResult(&base::DeleteFile),
-                 cache_directory_, true),
+      base::Bind(base::IgnoreResult(&base::DeleteFile), cache_directory_, true),
       base::Bind(&AppCacheStorageImpl::CallScheduleReinitialize,
-                  weak_factory_.GetWeakPtr()));
+                 weak_factory_.GetWeakPtr()));
 }
 
 void AppCacheStorageImpl::CallScheduleReinitialize() {

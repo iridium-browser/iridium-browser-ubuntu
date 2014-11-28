@@ -250,6 +250,16 @@
                 '/EXPORT:DllUnregisterServer=PsDllUnregisterServer,PRIVATE',
               ],
             },
+            'conditions': [
+              ['clang==1', {
+                # atlapp.h contains a global "using namespace WTL;".
+                # TODO: Remove once remoting/host/verify_config_window_win.h no
+                # longer depends on atlapp.h, http://crbug.com/5027
+                'VCCLCompilerTool': {
+                  'AdditionalOptions': ['-Wno-header-hygiene'],
+                },
+              }],
+            ],
           },
         },  # end of target 'remoting_core'
         {

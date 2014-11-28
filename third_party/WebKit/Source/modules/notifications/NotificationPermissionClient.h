@@ -21,14 +21,14 @@ public:
     // Requests user permission to show platform notifications from the origin
     // of the current frame. The provided callback will be ran when the user
     // has made a decision.
-    virtual void requestPermission(ExecutionContext*, PassOwnPtr<NotificationPermissionCallback>) = 0;
+    virtual void requestPermission(ExecutionContext*, NotificationPermissionCallback*) = 0;
 
     // WillBeHeapSupplement requirements.
     static const char* supplementName();
     static NotificationPermissionClient* from(ExecutionContext*);
 };
 
-void proviceNotificationPermissionClientTo(LocalFrame&, PassOwnPtrWillBeRawPtr<NotificationPermissionClient>);
+void provideNotificationPermissionClientTo(LocalFrame&, PassOwnPtrWillBeRawPtr<NotificationPermissionClient>);
 
 } // namespace blink
 

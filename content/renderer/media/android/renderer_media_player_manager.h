@@ -38,6 +38,7 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
 
   // RenderFrameObserver overrides.
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
 
   // Initializes a MediaPlayerAndroid object in browser process.
   void Initialize(MediaPlayerHostMsg_Initialize_Type type,
@@ -72,6 +73,12 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
 
   // Destroys the player in the browser process
   void DestroyPlayer(int player_id);
+
+  // Requests remote playback if possible
+  void RequestRemotePlayback(int player_id);
+
+  // Requests control of remote playback
+  void RequestRemotePlaybackControl(int player_id);
 
   // Requests the player to enter fullscreen.
   void EnterFullscreen(int player_id, blink::WebFrame* frame);
@@ -131,10 +138,13 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
   void OnMediaPlaybackCompleted(int player_id);
   void OnMediaBufferingUpdate(int player_id, int percent);
   void OnSeekRequest(int player_id, const base::TimeDelta& time_to_seek);
-  void OnSeekCompleted(int player_id, const base::TimeDelta& current_time);
+  void OnSeekCompleted(int player_id,
+                       const base::TimeDelta& current_timestamp);
   void OnMediaError(int player_id, int error);
   void OnVideoSizeChanged(int player_id, int width, int height);
-  void OnTimeUpdate(int player_id, base::TimeDelta current_time);
+  void OnTimeUpdate(int player_id,
+                    base::TimeDelta current_timestamp,
+                    base::TimeTicks current_time_ticks);
   void OnMediaPlayerReleased(int player_id);
   void OnConnectedToRemoteDevice(int player_id,
       const std::string& remote_playback_message);
@@ -144,7 +154,7 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
   void OnPlayerPlay(int player_id);
   void OnPlayerPause(int player_id);
   void OnRequestFullscreen(int player_id);
-  void OnPauseVideo();
+  void OnRemoteRouteAvailabilityChanged(int player_id, bool routes_available);
 
   // Release all video player resources.
   // If something is in progress the resource will not be freed. It will

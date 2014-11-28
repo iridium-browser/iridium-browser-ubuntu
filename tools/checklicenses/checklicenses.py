@@ -186,6 +186,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'GPL',
         'GPL (v2)',
         'GPL (v2 or later)',
+        'GPL (v3 or later)',
         'UNKNOWN',  # http://crbug.com/98123
     ],
     'third_party/fontconfig': [
@@ -231,6 +232,16 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/libjpeg_turbo': [  # http://crbug.com/98314
         'UNKNOWN',
     ],
+
+    # Many liblouis files are mirrored but not used in the NaCl module.
+    # They are not excluded from the mirror because of lack of infrastructure
+    # support.  Getting license headers added to the files where missing is
+    # tracked in https://github.com/liblouis/liblouis/issues/22.
+    'third_party/liblouis/src': [
+        'GPL (v3 or later)',
+        'UNKNOWN',
+    ],
+
     'third_party/libpng': [  # http://crbug.com/98318
         'UNKNOWN',
     ],

@@ -20,19 +20,17 @@
 #include "chrome/browser/extensions/declarative_user_script_master.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/extension_warning_badge_service.h"
-#include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/browser/extensions/install_verifier.h"
 #include "chrome/browser/extensions/navigation_observer.h"
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/extensions/shared_user_script_master.h"
-#include "chrome/browser/extensions/standard_management_policy_provider.h"
 #include "chrome/browser/extensions/state_store_notification_observer.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
-#include "chrome/browser/extensions/updater/manifest_fetch_data.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -59,8 +57,11 @@
 #include "extensions/browser/quota_service.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/browser/state_store.h"
+#include "extensions/browser/warning_service.h"
+#include "extensions/browser/warning_set.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
 #include "net/base/escape.h"
 
@@ -123,9 +124,6 @@ void ExtensionSystemImpl::Shared::InitPrefs() {
 
   blacklist_.reset(new Blacklist(ExtensionPrefs::Get(profile_)));
 
-  standard_management_policy_provider_.reset(
-      new StandardManagementPolicyProvider(ExtensionPrefs::Get(profile_)));
-
 #if defined(OS_CHROMEOS)
   const user_manager::User* user =
       user_manager::UserManager::Get()->GetActiveUser();
@@ -140,9 +138,9 @@ void ExtensionSystemImpl::Shared::InitPrefs() {
 }
 
 void ExtensionSystemImpl::Shared::RegisterManagementPolicyProviders() {
-  DCHECK(standard_management_policy_provider_.get());
   management_policy_->RegisterProvider(
-      standard_management_policy_provider_.get());
+      ExtensionManagementFactory::GetForBrowserContext(profile_)
+          ->GetProvider());
 
 #if defined(OS_CHROMEOS)
   if (device_local_account_management_policy_provider_) {
@@ -217,7 +215,8 @@ class ContentVerifierDelegateImpl : public ContentVerifierDelegate {
     return extension_file_util::GetBrowserImagePaths(extension);
   }
 
-  virtual void VerifyFailed(const std::string& extension_id) OVERRIDE {
+  virtual void VerifyFailed(const std::string& extension_id,
+                            ContentVerifyJob::FailureReason reason) OVERRIDE {
     if (!service_)
       return;
     ExtensionRegistry* registry = ExtensionRegistry::Get(service_->profile());
@@ -231,6 +230,8 @@ class ContentVerifierDelegateImpl : public ContentVerifierDelegate {
       ExtensionPrefs::Get(service_->profile())
           ->IncrementCorruptedDisableCount();
       UMA_HISTOGRAM_BOOLEAN("Extensions.CorruptExtensionBecameDisabled", true);
+      UMA_HISTOGRAM_ENUMERATION("Extensions.CorruptExtensionDisabledReason",
+          reason, ContentVerifyJob::FAILURE_REASON_MAX);
     } else if (!ContainsKey(would_be_disabled_ids_, extension_id)) {
       UMA_HISTOGRAM_BOOLEAN("Extensions.CorruptExtensionWouldBeDisabled", true);
       would_be_disabled_ids_.insert(extension_id);
@@ -383,10 +384,10 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   // Make the chrome://extension-icon/ resource available.
   content::URLDataSource::Add(profile_, new ExtensionIconSource(profile_));
 
-  extension_warning_service_.reset(new ExtensionWarningService(profile_));
+  warning_service_.reset(new WarningService(profile_));
   extension_warning_badge_service_.reset(
       new ExtensionWarningBadgeService(profile_));
-  extension_warning_service_->AddObserver(
+  warning_service_->AddObserver(
       extension_warning_badge_service_.get());
   error_console_.reset(new ErrorConsole(profile_));
   quota_service_.reset(new QuotaService);
@@ -411,11 +412,11 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
 }
 
 void ExtensionSystemImpl::Shared::Shutdown() {
-  if (extension_warning_service_) {
-    extension_warning_service_->RemoveObserver(
+  if (warning_service_) {
+    warning_service_->RemoveObserver(
         extension_warning_badge_service_.get());
   }
-  if (content_verifier_)
+  if (content_verifier_.get())
     content_verifier_->Shutdown();
   if (extension_service_)
     extension_service_->Shutdown();
@@ -461,8 +462,8 @@ EventRouter* ExtensionSystemImpl::Shared::event_router() {
   return event_router_.get();
 }
 
-ExtensionWarningService* ExtensionSystemImpl::Shared::warning_service() {
-  return extension_warning_service_.get();
+WarningService* ExtensionSystemImpl::Shared::warning_service() {
+  return warning_service_.get();
 }
 
 Blacklist* ExtensionSystemImpl::Shared::blacklist() {
@@ -579,7 +580,7 @@ EventRouter* ExtensionSystemImpl::event_router() {
   return shared_->event_router();
 }
 
-ExtensionWarningService* ExtensionSystemImpl::warning_service() {
+WarningService* ExtensionSystemImpl::warning_service() {
   return shared_->warning_service();
 }
 

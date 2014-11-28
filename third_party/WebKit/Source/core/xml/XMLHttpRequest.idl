@@ -33,7 +33,8 @@ enum XMLHttpRequestResponseType {
     "document",
     "json",
     "text",
-    "legacystream"
+    "legacystream",
+    "stream"
 };
 
 [
@@ -81,5 +82,5 @@ enum XMLHttpRequestResponseType {
     readonly attribute DOMString statusText;
 
     // Extension
-    void overrideMimeType(DOMString override);
+    [RaisesException] void overrideMimeType(DOMString override);
 };

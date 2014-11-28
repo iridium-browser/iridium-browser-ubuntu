@@ -65,10 +65,6 @@ class WebContentsCloseHandler;
 class JumpList;
 #endif
 
-namespace autofill {
-class PasswordGenerator;
-}
-
 namespace content {
 class RenderFrameHost;
 }
@@ -367,19 +363,11 @@ class BrowserView : public BrowserWindow,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode,
       const signin::ManageAccountsParams& manage_accounts_params) OVERRIDE;
-  virtual void ShowPasswordGenerationBubble(
-      const gfx::Rect& rect,
-      const autofill::PasswordForm& form,
-      autofill::PasswordGenerator* password_generator) OVERRIDE;
   virtual void OverscrollUpdate(int delta_y) OVERRIDE;
   virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() OVERRIDE;
   virtual void ExecuteExtensionCommand(
       const extensions::Extension* extension,
       const extensions::Command& command) OVERRIDE;
-  virtual void ShowPageActionPopup(
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void ShowBrowserActionPopup(
-      const extensions::Extension* extension) OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const OVERRIDE;
@@ -405,6 +393,7 @@ class BrowserView : public BrowserWindow,
   // Overridden from views::WidgetDelegate:
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
+  virtual bool CanMinimize() const OVERRIDE;
   virtual bool CanActivate() const OVERRIDE;
   virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual base::string16 GetAccessibleWindowTitle() const OVERRIDE;

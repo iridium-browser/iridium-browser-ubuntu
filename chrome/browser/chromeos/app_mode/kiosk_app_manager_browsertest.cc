@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -132,14 +132,14 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
       return;
     loaded_ = true;
     quit_ = true;
-    if (runner_)
+    if (runner_.get())
       runner_->Quit();
   }
 
   virtual void OnKioskAppDataLoadFailure(const std::string& app_id) OVERRIDE {
     loaded_ = false;
     quit_ = true;
-    if (runner_)
+    if (runner_.get())
       runner_->Quit();
   }
 
@@ -521,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, RemoveApp) {
 
   // Remove the app now.
   manager()->RemoveApp(kTestLocalFsKioskApp);
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
+  content::RunAllBlockingPoolTasksUntilIdle();
   manager()->GetApps(&apps);
   ASSERT_EQ(0u, apps.size());
   EXPECT_FALSE(base::PathExists(crx_path));
@@ -603,7 +603,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAndRemoveApp) {
 
   // Remove the app now.
   manager()->RemoveApp(kTestLocalFsKioskApp);
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
+  content::RunAllBlockingPoolTasksUntilIdle();
   manager()->GetApps(&apps);
   ASSERT_EQ(0u, apps.size());
   // Verify both v1 and v2 crx files are removed.

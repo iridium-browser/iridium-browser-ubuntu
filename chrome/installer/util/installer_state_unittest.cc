@@ -8,13 +8,14 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_path_override.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/version.h"
 #include "base/win/registry.h"
@@ -352,7 +353,7 @@ TEST_F(InstallerStateTest, WithProduct) {
 
   {
     RegistryOverrideManager override_manager;
-    override_manager.OverrideRegistry(root, L"root_pit");
+    override_manager.OverrideRegistry(root);
     BrowserDistribution* dist = BrowserDistribution::GetSpecificDistribution(
         BrowserDistribution::CHROME_BROWSER);
     RegKey chrome_key(root, dist->GetVersionKey().c_str(), KEY_ALL_ACCESS);
@@ -384,7 +385,7 @@ TEST_F(InstallerStateTest, InstallerResult) {
   // check results for a fresh install of single Chrome
   {
     RegistryOverrideManager override_manager;
-    override_manager.OverrideRegistry(root, L"root_inst_res");
+    override_manager.OverrideRegistry(root);
     CommandLine cmd_line = CommandLine::FromString(L"setup.exe --system-level");
     const MasterPreferences prefs(cmd_line);
     InstallationState machine_state;
@@ -415,7 +416,7 @@ TEST_F(InstallerStateTest, InstallerResult) {
   // check results for a fresh install of multi Chrome
   {
     RegistryOverrideManager override_manager;
-    override_manager.OverrideRegistry(root, L"root_inst_res");
+    override_manager.OverrideRegistry(root);
     CommandLine cmd_line = CommandLine::FromString(
         L"setup.exe --system-level --multi-install --chrome");
     const MasterPreferences prefs(cmd_line);
@@ -485,7 +486,7 @@ TEST_F(InstallerStateTest, IsFileInUse) {
                    SYNCHRONIZE | FILE_EXECUTE,
                    FILE_SHARE_DELETE | FILE_SHARE_READ,
                    NULL, OPEN_EXISTING, 0, 0));
-    ASSERT_TRUE(temp_handle != NULL);
+    ASSERT_TRUE(temp_handle.IsValid());
 
     // The file should now be in use.
     EXPECT_TRUE(MockInstallerState::IsFileInUse(temp_file));
@@ -603,6 +604,22 @@ TEST_F(InstallerStateTest, RemoveOldVersionDirs) {
 }
 
 TEST_F(InstallerStateTest, InitializeTwice) {
+  // Override these paths so that they can be found after the registry override
+  // manager is in place.
+  base::FilePath temp;
+  PathService::Get(base::DIR_PROGRAM_FILES, &temp);
+  base::ScopedPathOverride program_files_override(base::DIR_PROGRAM_FILES,
+                                                  temp);
+  PathService::Get(base::DIR_PROGRAM_FILESX86, &temp);
+  base::ScopedPathOverride program_filesx86_override(base::DIR_PROGRAM_FILESX86,
+                                                     temp);
+  PathService::Get(base::DIR_LOCAL_APP_DATA, &temp);
+  base::ScopedPathOverride local_app_data_override(base::DIR_LOCAL_APP_DATA,
+                                                   temp);
+  registry_util::RegistryOverrideManager override_manager;
+  override_manager.OverrideRegistry(HKEY_CURRENT_USER);
+  override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE);
+
   InstallationState machine_state;
   machine_state.Initialize();
 

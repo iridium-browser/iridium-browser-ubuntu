@@ -19,10 +19,10 @@
 #include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/native_window_notification_source.h"
-#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -78,7 +78,6 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
-#include "chrome/browser/ui/views/password_generation_bubble_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
@@ -98,9 +97,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/password_manager/core/browser/password_manager.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/language_state.h"
+#include "content/app/resources/grit/content_resources.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
@@ -109,13 +111,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
-#include "grit/ui_strings.h"
-#include "grit/webkit_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/window.h"
@@ -130,6 +126,7 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/webview/webview.h"
@@ -785,6 +782,14 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
     devtools_web_view_->SetWebContents(NULL);
   }
 
+  // Do this before updating InfoBarContainer as the InfoBarContainer may
+  // callback to us and trigger layout.
+  if (bookmark_bar_view_.get()) {
+    bookmark_bar_view_->SetBookmarkBarState(
+        browser_->bookmark_bar_state(),
+        BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
+  }
+
   infobar_container_->ChangeInfoBarManager(
       InfoBarService::FromWebContents(new_contents));
 
@@ -796,11 +801,6 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
         permission_bubble_view_.get());
   }
 
-  if (bookmark_bar_view_.get()) {
-    bookmark_bar_view_->SetBookmarkBarState(
-        browser_->bookmark_bar_state(),
-        BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
-  }
   UpdateUIForContents(new_contents);
 
   // Layout for DevTools _before_ setting the both main and devtools WebContents
@@ -918,7 +918,7 @@ bool BrowserView::IsFullscreenBubbleVisible() const {
 
 #if defined(OS_WIN)
 void BrowserView::SetMetroSnapMode(bool enable) {
-  HISTOGRAM_COUNTS("Metro.SnapModeToggle", enable);
+  LOCAL_HISTOGRAM_COUNTS("Metro.SnapModeToggle", enable);
   ProcessFullscreen(enable, METRO_SNAP_FULLSCREEN, GURL(), FEB_TYPE_NONE);
 }
 
@@ -1500,6 +1500,10 @@ bool BrowserView::CanMaximize() const {
   return true;
 }
 
+bool BrowserView::CanMinimize() const {
+  return true;
+}
+
 bool BrowserView::CanActivate() const {
   if (!AppModalDialogQueue::GetInstance()->active_dialog() ||
       !AppModalDialogQueue::GetInstance()->active_dialog()->native_dialog())
@@ -1543,7 +1547,9 @@ bool BrowserView::ShouldShowWindowTitle() const {
   // For Ash only, trusted windows (apps and settings) do not show an icon,
   // crbug.com/119411. Child windows (i.e. popups) do show an icon.
   if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH &&
-      browser_->is_trusted_source())
+      browser_->is_trusted_source() &&
+      !(browser_->is_app() &&
+        extensions::util::IsStreamlinedHostedAppsEnabled()))
     return false;
 
   return browser_->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
@@ -1572,7 +1578,9 @@ bool BrowserView::ShouldShowWindowIcon() const {
   // For Ash only, trusted windows (apps and settings) do not show an icon,
   // crbug.com/119411. Child windows (i.e. popups) do show an icon.
   if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH &&
-      browser_->is_trusted_source())
+      browser_->is_trusted_source() &&
+      !(browser_->is_app() &&
+        extensions::util::IsStreamlinedHostedAppsEnabled()))
     return false;
 
   return browser_->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
@@ -1594,7 +1602,7 @@ bool BrowserView::ExecuteWindowsCommand(int command_id) {
 }
 
 std::string BrowserView::GetWindowName() const {
-  return chrome::GetWindowPlacementKey(browser_.get());
+  return chrome::GetWindowName(browser_.get());
 }
 
 void BrowserView::SaveWindowPlacement(const gfx::Rect& bounds,
@@ -2016,8 +2024,7 @@ void BrowserView::LoadingAnimationCallback() {
 void BrowserView::OnLoadCompleted() {
 #if defined(OS_WIN)
   DCHECK(!jumplist_);
-  jumplist_ = new JumpList();
-  jumplist_->AddObserver(browser_->profile());
+  jumplist_ = new JumpList(browser_->profile());
 #endif
 }
 
@@ -2047,8 +2054,9 @@ bool BrowserView::MaybeShowBookmarkBar(WebContents* contents) {
         BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
     GetBrowserViewLayout()->set_bookmark_bar(bookmark_bar_view_.get());
   }
-  bookmark_bar_view_->SetVisible(show_bookmark_bar);
-  bookmark_bar_view_->SetPageNavigator(contents);
+  // Don't change the visibility of the BookmarkBarView. BrowserViewLayout
+  // handles it.
+  bookmark_bar_view_->SetPageNavigator(GetActiveWebContents());
 
   // Update parenting for the bookmark bar. This may detach it from all views.
   bool needs_layout = false;
@@ -2430,34 +2438,6 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton(
   }
 }
 
-void BrowserView::ShowPasswordGenerationBubble(
-    const gfx::Rect& rect,
-    const autofill::PasswordForm& form,
-    autofill::PasswordGenerator* password_generator) {
-  // Create a rect in the content bounds that the bubble will point to.
-  gfx::Point origin(rect.origin());
-  views::View::ConvertPointToScreen(GetTabContentsContainerView(), &origin);
-  gfx::Rect bounds(origin, rect.size());
-
-  // Create the bubble.
-  WebContents* web_contents = GetActiveWebContents();
-  if (!web_contents)
-    return;
-
-  PasswordGenerationBubbleView* bubble = new PasswordGenerationBubbleView(
-      form,
-      bounds,
-      this,
-      web_contents->GetRenderViewHost(),
-      ChromePasswordManagerClient::GetManagerFromWebContents(web_contents),
-      password_generator,
-      GetWidget()->GetThemeProvider());
-
-  views::BubbleDelegateView::CreateBubble(bubble);
-  bubble->SetAlignment(views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR);
-  bubble->GetWidget()->Show();
-}
-
 void BrowserView::OverscrollUpdate(int delta_y) {
   if (scroll_end_effect_controller_)
     scroll_end_effect_controller_->OverscrollUpdate(delta_y);
@@ -2478,16 +2458,6 @@ void BrowserView::ExecuteExtensionCommand(
     const extensions::Extension* extension,
     const extensions::Command& command) {
   toolbar_->ExecuteExtensionCommand(extension, command);
-}
-
-void BrowserView::ShowPageActionPopup(
-    const extensions::Extension* extension) {
-  toolbar_->ShowPageActionPopup(extension);
-}
-
-void BrowserView::ShowBrowserActionPopup(
-    const extensions::Extension* extension) {
-  toolbar_->ShowBrowserActionPopup(extension);
 }
 
 void BrowserView::DoCutCopyPaste(void (WebContents::*method)(),

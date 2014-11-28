@@ -17,9 +17,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/md5.h"
@@ -296,8 +296,6 @@ class RegistryEntry {
     chrome_html_prog_id.append(GetBrowserProgId(suffix));
     entries->push_back(new RegistryEntry(
         chrome_html_prog_id, dist->GetBrowserProgIdDesc()));
-    entries->push_back(new RegistryEntry(
-        chrome_html_prog_id, ShellUtil::kRegUrlProtocol, base::string16()));
     entries->push_back(new RegistryEntry(
         chrome_html_prog_id + ShellUtil::kRegDefaultIcon, icon_path));
     entries->push_back(new RegistryEntry(

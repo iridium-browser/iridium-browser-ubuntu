@@ -7,14 +7,12 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "modules/serviceworkers/FetchBodyStream.h"
+#include "modules/serviceworkers/Body.h"
 #include "modules/serviceworkers/FetchResponseData.h"
 #include "modules/serviceworkers/Headers.h"
 #include "platform/blob/BlobData.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/WTFString.h"
+#include "wtf/Forward.h"
 
 namespace blink {
 
@@ -23,34 +21,43 @@ class ExceptionState;
 class ResponseInit;
 class WebServiceWorkerResponse;
 
-class Response FINAL : public RefCountedWillBeGarbageCollected<Response>, public ScriptWrappable {
-    DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(Response);
+class Response FINAL : public Body {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<Response> create(Blob*, const Dictionary&, ExceptionState&);
-    static PassRefPtrWillBeRawPtr<Response> create(const String&, const Dictionary&, ExceptionState&);
-    static PassRefPtrWillBeRawPtr<Response> create(Blob*, const ResponseInit&, ExceptionState&);
-
-    static PassRefPtrWillBeRawPtr<Response> create(PassRefPtrWillBeRawPtr<FetchResponseData>);
+    virtual ~Response() { }
+    static Response* create(ExecutionContext*, Blob*, const Dictionary&, ExceptionState&);
+    static Response* create(ExecutionContext*, const String&, const Dictionary&, ExceptionState&);
+    static Response* create(ExecutionContext*, const ArrayBuffer*, const Dictionary&, ExceptionState&);
+    static Response* create(ExecutionContext*, const ArrayBufferView*, const Dictionary&, ExceptionState&);
+    static Response* create(ExecutionContext*, Blob*, const ResponseInit&, ExceptionState&);
+    static Response* create(ExecutionContext*, FetchResponseData*);
+    static Response* create(ExecutionContext*, const WebServiceWorkerResponse&);
+    // The 'FetchResponseData' object is shared between responses, as it is
+    // immutable to the user after Response creation. Headers are copied.
+    static Response* create(const Response&);
 
     String type() const;
     String url() const;
     unsigned short status() const;
     String statusText() const;
-    PassRefPtrWillBeRawPtr<Headers> headers() const;
+    Headers* headers() const;
 
-    PassRefPtrWillBeRawPtr<FetchBodyStream> body(ExecutionContext*);
+    Response* clone() const;
 
     void populateWebServiceWorkerResponse(WebServiceWorkerResponse&);
 
-    void trace(Visitor*);
+    virtual void trace(Visitor*) OVERRIDE;
 
 private:
-    Response();
-    explicit Response(PassRefPtrWillBeRawPtr<FetchResponseData>);
+    explicit Response(const Response&);
+    explicit Response(ExecutionContext*);
+    Response(ExecutionContext*, FetchResponseData*);
+    Response(ExecutionContext*, const WebServiceWorkerResponse&);
 
-    RefPtrWillBeMember<FetchResponseData> m_response;
-    RefPtrWillBeMember<Headers> m_headers;
-    RefPtrWillBeMember<FetchBodyStream> m_fetchBodyStream;
+    virtual PassRefPtr<BlobDataHandle> blobDataHandle() OVERRIDE;
+
+    const Member<FetchResponseData> m_response;
+    const Member<Headers> m_headers;
 };
 
 } // namespace blink

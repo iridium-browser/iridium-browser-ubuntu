@@ -15,24 +15,30 @@ namespace content {
 // Provides common implementation of a GPU memory buffer.
 class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
+  typedef base::Callback<void(scoped_ptr<GpuMemoryBufferImpl> buffer)>
+      CreationCallback;
   typedef base::Callback<void(const gfx::GpuMemoryBufferHandle& handle)>
       AllocationCallback;
+  typedef base::Closure DestructionCallback;
 
   virtual ~GpuMemoryBufferImpl();
 
   // Creates a GPU memory buffer instance with |size| and |internalformat| for
-  // |usage|.
-  static scoped_ptr<GpuMemoryBufferImpl> Create(const gfx::Size& size,
-                                                unsigned internalformat,
-                                                unsigned usage);
+  // |usage| by the current process and |client_id|.
+  static void Create(const gfx::Size& size,
+                     unsigned internalformat,
+                     unsigned usage,
+                     int client_id,
+                     const CreationCallback& callback);
 
   // Allocates a GPU memory buffer with |size| and |internalformat| for |usage|
-  // by |child_process|. The |handle| returned can be used by the
-  // |child_process| to create an instance of this class.
+  // by |child_process| and |child_client_id|. The |handle| returned can be
+  // used by the |child_process| to create an instance of this class.
   static void AllocateForChildProcess(const gfx::Size& size,
                                       unsigned internalformat,
                                       unsigned usage,
                                       base::ProcessHandle child_process,
+                                      int child_client_id,
                                       const AllocationCallback& callback);
 
   // Notify that GPU memory buffer has been deleted by |child_process|.
@@ -41,11 +47,14 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
                                     base::ProcessHandle child_process);
 
   // Creates an instance from the given |handle|. |size| and |internalformat|
-  // should match what was used to allocate the |handle|.
+  // should match what was used to allocate the |handle|. |callback| is
+  // called when instance is deleted, which is not necessarily on the same
+  // thread as this function was called on and instance was created on.
   static scoped_ptr<GpuMemoryBufferImpl> CreateFromHandle(
       const gfx::GpuMemoryBufferHandle& handle,
       const gfx::Size& size,
-      unsigned internalformat);
+      unsigned internalformat,
+      const DestructionCallback& callback);
 
   // Returns true if |internalformat| is a format recognized by this base class.
   static bool IsFormatValid(unsigned internalformat);
@@ -61,10 +70,13 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   virtual bool IsMapped() const OVERRIDE;
 
  protected:
-  GpuMemoryBufferImpl(const gfx::Size& size, unsigned internalformat);
+  GpuMemoryBufferImpl(const gfx::Size& size,
+                      unsigned internalformat,
+                      const DestructionCallback& callback);
 
   const gfx::Size size_;
   const unsigned internalformat_;
+  const DestructionCallback callback_;
   bool mapped_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferImpl);

@@ -19,8 +19,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/common/extension.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/common/fileapi/file_system_types.h"
+#include "extensions/test/result_catcher.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/common/fileapi/file_system_types.h"
 
 namespace utils = extension_function_test_utils;
 
@@ -171,11 +172,11 @@ class FileBrowserHandlerExtensionTest : public ExtensionApiTest {
 
   // Creates new, test mount point.
   void AddTmpMountPoint(const std::string& extension_id) {
-    BrowserContext::GetMountPoints(browser()->profile())->RegisterFileSystem(
-        "tmp",
-        fileapi::kFileSystemTypeNativeLocal,
-        fileapi::FileSystemMountOption(),
-        tmp_mount_point_);
+    BrowserContext::GetMountPoints(browser()->profile())
+        ->RegisterFileSystem("tmp",
+                             storage::kFileSystemTypeNativeLocal,
+                             storage::FileSystemMountOption(),
+                             tmp_mount_point_);
   }
 
   base::FilePath GetFullPathOnTmpMountPoint(
@@ -273,7 +274,7 @@ IN_PROC_BROWSER_TEST_F(FileBrowserHandlerExtensionTest, EndToEnd) {
 
   AddTmpMountPoint(extension->id());
 
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
 
   GURL url = extension->GetResourceURL("test.html");
   ui_test_utils::NavigateToURL(browser(), url);

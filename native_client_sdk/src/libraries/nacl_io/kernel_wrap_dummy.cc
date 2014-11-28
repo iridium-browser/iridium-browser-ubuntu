@@ -48,7 +48,7 @@ int _real_munmap(void* addr, size_t length) {
   return ENOSYS;
 }
 
-int _real_open(const char* pathname, int oflag, mode_t cmode, int* newfd) {
+int _real_open(const char* pathname, int oflag, mode_t mode, int* newfd) {
   return ENOSYS;
 }
 
@@ -76,6 +76,10 @@ int _real_write(int fd, const void* buf, size_t count, size_t* nwrote) {
 
 void _real_exit(int status) {
   exit(status);
+}
+
+int _real_getcwd(char* pathname, size_t len) {
+  return ENOSYS;
 }
 
 #endif

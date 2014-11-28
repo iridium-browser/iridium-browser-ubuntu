@@ -14,9 +14,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_member.h"
@@ -53,7 +53,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/generated_resources.h"
 #include "grit/net_internals_resources.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log_logger.h"
@@ -258,6 +257,13 @@ class NetInternalsMessageHandler
   void ImportONCFileToNSSDB(const std::string& onc_blob,
                             const std::string& passcode,
                             net::NSSCertDatabase* nssdb);
+
+  // Called back by the CertificateImporter when a certificate import finished.
+  // |previous_error| contains earlier errors during this import.
+  void OnCertificatesImported(
+      const std::string& previous_error,
+      bool success,
+      const net::CertificateList& onc_trusted_certificates);
 #endif
 
  private:
@@ -1089,7 +1095,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
     } else {
       net::TransportSecurityState::DomainState static_state;
       const bool found_static = transport_security_state->GetStaticDomainState(
-          domain, true, &static_state);
+          domain, &static_state);
       if (found_static) {
         result->SetBoolean("has_static_sts",
                            found_static && static_state.ShouldUpgradeToSSL());
@@ -1212,7 +1218,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHttpCacheInfo(
 
   if (disk_cache) {
     // Extract the statistics key/value pairs from the backend.
-    std::vector<std::pair<std::string, std::string> > stats;
+    base::StringPairs stats;
     disk_cache->GetStats(&stats);
     for (size_t i = 0; i < stats.size(); ++i) {
       stats_dict->SetStringWithoutPathExpansion(
@@ -1408,38 +1414,52 @@ void NetInternalsMessageHandler::ImportONCFileToNSSDB(
     const std::string& onc_blob,
     const std::string& passcode,
     net::NSSCertDatabase* nssdb) {
-  std::string error;
   user_manager::User* user = chromeos::ProfileHelper::Get()->GetUserByProfile(
       Profile::FromWebUI(web_ui()));
 
-  if (user) {
-    onc::ONCSource onc_source = onc::ONC_SOURCE_USER_IMPORT;
-
-    base::ListValue network_configs;
-    base::DictionaryValue global_network_config;
-    base::ListValue certificates;
-    if (!chromeos::onc::ParseAndValidateOncForImport(onc_blob,
-                                                     onc_source,
-                                                     passcode,
-                                                     &network_configs,
-                                                     &global_network_config,
-                                                     &certificates)) {
-      error = "Errors occurred during the ONC parsing. ";
-    }
-
-    chromeos::onc::CertificateImporterImpl cert_importer(nssdb);
-    if (!cert_importer.ImportCertificates(certificates, onc_source, NULL))
-      error += "Some certificates couldn't be imported. ";
-
-    std::string network_error;
-    chromeos::onc::ImportNetworksForUser(user, network_configs, &network_error);
-    if (!network_error.empty())
-      error += network_error;
-  } else {
-    error = "User not found.";
+  if (!user) {
+    std::string error = "User not found.";
+    SendJavascriptCommand("receivedONCFileParse", new base::StringValue(error));
+    return;
   }
 
-  LOG_IF(ERROR, !error.empty()) << error;
+  std::string error;
+  onc::ONCSource onc_source = onc::ONC_SOURCE_USER_IMPORT;
+  base::ListValue network_configs;
+  base::DictionaryValue global_network_config;
+  base::ListValue certificates;
+  if (!chromeos::onc::ParseAndValidateOncForImport(onc_blob,
+                                                   onc_source,
+                                                   passcode,
+                                                   &network_configs,
+                                                   &global_network_config,
+                                                   &certificates)) {
+    error = "Errors occurred during the ONC parsing. ";
+  }
+
+  std::string network_error;
+  chromeos::onc::ImportNetworksForUser(user, network_configs, &network_error);
+  if (!network_error.empty())
+    error += network_error;
+
+  chromeos::onc::CertificateImporterImpl cert_importer(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO), nssdb);
+  cert_importer.ImportCertificates(
+      certificates,
+      onc_source,
+      base::Bind(&NetInternalsMessageHandler::OnCertificatesImported,
+                 AsWeakPtr(),
+                 error));
+}
+
+void NetInternalsMessageHandler::OnCertificatesImported(
+    const std::string& previous_error,
+    bool success,
+    const net::CertificateList& /* unused onc_trusted_certificates */) {
+  std::string error = previous_error;
+  if (!success)
+    error += "Some certificates couldn't be imported. ";
+
   SendJavascriptCommand("receivedONCFileParse", new base::StringValue(error));
 }
 

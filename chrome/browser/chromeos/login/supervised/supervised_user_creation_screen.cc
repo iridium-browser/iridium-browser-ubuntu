@@ -10,6 +10,7 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/camera_detector.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/screen_manager.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/screens/screen_observer.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
@@ -86,11 +87,17 @@ void ConfigureErrorScreen(ErrorScreen* screen,
 
 } // namespace
 
+// static
+SupervisedUserCreationScreen* SupervisedUserCreationScreen::Get(
+    ScreenManager* manager) {
+  return static_cast<SupervisedUserCreationScreen*>(
+      manager->GetScreen(WizardController::kSupervisedUserCreationScreenName));
+}
+
 SupervisedUserCreationScreen::SupervisedUserCreationScreen(
     ScreenObserver* observer,
     SupervisedUserCreationScreenHandler* actor)
     : WizardScreen(observer),
-      weak_factory_(this),
       actor_(actor),
       on_error_screen_(false),
       manager_signin_in_progress_(false),
@@ -98,7 +105,8 @@ SupervisedUserCreationScreen::SupervisedUserCreationScreen(
       sync_service_(NULL),
       image_decoder_(NULL),
       apply_photo_after_decoding_(false),
-      selected_image_(0) {
+      selected_image_(0),
+      weak_factory_(this) {
   DCHECK(actor_);
   if (actor_)
     actor_->SetDelegate(this);

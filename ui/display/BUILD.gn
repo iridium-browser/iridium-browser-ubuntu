@@ -8,8 +8,6 @@ component("display") {
   sources = [
     "chromeos/display_configurator.cc",
     "chromeos/display_configurator.h",
-    "chromeos/touchscreen_delegate_impl.cc",
-    "chromeos/touchscreen_delegate_impl.h",
     "chromeos/ozone/display_configurator_ozone.cc",
     "chromeos/x11/display_configurator_x11.cc",
     "chromeos/x11/display_mode_x11.cc",
@@ -22,8 +20,6 @@ component("display") {
     "chromeos/x11/native_display_delegate_x11.h",
     "chromeos/x11/native_display_event_dispatcher_x11.cc",
     "chromeos/x11/native_display_event_dispatcher_x11.h",
-    "chromeos/x11/touchscreen_device_manager_x11.cc",
-    "chromeos/x11/touchscreen_device_manager_x11.h",
     "display_export.h",
     "display_switches.cc",
     "display_switches.h",
@@ -68,6 +64,9 @@ component("test_util") {
 
   defines = [ "DISPLAY_IMPLEMENTATION" ]
 
+  public_deps = [
+    ":display",
+  ]
   deps = [
     "//base",
     "//ui/gfx",
@@ -82,7 +81,6 @@ component("test_util") {
 test("display_unittests") {
   sources = [
     "chromeos/display_configurator_unittest.cc",
-    "chromeos/touchscreen_delegate_impl_unittest.cc",
     "chromeos/x11/display_util_x11_unittest.cc",
     "chromeos/x11/native_display_event_dispatcher_x11_unittest.cc",
     "util/display_util_unittest.cc",
@@ -90,6 +88,8 @@ test("display_unittests") {
   ]
 
   deps = [
+    ":test_util",
+    "//base",
     "//base/test:run_all_unittests",
     "//testing/gtest",
     "//ui/display/util",
@@ -99,7 +99,6 @@ test("display_unittests") {
   if (is_chromeos) {
     deps += [
       ":display",
-      ":test_util",
       "//ui/display/types",
     ]
   }

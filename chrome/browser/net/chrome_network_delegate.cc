@@ -12,6 +12,7 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/net/client_hints.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/safe_search_util.h"
-#include "chrome/browser/performance_monitor/performance_monitor.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
@@ -34,6 +34,7 @@
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_protocol.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_usage_stats.h"
 #include "components/domain_reliability/monitor.h"
 #include "content/public/browser/browser_thread.h"
@@ -116,7 +117,8 @@ void UpdateContentLengthPrefs(
     int received_content_length,
     int original_content_length,
     data_reduction_proxy::DataReductionProxyRequestType request_type,
-    Profile* profile) {
+    Profile* profile,
+    data_reduction_proxy::DataReductionProxyStatisticsPrefs* statistics_prefs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_GE(received_content_length, 0);
   DCHECK_GE(original_content_length, 0);
@@ -125,40 +127,31 @@ void UpdateContentLengthPrefs(
   if (!g_browser_process)
     return;
 
-  PrefService* prefs = g_browser_process->local_state();
-  if (!prefs)
-    return;
-
   // Ignore off-the-record data.
   if (!g_browser_process->profile_manager()->IsValidProfile(profile) ||
       profile->IsOffTheRecord()) {
     return;
   }
-#if defined(OS_ANDROID) && defined(SPDY_PROXY_AUTH_ORIGIN)
-  // If Android ever goes multi profile, the profile should be passed so that
-  // the browser preference will be taken.
-  bool with_data_reduction_proxy_enabled =
-      ProfileManager::GetActiveUserProfile()->GetPrefs()->GetBoolean(
-          data_reduction_proxy::prefs::kDataReductionProxyEnabled);
-#else
-  bool with_data_reduction_proxy_enabled = false;
-#endif
-
-  data_reduction_proxy::UpdateContentLengthPrefs(received_content_length,
-                                         original_content_length,
-                                         with_data_reduction_proxy_enabled,
-                                         request_type, prefs);
+  data_reduction_proxy::UpdateContentLengthPrefs(
+      received_content_length,
+      original_content_length,
+      profile->GetPrefs(),
+      request_type, statistics_prefs);
 }
 
 void StoreAccumulatedContentLength(
     int received_content_length,
     int original_content_length,
     data_reduction_proxy::DataReductionProxyRequestType request_type,
-    Profile* profile) {
+    Profile* profile,
+    data_reduction_proxy::DataReductionProxyStatisticsPrefs* statistics_prefs) {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
       base::Bind(&UpdateContentLengthPrefs,
-                 received_content_length, original_content_length,
-                 request_type, profile));
+                 received_content_length,
+                 original_content_length,
+                 request_type,
+                 profile,
+                 statistics_prefs));
 }
 
 void RecordContentLengthHistograms(
@@ -217,8 +210,8 @@ void RecordPrecacheStatsOnUIThread(const GURL& url,
 
   precache::PrecacheManager* precache_manager =
       precache::PrecacheManagerFactory::GetForBrowserContext(profile);
-  if (!precache_manager) {
-    // This could be NULL if the profile is off the record.
+  if (!precache_manager || !precache_manager->IsPrecachingAllowed()) {
+    // |precache_manager| could be NULL if the profile is off the record.
     return;
   }
 
@@ -233,6 +226,12 @@ void RecordIOThreadToRequestStartOnUIThread(
   UMA_HISTOGRAM_TIMES("Net.IOThreadCreationToHTTPRequestStart", request_lag);
 }
 #endif  // defined(OS_ANDROID)
+
+void ReportInvalidReferrerSend(const GURL& target_url,
+                               const GURL& referrer_url) {
+  base::RecordAction(
+      base::UserMetricsAction("Net.URLRequest_StartJob_InvalidReferrer"));
+}
 
 }  // namespace
 
@@ -254,7 +253,8 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
       prerender_tracker_(NULL),
       data_reduction_proxy_params_(NULL),
       data_reduction_proxy_usage_stats_(NULL),
-      data_reduction_proxy_auth_request_handler_(NULL) {
+      data_reduction_proxy_auth_request_handler_(NULL),
+      data_reduction_proxy_statistics_prefs_(NULL) {
   DCHECK(enable_referrers);
   extensions_delegate_.reset(
       ChromeExtensionsNetworkDelegate::Create(event_router));
@@ -323,6 +323,8 @@ void ChromeNetworkDelegate::AllowAccessToAllFiles() {
 }
 
 // static
+// TODO(megjablon): Use data_reduction_proxy_delayed_pref_service to read prefs.
+// Until updated the pref values may be up to an hour behind on desktop.
 base::Value* ChromeNetworkDelegate::HistoricNetworkStatsInfoToValue() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   PrefService* prefs = g_browser_process->local_state();
@@ -522,9 +524,6 @@ void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
                                            int bytes_read) {
   TRACE_EVENT_ASYNC_STEP_PAST1("net", "URLRequest", &request, "DidRead",
                                "bytes_read", bytes_read);
-  performance_monitor::PerformanceMonitor::GetInstance()->BytesReadOnIOThread(
-      request, bytes_read);
-
 #if defined(ENABLE_TASK_MANAGER)
   // This is not completely accurate, but as a first approximation ignore
   // requests that are served from the cache. See bug 330931 for more info.
@@ -583,11 +582,12 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
       RecordContentLengthHistograms(received_content_length,
                                     original_content_length,
                                     freshness_lifetime);
+
       if (data_reduction_proxy_enabled_ &&
           data_reduction_proxy_usage_stats_ &&
           !proxy_config_getter_.is_null()) {
-        data_reduction_proxy_usage_stats_->RecordBypassedBytesHistograms(
-            *request,
+        data_reduction_proxy_usage_stats_->RecordBytesHistograms(
+            request,
             *data_reduction_proxy_enabled_,
             proxy_config_getter_.Run());
       }
@@ -815,16 +815,28 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
   return net::OK;
 }
 
+bool ChromeNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(
+    const net::URLRequest& request,
+    const GURL& target_url,
+    const GURL& referrer_url) const {
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+      base::Bind(&ReportInvalidReferrerSend, target_url, referrer_url));
+  return true;
+}
+
 void ChromeNetworkDelegate::AccumulateContentLength(
     int64 received_content_length,
     int64 original_content_length,
     data_reduction_proxy::DataReductionProxyRequestType request_type) {
   DCHECK_GE(received_content_length, 0);
   DCHECK_GE(original_content_length, 0);
-  StoreAccumulatedContentLength(received_content_length,
-                                original_content_length,
-                                request_type,
-                                reinterpret_cast<Profile*>(profile_));
+  if (data_reduction_proxy_statistics_prefs_) {
+    StoreAccumulatedContentLength(received_content_length,
+                                  original_content_length,
+                                  request_type,
+                                  reinterpret_cast<Profile*>(profile_),
+                                  data_reduction_proxy_statistics_prefs_);
+  }
   received_content_length_ += received_content_length;
   original_content_length_ += original_content_length;
 }

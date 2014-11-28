@@ -7,11 +7,12 @@
 
 #include "core/frame/RemoteFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "platform/UserGestureIndicator.h"
+#include "platform/heap/Handle.h"
 #include "web/OpenedFrameTracker.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebRemoteFrameImpl.h"
 #include <algorithm>
-
 
 namespace blink {
 
@@ -25,13 +26,22 @@ Frame* toCoreFrame(const WebFrame* frame)
         : toWebRemoteFrameImpl(frame)->frame();
 }
 
-void WebFrame::swap(WebFrame* frame)
+bool WebFrame::swap(WebFrame* frame)
 {
     using std::swap;
+    RefPtrWillBeRawPtr<Frame> oldFrame = toCoreFrame(this);
 
-    // All child frames must have been detached first.
-    ASSERT(!m_firstChild && !m_lastChild);
-    // The frame being swapped in should not have a blink::Frame associated
+    // All child frames must be detached first.
+    oldFrame->detachChildren();
+
+    // If the frame has been detached during detaching its children, return
+    // immediately.
+    // FIXME: There is no unit test for this condition, so one needs to be
+    // written.
+    if (!oldFrame->host())
+        return false;
+
+    // The frame being swapped in should not have a Frame associated
     // with it yet.
     ASSERT(!toCoreFrame(frame));
 
@@ -62,11 +72,10 @@ void WebFrame::swap(WebFrame* frame)
         frame->m_openedFrameTracker.reset(m_openedFrameTracker.release());
     }
 
-    // Finally, clone the state of the current blink::Frame into one matching
+    // Finally, clone the state of the current Frame into one matching
     // the type of the passed in WebFrame.
     // FIXME: This is a bit clunky; this results in pointless decrements and
     // increments of connected subframes.
-    Frame* oldFrame = toCoreFrame(this);
     FrameOwner* owner = oldFrame->owner();
     oldFrame->disconnectOwnerElement();
     if (frame->isWebLocalFrame()) {
@@ -74,6 +83,13 @@ void WebFrame::swap(WebFrame* frame)
     } else {
         toWebRemoteFrameImpl(frame)->initializeCoreFrame(oldFrame->host(), owner, oldFrame->tree().name());
     }
+
+    return true;
+}
+
+void WebFrame::detach()
+{
+    toCoreFrame(this)->detach();
 }
 
 WebFrame* WebFrame::opener() const
@@ -184,7 +200,7 @@ WebFrame* WebFrame::findChildByName(const WebString& name) const
     return fromFrame(frame->tree().child(name));
 }
 
-WebFrame* WebFrame::fromFrame(blink::Frame* frame)
+WebFrame* WebFrame::fromFrame(Frame* frame)
 {
     if (!frame)
         return 0;
@@ -208,6 +224,22 @@ WebFrame::WebFrame()
 WebFrame::~WebFrame()
 {
     m_openedFrameTracker.reset(0);
+}
+
+void WebFrame::traceChildren(Visitor* visitor, WebFrame* frame)
+{
+#if ENABLE(OILPAN)
+    // Trace the children frames.
+    WebFrame* child = frame ? frame->firstChild() : 0;
+    while (child) {
+        if (child->isWebLocalFrame())
+            visitor->trace(toWebLocalFrameImpl(child));
+        else
+            visitor->trace(toWebRemoteFrameImpl(child));
+
+        child = child->nextSibling();
+    }
+#endif
 }
 
 } // namespace blink

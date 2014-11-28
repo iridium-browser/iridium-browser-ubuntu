@@ -19,12 +19,12 @@
  */
 
 #include "config.h"
-
 #include "core/svg/SVGTextPathElement.h"
 
 #include "core/XLinkNames.h"
 #include "core/rendering/svg/RenderSVGResource.h"
 #include "core/rendering/svg/RenderSVGTextPath.h"
+#include "core/svg/SVGDocumentExtensions.h"
 
 namespace blink {
 
@@ -55,8 +55,6 @@ inline SVGTextPathElement::SVGTextPathElement(Document& document)
     , m_method(SVGAnimatedEnumeration<SVGTextPathMethodType>::create(this, SVGNames::methodAttr, SVGTextPathMethodAlign))
     , m_spacing(SVGAnimatedEnumeration<SVGTextPathSpacingType>::create(this, SVGNames::spacingAttr, SVGTextPathSpacingExact))
 {
-    ScriptWrappable::init(this);
-
     addToPropertyMap(m_startOffset);
     addToPropertyMap(m_method);
     addToPropertyMap(m_spacing);
@@ -185,4 +183,4 @@ bool SVGTextPathElement::selfHasRelativeLengths() const
         || SVGTextContentElement::selfHasRelativeLengths();
 }
 
-}
+} // namespace blink

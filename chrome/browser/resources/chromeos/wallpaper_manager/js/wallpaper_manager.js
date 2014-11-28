@@ -54,7 +54,6 @@ function WallpaperManager(dialogDom) {
    * Returns a translated string.
    *
    * Wrapper function to make dealing with translated strings more concise.
-   * Equivilant to localStrings.getString(id).
    *
    * @param {string} id The id of the string to return.
    * @return {string} The translated string.
@@ -318,6 +317,7 @@ function WallpaperManager(dialogDom) {
 
     this.onResize_();
     this.initContextMenuAndCommand_();
+    WallpaperUtil.testSendMessage('launched');
   };
 
   /**
@@ -524,7 +524,7 @@ function WallpaperManager(dialogDom) {
               });
             }, errorHandler);
           }, errorHandler);
-        }
+        };
         this.wallpaperDirs_.getDirectory(WallpaperDirNameEnum.ORIGINAL,
                                          success, errorHandler);
         break;
@@ -875,7 +875,7 @@ function WallpaperManager(dialogDom) {
           fileEntry.remove(function() {
           }, errorHandler);
         }, errorHandler);
-      }
+      };
 
       // Removes copy of original.
       self.wallpaperDirs_.getDirectory(WallpaperDirNameEnum.ORIGINAL, success,
@@ -967,7 +967,7 @@ function WallpaperManager(dialogDom) {
       var errorHandler = this.onFileSystemError_.bind(this);
       var toArray = function(list) {
         return Array.prototype.slice.call(list || [], 0);
-      }
+      };
 
       var self = this;
       var processResults = function(entries) {
@@ -1009,7 +1009,7 @@ function WallpaperManager(dialogDom) {
         self.wallpaperGrid_.dataModel = wallpapersDataModel;
         self.wallpaperGrid_.selectedItem = selectedItem;
         self.wallpaperGrid_.activeItem = selectedItem;
-      }
+      };
 
       var success = function(dirEntry) {
         var dirReader = dirEntry.createReader();
@@ -1027,7 +1027,7 @@ function WallpaperManager(dialogDom) {
           }, errorHandler);
         };
         readEntries(); // Start reading dirs.
-      }
+      };
       this.wallpaperDirs_.getDirectory(WallpaperDirNameEnum.ORIGINAL,
                                        success, errorHandler);
     } else {

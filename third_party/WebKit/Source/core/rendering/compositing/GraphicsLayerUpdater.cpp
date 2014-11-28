@@ -28,6 +28,7 @@
 #include "core/rendering/compositing/GraphicsLayerUpdater.h"
 
 #include "core/html/HTMLMediaElement.h"
+#include "core/inspector/InspectorTraceEvents.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderLayerReflectionInfo.h"
 #include "core/rendering/RenderPart.h"
@@ -98,17 +99,9 @@ void GraphicsLayerUpdater::updateRecursive(RenderLayer& layer, UpdateType update
             ASSERT(compositingContainer == layer.enclosingLayerWithCompositedLayerMapping(ExcludeSelf));
 
             if (mapping->updateRequiresOwnBackingStoreForAncestorReasons(compositingContainer)) {
+                TRACE_LAYER_INVALIDATION(&layer, InspectorLayerInvalidationTrackingEvent::AncestorRequiresNewLayer);
                 layersNeedingPaintInvalidation.append(&layer);
                 updateType = ForceUpdate;
-            }
-
-            // Note carefully: here we assume that the compositing state of all descendants have been updated already,
-            // so it is legitimate to compute and cache the composited bounds for this layer.
-            mapping->updateCompositedBounds();
-
-            if (RenderLayerReflectionInfo* reflection = layer.reflectionInfo()) {
-                if (reflection->reflectionLayer()->hasCompositedLayerMapping())
-                    reflection->reflectionLayer()->compositedLayerMapping()->updateCompositedBounds();
             }
 
             if (mapping->updateGraphicsLayerConfiguration())

@@ -111,6 +111,10 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   // WINDOW_UPDATE frame.
   void AddBytesConsumed(uint64 bytes);
 
+  // Updates the flow controller's send window offset and calls OnCanWrite if
+  // it was blocked before.
+  void UpdateSendWindowOffset(uint64 new_offset);
+
   // Returns true if the stream is flow control blocked, by the stream flow
   // control window or the connection flow control window.
   bool IsFlowControlBlocked();
@@ -122,6 +126,9 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   bool HasFinalReceivedByteOffset() const {
     return fin_received_ || rst_received_;
   }
+
+  // Returns true if the stream has queued data waiting to write.
+  bool HasBufferedData() const;
 
  protected:
   // Sends as much of 'data' to the connection as the connection will consume,
@@ -151,8 +158,6 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   // Close the write side of the socket.  Further writes will fail.
   void CloseWriteSide();
 
-  bool HasBufferedData() const;
-
   bool fin_buffered() const { return fin_buffered_; }
 
   const QuicSession* session() const { return session_; }
@@ -161,7 +166,7 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   const QuicStreamSequencer* sequencer() const { return &sequencer_; }
   QuicStreamSequencer* sequencer() { return &sequencer_; }
 
-  // TODO(rjshade): Remove this method when removing QUIC_VERSION_20.
+  // TODO(rjshade): Remove this method when removing QUIC_VERSION_19.
   void DisableFlowControl() {
     flow_controller_.Disable();
   }

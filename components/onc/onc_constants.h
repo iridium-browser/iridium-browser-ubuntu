@@ -13,6 +13,7 @@ namespace onc {
 
 // Indicates from which source an ONC blob comes from.
 enum ONCSource {
+  ONC_SOURCE_UNKNOWN,
   ONC_SOURCE_NONE,
   ONC_SOURCE_USER_IMPORT,
   ONC_SOURCE_DEVICE_POLICY,
@@ -29,7 +30,6 @@ ONC_EXPORT extern const char kAugmentationActiveSetting[];
 // The one of different setting sources (user/device policy, user/shared
 // settings) that has highest priority over the others.
 ONC_EXPORT extern const char kAugmentationEffectiveSetting[];
-ONC_EXPORT extern const char kAugmentationUnmanaged[];
 ONC_EXPORT extern const char kAugmentationUserPolicy[];
 ONC_EXPORT extern const char kAugmentationDevicePolicy[];
 ONC_EXPORT extern const char kAugmentationUserSetting[];
@@ -62,17 +62,28 @@ ONC_EXPORT extern const char kDevice[];
 ONC_EXPORT extern const char kEthernet[];
 ONC_EXPORT extern const char kGUID[];
 ONC_EXPORT extern const char kIPConfigs[];
+ONC_EXPORT extern const char kSavedIPConfig[];
+ONC_EXPORT extern const char kStaticIPConfig[];
 ONC_EXPORT extern const char kMacAddress[];
 ONC_EXPORT extern const char kName[];
 ONC_EXPORT extern const char kNameServers[];
+ONC_EXPORT extern const char kPriority[];
 ONC_EXPORT extern const char kProxySettings[];
 ONC_EXPORT extern const char kSearchDomains[];
+ONC_EXPORT extern const char kSource[];
+ONC_EXPORT extern const char kSourceDevice[];
+ONC_EXPORT extern const char kSourceDevicePolicy[];
+ONC_EXPORT extern const char kSourceNone[];
+ONC_EXPORT extern const char kSourceUser[];
+ONC_EXPORT extern const char kSourceUserPolicy[];
 ONC_EXPORT extern const char kConnectionState[];
+ONC_EXPORT extern const char kRestrictedConnectivity[];
 ONC_EXPORT extern const char kConnectable[];
 ONC_EXPORT extern const char kErrorState[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kVPN[];
 ONC_EXPORT extern const char kWiFi[];
+ONC_EXPORT extern const char kWimax[];
 
 ONC_EXPORT extern std::string CellularProperty(const std::string& property);
 ONC_EXPORT extern std::string VpnProperty(const std::string& property);
@@ -93,6 +104,10 @@ ONC_EXPORT extern const char kWireless[];
 
 namespace cellular {
 ONC_EXPORT extern const char kActivationState[];
+ONC_EXPORT extern const char kActivated[];
+ONC_EXPORT extern const char kActivating[];
+ONC_EXPORT extern const char kNotActivated[];
+ONC_EXPORT extern const char kPartiallyActivated[];
 ONC_EXPORT extern const char kActivationType[];
 ONC_EXPORT extern const char kAllowRoaming[];
 ONC_EXPORT extern const char kAPN[];
@@ -107,6 +122,7 @@ ONC_EXPORT extern const char kHomeProvider[];
 ONC_EXPORT extern const char kICCID[];
 ONC_EXPORT extern const char kIMEI[];
 ONC_EXPORT extern const char kIMSI[];
+ONC_EXPORT extern const char kLastGoodAPN[];
 ONC_EXPORT extern const char kManufacturer[];
 ONC_EXPORT extern const char kMDN[];
 ONC_EXPORT extern const char kMEID[];
@@ -116,7 +132,8 @@ ONC_EXPORT extern const char kNetworkTechnology[];
 ONC_EXPORT extern const char kPRLVersion[];
 ONC_EXPORT extern const char kProviderRequiresRoaming[];
 ONC_EXPORT extern const char kRoamingState[];
-ONC_EXPORT extern const char kSelectedNetwork[];
+ONC_EXPORT extern const char kHome[];
+ONC_EXPORT extern const char kRoaming[];
 ONC_EXPORT extern const char kServingOperator[];
 ONC_EXPORT extern const char kSIMLockStatus[];
 ONC_EXPORT extern const char kSIMPresent[];
@@ -131,6 +148,7 @@ ONC_EXPORT extern const char kName[];
 }  // namespace cellular_provider
 
 namespace cellular_apn {
+ONC_EXPORT extern const char kAccessPointName[];
 ONC_EXPORT extern const char kName[];
 ONC_EXPORT extern const char kUsername[];
 ONC_EXPORT extern const char kPassword[];
@@ -166,6 +184,7 @@ ONC_EXPORT extern const char kIPv6[];
 ONC_EXPORT extern const char kNameServers[];
 ONC_EXPORT extern const char kRoutingPrefix[];
 ONC_EXPORT extern const char kType[];
+ONC_EXPORT extern const char kWebProxyAutoDiscoveryUrl[];
 }  // namespace ipconfig
 
 namespace ethernet {
@@ -183,7 +202,6 @@ ONC_EXPORT extern const char kFrequency[];
 ONC_EXPORT extern const char kFrequencyList[];
 ONC_EXPORT extern const char kHiddenSSID[];
 ONC_EXPORT extern const char kPassphrase[];
-ONC_EXPORT extern const char kProxyURL[];
 ONC_EXPORT extern const char kSSID[];
 ONC_EXPORT extern const char kSecurity[];
 ONC_EXPORT extern const char kSecurityNone[];
@@ -194,6 +212,12 @@ ONC_EXPORT extern const char kWPA_PSK[];
 ONC_EXPORT extern const char kWPA2_PSK[];
 ONC_EXPORT extern const char kWPA_EAP[];
 }  // namespace wifi
+
+namespace wimax {
+ONC_EXPORT extern const char kAutoConnect[];
+ONC_EXPORT extern const char kEAP[];
+ONC_EXPORT extern const char kSignalStrength[];
+}  // namespace wimax
 
 namespace client_cert {
 ONC_EXPORT extern const char kClientCertPattern[];

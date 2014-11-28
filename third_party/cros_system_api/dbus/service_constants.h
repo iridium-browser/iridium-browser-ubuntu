@@ -8,6 +8,7 @@
 #include <stdint.h>  // for uint32_t
 
 namespace dbus {
+const char kDBusInterface[] = "org.freedesktop.DBus";
 const char kDBusServiceName[] = "org.freedesktop.DBus";
 const char kDBusServicePath[] = "/org/freedesktop/DBus";
 
@@ -123,6 +124,7 @@ const char kCryptohomeTpmAttestationSetKeyPayload[] =
     "TpmAttestationSetKeyPayload";
 const char kCryptohomeTpmAttestationDeleteKeys[] =
     "TpmAttestationDeleteKeys";
+const char kCryptohomeGetKeyDataEx[] = "GetKeyDataEx";
 const char kCryptohomeCheckKeyEx[] = "CheckKeyEx";
 const char kCryptohomeMountEx[] = "MountEx";
 const char kCryptohomeAddKeyEx[] = "AddKeyEx";
@@ -260,6 +262,9 @@ const char kSetPolicyMethod[] = "SetPolicy";
 const char kRegisterSuspendDelayMethod[] = "RegisterSuspendDelay";
 const char kUnregisterSuspendDelayMethod[] = "UnregisterSuspendDelay";
 const char kHandleSuspendReadinessMethod[] = "HandleSuspendReadiness";
+const char kRegisterDarkSuspendDelayMethod[] = "RegisterDarkSuspendDelay";
+const char kUnregisterDarkSuspendDelayMethod[] = "UnregisterDarkSuspendDelay";
+const char kHandleDarkSuspendReadinessMethod[] = "HandleDarkSuspendReadiness";
 const char kHandlePowerButtonAcknowledgmentMethod[] =
     "HandlePowerButtonAcknowledgment";
 // Signals emitted by powerd.
@@ -268,6 +273,7 @@ const char kKeyboardBrightnessChangedSignal[] = "KeyboardBrightnessChanged";
 const char kPeripheralBatteryStatusSignal[] = "PeripheralBatteryStatus";
 const char kPowerSupplyPollSignal[] = "PowerSupplyPoll";
 const char kSuspendImminentSignal[] = "SuspendImminent";
+const char kDarkSuspendImminentSignal[] = "DarkSuspendImminent";
 const char kSuspendDoneSignal[] = "SuspendDone";
 const char kInputEventSignal[] = "InputEvent";
 const char kIdleActionImminentSignal[] = "IdleActionImminent";
@@ -379,6 +385,13 @@ const char kUIDataProperty[] = "UIData";
 const char kConnectionIdProperty[] = "ConnectionId";
 const char kVisibleProperty[] = "Visible";
 const char kDnsAutoFallbackProperty[] = "DNSAutoFallback";
+const char kPortalDetectionFailedPhaseProperty[] =
+    "PortalDetectionFailedPhase";
+const char kPortalDetectionFailedStatusProperty[] =
+    "PortalDetectionFailedStatus";
+const char kSavedIPConfigProperty[] = "SavedIPConfig";
+const char kStaticIPConfigProperty[] = "StaticIPConfig";
+const char kLinkMonitorDisableProperty[] = "LinkMonitorDisable";
 
 // Flimflam provider property names.
 const char kProviderHostProperty[] = "Provider.Host";
@@ -421,8 +434,6 @@ const char kRoamingStateProperty[] = "Cellular.RoamingState";
 const char kOperatorNameProperty[] = "Cellular.OperatorName";
 const char kOperatorCodeProperty[] = "Cellular.OperatorCode";
 const char kServingOperatorProperty[] = "Cellular.ServingOperator";
-// DEPRECATED
-const char kPaymentURLProperty[] = "Cellular.OlpUrl";
 const char kPaymentPortalProperty[] = "Cellular.Olp";
 const char kUsageURLProperty[] = "Cellular.UsageUrl";
 const char kCellularApnProperty[] = "Cellular.APN";
@@ -496,6 +507,16 @@ const char kStateOnline[] = "online";
 const char kStateDisconnect[] = "disconnect";
 const char kStateFailure[] = "failure";
 const char kStateActivationFailure[] = "activation-failure";
+
+// Flimflam portal phase and status.
+const char kPortalDetectionPhaseConnection[] = "Connection";
+const char kPortalDetectionPhaseDns[] = "DNS";
+const char kPortalDetectionPhaseHttp[] = "HTTP";
+const char kPortalDetectionPhaseContent[] = "Content";
+const char kPortalDetectionPhaseUnknown[] = "Unknown";
+const char kPortalDetectionStatusFailure[] = "Failure";
+const char kPortalDetectionStatusTimeout[] = "Timeout";
+const char kPortalDetectionStatusSuccess[] = "Success";
 
 // Flimflam property names for SIMLock status.
 const char kSIMLockStatusProperty[] = "Cellular.SIMLockStatus";
@@ -748,6 +769,12 @@ const char kClearPropertiesFunction[] = "ClearProperties";
 const char kCompleteCellularActivationFunction[] = "CompleteCellularActivation";
 const char kConfigureServiceForProfileFunction[] = "ConfigureServiceForProfile";
 const char kConnectToBestServicesFunction[] = "ConnectToBestServices";
+const char kCreateConnectivityReportFunction[] = "CreateConnectivityReport";
+const char kAddWakeOnPacketConnectionFunction[] = "AddWakeOnPacketConnection";
+const char kRemoveWakeOnPacketConnectionFunction[] =
+    "RemoveWakeOnPacketConnection";
+const char kRemoveAllWakeOnPacketConnectionsFunction[] =
+    "RemoveAllWakeOnPacketConnections";
 const char kGetLoadableProfileEntriesFunction[] = "GetLoadableProfileEntries";
 const char kGetNetworksForGeolocation[] = "GetNetworksForGeolocation";
 const char kPerformTDLSOperationFunction[] = "PerformTDLSOperation";
@@ -791,15 +818,15 @@ const char kHostNameProperty[] = "HostName";
 const char kIgnoredDNSSearchPathsProperty[] = "IgnoredDNSSearchPaths";
 const char kLinkMonitorTechnologiesProperty[] =
     "LinkMonitorTechnologies";
+const char kNoAutoConnectTechnologiesProperty[] = "NoAutoConnectTechnologies";
 const char kPortalCheckIntervalProperty[] = "PortalCheckInterval";
 const char kServiceCompleteListProperty[] = "ServiceCompleteList";
 const char kShortDNSTimeoutTechnologiesProperty[] =
     "ShortDNSTimeoutTechnologies";
 const char kUninitializedTechnologiesProperty[] = "UninitializedTechnologies";
+const char kWakeOnLanEnabledProperty[] = "WakeOnLanEnabled";
 
 // Service property names.
-const char kActivateOverNonCellularNetworkProperty[] =
-    "Cellular.ActivateOverNonCellularNetwork";
 const char kActivationTypeProperty[] = "Cellular.ActivationType";
 const char kDiagnosticsDisconnectsProperty[] = "Diagnostics.Disconnects";
 const char kDiagnosticsMisconnectsProperty[] = "Diagnostics.Misconnects";
@@ -1592,10 +1619,6 @@ const char kCloseStorage[] = "CloseStorage";
 const char kReadDirectoryEntryIds[] = "ReadDirectoryEntryIds";
 const char kGetFileInfo[] = "GetFileInfo";
 const char kReadFileChunk[] = "ReadFileChunk";
-// TODO(thestig): Remove these 3 deprecated methods.
-const char kReadDirectoryById[] = "ReadDirectoryById";
-const char kReadFileChunkById[] = "ReadFileChunkById";
-const char kGetFileInfoById[] = "GetFileInfoById";
 
 // Signals.
 const char kMTPStorageAttached[] = "MTPStorageAttached";

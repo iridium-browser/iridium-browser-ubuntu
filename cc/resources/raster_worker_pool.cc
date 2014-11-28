@@ -6,27 +6,14 @@
 
 #include <algorithm>
 
-#include "base/atomic_sequence_num.h"
-#include "base/debug/trace_event_synthetic_delay.h"
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/simple_thread.h"
-#include "base/threading/thread_local.h"
 #include "cc/base/scoped_ptr_deque.h"
 
 namespace cc {
 namespace {
-
-// Synthetic delay for raster tasks that are required for activation. Global to
-// avoid static initializer on critical path.
-struct RasterRequiredForActivationSyntheticDelayInitializer {
-  RasterRequiredForActivationSyntheticDelayInitializer()
-      : delay(base::debug::TraceEventSyntheticDelay::Lookup(
-            "cc.RasterRequiredForActivation")) {}
-  base::debug::TraceEventSyntheticDelay* delay;
-};
-static base::LazyInstance<RasterRequiredForActivationSyntheticDelayInitializer>
-    g_raster_required_for_activation_delay = LAZY_INSTANCE_INITIALIZER;
 
 class RasterTaskGraphRunner : public TaskGraphRunner,
                               public base::DelegateSimpleThread::Delegate {
@@ -50,34 +37,13 @@ class RasterTaskGraphRunner : public TaskGraphRunner,
 
   virtual ~RasterTaskGraphRunner() { NOTREACHED(); }
 
-  size_t GetPictureCloneIndexForCurrentThread() {
-    // Use index 0 if called on non-raster thread.
-    ThreadLocalState* thread_local_state = current_tls_.Get();
-    return thread_local_state ? current_tls_.Get()->picture_clone_index : 0;
-  }
-
  private:
-  struct ThreadLocalState {
-    explicit ThreadLocalState(size_t picture_clone_index)
-        : picture_clone_index(picture_clone_index) {}
-
-    size_t picture_clone_index;
-  };
-
   // Overridden from base::DelegateSimpleThread::Delegate:
   virtual void Run() OVERRIDE {
-    // Use picture clone index 0..num_threads.
-    int picture_clone_index = picture_clone_index_sequence_.GetNext();
-    DCHECK_LE(0, picture_clone_index);
-    DCHECK_GT(RasterWorkerPool::GetNumRasterThreads(), picture_clone_index);
-    current_tls_.Set(new ThreadLocalState(picture_clone_index));
-
     TaskGraphRunner::Run();
   }
 
   ScopedPtrDeque<base::DelegateSimpleThread> workers_;
-  base::AtomicSequenceNumber picture_clone_index_sequence_;
-  base::ThreadLocalPointer<ThreadLocalState> current_tls_;
 };
 
 base::LazyInstance<RasterTaskGraphRunner>::Leaky g_task_graph_runner =
@@ -120,57 +86,15 @@ class RasterFinishedTaskImpl : public RasterizerTask {
   DISALLOW_COPY_AND_ASSIGN(RasterFinishedTaskImpl);
 };
 
-class RasterRequiredForActivationFinishedTaskImpl
-    : public RasterFinishedTaskImpl {
- public:
-  RasterRequiredForActivationFinishedTaskImpl(
-      base::SequencedTaskRunner* task_runner,
-      const base::Closure& on_raster_finished_callback,
-      size_t tasks_required_for_activation_count)
-      : RasterFinishedTaskImpl(task_runner, on_raster_finished_callback),
-        tasks_required_for_activation_count_(
-            tasks_required_for_activation_count) {
-    if (tasks_required_for_activation_count_) {
-      g_raster_required_for_activation_delay.Get().delay->BeginParallel(
-          &activation_delay_end_time_);
-    }
-  }
-
-  // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {
-    TRACE_EVENT0(
-        "cc", "RasterRequiredForActivationFinishedTaskImpl::RunOnWorkerThread");
-
-    if (tasks_required_for_activation_count_) {
-      g_raster_required_for_activation_delay.Get().delay->EndParallel(
-          activation_delay_end_time_);
-    }
-    RasterFinished();
-  }
-
- private:
-  virtual ~RasterRequiredForActivationFinishedTaskImpl() {}
-
-  base::TimeTicks activation_delay_end_time_;
-  const size_t tasks_required_for_activation_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(RasterRequiredForActivationFinishedTaskImpl);
-};
-
 }  // namespace
 
-// This allows an external rasterize on-demand system to run raster tasks
-// with highest priority using the same task graph runner instance.
-unsigned RasterWorkerPool::kOnDemandRasterTaskPriority = 0u;
 // This allows a micro benchmark system to run tasks with highest priority,
 // since it should finish as quickly as possible.
 unsigned RasterWorkerPool::kBenchmarkRasterTaskPriority = 0u;
 // Task priorities that make sure raster finished tasks run before any
 // remaining raster tasks.
-unsigned RasterWorkerPool::kRasterFinishedTaskPriority = 2u;
-unsigned RasterWorkerPool::kRasterRequiredForActivationFinishedTaskPriority =
-    1u;
-unsigned RasterWorkerPool::kRasterTaskPriorityBase = 3u;
+unsigned RasterWorkerPool::kRasterFinishedTaskPriority = 1u;
+unsigned RasterWorkerPool::kRasterTaskPriorityBase = 2u;
 
 RasterWorkerPool::RasterWorkerPool() {}
 
@@ -198,28 +122,11 @@ TaskGraphRunner* RasterWorkerPool::GetTaskGraphRunner() {
 }
 
 // static
-size_t RasterWorkerPool::GetPictureCloneIndexForCurrentThread() {
-  return g_task_graph_runner.Pointer()->GetPictureCloneIndexForCurrentThread();
-}
-
-// static
 scoped_refptr<RasterizerTask> RasterWorkerPool::CreateRasterFinishedTask(
     base::SequencedTaskRunner* task_runner,
     const base::Closure& on_raster_finished_callback) {
   return make_scoped_refptr(
       new RasterFinishedTaskImpl(task_runner, on_raster_finished_callback));
-}
-
-// static
-scoped_refptr<RasterizerTask>
-RasterWorkerPool::CreateRasterRequiredForActivationFinishedTask(
-    size_t tasks_required_for_activation_count,
-    base::SequencedTaskRunner* task_runner,
-    const base::Closure& on_raster_finished_callback) {
-  return make_scoped_refptr(new RasterRequiredForActivationFinishedTaskImpl(
-      task_runner,
-      on_raster_finished_callback,
-      tasks_required_for_activation_count));
 }
 
 // static
@@ -285,6 +192,53 @@ void RasterWorkerPool::InsertNodesForRasterTask(
   }
 
   InsertNodeForTask(graph, raster_task, priority, dependencies);
+}
+
+// static
+void RasterWorkerPool::AcquireBitmapForBuffer(SkBitmap* bitmap,
+                                              uint8_t* buffer,
+                                              ResourceFormat buffer_format,
+                                              const gfx::Size& size,
+                                              int stride) {
+  switch (buffer_format) {
+    case RGBA_4444:
+      bitmap->allocN32Pixels(size.width(), size.height());
+      break;
+    case RGBA_8888:
+    case BGRA_8888: {
+      SkImageInfo info =
+          SkImageInfo::MakeN32Premul(size.width(), size.height());
+      if (!stride)
+        stride = info.minRowBytes();
+      bitmap->installPixels(info, buffer, stride);
+      break;
+    }
+    case ALPHA_8:
+    case LUMINANCE_8:
+    case RGB_565:
+    case ETC1:
+      NOTREACHED();
+      break;
+  }
+}
+
+// static
+void RasterWorkerPool::ReleaseBitmapForBuffer(SkBitmap* bitmap,
+                                              uint8_t* buffer,
+                                              ResourceFormat buffer_format) {
+  SkColorType buffer_color_type = ResourceFormatToSkColorType(buffer_format);
+  if (buffer_color_type != bitmap->colorType()) {
+    SkImageInfo dst_info = bitmap->info();
+    dst_info.fColorType = buffer_color_type;
+    // TODO(kaanb): The GL pipeline assumes a 4-byte alignment for the
+    // bitmap data. There will be no need to call SkAlign4 once crbug.com/293728
+    // is fixed.
+    const size_t dst_row_bytes = SkAlign4(dst_info.minRowBytes());
+    DCHECK_EQ(0u, dst_row_bytes % 4);
+    bool success = bitmap->readPixels(dst_info, buffer, dst_row_bytes, 0, 0);
+    DCHECK_EQ(true, success);
+  }
+  bitmap->reset();
 }
 
 }  // namespace cc

@@ -232,10 +232,12 @@ HttpFsNode::HttpFsNode(Filesystem* filesystem,
       buffer_len_(0),
       cache_content_(cache_content),
       has_cached_size_(false) {
+  // http nodes are read-only by default
+  SetMode(S_IRALL);
 }
 
-void HttpFsNode::SetMode(int mode) {
-  stat_.st_mode = mode;
+HttpFsNode::~HttpFsNode() {
+  free(buffer_);
 }
 
 Error HttpFsNode::GetStat_Locked(struct stat* stat) {
@@ -297,7 +299,7 @@ Error HttpFsNode::GetStat_Locked(struct stat* stat) {
     stat_.st_mtime = 0;
     stat_.st_ctime = 0;
 
-    stat_.st_mode |= S_IFREG;
+    SetType(S_IFREG);
   }
 
   // Fill the stat structure if provided

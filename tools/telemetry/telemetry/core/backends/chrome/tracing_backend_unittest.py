@@ -7,7 +7,10 @@ import json
 import logging
 import unittest
 
+from telemetry import benchmark
 from telemetry.core import util
+from telemetry.core.platform import tracing_category_filter
+from telemetry.core.platform import tracing_options
 from telemetry.timeline import model
 from telemetry.timeline import tracing_timeline_data
 from telemetry.unittest import tab_test_case
@@ -23,16 +26,20 @@ class TracingBackendTest(tab_test_case.TabTestCase):
       return bool(self._tab.EvaluateJavaScript(js_is_done))
     util.WaitFor(_IsDone, 5)
 
+  @benchmark.Disabled('chromeos') # crbug.com/412713.
   def testGotTrace(self):
-    if not self._browser.supports_tracing:
+    tracing_controller = self._browser.platform.tracing_controller
+    if not tracing_controller.IsChromeTracingSupported(self._browser):
       logging.warning('Browser does not support tracing, skipping test.')
       return
     self._StartServer()
-    self._browser.StartTracing()
-    self._browser.StopTracing()
-
-    # TODO(tengs): check model for correctness after trace_event_importer
-    # is implemented (crbug.com/173327).
+    options = tracing_options.TracingOptions()
+    options.enable_chrome_trace = True
+    tracing_controller.Start(
+      options, tracing_category_filter.TracingCategoryFilter())
+    trace_data = tracing_controller.Stop()
+    # Test that trace data is parsable
+    model.TimelineModel(trace_data)
 
 
 class ChromeTraceResultTest(unittest.TestCase):

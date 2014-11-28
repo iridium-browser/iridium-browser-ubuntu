@@ -38,7 +38,7 @@
 
 namespace blink {
 
-class DatabaseBackendBase;
+class Database;
 class DatabaseContext;
 class OriginLock;
 class SecurityOrigin;
@@ -57,26 +57,25 @@ public:
     bool canEstablishDatabase(DatabaseContext*, const String& name, const String& displayName, unsigned long estimatedSize, DatabaseError&);
     String fullPathForDatabase(SecurityOrigin*, const String& name, bool createIfDoesNotExist = true);
 
-    void addOpenDatabase(DatabaseBackendBase*);
-    void removeOpenDatabase(DatabaseBackendBase*);
+    void addOpenDatabase(Database*);
+    void removeOpenDatabase(Database*);
 
-    unsigned long long getMaxSizeForDatabase(const DatabaseBackendBase*);
+    unsigned long long getMaxSizeForDatabase(const Database*);
 
-    void interruptAllDatabasesForContext(const DatabaseContext*);
     void closeDatabasesImmediately(const String& originIdentifier, const String& name);
 
-    void prepareToOpenDatabase(DatabaseBackendBase*);
-    void failedToOpenDatabase(DatabaseBackendBase*);
+    void prepareToOpenDatabase(Database*);
+    void failedToOpenDatabase(Database*);
 
 private:
-    typedef HashSet<DatabaseBackendBase*> DatabaseSet;
+    typedef HashSet<Database*> DatabaseSet;
     typedef HashMap<String, DatabaseSet*> DatabaseNameMap;
     typedef HashMap<String, DatabaseNameMap*> DatabaseOriginMap;
     class CloseOneDatabaseImmediatelyTask;
 
     DatabaseTracker();
 
-    void closeOneDatabaseImmediately(const String& originIdentifier, const String& name, DatabaseBackendBase*);
+    void closeOneDatabaseImmediately(const String& originIdentifier, const String& name, Database*);
 
     Mutex m_openDatabaseMapGuard;
     mutable OwnPtr<DatabaseOriginMap> m_openDatabaseMap;

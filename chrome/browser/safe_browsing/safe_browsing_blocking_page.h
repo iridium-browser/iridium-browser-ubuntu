@@ -125,24 +125,30 @@ class SafeBrowsingBlockingPage : public content::InterstitialPageDelegate {
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingBlockingPageTest,
       MalwareReportsToggling);
 
-  enum BlockingPageEvent {
+  // These enums are used for histograms.  Don't reorder, delete, or insert
+  // elements.  New elements should be added before MAX_ACTION only.
+  enum Decision {
     SHOW,
     PROCEED,
     DONT_PROCEED,
+    PROCEEDING_DISABLED,
+    MAX_DECISION
+  };
+  enum Interaction {
+    TOTAL_VISITS,
     SHOW_ADVANCED,
+    SHOW_PRIVACY_POLICY,
+    SHOW_DIAGNOSTIC,
+    SHOW_LEARN_MORE,
+    MAX_INTERACTION
   };
 
-  // Records a user action for this interstitial, using the form
-  // SBInterstitial[Phishing|Malware|Multiple][Show|Proceed|DontProceed].
-  void RecordUserAction(BlockingPageEvent event);
+  // Record a user decision or interaction to the appropriate UMA histogram.
+  void RecordUserDecision(Decision decision);
+  void RecordUserInteraction(Interaction interaction);
 
   // Used to query the HistoryService to see if the URL is in history. For UMA.
   void OnGotHistoryCount(bool success, int num_visits, base::Time first_visit);
-
-  // Records the time it took for the user to react to the
-  // interstitial.  We won't double-count if this method is called
-  // multiple times.
-  void RecordUserReactionTime(const std::string& command);
 
   // Checks if we should even show the malware details option. For example, we
   // don't show it in incognito mode.
@@ -204,27 +210,14 @@ class SafeBrowsingBlockingPage : public content::InterstitialPageDelegate {
   GURL url_;
   content::InterstitialPage* interstitial_page_;  // Owns us
 
-  // Time when the interstitial was show.  This variable is set in
-  // GetHTMLContents() which is called right before the interstitial
-  // is shown to the user. Will return is_null() once we reported the
-  // user action.
-  base::TimeTicks interstitial_show_time_;
-
-  // Whether the user has expanded the "see more" section of the page already
-  // during this interstitial page.
-  bool has_expanded_see_more_section_;
-
-  // Whether the user has left the reporting checkbox checked.
-  bool reporting_checkbox_checked_;
-
   // Whether the interstitial should create a view.
   bool create_view_;
 
   // Which type of interstitial this is.
   enum {
     TYPE_MALWARE,
+    TYPE_HARMFUL,
     TYPE_PHISHING,
-    TYPE_MALWARE_AND_PHISHING,
   } interstitial_type_;
 
   // The factory used to instantiate SafeBrowsingBlockingPage objects.
@@ -240,6 +233,7 @@ class SafeBrowsingBlockingPage : public content::InterstitialPageDelegate {
   // Fills the passed dictionary with the values to be passed to the template
   // when creating the HTML.
   void PopulateMalwareLoadTimeData(base::DictionaryValue* load_time_data);
+  void PopulateHarmfulLoadTimeData(base::DictionaryValue* load_time_data);
   void PopulatePhishingLoadTimeData(base::DictionaryValue* load_time_data);
 
 #if defined(ENABLE_EXTENSIONS)

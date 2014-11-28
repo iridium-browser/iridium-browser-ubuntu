@@ -172,6 +172,14 @@ TestPostMessage::~TestPostMessage() {
 bool TestPostMessage::Init() {
   bool success = CheckTestingInterface();
 
+  // Add a post condition to tests which caches the postMessage function and
+  // then calls it after the instance is destroyed. The ensures that no UAF
+  // occurs because the MessageChannel may still be alive after the plugin
+  // instance is destroyed (it will get garbage collected eventually).
+  instance_->EvalScript("window.pluginPostMessage = "
+                        "document.getElementById('plugin').postMessage");
+  instance_->AddPostCondition("window.pluginPostMessage('') === undefined");
+
   // Set up a special listener that only responds to a FINISHED_WAITING string.
   // This is for use by WaitForMessages.
   std::string js_code;
@@ -861,7 +869,7 @@ std::string TestPostMessage::TestNonMainThread() {
   // times.  For good measure, call postMessage from the main thread
   // kMessagesToSendPerThread times. At the end, we make sure we got all the
   // values we expected.
-  PP_ThreadType threads[kThreadsToRun];
+  PP_Thread threads[kThreadsToRun];
   for (int32_t i = 0; i < kThreadsToRun; ++i) {
     // Set up a thread to send a value of i.
     void* arg = new InvokePostMessageThreadArg(instance_, pp::Var(i));

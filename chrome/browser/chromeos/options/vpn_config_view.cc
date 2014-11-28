@@ -13,10 +13,7 @@
 #include "chrome/browser/chromeos/net/onc_utils.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/net/x509_certificate_model.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
-#include "chrome/grit/theme_resources.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_event_log.h"
@@ -457,8 +454,8 @@ void VPNConfigView::SetUserCertProperties(
     base::DictionaryValue* properties) const {
   if (!HaveUserCerts()) {
     // No certificate selected or not required.
-    chromeos::client_cert::SetEmptyShillProperties(
-        chromeos::client_cert::CONFIG_TYPE_EAP, properties);
+    chromeos::client_cert::SetEmptyShillProperties(client_cert_type,
+                                                   properties);
   } else {
     // Certificates are listed in the order they appear in the model.
     int index = user_cert_combobox_ ? user_cert_combobox_->selected_index() : 0;
@@ -837,12 +834,13 @@ void VPNConfigView::SetConfigProperties(
       break;
     }
     case PROVIDER_TYPE_INDEX_L2TP_IPSEC_USER_CERT: {
-      std::string ca_cert_pem = GetServerCACertPEM();
-      if (!ca_cert_pem.empty()) {
+      if (server_ca_cert_combobox_) {
+        std::string ca_cert_pem = GetServerCACertPEM();
         base::ListValue* pem_list = new base::ListValue;
-        pem_list->AppendString(ca_cert_pem);
-        properties->SetWithoutPathExpansion(
-            shill::kL2tpIpsecCaCertPemProperty, pem_list);
+        if (!ca_cert_pem.empty())
+          pem_list->AppendString(ca_cert_pem);
+        properties->SetWithoutPathExpansion(shill::kL2tpIpsecCaCertPemProperty,
+                                            pem_list);
       }
       SetUserCertProperties(client_cert::CONFIG_TYPE_IPSEC, properties);
       if (!group_name.empty()) {
@@ -860,12 +858,13 @@ void VPNConfigView::SetConfigProperties(
       break;
     }
     case PROVIDER_TYPE_INDEX_OPEN_VPN: {
-      std::string ca_cert_pem = GetServerCACertPEM();
-      if (!ca_cert_pem.empty()) {
+      if (server_ca_cert_combobox_) {
+        std::string ca_cert_pem = GetServerCACertPEM();
         base::ListValue* pem_list = new base::ListValue;
-        pem_list->AppendString(ca_cert_pem);
-        properties->SetWithoutPathExpansion(
-            shill::kOpenVPNCaCertPemProperty, pem_list);
+        if (!ca_cert_pem.empty())
+          pem_list->AppendString(ca_cert_pem);
+        properties->SetWithoutPathExpansion(shill::kOpenVPNCaCertPemProperty,
+                                            pem_list);
       }
       SetUserCertProperties(client_cert::CONFIG_TYPE_OPENVPN, properties);
       properties->SetStringWithoutPathExpansion(

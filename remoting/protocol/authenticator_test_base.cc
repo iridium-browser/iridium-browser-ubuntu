@@ -5,18 +5,19 @@
 #include "remoting/protocol/authenticator_test_base.h"
 
 #include "base/base64.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/timer/timer.h"
+#include "net/base/net_errors.h"
 #include "net/base/test_data_directory.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/channel_authenticator.h"
-#include "remoting/protocol/fake_session.h"
+#include "remoting/protocol/fake_stream_socket.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
 
 using testing::_;
 using testing::SaveArg;
@@ -110,8 +111,8 @@ void AuthenticatorTestBase::ContinueAuthExchangeWith(Authenticator* sender,
 }
 
 void AuthenticatorTestBase::RunChannelAuth(bool expected_fail) {
-  client_fake_socket_.reset(new FakeSocket());
-  host_fake_socket_.reset(new FakeSocket());
+  client_fake_socket_.reset(new FakeStreamSocket());
+  host_fake_socket_.reset(new FakeStreamSocket());
   client_fake_socket_->PairWith(host_fake_socket_.get());
 
   client_auth_->SecureAndAuthenticate(
@@ -157,14 +158,14 @@ void AuthenticatorTestBase::RunChannelAuth(bool expected_fail) {
 }
 
 void AuthenticatorTestBase::OnHostConnected(
-    net::Error error,
+    int error,
     scoped_ptr<net::StreamSocket> socket) {
   host_callback_.OnDone(error);
   host_socket_ = socket.Pass();
 }
 
 void AuthenticatorTestBase::OnClientConnected(
-    net::Error error,
+    int error,
     scoped_ptr<net::StreamSocket> socket) {
   client_callback_.OnDone(error);
   client_socket_ = socket.Pass();

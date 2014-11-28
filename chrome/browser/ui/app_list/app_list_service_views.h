@@ -40,8 +40,11 @@ class AppListServiceViews : public AppListServiceImpl,
   virtual Profile* GetCurrentAppListProfile() OVERRIDE;
   virtual AppListControllerDelegate* GetControllerDelegate() OVERRIDE;
 
+  // AppListServiceImpl overrides:
+  virtual void DestroyAppList() OVERRIDE;
+
   // AppListShowerDelegate overrides:
-  virtual AppListControllerDelegate* GetControllerDelegateForCreate() OVERRIDE;
+  virtual AppListViewDelegate* GetViewDelegateForCreate() OVERRIDE;
 
  private:
   // Responsible for creating the app list and responding to profile changes.

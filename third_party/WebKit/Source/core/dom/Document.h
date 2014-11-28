@@ -71,7 +71,6 @@ class CanvasRenderingContext2D;
 class Chrome;
 class Comment;
 class ConsoleMessage;
-class ContentSecurityPolicyResponseHeaders;
 class ContextFeatures;
 class CustomElementMicrotaskRunQueue;
 class CustomElementRegistrationContext;
@@ -80,6 +79,7 @@ class DocumentFragment;
 class DocumentLifecycleNotifier;
 class DocumentLoader;
 class DocumentMarkerController;
+class DocumentNameCollection;
 class DocumentParser;
 class DocumentState;
 class DocumentType;
@@ -213,8 +213,9 @@ private:
     RawPtrWillBeMember<Document> m_document;
 };
 
-class Document : public ContainerNode, public TreeScope, public SecurityContext, public ExecutionContext, public ExecutionContextClient
+class Document : public ContainerNode, public TreeScope, public SecurityContext, public ExecutionContext
     , public DocumentSupplementable, public LifecycleContext<Document> {
+    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Document);
 public:
     static PassRefPtrWillBeRawPtr<Document> create(const DocumentInit& initializer = DocumentInit())
@@ -233,7 +234,6 @@ public:
 #endif
     using SecurityContext::securityOrigin;
     using SecurityContext::contentSecurityPolicy;
-    using ExecutionContextClient::addConsoleMessage;
     using TreeScope::getElementById;
 
     virtual bool canContainRangeEndPoint() const OVERRIDE { return true; }
@@ -363,7 +363,7 @@ public:
     PassRefPtrWillBeRawPtr<HTMLAllCollection> all();
 
     PassRefPtrWillBeRawPtr<HTMLCollection> windowNamedItems(const AtomicString& name);
-    PassRefPtrWillBeRawPtr<HTMLCollection> documentNamedItems(const AtomicString& name);
+    PassRefPtrWillBeRawPtr<DocumentNameCollection> documentNamedItems(const AtomicString& name);
 
     bool isHTMLDocument() const { return m_documentClasses & HTMLDocumentClass; }
     bool isXHTMLDocument() const { return m_documentClasses & XHTMLDocumentClass; }
@@ -487,6 +487,7 @@ public:
 
     RenderView* renderView() const { return m_renderView; }
 
+    Document& axObjectCacheOwner() const;
     AXObjectCache* existingAXObjectCache() const;
     AXObjectCache* axObjectCache() const;
     void clearAXObjectCache();
@@ -709,6 +710,10 @@ public:
     // Returns 0 if this is the top level document.
     HTMLFrameOwnerElement* ownerElement() const;
 
+    // Returns true if this document belongs to a frame that the parent document
+    // made invisible (for instance by setting as style display:none).
+    bool isInInvisibleSubframe() const;
+
     String title() const { return m_title; }
     void setTitle(const String&);
 
@@ -874,7 +879,7 @@ public:
 
     void initSecurityContext();
     void initSecurityContext(const DocumentInit&);
-    void initContentSecurityPolicy(const ContentSecurityPolicyResponseHeaders&);
+    void initContentSecurityPolicy(PassRefPtr<ContentSecurityPolicy> = nullptr);
 
     bool allowInlineEventHandlers(Node*, EventListener*, const String& contextURL, const WTF::OrdinalNumber& contextLine);
     bool allowExecutingScripts(Node*);
@@ -883,7 +888,6 @@ public:
 
     enum LoadEventProgress {
         LoadEventNotRun,
-        LoadEventTried,
         LoadEventInProgress,
         LoadEventCompleted,
         BeforeUnloadEventInProgress,
@@ -909,10 +913,12 @@ public:
     void enqueueResizeEvent();
     void enqueueScrollEventForNode(Node*);
     void enqueueAnimationFrameEvent(PassRefPtrWillBeRawPtr<Event>);
+    // Only one event for a target/event type combination will be dispatched per frame.
+    void enqueueUniqueAnimationFrameEvent(PassRefPtrWillBeRawPtr<Event>);
     void enqueueMediaQueryChangeListeners(WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener> >&);
 
-    bool hasFullscreenElementStack() const { return m_hasFullscreenElementStack; }
-    void setHasFullscreenElementStack() { m_hasFullscreenElementStack = true; }
+    bool hasFullscreenSupplement() const { return m_hasFullscreenSupplement; }
+    void setHasFullscreenSupplement() { m_hasFullscreenSupplement = true; }
 
     void exitPointerLock();
     Element* pointerLockElement() const;
@@ -929,12 +935,12 @@ public:
 
     const DocumentTiming& timing() const { return m_documentTiming; }
 
-    int requestAnimationFrame(PassOwnPtr<RequestAnimationFrameCallback>);
+    int requestAnimationFrame(RequestAnimationFrameCallback*);
     void cancelAnimationFrame(int id);
     void serviceScriptedAnimations(double monotonicAnimationStartTime);
 
     virtual EventTarget* errorEventTarget() OVERRIDE FINAL;
-    virtual void logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE FINAL;
+    virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE FINAL;
 
     void initDNSPrefetch();
 
@@ -996,7 +1002,7 @@ public:
 
     void didAssociateFormControl(Element*);
 
-    virtual void addMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE FINAL;
+    virtual void addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE FINAL;
 
     virtual LocalDOMWindow* executingWindow() OVERRIDE FINAL;
     LocalFrame* executingFrame();
@@ -1031,6 +1037,9 @@ public:
     void didRecalculateStyleForElement() { ++m_styleRecalcElementCounter; }
 
     AtomicString convertLocalName(const AtomicString&);
+
+    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) OVERRIDE;
+    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) OVERRIDE;
 
 protected:
     Document(const DocumentInit&, DocumentClassFlags = DefaultDocumentClass);
@@ -1152,7 +1161,7 @@ private:
     // do eventually load.
     PendingSheetLayout m_pendingSheetLayout;
 
-    LocalFrame* m_frame;
+    RawPtrWillBeMember<LocalFrame> m_frame;
     RawPtrWillBeMember<LocalDOMWindow> m_domWindow;
     // FIXME: oilpan: when we get rid of the transition types change the
     // HTMLImportsController to not be a DocumentSupplement since it is
@@ -1304,7 +1313,7 @@ private:
 #endif
     WeakPtrWillBeWeakMember<Document> m_contextDocument;
 
-    bool m_hasFullscreenElementStack; // For early return in FullscreenElementStack::fromIfExists()
+    bool m_hasFullscreenSupplement; // For early return in Fullscreen::fromIfExists()
 
     WillBeHeapVector<RefPtrWillBeMember<Element> > m_topLayerElements;
 
@@ -1382,7 +1391,6 @@ inline void Document::scheduleRenderTreeUpdateIfNeeded()
         scheduleRenderTreeUpdate();
 }
 
-DEFINE_TYPE_CASTS(Document, ExecutionContextClient, client, client->isDocument(), client.isDocument());
 DEFINE_TYPE_CASTS(Document, ExecutionContext, context, context->isDocument(), context.isDocument());
 DEFINE_NODE_TYPE_CASTS(Document, isDocumentNode());
 

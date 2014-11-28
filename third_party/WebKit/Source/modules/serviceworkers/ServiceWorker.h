@@ -46,12 +46,9 @@ namespace blink {
 class ScriptState;
 class ScriptPromiseResolver;
 
-class ServiceWorker
-    : public AbstractWorker
-    , public WebServiceWorkerProxy {
+class ServiceWorker FINAL : public AbstractWorker, public WebServiceWorkerProxy {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    virtual ~ServiceWorker() { }
-
     // For CallbackPromiseAdapter
     typedef WebServiceWorker WebType;
     static PassRefPtrWillBeRawPtr<ServiceWorker> take(ScriptPromiseResolver*, WebType* worker);
@@ -60,6 +57,7 @@ public:
     static void dispose(WebType*);
 
     void postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, ExceptionState&);
+    void terminate(ExceptionState&);
 
     String scriptURL() const;
     const AtomicString& state() const;
@@ -86,7 +84,7 @@ private:
     ServiceWorker(ExecutionContext*, PassOwnPtr<WebServiceWorker>);
     void setProxyState(ProxyState);
     void onPromiseResolved();
-    void waitOnPromise(ScriptPromise);
+    void waitOnPromise(ScriptPromiseResolver*);
 
     // ActiveDOMObject overrides.
     virtual bool hasPendingActivity() const OVERRIDE;

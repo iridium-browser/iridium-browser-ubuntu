@@ -11,6 +11,7 @@
 
 namespace base {
 class MessageLoopForUI;
+class Thread;
 }
 
 namespace ui {
@@ -52,8 +53,8 @@ class AthenaTestHelper {
   // Flushes message loop.
   void RunAllPendingInMessageLoop();
 
-  aura::Window* root_window() { return host_->window(); }
-  aura::WindowTreeHost* host() { return host_.get(); }
+  aura::Window* GetRootWindow();
+  aura::WindowTreeHost* GetHost();
 
  private:
   bool setup_called_;
@@ -61,11 +62,8 @@ class AthenaTestHelper {
 
   base::MessageLoopForUI* message_loop_;
 
-  scoped_ptr<aura::WindowTreeHost> host_;
-  scoped_ptr<aura::TestScreen> test_screen_;
-  scoped_ptr<aura::client::FocusClient> focus_client_;
-  scoped_ptr< ::wm::InputMethodEventFilter> input_method_filter_;
   scoped_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
+  scoped_ptr<base::Thread> file_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(AthenaTestHelper);
 };

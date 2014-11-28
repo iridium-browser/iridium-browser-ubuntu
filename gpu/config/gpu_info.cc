@@ -17,6 +17,19 @@ void EnumerateGPUDevice(gpu::GPUInfo::Enumerator* enumerator,
   enumerator->EndGPUDevice();
 }
 
+void EnumerateVideoEncodeAcceleratorSupportedProfile(
+    gpu::GPUInfo::Enumerator* enumerator,
+    const media::VideoEncodeAccelerator::SupportedProfile profile) {
+  enumerator->BeginVideoEncodeAcceleratorSupportedProfile();
+  enumerator->AddInt("profile", profile.profile);
+  enumerator->AddInt("maxResolutionWidth", profile.max_resolution.width());
+  enumerator->AddInt("maxResolutionHeight", profile.max_resolution.height());
+  enumerator->AddInt("maxFramerateNumerator", profile.max_framerate_numerator);
+  enumerator->AddInt("maxFramerateDenominator",
+                     profile.max_framerate_denominator);
+  enumerator->EndVideoEncodeAcceleratorSupportedProfile();
+}
+
 }  // namespace
 
 namespace gpu {
@@ -30,8 +43,7 @@ GPUInfo::GPUDevice::GPUDevice()
 GPUInfo::GPUDevice::~GPUDevice() { }
 
 GPUInfo::GPUInfo()
-    : finalized(false),
-      optimus(false),
+    : optimus(false),
       amd_switchable(false),
       lenovo_dcute(false),
       adapter_luid(0),
@@ -40,14 +52,20 @@ GPUInfo::GPUInfo()
       software_rendering(false),
       direct_rendering(true),
       sandboxed(false),
-      process_crash_count(0) {
+      process_crash_count(0),
+      basic_info_state(kCollectInfoNone),
+#if defined(OS_WIN)
+      context_info_state(kCollectInfoNone),
+      dx_diagnostics_info_state(kCollectInfoNone) {
+#else
+      context_info_state(kCollectInfoNone) {
+#endif
 }
 
 GPUInfo::~GPUInfo() { }
 
 void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
   struct GPUInfoKnownFields {
-    bool finalized;
     base::TimeDelta initialization_time;
     bool optimus;
     bool amd_switchable;
@@ -77,9 +95,14 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     bool direct_rendering;
     bool sandboxed;
     int process_crash_count;
+    CollectInfoResult basic_info_state;
+    CollectInfoResult context_info_state;
 #if defined(OS_WIN)
+    CollectInfoResult dx_diagnostics_info_state;
     DxDiagNode dx_diagnostics;
 #endif
+    std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+        video_encode_accelerator_supported_profiles;
   };
 
   // If this assert fails then most likely something below needs to be updated.
@@ -98,7 +121,6 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
   }
 
   enumerator->BeginAuxAttributes();
-  enumerator->AddBool("finalized", finalized);
   enumerator->AddTimeDeltaInSecondsF("initializationTime",
                                      initialization_time);
   enumerator->AddBool("optimus", optimus);
@@ -130,7 +152,17 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
   enumerator->AddBool("directRendering", direct_rendering);
   enumerator->AddBool("sandboxed", sandboxed);
   enumerator->AddInt("processCrashCount", process_crash_count);
+  enumerator->AddInt("basicInfoState", basic_info_state);
+  enumerator->AddInt("contextInfoState", context_info_state);
+#if defined(OS_WIN)
+  enumerator->AddInt("DxDiagnosticsInfoState", dx_diagnostics_info_state);
+#endif
   // TODO(kbr): add dx_diagnostics on Windows.
+  for (size_t ii = 0; ii < video_encode_accelerator_supported_profiles.size();
+       ++ii) {
+    EnumerateVideoEncodeAcceleratorSupportedProfile(
+        enumerator, video_encode_accelerator_supported_profiles[ii]);
+  }
   enumerator->EndAuxAttributes();
 }
 

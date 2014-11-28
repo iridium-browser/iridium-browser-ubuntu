@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/panels/native_panel.h"
@@ -33,6 +34,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/common/constants.h"
@@ -115,10 +117,11 @@ base::DictionaryValue* PanelExtensionWindowController::CreateTabValue(
   DCHECK(IsVisibleToExtension(extension));
   base::DictionaryValue* tab_value = new base::DictionaryValue();
   tab_value->SetInteger(extensions::tabs_constants::kIdKey,
-                        SessionID::IdForTab(web_contents));
+                        SessionTabHelper::IdForTab(web_contents));
   tab_value->SetInteger(extensions::tabs_constants::kIndexKey, 0);
-  tab_value->SetInteger(extensions::tabs_constants::kWindowIdKey,
-                        SessionID::IdForWindowContainingTab(web_contents));
+  tab_value->SetInteger(
+      extensions::tabs_constants::kWindowIdKey,
+      SessionTabHelper::IdForWindowContainingTab(web_contents));
   tab_value->SetString(
       extensions::tabs_constants::kUrlKey, web_contents->GetURL().spec());
   tab_value->SetString(extensions::tabs_constants::kStatusKey,
@@ -437,11 +440,6 @@ void Panel::Observe(int type,
     case content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED:
       ConfigureAutoResize(content::Source<content::WebContents>(source).ptr());
       break;
-    case extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
-      if (content::Details<extensions::UnloadedExtensionInfo>(
-              details)->extension->id() == extension_id())
-        Close();
-      break;
     case chrome::NOTIFICATION_APP_TERMINATING:
       Close();
       break;
@@ -450,6 +448,13 @@ void Panel::Observe(int type,
   }
 }
 
+void Panel::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UnloadedExtensionInfo::Reason reason) {
+  if (extension->id() == extension_id())
+    Close();
+}
 void Panel::OnTitlebarClicked(panel::ClickModifier modifier) {
   if (collection_)
     collection_->OnPanelTitlebarClicked(this, modifier);
@@ -489,6 +494,7 @@ void Panel::OnNativePanelClosed() {
   // Ensure previously enqueued OnImageLoaded callbacks are ignored.
   image_loader_ptr_factory_.InvalidateWeakPtrs();
   registrar_.RemoveAll();
+  extension_registry_->RemoveObserver(this);
   manager()->OnPanelClosed(this);
   DCHECK(!collection_);
 }
@@ -530,9 +536,7 @@ void Panel::Initialize(const GURL& url,
     native_panel_->AttachWebContents(web_contents);
 
   // Close when the extension is unloaded or the browser is exiting.
-  registrar_.Add(this,
-                 extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-                 content::Source<Profile>(profile_));
+  extension_registry_->AddObserver(this);
   registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
@@ -799,8 +803,10 @@ void Panel::MinimizeBySystem() {
   native_panel_->MinimizePanelBySystem();
 }
 
-Panel::Panel(Profile* profile, const std::string& app_name,
-             const gfx::Size& min_size, const gfx::Size& max_size)
+Panel::Panel(Profile* profile,
+             const std::string& app_name,
+             const gfx::Size& min_size,
+             const gfx::Size& max_size)
     : app_name_(app_name),
       profile_(profile),
       collection_(NULL),
@@ -814,6 +820,7 @@ Panel::Panel(Profile* profile, const std::string& app_name,
       attention_mode_(USE_PANEL_ATTENTION),
       expansion_state_(EXPANDED),
       command_updater_(this),
+      extension_registry_(extensions::ExtensionRegistry::Get(profile_)),
       image_loader_ptr_factory_(this) {
 }
 

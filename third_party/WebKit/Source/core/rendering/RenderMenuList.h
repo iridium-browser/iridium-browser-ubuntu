@@ -45,6 +45,7 @@ public:
     bool popupIsVisible() const { return m_popupIsVisible; }
     void showPopup();
     void hidePopup();
+    PopupMenu* popup() const { return m_popup.get(); }
 
     void setOptionsChanged(bool changed) { m_optionsChanged = changed; }
 
@@ -129,7 +130,7 @@ private:
 
     RefPtr<RenderStyle> m_optionStyle;
 
-    RefPtr<PopupMenu> m_popup;
+    RefPtrWillBeMember<PopupMenu> m_popup;
     bool m_popupIsVisible;
 };
 

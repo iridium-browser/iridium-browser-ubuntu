@@ -43,6 +43,7 @@
 #include "core/html/canvas/WebGLContextEvent.h"
 #include "core/html/canvas/WebGLRenderingContext.h"
 #include "core/rendering/RenderHTMLCanvas.h"
+#include "core/rendering/RenderLayer.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/Canvas2DImageBufferSurface.h"
@@ -85,7 +86,6 @@ inline HTMLCanvasElement::HTMLCanvasElement(Document& document)
     , m_didFailToCreateImageBuffer(false)
     , m_didClearImageBuffer(false)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(HTMLCanvasElement)
@@ -152,11 +152,10 @@ CanvasRenderingContext* HTMLCanvasElement::getContext(const String& type, Canvas
     // before creating a new 2D context. Vice versa when requesting a WebGL canvas. Requesting a
     // context with any other type string will destroy any existing context.
     enum ContextType {
-        Context2d,
-        ContextWebkit3d,
-        ContextExperimentalWebgl,
-        ContextWebgl,
-        // Only add new items to the end and keep the order of existing items.
+        // Do not change assigned numbers of existing items: add new features to the end of the list.
+        Context2d = 0,
+        ContextExperimentalWebgl = 2,
+        ContextWebgl = 3,
         ContextTypeCount,
     };
 
@@ -207,20 +206,15 @@ void HTMLCanvasElement::didFinalizeFrame()
     if (m_dirtyRect.isEmpty())
         return;
 
-    // Fix for crbug.com/417201 just for Chrome 38: invalidate the content layer
-    // if accelerated. This code (four lines below) should be removed from trunk
-    // after merging to the M-38 branch.
-    if (RenderBox* ro = renderBox()) {
-        if (ro->hasAcceleratedCompositing())
-            ro->contentChanged(CanvasChanged);
-    }
-
     // Propagate the m_dirtyRect accumulated so far to the compositor
     // before restarting with a blank dirty rect.
     FloatRect srcRect(0, 0, size().width(), size().height());
     m_dirtyRect.intersect(srcRect);
     if (RenderBox* ro = renderBox()) {
         FloatRect mappedDirtyRect = mapRect(m_dirtyRect, srcRect, ro->contentBoxRect());
+        // For querying RenderLayer::compositingState()
+        // FIXME: is this invalidation using the correct compositing state?
+        DisableCompositingQueryAsserts disabler;
         ro->invalidatePaintRectangle(enclosingIntRect(mappedDirtyRect));
     }
     notifyObserversCanvasChanged(m_dirtyRect);
@@ -312,7 +306,7 @@ void HTMLCanvasElement::reset()
                     renderBox()->contentChanged(CanvasChanged);
             }
             if (hadImageBuffer)
-                renderer->paintInvalidationForWholeRenderer();
+                renderer->setShouldDoFullPaintInvalidation(true);
         }
     }
 
@@ -483,8 +477,17 @@ PassOwnPtr<ImageBufferSurface> HTMLCanvasElement::createImageBufferSurface(const
     OpacityMode opacityMode = !m_context || m_context->hasAlpha() ? NonOpaque : Opaque;
 
     *msaaSampleCount = 0;
-    if (is3D())
+    if (is3D()) {
+        // If 3d, but the use of the canvas will be for non-accelerated content
+        // (such as -webkit-canvas, then then make a non-accelerated
+        // ImageBuffer. This means copying the internal Image will require a
+        // pixel readback, but that is unavoidable in this case.
+        // FIXME: Actually, avoid setting m_accelerationDisabled at all when
+        // doing GPU-based rasterization.
+        if (m_accelerationDisabled)
+            return adoptPtr(new UnacceleratedImageBufferSurface(size(), opacityMode));
         return adoptPtr(new WebGLImageBufferSurface(size(), opacityMode));
+    }
 
     if (RuntimeEnabledFeatures::displayList2dCanvasEnabled()) {
         OwnPtr<ImageBufferSurface> surface = adoptPtr(new RecordingImageBufferSurface(size(), opacityMode));
@@ -698,16 +701,14 @@ AffineTransform HTMLCanvasElement::baseTransform() const
 
 void HTMLCanvasElement::didChangeVisibilityState(PageVisibilityState visibility)
 {
-    if (hasImageBuffer()) {
-        bool hidden = visibility != PageVisibilityStateVisible;
-        if (hidden) {
-            clearCopiedImage();
-            if (is3D()) {
-                discardImageBuffer();
-            }
-        }
-        if (hasImageBuffer()) {
-            m_imageBuffer->setIsHidden(hidden);
+    if (!m_context)
+        return;
+    bool hidden = visibility != PageVisibilityStateVisible;
+    m_context->setIsHidden(hidden);
+    if (hidden) {
+        clearCopiedImage();
+        if (is3D()) {
+            discardImageBuffer();
         }
     }
 }

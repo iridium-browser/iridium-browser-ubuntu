@@ -10,8 +10,8 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -86,7 +86,7 @@ class AutoSubframeVisitsReader : public ExpiringVisitsReader {
 
     db->GetVisitsInRangeForTransition(begin_time, early_end_time,
                                       max_visits,
-                                      content::PAGE_TRANSITION_AUTO_SUBFRAME,
+                                      ui::PAGE_TRANSITION_AUTO_SUBFRAME,
                                       visits);
     bool more = static_cast<int>(visits->size()) == max_visits;
     if (!more)
@@ -132,8 +132,8 @@ ExpireHistoryBackend::ExpireHistoryBackend(
     : delegate_(delegate),
       main_db_(NULL),
       thumb_db_(NULL),
-      weak_factory_(this),
-      history_client_(history_client) {
+      history_client_(history_client),
+      weak_factory_(this) {
 }
 
 ExpireHistoryBackend::~ExpireHistoryBackend() {
@@ -399,13 +399,13 @@ void ExpireHistoryBackend::ExpireURLsForVisits(const VisitVector& visits,
     // TODO(pkasting): http://b/1148304 We shouldn't be marking so many URLs as
     // typed, which would help eliminate the need for this code (we still would
     // need to handle RELOAD transitions specially, though).
-    content::PageTransition transition =
-        content::PageTransitionStripQualifier(visits[i].transition);
-    if (transition != content::PAGE_TRANSITION_RELOAD)
+    ui::PageTransition transition =
+        ui::PageTransitionStripQualifier(visits[i].transition);
+    if (transition != ui::PAGE_TRANSITION_RELOAD)
       cur.visit_count++;
-    if ((transition == content::PAGE_TRANSITION_TYPED &&
-        !content::PageTransitionIsRedirect(visits[i].transition)) ||
-        transition == content::PAGE_TRANSITION_KEYWORD_GENERATED)
+    if ((transition == ui::PAGE_TRANSITION_TYPED &&
+        !ui::PageTransitionIsRedirect(visits[i].transition)) ||
+        transition == ui::PAGE_TRANSITION_KEYWORD_GENERATED)
       cur.typed_count++;
   }
 

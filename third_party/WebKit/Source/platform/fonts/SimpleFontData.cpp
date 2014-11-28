@@ -32,8 +32,6 @@
 
 #include "wtf/MathExtras.h"
 
-using namespace std;
-
 namespace blink {
 
 const float smallCapsFontSizeMultiplier = 0.7f;
@@ -96,13 +94,14 @@ void SimpleFontData::initCharWidths()
         m_avgCharWidth = m_fontMetrics.xHeight();
 
     if (m_maxCharWidth <= 0.f)
-        m_maxCharWidth = max(m_avgCharWidth, m_fontMetrics.floatAscent());
+        m_maxCharWidth = std::max(m_avgCharWidth, m_fontMetrics.floatAscent());
 }
 
 void SimpleFontData::platformGlyphInit()
 {
     GlyphPage* glyphPageZero = GlyphPageTreeNode::getRootChild(this, 0)->page();
     if (!glyphPageZero) {
+        WTF_LOG_ERROR("Failed to get glyph page zero.");
         m_spaceGlyph = 0;
         m_spaceWidth = 0;
         m_zeroGlyph = 0;
@@ -218,18 +217,6 @@ PassRefPtr<SimpleFontData> SimpleFontData::brokenIdeographFontData() const
     }
     return m_derivedFontData->brokenIdeograph;
 }
-
-#ifndef NDEBUG
-String SimpleFontData::description() const
-{
-    if (isSVGFont())
-        return "[SVG font]";
-    if (isCustomFont())
-        return "[custom font]";
-
-    return platformData().description();
-}
-#endif
 
 PassOwnPtr<SimpleFontData::DerivedFontData> SimpleFontData::DerivedFontData::create(bool forCustomFont)
 {

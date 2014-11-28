@@ -26,13 +26,19 @@
 #include "chrome/browser/net/cookie_store_util.h"
 #include "chrome/browser/net/http_server_properties_manager_factory.h"
 #include "chrome/browser/net/predictor.h"
+#include "chrome/browser/net/quota_policy_channel_id_store.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_configurator.h"
-#include "chrome/browser/net/sqlite_channel_id_store.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_protocol.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/common/data_reduction_proxy_pref_names.h"
 #include "components/domain_reliability/monitor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -49,15 +55,7 @@
 #include "net/http/http_server_properties_manager.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/url_request/url_request_job_factory_impl.h"
-#include "webkit/browser/quota/special_storage_policy.h"
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_protocol.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_usage_stats.h"
-#include "components/data_reduction_proxy/common/data_reduction_proxy_pref_names.h"
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
+#include "storage/browser/quota/special_storage_policy.h"
 
 namespace {
 
@@ -87,9 +85,7 @@ net::BackendType ChooseCacheBackendType() {
 }  // namespace
 
 using content::BrowserThread;
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
 using data_reduction_proxy::DataReductionProxyParams;
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
 
 ProfileImplIOData::Handle::Handle(Profile* profile)
     : io_data_(new ProfileImplIOData),
@@ -101,6 +97,8 @@ ProfileImplIOData::Handle::Handle(Profile* profile)
 
 ProfileImplIOData::Handle::~Handle() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  io_data_->data_reduction_proxy_statistics_prefs()->WritePrefs();
+
   if (io_data_->predictor_ != NULL) {
     // io_data_->predictor_ might be NULL if Init() was never called
     // (i.e. we shut down before ProfileImpl::DoFinalInit() got called).
@@ -120,25 +118,27 @@ ProfileImplIOData::Handle::~Handle() {
 }
 
 void ProfileImplIOData::Handle::Init(
-      const base::FilePath& cookie_path,
-      const base::FilePath& channel_id_path,
-      const base::FilePath& cache_path,
-      int cache_max_size,
-      const base::FilePath& media_cache_path,
-      int media_cache_max_size,
-      const base::FilePath& extensions_cookie_path,
-      const base::FilePath& profile_path,
-      const base::FilePath& infinite_cache_path,
-      chrome_browser_net::Predictor* predictor,
-      content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
-      quota::SpecialStoragePolicy* special_storage_policy,
-      scoped_ptr<domain_reliability::DomainReliabilityMonitor>
-          domain_reliability_monitor,
-      const base::Callback<void(bool)>& data_reduction_proxy_unavailable,
-      scoped_ptr<DataReductionProxyChromeConfigurator>
-          data_reduction_proxy_chrome_configurator,
-      scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-          data_reduction_proxy_params) {
+    const base::FilePath& cookie_path,
+    const base::FilePath& channel_id_path,
+    const base::FilePath& cache_path,
+    int cache_max_size,
+    const base::FilePath& media_cache_path,
+    int media_cache_max_size,
+    const base::FilePath& extensions_cookie_path,
+    const base::FilePath& profile_path,
+    const base::FilePath& infinite_cache_path,
+    chrome_browser_net::Predictor* predictor,
+    content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
+    storage::SpecialStoragePolicy* special_storage_policy,
+    scoped_ptr<domain_reliability::DomainReliabilityMonitor>
+        domain_reliability_monitor,
+    const base::Callback<void(bool)>& data_reduction_proxy_unavailable,
+    scoped_ptr<DataReductionProxyChromeConfigurator>
+        data_reduction_proxy_chrome_configurator,
+    scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
+        data_reduction_proxy_params,
+    scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+        data_reduction_proxy_statistics_prefs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!io_data_->lazy_params_);
   DCHECK(predictor);
@@ -168,15 +168,16 @@ void ProfileImplIOData::Handle::Init(
   io_data_->domain_reliability_monitor_ = domain_reliability_monitor.Pass();
 
   io_data_->InitializeMetricsEnabledStateOnUIThread();
+  if (io_data_->domain_reliability_monitor_)
+    io_data_->domain_reliability_monitor_->MoveToNetworkThread();
 
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  io_data_->data_reduction_proxy_unavailable_callback_ =
-      data_reduction_proxy_unavailable;
-  io_data_->data_reduction_proxy_chrome_configurator_ =
-      data_reduction_proxy_chrome_configurator.Pass();
-  io_data_->data_reduction_proxy_params_ =
-      data_reduction_proxy_params.Pass();
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
+  io_data_->set_data_reduction_proxy_unavailable_callback(
+      data_reduction_proxy_unavailable);
+  io_data_->set_data_reduction_proxy_chrome_configurator(
+      data_reduction_proxy_chrome_configurator.Pass());
+  io_data_->set_data_reduction_proxy_params(data_reduction_proxy_params.Pass());
+  io_data_->set_data_reduction_proxy_statistics_prefs(
+      data_reduction_proxy_statistics_prefs.Pass());
 }
 
 content::ResourceContext*
@@ -355,12 +356,10 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
   io_data_->safe_browsing_enabled()->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
 #endif
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
   io_data_->data_reduction_proxy_enabled()->Init(
       data_reduction_proxy::prefs::kDataReductionProxyEnabled, pref_service);
   io_data_->data_reduction_proxy_enabled()->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
   io_data_->InitializeOnUIThread(profile_);
 }
 
@@ -378,13 +377,13 @@ ProfileImplIOData::Handle::GetAllContextGetters() {
   for (; iter != app_request_context_getter_map_.end(); ++iter)
     context_getters->push_back(iter->second);
 
-  if (extensions_request_context_getter_)
+  if (extensions_request_context_getter_.get())
     context_getters->push_back(extensions_request_context_getter_);
 
-  if (media_request_context_getter_)
+  if (media_request_context_getter_.get())
     context_getters->push_back(media_request_context_getter_);
 
-  if (main_request_context_getter_)
+  if (main_request_context_getter_.get())
     context_getters->push_back(main_request_context_getter_);
 
   return context_getters.Pass();
@@ -424,34 +423,35 @@ void ProfileImplIOData::InitializeInternal(
   IOThread* const io_thread = profile_params->io_thread;
   IOThread::Globals* const io_thread_globals = io_thread->globals();
 
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  data_reduction_proxy_auth_request_handler_.reset(
-      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-          DataReductionProxyChromeSettings::GetClient(),
-          data_reduction_proxy_params_.get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
-  data_reduction_proxy_usage_stats_.reset(
-      new data_reduction_proxy::DataReductionProxyUsageStats(
-          data_reduction_proxy_params_.get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)));
-  data_reduction_proxy_usage_stats_->set_unavailable_callback(
-      data_reduction_proxy_unavailable_callback_);
-
+  set_data_reduction_proxy_auth_request_handler(
+      scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
+          (new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
+              DataReductionProxyChromeSettings::GetClient(),
+              data_reduction_proxy_params(),
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO))));
+  set_data_reduction_proxy_usage_stats(
+      scoped_ptr<data_reduction_proxy::DataReductionProxyUsageStats>
+          (new data_reduction_proxy::DataReductionProxyUsageStats(
+              data_reduction_proxy_params(),
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)
+                  .get())));
+  data_reduction_proxy_usage_stats()->set_unavailable_callback(
+      data_reduction_proxy_unavailable_callback());
 
   network_delegate()->set_data_reduction_proxy_params(
-      data_reduction_proxy_params_.get());
+      data_reduction_proxy_params());
   network_delegate()->set_data_reduction_proxy_usage_stats(
-      data_reduction_proxy_usage_stats_.get());
+      data_reduction_proxy_usage_stats());
   network_delegate()->set_data_reduction_proxy_auth_request_handler(
-      data_reduction_proxy_auth_request_handler_.get());
+      data_reduction_proxy_auth_request_handler());
+  network_delegate()->set_data_reduction_proxy_statistics_prefs(
+      data_reduction_proxy_statistics_prefs());
   network_delegate()->set_on_resolve_proxy_handler(
       base::Bind(data_reduction_proxy::OnResolveProxyHandler));
   network_delegate()->set_proxy_config_getter(
       base::Bind(
           &DataReductionProxyChromeConfigurator::GetProxyConfigOnIO,
-          base::Unretained(data_reduction_proxy_chrome_configurator_.get())));
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
-
+          base::Unretained(data_reduction_proxy_chrome_configurator())));
   network_delegate()->set_predictor(predictor_.get());
 
   // Initialize context members.
@@ -521,8 +521,8 @@ void ProfileImplIOData::InitializeInternal(
   if (!channel_id_service) {
     DCHECK(!lazy_params_->channel_id_path.empty());
 
-    scoped_refptr<SQLiteChannelIDStore> channel_id_db =
-        new SQLiteChannelIDStore(
+    scoped_refptr<QuotaPolicyChannelIDStore> channel_id_db =
+        new QuotaPolicyChannelIDStore(
             lazy_params_->channel_id_path,
             BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
                 BrowserThread::GetBlockingPool()->GetSequenceToken()),
@@ -541,8 +541,7 @@ void ProfileImplIOData::InitializeInternal(
           ChooseCacheBackendType(),
           lazy_params_->cache_path,
           lazy_params_->cache_max_size,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
-              .get());
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
   scoped_ptr<net::HttpCache> main_cache = CreateMainHttpFactory(
       profile_params, main_backend);
   main_cache->InitializeInfiniteCache(lazy_params_->infinite_cache_path);
@@ -578,15 +577,9 @@ void ProfileImplIOData::InitializeInternal(
 
   // Setup the SDCHManager for this profile.
   sdch_manager_.reset(new net::SdchManager);
-  sdch_manager_->set_sdch_fetcher(
-      new net::SdchDictionaryFetcher(
-          sdch_manager_.get(),
-          // SdchDictionaryFetcher takes a reference to the Getter, and
-          // hence implicitly takes ownership.
-          new net::TrivialURLRequestContextGetter(
-              main_context,
-              content::BrowserThread::GetMessageLoopProxyForThread(
-                  content::BrowserThread::IO))));
+  sdch_manager_->set_sdch_fetcher(scoped_ptr<net::SdchFetcher>(
+      new net::SdchDictionaryFetcher(sdch_manager_.get(),
+                                     main_context)).Pass());
   main_context->set_sdch_manager(sdch_manager_.get());
 
   // Create a media request context based on the main context, but using a
@@ -596,12 +589,12 @@ void ProfileImplIOData::InitializeInternal(
                                                              details));
 
   if (domain_reliability_monitor_) {
-    domain_reliability_monitor_->Init(
-        main_context,
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
-    domain_reliability_monitor_->AddBakedInConfigs();
-    network_delegate()->set_domain_reliability_monitor(
-        domain_reliability_monitor_.get());
+    domain_reliability::DomainReliabilityMonitor* monitor =
+        domain_reliability_monitor_.get();
+    monitor->InitURLRequestContext(main_context);
+    monitor->AddBakedInConfigs();
+    monitor->SetDiscardUploads(!GetMetricsEnabledStateOnIOThread());
+    network_delegate()->set_domain_reliability_monitor(monitor);
   }
 
   lazy_params_.reset();
@@ -681,8 +674,7 @@ net::URLRequestContext* ProfileImplIOData::InitializeAppRequestContext(
         ChooseCacheBackendType(),
         cache_path,
         app_cache_max_size_,
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
-            .get());
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
   }
   net::HttpNetworkSession* main_network_session =
       main_http_factory_->GetSession();
@@ -772,8 +764,7 @@ ProfileImplIOData::InitializeMediaRequestContext(
           ChooseCacheBackendType(),
           cache_path,
           cache_max_size,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
-              .get());
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
   net::HttpNetworkSession* main_network_session =
       main_http_factory_->GetSession();
   scoped_ptr<net::HttpCache> media_http_cache =

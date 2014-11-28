@@ -22,14 +22,6 @@ namespace content {
 class CookieCryptoDelegate;
 }  // namespace content
 
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-namespace data_reduction_proxy {
-class DataReductionProxyParams;
-class DataReductionProxyUsageStats;
-class DataReductionProxyAuthRequestHandler;
-}
-#endif
-
 namespace domain_reliability {
 class DomainReliabilityMonitor;
 }  // namespace domain_reliability
@@ -43,11 +35,9 @@ class ProxyConfig;
 class SDCHManager;
 }  // namespace net
 
-namespace quota {
+namespace storage {
 class SpecialStoragePolicy;
-}  // namespace quota
-
-class DataReductionProxyChromeConfigurator;
+}  // namespace storage
 
 class ProfileImplIOData : public ProfileIOData {
  public:
@@ -58,27 +48,28 @@ class ProfileImplIOData : public ProfileIOData {
 
     // Init() must be called before ~Handle(). It records most of the
     // parameters needed to construct a ChromeURLRequestContextGetter.
-    void Init(const base::FilePath& cookie_path,
-              const base::FilePath& channel_id_path,
-              const base::FilePath& cache_path,
-              int cache_max_size,
-              const base::FilePath& media_cache_path,
-              int media_cache_max_size,
-              const base::FilePath& extensions_cookie_path,
-              const base::FilePath& profile_path,
-              const base::FilePath& infinite_cache_path,
-              chrome_browser_net::Predictor* predictor,
-              content::CookieStoreConfig::SessionCookieMode
-                  session_cookie_mode,
-              quota::SpecialStoragePolicy* special_storage_policy,
-              scoped_ptr<domain_reliability::DomainReliabilityMonitor>
-                  domain_reliability_monitor,
-              const base::Callback<void(bool)>&
-                  data_reduction_proxy_unavailable,
-              scoped_ptr<DataReductionProxyChromeConfigurator>
-                  data_reduction_proxy_chrome_configurator,
-              scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-                  data_reduction_proxy_params);
+    void Init(
+        const base::FilePath& cookie_path,
+        const base::FilePath& channel_id_path,
+        const base::FilePath& cache_path,
+        int cache_max_size,
+        const base::FilePath& media_cache_path,
+        int media_cache_max_size,
+        const base::FilePath& extensions_cookie_path,
+        const base::FilePath& profile_path,
+        const base::FilePath& infinite_cache_path,
+        chrome_browser_net::Predictor* predictor,
+        content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
+        storage::SpecialStoragePolicy* special_storage_policy,
+        scoped_ptr<domain_reliability::DomainReliabilityMonitor>
+            domain_reliability_monitor,
+        const base::Callback<void(bool)>& data_reduction_proxy_unavailable,
+        scoped_ptr<DataReductionProxyChromeConfigurator>
+            data_reduction_proxy_chrome_configurator,
+        scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
+            data_reduction_proxy_params,
+        scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+            data_reduction_proxy_statistics_prefs);
 
     // These Create*ContextGetter() functions are only exposed because the
     // circular relationship between Profile, ProfileIOData::Handle, and the
@@ -175,7 +166,7 @@ class ProfileImplIOData : public ProfileIOData {
     base::FilePath extensions_cookie_path;
     base::FilePath infinite_cache_path;
     content::CookieStoreConfig::SessionCookieMode session_cookie_mode;
-    scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy;
+    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy;
   };
 
   ProfileImplIOData();
@@ -248,18 +239,6 @@ class ProfileImplIOData : public ProfileIOData {
   base::FilePath profile_path_;
   int app_cache_max_size_;
   int app_media_cache_max_size_;
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-      data_reduction_proxy_params_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyUsageStats>
-      data_reduction_proxy_usage_stats_;
-  mutable base::Callback<void(bool)> data_reduction_proxy_unavailable_callback_;
-  mutable scoped_ptr<DataReductionProxyChromeConfigurator>
-      data_reduction_proxy_chrome_configurator_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
-      data_reduction_proxy_auth_request_handler_;
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImplIOData);
 };

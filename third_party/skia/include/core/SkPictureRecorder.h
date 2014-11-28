@@ -28,21 +28,38 @@ public:
     SkPictureRecorder();
     ~SkPictureRecorder();
 
+#ifdef SK_LEGACY_PICTURE_SIZE_API
+    SkCanvas* beginRecording(int width, int height,
+                             SkBBHFactory* bbhFactory = NULL,
+                             uint32_t recordFlags = 0) {
+        return this->beginRecording(SkIntToScalar(width), SkIntToScalar(height),
+                                    bbhFactory, recordFlags);
+    }
+#endif
+
     /** Returns the canvas that records the drawing commands.
-        @param width the base width for the picture, as if the recording
-                     canvas' bitmap had this width.
-        @param height the base width for the picture, as if the recording
-                     canvas' bitmap had this height.
+        @param width the width of the cull rect used when recording this picture.
+        @param height the height of the cull rect used when recording this picture.
         @param bbhFactory factory to create desired acceleration structure
         @param recordFlags optional flags that control recording.
         @return the canvas.
     */
-    SkCanvas* beginRecording(int width, int height,
+    SkCanvas* beginRecording(SkScalar width, SkScalar height,
                              SkBBHFactory* bbhFactory = NULL,
                              uint32_t recordFlags = 0);
 
-    /** Same as beginRecording(), using a new faster backend. */
-    SkCanvas* EXPERIMENTAL_beginRecording(int width, int height,
+    // As usual, we have a deprecated old version and a maybe almost working
+    // new version.  We currently point beginRecording() to
+    // DEPRECATED_beginRecording() unless SK_PICTURE_USE_SK_RECORD is defined,
+    // then we use EXPERIMENTAL_beginRecording().
+
+    // Old slower backend.
+    SkCanvas* DEPRECATED_beginRecording(SkScalar width, SkScalar height,
+                                        SkBBHFactory* bbhFactory = NULL,
+                                        uint32_t recordFlags = 0);
+
+    // New faster backend.
+    SkCanvas* EXPERIMENTAL_beginRecording(SkScalar width, SkScalar height,
                                           SkBBHFactory* bbhFactory = NULL);
 
     /** Returns the recording canvas if one is active, or NULL if recording is
@@ -77,9 +94,8 @@ private:
     friend class SkPictureRecorderReplayTester; // for unit testing
     void partialReplay(SkCanvas* canvas) const;
 
-    int fWidth;
-    int fHeight;
-
+    SkScalar                      fCullWidth;
+    SkScalar                      fCullHeight;
     SkAutoTUnref<SkBBoxHierarchy> fBBH;
 
     // One of these two canvases will be non-NULL.

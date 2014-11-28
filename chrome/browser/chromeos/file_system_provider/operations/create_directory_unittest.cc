@@ -16,8 +16,8 @@
 #include "chrome/common/extensions/api/file_system_provider.h"
 #include "chrome/common/extensions/api/file_system_provider_internal.h"
 #include "extensions/browser/event_router.h"
+#include "storage/browser/fileapi/async_file_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/async_file_util.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -49,6 +49,8 @@ class FileSystemProviderOperationsCreateDirectoryTest : public testing::Test {
 };
 
 TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute) {
+  using extensions::api::file_system_provider::CreateDirectoryRequestedOptions;
+
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
@@ -56,7 +58,6 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute) {
       NULL,
       file_system_info_,
       base::FilePath::FromUTF8Unsafe(kDirectoryPath),
-      false /* exclusive */,
       true /* recursive */,
       base::Bind(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
@@ -73,28 +74,16 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute) {
   base::ListValue* event_args = event->event_args.get();
   ASSERT_EQ(1u, event_args->GetSize());
 
-  base::DictionaryValue* options = NULL;
-  ASSERT_TRUE(event_args->GetDictionary(0, &options));
+  const base::DictionaryValue* options_as_value = NULL;
+  ASSERT_TRUE(event_args->GetDictionary(0, &options_as_value));
 
-  std::string event_file_system_id;
-  EXPECT_TRUE(options->GetString("fileSystemId", &event_file_system_id));
-  EXPECT_EQ(kFileSystemId, event_file_system_id);
-
-  int event_request_id = -1;
-  EXPECT_TRUE(options->GetInteger("requestId", &event_request_id));
-  EXPECT_EQ(kRequestId, event_request_id);
-
-  std::string event_directory_path;
-  EXPECT_TRUE(options->GetString("directoryPath", &event_directory_path));
-  EXPECT_EQ(kDirectoryPath, event_directory_path);
-
-  bool event_exclusive;
-  EXPECT_TRUE(options->GetBoolean("exclusive", &event_exclusive));
-  EXPECT_FALSE(event_exclusive);
-
-  bool event_recursive;
-  EXPECT_TRUE(options->GetBoolean("recursive", &event_recursive));
-  EXPECT_TRUE(event_recursive);
+  CreateDirectoryRequestedOptions options;
+  ASSERT_TRUE(
+      CreateDirectoryRequestedOptions::Populate(*options_as_value, &options));
+  EXPECT_EQ(kFileSystemId, options.file_system_id);
+  EXPECT_EQ(kRequestId, options.request_id);
+  EXPECT_EQ(kDirectoryPath, options.directory_path);
+  EXPECT_TRUE(options.recursive);
 }
 
 TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute_NoListener) {
@@ -105,7 +94,6 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute_NoListener) {
       NULL,
       file_system_info_,
       base::FilePath::FromUTF8Unsafe(kDirectoryPath),
-      false /* exclusive */,
       true /* recursive */,
       base::Bind(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
@@ -130,7 +118,6 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute_ReadOnly) {
       NULL,
       read_only_file_system_info,
       base::FilePath::FromUTF8Unsafe(kDirectoryPath),
-      false /* exclusive */,
       true /* recursive */,
       base::Bind(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
@@ -148,7 +135,6 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, OnSuccess) {
       NULL,
       file_system_info_,
       base::FilePath::FromUTF8Unsafe(kDirectoryPath),
-      false /* exclusive */,
       true /* recursive */,
       base::Bind(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
@@ -172,7 +158,6 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, OnError) {
       NULL,
       file_system_info_,
       base::FilePath::FromUTF8Unsafe(kDirectoryPath),
-      false /* exclusive */,
       true /* recursive */,
       base::Bind(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(

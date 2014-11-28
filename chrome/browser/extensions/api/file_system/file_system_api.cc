@@ -4,12 +4,12 @@
 
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
 
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
+#include <set>
+
 #include "apps/saved_files_service.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
@@ -27,25 +27,27 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/file_system.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/granted_file_entry.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/common/fileapi/file_system_types.h"
+#include "storage/common/fileapi/file_system_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/selected_file_info.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/browser/fileapi/isolated_context.h"
-#include "webkit/common/fileapi/file_system_types.h"
-#include "webkit/common/fileapi/file_system_util.h"
 
 #if defined(OS_MACOSX)
 #include <CoreFoundation/CoreFoundation.h>
@@ -58,8 +60,7 @@
 
 using apps::SavedFileEntry;
 using apps::SavedFilesService;
-using apps::AppWindow;
-using fileapi::IsolatedContext;
+using storage::IsolatedContext;
 
 const char kInvalidCallingPage[] = "Invalid calling page. This function can't "
     "be called from a background page.";
@@ -298,7 +299,7 @@ bool FileSystemGetWritableEntryFunction::RunAsync() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &filesystem_name));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_path));
 
-  if (!app_file_handler_util::HasFileSystemWritePermission(extension_)) {
+  if (!app_file_handler_util::HasFileSystemWritePermission(extension_.get())) {
     error_ = kRequiresFileSystemWriteError;
     return false;
   }
@@ -349,7 +350,7 @@ bool FileSystemIsWritableEntryFunction::RunSync() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_path));
 
   std::string filesystem_id;
-  if (!fileapi::CrackIsolatedFileSystemName(filesystem_name, &filesystem_id)) {
+  if (!storage::CrackIsolatedFileSystemName(filesystem_name, &filesystem_id)) {
     error_ = app_file_handler_util::kInvalidParameters;
     return false;
   }
@@ -488,8 +489,7 @@ void FileSystemChooseEntryFunction::ShowPicker(
   // platform-app only.
   content::WebContents* web_contents = NULL;
   if (extension_->is_platform_app()) {
-    apps::AppWindowRegistry* registry =
-        apps::AppWindowRegistry::Get(GetProfile());
+    AppWindowRegistry* registry = AppWindowRegistry::Get(GetProfile());
     DCHECK(registry);
     AppWindow* app_window =
         registry->GetAppWindowForRenderViewHost(render_view_host());
@@ -570,10 +570,10 @@ void FileSystemChooseEntryFunction::RegisterTempExternalFileSystemForTest(
   // For testing on Chrome OS, where to deal with remote and local paths
   // smoothly, all accessed paths need to be registered in the list of
   // external mount points.
-  fileapi::ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
+  storage::ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
       name,
-      fileapi::kFileSystemTypeNativeLocal,
-      fileapi::FileSystemMountOption(),
+      storage::kFileSystemTypeNativeLocal,
+      storage::FileSystemMountOption(),
       path);
 }
 
@@ -609,8 +609,7 @@ void FileSystemChooseEntryFunction::FilesSelected(
   if (is_directory_) {
     // Get the WebContents for the app window to be the parent window of the
     // confirmation dialog if necessary.
-    apps::AppWindowRegistry* registry =
-        apps::AppWindowRegistry::Get(GetProfile());
+    AppWindowRegistry* registry = AppWindowRegistry::Get(GetProfile());
     DCHECK(registry);
     AppWindow* app_window =
         registry->GetAppWindowForRenderViewHost(render_view_host());
@@ -687,7 +686,8 @@ void FileSystemChooseEntryFunction::ConfirmDirectoryAccessOnFileThread(
           FROM_HERE,
           base::Bind(
               CreateDirectoryAccessConfirmationDialog,
-              app_file_handler_util::HasFileSystemWritePermission(extension_),
+              app_file_handler_util::HasFileSystemWritePermission(
+                  extension_.get()),
               base::UTF8ToUTF16(extension_->name()),
               web_contents,
               base::Bind(
@@ -709,7 +709,7 @@ void FileSystemChooseEntryFunction::ConfirmDirectoryAccessOnFileThread(
 
 void FileSystemChooseEntryFunction::OnDirectoryAccessConfirmed(
     const std::vector<base::FilePath>& paths) {
-  if (app_file_handler_util::HasFileSystemWritePermission(extension_)) {
+  if (app_file_handler_util::HasFileSystemWritePermission(extension_.get())) {
     PrepareFilesForWritableApp(paths);
     return;
   }
@@ -794,11 +794,13 @@ bool FileSystemChooseEntryFunction::RunAsync() {
       picker_type = ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE;
 
     if (options->type == file_system::CHOOSE_ENTRY_TYPE_OPENWRITABLEFILE &&
-        !app_file_handler_util::HasFileSystemWritePermission(extension_)) {
+        !app_file_handler_util::HasFileSystemWritePermission(
+            extension_.get())) {
       error_ = kRequiresFileSystemWriteError;
       return false;
     } else if (options->type == file_system::CHOOSE_ENTRY_TYPE_SAVEFILE) {
-      if (!app_file_handler_util::HasFileSystemWritePermission(extension_)) {
+      if (!app_file_handler_util::HasFileSystemWritePermission(
+              extension_.get())) {
         error_ = kRequiresFileSystemWriteError;
         return false;
       }

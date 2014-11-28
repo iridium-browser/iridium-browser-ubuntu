@@ -141,6 +141,10 @@ void WebPluginContainerImpl::invalidateRect(const IntRect& rect)
     IntRect dirtyRect = rect;
     dirtyRect.move(renderer->borderLeft() + renderer->paddingLeft(),
                    renderer->borderTop() + renderer->paddingTop());
+
+    // For querying RenderLayer::compositingState().
+    // This code should be correct.
+    DisableCompositingQueryAsserts disabler;
     renderer->invalidatePaintRectangle(dirtyRect);
 }
 
@@ -432,7 +436,7 @@ v8::Local<v8::Object> WebPluginContainerImpl::v8ObjectForElement()
         return v8::Local<v8::Object>();
 
     ScriptState* scriptState = ScriptState::forMainWorld(frame);
-    if (scriptState->contextIsEmpty())
+    if (scriptState->contextIsValid())
         return v8::Local<v8::Object>();
 
     v8::Handle<v8::Value> v8value = toV8(m_element, scriptState->context()->Global(), scriptState->isolate());
@@ -670,7 +674,11 @@ bool WebPluginContainerImpl::paintCustomOverhangArea(GraphicsContext* context, c
 // Private methods -------------------------------------------------------------
 
 WebPluginContainerImpl::WebPluginContainerImpl(HTMLPlugInElement* element, WebPlugin* webPlugin)
+#if ENABLE(OILPAN)
+    : m_frame(element->document().frame())
+#else
     : FrameDestructionObserver(element->document().frame())
+#endif
     , m_element(element)
     , m_webPlugin(webPlugin)
     , m_webLayer(0)

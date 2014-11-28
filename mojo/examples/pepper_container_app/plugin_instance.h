@@ -85,8 +85,13 @@ class PluginInstance : public ppapi::thunk::PPB_Instance_API {
   virtual void PostMessage(PP_Instance instance, PP_Var message) OVERRIDE;
   virtual int32_t RegisterMessageHandler(PP_Instance instance,
                                          void* user_data,
-                                         const PPP_MessageHandler_0_1* handler,
+                                         const PPP_MessageHandler_0_2* handler,
                                          PP_Resource message_loop) OVERRIDE;
+  virtual int32_t RegisterMessageHandler_1_1_Deprecated(
+      PP_Instance instance,
+      void* user_data,
+      const PPP_MessageHandler_0_1_Deprecated* handler,
+      PP_Resource message_loop) OVERRIDE;
   virtual void UnregisterMessageHandler(PP_Instance instance) OVERRIDE;
   virtual PP_Bool SetCursor(PP_Instance instance,
                             PP_MouseCursor_Type type,
@@ -118,6 +123,9 @@ class PluginInstance : public ppapi::thunk::PPB_Instance_API {
   virtual void PromiseResolvedWithSession(PP_Instance instance,
                                           uint32 promise_id,
                                           PP_Var web_session_id_var) OVERRIDE;
+  virtual void PromiseResolvedWithKeyIds(PP_Instance instance,
+                                         uint32 promise_id,
+                                         PP_Var key_ids_var) OVERRIDE;
   virtual void PromiseRejected(PP_Instance instance,
                                uint32 promise_id,
                                PP_CdmExceptionCode exception_code,
@@ -127,6 +135,12 @@ class PluginInstance : public ppapi::thunk::PPB_Instance_API {
                               PP_Var web_session_id_var,
                               PP_Var message_var,
                               PP_Var destination_url_var) OVERRIDE;
+  virtual void SessionKeysChange(PP_Instance instance,
+                                 PP_Var web_session_id_var,
+                                 PP_Bool has_additional_usable_key) OVERRIDE;
+  virtual void SessionExpirationChange(PP_Instance instance,
+                                       PP_Var web_session_id_var,
+                                       PP_Time new_expiry_time) OVERRIDE;
   virtual void SessionReady(PP_Instance instance,
                             PP_Var web_session_id_var) OVERRIDE;
   virtual void SessionClosed(PP_Instance instance,

@@ -27,7 +27,6 @@
 #include "cc/quads/stream_video_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/layer_quad.h"
-#include "cc/resources/raster_worker_pool.h"
 #include "cc/resources/scoped_resource.h"
 #include "cc/resources/texture_mailbox_deleter.h"
 #include "gpu/GLES2/gl2extchromium.h"
@@ -37,10 +36,10 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/GrTexture.h"
-#include "third_party/skia/include/gpu/SkGpuDevice.h"
 #include "third_party/skia/include/gpu/SkGrTexturePixelRef.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 #include "ui/gfx/geometry/quad_f.h"
@@ -78,44 +77,6 @@ class FallbackFence : public ResourceProvider::Fence {
   bool has_passed_;
 
   DISALLOW_COPY_AND_ASSIGN(FallbackFence);
-};
-
-class OnDemandRasterTaskImpl : public Task {
- public:
-  OnDemandRasterTaskImpl(PicturePileImpl* picture_pile,
-                         SkBitmap* bitmap,
-                         gfx::Rect content_rect,
-                         float contents_scale)
-      : picture_pile_(picture_pile),
-        bitmap_(bitmap),
-        content_rect_(content_rect),
-        contents_scale_(contents_scale) {
-    DCHECK(picture_pile_);
-    DCHECK(bitmap_);
-  }
-
-  // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {
-    TRACE_EVENT0("cc", "OnDemandRasterTaskImpl::RunOnWorkerThread");
-    SkCanvas canvas(*bitmap_);
-
-    PicturePileImpl* picture_pile = picture_pile_->GetCloneForDrawingOnThread(
-        RasterWorkerPool::GetPictureCloneIndexForCurrentThread());
-    DCHECK(picture_pile);
-
-    picture_pile->RasterToBitmap(&canvas, content_rect_, contents_scale_, NULL);
-  }
-
- protected:
-  virtual ~OnDemandRasterTaskImpl() {}
-
- private:
-  PicturePileImpl* picture_pile_;
-  SkBitmap* bitmap_;
-  const gfx::Rect content_rect_;
-  const float contents_scale_;
-
-  DISALLOW_COPY_AND_ASSIGN(OnDemandRasterTaskImpl);
 };
 
 bool NeedsIOSurfaceReadbackWorkaround() {
@@ -458,6 +419,13 @@ void GLRenderer::ClearFramebuffer(DrawingFrame* frame,
   }
 }
 
+static ResourceProvider::ResourceId WaitOnResourceSyncPoints(
+    ResourceProvider* resource_provider,
+    ResourceProvider::ResourceId resource_id) {
+  resource_provider->WaitSyncPointIfNeeded(resource_id);
+  return resource_id;
+}
+
 void GLRenderer::BeginDrawingFrame(DrawingFrame* frame) {
   if (frame->device_viewport_rect.IsEmpty())
     return;
@@ -491,6 +459,20 @@ void GLRenderer::BeginDrawingFrame(DrawingFrame* frame) {
     read_lock_fence = make_scoped_refptr(new FallbackFence(gl_));
   }
   resource_provider_->SetReadLockFence(read_lock_fence.get());
+
+  // Insert WaitSyncPointCHROMIUM on quad resources prior to drawing the frame,
+  // so that drawing can proceed without GL context switching interruptions.
+  DrawQuad::ResourceIteratorCallback wait_on_resource_syncpoints_callback =
+      base::Bind(&WaitOnResourceSyncPoints, resource_provider_);
+
+  for (size_t i = 0; i < frame->render_passes_in_draw_order->size(); ++i) {
+    RenderPass* pass = frame->render_passes_in_draw_order->at(i);
+    for (QuadList::Iterator iter = pass->quad_list.begin();
+         iter != pass->quad_list.end();
+         ++iter) {
+      iter->IterateResources(wait_on_resource_syncpoints_callback);
+    }
+  }
 
   // TODO(enne): Do we need to reinitialize all of this state per frame?
   ReinitializeGLState();
@@ -629,7 +611,7 @@ void GLRenderer::DrawDebugBorderQuad(const DrawingFrame* frame,
   GLC(gl_, gl_->DrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_SHORT, 0));
 }
 
-static SkBitmap ApplyImageFilter(
+static skia::RefPtr<SkImage> ApplyImageFilter(
     scoped_ptr<GLRenderer::ScopedUseGrContext> use_gr_context,
     ResourceProvider* resource_provider,
     const gfx::Point& origin,
@@ -637,10 +619,10 @@ static SkBitmap ApplyImageFilter(
     SkImageFilter* filter,
     ScopedResource* source_texture_resource) {
   if (!filter)
-    return SkBitmap();
+    return skia::RefPtr<SkImage>();
 
   if (!use_gr_context)
-    return SkBitmap();
+    return skia::RefPtr<SkImage>();
 
   ResourceProvider::ScopedReadLockGL lock(resource_provider,
                                           source_texture_resource->id());
@@ -656,6 +638,12 @@ static SkBitmap ApplyImageFilter(
   skia::RefPtr<GrTexture> texture =
       skia::AdoptRef(use_gr_context->context()->wrapBackendTexture(
           backend_texture_description));
+  if (!texture) {
+    TRACE_EVENT_INSTANT0("cc",
+                         "ApplyImageFilter wrap background texture failed",
+                         TRACE_EVENT_SCOPE_THREAD);
+    return skia::RefPtr<SkImage>();
+  }
 
   SkImageInfo info =
       SkImageInfo::MakeN32Premul(source_texture_resource->size().width(),
@@ -679,40 +667,44 @@ static SkBitmap ApplyImageFilter(
       use_gr_context->context(), desc, GrContext::kExact_ScratchTexMatch);
   skia::RefPtr<GrTexture> backing_store =
       skia::AdoptRef(scratch_texture.detach());
-  if (backing_store.get() == NULL) {
+  if (!backing_store) {
     TRACE_EVENT_INSTANT0("cc",
                          "ApplyImageFilter scratch texture allocation failed",
                          TRACE_EVENT_SCOPE_THREAD);
-    return SkBitmap();
+    return skia::RefPtr<SkImage>();
   }
 
-  // Create a device and canvas using that backing store.
-  skia::RefPtr<SkGpuDevice> device =
-      skia::AdoptRef(SkGpuDevice::Create(backing_store->asRenderTarget()));
-  DCHECK(device.get());
-  SkCanvas canvas(device.get());
+  // Create surface to draw into.
+  skia::RefPtr<SkSurface> surface = skia::AdoptRef(
+      SkSurface::NewRenderTargetDirect(backing_store->asRenderTarget()));
+  skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
 
   // Draw the source bitmap through the filter to the canvas.
   SkPaint paint;
   paint.setImageFilter(filter);
-  canvas.clear(SK_ColorTRANSPARENT);
+  canvas->clear(SK_ColorTRANSPARENT);
 
-  canvas.translate(SkIntToScalar(-origin.x()), SkIntToScalar(-origin.y()));
-  canvas.scale(scale.x(), scale.y());
-  canvas.drawSprite(source, 0, 0, &paint);
+  canvas->translate(SkIntToScalar(-origin.x()), SkIntToScalar(-origin.y()));
+  canvas->scale(scale.x(), scale.y());
+  canvas->drawSprite(source, 0, 0, &paint);
+
+  skia::RefPtr<SkImage> image = skia::AdoptRef(surface->newImageSnapshot());
+  if (!image || !image->getTexture()) {
+    return skia::RefPtr<SkImage>();
+  }
 
   // Flush the GrContext to ensure all buffered GL calls are drawn to the
   // backing store before we access and return it, and have cc begin using the
   // GL context again.
-  use_gr_context->context()->flush();
+  canvas->flush();
 
-  return device->accessBitmap(false);
+  return image;
 }
 
-static SkBitmap ApplyBlendModeWithBackdrop(
+static skia::RefPtr<SkImage> ApplyBlendModeWithBackdrop(
     scoped_ptr<GLRenderer::ScopedUseGrContext> use_gr_context,
     ResourceProvider* resource_provider,
-    SkBitmap source_bitmap_with_filters,
+    skia::RefPtr<SkImage> source_bitmap_with_filters,
     ScopedResource* source_texture_resource,
     ScopedResource* background_texture_resource,
     SkXfermode::Mode blend_mode) {
@@ -730,11 +722,11 @@ static SkBitmap ApplyBlendModeWithBackdrop(
 
   int source_texture_with_filters_id;
   scoped_ptr<ResourceProvider::ScopedReadLockGL> lock;
-  if (source_bitmap_with_filters.getTexture()) {
-    DCHECK_EQ(source_size.width(), source_bitmap_with_filters.width());
-    DCHECK_EQ(source_size.height(), source_bitmap_with_filters.height());
+  if (source_bitmap_with_filters) {
+    DCHECK_EQ(source_size.width(), source_bitmap_with_filters->width());
+    DCHECK_EQ(source_size.height(), source_bitmap_with_filters->height());
     GrTexture* texture =
-        reinterpret_cast<GrTexture*>(source_bitmap_with_filters.getTexture());
+        reinterpret_cast<GrTexture*>(source_bitmap_with_filters->getTexture());
     source_texture_with_filters_id = texture->getTextureHandle();
   } else {
     lock.reset(new ResourceProvider::ScopedReadLockGL(
@@ -756,6 +748,13 @@ static SkBitmap ApplyBlendModeWithBackdrop(
   skia::RefPtr<GrTexture> source_texture =
       skia::AdoptRef(use_gr_context->context()->wrapBackendTexture(
           backend_texture_description));
+  if (!source_texture) {
+    TRACE_EVENT_INSTANT0(
+        "cc",
+        "ApplyBlendModeWithBackdrop wrap source texture failed",
+        TRACE_EVENT_SCOPE_THREAD);
+    return skia::RefPtr<SkImage>();
+  }
 
   backend_texture_description.fWidth = background_size.width();
   backend_texture_description.fHeight = background_size.height();
@@ -763,6 +762,13 @@ static SkBitmap ApplyBlendModeWithBackdrop(
   skia::RefPtr<GrTexture> background_texture =
       skia::AdoptRef(use_gr_context->context()->wrapBackendTexture(
           backend_texture_description));
+  if (!background_texture) {
+    TRACE_EVENT_INSTANT0(
+        "cc",
+        "ApplyBlendModeWithBackdrop wrap background texture failed",
+        TRACE_EVENT_SCOPE_THREAD);
+    return skia::RefPtr<SkImage>();
+  }
 
   SkImageInfo source_info =
       SkImageInfo::MakeN32Premul(source_size.width(), source_size.height());
@@ -795,7 +801,7 @@ static SkBitmap ApplyBlendModeWithBackdrop(
       use_gr_context->context(), desc, GrContext::kExact_ScratchTexMatch);
   skia::RefPtr<GrTexture> backing_store =
       skia::AdoptRef(scratch_texture.detach());
-  if (backing_store.get() == NULL) {
+  if (!backing_store) {
     TRACE_EVENT_INSTANT0(
         "cc",
         "ApplyBlendModeWithBackdrop scratch texture allocation failed",
@@ -804,24 +810,30 @@ static SkBitmap ApplyBlendModeWithBackdrop(
   }
 
   // Create a device and canvas using that backing store.
-  skia::RefPtr<SkGpuDevice> device =
-      skia::AdoptRef(SkGpuDevice::Create(backing_store->asRenderTarget()));
-  DCHECK(device.get());
-  SkCanvas canvas(device.get());
+  skia::RefPtr<SkSurface> surface = skia::AdoptRef(
+      SkSurface::NewRenderTargetDirect(backing_store->asRenderTarget()));
+  if (!surface)
+    return skia::RefPtr<SkImage>();
+  skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
 
   // Draw the source bitmap through the filter to the canvas.
-  canvas.clear(SK_ColorTRANSPARENT);
-  canvas.drawSprite(background, 0, 0);
+  canvas->clear(SK_ColorTRANSPARENT);
+  canvas->drawSprite(background, 0, 0);
   SkPaint paint;
   paint.setXfermodeMode(blend_mode);
-  canvas.drawSprite(source, 0, 0, &paint);
+  canvas->drawSprite(source, 0, 0, &paint);
+
+  skia::RefPtr<SkImage> image = skia::AdoptRef(surface->newImageSnapshot());
+  if (!image || !image->getTexture()) {
+    return skia::RefPtr<SkImage>();
+  }
 
   // Flush the GrContext to ensure all buffered GL calls are drawn to the
   // backing store before we access and return it, and have cc begin using the
   // GL context again.
-  use_gr_context->context()->flush();
+  canvas->flush();
 
-  return device->accessBitmap(false);
+  return image;
 }
 
 scoped_ptr<ScopedResource> GLRenderer::GetBackgroundWithFilters(
@@ -879,11 +891,9 @@ scoped_ptr<ScopedResource> GLRenderer::GetBackgroundWithFilters(
 
   scoped_ptr<ScopedResource> device_background_texture =
       ScopedResource::Create(resource_provider_);
-  // The TextureUsageFramebuffer hint makes ResourceProvider avoid immutable
-  // storage allocation (texStorage2DEXT) for this texture. copyTexImage2D fails
-  // when called on a texture having immutable storage.
+  // CopyTexImage2D fails when called on a texture having immutable storage.
   device_background_texture->Allocate(
-      window_rect.size(), ResourceProvider::TextureUsageFramebuffer, RGBA_8888);
+      window_rect.size(), ResourceProvider::TextureHintDefault, RGBA_8888);
   {
     ResourceProvider::ScopedWriteLockGL lock(resource_provider_,
                                              device_background_texture->id());
@@ -894,7 +904,7 @@ scoped_ptr<ScopedResource> GLRenderer::GetBackgroundWithFilters(
   skia::RefPtr<SkImageFilter> filter = RenderSurfaceFilters::BuildImageFilter(
       quad->background_filters, device_background_texture->size());
 
-  SkBitmap filtered_device_background;
+  skia::RefPtr<SkImage> filtered_device_background;
   if (apply_background_filters) {
     filtered_device_background =
         ApplyImageFilter(ScopedUseGrContext::Create(this, frame),
@@ -904,13 +914,12 @@ scoped_ptr<ScopedResource> GLRenderer::GetBackgroundWithFilters(
                          filter.get(),
                          device_background_texture.get());
   }
-  *background_changed = (filtered_device_background.getTexture() != NULL);
+  *background_changed = (filtered_device_background != NULL);
 
   int filtered_device_background_texture_id = 0;
   scoped_ptr<ResourceProvider::ScopedReadLockGL> lock;
-  if (filtered_device_background.getTexture()) {
-    GrTexture* texture =
-        reinterpret_cast<GrTexture*>(filtered_device_background.getTexture());
+  if (filtered_device_background) {
+    GrTexture* texture = filtered_device_background->getTexture();
     filtered_device_background_texture_id = texture->getTextureHandle();
   } else {
     lock.reset(new ResourceProvider::ScopedReadLockGL(
@@ -921,7 +930,9 @@ scoped_ptr<ScopedResource> GLRenderer::GetBackgroundWithFilters(
   scoped_ptr<ScopedResource> background_texture =
       ScopedResource::Create(resource_provider_);
   background_texture->Allocate(
-      quad->rect.size(), ResourceProvider::TextureUsageFramebuffer, RGBA_8888);
+      quad->rect.size(),
+      ResourceProvider::TextureHintImmutableFramebuffer,
+      RGBA_8888);
 
   const RenderPass* target_render_pass = frame->current_render_pass;
   bool using_background_texture =
@@ -1007,7 +1018,7 @@ void GLRenderer::DrawRenderPassQuad(DrawingFrame* frame,
 
   // TODO(senorblanco): Cache this value so that we don't have to do it for both
   // the surface and its replica.  Apply filters to the contents texture.
-  SkBitmap filter_bitmap;
+  skia::RefPtr<SkImage> filter_bitmap;
   SkScalar color_matrix[20];
   bool use_color_matrix = false;
   if (!quad->filters.IsEmpty()) {
@@ -1095,9 +1106,8 @@ void GLRenderer::DrawRenderPassQuad(DrawingFrame* frame,
   // this draw instead of having a separate copy of the background texture.
 
   scoped_ptr<ResourceProvider::ScopedSamplerGL> contents_resource_lock;
-  if (filter_bitmap.getTexture()) {
-    GrTexture* texture =
-        reinterpret_cast<GrTexture*>(filter_bitmap.getTexture());
+  if (filter_bitmap) {
+    GrTexture* texture = filter_bitmap->getTexture();
     DCHECK_EQ(GL_TEXTURE0, GetActiveTextureUnit(gl_));
     gl_->BindTexture(GL_TEXTURE_2D, texture->getTextureHandle());
   } else {
@@ -1352,7 +1362,7 @@ void GLRenderer::DrawRenderPassQuad(DrawingFrame* frame,
 
   // Flush the compositor context before the filter bitmap goes out of
   // scope, so the draw gets processed before the filter texture gets deleted.
-  if (filter_bitmap.getTexture())
+  if (filter_bitmap)
     GLC(gl_, gl_->Flush());
 }
 
@@ -1909,22 +1919,18 @@ void GLRenderer::DrawPictureQuad(const DrawingFrame* frame,
     if (on_demand_tile_raster_resource_id_)
       resource_provider_->DeleteResource(on_demand_tile_raster_resource_id_);
 
-    on_demand_tile_raster_resource_id_ =
-        resource_provider_->CreateGLTexture(quad->texture_size,
-                                            GL_TEXTURE_2D,
-                                            GL_TEXTURE_POOL_UNMANAGED_CHROMIUM,
-                                            GL_CLAMP_TO_EDGE,
-                                            ResourceProvider::TextureUsageAny,
-                                            quad->texture_format);
+    on_demand_tile_raster_resource_id_ = resource_provider_->CreateGLTexture(
+        quad->texture_size,
+        GL_TEXTURE_2D,
+        GL_TEXTURE_POOL_UNMANAGED_CHROMIUM,
+        GL_CLAMP_TO_EDGE,
+        ResourceProvider::TextureHintImmutable,
+        quad->texture_format);
   }
 
-  // Create and run on-demand raster task for tile.
-  scoped_refptr<Task> on_demand_raster_task(
-      new OnDemandRasterTaskImpl(quad->picture_pile,
-                                 &on_demand_tile_raster_bitmap_,
-                                 quad->content_rect,
-                                 quad->contents_scale));
-  client_->RunOnDemandRasterTask(on_demand_raster_task.get());
+  SkCanvas canvas(on_demand_tile_raster_bitmap_);
+  quad->picture_pile->RasterToBitmap(
+      &canvas, quad->content_rect, quad->contents_scale, NULL);
 
   uint8_t* bitmap_pixels = NULL;
   SkBitmap on_demand_tile_raster_bitmap_dest;

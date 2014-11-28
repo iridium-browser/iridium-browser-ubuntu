@@ -38,16 +38,14 @@ static const arg_def_t timebase_arg =
     ARG_DEF("t", "timebase", 1, "timebase (num/den)");
 static const arg_def_t bitrate_arg = ARG_DEF(
     "b", "target-bitrate", 1, "encoding bitrate, in kilobits per second");
-static const arg_def_t layers_arg =
-    ARG_DEF("l", "layers", 1, "number of SVC layers");
+static const arg_def_t spatial_layers_arg =
+    ARG_DEF("sl", "spatial-layers", 1, "number of spatial SVC layers");
+static const arg_def_t temporal_layers_arg =
+    ARG_DEF("tl", "temporal-layers", 1, "number of temporal SVC layers");
 static const arg_def_t kf_dist_arg =
     ARG_DEF("k", "kf-dist", 1, "number of frames between keyframes");
 static const arg_def_t scale_factors_arg =
     ARG_DEF("r", "scale-factors", 1, "scale factors (lowest to highest layer)");
-static const arg_def_t quantizers_arg =
-    ARG_DEF("q", "quantizers", 1, "quantizers for non key frames, also will "
-            "be applied to key frames if -qn is not specified (lowest to "
-            "highest layer)");
 static const arg_def_t passes_arg =
     ARG_DEF("p", "passes", 1, "Number of passes (1/2)");
 static const arg_def_t pass_arg =
@@ -65,10 +63,10 @@ static const arg_def_t max_bitrate_arg =
 
 static const arg_def_t *svc_args[] = {
   &frames_arg,        &width_arg,         &height_arg,
-  &timebase_arg,      &bitrate_arg,       &skip_frames_arg, &layers_arg,
-  &kf_dist_arg,       &scale_factors_arg, &quantizers_arg,  &passes_arg,
-  &pass_arg,          &fpf_name_arg,      &min_q_arg,       &max_q_arg,
-  &min_bitrate_arg,   &max_bitrate_arg,   NULL
+  &timebase_arg,      &bitrate_arg,       &skip_frames_arg, &spatial_layers_arg,
+  &kf_dist_arg,       &scale_factors_arg, &passes_arg,      &pass_arg,
+  &fpf_name_arg,      &min_q_arg,         &max_q_arg,       &min_bitrate_arg,
+  &max_bitrate_arg,   &temporal_layers_arg,                 NULL
 };
 
 static const uint32_t default_frames_to_skip = 0;
@@ -79,6 +77,7 @@ static const uint32_t default_timebase_num = 1;
 static const uint32_t default_timebase_den = 60;
 static const uint32_t default_bitrate = 1000;
 static const uint32_t default_spatial_layers = 5;
+static const uint32_t default_temporal_layers = 1;
 static const uint32_t default_kf_dist = 100;
 
 typedef struct {
@@ -115,10 +114,12 @@ static void parse_command_line(int argc, const char **argv_,
   const char *fpf_file_name = NULL;
   unsigned int min_bitrate = 0;
   unsigned int max_bitrate = 0;
+  char string_options[1024] = {0};
 
   // initialize SvcContext with parameters that will be passed to vpx_svc_init
   svc_ctx->log_level = SVC_LOG_DEBUG;
   svc_ctx->spatial_layers = default_spatial_layers;
+  svc_ctx->temporal_layers = default_temporal_layers;
 
   // start with default encoder configuration
   res = vpx_codec_enc_config_default(vpx_codec_vp9_cx(), enc_cfg, 0);
@@ -156,15 +157,16 @@ static void parse_command_line(int argc, const char **argv_,
       enc_cfg->rc_target_bitrate = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &skip_frames_arg, argi)) {
       app_input->frames_to_skip = arg_parse_uint(&arg);
-    } else if (arg_match(&arg, &layers_arg, argi)) {
+    } else if (arg_match(&arg, &spatial_layers_arg, argi)) {
       svc_ctx->spatial_layers = arg_parse_uint(&arg);
+    } else if (arg_match(&arg, &temporal_layers_arg, argi)) {
+      svc_ctx->temporal_layers = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &kf_dist_arg, argi)) {
       enc_cfg->kf_min_dist = arg_parse_uint(&arg);
       enc_cfg->kf_max_dist = enc_cfg->kf_min_dist;
     } else if (arg_match(&arg, &scale_factors_arg, argi)) {
-      vpx_svc_set_scale_factors(svc_ctx, arg.val);
-    } else if (arg_match(&arg, &quantizers_arg, argi)) {
-      vpx_svc_set_quantizers(svc_ctx, arg.val);
+      snprintf(string_options, 1024, "%s scale-factors=%s",
+               string_options, arg.val);
     } else if (arg_match(&arg, &passes_arg, argi)) {
       passes = arg_parse_uint(&arg);
       if (passes < 1 || passes > 2) {
@@ -178,9 +180,11 @@ static void parse_command_line(int argc, const char **argv_,
     } else if (arg_match(&arg, &fpf_name_arg, argi)) {
       fpf_file_name = arg.val;
     } else if (arg_match(&arg, &min_q_arg, argi)) {
-      enc_cfg->rc_min_quantizer = arg_parse_uint(&arg);
+      snprintf(string_options, 1024, "%s min-quantizers=%s",
+               string_options, arg.val);
     } else if (arg_match(&arg, &max_q_arg, argi)) {
-      enc_cfg->rc_max_quantizer = arg_parse_uint(&arg);
+      snprintf(string_options, 1024, "%s max-quantizers=%s",
+               string_options, arg.val);
     } else if (arg_match(&arg, &min_bitrate_arg, argi)) {
       min_bitrate = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &max_bitrate_arg, argi)) {
@@ -189,6 +193,10 @@ static void parse_command_line(int argc, const char **argv_,
       ++argj;
     }
   }
+
+  // There will be a space in front of the string options
+  if (strlen(string_options) > 0)
+    vpx_svc_set_options(svc_ctx, string_options + 1);
 
   if (passes == 0 || passes == 1) {
     if (pass) {
@@ -275,7 +283,7 @@ int main(int argc, const char **argv) {
   int frame_duration = 1; /* 1 timebase tick per frame */
   FILE *infile = NULL;
   int end_of_stream = 0;
-  int frame_size;
+  int frames_received = 0;
 
   memset(&svc_ctx, 0, sizeof(svc_ctx));
   svc_ctx.log_print = 1;
@@ -297,12 +305,6 @@ int main(int argc, const char **argv) {
   info.codec_fourcc = VP9_FOURCC;
   info.time_base.numerator = enc_cfg.g_timebase.num;
   info.time_base.denominator = enc_cfg.g_timebase.den;
-  if (vpx_svc_get_layer_resolution(&svc_ctx, svc_ctx.spatial_layers - 1,
-                                   (unsigned int *)&info.frame_width,
-                                   (unsigned int *)&info.frame_height) !=
-      VPX_CODEC_OK) {
-    die("Failed to get output resolution");
-  }
 
   if (!(app_input.passes == 2 && app_input.pass == 1)) {
     // We don't save the bitstream for the 1st pass on two pass rate control
@@ -318,6 +320,8 @@ int main(int argc, const char **argv) {
 
   // Encode frames
   while (!end_of_stream) {
+    vpx_codec_iter_t iter = NULL;
+    const vpx_codec_cx_pkt_t *cx_pkt;
     if (frame_cnt >= app_input.frames_to_code || !vpx_img_read(&raw, infile)) {
       // We need one extra vpx_svc_encode call at end of stream to flush
       // encoder and get remaining data
@@ -330,18 +334,34 @@ int main(int argc, const char **argv) {
     if (res != VPX_CODEC_OK) {
       die_codec(&codec, "Failed to encode frame");
     }
-    if (!(app_input.passes == 2 && app_input.pass == 1)) {
-      while ((frame_size = vpx_svc_get_frame_size(&svc_ctx)) > 0) {
-        vpx_video_writer_write_frame(writer,
-                                     vpx_svc_get_buffer(&svc_ctx),
-                                     frame_size, pts);
+
+    while ((cx_pkt = vpx_codec_get_cx_data(&codec, &iter)) != NULL) {
+      switch (cx_pkt->kind) {
+        case VPX_CODEC_CX_FRAME_PKT: {
+          if (cx_pkt->data.frame.sz > 0)
+            vpx_video_writer_write_frame(writer,
+                                         cx_pkt->data.frame.buf,
+                                         cx_pkt->data.frame.sz,
+                                         cx_pkt->data.frame.pts);
+
+          printf("SVC frame: %d, kf: %d, size: %d, pts: %d\n", frames_received,
+                 !!(cx_pkt->data.frame.flags & VPX_FRAME_IS_KEY),
+                 (int)cx_pkt->data.frame.sz, (int)cx_pkt->data.frame.pts);
+          ++frames_received;
+          break;
+        }
+        case VPX_CODEC_STATS_PKT: {
+          stats_write(&app_input.rc_stats,
+                      cx_pkt->data.twopass_stats.buf,
+                      cx_pkt->data.twopass_stats.sz);
+          break;
+        }
+        default: {
+          break;
+        }
       }
     }
-    if (vpx_svc_get_rc_stats_buffer_size(&svc_ctx) > 0) {
-      stats_write(&app_input.rc_stats,
-                  vpx_svc_get_rc_stats_buffer(&svc_ctx),
-                  vpx_svc_get_rc_stats_buffer_size(&svc_ctx));
-    }
+
     if (!end_of_stream) {
       ++frame_cnt;
       pts += frame_duration;

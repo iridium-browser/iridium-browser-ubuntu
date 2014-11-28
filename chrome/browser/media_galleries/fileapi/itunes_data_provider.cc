@@ -21,8 +21,8 @@
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/browser/media_galleries/imported_media_gallery_registry.h"
 #include "chrome/common/media_galleries/itunes_library.h"
+#include "storage/browser/fileapi/native_file_util.h"
 #include "third_party/icu/source/common/unicode/locid.h"
-#include "webkit/browser/fileapi/native_file_util.h"
 
 namespace itunes {
 
@@ -96,7 +96,7 @@ bool CheckLocaleStringAutoAddPath(
 
   base::FilePath localized_auto_add_path =
       media_path.Append(base::FilePath::FromUTF8Unsafe(it->second));
-  if (!fileapi::NativeFileUtil::DirectoryExists(localized_auto_add_path))
+  if (!storage::NativeFileUtil::DirectoryExists(localized_auto_add_path))
     return false;
 
   *result_path = localized_auto_add_path;
@@ -113,7 +113,7 @@ base::FilePath GetAutoAddPath(const base::FilePath& library_path) {
   // Test 'universal' path first.
   base::FilePath universal_auto_add_path =
       media_path.AppendASCII("Automatically Add to iTunes.localized");
-  if (fileapi::NativeFileUtil::DirectoryExists(universal_auto_add_path))
+  if (storage::NativeFileUtil::DirectoryExists(universal_auto_add_path))
     return universal_auto_add_path;
 
   // Test user locale. Localized directory names encoded in UTF-8.

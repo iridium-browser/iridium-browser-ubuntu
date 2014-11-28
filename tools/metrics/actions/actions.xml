@@ -348,8 +348,11 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Accel_Focus_Launcher">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
-  <description>Please enter the description of this user action.</description>
+  <owner>kuscher@chromium.org</owner>
+  <description>Keyboard accelerator to focus the app shelf.</description>
+  <obsolete>
+    Deprecated 09/2014 in issue 248353 and replaced by Accel_Focus_Shelf.
+  </obsolete>
 </action>
 
 <action name="Accel_Focus_Location">
@@ -370,6 +373,11 @@ should be able to be added at any place in this file.
 <action name="Accel_Focus_Search">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Accel_Focus_Shelf">
+  <owner>kuscher@chromium.org</owner>
+  <description>Keyboard accelerator to focus the app shelf.</description>
 </action>
 
 <action name="Accel_Focus_Toolbar">
@@ -2035,9 +2043,38 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="CloseTab_AudioIndicator">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the close tab button; the audio indicator was showing.
+  </description>
+</action>
+
 <action name="CloseTab_Mouse">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="CloseTab_MuteToggleAvailable">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the close tab button; the audio mute toggle button was enabled.
+  </description>
+</action>
+
+<action name="CloseTab_NoMediaIndicator">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the close tab button; the media indicator was not showing.
+  </description>
+</action>
+
+<action name="CloseTab_RecordingIndicator">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the close tab button; the recording/capture indicator was
+    showing.
+  </description>
 </action>
 
 <action name="CloseWebApp">
@@ -2470,6 +2507,14 @@ should be able to be added at any place in this file.
   <owner>smaslo@chromium.org</owner>
   <owner>yfriedman@chromium.org</owner>
   <description>User opens distilled page preferences.</description>
+</action>
+
+<action name="DomDistiller_ViewOriginal">
+  <owner>yfriedman@chromium.org</owner>
+  <description>
+    Records clicks on the &quot;View Original&quot; link in the distilled page
+    viewer.
+  </description>
 </action>
 
 <action name="Duplicate">
@@ -7056,6 +7101,27 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="MediaIndicatorButton_Dragged">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User dragged the tab media indicator button; perhaps meant to drag the tab.
+  </description>
+</action>
+
+<action name="MediaIndicatorButton_Mute">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the tab media indicator button to mute the tab.
+  </description>
+</action>
+
+<action name="MediaIndicatorButton_Unmute">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the tab media indicator button to unmute the tab.
+  </description>
+</action>
+
 <action name="Menu_Take_Screenshot">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -10802,6 +10868,13 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="TabContextMenu_MuteTabs">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User muted one or more tabs via the tab context menu.
+  </description>
+</action>
+
 <action name="TabContextMenu_NewTab">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -10832,6 +10905,13 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="TabContextMenu_UnmuteTabs">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User unmuted one or more tabs via the tab context menu.
+  </description>
+</action>
+
 <action name="TabContextMenu_UseDestinationsTab_Off">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -10845,6 +10925,13 @@ should be able to be added at any place in this file.
 <action name="TabContextMenu_UseVerticalTabs">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="TabMediaIndicator_Clicked">
+  <owner>miu@chromium.org</owner>
+  <description>
+    User clicked the tab media indicator; this will have no effect.
+  </description>
 </action>
 
 <action name="TabOverview_DetachCell">
@@ -11075,46 +11162,58 @@ should be able to be added at any place in this file.
 <action name="UpgradeCheck_AlreadyUpToDate">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
 <action name="UpgradeCheck_AlreadyUpgraded">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
 <action name="UpgradeCheck_Done">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Not present in codebase.</obsolete>
 </action>
 
 <action name="UpgradeCheck_Error">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>
+    Removed from codebase; see GoogleUpdate.UpgradeResult,
+    GoogleUpdate.UpdateErrorCode, and GoogleUpdate.ErrorHresult.
+  </obsolete>
 </action>
 
 <action name="UpgradeCheck_Started">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
 <action name="UpgradeCheck_TimedOut">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Not present in codebase.</obsolete>
 </action>
 
 <action name="UpgradeCheck_UpgradeIsAvailable">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
 <action name="UpgradeCheck_Upgraded">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
 <action name="Upgrade_Started">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
 <action name="ViewAboutConflicts">
@@ -11338,14 +11437,36 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="Win7ASHRestart">
+  <owner>cpu@chromium.org</owner>
+  <owner>ananta@chromium.org</owner>
+  <owner>shrikant@chromium.org</owner>
+  <description>Tracks when Chrome was restarted on Win7 in Ash.</description>
+</action>
+
+<action name="Win7DesktopRestart">
+  <owner>cpu@chromium.org</owner>
+  <owner>ananta@chromium.org</owner>
+  <owner>shrikant@chromium.org</owner>
+  <description>
+    Tracks when Chrome was restarted on Win7 in desktop.
+  </description>
+</action>
+
 <action name="Win8DesktopRestart">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
-  <description>Please enter the description of this user action.</description>
+  <owner>cpu@chromium.org</owner>
+  <owner>ananta@chromium.org</owner>
+  <owner>shrikant@chromium.org</owner>
+  <description>
+    Tracks when Chrome was restarted on Win8 in desktop.
+  </description>
 </action>
 
 <action name="Win8MetroRestart">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
-  <description>Please enter the description of this user action.</description>
+  <owner>cpu@chromium.org</owner>
+  <owner>ananta@chromium.org</owner>
+  <owner>shrikant@chromium.org</owner>
+  <description>Tracks when Chrome was restarted on Win8 in metro.</description>
 </action>
 
 <action name="WindowBorder_ClickTogglesSingleAxisMaximize">

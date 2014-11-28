@@ -49,8 +49,6 @@ component("ozone_base") {
   sources = [
     "public/cursor_factory_ozone.cc",
     "public/cursor_factory_ozone.h",
-    "public/event_factory_ozone.cc",
-    "public/event_factory_ozone.h",
     "public/gpu_platform_support.cc",
     "public/gpu_platform_support.h",
     "public/gpu_platform_support_host.cc",
@@ -89,8 +87,6 @@ component("ozone") {
     "common/chromeos/display_util.h",
     "common/chromeos/native_display_delegate_ozone.cc",
     "common/chromeos/native_display_delegate_ozone.h",
-    "common/chromeos/touchscreen_device_manager_ozone.cc",
-    "common/chromeos/touchscreen_device_manager_ozone.h",
     "common/gpu/ozone_gpu_message_generator.cc",
     "common/gpu/ozone_gpu_message_generator.h",
     "common/gpu/ozone_gpu_message_params.cc",
@@ -100,6 +96,8 @@ component("ozone") {
     "public/ozone_platform.h",
     "public/ozone_switches.cc",
     "public/ozone_switches.h",
+    "public/ui_thread_gpu.cc",
+    "public/ui_thread_gpu.h",
     "platform_selection.cc",
     "platform_selection.h",
   ]
@@ -123,7 +121,7 @@ component("ozone") {
   ] + ozone_platform_deps
 
   if (is_chromeos) {
-    deps += [ "//ui/dusplay/types" ]
+    deps += [ "//ui/display/types" ]
   }
 }
 

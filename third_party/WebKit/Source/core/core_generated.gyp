@@ -150,7 +150,9 @@
           # crbug.com/341031
           'private_script_files': [
              '../bindings/core/v8/PrivateScriptRunner.js',
-             '../core/html/HTMLMarqueeElement.js',
+             'html/HTMLMarqueeElement.js',
+             'html/shadow/PluginPlaceholderElement.js',
+             'xml/DocumentXMLTreeViewer.js',
           ],
           'inputs': [
              '../build/scripts/make_private_script_source.py',
@@ -182,6 +184,7 @@
            'action': [
              'python',
              '../build/scripts/make_private_script_source.py',
+             '--for-testing',
              '<@(_outputs)',
              '<@(_private_script_files)'
            ],
@@ -406,8 +409,6 @@
             '<(blink_core_output_dir)/HTMLElementFactory.h',
             '<(blink_core_output_dir)/HTMLNames.cpp',
             '<(blink_core_output_dir)/HTMLNames.h',
-            '<(blink_core_output_dir)/V8HTMLElementWrapperFactory.cpp',
-            '<(blink_core_output_dir)/V8HTMLElementWrapperFactory.h',
           ],
           'action': [
             'python',
@@ -447,8 +448,6 @@
             '<(blink_core_output_dir)/SVGElementFactory.h',
             '<(blink_core_output_dir)/SVGNames.cpp',
             '<(blink_core_output_dir)/SVGNames.h',
-            '<(blink_core_output_dir)/V8SVGElementWrapperFactory.cpp',
-            '<(blink_core_output_dir)/V8SVGElementWrapperFactory.h',
           ],
           'action': [
             'python',
@@ -486,7 +485,6 @@
           'outputs': [
             '<(blink_core_output_dir)/Event.cpp',
             '<(blink_core_output_dir)/EventHeaders.h',
-            '<(blink_core_output_dir)/EventInterfaces.h',
           ],
           'action': [
             'python',
@@ -511,24 +509,6 @@
             'python',
             '../build/scripts/make_names.py',
             '<(blink_core_output_dir)/EventInterfaces.in',
-            '--output_dir',
-            '<(blink_core_output_dir)',
-          ],
-        },
-        {
-          'action_name': 'EventTargetFactory',
-          'inputs': [
-            '<@(make_event_factory_files)',
-            'events/EventTargetFactory.in',
-          ],
-          'outputs': [
-            '<(blink_core_output_dir)/EventTargetHeaders.h',
-            '<(blink_core_output_dir)/EventTargetInterfaces.h',
-          ],
-          'action': [
-            'python',
-            '../build/scripts/make_event_factory.py',
-            'events/EventTargetFactory.in',
             '--output_dir',
             '<(blink_core_output_dir)',
           ],

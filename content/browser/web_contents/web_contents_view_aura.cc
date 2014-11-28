@@ -6,7 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
@@ -19,6 +19,7 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
+#include "content/browser/renderer_host/web_input_event_aura.h"
 #include "content/browser/web_contents/aura/gesture_nav_simple.h"
 #include "content/browser/web_contents/aura/image_window_delegate.h"
 #include "content/browser/web_contents/aura/overscroll_navigation_overlay.h"
@@ -810,7 +811,7 @@ void WebContentsViewAura::InstallOverscrollControllerDelegate(
 void WebContentsViewAura::PrepareOverscrollWindow() {
   // If there is an existing |overscroll_window_| which is in the middle of an
   // animation, then destroying the window here causes the animation to be
-  // completed immidiately, which triggers |OnImplicitAnimationsCompleted()|
+  // completed immediately, which triggers |OnImplicitAnimationsCompleted()|
   // callback, and that tries to reset |overscroll_window_| again, causing a
   // double-free. So use a temporary variable here.
   if (overscroll_window_) {
@@ -1269,6 +1270,22 @@ void WebContentsViewAura::TakeFocus(bool reverse) {
   }
 }
 
+void WebContentsViewAura::ShowDisambiguationPopup(
+    const gfx::Rect& target_rect,
+    const SkBitmap& zoomed_bitmap,
+    const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
+    const base::Callback<void(ui::MouseEvent*)>& mouse_cb) {
+  if (delegate_) {
+    delegate_->ShowDisambiguationPopup(target_rect, zoomed_bitmap,
+        window_.get(), gesture_cb, mouse_cb);
+  }
+}
+
+void WebContentsViewAura::HideDisambiguationPopup() {
+  if (delegate_)
+    delegate_->HideDisambiguationPopup();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsViewAura, OverscrollControllerDelegate implementation:
 
@@ -1288,21 +1305,26 @@ bool WebContentsViewAura::OnOverscrollUpdate(float delta_x, float delta_y) {
   gfx::Vector2d translate = GetTranslationForOverscroll(delta_x, delta_y);
   gfx::Transform transform;
 
-  // Vertical overscrolls don't participate in the navigation gesture.
-  if (current_overscroll_gesture_ != OVERSCROLL_NORTH &&
-      current_overscroll_gesture_ != OVERSCROLL_SOUTH) {
+  if (current_overscroll_gesture_ == OVERSCROLL_NORTH ||
+      current_overscroll_gesture_ == OVERSCROLL_SOUTH) {
+    OverscrollUpdateForWebContentsDelegate(translate.y());
+  } else {
+    // Only horizontal overscrolls participate in the navigation gesture.
     transform.Translate(translate.x(), translate.y());
     target->SetTransform(transform);
     UpdateOverscrollWindowBrightness(delta_x);
   }
 
-  OverscrollUpdateForWebContentsDelegate(translate.y());
   return !translate.IsZero();
 }
 
 void WebContentsViewAura::OnOverscrollComplete(OverscrollMode mode) {
   UMA_HISTOGRAM_ENUMERATION("Overscroll.Completed", mode, OVERSCROLL_COUNT);
-  OverscrollUpdateForWebContentsDelegate(0);
+  if (web_contents_->GetDelegate() &&
+      IsScrollEndEffectEnabled() &&
+      (mode == OVERSCROLL_NORTH || mode == OVERSCROLL_SOUTH)) {
+    web_contents_->GetDelegate()->OverscrollComplete();
+  }
   NavigationControllerImpl& controller = web_contents_->GetController();
   if (ShouldNavigateForward(controller, mode) ||
       ShouldNavigateBack(controller, mode)) {
@@ -1318,6 +1340,9 @@ void WebContentsViewAura::OnOverscrollModeChange(OverscrollMode old_mode,
   // Reset any in-progress overscroll animation first.
   ResetOverscrollTransform();
 
+  if (old_mode == OVERSCROLL_NORTH || old_mode == OVERSCROLL_SOUTH)
+    OverscrollUpdateForWebContentsDelegate(0);
+
   if (new_mode != OVERSCROLL_NONE && touch_editable_)
     touch_editable_->OverscrollStarted();
 
@@ -1326,7 +1351,6 @@ void WebContentsViewAura::OnOverscrollModeChange(OverscrollMode old_mode,
       ((new_mode == OVERSCROLL_EAST || new_mode == OVERSCROLL_WEST) &&
        navigation_overlay_.get() && navigation_overlay_->has_window())) {
     current_overscroll_gesture_ = OVERSCROLL_NONE;
-    OverscrollUpdateForWebContentsDelegate(0);
   } else {
     aura::Window* target = GetWindowToAnimateForOverscroll();
     if (target) {
@@ -1576,19 +1600,6 @@ int WebContentsViewAura::OnPerformDrop(const ui::DropTargetEvent& event) {
     drag_dest_delegate_->OnDrop();
   current_drop_data_.reset();
   return ConvertFromWeb(current_drag_op_);
-}
-
-void WebContentsViewAura::OnWindowParentChanged(aura::Window* window,
-                                                aura::Window* parent) {
-  // Ignore any visibility changes in the hierarchy below.
-  if (window != window_.get() && window_->Contains(window))
-    return;
-
-  // On Windows we will get called with a parent of NULL as part of the shut
-  // down process. As such we do only change the visibility when a parent gets
-  // set.
-  if (parent)
-    UpdateWebContentsVisibility(window->IsVisible());
 }
 
 void WebContentsViewAura::OnWindowVisibilityChanged(aura::Window* window,

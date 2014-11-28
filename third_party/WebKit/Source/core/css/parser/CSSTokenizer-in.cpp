@@ -1076,12 +1076,6 @@ inline void CSSTokenizer::detectAtToken(int length, bool hasEscape)
             if (LIKELY(!hasEscape && m_internal))
                 m_token = INTERNAL_SELECTOR_SYM;
         }
-        CASE("-internal-medialist") {
-            if (!m_internal)
-                return;
-            m_parsingMode = MediaQueryMode;
-            m_token = INTERNAL_MEDIALIST_SYM;
-        }
         CASE("-internal-keyframe-rule") {
             if (LIKELY(!hasEscape && m_internal))
                 m_token = INTERNAL_KEYFRAME_RULE_SYM;
@@ -1172,7 +1166,6 @@ restartAfterComment:
             // Skip parenthesis
             ++currentCharacter<SrcCharacterType>();
             ++result;
-            ++yylval->string.m_length;
 
             if (m_token == URI) {
                 m_token = FUNCTION;
@@ -1239,27 +1232,22 @@ restartAfterComment:
             break;
         }
 
-        // Use SVG parser for numbers on SVG presentation attributes.
-        if (isSVGNumberParsingEnabledForMode(m_parser.m_context.mode())) {
-            // We need to take care of units like 'em' or 'ex'.
-            SrcCharacterType* character = currentCharacter<SrcCharacterType>();
-            if (isASCIIAlphaCaselessEqual(*character, 'e')) {
-                ASSERT(character - tokenStart<SrcCharacterType>() > 0);
+        // We need to take care of units like 'em' or 'ex'.
+        SrcCharacterType* character = currentCharacter<SrcCharacterType>();
+        if (isASCIIAlphaCaselessEqual(*character, 'e')) {
+            ASSERT(character - tokenStart<SrcCharacterType>() > 0);
+            ++character;
+            if (*character == '-' || *character == '+' || isASCIIDigit(*character)) {
                 ++character;
-                if (*character == '-' || *character == '+' || isASCIIDigit(*character)) {
+                while (isASCIIDigit(*character))
                     ++character;
-                    while (isASCIIDigit(*character))
-                        ++character;
-                    // Use FLOATTOKEN if the string contains exponents.
-                    dotSeen = true;
-                    currentCharacter<SrcCharacterType>() = character;
-                }
+                // Use FLOATTOKEN if the string contains exponents.
+                dotSeen = true;
+                currentCharacter<SrcCharacterType>() = character;
             }
-            if (!parseSVGNumber(tokenStart<SrcCharacterType>(), character - tokenStart<SrcCharacterType>(), yylval->number))
-                break;
-        } else {
-            yylval->number = charactersToDouble(tokenStart<SrcCharacterType>(), currentCharacter<SrcCharacterType>() - tokenStart<SrcCharacterType>());
         }
+
+        yylval->number = charactersToDouble(tokenStart<SrcCharacterType>(), currentCharacter<SrcCharacterType>() - tokenStart<SrcCharacterType>());
 
         // Type of the function.
         if (isIdentifierStart<SrcCharacterType>()) {
@@ -1321,8 +1309,8 @@ restartAfterComment:
                         currentCharacter<SrcCharacterType>() = nextCharacter;
                     }
                 }
+                resultString.setLength(result - tokenStart<SrcCharacterType>());
             }
-            resultString.setLength(result - tokenStart<SrcCharacterType>());
             yylval->string = resultString;
         } else if (currentCharacter<SrcCharacterType>()[0] == '-' && currentCharacter<SrcCharacterType>()[1] == '>') {
             currentCharacter<SrcCharacterType>() += 2;

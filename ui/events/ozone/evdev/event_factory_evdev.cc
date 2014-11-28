@@ -10,6 +10,7 @@
 #include "base/debug/trace_event.h"
 #include "base/stl_util.h"
 #include "base/task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "ui/events/ozone/device/device_event.h"
 #include "ui/events/ozone/device/device_manager.h"
@@ -139,7 +140,7 @@ EventFactoryEvdev::EventFactoryEvdev(
           base::Bind(base::IgnoreResult(&EventFactoryEvdev::DispatchUiEvent),
                      base::Unretained(this))),
       weak_ptr_factory_(this) {
-  CHECK(device_manager_);
+  DCHECK(device_manager_);
 }
 
 EventFactoryEvdev::~EventFactoryEvdev() { STLDeleteValues(&converters_); }
@@ -152,7 +153,7 @@ void EventFactoryEvdev::AttachInputDevice(
     const base::FilePath& path,
     scoped_ptr<EventConverterEvdev> converter) {
   TRACE_EVENT1("ozone", "AttachInputDevice", "path", path.value());
-  CHECK(ui_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(ui_task_runner_->RunsTasksOnCurrentThread());
 
   // If we have an existing device, detach it. We don't want two
   // devices with the same name open at the same time.
@@ -197,8 +198,8 @@ void EventFactoryEvdev::OnDeviceEvent(const DeviceEvent& event) {
 }
 
 void EventFactoryEvdev::OnDispatcherListChanged() {
-  if (!ui_task_runner_) {
-    ui_task_runner_ = base::MessageLoopProxy::current();
+  if (!ui_task_runner_.get()) {
+    ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
     // Scan & monitor devices.
     device_manager_->AddObserver(this);
     device_manager_->ScanDevices(this);
@@ -207,7 +208,7 @@ void EventFactoryEvdev::OnDispatcherListChanged() {
 
 void EventFactoryEvdev::DetachInputDevice(const base::FilePath& path) {
   TRACE_EVENT1("ozone", "DetachInputDevice", "path", path.value());
-  CHECK(ui_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(ui_task_runner_->RunsTasksOnCurrentThread());
 
   // Remove device from map.
   scoped_ptr<EventConverterEvdev> converter(converters_[path]);

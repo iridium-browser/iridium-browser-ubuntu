@@ -9,9 +9,7 @@ namespace extensions {
 class FileSystemProviderApiTest : public ExtensionApiTest {
  public:
   FileSystemProviderApiTest()
-      // Set the channel to "trunk" since this API is restricted to trunk.
-      : current_channel_(chrome::VersionInfo::CHANNEL_UNKNOWN) {
-  }
+      : current_channel_(chrome::VersionInfo::CHANNEL_DEV) {}
 
   // Loads a helper testing extension.
   virtual void SetUpOnMainThread() OVERRIDE {
@@ -34,6 +32,12 @@ IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, Mount) {
 
 IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, Unmount) {
   ASSERT_TRUE(RunPlatformAppTestWithFlags("file_system_provider/unmount",
+                                          kFlagLoadAsComponent))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, GetAll) {
+  ASSERT_TRUE(RunPlatformAppTestWithFlags("file_system_provider/get_all",
                                           kFlagLoadAsComponent))
       << message_;
 }
@@ -112,6 +116,17 @@ IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, Truncate) {
 
 IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, WriteFile) {
   ASSERT_TRUE(RunPlatformAppTestWithFlags("file_system_provider/write_file",
+                                          kFlagLoadAsComponent))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, Extension) {
+  ASSERT_TRUE(RunComponentExtensionTest("file_system_provider/extension"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemProviderApiTest, Thumbnail) {
+  ASSERT_TRUE(RunPlatformAppTestWithFlags("file_system_provider/thumbnail",
                                           kFlagLoadAsComponent))
       << message_;
 }

@@ -38,6 +38,7 @@
 #include "talk/media/base/fakenetworkinterface.h"
 #include "talk/media/base/fakertp.h"
 #include "talk/media/webrtc/fakewebrtcvoiceengine.h"
+#include "talk/media/webrtc/webrtcvie.h"
 #include "talk/media/webrtc/webrtcvoiceengine.h"
 #include "talk/p2p/base/fakesession.h"
 #include "talk/session/media/channel.h"
@@ -1151,7 +1152,6 @@ TEST_F(WebRtcVoiceEngineTestFake, SetSendCodecNoOpusFec) {
   int channel_num = voe_.GetLastChannel();
   std::vector<cricket::AudioCodec> codecs;
   codecs.push_back(kOpusCodec);
-  codecs[0].bitrate = 0;
   EXPECT_TRUE(channel_->SetSendCodecs(codecs));
   EXPECT_FALSE(voe_.GetCodecFEC(channel_num));
 }
@@ -1228,32 +1228,160 @@ TEST_F(WebRtcVoiceEngineTestFake, SetSendCodecIsacWithParamNoFec) {
   EXPECT_TRUE(channel_->SetSendCodecs(codecs));
   EXPECT_FALSE(voe_.GetCodecFEC(channel_num));
 }
-#endif  // USE_WEBRTC_DEV_BRANCH
 
-// Test AudioOptions controls whether opus FEC is supported in codec list.
-TEST_F(WebRtcVoiceEngineTestFake, OpusFecViaOptions) {
+// Test that Opus FEC status can be changed.
+TEST_F(WebRtcVoiceEngineTestFake, ChangeOpusFecStatus) {
   EXPECT_TRUE(SetupEngine());
-  std::vector<cricket::AudioCodec> codecs = engine_.codecs();
-  int value;
-  for (std::vector<cricket::AudioCodec>::const_iterator it = codecs.begin();
-      it != codecs.end(); ++it) {
-    if (_stricmp(it->name.c_str(), cricket::kOpusCodecName) == 0) {
-      EXPECT_FALSE(it->GetParam(cricket::kCodecParamUseInbandFec, &value));
-    }
-  }
-
-  cricket::AudioOptions options;
-  options.opus_fec.Set(true);
-  EXPECT_TRUE(engine_.SetOptions(options));
-  codecs = engine_.codecs();
-  for (std::vector<cricket::AudioCodec>::const_iterator it = codecs.begin();
-      it != codecs.end(); ++it) {
-    if (_stricmp(it->name.c_str(), cricket::kOpusCodecName) == 0) {
-      EXPECT_TRUE(it->GetParam(cricket::kCodecParamUseInbandFec, &value));
-      EXPECT_EQ(1, value);
-    }
-  }
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_FALSE(voe_.GetCodecFEC(channel_num));
+  codecs[0].params["useinbandfec"] = "1";
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_TRUE(voe_.GetCodecFEC(channel_num));
 }
+
+// Test maxplaybackrate <= 8000 triggers Opus narrow band mode.
+TEST_F(WebRtcVoiceEngineTestFake, SetOpusMaxPlaybackRateNb) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  codecs[0].bitrate = 0;
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 8000);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthNb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+  webrtc::CodecInst gcodec;
+  EXPECT_EQ(0, voe_.GetSendCodec(channel_num, gcodec));
+  EXPECT_STREQ("opus", gcodec.plname);
+  // TODO(minyue): Default bit rate is not but can in future be affected by
+  // kCodecParamMaxPlaybackRate.
+  EXPECT_EQ(32000, gcodec.rate);
+}
+
+// Test 8000 < maxplaybackrate <= 12000 triggers Opus medium band mode.
+TEST_F(WebRtcVoiceEngineTestFake, SetOpusMaxPlaybackRateMb) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  codecs[0].bitrate = 0;
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 8001);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthMb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+  webrtc::CodecInst gcodec;
+  EXPECT_EQ(0, voe_.GetSendCodec(channel_num, gcodec));
+  EXPECT_STREQ("opus", gcodec.plname);
+  // TODO(minyue): Default bit rate is not but can in future be affected by
+  // kCodecParamMaxPlaybackRate.
+  EXPECT_EQ(32000, gcodec.rate);
+}
+
+// Test 12000 < maxplaybackrate <= 16000 triggers Opus wide band mode.
+TEST_F(WebRtcVoiceEngineTestFake, SetOpusMaxPlaybackRateWb) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  codecs[0].bitrate = 0;
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 12001);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthWb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+  webrtc::CodecInst gcodec;
+  EXPECT_EQ(0, voe_.GetSendCodec(channel_num, gcodec));
+  EXPECT_STREQ("opus", gcodec.plname);
+  // TODO(minyue): Default bit rate is not but can in future be affected by
+  // kCodecParamMaxPlaybackRate.
+  EXPECT_EQ(32000, gcodec.rate);
+}
+
+// Test 16000 < maxplaybackrate <= 24000 triggers Opus super wide band mode.
+TEST_F(WebRtcVoiceEngineTestFake, SetOpusMaxPlaybackRateSwb) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  codecs[0].bitrate = 0;
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 16001);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthSwb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+  webrtc::CodecInst gcodec;
+  EXPECT_EQ(0, voe_.GetSendCodec(channel_num, gcodec));
+  EXPECT_STREQ("opus", gcodec.plname);
+  // TODO(minyue): Default bit rate is not but can in future be affected by
+  // kCodecParamMaxPlaybackRate.
+  EXPECT_EQ(32000, gcodec.rate);
+}
+
+// Test 24000 < maxplaybackrate triggers Opus full band mode.
+TEST_F(WebRtcVoiceEngineTestFake, SetOpusMaxPlaybackRateFb) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  codecs[0].bitrate = 0;
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 24001);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthFb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+  webrtc::CodecInst gcodec;
+  EXPECT_EQ(0, voe_.GetSendCodec(channel_num, gcodec));
+  EXPECT_STREQ("opus", gcodec.plname);
+  // TODO(minyue): Default bit rate is not but can in future be affected by
+  // kCodecParamMaxPlaybackRate.
+  EXPECT_EQ(32000, gcodec.rate);
+}
+
+// Test Opus that without maxplaybackrate, default playback rate is used.
+TEST_F(WebRtcVoiceEngineTestFake, DefaultOpusMaxPlaybackRate) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthFb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+}
+
+// Test the with non-Opus, maxplaybackrate has no effect.
+TEST_F(WebRtcVoiceEngineTestFake, SetNonOpusMaxPlaybackRate) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kIsacCodec);
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 32000);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(0, voe_.GetMaxEncodingBandwidth(channel_num));
+}
+
+// Test maxplaybackrate can be set on two streams.
+TEST_F(WebRtcVoiceEngineTestFake, SetOpusMaxPlaybackRateOnTwoStreams) {
+  EXPECT_TRUE(SetupEngine());
+  int channel_num = voe_.GetLastChannel();
+  std::vector<cricket::AudioCodec> codecs;
+  codecs.push_back(kOpusCodec);
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  // Default bandwidth is 24000.
+  EXPECT_EQ(cricket::kOpusBandwidthFb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+
+  codecs[0].SetParam(cricket::kCodecParamMaxPlaybackRate, 8000);
+
+  EXPECT_TRUE(channel_->SetSendCodecs(codecs));
+  EXPECT_EQ(cricket::kOpusBandwidthNb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+
+  channel_->AddSendStream(cricket::StreamParams::CreateLegacy(kSsrc2));
+  channel_num = voe_.GetLastChannel();
+  EXPECT_EQ(cricket::kOpusBandwidthNb,
+            voe_.GetMaxEncodingBandwidth(channel_num));
+}
+#endif  // USE_WEBRTC_DEV_BRANCH
 
 // Test that we can apply CELT with stereo mode but fail with mono mode.
 TEST_F(WebRtcVoiceEngineTestFake, SetSendCodecsCelt) {
@@ -3185,3 +3313,113 @@ TEST(WebRtcVoiceEngineTest, CoInitialize) {
   CoUninitialize();
 }
 #endif
+
+TEST_F(WebRtcVoiceEngineTestFake, ChangeCombinedAudioVideoBweOption) {
+  // Test that changing the combined_audio_video_bwe option results in the
+  // expected state changes in VoiceEngine.
+  cricket::ViEWrapper vie;
+  const int kVieCh = 667;
+
+  EXPECT_TRUE(SetupEngine());
+  cricket::WebRtcVoiceMediaChannel* media_channel =
+      static_cast<cricket::WebRtcVoiceMediaChannel*>(channel_);
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(vie.engine(),
+                                                            kVieCh));
+  EXPECT_TRUE(media_channel->AddRecvStream(
+      cricket::StreamParams::CreateLegacy(2)));
+  int recv_ch = voe_.GetLastChannel();
+
+  // Combined BWE should not be set up yet.
+  EXPECT_EQ(NULL, voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(-1, voe_.GetVideoChannel(recv_ch));
+
+  // Enable combined BWE option - now it should be set up.
+  cricket::AudioOptions options;
+  options.combined_audio_video_bwe.Set(true);
+  EXPECT_TRUE(media_channel->SetOptions(options));
+  EXPECT_EQ(vie.network(), voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(kVieCh, voe_.GetVideoChannel(recv_ch));
+
+  // Disable combined BWE option - should be disabled again.
+  options.combined_audio_video_bwe.Set(false);
+  EXPECT_TRUE(media_channel->SetOptions(options));
+  EXPECT_EQ(NULL, voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(-1, voe_.GetVideoChannel(recv_ch));
+
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(NULL, -1));
+}
+
+TEST_F(WebRtcVoiceEngineTestFake, SetupSharedBandwidthEstimation) {
+  // Test that calling SetupSharedBandwidthEstimation() on the voice media
+  // channel results in the expected state changes in VoiceEngine.
+  cricket::ViEWrapper vie1;
+  cricket::ViEWrapper vie2;
+  const int kVieCh1 = 667;
+  const int kVieCh2 = 70;
+
+  EXPECT_TRUE(SetupEngine());
+  cricket::WebRtcVoiceMediaChannel* media_channel =
+      static_cast<cricket::WebRtcVoiceMediaChannel*>(channel_);
+  cricket::AudioOptions options;
+  options.combined_audio_video_bwe.Set(true);
+  EXPECT_TRUE(media_channel->SetOptions(options));
+  EXPECT_TRUE(media_channel->AddRecvStream(
+      cricket::StreamParams::CreateLegacy(2)));
+  int recv_ch = voe_.GetLastChannel();
+
+  // Combined BWE should not be set up yet.
+  EXPECT_EQ(NULL, voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(-1, voe_.GetVideoChannel(recv_ch));
+
+  // Register - should be enabled.
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(vie1.engine(),
+                                                            kVieCh1));
+  EXPECT_EQ(vie1.network(), voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(kVieCh1, voe_.GetVideoChannel(recv_ch));
+
+  // Re-register - should still be enabled.
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(vie2.engine(),
+                                                            kVieCh2));
+  EXPECT_EQ(vie2.network(), voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(kVieCh2, voe_.GetVideoChannel(recv_ch));
+
+  // Unregister - should be disabled again.
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(NULL, -1));
+  EXPECT_EQ(NULL, voe_.GetViENetwork(recv_ch));
+  EXPECT_EQ(-1, voe_.GetVideoChannel(recv_ch));
+}
+
+TEST_F(WebRtcVoiceEngineTestFake, ConfigureCombinedBweForNewRecvStreams) {
+  // Test that adding receive streams after enabling combined bandwidth
+  // estimation will correctly configure each channel.
+  cricket::ViEWrapper vie;
+  const int kVieCh = 667;
+
+  EXPECT_TRUE(SetupEngine());
+  cricket::WebRtcVoiceMediaChannel* media_channel =
+      static_cast<cricket::WebRtcVoiceMediaChannel*>(channel_);
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(vie.engine(),
+                                                            kVieCh));
+  cricket::AudioOptions options;
+  options.combined_audio_video_bwe.Set(true);
+  EXPECT_TRUE(media_channel->SetOptions(options));
+
+  static const uint32 kSsrcs[] = {1, 2, 3, 4};
+  int voe_channels[ARRAY_SIZE(kSsrcs)] = {0};
+  for (unsigned int i = 0; i < ARRAY_SIZE(kSsrcs); ++i) {
+    EXPECT_TRUE(media_channel->AddRecvStream(
+        cricket::StreamParams::CreateLegacy(kSsrcs[i])));
+    int recv_ch = media_channel->GetReceiveChannelNum(kSsrcs[i]);
+    EXPECT_NE(-1, recv_ch);
+    voe_channels[i] = recv_ch;
+    EXPECT_EQ(vie.network(), voe_.GetViENetwork(recv_ch));
+    EXPECT_EQ(kVieCh, voe_.GetVideoChannel(recv_ch));
+  }
+
+  EXPECT_TRUE(media_channel->SetupSharedBandwidthEstimation(NULL, -1));
+
+  for (unsigned int i = 0; i < ARRAY_SIZE(voe_channels); ++i) {
+    EXPECT_EQ(NULL, voe_.GetViENetwork(voe_channels[i]));
+    EXPECT_EQ(-1, voe_.GetVideoChannel(voe_channels[i]));
+  }
+}

@@ -15,6 +15,9 @@ import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
+/**
+ * Tests org.chromium.chrome.browser.ShortcutHelper and it's C++ counterpart.
+ */
 public class ShortcutHelperTest extends ChromeShellTestBase {
     private static final String WEBAPP_ACTION_NAME = "WEBAPP_ACTION";
 
@@ -38,6 +41,14 @@ public class ShortcutHelperTest extends ChromeShellTestBase {
             "<html>"
             + "<head><title>" + NORMAL_TITLE + "</title></head>"
             + "<body>Not Webapp capable</body></html>");
+
+    private static final String META_APP_NAME_TITLE = "Web application-name";
+    private static final String META_APP_NAME_HTML = UrlUtils.encodeHtmlDataUri(
+            "<html><head>"
+            + "<meta name=\"mobile-web-app-capable\" content=\"yes\" />"
+            + "<meta name=\"application-name\" content=\"" + META_APP_NAME_TITLE + "\">"
+            + "<title>Not the right title</title>"
+            + "</head><body>Webapp capable</body></html>");
 
     private static class TestObserver implements ChromeShellApplicationObserver {
         Intent mFiredIntent;
@@ -150,6 +161,19 @@ public class ShortcutHelperTest extends ChromeShellTestBase {
         assertEquals(EDITED_WEBAPP_TITLE , firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
     }
 
+    /**
+     * @MediumTest
+     * @Feature("{Webapp}")
+     * crbug.com/303486
+     */
+    @FlakyTest
+    public void testAddWebappShortcutsWithApplicationName() throws InterruptedException {
+        // Add a webapp shortcut to check edited title.
+        addShortcutToURL(META_APP_NAME_HTML, "");
+        Intent firedIntent = mTestObserver.mFiredIntent;
+        assertEquals(META_APP_NAME_TITLE , firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+    }
+
     private void addShortcutToURL(String url, final String title) throws InterruptedException {
         loadUrlWithSanitization(url);
         assertTrue(waitForActiveShellToBeDoneLoading());
@@ -158,8 +182,16 @@ public class ShortcutHelperTest extends ChromeShellTestBase {
         getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                ShortcutHelper.addShortcut(mActivity.getApplicationContext(),
-                        mActivity.getActiveTab(), title);
+                final ShortcutHelper shortcutHelper = new ShortcutHelper(
+                        mActivity.getApplicationContext(), mActivity.getActiveTab());
+                // Calling initialize() isn't strictly required but it is
+                // testing this code path.
+                shortcutHelper.initialize(new ShortcutHelper.OnInitialized() {
+                    @Override
+                    public void onInitialized(String t) {
+                        shortcutHelper.addShortcut(title);
+                    }
+                });
             }
         });
 

@@ -7,9 +7,11 @@ from telemetry.core.backends import form_based_credentials_backend
 
 class GoogleCredentialsBackend(
     form_based_credentials_backend.FormBasedCredentialsBackend):
-  def IsAlreadyLoggedIn(self, tab):
-    return tab.EvaluateJavaScript(
-        'document.getElementById("gb")!== null')
+
+  @property
+  def logged_in_javascript(self):
+    """Evaluates to true iff already logged in."""
+    return 'document.getElementById("gb")!== null'
 
   @property
   def credentials_type(self):
@@ -17,7 +19,11 @@ class GoogleCredentialsBackend(
 
   @property
   def url(self):
-    return 'https://accounts.google.com/'
+    # pylint: disable=C0301
+    # WPR doesn't support having 2 responses for the same URL (with/without
+    # session cookie), so after login behaviour differs with/without wpr.
+    # Sign-in URL is specified directly to overcome this.
+    return 'https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Faccounts.google.com%2FManageAccount'
 
   @property
   def login_form_id(self):

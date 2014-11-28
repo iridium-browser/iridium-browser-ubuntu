@@ -19,12 +19,13 @@
 #include "nacl_io/osmman.h"
 #include "nacl_io/ossocket.h"
 #include "nacl_io/ostermios.h"
+#include "nacl_io/ostime.h"
+#include "ppapi_simple/ps.h"
 
 #if defined(__native_client__) && !defined(__GLIBC__)
 extern "C" {
-// TODO(sbc): remove once these get added to the newlib toolchain headers.
+// TODO(sbc): remove once this gets added to the newlib toolchain headers.
 int fchdir(int fd);
-int utimes(const char *filename, const struct timeval times[2]);
 }
 #endif
 
@@ -39,30 +40,48 @@ using ::testing::StrEq;
 
 namespace {
 
-#define COMPARE_FIELD(f)                                                     \
-  if (arg->f != statbuf->f) {                                                \
-    *result_listener << "mismatch of field \"" #f                            \
-                        "\". "                                               \
-                        "expected: " << statbuf->f << " actual: " << arg->f; \
-    return false;                                                            \
+#define COMPARE_FIELD(actual, expected, f)                                 \
+  if (actual != expected) {                                                \
+    *result_listener << "mismatch of field \"" f                           \
+                        "\". "                                             \
+                        "expected: " << expected << " actual: " << actual; \
+    return false;                                                          \
   }
 
-MATCHER_P(IsEqualToStatbuf, statbuf, "") {
-  COMPARE_FIELD(st_dev);
-  COMPARE_FIELD(st_ino);
-  COMPARE_FIELD(st_mode);
-  COMPARE_FIELD(st_nlink);
-  COMPARE_FIELD(st_uid);
-  COMPARE_FIELD(st_gid);
-  COMPARE_FIELD(st_rdev);
-  COMPARE_FIELD(st_size);
-  COMPARE_FIELD(st_atime);
-  COMPARE_FIELD(st_mtime);
-  COMPARE_FIELD(st_ctime);
+#define COMPARE_FIELD_SIMPLE(f) COMPARE_FIELD(arg->f, other->f, #f)
+
+MATCHER_P(IsEqualToStatbuf, other, "") {
+  COMPARE_FIELD_SIMPLE(st_dev);
+  COMPARE_FIELD_SIMPLE(st_ino);
+  COMPARE_FIELD_SIMPLE(st_mode);
+  COMPARE_FIELD_SIMPLE(st_nlink);
+  COMPARE_FIELD_SIMPLE(st_uid);
+  COMPARE_FIELD_SIMPLE(st_gid);
+  COMPARE_FIELD_SIMPLE(st_rdev);
+  COMPARE_FIELD_SIMPLE(st_size);
+  COMPARE_FIELD_SIMPLE(st_atime);
+  COMPARE_FIELD_SIMPLE(st_mtime);
+  COMPARE_FIELD_SIMPLE(st_ctime);
+  return true;
+}
+
+MATCHER_P(IsEqualToUtimbuf, other, "") {
+  COMPARE_FIELD(arg[0].tv_sec, other->actime, "actime");
+  COMPARE_FIELD(arg[1].tv_sec, other->modtime, "modtime");
+  return true;
+}
+
+MATCHER_P(IsEqualToTimeval, other, "") {
+  COMPARE_FIELD(arg[0].tv_sec, other[0].tv_sec, "[0].tv_sec");
+  COMPARE_FIELD(arg[0].tv_nsec, other[0].tv_usec * 1000, "[0].tv_usec");
+  COMPARE_FIELD(arg[1].tv_sec, other[1].tv_sec, "[1].tv_sec");
+  COMPARE_FIELD(arg[1].tv_nsec, other[1].tv_usec * 1000, "[1].tv_usec");
   return true;
 }
 
 #undef COMPARE_FIELD
+#undef COMPARE_FIELD_SIMPLE
+
 
 ACTION_P(SetErrno, value) {
   errno = value;
@@ -126,7 +145,7 @@ class KernelWrapTest : public ::testing::Test {
     errno = 0;
 
     // Initializing the KernelProxy opens stdin/stdout/stderr.
-    EXPECT_CALL(mock, open(_, _))
+    EXPECT_CALL(mock, open(_, _, _))
         .WillOnce(Return(0))
         .WillOnce(Return(1))
         .WillOnce(Return(2));
@@ -188,14 +207,16 @@ TEST_F(KernelWrapTest, chdir) {
 
 TEST_F(KernelWrapTest, chmod) {
   EXPECT_CALL(mock, chmod(kDummyConstChar, kDummyMode))
-      .WillOnce(Return(kDummyInt2));
-  EXPECT_EQ(kDummyInt2,chmod(kDummyConstChar, kDummyMode));
+      .WillOnce(DoAll(SetErrno(kDummyErrno), Return(-1)));
+  EXPECT_EQ(-1, chmod(kDummyConstChar, kDummyMode));
+  ASSERT_EQ(kDummyErrno, errno);
 }
 
 TEST_F(KernelWrapTest, chown) {
   EXPECT_CALL(mock, chown(kDummyConstChar, kDummyUid, kDummyGid))
-      .WillOnce(Return(kDummyInt));
-  EXPECT_EQ(kDummyInt, chown(kDummyConstChar, kDummyUid, kDummyGid));
+      .WillOnce(DoAll(SetErrno(kDummyErrno), Return(-1)));
+  EXPECT_EQ(-1, chown(kDummyConstChar, kDummyUid, kDummyGid));
+  ASSERT_EQ(kDummyErrno, errno);
 }
 
 TEST_F(KernelWrapTest, close) {
@@ -299,6 +320,14 @@ TEST_F(KernelWrapTest, fsync) {
   ASSERT_EQ(kDummyErrno, errno);
 }
 
+TEST_F(KernelWrapTest, futimes) {
+  struct timeval times[2] = {{123, 234}, {345, 456}};
+  EXPECT_CALL(mock, futimens(kDummyInt, IsEqualToTimeval(times)))
+      .WillOnce(DoAll(SetErrno(kDummyErrno), Return(-1)));
+  EXPECT_EQ(-1, futimes(kDummyInt, times));
+  ASSERT_EQ(kDummyErrno, errno);
+}
+
 TEST_F(KernelWrapTest, getcwd) {
   char buffer[PATH_MAX];
   char result[PATH_MAX];
@@ -372,8 +401,9 @@ TEST_F(KernelWrapTest, lchown) {
 
 TEST_F(KernelWrapTest, link) {
   EXPECT_CALL(mock, link(kDummyConstChar, kDummyConstChar2))
-      .WillOnce(Return(kDummyInt));
-  EXPECT_EQ(kDummyInt, link(kDummyConstChar, kDummyConstChar2));
+      .WillOnce(DoAll(SetErrno(kDummyErrno), Return(-1)));
+  EXPECT_EQ(-1, link(kDummyConstChar, kDummyConstChar2));
+  ASSERT_EQ(kDummyErrno, errno);
 }
 
 TEST_F(KernelWrapTest, lseek) {
@@ -446,12 +476,12 @@ TEST_F(KernelWrapTest, munmap) {
 
 TEST_F(KernelWrapTest, open) {
   // We pass O_RDONLY because we do not want an error in flags translation
-  EXPECT_CALL(mock, open(kDummyConstChar, 0))
+  EXPECT_CALL(mock, open(kDummyConstChar, 0, 0))
       .WillOnce(Return(kDummyInt2))
       .WillOnce(Return(kDummyInt2));
 
-  EXPECT_EQ(kDummyInt2, open(kDummyConstChar, 0));
-  EXPECT_EQ(kDummyInt2, open(kDummyConstChar, 0));
+  EXPECT_EQ(kDummyInt2, open(kDummyConstChar, 0, 0));
+  EXPECT_EQ(kDummyInt2, open(kDummyConstChar, 0, 0));
 }
 
 TEST_F(KernelWrapTest, pipe) {
@@ -611,14 +641,15 @@ TEST_F(KernelWrapTest, unlink) {
 }
 
 TEST_F(KernelWrapTest, utime) {
-  const struct utimbuf* times = NULL;
-  EXPECT_CALL(mock, utime(kDummyConstChar, times)).WillOnce(Return(kDummyInt));
-  EXPECT_EQ(kDummyInt, utime(kDummyConstChar, times));
+  const struct utimbuf times = {123, 456};
+  EXPECT_CALL(mock, utimens(kDummyConstChar, IsEqualToUtimbuf(&times)))
+      .WillOnce(Return(kDummyInt));
+  EXPECT_EQ(kDummyInt, utime(kDummyConstChar, &times));
 }
 
 TEST_F(KernelWrapTest, utimes) {
-  struct timeval* times = NULL;
-  EXPECT_CALL(mock, utimes(kDummyConstChar, times))
+  struct timeval times[2] = {{123, 234}, {345, 456}};
+  EXPECT_CALL(mock, utimens(kDummyConstChar, IsEqualToTimeval(times)))
       .WillOnce(DoAll(SetErrno(kDummyErrno), Return(-1)));
   EXPECT_EQ(-1, utimes(kDummyConstChar, times));
   ASSERT_EQ(kDummyErrno, errno);
@@ -628,6 +659,40 @@ TEST_F(KernelWrapTest, write) {
   EXPECT_CALL(mock, write(kDummyInt, kDummyVoidPtr, kDummyInt2))
       .WillOnce(Return(kDummyInt3));
   EXPECT_EQ(kDummyInt3, write(kDummyInt, kDummyVoidPtr, kDummyInt2));
+}
+
+class KernelWrapTestUninit : public ::testing::Test {
+  void SetUp() {
+    ASSERT_EQ(0, ki_push_state_for_testing());
+    kernel_wrap_uninit();
+  }
+
+  void TearDown() {
+    kernel_wrap_init();
+    ki_pop_state_for_testing();
+  }
+};
+
+TEST_F(KernelWrapTestUninit, Mkdir_Uninitialised) {
+  // If we are running within chrome we can't use these calls without
+  // nacl_io initialized.
+  if (PSGetInstanceId() != 0)
+    return;
+  EXPECT_EQ(0, mkdir("./foo", S_IREAD | S_IWRITE));
+  EXPECT_EQ(0, rmdir("./foo"));
+}
+
+TEST_F(KernelWrapTestUninit, Getcwd_Uninitialised) {
+  // If we are running within chrome we can't use these calls without
+  // nacl_io initialized.
+  if (PSGetInstanceId() != 0)
+    return;
+  char dir[PATH_MAX];
+  ASSERT_NE((char*)NULL, getcwd(dir, PATH_MAX));
+  // Verify that the CWD ends with 'nacl_io_test'
+  const char* suffix = "nacl_io_test";
+  ASSERT_GT(strlen(dir), strlen(suffix));
+  ASSERT_EQ(0, strcmp(dir+strlen(dir)-strlen(suffix), suffix));
 }
 
 #if defined(PROVIDES_SOCKET_API) and !defined(__BIONIC__)

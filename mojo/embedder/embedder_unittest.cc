@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/test_io_thread.h"
 #include "mojo/common/test/multiprocess_test_helper.h"
 #include "mojo/embedder/platform_channel_pair.h"
 #include "mojo/embedder/test_embedder.h"
@@ -36,13 +37,13 @@ class ScopedTestChannel {
       : io_thread_task_runner_(io_thread_task_runner),
         bootstrap_message_pipe_(MOJO_HANDLE_INVALID),
         did_create_channel_event_(true, false),
-        channel_info_(NULL) {
+        channel_info_(nullptr) {
     bootstrap_message_pipe_ =
         CreateChannel(platform_handle.Pass(),
                       io_thread_task_runner_,
                       base::Bind(&ScopedTestChannel::DidCreateChannel,
                                  base::Unretained(this)),
-                      NULL)
+                      nullptr)
             .release()
             .value();
     CHECK_NE(bootstrap_message_pipe_, MOJO_HANDLE_INVALID);
@@ -77,7 +78,7 @@ class ScopedTestChannel {
   void DestroyChannel() {
     CHECK(channel_info_);
     DestroyChannelOnIOThread(channel_info_);
-    channel_info_ = NULL;
+    channel_info_ = nullptr;
   }
 
   scoped_refptr<base::TaskRunner> io_thread_task_runner_;
@@ -100,20 +101,20 @@ class ScopedTestChannel {
 
 class EmbedderTest : public testing::Test {
  public:
-  EmbedderTest() : test_io_thread_(system::test::TestIOThread::kAutoStart) {}
+  EmbedderTest() : test_io_thread_(base::TestIOThread::kAutoStart) {}
   virtual ~EmbedderTest() {}
 
  protected:
-  system::test::TestIOThread* test_io_thread() { return &test_io_thread_; }
+  base::TestIOThread* test_io_thread() { return &test_io_thread_; }
 
  private:
-  system::test::TestIOThread test_io_thread_;
+  base::TestIOThread test_io_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(EmbedderTest);
 };
 
 TEST_F(EmbedderTest, ChannelsBasic) {
-  Init();
+  mojo::embedder::test::InitWithSimplePlatformSupport();
 
   {
     PlatformChannelPair channel_pair;
@@ -132,7 +133,7 @@ TEST_F(EmbedderTest, ChannelsBasic) {
               MojoWriteMessage(server_mp,
                                kHello,
                                static_cast<uint32_t>(sizeof(kHello)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -148,8 +149,8 @@ TEST_F(EmbedderTest, ChannelsBasic) {
               MojoReadMessage(client_mp,
                               buffer,
                               &num_bytes,
-                              NULL,
-                              NULL,
+                              nullptr,
+                              nullptr,
                               MOJO_READ_MESSAGE_FLAG_NONE));
     EXPECT_EQ(sizeof(kHello), num_bytes);
     EXPECT_STREQ(kHello, buffer);
@@ -162,15 +163,15 @@ TEST_F(EmbedderTest, ChannelsBasic) {
     // the server and client channels were completely created).
     server_channel.WaitForChannelCreationCompletion();
     client_channel.WaitForChannelCreationCompletion();
-    EXPECT_TRUE(server_channel.channel_info() != NULL);
-    EXPECT_TRUE(client_channel.channel_info() != NULL);
+    EXPECT_TRUE(server_channel.channel_info());
+    EXPECT_TRUE(client_channel.channel_info());
   }
 
   EXPECT_TRUE(test::Shutdown());
 }
 
 TEST_F(EmbedderTest, ChannelsHandlePassing) {
-  Init();
+  mojo::embedder::test::InitWithSimplePlatformSupport();
 
   {
     PlatformChannelPair channel_pair;
@@ -184,7 +185,7 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
     EXPECT_NE(client_mp, MOJO_HANDLE_INVALID);
 
     MojoHandle h0, h1;
-    EXPECT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(NULL, &h0, &h1));
+    EXPECT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(nullptr, &h0, &h1));
 
     // Write a message to |h0| (attaching nothing).
     const char kHello[] = "hello";
@@ -192,7 +193,7 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
               MojoWriteMessage(h0,
                                kHello,
                                static_cast<uint32_t>(sizeof(kHello)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -213,7 +214,7 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
               MojoWriteMessage(h0,
                                kFoo,
                                static_cast<uint32_t>(sizeof(kFoo)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -270,10 +271,13 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
     // Read the second message from |h1|.
     memset(buffer, 0, sizeof(buffer));
     num_bytes = static_cast<uint32_t>(sizeof(buffer));
-    EXPECT_EQ(
-        MOJO_RESULT_OK,
-        MojoReadMessage(
-            h1, buffer, &num_bytes, NULL, NULL, MOJO_READ_MESSAGE_FLAG_NONE));
+    EXPECT_EQ(MOJO_RESULT_OK,
+              MojoReadMessage(h1,
+                              buffer,
+                              &num_bytes,
+                              nullptr,
+                              nullptr,
+                              MOJO_READ_MESSAGE_FLAG_NONE));
     EXPECT_EQ(sizeof(kFoo), num_bytes);
     EXPECT_STREQ(kFoo, buffer);
 
@@ -283,7 +287,7 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
               MojoWriteMessage(h1,
                                kBarBaz,
                                static_cast<uint32_t>(sizeof(kBarBaz)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -295,10 +299,13 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
     // Read a message from |h0|.
     memset(buffer, 0, sizeof(buffer));
     num_bytes = static_cast<uint32_t>(sizeof(buffer));
-    EXPECT_EQ(
-        MOJO_RESULT_OK,
-        MojoReadMessage(
-            h0, buffer, &num_bytes, NULL, NULL, MOJO_READ_MESSAGE_FLAG_NONE));
+    EXPECT_EQ(MOJO_RESULT_OK,
+              MojoReadMessage(h0,
+                              buffer,
+                              &num_bytes,
+                              nullptr,
+                              nullptr,
+                              MOJO_READ_MESSAGE_FLAG_NONE));
     EXPECT_EQ(sizeof(kBarBaz), num_bytes);
     EXPECT_STREQ(kBarBaz, buffer);
 
@@ -309,8 +316,8 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
 
     server_channel.WaitForChannelCreationCompletion();
     client_channel.WaitForChannelCreationCompletion();
-    EXPECT_TRUE(server_channel.channel_info() != NULL);
-    EXPECT_TRUE(client_channel.channel_info() != NULL);
+    EXPECT_TRUE(server_channel.channel_info());
+    EXPECT_TRUE(client_channel.channel_info());
   }
 
   EXPECT_TRUE(test::Shutdown());
@@ -331,7 +338,7 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
 //  11.                                      (wait/cl.)
 //  12.                                                  (wait/cl.)
 TEST_F(EmbedderTest, MultiprocessChannels) {
-  Init();
+  mojo::embedder::test::InitWithSimplePlatformSupport();
   mojo::test::MultiprocessTestHelper multiprocess_test_helper;
   multiprocess_test_helper.StartChild("MultiprocessChannelsClient");
 
@@ -342,7 +349,7 @@ TEST_F(EmbedderTest, MultiprocessChannels) {
     MojoHandle server_mp = server_channel.bootstrap_message_pipe();
     EXPECT_NE(server_mp, MOJO_HANDLE_INVALID);
     server_channel.WaitForChannelCreationCompletion();
-    EXPECT_TRUE(server_channel.channel_info() != NULL);
+    EXPECT_TRUE(server_channel.channel_info());
 
     // 1. Write a message to |server_mp| (attaching nothing).
     const char kHello[] = "hello";
@@ -350,7 +357,7 @@ TEST_F(EmbedderTest, MultiprocessChannels) {
               MojoWriteMessage(server_mp,
                                kHello,
                                static_cast<uint32_t>(sizeof(kHello)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -368,8 +375,8 @@ TEST_F(EmbedderTest, MultiprocessChannels) {
               MojoReadMessage(server_mp,
                               buffer,
                               &num_bytes,
-                              NULL,
-                              NULL,
+                              nullptr,
+                              nullptr,
                               MOJO_READ_MESSAGE_FLAG_NONE));
     const char kWorld[] = "world!";
     EXPECT_EQ(sizeof(kWorld), num_bytes);
@@ -377,7 +384,7 @@ TEST_F(EmbedderTest, MultiprocessChannels) {
 
     // Create a new message pipe (endpoints |mp0| and |mp1|).
     MojoHandle mp0, mp1;
-    EXPECT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(NULL, &mp0, &mp1));
+    EXPECT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(nullptr, &mp0, &mp1));
 
     // 3. Write something to |mp0|.
     const char kFoo[] = "FOO";
@@ -385,7 +392,7 @@ TEST_F(EmbedderTest, MultiprocessChannels) {
               MojoWriteMessage(mp0,
                                kFoo,
                                static_cast<uint32_t>(sizeof(kFoo)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -430,10 +437,13 @@ TEST_F(EmbedderTest, MultiprocessChannels) {
         MojoWait(mp2, MOJO_HANDLE_SIGNAL_READABLE, MOJO_DEADLINE_INDEFINITE));
     memset(buffer, 0, sizeof(buffer));
     num_bytes = static_cast<uint32_t>(sizeof(buffer));
-    EXPECT_EQ(
-        MOJO_RESULT_OK,
-        MojoReadMessage(
-            mp2, buffer, &num_bytes, NULL, NULL, MOJO_READ_MESSAGE_FLAG_NONE));
+    EXPECT_EQ(MOJO_RESULT_OK,
+              MojoReadMessage(mp2,
+                              buffer,
+                              &num_bytes,
+                              nullptr,
+                              nullptr,
+                              MOJO_READ_MESSAGE_FLAG_NONE));
     const char kBaz[] = "baz";
     EXPECT_EQ(sizeof(kBaz), num_bytes);
     EXPECT_STREQ(kBaz, buffer);
@@ -460,9 +470,8 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
       mojo::test::MultiprocessTestHelper::client_platform_handle.Pass();
   EXPECT_TRUE(client_platform_handle.is_valid());
 
-  system::test::TestIOThread test_io_thread(
-      system::test::TestIOThread::kAutoStart);
-  Init();
+  base::TestIOThread test_io_thread(base::TestIOThread::kAutoStart);
+  mojo::embedder::test::InitWithSimplePlatformSupport();
 
   {
     ScopedTestChannel client_channel(test_io_thread.task_runner(),
@@ -470,7 +479,7 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
     MojoHandle client_mp = client_channel.bootstrap_message_pipe();
     EXPECT_NE(client_mp, MOJO_HANDLE_INVALID);
     client_channel.WaitForChannelCreationCompletion();
-    CHECK(client_channel.channel_info() != NULL);
+    CHECK(client_channel.channel_info() != nullptr);
 
     // 1. Read the first message from |client_mp|.
     EXPECT_EQ(
@@ -483,8 +492,8 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
               MojoReadMessage(client_mp,
                               buffer,
                               &num_bytes,
-                              NULL,
-                              NULL,
+                              nullptr,
+                              nullptr,
                               MOJO_READ_MESSAGE_FLAG_NONE));
     const char kHello[] = "hello";
     EXPECT_EQ(sizeof(kHello), num_bytes);
@@ -496,7 +505,7 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
               MojoWriteMessage(client_mp,
                                kWorld,
                                static_cast<uint32_t>(sizeof(kWorld)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -532,7 +541,7 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
 
     // Create a new message pipe (endpoints |mp2| and |mp3|).
     MojoHandle mp2, mp3;
-    EXPECT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(NULL, &mp2, &mp3));
+    EXPECT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(nullptr, &mp2, &mp3));
 
     // 7. Write a message to |mp3|.
     const char kBaz[] = "baz";
@@ -540,7 +549,7 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
               MojoWriteMessage(mp3,
                                kBaz,
                                static_cast<uint32_t>(sizeof(kBaz)),
-                               NULL,
+                               nullptr,
                                0,
                                MOJO_WRITE_MESSAGE_FLAG_NONE));
 
@@ -564,10 +573,13 @@ MOJO_MULTIPROCESS_TEST_CHILD_TEST(MultiprocessChannelsClient) {
         MojoWait(mp1, MOJO_HANDLE_SIGNAL_READABLE, MOJO_DEADLINE_INDEFINITE));
     memset(buffer, 0, sizeof(buffer));
     num_bytes = static_cast<uint32_t>(sizeof(buffer));
-    EXPECT_EQ(
-        MOJO_RESULT_OK,
-        MojoReadMessage(
-            mp1, buffer, &num_bytes, NULL, NULL, MOJO_READ_MESSAGE_FLAG_NONE));
+    EXPECT_EQ(MOJO_RESULT_OK,
+              MojoReadMessage(mp1,
+                              buffer,
+                              &num_bytes,
+                              nullptr,
+                              nullptr,
+                              MOJO_READ_MESSAGE_FLAG_NONE));
     const char kFoo[] = "FOO";
     EXPECT_EQ(sizeof(kFoo), num_bytes);
     EXPECT_STREQ(kFoo, buffer);

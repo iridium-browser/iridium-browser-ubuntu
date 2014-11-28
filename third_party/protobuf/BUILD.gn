@@ -92,7 +92,7 @@ source_set("protobuf_lite") {
   if (is_win) {
     configs -= [ "//build/config/win:lean_and_mean" ]
   }
-  direct_dependent_configs = [ ":protobuf_config" ]
+  public_configs = [ ":protobuf_config" ]
 
   cflags = protobuf_lite_cflags
 
@@ -105,7 +105,8 @@ source_set("protobuf_lite") {
 # into that category. Do not use in Chrome code.
 
 source_set("protobuf_full") {
-  visibility = ":*"  # Prevent people from depending on this outside our file.
+  # Prevent people from depending on this outside our file.
+  visibility = [ ":*" ]
 
   sources = protobuf_lite_sources
   sources += [
@@ -168,7 +169,7 @@ source_set("protobuf_full") {
   if (is_win) {
     configs -= [ "//build/config/win:lean_and_mean" ]
   }
-  direct_dependent_configs = [ ":protobuf_config" ]
+  public_configs = [ ":protobuf_config" ]
 
   cflags = protobuf_lite_cflags
 }

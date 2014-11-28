@@ -60,9 +60,8 @@ WebInspector.AuditLauncherView = function(auditController)
     this._headerElement.textContent = WebInspector.UIString("No audits to run");
     this._contentElement.appendChild(this._headerElement);
 
-    var target = this._auditController.target();
-    target.networkManager.addEventListener(WebInspector.NetworkManager.EventTypes.RequestStarted, this._onRequestStarted, this);
-    target.networkManager.addEventListener(WebInspector.NetworkManager.EventTypes.RequestFinished, this._onRequestFinished, this);
+    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.EventTypes.RequestStarted, this._onRequestStarted, this);
+    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.EventTypes.RequestFinished, this._onRequestFinished, this);
     WebInspector.profilingLock().addEventListener(WebInspector.Lock.Events.StateChanged, this._updateButton, this);
 
     var defaultSelectedAuditCategory = {};
@@ -142,7 +141,6 @@ WebInspector.AuditLauncherView.prototype = {
         this._auditRunning = auditRunning;
         this._updateButton();
         this._toggleUIComponents(this._auditRunning);
-        var target = this._auditController.target();
         if (this._auditRunning) {
             WebInspector.profilingLock().acquire();
             this._startAudit();
@@ -238,7 +236,7 @@ WebInspector.AuditLauncherView.prototype = {
         if (id !== "")
             element.addEventListener("click", this._boundCategoryClickListener, false);
         labelElement.appendChild(element);
-        labelElement.appendChild(document.createTextNode(title));
+        labelElement.createTextChild(title);
         labelElement.__displayName = title;
 
         return labelElement;
@@ -288,7 +286,7 @@ WebInspector.AuditLauncherView.prototype = {
         this._auditReloadedStateElement = labelElement.createChild("input");
         this._auditReloadedStateElement.name = "audit-mode";
         this._auditReloadedStateElement.type = "radio";
-        labelElement.appendChild(document.createTextNode("Reload Page and Audit on Load"));
+        labelElement.createTextChild("Reload Page and Audit on Load");
 
         this._launchButton = this._buttonContainerElement.createChild("button", "text-button");
         this._launchButton.textContent = WebInspector.UIString("Run");
@@ -326,7 +324,6 @@ WebInspector.AuditLauncherView.prototype = {
 
     _updateButton: function()
     {
-        var target = this._auditController.target();
         var enable = this._auditRunning || (this._currentCategoriesCount && !WebInspector.profilingLock().isAcquired());
         this._launchButton.textContent = this._auditRunning ? WebInspector.UIString("Stop") : WebInspector.UIString("Run");
         this._launchButton.disabled = !enable;

@@ -5,6 +5,8 @@
 {
   'variables': {
     'remoting_base_sources': [
+      # Note: sources list duplicated in GN build.
+      # See remoting/base/BUILD.gn
       'base/auth_token_util.cc',
       'base/auth_token_util.h',
       'base/auto_thread.cc',
@@ -60,6 +62,8 @@
       'codec/video_decoder_vpx.cc',
       'codec/video_decoder_vpx.h',
       'codec/video_encoder.h',
+      'codec/video_encoder_helper.cc',
+      'codec/video_encoder_helper.h',
       'codec/video_encoder_verbatim.cc',
       'codec/video_encoder_verbatim.h',
       'codec/video_encoder_vpx.cc',
@@ -67,6 +71,8 @@
     ],
 
     'remoting_protocol_sources': [
+      # Note: sources list duplicated in GN build.
+      # See remoting/protocol/BUILD.gn
       'protocol/audio_reader.cc',
       'protocol/audio_reader.h',
       'protocol/audio_stub.h',
@@ -94,6 +100,8 @@
       'protocol/client_event_dispatcher.cc',
       'protocol/client_event_dispatcher.h',
       'protocol/client_stub.h',
+      'protocol/client_video_dispatcher.cc',
+      'protocol/client_video_dispatcher.h',
       'protocol/clipboard_echo_filter.cc',
       'protocol/clipboard_echo_filter.h',
       'protocol/clipboard_filter.cc',
@@ -107,12 +115,15 @@
       'protocol/connection_to_host.h',
       'protocol/content_description.cc',
       'protocol/content_description.h',
+      'protocol/datagram_channel_factory.h',
       'protocol/errors.h',
       'protocol/host_control_dispatcher.cc',
       'protocol/host_control_dispatcher.h',
       'protocol/host_event_dispatcher.cc',
       'protocol/host_event_dispatcher.h',
       'protocol/host_stub.h',
+      'protocol/host_video_dispatcher.cc',
+      'protocol/host_video_dispatcher.h',
       'protocol/input_event_tracker.cc',
       'protocol/input_event_tracker.h',
       'protocol/input_filter.cc',
@@ -157,10 +168,10 @@
       'protocol/pairing_host_authenticator.h',
       'protocol/pairing_registry.cc',
       'protocol/pairing_registry.h',
-      'protocol/protobuf_video_reader.cc',
-      'protocol/protobuf_video_reader.h',
-      'protocol/protobuf_video_writer.cc',
-      'protocol/protobuf_video_writer.h',
+      'protocol/pseudotcp_channel_factory.cc',
+      'protocol/pseudotcp_channel_factory.h',
+      'protocol/secure_channel_factory.cc',
+      'protocol/secure_channel_factory.h',
       'protocol/session.h',
       'protocol/session_config.cc',
       'protocol/session_config.h',
@@ -169,6 +180,7 @@
       'protocol/socket_util.h',
       'protocol/ssl_hmac_channel_authenticator.cc',
       'protocol/ssl_hmac_channel_authenticator.h',
+      'protocol/stream_channel_factory.h',
       'protocol/third_party_authenticator_base.cc',
       'protocol/third_party_authenticator_base.h',
       'protocol/third_party_client_authenticator.cc',
@@ -180,11 +192,7 @@
       'protocol/transport.h',
       'protocol/v2_authenticator.cc',
       'protocol/v2_authenticator.h',
-      'protocol/video_reader.cc',
-      'protocol/video_reader.h',
       'protocol/video_stub.h',
-      'protocol/video_writer.cc',
-      'protocol/video_writer.h',
       'signaling/iq_sender.cc',
       'signaling/iq_sender.h',
       'signaling/jingle_info_request.cc',
@@ -199,6 +207,8 @@
     ],
 
     'remoting_client_sources': [
+      # Note: sources list duplicated in GN build.
+      # See remoting/client/BUILD.gn
       'client/audio_decode_scheduler.cc',
       'client/audio_decode_scheduler.h',
       'client/audio_player.cc',
@@ -228,6 +238,8 @@
     ],
 
     'remoting_client_plugin_sources': [
+      # Note: sources list duplicated in GN build.
+      # See remoting/client/plugin/BUILD.gn
       'client/plugin/chromoting_instance.cc',
       'client/plugin/chromoting_instance.h',
       'client/plugin/delegating_signal_strategy.cc',

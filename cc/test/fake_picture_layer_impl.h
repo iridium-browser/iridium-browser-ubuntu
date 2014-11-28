@@ -61,6 +61,7 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   using PictureLayerImpl::GetViewportForTilePriorityInContentSpace;
   using PictureLayerImpl::SanityCheckTilingState;
   using PictureLayerImpl::GetRecycledTwinLayer;
+  using PictureLayerImpl::UpdatePile;
 
   using PictureLayerImpl::UpdateIdealScales;
   using PictureLayerImpl::MaximumTilingContentsScale;
@@ -75,6 +76,9 @@ class FakePictureLayerImpl : public PictureLayerImpl {
 
   float raster_page_scale() const { return raster_page_scale_; }
   void set_raster_page_scale(float scale) { raster_page_scale_ = scale; }
+
+  float ideal_contents_scale() const { return ideal_contents_scale_; }
+  float raster_contents_scale() const { return raster_contents_scale_; }
 
   PictureLayerTiling* HighResTiling() const;
   PictureLayerTiling* LowResTiling() const;
@@ -105,8 +109,14 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   void SetAllTilesVisible();
   void SetAllTilesReady();
   void SetAllTilesReadyInTiling(PictureLayerTiling* tiling);
+  void SetTileReady(Tile* tile);
   void ResetAllTilesPriorities();
   PictureLayerTilingSet* GetTilings() { return tilings_.get(); }
+
+  size_t release_resources_count() const { return release_resources_count_; }
+  void reset_release_resources_count() { release_resources_count_ = 0; }
+
+  virtual void ReleaseResources() OVERRIDE;
 
  protected:
   FakePictureLayerImpl(
@@ -126,6 +136,7 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   size_t did_become_active_call_count_;
   bool has_valid_tile_priorities_;
   bool use_set_valid_tile_priorities_flag_;
+  size_t release_resources_count_;
 };
 
 }  // namespace cc

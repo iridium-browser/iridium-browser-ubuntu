@@ -46,32 +46,30 @@ static_library("core") {
     "viewer.h",
   ]
 
+  public_deps = [
+    "//components/dom_distiller/core/proto",
+    "//third_party/dom_distiller_js:proto",
+  ]
   deps = [
     "//base",
-    "//components/dom_distiller/core/proto",
     "//components/leveldb_proto",
     "//components/resources",
     "//components/strings",
     "//net",
     "//skia",
     "//sync",
-    "//third_party/dom_distiller_js/package/proto",
     "//ui/base",
     "//url",
   ]
 
-  forward_dependent_configs_from = [
-    "//components/dom_distiller/core/proto",
-    "//third_party/dom_distiller_js/package/proto",
-  ]
-
   if (is_android) {
-    #deps += [ ":dom_distiller_core_jni_headers" ]  TODO(GYP)
+    deps += [ ":jni_headers" ]
   }
 }
 
 # GYP version: components/dom_distiller.gypi:dom_distiller_test_support
 static_library("test_support") {
+  testonly = true
   sources = [
     "dom_distiller_test_util.cc",
     "dom_distiller_test_util.h",
@@ -91,6 +89,7 @@ static_library("test_support") {
 }
 
 source_set("unit_tests") {
+  testonly = true
   sources = [
     "article_entry_unittest.cc",
     "distilled_content_store_unittest.cc",
@@ -111,4 +110,17 @@ source_set("unit_tests") {
     "//testing/gmock",
     "//testing/gtest",
   ]
+}
+
+if (is_android) {
+  import("//build/config/android/rules.gni")
+
+  generate_jni("jni_headers") {
+    sources = [
+      "../android/java/src/org/chromium/components/dom_distiller/core/DistilledPagePrefs.java",
+      "../android/java/src/org/chromium/components/dom_distiller/core/DomDistillerService.java",
+      "../android/java/src/org/chromium/components/dom_distiller/core/DomDistillerUrlUtils.java",
+    ]
+    jni_package = "dom_distiller_core"
+  }
 }

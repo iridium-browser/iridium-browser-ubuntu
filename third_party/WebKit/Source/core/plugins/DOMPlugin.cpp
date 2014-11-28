@@ -29,11 +29,15 @@ DOMPlugin::DOMPlugin(PluginData* pluginData, LocalFrame* frame, unsigned index)
     , m_pluginData(pluginData)
     , m_index(index)
 {
-    ScriptWrappable::init(this);
 }
 
 DOMPlugin::~DOMPlugin()
 {
+}
+
+void DOMPlugin::trace(Visitor* visitor)
+{
+    FrameDestructionObserver::trace(visitor);
 }
 
 String DOMPlugin::name() const

@@ -364,6 +364,10 @@ cr.define('print_preview', function() {
           this.cloudPrintInterface_,
           cloudprint.CloudPrintInterface.EventType.PRINTER_FAILED,
           this.onCloudPrintPrinterFailed_.bind(this));
+      this.tracker_.add(
+          this.cloudPrintInterface_,
+          cloudprint.CloudPrintInterface.EventType.PROCESS_INVITE_DONE,
+          this.onCloudPrintProcessInviteDone_.bind(this));
     },
 
     /**
@@ -379,7 +383,9 @@ cr.define('print_preview', function() {
       });
     },
 
-    /** @param {!print_preview.Destination} Destination to select. */
+    /**
+     * @param {!print_preview.Destination} destination Destination to select.
+     */
     selectDestination: function(destination) {
       this.isInAutoSelectMode_ = false;
       // When auto select expires, DESTINATION_SELECT event has to be dispatched
@@ -509,6 +515,13 @@ cr.define('print_preview', function() {
         this.startLoadCloudDestinations(
             print_preview.Destination.Origin.COOKIES);
       }
+    },
+
+    /** Initiates loading of all known destination types. */
+    startLoadAllDestinations: function() {
+      this.startLoadCloudDestinations();
+      this.startLoadLocalDestinations();
+      this.startLoadPrivetDestinations();
     },
 
     /**
@@ -680,7 +693,7 @@ cr.define('print_preview', function() {
             print_preview.Destination.GooglePromotedId.SAVE_AS_PDF,
             print_preview.Destination.Type.LOCAL,
             print_preview.Destination.Origin.LOCAL,
-            localStrings.getString('printToPDF'),
+            loadTimeData.getString('printToPDF'),
             false /*isRecent*/,
             print_preview.Destination.ConnectionStatus.ONLINE));
       }
@@ -705,7 +718,7 @@ cr.define('print_preview', function() {
 
     /**
      * Called when the local destinations have been got from the native layer.
-     * @param {Event} Contains the local destinations.
+     * @param {Event} event Contains the local destinations.
      * @private
      */
     onLocalDestinationsSet_: function(event) {
@@ -836,6 +849,20 @@ cr.define('print_preview', function() {
     },
 
     /**
+     * Called when printer sharing invitation was processed successfully.
+     * @param {Event} event Contains detailed information about the invite and
+     *     newly accepted destination (if known).
+     * @private
+     */
+    onCloudPrintProcessInviteDone_: function(event) {
+      if (event.accept && event.printer) {
+        // Hint the destination list to promote this new destination.
+        event.printer.isRecent = true;
+        this.insertDestination_(event.printer);
+      }
+    },
+
+    /**
      * Called when a Privet printer is added to the local network.
      * @param {object} event Contains information about the added printer.
      * @private
@@ -875,9 +902,7 @@ cr.define('print_preview', function() {
       this.reset_();
       this.isInAutoSelectMode_ = true;
       this.createLocalPdfPrintDestination_();
-      this.startLoadLocalDestinations();
-      this.startLoadCloudDestinations();
-      this.startLoadPrivetDestinations();
+      this.startLoadAllDestinations();
     },
 
     // TODO(vitalybuka): Remove three next functions replacing Destination.id

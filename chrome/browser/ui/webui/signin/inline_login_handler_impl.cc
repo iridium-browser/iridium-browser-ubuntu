@@ -14,6 +14,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
+#include "chrome/browser/signin/local_auth.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -115,10 +116,19 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
   }
 
   AboutSigninInternals* about_signin_internals =
-    AboutSigninInternalsFactory::GetForProfile(profile_);
+      AboutSigninInternalsFactory::GetForProfile(profile_);
   about_signin_internals->OnRefreshTokenReceived("Successful");
 
   signin::Source source = signin::GetSourceForPromoURL(current_url_);
+
+  std::string primary_email =
+      SigninManagerFactory::GetForProfile(profile_)->GetAuthenticatedUsername();
+  if (gaia::AreEmailsSame(email, primary_email) &&
+      source == signin::SOURCE_REAUTH &&
+      switches::IsNewProfileManagement()) {
+    chrome::SetLocalAuthCredentials(profile_, password_);
+  }
+
   if (source == signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT ||
       source == signin::SOURCE_REAUTH) {
     ProfileOAuth2TokenServiceFactory::GetForProfile(profile_)->
@@ -166,7 +176,6 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
     } else {
       confirmation_required =
           source == signin::SOURCE_SETTINGS ||
-          source == signin::SOURCE_WEBSTORE_INSTALL ||
           choose_what_to_sync_ ?
               OneClickSigninSyncStarter::NO_CONFIRMATION :
               OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN;
@@ -212,8 +221,8 @@ void InlineSigninHelper::OnSigninOAuthInformationFailure(
 }  // namespace
 
 InlineLoginHandlerImpl::InlineLoginHandlerImpl()
-      : weak_factory_(this),
-        confirm_untrusted_signin_(false) {
+      : confirm_untrusted_signin_(false),
+        weak_factory_(this) {
 }
 
 InlineLoginHandlerImpl::~InlineLoginHandlerImpl() {}
@@ -230,7 +239,7 @@ bool InlineLoginHandlerImpl::HandleContextMenu(
 void InlineLoginHandlerImpl::DidCommitProvisionalLoadForFrame(
     content::RenderFrameHost* render_frame_host,
     const GURL& url,
-    content::PageTransition transition_type) {
+    ui::PageTransition transition_type) {
   if (!web_contents())
     return;
 
@@ -244,11 +253,13 @@ void InlineLoginHandlerImpl::DidCommitProvisionalLoadForFrame(
 
   // Loading any untrusted (e.g., HTTP) URLs in the privileged sign-in process
   // will require confirmation before the sign in takes effect.
-  if (!url.is_empty() &&
-      url.spec() != url::kAboutBlankURL &&
-      !gaia::IsGaiaSignonRealm(url.GetOrigin()) &&
-      !signin::IsContinueUrlForWebBasedSigninFlow(url)) {
-    confirm_untrusted_signin_ = true;
+  if (!url.is_empty()) {
+    GURL origin(url.GetOrigin());
+    if (url.spec() != url::kAboutBlankURL &&
+        origin != kGaiaExtOrigin &&
+        !gaia::IsGaiaSignonRealm(origin)) {
+      confirm_untrusted_signin_ = true;
+    }
   }
 }
 

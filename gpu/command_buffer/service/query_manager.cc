@@ -37,7 +37,7 @@ class AsyncPixelTransferCompletionObserverImpl
   virtual void DidComplete(const AsyncMemoryParams& mem_params) OVERRIDE {
     base::AutoLock locked(lock_);
     if (!cancelled_) {
-      DCHECK(mem_params.buffer());
+      DCHECK(mem_params.buffer().get());
       void* data = mem_params.GetDataAddress();
       QuerySync* sync = static_cast<QuerySync*>(data);
       base::subtle::Release_Store(&sync->process_count, submit_count_);
@@ -88,7 +88,7 @@ bool AsyncPixelTransfersCompletedQuery::End(
   // use-after-free of the memory.
   scoped_refptr<Buffer> buffer =
       manager()->decoder()->GetSharedMemoryBuffer(shm_id());
-  if (!buffer)
+  if (!buffer.get())
     return false;
   AsyncMemoryParams mem_params(buffer, shm_offset(), sizeof(QuerySync));
   if (!mem_params.GetDataAddress())
@@ -99,8 +99,8 @@ bool AsyncPixelTransfersCompletedQuery::End(
   // Ask AsyncPixelTransferDelegate to run completion callback after all
   // previous async transfers are done. No guarantee that callback is run
   // on the current thread.
-  manager()->decoder()->GetAsyncPixelTransferManager()
-      ->AsyncNotifyCompletion(mem_params, observer_);
+  manager()->decoder()->GetAsyncPixelTransferManager()->AsyncNotifyCompletion(
+      mem_params, observer_.get());
 
   return AddToPendingTransferQueue(submit_count);
 }
@@ -128,7 +128,7 @@ void AsyncPixelTransfersCompletedQuery::Destroy(bool /* have_context */) {
 }
 
 AsyncPixelTransfersCompletedQuery::~AsyncPixelTransfersCompletedQuery() {
-  if (observer_)
+  if (observer_.get())
     observer_->Cancel();
 }
 

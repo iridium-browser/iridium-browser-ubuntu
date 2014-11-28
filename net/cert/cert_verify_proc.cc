@@ -262,6 +262,9 @@ int CertVerifyProc::Verify(X509Certificate* cert,
       rv = MapCertStatusToNetError(verify_result->cert_status);
   }
 
+  if (verify_result->has_sha1)
+    verify_result->cert_status |= CERT_STATUS_SHA1_SIGNATURE_PRESENT;
+
   // Flag certificates from publicly-trusted CAs that are issued to intranet
   // hosts. While the CA/Browser Forum Baseline Requirements (v1.1) permit
   // these to be issued until 1 November 2015, they represent a real risk for
@@ -581,8 +584,8 @@ bool CertVerifyProc::HasNameConstraintsViolation(
     // Not a real certificate - just for testing. This is the SPKI hash of
     // the keys used in net/data/ssl/certificates/name_constraint_*.crt.
     {
-      {0x15, 0x45, 0xd7, 0x3b, 0x58, 0x6b, 0x47, 0xcf, 0xc1, 0x44,
-       0xa2, 0xc9, 0xaa, 0xab, 0x98, 0x3d, 0x21, 0xcc, 0x42, 0xde},
+      {0x61, 0xec, 0x82, 0x8b, 0xdb, 0x5c, 0x78, 0x2a, 0x8f, 0xcc,
+       0x4f, 0x0f, 0x14, 0xbb, 0x85, 0x31, 0x93, 0x9f, 0xf7, 0x3d},
       kDomainsTest,
     },
   };

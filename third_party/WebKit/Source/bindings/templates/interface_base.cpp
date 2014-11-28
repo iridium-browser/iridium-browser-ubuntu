@@ -13,31 +13,6 @@
 {% endfor %}
 
 namespace blink {
-
-static void initializeScriptWrappableForInterface({{cpp_class}}* object)
-{
-    if (ScriptWrappable::wrapperCanBeStoredInObject(object))
-        ScriptWrappable::fromObject(object)->setTypeInfo(&{{v8_class}}::wrapperTypeInfo);
-    else
-        ASSERT_NOT_REACHED();
-}
-
-} // namespace blink
-
-{#
-In ScriptWrappable::init, the use of a local function declaration has an
-issue on Windows: the local declaration does not pick up the surrounding
-namespace. Therefore, we provide this function in the global namespace.
-More info on the MSVC bug here (Bug 664619):
-The namespace of local function declarations in C++ by Uray M. János
-http://connect.microsoft.com/VisualStudio/feedback/details/664619/the-namespace-of-local-function-declarations-in-c
-#}
-void webCoreInitializeScriptWrappableForInterface(blink::{{cpp_class}}* object)
-{
-    blink::initializeScriptWrappableForInterface(object);
-}
-
-namespace blink {
 {% set to_active_dom_object = '%s::toActiveDOMObject' % v8_class
                               if is_active_dom_object else '0' %}
 {% set to_event_target = '%s::toEventTarget' % v8_class
@@ -48,12 +23,26 @@ namespace blink {
                                   if parent_interface else '0' %}
 {% set wrapper_type_prototype = 'WrapperTypeExceptionPrototype' if is_exception else
                                 'WrapperTypeObjectPrototype' %}
-const WrapperTypeInfo {{v8_class}}::wrapperTypeInfo = { gin::kEmbedderBlink, {{v8_class}}::domTemplate, {{v8_class}}::derefObject, {{to_active_dom_object}}, {{to_event_target}}, {{visit_dom_wrapper}}, {{v8_class}}::installConditionallyEnabledMethods, {{parent_wrapper_type_info}}, {{wrapper_type_prototype}}, {{gc_type}} };
 
+const WrapperTypeInfo {{v8_class}}::wrapperTypeInfo = { gin::kEmbedderBlink, {{v8_class}}::domTemplate, {{v8_class}}::refObject, {{v8_class}}::derefObject, {{v8_class}}::createPersistentHandle, {{to_active_dom_object}}, {{to_event_target}}, {{visit_dom_wrapper}}, {{v8_class}}::installConditionallyEnabledMethods, {{v8_class}}::installConditionallyEnabledProperties, {{parent_wrapper_type_info}}, WrapperTypeInfo::{{wrapper_type_prototype}}, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{lifetime}}, WrapperTypeInfo::{{gc_type}} };
+
+{% if is_script_wrappable %}
+// This static member must be declared by DEFINE_WRAPPERTYPEINFO in {{cpp_class}}.h.
+// For details, see the comment of DEFINE_WRAPPERTYPEINFO in
+// bindings/core/v8/ScriptWrappable.h.
+const WrapperTypeInfo& {{cpp_class}}::s_wrapperTypeInfo = {{v8_class}}::wrapperTypeInfo;
+
+{% endif %}
 namespace {{cpp_class}}V8Internal {
 
 template <typename T> void V8_USE(T) { }
 
+{# Constants #}
+{% from 'constants.cpp' import constant_getter_callback
+       with context %}
+{% for constant in special_getter_constants %}
+{{constant_getter_callback(constant)}}
+{% endfor %}
 {# Attributes #}
 {% from 'attributes.cpp' import constructor_getter_callback,
        attribute_getter, attribute_getter_callback,
@@ -109,6 +98,10 @@ template <typename T> void V8_USE(T) { }
 {% endfor %}
 {% endif %}
 {% endfor %}
+{% if iterator_method %}
+{{generate_method(iterator_method)}}
+{{method_callback(iterator_method)}}
+{% endif %}
 {% block origin_safe_method_setter %}{% endblock %}
 {# Constructors #}
 {% for constructor in constructors %}

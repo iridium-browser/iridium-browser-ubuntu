@@ -29,20 +29,19 @@
 #include "config.h"
 #include "modules/webdatabase/SQLTransactionBackend.h"
 
-#include "platform/Logging.h"
-#include "modules/webdatabase/sqlite/SQLValue.h"
-#include "modules/webdatabase/sqlite/SQLiteTransaction.h"
-#include "modules/webdatabase/AbstractSQLTransaction.h"
-#include "modules/webdatabase/Database.h" // FIXME: Should only be used in the frontend.
+#include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseAuthorizer.h"
-#include "modules/webdatabase/DatabaseBackend.h"
 #include "modules/webdatabase/DatabaseContext.h"
 #include "modules/webdatabase/DatabaseThread.h"
 #include "modules/webdatabase/DatabaseTracker.h"
 #include "modules/webdatabase/SQLError.h"
 #include "modules/webdatabase/SQLStatementBackend.h"
+#include "modules/webdatabase/SQLTransaction.h"
 #include "modules/webdatabase/SQLTransactionClient.h"
 #include "modules/webdatabase/SQLTransactionCoordinator.h"
+#include "modules/webdatabase/sqlite/SQLValue.h"
+#include "modules/webdatabase/sqlite/SQLiteTransaction.h"
+#include "platform/Logging.h"
 #include "wtf/StdLibExtras.h"
 
 
@@ -230,9 +229,9 @@
 // ==============================================================================
 // The RefPtr chain goes something like this:
 //
-//     At birth (in DatabaseBackend::runTransaction()):
+//     At birth (in Database::runTransaction()):
 //     ====================================================
-//     DatabaseBackend                    // Deque<RefPtr<SQLTransactionBackend> > m_transactionQueue points to ...
+//     Database                           // Deque<RefPtr<SQLTransactionBackend> > m_transactionQueue points to ...
 //     --> SQLTransactionBackend          // RefPtr<SQLTransaction> m_frontend points to ...
 //         --> SQLTransaction             // RefPtr<SQLTransactionBackend> m_backend points to ...
 //             --> SQLTransactionBackend  // which is a circular reference.
@@ -245,7 +244,7 @@
 //     or if the database was interrupted. See comments on "What happens if a transaction
 //     is interrupted?" below for details.
 //
-//     After scheduling the transaction with the DatabaseThread (DatabaseBackend::scheduleTransaction()):
+//     After scheduling the transaction with the DatabaseThread (Database::scheduleTransaction()):
 //     ======================================================================================================
 //     DatabaseThread                         // MessageQueue<DatabaseTask> m_queue points to ...
 //     --> DatabaseTransactionTask            // RefPtr<SQLTransactionBackend> m_transaction points to ...
@@ -299,9 +298,9 @@
 //     Phase 1. After Birth, before scheduling
 //
 //     - To clean up, DatabaseThread::databaseThread() will call
-//       DatabaseBackend::close() during its shutdown.
-//     - DatabaseBackend::close() will iterate
-//       DatabaseBackend::m_transactionQueue and call
+//       Database::close() during its shutdown.
+//     - Database::close() will iterate
+//       Database::m_transactionQueue and call
 //       notifyDatabaseThreadIsShuttingDown() on each transaction there.
 //
 //     Phase 2. After scheduling, before state AcquireLock
@@ -340,16 +339,16 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<SQLTransactionBackend> SQLTransactionBackend::create(DatabaseBackend* db,
-    PassRefPtrWillBeRawPtr<AbstractSQLTransaction> frontend,
+PassRefPtrWillBeRawPtr<SQLTransactionBackend> SQLTransactionBackend::create(Database* db,
+    PassRefPtrWillBeRawPtr<SQLTransaction> frontend,
     PassRefPtrWillBeRawPtr<SQLTransactionWrapper> wrapper,
     bool readOnly)
 {
     return adoptRefWillBeNoop(new SQLTransactionBackend(db, frontend, wrapper, readOnly));
 }
 
-SQLTransactionBackend::SQLTransactionBackend(DatabaseBackend* db,
-    PassRefPtrWillBeRawPtr<AbstractSQLTransaction> frontend,
+SQLTransactionBackend::SQLTransactionBackend(Database* db,
+    PassRefPtrWillBeRawPtr<SQLTransaction> frontend,
     PassRefPtrWillBeRawPtr<SQLTransactionWrapper> wrapper,
     bool readOnly)
     : m_frontend(frontend)
@@ -381,7 +380,6 @@ void SQLTransactionBackend::trace(Visitor* visitor)
     visitor->trace(m_database);
     visitor->trace(m_wrapper);
     visitor->trace(m_statementQueue);
-    AbstractSQLTransactionBackend::trace(visitor);
 }
 
 void SQLTransactionBackend::doCleanup()
@@ -434,7 +432,7 @@ void SQLTransactionBackend::doCleanup()
     m_wrapper = nullptr;
 }
 
-AbstractSQLStatement* SQLTransactionBackend::currentStatement()
+SQLStatement* SQLTransactionBackend::currentStatement()
 {
     return m_currentStatementBackend->frontend();
 }
@@ -484,7 +482,7 @@ void SQLTransactionBackend::computeNextStateAndCleanupIfNeeded()
 {
     // Only honor the requested state transition if we're not supposed to be
     // cleaning up and shutting down:
-    if (m_database->opened() && !m_database->isInterrupted()) {
+    if (m_database->opened()) {
         setStateToRequestedState();
         ASSERT(m_nextState == SQLTransactionState::AcquireLock
             || m_nextState == SQLTransactionState::OpenTransactionAndPreflight
@@ -526,7 +524,7 @@ void SQLTransactionBackend::performNextStep()
     runStateMachine();
 }
 
-void SQLTransactionBackend::executeSQL(PassOwnPtrWillBeRawPtr<AbstractSQLStatement> statement,
+void SQLTransactionBackend::executeSQL(PassOwnPtrWillBeRawPtr<SQLStatement> statement,
     const String& sqlStatement, const Vector<SQLValue>& arguments, int permissions)
 {
     enqueueStatementBackend(SQLStatementBackend::create(statement, sqlStatement, arguments, permissions));
@@ -675,7 +673,7 @@ SQLTransactionState SQLTransactionBackend::runCurrentStatementAndGetNextState()
     m_database->resetAuthorizer();
 
     if (m_hasVersionMismatch)
-        m_currentStatementBackend->setVersionMismatchedError(Database::from(m_database.get()));
+        m_currentStatementBackend->setVersionMismatchedError(m_database.get());
 
     if (m_currentStatementBackend->execute(m_database.get())) {
         if (m_database->lastActionChangedDatabase()) {

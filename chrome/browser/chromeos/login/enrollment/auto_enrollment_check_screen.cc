@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "chrome/browser/chromeos/login/screen_manager.h"
 #include "chrome/browser/chromeos/login/screens/screen_observer.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chromeos/chromeos_switches.h"
@@ -15,6 +16,13 @@
 #include "chromeos/network/network_state_handler.h"
 
 namespace chromeos {
+
+// static
+AutoEnrollmentCheckScreen* AutoEnrollmentCheckScreen::Get(
+    ScreenManager* manager) {
+  return static_cast<AutoEnrollmentCheckScreen*>(
+      manager->GetScreen(WizardController::kAutoEnrollmentCheckScreenName));
+}
 
 AutoEnrollmentCheckScreen::AutoEnrollmentCheckScreen(
     ScreenObserver* observer,
@@ -172,10 +180,11 @@ bool AutoEnrollmentCheckScreen::UpdateCaptivePortalStatus(
       ShowErrorScreen(ErrorScreen::ERROR_STATE_PROXY);
       return true;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_COUNT:
-      // Trigger NOTREACHED() below.
-      break;
+      NOTREACHED() << "Bad status: CAPTIVE_PORTAL_STATUS_COUNT";
+      return false;
   }
 
+  // Return is required to avoid compiler warning.
   NOTREACHED() << "Bad status " << new_captive_portal_status;
   return false;
 }
@@ -197,6 +206,7 @@ bool AutoEnrollmentCheckScreen::UpdateAutoEnrollmentState(
       return true;
   }
 
+  // Return is required to avoid compiler warning.
   NOTREACHED() << "bad state " << new_auto_enrollment_state;
   return false;
 }

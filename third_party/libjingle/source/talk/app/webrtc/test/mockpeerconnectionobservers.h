@@ -120,40 +120,50 @@ class MockStatsObserver : public webrtc::StatsObserver {
   MockStatsObserver()
       : called_(false) {}
   virtual ~MockStatsObserver() {}
-  virtual void OnComplete(const std::vector<webrtc::StatsReport>& reports) {
+  virtual void OnComplete(const StatsReports& reports) {
     called_ = true;
-    reports_ = reports;
+    reports_.clear();
+    reports_.reserve(reports.size());
+    StatsReports::const_iterator it;
+    for (it = reports.begin(); it != reports.end(); ++it)
+      reports_.push_back(StatsReportCopyable(*(*it)));
   }
 
   bool called() const { return called_; }
   size_t number_of_reports() const { return reports_.size(); }
 
   int AudioOutputLevel() {
-    return GetSsrcStatsValue(
-        webrtc::StatsReport::kStatsValueNameAudioOutputLevel);
+    return GetStatsValue(StatsReport::kStatsReportTypeSsrc,
+                         StatsReport::kStatsValueNameAudioOutputLevel);
   }
 
   int AudioInputLevel() {
-    return GetSsrcStatsValue(
-        webrtc::StatsReport::kStatsValueNameAudioInputLevel);
+    return GetStatsValue(StatsReport::kStatsReportTypeSsrc,
+                         StatsReport::kStatsValueNameAudioInputLevel);
   }
 
   int BytesReceived() {
-    return GetSsrcStatsValue(
-        webrtc::StatsReport::kStatsValueNameBytesReceived);
+    return GetStatsValue(StatsReport::kStatsReportTypeSsrc,
+                         StatsReport::kStatsValueNameBytesReceived);
   }
 
   int BytesSent() {
-    return GetSsrcStatsValue(webrtc::StatsReport::kStatsValueNameBytesSent);
+    return GetStatsValue(StatsReport::kStatsReportTypeSsrc,
+                         StatsReport::kStatsValueNameBytesSent);
+  }
+
+  int AvailableReceiveBandwidth() {
+    return GetStatsValue(StatsReport::kStatsReportTypeBwe,
+                         StatsReport::kStatsValueNameAvailableReceiveBandwidth);
   }
 
  private:
-  int GetSsrcStatsValue(const std::string name) {
+  int GetStatsValue(const std::string& type, StatsReport::StatsValueName name) {
     if (reports_.empty()) {
       return 0;
     }
     for (size_t i = 0; i < reports_.size(); ++i) {
-      if (reports_[i].type != StatsReport::kStatsReportTypeSsrc)
+      if (reports_[i].type != type)
         continue;
       webrtc::StatsReport::Values::const_iterator it =
           reports_[i].values.begin();
@@ -167,7 +177,7 @@ class MockStatsObserver : public webrtc::StatsObserver {
   }
 
   bool called_;
-  std::vector<webrtc::StatsReport> reports_;
+  std::vector<StatsReportCopyable> reports_;
 };
 
 }  // namespace webrtc

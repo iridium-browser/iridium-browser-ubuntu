@@ -7,9 +7,10 @@
       'target_name': 'android_webview_apk',
       'type': 'none',
       'dependencies': [
-        'libwebviewchromium',
+        'libstandalonelibwebviewchromium',
         'android_webview_java',
         'android_webview_pak',
+        'libdrawgl',
       ],
       'variables': {
         'apk_name': 'AndroidWebView',
@@ -17,9 +18,10 @@
         'native_lib_target': 'libstandalonelibwebviewchromium',
         'resource_dir': 'test/shell/res',
         'extensions_to_not_compress': 'pak',
+        'extra_native_libs': ['<(SHARED_LIB_DIR)/libdrawgl.>(android_product_extension)'],
         'additional_input_paths': [
-          '<(PRODUCT_DIR)/android_webview_apk/assets/webviewchromium.pak',
-          '<(PRODUCT_DIR)/android_webview_apk/assets/en-US.pak',
+          '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
+          '<(PRODUCT_DIR)/android_webview_assets/en-US.pak',
           '<(PRODUCT_DIR)/android_webview_apk/assets/asset_file.html',
           '<(PRODUCT_DIR)/android_webview_apk/assets/cookie_test.html',
           '<(PRODUCT_DIR)/android_webview_apk/assets/asset_icon.png',
@@ -37,6 +39,8 @@
         {
           'destination': '<(PRODUCT_DIR)/android_webview_apk/assets',
           'files': [
+            '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
+            '<(PRODUCT_DIR)/android_webview_assets/en-US.pak',
             '<(java_in_dir)/assets/asset_file.html',
             '<(java_in_dir)/assets/asset_icon.png',
             '<(java_in_dir)/assets/cookie_test.html',
@@ -161,6 +165,24 @@
         },
       ],
       'includes': [ '../build/apk_test.gypi' ],
+    },
+    {
+      'target_name': 'libdrawgl',
+      'type': 'shared_library',
+      # Do not depend on any other component here, since this target
+      # builds a separate shared library!
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+          '../android_webview/test/shell/src/draw_gl/draw_gl.cc',
+      ],
+    },
+    {
+      'target_name': 'libstandalonelibwebviewchromium',
+      'includes': [
+        'libwebviewchromium.gypi',
+      ],
     },
   ],
 }

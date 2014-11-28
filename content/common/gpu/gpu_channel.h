@@ -167,6 +167,12 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
   // Decrement the count of unhandled IPC messages and defer preemption.
   void MessageProcessed();
 
+  // Try to match the messages pattern for GL SwapBuffers operation in the
+  // deferred message queue starting from the current processing message.
+  // Return the number of messages that matches the given pattern, e.g.
+  // AsyncFlush -> Echo sequence.
+  size_t MatchSwapBufferMessagesPattern(IPC::Message* current_message);
+
   // The lifetime of objects of this class is managed by a GpuChannelManager.
   // The GpuChannelManager destroy all the GpuChannels that they own when they
   // are destroyed. So a raw pointer is safe.
@@ -211,8 +217,6 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
   bool handle_messages_scheduled_;
   IPC::Message* currently_processing_message_;
 
-  base::WeakPtrFactory<GpuChannel> weak_factory_;
-
   scoped_refptr<GpuChannelMessageFilter> filter_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
   scoped_ptr<DevToolsGpuAgent> devtools_gpu_agent_;
@@ -220,6 +224,11 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
   size_t num_stubs_descheduled_;
 
   bool allow_future_sync_points_;
+
+  // Member variables should appear before the WeakPtrFactory, to ensure
+  // that any WeakPtrs to Controller are invalidated before its members
+  // variable's destructors are executed, rendering them invalid.
+  base::WeakPtrFactory<GpuChannel> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannel);
 };

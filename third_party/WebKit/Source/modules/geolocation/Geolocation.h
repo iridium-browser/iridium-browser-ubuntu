@@ -53,6 +53,7 @@ class Geolocation FINAL
     : public GarbageCollectedFinalized<Geolocation>
     , public ScriptWrappable
     , public ActiveDOMObject {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static Geolocation* create(ExecutionContext*);
     virtual ~Geolocation();
@@ -64,11 +65,11 @@ public:
 
     // Creates a oneshot and attempts to obtain a position that meets the
     // constraints of the options.
-    void getCurrentPosition(PassOwnPtr<PositionCallback>, PassOwnPtr<PositionErrorCallback>, const Dictionary&);
+    void getCurrentPosition(PositionCallback*, PositionErrorCallback*, const Dictionary&);
 
     // Creates a watcher that will be notified whenever a new position is
     // available that meets the constraints of the options.
-    int watchPosition(PassOwnPtr<PositionCallback>, PassOwnPtr<PositionErrorCallback>, const Dictionary&);
+    int watchPosition(PositionCallback*, PositionErrorCallback*, const Dictionary&);
 
     // Removes all references to the watcher, it will not be updated again.
     void clearWatch(int watchID);

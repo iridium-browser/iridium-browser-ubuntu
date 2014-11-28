@@ -226,7 +226,7 @@ void DisplayReconfigCallback(CGDirectDisplayID display,
   bool gpu_changed = false;
   if (flags & kCGDisplayAddFlag) {
     uint32 vendor_id, device_id;
-    if (gpu::CollectGpuID(&vendor_id, &device_id) == gpu::kGpuIDSuccess) {
+    if (gpu::CollectGpuID(&vendor_id, &device_id) == gpu::kCollectInfoSuccess) {
       gpu_changed = manager->UpdateActiveGpu(vendor_id, device_id);
     }
   }
@@ -271,7 +271,7 @@ bool GpuDataManagerImplPrivate::IsFeatureBlacklisted(int feature) const {
     return true;
   }
 #endif  // OS_CHROMEOS
-  if (use_swiftshader_) {
+  if (use_swiftshader_ || ShouldUseWarp()) {
     // Skia's software rendering is probably more efficient than going through
     // software emulation of the GPU, so use that.
     if (feature == gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS)
@@ -287,7 +287,7 @@ bool GpuDataManagerImplPrivate::IsDriverBugWorkaroundActive(int feature) const {
 }
 
 size_t GpuDataManagerImplPrivate::GetBlacklistedFeatureCount() const {
-  if (use_swiftshader_)
+  if (use_swiftshader_ || ShouldUseWarp())
     return 1;
   return blacklisted_features_.size();
 }
@@ -311,7 +311,7 @@ void GpuDataManagerImplPrivate::GetGpuProcessHandles(
 
 bool GpuDataManagerImplPrivate::GpuAccessAllowed(
     std::string* reason) const {
-  if (use_swiftshader_)
+  if (use_swiftshader_ || ShouldUseWarp())
     return true;
 
   if (!gpu_process_accessible_) {
@@ -363,7 +363,7 @@ bool GpuDataManagerImplPrivate::GpuAccessAllowed(
 }
 
 void GpuDataManagerImplPrivate::RequestCompleteGpuInfoIfNeeded() {
-  if (complete_gpu_info_already_requested_ || gpu_info_.finalized)
+  if (complete_gpu_info_already_requested_ || IsCompleteGpuInfoAvailable())
     return;
   complete_gpu_info_already_requested_ = true;
 
@@ -377,8 +377,20 @@ void GpuDataManagerImplPrivate::RequestCompleteGpuInfoIfNeeded() {
       new GpuMsg_CollectGraphicsInfo());
 }
 
+bool GpuDataManagerImplPrivate::IsEssentialGpuInfoAvailable() const {
+  if (gpu_info_.basic_info_state == gpu::kCollectInfoNone ||
+      gpu_info_.context_info_state == gpu::kCollectInfoNone) {
+    return false;
+  }
+  return true;
+}
+
 bool GpuDataManagerImplPrivate::IsCompleteGpuInfoAvailable() const {
-  return gpu_info_.finalized;
+#if defined(OS_WIN)
+  if (gpu_info_.dx_diagnostics_info_state == gpu::kCollectInfoNone)
+    return false;
+#endif
+  return IsEssentialGpuInfoAvailable();
 }
 
 void GpuDataManagerImplPrivate::RequestVideoMemoryUsageStatsUpdate() const {
@@ -396,6 +408,11 @@ void GpuDataManagerImplPrivate::RegisterSwiftShaderPath(
     const base::FilePath& path) {
   swiftshader_path_ = path;
   EnableSwiftShaderIfNecessary();
+}
+
+bool GpuDataManagerImplPrivate::ShouldUseWarp() const {
+  return use_warp_ ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseWarp);
 }
 
 void GpuDataManagerImplPrivate::AddObserver(GpuDataManagerObserver* observer) {
@@ -503,9 +520,13 @@ void GpuDataManagerImplPrivate::Initialize() {
     gpu::CollectBasicGraphicsInfo(&gpu_info);
   }
 #if defined(ARCH_CPU_X86_FAMILY)
-  if (!gpu_info.gpu.vendor_id || !gpu_info.gpu.device_id)
-    gpu_info.finalized = true;
-#endif
+  if (!gpu_info.gpu.vendor_id || !gpu_info.gpu.device_id) {
+    gpu_info.context_info_state = gpu::kCollectInfoNonFatalFailure;
+#if defined(OS_WIN)
+    gpu_info.dx_diagnostics_info_state = gpu::kCollectInfoNonFatalFailure;
+#endif  // OS_WIN
+  }
+#endif  // ARCH_CPU_X86_FAMILY
 
   std::string gpu_blacklist_string;
   std::string gpu_driver_bug_list_string;
@@ -545,12 +566,12 @@ void GpuDataManagerImplPrivate::UpdateGpuInfoHelper() {
 
 void GpuDataManagerImplPrivate::UpdateGpuInfo(const gpu::GPUInfo& gpu_info) {
   // No further update of gpu_info if falling back to SwiftShader.
-  if (use_swiftshader_)
+  if (use_swiftshader_ || ShouldUseWarp())
     return;
 
   gpu::MergeGPUInfo(&gpu_info_, gpu_info);
-  complete_gpu_info_already_requested_ =
-      complete_gpu_info_already_requested_ || gpu_info_.finalized;
+  if (IsCompleteGpuInfoAvailable())
+    complete_gpu_info_already_requested_ = true;
 
   UpdateGpuInfoHelper();
 }
@@ -645,6 +666,9 @@ void GpuDataManagerImplPrivate::AppendGpuCommandLine(
       gpu_info_.driver_vendor);
   command_line->AppendSwitchASCII(switches::kGpuDriverVersion,
       gpu_info_.driver_version);
+
+  if (ShouldUseWarp())
+    command_line->AppendSwitch(switches::kUseWarp);
 }
 
 void GpuDataManagerImplPrivate::AppendPluginCommandLine(
@@ -699,12 +723,6 @@ void GpuDataManagerImplPrivate::UpdateRendererWebPrefs(
           switches::kDisableAcceleratedVideoDecode)) {
     prefs->pepper_accelerated_video_decode_enabled = true;
   }
-
-  if (!IsFeatureBlacklisted(
-          gpu::GPU_FEATURE_TYPE_GPU_RASTERIZATION_EXPANDED_HEURISTICS) ||
-      base::FieldTrialList::FindFullName(
-          "GpuRasterizationExpandedContentWhitelist") == "Enabled")
-    prefs->use_expanded_heuristics_for_gpu_rasterization = true;
 }
 
 void GpuDataManagerImplPrivate::DisableHardwareAcceleration() {
@@ -713,6 +731,7 @@ void GpuDataManagerImplPrivate::DisableHardwareAcceleration() {
   for (int i = 0; i < gpu::NUMBER_OF_GPU_FEATURE_TYPES; ++i)
     blacklisted_features_.insert(i);
 
+  EnableWarpIfNecessary();
   EnableSwiftShaderIfNecessary();
   NotifyGpuInfoUpdate();
 }
@@ -819,6 +838,11 @@ bool GpuDataManagerImplPrivate::UpdateActiveGpu(
 }
 
 bool GpuDataManagerImplPrivate::CanUseGpuBrowserCompositor() const {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableGpuCompositing))
+    return false;
+  if (ShouldUseWarp())
+    return true;
   if (ShouldUseSwiftShader())
     return false;
   if (IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING))
@@ -865,6 +889,7 @@ GpuDataManagerImplPrivate::GpuDataManagerImplPrivate(
     : complete_gpu_info_already_requested_(false),
       observer_list_(new GpuDataManagerObserverList),
       use_swiftshader_(false),
+      use_warp_(false),
       card_blacklisted_(false),
       update_histograms_(true),
       window_count_(0),
@@ -938,6 +963,7 @@ void GpuDataManagerImplPrivate::UpdateBlacklistedFeatures(
     blacklisted_features_.insert(gpu::GPU_FEATURE_TYPE_WEBGL);
   }
 
+  EnableWarpIfNecessary();
   EnableSwiftShaderIfNecessary();
 }
 
@@ -963,6 +989,9 @@ void GpuDataManagerImplPrivate::NotifyGpuInfoUpdate() {
 }
 
 void GpuDataManagerImplPrivate::EnableSwiftShaderIfNecessary() {
+  if (ShouldUseWarp())
+    return;
+
   if (!GpuAccessAllowed(NULL) ||
       blacklisted_features_.count(gpu::GPU_FEATURE_TYPE_WEBGL)) {
     if (!swiftshader_path_.empty() &&
@@ -970,6 +999,22 @@ void GpuDataManagerImplPrivate::EnableSwiftShaderIfNecessary() {
              switches::kDisableSoftwareRasterizer))
       use_swiftshader_ = true;
   }
+}
+
+void GpuDataManagerImplPrivate::EnableWarpIfNecessary() {
+#if defined(OS_WIN)
+  if (use_warp_)
+    return;
+  // We should only use WARP if we are unable to use the regular GPU for
+  // compositing, and if we in Metro mode.
+  use_warp_ =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kViewerConnect) &&
+      !CanUseGpuBrowserCompositor();
+#endif
+}
+
+void GpuDataManagerImplPrivate::ForceWarpModeForTesting() {
+  use_warp_ = true;
 }
 
 std::string GpuDataManagerImplPrivate::GetDomainFromURL(
@@ -1079,7 +1124,10 @@ void GpuDataManagerImplPrivate::Notify3DAPIBlocked(const GURL& url,
 
 void GpuDataManagerImplPrivate::OnGpuProcessInitFailure() {
   gpu_process_accessible_ = false;
-  gpu_info_.finalized = true;
+  gpu_info_.context_info_state = gpu::kCollectInfoFatalFailure;
+#if defined(OS_WIN)
+  gpu_info_.dx_diagnostics_info_state = gpu::kCollectInfoFatalFailure;
+#endif
   complete_gpu_info_already_requested_ = true;
   // Some observers might be waiting.
   NotifyGpuInfoUpdate();

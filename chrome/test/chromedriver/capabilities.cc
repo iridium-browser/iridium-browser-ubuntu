@@ -47,6 +47,18 @@ Status ParseString(std::string* to_set,
   return Status(kOk);
 }
 
+Status ParseInterval(int* to_set,
+                     const base::Value& option,
+                     Capabilities* capabilities) {
+  int parsed_int = 0;
+  if (!option.GetAsInteger(&parsed_int))
+    return Status(kUnknownError, "must be an integer");
+  if (parsed_int <= 0)
+    return Status(kUnknownError, "must be positive");
+  *to_set = parsed_int;
+  return Status(kOk);
+}
+
 Status ParseFilePath(base::FilePath* to_set,
                      const base::Value& option,
                      Capabilities* capabilities) {
@@ -323,6 +335,8 @@ Status ParsePerfLoggingPrefs(const base::Value& option,
     return Status(kUnknownError, "must be a dictionary");
 
   std::map<std::string, Parser> parser_map;
+  parser_map["bufferUsageReportingInterval"] = base::Bind(&ParseInterval,
+      &capabilities->perf_logging_prefs.buffer_usage_reporting_interval);
   parser_map["enableNetwork"] = base::Bind(
       &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.network);
   parser_map["enablePage"] = base::Bind(
@@ -375,6 +389,7 @@ Status ParseChromeOptions(
     parser_map["androidUseRunningApp"] =
         base::Bind(&ParseBoolean, &capabilities->android_use_running_app);
     parser_map["args"] = base::Bind(&ParseSwitches);
+    parser_map["excludeSwitches"] = base::Bind(&ParseExcludeSwitches);
     parser_map["loadAsync"] = base::Bind(&IgnoreDeprecatedOption, "loadAsync");
   } else if (is_remote) {
     parser_map["debuggerAddress"] = base::Bind(&ParseUseRemoteBrowser);
@@ -382,7 +397,6 @@ Status ParseChromeOptions(
     parser_map["args"] = base::Bind(&ParseSwitches);
     parser_map["binary"] = base::Bind(&ParseFilePath, &capabilities->binary);
     parser_map["detach"] = base::Bind(&ParseBoolean, &capabilities->detach);
-    parser_map["mobileEmulation"] = base::Bind(&ParseMobileEmulation);
     parser_map["excludeSwitches"] = base::Bind(&ParseExcludeSwitches);
     parser_map["extensions"] = base::Bind(&ParseExtensions);
     parser_map["forceDevToolsScreenshot"] = base::Bind(
@@ -393,6 +407,7 @@ Status ParseChromeOptions(
     parser_map["logPath"] = base::Bind(&ParseLogPath);
     parser_map["minidumpPath"] =
         base::Bind(&ParseString, &capabilities->minidump_path);
+    parser_map["mobileEmulation"] = base::Bind(&ParseMobileEmulation);
     parser_map["prefs"] = base::Bind(&ParseDict, &capabilities->prefs);
   }
 
@@ -522,7 +537,8 @@ PerfLoggingPrefs::PerfLoggingPrefs()
     : network(InspectorDomainStatus::kDefaultEnabled),
       page(InspectorDomainStatus::kDefaultEnabled),
       timeline(InspectorDomainStatus::kDefaultEnabled),
-      trace_categories() {}
+      trace_categories(),
+      buffer_usage_reporting_interval(1000) {}
 
 PerfLoggingPrefs::~PerfLoggingPrefs() {}
 

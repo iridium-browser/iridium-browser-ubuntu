@@ -7,33 +7,30 @@
 
 #include "Test.h"
 #include "SkRandom.h"
-#include "SkQuadTree.h"
 #include "SkRTree.h"
 #include "SkTSort.h"
 
 static const size_t RTREE_MIN_CHILDREN = 6;
 static const size_t RTREE_MAX_CHILDREN = 11;
-static const size_t QUADTREE_MIN_CHILDREN = 0;
-static const size_t QUADTREE_MAX_CHILDREN = 0; // No hard limit for quadtree
 
 static const int NUM_RECTS = 200;
 static const size_t NUM_ITERATIONS = 100;
 static const size_t NUM_QUERIES = 50;
 
-static const int MAX_SIZE = 1000;
+static const SkScalar MAX_SIZE = 1000.0f;
 
 struct DataRect {
-    SkIRect rect;
+    SkRect rect;
     void* data;
 };
 
-static SkIRect random_rect(SkRandom& rand) {
-    SkIRect rect = {0,0,0,0};
+static SkRect random_rect(SkRandom& rand) {
+    SkRect rect = {0,0,0,0};
     while (rect.isEmpty()) {
-        rect.fLeft   = rand.nextS() % MAX_SIZE;
-        rect.fRight  = rand.nextS() % MAX_SIZE;
-        rect.fTop    = rand.nextS() % MAX_SIZE;
-        rect.fBottom = rand.nextS() % MAX_SIZE;
+        rect.fLeft   = rand.nextRangeF(0, MAX_SIZE);
+        rect.fRight  = rand.nextRangeF(0, MAX_SIZE);
+        rect.fTop    = rand.nextRangeF(0, MAX_SIZE);
+        rect.fBottom = rand.nextRangeF(0, MAX_SIZE);
         rect.sort();
     }
     return rect;
@@ -46,12 +43,15 @@ static void random_data_rects(SkRandom& rand, DataRect out[], int n) {
     }
 }
 
-static bool verify_query(SkIRect query, DataRect rects[],
+static bool verify_query(SkRect query, DataRect rects[],
                          SkTDArray<void*>& found) {
+    // TODO(mtklein): no need to do this after everything's SkRects
+    query.roundOut();
+
     SkTDArray<void*> expected;
     // manually intersect with every rectangle
     for (int i = 0; i < NUM_RECTS; ++i) {
-        if (SkIRect::IntersectsNoEmptyCheck(query, rects[i].rect)) {
+        if (SkRect::Intersects(query, rects[i].rect)) {
             expected.push(rects[i].data);
         }
     }
@@ -76,7 +76,7 @@ static void run_queries(skiatest::Reporter* reporter, SkRandom& rand, DataRect r
                         SkBBoxHierarchy& tree) {
     for (size_t i = 0; i < NUM_QUERIES; ++i) {
         SkTDArray<void*> hits;
-        SkIRect query = random_rect(rand);
+        SkRect query = random_rect(rand);
         tree.search(query, &hits);
         REPORTER_ASSERT(reporter, verify_query(query, rects, hits));
     }
@@ -86,7 +86,7 @@ static void tree_test_main(SkBBoxHierarchy* tree, int minChildren, int maxChildr
                            skiatest::Reporter* reporter) {
     DataRect rects[NUM_RECTS];
     SkRandom rand;
-    REPORTER_ASSERT(reporter, NULL != tree);
+    REPORTER_ASSERT(reporter, tree);
 
     int expectedDepthMin = -1;
     int expectedDepthMax = -1;
@@ -166,19 +166,5 @@ DEF_TEST(BBoxHierarchy, reporter) {
         SkRTree* unsortedRtree = SkRTree::Create(RTREE_MIN_CHILDREN, RTREE_MAX_CHILDREN, 1, false);
         SkAutoUnref auo(unsortedRtree);
         tree_test_main(unsortedRtree, RTREE_MIN_CHILDREN, RTREE_MAX_CHILDREN, reporter);
-    }
-
-    // QuadTree
-    {
-        SkQuadTree* quadtree = SkNEW_ARGS(SkQuadTree, (
-            SkIRect::MakeLTRB(-MAX_SIZE, -MAX_SIZE, MAX_SIZE, MAX_SIZE)));
-        SkAutoUnref au(quadtree);
-        tree_test_main(quadtree, QUADTREE_MIN_CHILDREN, QUADTREE_MAX_CHILDREN, reporter);
-
-        // QuadTree that orders input rectangles on deferred insert.
-        SkQuadTree* unsortedQuadTree = SkNEW_ARGS(SkQuadTree, (
-            SkIRect::MakeLTRB(-MAX_SIZE, -MAX_SIZE, MAX_SIZE, MAX_SIZE)));
-        SkAutoUnref auo(unsortedQuadTree);
-        tree_test_main(unsortedQuadTree, QUADTREE_MIN_CHILDREN, QUADTREE_MAX_CHILDREN, reporter);
     }
 }

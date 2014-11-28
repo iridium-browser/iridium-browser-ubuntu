@@ -405,7 +405,7 @@ void DesktopWindowTreeHostWin::FrameTypeChanged() {
 }
 
 void DesktopWindowTreeHostWin::SetFullscreen(bool fullscreen) {
-  message_handler_->fullscreen_handler()->SetFullscreen(fullscreen);
+  message_handler_->SetFullscreen(fullscreen);
   // TODO(sky): workaround for ScopedFullscreenVisibility showing window
   // directly. Instead of this should listen for visibility changes and then
   // update window.
@@ -452,6 +452,10 @@ bool DesktopWindowTreeHostWin::IsAnimatingClosed() const {
 
 bool DesktopWindowTreeHostWin::IsTranslucentWindowOpacitySupported() const {
   return ui::win::IsAeroGlassEnabled();
+}
+
+void DesktopWindowTreeHostWin::SizeConstraintsChanged() {
+  message_handler_->SizeConstraintsChanged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -605,6 +609,10 @@ bool DesktopWindowTreeHostWin::CanResize() const {
 
 bool DesktopWindowTreeHostWin::CanMaximize() const {
   return GetWidget()->widget_delegate()->CanMaximize();
+}
+
+bool DesktopWindowTreeHostWin::CanMinimize() const {
+  return GetWidget()->widget_delegate()->CanMinimize();
 }
 
 bool DesktopWindowTreeHostWin::CanActivate() const {

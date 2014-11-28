@@ -64,7 +64,6 @@ DOMSelection::DOMSelection(const TreeScope* treeScope)
     : DOMWindowProperty(treeScope->rootNode().document().frame())
     , m_treeScope(treeScope)
 {
-    ScriptWrappable::init(this);
 }
 
 void DOMSelection::clearTreeScope()
@@ -222,11 +221,6 @@ void DOMSelection::collapse(Node* node, int offset, ExceptionState& exceptionSta
     m_frame->selection().setSelectedRange(range.get(), DOWNSTREAM, m_frame->selection().isDirectional() ? FrameSelection::Directional : FrameSelection::NonDirectional);
 }
 
-void DOMSelection::collapse(Node* node, ExceptionState& exceptionState)
-{
-    collapse(node, 0, exceptionState);
-}
-
 void DOMSelection::collapseToEnd(ExceptionState& exceptionState)
 {
     if (!m_frame)
@@ -360,13 +354,6 @@ void DOMSelection::extend(Node* node, int offset, ExceptionState& exceptionState
 
     // FIXME: Eliminate legacy editing positions
     m_frame->selection().setExtent(VisiblePosition(createLegacyEditingPosition(node, offset), DOWNSTREAM));
-}
-
-void DOMSelection::extend(Node* node, ExceptionState& exceptionState)
-{
-    // This default value implementation differs from the spec, which says |offset| is not optional.
-    // FIXME: Specify this default value in Selection.idl.
-    extend(node, 0, exceptionState);
 }
 
 PassRefPtrWillBeRawPtr<Range> DOMSelection::getRangeAt(int index, ExceptionState& exceptionState)
@@ -518,7 +505,10 @@ String DOMSelection::toString()
     if (!m_frame)
         return String();
 
-    return plainText(m_frame->selection().selection().toNormalizedRange().get());
+    Position start, end;
+    if (m_frame->selection().selection().toNormalizedPositions(start, end))
+        return plainText(start, end);
+    return emptyString();
 }
 
 Node* DOMSelection::shadowAdjustedNode(const Position& position) const
@@ -568,6 +558,12 @@ void DOMSelection::addConsoleError(const String& message)
 {
     if (m_treeScope)
         m_treeScope->document().addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
+}
+
+void DOMSelection::trace(Visitor* visitor)
+{
+    visitor->trace(m_treeScope);
+    DOMWindowProperty::trace(visitor);
 }
 
 } // namespace blink

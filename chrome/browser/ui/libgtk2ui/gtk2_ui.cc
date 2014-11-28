@@ -14,6 +14,7 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/nix/mime_util_xdg.h"
+#include "base/nix/xdg_util.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -32,9 +33,8 @@
 #include "chrome/browser/ui/libgtk2ui/skia_utils_gtk2.h"
 #include "chrome/browser/ui/libgtk2ui/unity_service.h"
 #include "chrome/browser/ui/libgtk2ui/x11_input_method_context_impl_gtk2.h"
-#include "grit/component_scaled_resources.h"
+#include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #include "printing/printing_context_linux.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -48,6 +48,7 @@
 #include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/linux_ui/window_button_order_observer.h"
@@ -378,9 +379,23 @@ gfx::FontRenderParams GetGtkFontRenderParams() {
   return params;
 }
 
+views::LinuxUI::NonClientMiddleClickAction GetDefaultMiddleClickAction() {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  switch (base::nix::GetDesktopEnvironment(env.get())) {
+    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+      // Starting with KDE 4.4, windows' titlebars can be dragged with the
+      // middle mouse button to create tab groups. We don't support that in
+      // Chrome, but at least avoid lowering windows in response to middle
+      // clicks to avoid surprising users who expect the KDE behavior.
+      return views::LinuxUI::MIDDLE_CLICK_ACTION_NONE;
+    default:
+      return views::LinuxUI::MIDDLE_CLICK_ACTION_LOWER;
+  }
+}
+
 }  // namespace
 
-Gtk2UI::Gtk2UI() : middle_click_action_(MIDDLE_CLICK_ACTION_LOWER) {
+Gtk2UI::Gtk2UI() : middle_click_action_(GetDefaultMiddleClickAction()) {
   GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 }
 

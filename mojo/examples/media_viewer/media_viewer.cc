@@ -8,7 +8,9 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "mojo/application/application_runner_chromium.h"
 #include "mojo/examples/media_viewer/media_viewer.mojom.h"
+#include "mojo/public/c/system/main.h"
 #include "mojo/public/cpp/application/application_connection.h"
 #include "mojo/public/cpp/application/application_delegate.h"
 #include "mojo/public/cpp/application/application_impl.h"
@@ -184,23 +186,6 @@ class ControlPanel : public views::ButtonListener {
   DISALLOW_COPY_AND_ASSIGN(ControlPanel);
 };
 
-class NavigatorImpl : public InterfaceImpl<Navigator> {
- public:
-  explicit NavigatorImpl(MediaViewer* viewer) : viewer_(viewer) {}
-  virtual ~NavigatorImpl() {}
-
- private:
-  // Overridden from Navigator:
-  virtual void Navigate(
-      uint32_t view_id,
-      NavigationDetailsPtr navigation_details,
-      ResponseDetailsPtr response_details) OVERRIDE;
-
-  MediaViewer* viewer_;
-
-  DISALLOW_COPY_AND_ASSIGN(NavigatorImpl);
-};
-
 class MediaViewer
     : public ApplicationDelegate,
       public ViewManagerDelegate,
@@ -208,9 +193,7 @@ class MediaViewer
       public ViewObserver {
  public:
   MediaViewer()
-      : navigator_factory_(this),
-        view_manager_client_factory_(this),
-        app_(NULL),
+      : app_(NULL),
         view_manager_(NULL),
         root_view_(NULL),
         control_view_(NULL),
@@ -224,59 +207,21 @@ class MediaViewer
       root_view_->RemoveObserver(this);
   }
 
-  void Navigate(
-      uint32_t view_id,
-      NavigationDetailsPtr navigation_details,
-      ResponseDetailsPtr response_details) {
-    // TODO(yzshen): This shouldn't be needed once FIFO is ready.
-    if (!view_manager_) {
-      pending_navigate_request_.reset(new PendingNavigateRequest);
-      pending_navigate_request_->view_id = view_id;
-      pending_navigate_request_->navigation_details = navigation_details.Pass();
-      pending_navigate_request_->response_details = response_details.Pass();
-
-      return;
-    }
-
-    std::string handler = GetHandlerForContentType(
-        response_details->response->mime_type);
-    if (handler.empty())
-      return;
-
-    content_view_->Embed(handler);
-
-    if (navigation_details) {
-      NavigatorPtr navigator;
-      app_->ConnectToService(handler, &navigator);
-      navigator->Navigate(content_view_->id(), navigation_details.Pass(),
-                          response_details.Pass());
-    }
-
-    // TODO(yzshen): determine the set of controls to show based on what
-    // interfaces the embedded app provides.
-    app_->ConnectToService(handler, &zoomable_media_);
-  }
-
  private:
   typedef std::map<std::string, std::string> HandlerMap;
-
-  struct PendingNavigateRequest {
-    uint32_t view_id;
-    NavigationDetailsPtr navigation_details;
-    ResponseDetailsPtr response_details;
-  };
 
 
   // Overridden from ApplicationDelegate:
   virtual void Initialize(ApplicationImpl* app) OVERRIDE {
+    view_manager_client_factory_.reset(
+        new ViewManagerClientFactory(app->shell(), this));
     app_ = app;
     views_init_.reset(new ViewsInit);
   }
 
   virtual bool ConfigureIncomingConnection(ApplicationConnection* connection)
       OVERRIDE {
-    connection->AddService(&navigator_factory_);
-    connection->AddService(&view_manager_client_factory_);
+    connection->AddService(view_manager_client_factory_.get());
     return true;
   }
 
@@ -308,14 +253,9 @@ class MediaViewer
     LayoutViews();
     root_view_->AddObserver(this);
 
-    if (pending_navigate_request_) {
-      scoped_ptr<PendingNavigateRequest> request(
-          pending_navigate_request_.release());
-
-      Navigate(request->view_id, request->navigation_details.Pass(),
-               request->response_details.Pass());
-    }
+    content_view_->Embed("TODO");
   }
+
   virtual void OnViewManagerDisconnected(
       ViewManager* view_manager) OVERRIDE {
     DCHECK_EQ(view_manager_, view_manager);
@@ -357,9 +297,7 @@ class MediaViewer
     return it != handler_map_.end() ? it->second : std::string();
   }
 
-  InterfaceFactoryImplWithContext<NavigatorImpl, MediaViewer>
-      navigator_factory_;
-  ViewManagerClientFactory view_manager_client_factory_;
+  scoped_ptr<ViewManagerClientFactory> view_manager_client_factory_;
 
   ApplicationImpl* app_;
   scoped_ptr<ViewsInit> views_init_;
@@ -370,24 +308,14 @@ class MediaViewer
   ControlPanel control_panel_;
   ZoomableMediaPtr zoomable_media_;
   HandlerMap handler_map_;
-  scoped_ptr<PendingNavigateRequest> pending_navigate_request_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaViewer);
 };
 
-void NavigatorImpl::Navigate(
-    uint32_t view_id,
-    NavigationDetailsPtr navigation_details,
-    ResponseDetailsPtr response_details) {
-  viewer_->Navigate(view_id, navigation_details.Pass(),
-                    response_details.Pass());
-}
-
 }  // namespace examples
-
-// static
-ApplicationDelegate* ApplicationDelegate::Create() {
-  return new examples::MediaViewer;
-}
-
 }  // namespace mojo
+
+MojoResult MojoMain(MojoHandle shell_handle) {
+  mojo::ApplicationRunnerChromium runner(new mojo::examples::MediaViewer);
+  return runner.Run(shell_handle);
+}

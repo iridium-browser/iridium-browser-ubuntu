@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/logger.h"
+#include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/vertex_attrib_manager.h"
@@ -187,7 +188,7 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   context_->SetGLVersionString(normalized_init.gl_version.c_str());
 
   context_->MakeCurrent(surface_.get());
-  gfx::GLSurface::InitializeDynamicMockBindingsForTests(context_);
+  gfx::GLSurface::InitializeDynamicMockBindingsForTests(context_.get());
 
   TestHelper::SetupContextGroupInitExpectations(
       gl_.get(),
@@ -200,6 +201,12 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   // we can use the ContextGroup to figure out how the real GLES2Decoder
   // will initialize itself.
   mock_decoder_.reset(new MockGLES2Decoder());
+
+  // Install FakeDoCommands handler so we can use individual DoCommand()
+  // expectations.
+  EXPECT_CALL(*mock_decoder_, DoCommands(_, _, _, _)).WillRepeatedly(
+      Invoke(mock_decoder_.get(), &MockGLES2Decoder::FakeDoCommands));
+
   EXPECT_TRUE(
       group_->Initialize(mock_decoder_.get(), DisallowedFeatures()));
 
@@ -1454,8 +1461,10 @@ void GLES2DecoderTestBase::SetupShader(
       GL_FRAGMENT_SHADER, fragment_shader_client_id,
       fragment_shader_service_id);
 
-  GetShader(vertex_shader_client_id)->SetStatus(true, "", NULL);
-  GetShader(fragment_shader_client_id)->SetStatus(true, "", NULL);
+  TestHelper::SetShaderStates(
+      gl_.get(), GetShader(vertex_shader_client_id), true);
+  TestHelper::SetShaderStates(
+      gl_.get(), GetShader(fragment_shader_client_id), true);
 
   cmds::AttachShader attach_cmd;
   attach_cmd.Init(program_client_id, vertex_shader_client_id);

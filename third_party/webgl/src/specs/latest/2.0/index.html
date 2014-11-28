@@ -28,7 +28,7 @@
     <!--end-logo-->
 
     <h1>WebGL 2 Specification</h1>
-    <h2 class="no-toc">Editor's Draft 30 July 2014</h2>
+    <h2 class="no-toc">Editor's Draft 10 September 2014</h2>
     <dl>
         <dt>This version:
             <dd>
@@ -112,9 +112,12 @@
     </p>
 
     <p>
-      WebGL 2 is backwards compatible with WebGL 1: existing content will run in WebGL 2 without
-      modification. To access the new behavior provided in this specification, the content
-      explicitly requests a new context (<a href="#">details below</a>).
+      WebGL 2 is not entirely backwards compatible with WebGL 1. Existing content written against
+      the core WebGL 1 specification without extensions will often run in WebGL 2 without
+      modification, but this is not always the case. All exceptions to backwards compatibility are
+      recorded in the <a href="#BACKWARDS_INCOMPATIBILITY">Backwards Incompatibility</a> section.
+      To access the new behavior provided in this specification, the content explicitly requests
+      a new context (<a href="#CONTEXT_CREATION">details below</a>).
     </p>
     </div>
 
@@ -130,7 +133,7 @@
 
     <p>
       The remaining sections of this document are intended to be read in conjunction
-      with the OpenGL ES 3.0 specification (3.0.2 at the time of this writing, available
+      with the OpenGL ES 3.0 specification (3.0.3 at the time of this writing, available
       from the <a href="http://www.khronos.org/registry/gles/">Khronos OpenGL ES API Registry</a>).
       Unless otherwise specified, the behavior of each method is defined by the
       OpenGL ES 3.0 specification.  This specification may diverge from OpenGL ES 3.0
@@ -152,7 +155,7 @@
 
 <!-- ======================================================================================================= -->
 
-    <h3>Context Creation</h3>
+    <h3><a name="CONTEXT_CREATION">Context Creation</a></h3>
 
     <p>
         Each <code>WebGLRenderingContext</code> and <code>WebGL2RenderingContext</code> has an
@@ -695,7 +698,7 @@ interface <dfn id="WebGL2RenderingContextBase">WebGL2RenderingContextBase</dfn>
   void invalidateFramebuffer(GLenum target, sequence&lt;GLenum&gt; attachments);
   void invalidateSubFramebuffer(GLenum target, sequence&lt;GLenum&gt; attachments,
                                 GLint x, GLint y, GLsizei width, GLsizei height);
-  void readBuffer(GLenum mode);
+  void readBuffer(GLenum src);
 
   /* Renderbuffer objects */
   void renderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat,
@@ -777,11 +780,7 @@ interface <dfn id="WebGL2RenderingContextBase">WebGL2RenderingContextBase</dfn>
   [WebGLHandlesContextLoss] GLboolean isSampler(WebGLSampler? sampler);
   void bindSampler(GLuint unit, WebGLSampler? sampler);
   void samplerParameteri(WebGLSampler? sampler, GLenum pname, GLint param);
-  typedef (Int32Array or sequence&lt;GLint&gt;) SamplerParameterIVSource;
-  void samplerParameteriv(WebGLSampler? sampler, GLenum pname, SamplerParameterIVSource param);
   void samplerParameterf(WebGLSampler? sampler, GLenum pname, GLfloat param);
-  typedef (Float32Array or sequence&lt;GLfloat&gt;) SamplerParameterFVSource;
-  void samplerParameterfv(WebGLSampler? sampler, GLenum pname, SamplerParameterFVSource param);
   any getSamplerParameter(WebGLSampler? sampler, GLenum pname);
 
   /* Sync objects */
@@ -957,6 +956,10 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Copy part of the data of the buffer bound to <em>readTarget</em> to the buffer bound to <em>writeTarget</em>.
+        See <a href="COPYING_BUFFERS">Copying Buffers</a> for restrictions imposed by the WebGL 2 API.
+      </dd>
       <dt>
         <p class="idl-code">void getBufferSubData(GLenum target, GLintptr offset, GetBufferDataDest returnedData)
         </p>
@@ -969,7 +972,13 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
         If <code>returnedData</code> is null then an <code>INVALID_VALUE</code> error is generated.
         If <code>offset</code> is less than zero, an <code>INVALID_VALUE</code> error is generated.
         If zero is bound to <code>target</code>, an <code>INVALID_OPERATION</code> error is generated.
+        If <code>target</code> is <code>TRANSFORM_FEEDBACK_BUFFER</code>, and any transform feedback object
+        is currently active, an <code>INVALID_OPERATION</code> error is generated.
         If any error is generated, no data is written to <code>returnedData</code>.
+        <br><br>
+        If the buffer is written and read sequentially by other operations and <code>getBufferSubData</code>,
+        it is the responsibility of the WebGL API to ensure that data are accessed consistently. This applies
+        even if the buffer is currently bound to a transform feedback binding point.
       </dd>
     </dl>
 
@@ -1007,15 +1016,21 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
       <dt>
         <p class="idl-code">void blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter)
           <span class="gl-spec">
-            (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.3.2">OpenGL ES 3.0.3 &sect;4.3.2</a>,
+            (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.3.3">OpenGL ES 3.0.3 &sect;4.3.3</a>,
             <a href="http://www.khronos.org/opengles/sdk/docs/man3/html/glBlitFramebuffer.xhtml" class="nonnormative">man page</a>)
           </span>
         </p>
       </dt>
+      <dd>
+        Transfer a rectangle of pixel values from one region of the read framebuffer to another in the draw
+        framebuffer. If the value of SAMPLE_BUFFERS for the read framebuffer is one and the value of
+        SAMPLE_BUFFERS for the draw framebuffer is zero, the samples corresponding to each pixel location in
+        the source are converted to a single sample before being written to the destination.
+      </dd>
       <dt>
         <p class="idl-code">void framebufferTextureLayer(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer)
           <span class="gl-spec">
-            (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.4">OpenGL ES 3.0.3 &sect;4.4</a>,
+            (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.4.2">OpenGL ES 3.0.3 &sect;4.4.2</a>,
             <a href="http://www.khronos.org/opengles/sdk/docs/man3/html/glFramebufferTextureLayer.xhtml" class="nonnormative">man page</a>)
           </span>
         </p>
@@ -1048,6 +1063,11 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Equivalent to calling <code>invalidateSubFramebuffer</code> with <code>x</code> and <code>y</code>
+        set to 0 and <code>width</code> and <code>height</code> set to the largest framebuffer object's
+        attachments' width and height.
+      </dd>
       <dt>
         <p class="idl-code">void invalidateSubFramebuffer (GLenum target, sequence&lt;GLenum&gt; attachments, GLint x, GLint y, GLsizei width, GLsizei height)
           <span class="gl-spec">
@@ -1056,14 +1076,20 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Signal the GL that it need not preserve all contents of a bound framebuffer object.
+      </dd>
       <dt>
-        <p class="idl-code">void readBuffer(GLenum mode)
+        <p class="idl-code">void readBuffer(GLenum src)
           <span class="gl-spec">
             (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.3.1">OpenGL ES 3.0.3 &sect;4.3.1</a>,
             <a href="http://www.khronos.org/opengles/sdk/docs/man3/html/glReadBuffer.xhtml" class="nonnormative">man page</a>)
           </span>
         </p>
       </dt>
+      <dd>
+        Specify a color buffer of the read framebuffer as the read buffer.
+      </dd>
     </dl>
 
 <!-- ======================================================================================================= -->
@@ -1107,6 +1133,13 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
 
     <h4>Texture objects</h4>
 
+    <p>
+        Texture objects provide storage and state for texturing operations. If no WebGLTexture is bound
+        (e.g., passing null or 0 to bindTexture) then attempts to modify or query the texture object shall
+        generate an <code>INVALID_OPERATION</code> error. This is indicated in the functions below in cases
+        where The OpenGL ES 3.0 specification allows the function to change the default texture.
+    </p>
+
     <dl class="methods">
       <dt class="idl-code">any getTexParameter(GLenum target, GLenum pname)
           <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-6.1.3">OpenGL ES 3.0.3 &sect;6.1.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glGetTexParameter.xhtml">man page</a>)</span>
@@ -1119,6 +1152,8 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
               <tr><td>TEXTURE_BASE_LEVEL</td><td>GLint</td></tr>
               <tr><td>TEXTURE_COMPARE_FUNC</td><td>GLenum</td></tr>
               <tr><td>TEXTURE_COMPARE_MODE</td><td>GLenum</td></tr>
+              <tr><td>TEXTURE_IMMUTABLE_FORMAT</td><td>GLboolean</td></tr>
+              <tr><td>TEXTURE_IMMUTABLE_LEVELS</td><td>GLuint</td></tr>
               <tr><td>TEXTURE_MAG_FILTER</td><td>GLenum</td></tr>
               <tr><td>TEXTURE_MAX_LEVEL</td><td>GLint</td></tr>
               <tr><td>TEXTURE_MAX_LOD</td><td>GLfloat</td></tr>
@@ -1145,6 +1180,13 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Specify all the levels of a two-dimensional or cube-map texture at the same time. <br><br>
+
+        The image contents are set as if a buffer of sufficient size initialized to 0 would be passed to
+        each texImage2D call in the pseudocode in The OpenGL ES 3.0 specification section 3.8.4
+        <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-3.8.4">OpenGL ES 3.0.3 &sect;3.8.4</a>)</span>.
+      </dd>
       <dt>
         <p class="idl-code">void texStorage3D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth)
           <span class="gl-spec">
@@ -1153,6 +1195,13 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Specify all the levels of a three-dimensional texture or two-dimensional array texture. <br><br>
+
+        The image contents are set as if a buffer of sufficient size initialized to 0 would be passed to
+        each texImage3D call in the pseudocode in The OpenGL ES 3.0 specification section 3.8.4
+        <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-3.8.4">OpenGL ES 3.0.3 &sect;3.8.4</a>)</span>.
+      </dd>
       <dt>
         <p class="idl-code">void texSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, ArrayBufferView? pixels)
           <span class="gl-spec">
@@ -1161,14 +1210,64 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Update a rectangular subregion of the currently bound WebGLTexture. <br><br>
+
+        <div class="note editor">Needs update to determine restrictions for <em>format</em> and
+        <em>pixels</em>. These restrictions also need to be updated for texImage2D and texSubImage2D
+        inherited from the WebGL 1.0 API.</div>
+
+        If an attempt is made to call this function with no WebGLTexture bound (see above), an
+        <code>INVALID_OPERATION</code> error is generated. <br><br>
+
+        <div class="note editor">Needs update to determine restrictions for <em>type</em></div>
+
+        If <code>pixels</code> is null then an </code>INVALID_VALUE</code> error is generated. <br><br>
+
+        See <a href="../1.0/#PIXEL_STORAGE_PARAMETERS">Pixel Storage Parameters</a> for WebGL-specific
+        pixel storage parameters that affect the behavior of this function.
+      </dd>
       <dt>
-        <p class="idl-code">void texSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLenum format, GLenum type, TexImageSource? source)
+        <p class="idl-code">void texSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLenum format, GLenum type, TexImageSource? source) /* May throw DOMException */
           <span class="gl-spec">
             (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-3.8.5">OpenGL ES 3.0.3 &sect;3.8.5</a>,
             <a href="http://www.khronos.org/opengles/sdk/docs/man3/html/glTexSubImage3D.xhtml" class="nonnormative">man page</a>)
           </span>
         </p>
       </dt>
+      <dd>
+        Update a rectangular subregion of the currently bound WebGLTexture. <br><br>
+
+        The depth of the updated subregion is set to 1. The width and height of the updated subregion are
+        determined as specified in section <a href="../1.0/#TEXTURE_UPLOAD_SIZE">Texture Upload Width and
+        Height</a>. <br><br>
+
+        See <a href="../1.0/#TEXIMAGE2D_HTML">texImage2D</a> for the interpretation of
+        the <em>format</em> and <em>type</em> arguments, and notes on
+        the <code>UNPACK_PREMULTIPLY_ALPHA_WEBGL</code> pixel storage parameter. <br><br>
+
+        The first pixel transferred from the source to the WebGL implementation corresponds to
+        the upper left corner of the source. This behavior is modified by the
+        the <code>UNPACK_FLIP_Y_WEBGL</code> <a href="../1.0/#PIXEL_STORAGE_PARAMETERS">pixel storage
+        parameter</a>. <br><br>
+
+        If an attempt is made to call this function with no WebGLTexture bound (see above), an
+        <code>INVALID_OPERATION</code> error is generated. <br><br>
+
+        <div class="note editor">Needs update to determine restrictions for <em>type</em></div>
+
+        If this function is called with an <code>HTMLImageElement</code>
+        or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing
+        Document, or with an <code>HTMLCanvasElement</code> whose <i>origin-clean</i> flag is
+        set to false, a <code>SECURITY_ERR</code> exception must be
+        thrown. See <a href="../1.0/#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.<br><br>
+
+        If <code>source</code> is null then an <code>INVALID_VALUE</code> error is
+        generated. <br><br>
+
+        See <a href="../1.0/#PIXEL_STORAGE_PARAMETERS">Pixel Storage Parameters</a> for WebGL-specific
+        pixel storage parameters that affect the behavior of this function.
+      </dd>
       <dt>
         <p class="idl-code">void copyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height)
           <span class="gl-spec">
@@ -1177,6 +1276,14 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        If an attempt is made to call this function with no WebGLTexture bound (see above), an
+        <code>INVALID_OPERATION</code> error is generated. <br><br>
+
+        For any pixel lying outside the frame buffer, all channels of the associated texel are
+        initialized to 0; see <a href="../1.0/#READS_OUTSIDE_FRAMEBUFFER">Reading Pixels Outside the
+        Framebuffer</a>. <br><br>
+      </dd>
       <dt>
         <p class="idl-code">void compressedTexImage3D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, ArrayBufferView data)
           <span class="gl-spec">
@@ -1193,6 +1300,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        If an attempt is made to call these functions with no WebGLTexture bound (see above), an
+        <code>INVALID_OPERATION</code> error is generated. <br><br>
+
+        <div class="note editor">Needs update for WebGL 2.0</div>
+      </dd>
     </dl>
 
 <!-- ======================================================================================================= -->
@@ -1477,6 +1590,9 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Create a WebGLQuery object and initialize it with a query object name as if by calling glGenQueries.
+      </dd>
       <dt>
         <p class="idl-code">void deleteQuery(WebGLQuery? query)
           <span class="gl-spec">
@@ -1485,6 +1601,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Delete the query object contained in the passed <code class="interface">WebGLQuery</code> as if by calling
+        glDeleteQueries. If the query has already been deleted the call has no effect.
+        Note that the query object will be deleted when the <code class="interface">WebGLQuery</code> object is destroyed.
+        This method merely gives the author greater control over when the query object is destroyed.
+      </dd>
       <dt>
         <p class="idl-code">[WebGLHandlesContextLoss] GLboolean isQuery(WebGLQuery? query)
           <span class="gl-spec">
@@ -1493,6 +1615,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Return true if the passed <code class="interface">WebGLQuery</code> is valid and false otherwise.<br><br>
+
+        Returns false if the query's <a href="../1.0/#webgl-object-invalidated-flag">invalidated
+        flag</a> is set.
+      </dd>
       <dt>
         <p class="idl-code">void beginQuery(GLenum target, WebGLQuery? query)
           <span class="gl-spec">
@@ -1501,6 +1629,9 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Begin an asynchronous query. <em>Target</em> indicates the type of query to be performed.
+      </dd>
       <dt>
         <p class="idl-code">void endQuery(GLenum target)
           <span class="gl-spec">
@@ -1509,6 +1640,11 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Mark the end of the sequence of commands to be tracked for the query type given by
+        <em>target</em>. When the final query result is available, the query object is updated
+        to indicate this and the result may be retrieved by calling <code>getQueryParameter</code>.
+      </dd>
       <dt>
         <p class="idl-code">WebGLQuery? getQuery(GLenum target, GLenum pname)
           <span class="gl-spec">
@@ -1554,7 +1690,7 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           <p>If <em>pname</em> is not in the table above, generates an <code>INVALID_ENUM</code>
           error and returns null.</p>
 
-          <p>if <em>query</em> is not a valid query object, or is a currently active query object,
+          <p>If <em>query</em> is not a valid query object, or is a currently active query object,
           generates an <code>INVALID_OPERATION</code> error and returns null.
 
           <p>Returns null if any OpenGL errors are generated during the execution of this
@@ -1575,6 +1711,10 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Create a <code class="interface">WebGLSampler</code> object and initialize it with a sampler object name as if by
+        calling glGenSamplers.
+      </dd>
       <dt>
         <p class="idl-code">void deleteSampler(WebGLSampler? sampler)
           <span class="gl-spec">
@@ -1583,6 +1723,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Delete the sampler object contained in the passed <code class="interface">WebGLSampler</code> as if by calling
+        glDeleteSamplers. If the sampler has already been deleted the call has no effect.
+        Note that the sampler object will be deleted when the <code class="interface">WebGLSampler</code> object is destroyed.
+        This method merely gives the author greater control over when the sampler object is destroyed.
+      </dd>
       <dt>
         <p class="idl-code">[WebGLHandlesContextLoss] GLboolean isSampler(WebGLSampler? sampler)
           <span class="gl-spec">
@@ -1591,6 +1737,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Return true if the passed <code class="interface">WebGLSampler</code> is valid and false otherwise. <br><br>
+
+        Returns false if the sampler's <a href="../1.0/#webgl-object-invalidated-flag">invalidated
+        flag</a> is set.
+      </dd>
       <dt>
         <p class="idl-code">void bindSampler(GLuint unit, WebGLSampler? sampler)
           <span class="gl-spec">
@@ -1599,11 +1751,14 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Bind the sampler object contained in the passed <code>WebGLSampler</code> to the texture unit at the
+        passed index. If a sampler is bound to a texture unit, the sampler's state supersedes the sampling
+        state of the texture bound to that texture unit.
+      </dd>
       <dt>
         <p class="idl-code">void samplerParameteri(WebGLSampler? sampler, GLenum pname, GLint param);</p>
-        <p class="idl-code">void samplerParameteriv(WebGLSampler? sampler, GLenum pname, SamplerParameterIVSource param)</p>
         <p class="idl-code">void samplerParameterf(WebGLSampler? sampler, GLenum pname, GLfloat param);</p>
-        <p class="idl-code">void samplerParameterfv(WebGLSampler? sampler, GLenum pname, SamplerParameterFVSource param)
           <span class="gl-spec">
             (<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-3.8.2">OpenGL ES 3.0.3 &sect;3.8.2</a>,
             <a href="http://www.khronos.org/opengles/sdk/docs/man3/html/glSamplerParameter.xhtml" class="nonnormative">man page</a>)
@@ -1637,6 +1792,10 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
 
     <h4>Sync objects</h4>
 
+    <p>
+        Sync objects can be used to synchronize execution between the GL server and the client.
+    </p>
+
     <dl class="methods">
       <dt>
         <p class="idl-code">WebGLSync? fenceSync(GLenum condition, GLbitfield flags)
@@ -1646,6 +1805,9 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+          Create a new fence sync object and insert an associated fence command in the GL command stream.
+      </dd>
       <dt>
         <p class="idl-code">[WebGLHandlesContextLoss] GLboolean isSync(WebGLSync? sync)
           <span class="gl-spec">
@@ -1654,6 +1816,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+          Return true if the passed <code class="interface">WebGLSync</code> is valid and false otherwise. <br><br>
+
+          Returns false if the sync's <a href="../1.0/#webgl-object-invalidated-flag">invalidated
+          flag</a> is set.
+      </dd>
       <dt>
         <p class="idl-code">void deleteSync(WebGLSync? sync)
           <span class="gl-spec">
@@ -1662,6 +1830,12 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+          Delete the sync object contained in the passed <code class="interface">WebGLSync</code> as if by calling
+          glDeleteSync. If the sync has already been deleted the call has no effect.
+          Note that the sync object will be deleted when the <code class="interface">WebGLSync</code> object is destroyed.
+          This method merely gives the author greater control over when the sync object is destroyed.
+      </dd>
       <dt>
         <p class="idl-code">GLenum clientWaitSync(WebGLSync? sync, GLbitfield flags, GLuint64 timeout)
           <span class="gl-spec">
@@ -1670,6 +1844,10 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Block execution until the passed sync object is signaled or the specified timeout has passed. Returns
+        <code>ALREADY_SIGNALED</code>, <code>TIMEOUT_EXPIRED</code>, or <code>CONDITION_SATISFIED</code>.
+      </dd>
       <dt>
         <p class="idl-code">void waitSync(WebGLSync? sync, GLbitfield flags, GLuint64 timeout)
           <span class="gl-spec">
@@ -1678,6 +1856,11 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+        Return immediately, but wait on the GL server until the passed sync object is signaled or an
+        implementation-dependent timeout has passed. The passed <em>timeout</em> must be set to
+        <code>TIMEOUT_IGNORED</code>.
+      </dd>
       <dt class="idl-code">any getSyncParameter(WebGLSync? sync, GLenum pname)
           <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-6.1.8">OpenGL ES 3.0.3 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glGetSynciv.xhtml">man page</a>)</span>
       </dt>
@@ -1724,7 +1907,7 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
             Delete the transform feedback object contained in the passed <code class="interface">WebGLTransformFeedback</code> as if by calling
             glDeleteTransformFeedbacks. If the transform feedback has already been deleted the call has no effect.
             Note that the transform feedback object will be deleted when the <code class="interface">WebGLTransformFeedback</code> object is destroyed.
-            This method merely gives the author greater control over when the vertex array object is destroyed.
+            This method merely gives the author greater control over when the transform feedback object is destroyed.
 
         <dt class="idl-code">[WebGLHandlesContextLoss] GLboolean isTransformFeedback(WebGLTransformFeedback? transformFeedback)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-6.1.11">OpenGL ES 3.0.3 &sect;6.1.11</a>,
@@ -1732,7 +1915,7 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
         <dd>
             Return true if the passed <code class="interface">WebGLTransformFeedback</code> is valid and false otherwise. <br><br>
 
-            Returns false if the transform feedback's <a href="#webgl-object-invalidated-flag">invalidated
+            Returns false if the transform feedback's <a href="../1.0/#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
 
         <dt class="idl-code">void bindTransformFeedback (GLenum target, WebGLTransformFeedback? transformFeedback)
@@ -1891,7 +2074,7 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
         <dd>
             Return true if the passed <code class="interface">WebGLVertexArrayObject</code> is valid and false otherwise. <br><br>
 
-            Returns false if the vertex array's <a href="#webgl-object-invalidated-flag">invalidated
+            Returns false if the vertex array's <a href="../1.0/#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
     </dl>
 
@@ -1903,13 +2086,52 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
         Needs update for WebGL 2.0
     </div>
 
+    <h3><a name="BACKWARDS_INCOMPATIBILITY">Backwards Incompatibility</a></h3>
+    
+    <p>
+        Some extensions that may have been supported in the WebGL 1 API are removed from the WebGL
+        2 API. For more details, see the
+        <a href="http://www.khronos.org/registry/webgl/extensions/">WebGL Extension Registry</a>.
+    </p>
+
+    <div class="note">
+        Extensions are typically removed only if equivalent functionality is available in the WebGL
+        2 API either in the core specification or in an improved extension. When an application
+        using WebGL 1 extensions is modified to run on the WebGL 2 API, it is often possible to
+        create a dummy extension object for each of the promoted extensions which simply
+        redirects calls to the appropriate WebGL 2 API functions. If the application is using shader
+        language extensions, porting shaders to GLSL ES 3.00 is typically required.
+    </div>
+
     <h3>New Features Supported in the WebGL 2 API</h3>
 
     <ul>
       <li>ETC2 and EAC Compressed texture formats <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=appendix-c">OpenGL ES 3.0.3 Appendix C</a>)</span></li>
+      <li>Pixel buffer objects <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-3.7.1">OpenGL ES 3.0.3 &sect;3.7.1</a> and <a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.3">OpenGL ES 3.0.3 &sect;4.3</a>)</span></li>
       <li>Primitive restart <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-2.8.1">OpenGL ES 3.0.3 &sect;2.8.1</a>)</span></li>
       <li>Rasterizer discard <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-3.1">OpenGL ES 3.0.3 &sect;3.1</a>)</span></li>
     </ul>
+
+    <h3>GLSL ES 3.00 support</h3>
+
+    <p>
+        In addition to supporting The OpenGL ES Shading Language, Version 1.00, the WebGL 2 API also accepts
+        shaders written in The OpenGL ES Shading Language, Version 3.00
+        <a href="#refsGLES30GLSL">[GLES30GLSL]</a>, with some restrictions.
+    </p>
+
+    <ul>
+        <li>
+            A shader referencing state variables or functions that are available in other versions of GLSL,
+            such as that found in versions of OpenGL for the desktop, must not be allowed to load.
+        </li>
+    </ul>
+
+    <p>
+        As in the WebGL 1.0 API, identifiers starting with "webgl_" and "_webgl_" are reserved for use by
+        WebGL. A shader which declares a function, variable, structure name, or structure field starting with
+        these prefixes must not be allowed to load.
+    </p>
 
     <h3>Vertex Attribute Divisor</h3>
 
@@ -1935,19 +2157,44 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
 
     <h3><a name="BUFFER_OBJECT_BINDING">Buffer Object Binding</a></h3>
 
+    <table>
+        <tr>
+            <th>WebGL buffer type</th>
+            <th>Binding points that set this type</th>
+        </tr>
+        <tr>
+            <td><em>undefined</em></td>
+            <td>none</td>
+        </tr>
+        <tr>
+            <td><em>element array</em></td>
+            <td>ELEMENT_ARRAY_BUFFER</td>
+        </tr>
+        <tr>
+            <td><em>other data</em></td>
+            <td>all binding points except ELEMENT_ARRAY_BUFFER, COPY_READ_BUFFER and COPY_WRITE_BUFFER</td>
+        </tr>
+    </table><br>
+
     <p>
-        In the WebGL 2 API, a given buffer object may not be bound both to <code>ELEMENT_ARRAY_BUFFER</code>
-        and some other buffer binding point in its lifetime. This restriction implies that a given buffer
-        object may contain either indices or other data, but not both.
+        In the WebGL 2 API, buffers have their WebGL buffer type initially set to <em>undefined</em>. Calling
+        <code>bindBuffer</code>, <code>bindBufferRange</code> or <code>bindBufferBase</code> with the
+        <code>target</code> argument set to any buffer binding point except <code>COPY_READ_BUFFER</code> or
+        <code>COPY_WRITE_BUFFER</code> will then set the WebGL buffer type of the buffer being bound according
+        to the table above.
     </p>
 
     <p>
-        The type of a WebGLBuffer is initialized the first time it is passed as an argument to
-        <code>bindBuffer</code>, <code>bindBufferRange</code> or <code>bindBufferBase</code>. A subsequent
-        call to one of these functions which attempts to bind a WebGLBuffer that has been bound to
-        <code>ELEMENT_ARRAY_BUFFER</code> to another binding point, or bind a WebGLBuffer which has been
-        bound to another binding point to <code>ELEMENT_ARRAY_BUFFER</code> will generate an
-        <code>INVALID_OPERATION</code> error, and the state of the binding point will remain untouched.
+        Any call to one of these functions which attempts to bind a WebGLBuffer that has the <em>element
+        array</em> WebGL buffer type to a binding point that falls under <em>other data</em>, or bind a
+        WebGLBuffer which has the <em>other data</em> WebGL buffer type to <code>ELEMENT_ARRAY_BUFFER</code>
+        will generate an <code>INVALID_OPERATION</code> error, and the state of the binding point will remain
+        untouched.
+    </p>
+
+    <p>
+        This restriction implies that a given buffer object may contain either indices or other data, but
+        not both.
     </p>
 
     <p>
@@ -1955,7 +2202,24 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
         restrictions in the WebGL 1 specification</a>.
     </p>
 
-    <h3>Draw buffers</h3>
+    <p>
+        In addition, a buffer can not be simultaneously bound to a transform feedback buffer binding point
+        and another buffer binding point in the WebGL 2 API. Attempting to violate this rule generates an
+        <code>INVALID_OPERATION</code> error, and the state of the binding point will remain untouched.
+    </p>
+
+    <h3><a name="COPYING_BUFFERS">Copying Buffers</a></h3>
+
+    <p>
+        Attempting to use <code>copyBufferSubData</code> to copy between buffers that have
+        <em>element array</em> and <em>other data</em> WebGL buffer types as specified in section
+        <a href="#BUFFER_OBJECT_BINDING">Buffer Object Binding</a> generates an
+        <code>INVALID_OPERATION</code> error and no copying is performed. Copying data into a buffer which
+        has the <em>undefined</em> WebGL buffer type sets its WebGL buffer type to the WebGL buffer type of
+        the source buffer.
+    </p>
+
+    <h3>Draw Buffers</h3>
 
     <p>
         The value of the MAX_COLOR_ATTACHMENTS parameter must be equal to that of the MAX_DRAW_BUFFERS
@@ -2027,6 +2291,52 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
         <code>INVALID_OPERATION</code> error instead of producing undefined results.
     </p>
 
+    <h3>Clamping Texture Offsets</h3>
+
+    <p>
+        All texture offset values passed to texture lookup functions in GLSL are clamped to the range
+        between the implementation-defined parameters <code>MIN_PROGRAM_TEXEL_OFFSET</code> and
+        <code>MAX_PROGRAM_TEXEL_OFFSET</code> inclusive.
+    </p>
+
+    <h3>Texel Fetches</h3>
+
+    <p>
+        Texel fetches that have undefined results in the OpenGL ES 3.0 API must return zero, or a texture
+        source color of (0, 0, 0, 1) in the case of a texel fetch from an incomplete texture in the WebGL 2
+        API.
+    </p>
+
+    <h3>GLSL ES 1.00 Fragment Shader Output</h3>
+
+    <p>
+        A fragment shader written in The OpenGL ES Shading Language, Version 1.00, that statically assigns a
+        value to <code>gl_FragData[n]</code> where <code>n</code> does not equal constant value 0 must fail
+        to compile in the WebGL 2 API. This is to achieve consistency with The OpenGL ES 3.0 specification
+        section 4.2.1 <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.3.pdf#nameddest=section-4.2.1">OpenGL ES 3.0.3 &sect;4.2.1</a>)</span>
+        and The OpenGL ES Shading Language 3.00 specification section 1.5 <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/GLSL_ES_Specification_3.00.3.pdf#nameddest=section-1.5">GLSL ES 3.00 &sect;1.5</a>)</span>.
+        As in the OpenGL ES 3.0 API, multiple fragment shader outputs are only supported for GLSL ES 3.00
+        shaders in the WebGL 2 API.
+    </p>
+
+    <h3>No TexImage3D</h3>
+
+    <p>
+        The <code>texImage3D</code> entry point is removed from the WebGL 2.0 API. Defining 3D texture images
+        is supported with <code>texStorage3D</code> and <code>compressedTexImage3D</code>.
+    </p>
+
+    <div class="note">
+        <code>texStorage2D</code> should also be considered a preferred alternative to
+        <code>texImage2D</code>, even though <code>texImage2D</code> is supported in the WebGL 2.0 API.
+    </div>
+
+    <h3>No MapBufferRange</h3>
+
+    <p>
+        The <code>MapBufferRange</code> entry point is removed from the WebGL 2.0 API. The following enum values are removed together with it: <code>BUFFER_ACCESS_FLAGS</code>, <code>BUFFER_MAP_LENGTH</code>, <code>BUFFER_MAP_OFFSET</code>.
+    </p>
+
 <!-- ======================================================================================================= -->
 
     <h2>References</h2>
@@ -2043,7 +2353,7 @@ WebGL2RenderingContext implements WebGL2RenderingContextBase;
             OpenGL&reg; ES Version 3.0.3</a></cite>,
             B. Lipchak 2013.
         </dd>
-        <dt id="refsGLES20GLSL">[GLES30GLSL]</dt>
+        <dt id="refsGLES30GLSL">[GLES30GLSL]</dt>
         <dd><cite><a href="http://www.khronos.org/registry/gles/specs/3.0/GLSL_ES_Specification_3.00.4.pdf">
             The OpenGL&reg; ES Shading Language Version 3.00</a></cite>,
             R. Simpson, March 2013.

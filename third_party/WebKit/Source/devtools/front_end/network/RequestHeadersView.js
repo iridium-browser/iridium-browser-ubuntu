@@ -234,7 +234,7 @@ WebInspector.RequestHeadersView.prototype = {
         paramsTreeElement.removeChildren();
 
         paramsTreeElement.listItemElement.removeChildren();
-        paramsTreeElement.listItemElement.appendChild(document.createTextNode(title));
+        paramsTreeElement.listItemElement.createTextChild(title);
 
         var headerCount = document.createElement("span");
         headerCount.classList.add("header-count");
@@ -287,7 +287,7 @@ WebInspector.RequestHeadersView.prototype = {
 
         var listItem = this._requestPayloadTreeElement.listItemElement;
         listItem.removeChildren();
-        listItem.appendChild(document.createTextNode(this._requestPayloadTreeElement.title));
+        listItem.createTextChild(this._requestPayloadTreeElement.title);
 
         /**
          * @param {!Event} event
@@ -400,7 +400,10 @@ WebInspector.RequestHeadersView.prototype = {
 
             var statusTextElement = statusCodeFragment.createChild("div", "header-value source-code");
             var statusText = this._request.statusCode + " " + this._request.statusText;
-            if (this._request.cached) {
+            if (this._request.fetchedViaServiceWorker) {
+                statusText += " " + WebInspector.UIString("(from ServiceWorker)");
+                statusTextElement.classList.add("status-from-cache");
+            } else if (this._request.cached) {
                 statusText += " " + WebInspector.UIString("(from cache)");
                 statusTextElement.classList.add("status-from-cache");
             }

@@ -53,6 +53,14 @@ class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
     // Advance the time 1s so the send times are never QuicTime::Zero.
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(1000));
     manager_.set_network_change_visitor(network_change_visitor_.get());
+
+    EXPECT_CALL(*send_algorithm_, HasReliableBandwidthEstimate())
+        .Times(AnyNumber());
+    EXPECT_CALL(*send_algorithm_, BandwidthEstimate())
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(QuicBandwidth::Zero()));
+    EXPECT_CALL(*send_algorithm_, InSlowStart()).Times(AnyNumber());
+    EXPECT_CALL(*send_algorithm_, InRecovery()).Times(AnyNumber());
   }
 
   virtual ~QuicSentPacketManagerTest() OVERRIDE {
@@ -72,7 +80,7 @@ class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
     }
 
     EXPECT_TRUE(manager_.HasUnackedPackets());
-    EXPECT_EQ(packets[0], manager_.GetLeastUnackedSentPacket());
+    EXPECT_EQ(packets[0], manager_.GetLeastUnacked());
     for (size_t i = 0; i < num_packets; ++i) {
       EXPECT_TRUE(manager_.IsUnacked(packets[i])) << packets[i];
     }
@@ -599,11 +607,11 @@ TEST_F(QuicSentPacketManagerTest, AckPreviousTransmissionThenTruncatedAck) {
   RetransmitAndSendPacket(1, 2);
   RetransmitAndSendPacket(2, 3);
   RetransmitAndSendPacket(3, 4);
-  manager_.OnSerializedPacket(CreateDataPacket(5));
-  manager_.OnSerializedPacket(CreateDataPacket(6));
-  manager_.OnSerializedPacket(CreateDataPacket(7));
-  manager_.OnSerializedPacket(CreateDataPacket(8));
-  manager_.OnSerializedPacket(CreateDataPacket(9));
+  SendDataPacket(5);
+  SendDataPacket(6);
+  SendDataPacket(7);
+  SendDataPacket(8);
+  SendDataPacket(9);
 
   // Ack previous transmission
   {
@@ -624,7 +632,7 @@ TEST_F(QuicSentPacketManagerTest, AckPreviousTransmissionThenTruncatedAck) {
     ack_frame.missing_packets.insert(5);
     ack_frame.missing_packets.insert(6);
     ack_frame.is_truncated = true;
-    ExpectAckAndLoss(false, 1, 3);
+    ExpectAckAndLoss(true, 1, 3);
     manager_.OnIncomingAck(ack_frame, clock_.Now());
   }
 
@@ -635,49 +643,48 @@ TEST_F(QuicSentPacketManagerTest, AckPreviousTransmissionThenTruncatedAck) {
   VerifyRetransmittablePackets(retransmittable, arraysize(retransmittable));
 }
 
-TEST_F(QuicSentPacketManagerTest, GetLeastUnackedSentPacket) {
-  EXPECT_EQ(0u, manager_.GetLeastUnackedSentPacket());
+TEST_F(QuicSentPacketManagerTest, GetLeastUnacked) {
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 }
 
-TEST_F(QuicSentPacketManagerTest, GetLeastUnackedSentPacketUnacked) {
+TEST_F(QuicSentPacketManagerTest, GetLeastUnackedUnacked) {
   SerializedPacket serialized_packet(CreateDataPacket(1));
 
   manager_.OnSerializedPacket(serialized_packet);
-  EXPECT_EQ(1u, manager_.GetLeastUnackedSentPacket());
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 }
 
-TEST_F(QuicSentPacketManagerTest, GetLeastUnackedSentPacketUnackedFec) {
+TEST_F(QuicSentPacketManagerTest, GetLeastUnackedUnackedFec) {
   SerializedPacket serialized_packet(CreateFecPacket(1));
 
   manager_.OnSerializedPacket(serialized_packet);
-  EXPECT_EQ(1u, manager_.GetLeastUnackedSentPacket());
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 }
 
-TEST_F(QuicSentPacketManagerTest, GetLeastUnackedPacketAndDiscard) {
+TEST_F(QuicSentPacketManagerTest, GetLeastUnackedAndDiscard) {
   VerifyUnackedPackets(NULL, 0);
 
-  SerializedPacket serialized_packet(CreateFecPacket(1));
-  manager_.OnSerializedPacket(serialized_packet);
-  EXPECT_EQ(1u, manager_.GetLeastUnackedSentPacket());
+  SendFecPacket(1);
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 
-  SerializedPacket serialized_packet2(CreateFecPacket(2));
-  manager_.OnSerializedPacket(serialized_packet2);
-  EXPECT_EQ(1u, manager_.GetLeastUnackedSentPacket());
+  SendFecPacket(2);
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 
-  SerializedPacket serialized_packet3(CreateFecPacket(3));
-  manager_.OnSerializedPacket(serialized_packet3);
-  EXPECT_EQ(1u, manager_.GetLeastUnackedSentPacket());
+  SendFecPacket(3);
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 
   QuicPacketSequenceNumber unacked[] = { 1, 2, 3 };
   VerifyUnackedPackets(unacked, arraysize(unacked));
   VerifyRetransmittablePackets(NULL, 0);
 
-  // Ack 2, which has never been sent, so there's no rtt update.
+  // Ack 2, so there's an rtt update.
+  ExpectAck(2);
   QuicAckFrame ack_frame;
   ack_frame.largest_observed = 2;
+  ack_frame.missing_packets.insert(1);
   manager_.OnIncomingAck(ack_frame, clock_.Now());
 
-  EXPECT_EQ(3u, manager_.GetLeastUnackedSentPacket());
+  EXPECT_EQ(1u, manager_.GetLeastUnacked());
 }
 
 TEST_F(QuicSentPacketManagerTest, GetSentTime) {
@@ -915,6 +922,8 @@ TEST_F(QuicSentPacketManagerTest, CryptoHandshakeTimeout) {
 
   // The first retransmits 2 packets.
   manager_.OnRetransmissionTimeout();
+  EXPECT_EQ(QuicTime::Delta::Zero(),
+            manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
   RetransmitNextPacket(6);
   RetransmitNextPacket(7);
   EXPECT_FALSE(manager_.HasPendingRetransmissions());
@@ -922,6 +931,8 @@ TEST_F(QuicSentPacketManagerTest, CryptoHandshakeTimeout) {
 
   // The second retransmits 2 packets.
   manager_.OnRetransmissionTimeout();
+  EXPECT_EQ(QuicTime::Delta::Zero(),
+            manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
   RetransmitNextPacket(8);
   RetransmitNextPacket(9);
   EXPECT_FALSE(manager_.HasPendingRetransmissions());
@@ -963,7 +974,7 @@ TEST_F(QuicSentPacketManagerTest, CryptoHandshakeTimeoutVersionNegotiation) {
 
   // Now act like a version negotiation packet arrived, which would cause all
   // unacked packets to be retransmitted.
-  manager_.RetransmitUnackedPackets(ALL_PACKETS);
+  manager_.RetransmitUnackedPackets(ALL_UNACKED_RETRANSMISSION);
 
   // Ensure the first two pending packets are the crypto retransmits.
   ASSERT_TRUE(manager_.HasPendingRetransmissions());
@@ -973,6 +984,13 @@ TEST_F(QuicSentPacketManagerTest, CryptoHandshakeTimeoutVersionNegotiation) {
   RetransmitNextPacket(9);
 
   EXPECT_TRUE(manager_.HasPendingRetransmissions());
+  // Send 3 more data packets and ensure the least unacked is raised.
+  RetransmitNextPacket(10);
+  RetransmitNextPacket(11);
+  RetransmitNextPacket(12);
+  EXPECT_FALSE(manager_.HasPendingRetransmissions());
+
+  EXPECT_EQ(8u, manager_.GetLeastUnacked());
 }
 
 TEST_F(QuicSentPacketManagerTest, CryptoHandshakeSpuriousRetransmission) {
@@ -1013,8 +1031,8 @@ TEST_F(QuicSentPacketManagerTest, CryptoHandshakeTimeoutUnsentDataPacket) {
 
   // Retransmit 2 crypto packets, but not the serialized packet.
   manager_.OnRetransmissionTimeout();
-  RetransmitNextPacket(6);
-  RetransmitNextPacket(7);
+  RetransmitNextPacket(4);
+  RetransmitNextPacket(5);
   EXPECT_FALSE(manager_.HasPendingRetransmissions());
   EXPECT_TRUE(QuicSentPacketManagerPeer::HasUnackedCryptoPackets(&manager_));
 }
@@ -1031,7 +1049,7 @@ TEST_F(QuicSentPacketManagerTest,
 
   // Now retransmit all the unacked packets, which occurs when there is a
   // version negotiation.
-  manager_.RetransmitUnackedPackets(ALL_PACKETS);
+  manager_.RetransmitUnackedPackets(ALL_UNACKED_RETRANSMISSION);
   QuicPacketSequenceNumber unacked[] = { 1, 2 };
   VerifyUnackedPackets(unacked, arraysize(unacked));
   EXPECT_TRUE(manager_.HasPendingRetransmissions());
@@ -1416,7 +1434,6 @@ TEST_F(QuicSentPacketManagerTest, NegotiateCongestionControlFromOptions) {
 }
 
 TEST_F(QuicSentPacketManagerTest, NegotiatePacingFromOptions) {
-  ValueRestore<bool> old_flag(&FLAGS_enable_quic_pacing, true);
   EXPECT_FALSE(manager_.using_pacing());
 
   QuicConfig config;
@@ -1430,6 +1447,23 @@ TEST_F(QuicSentPacketManagerTest, NegotiatePacingFromOptions) {
   manager_.SetFromConfig(config);
 
   EXPECT_TRUE(manager_.using_pacing());
+}
+
+TEST_F(QuicSentPacketManagerTest, UseInitialRoundTripTimeToSend) {
+  uint32 initial_rtt_us = 325000;
+  EXPECT_NE(initial_rtt_us,
+            manager_.GetRttStats()->SmoothedRtt().ToMicroseconds());
+
+  QuicConfig config;
+  config.SetInitialRoundTripTimeUsToSend(initial_rtt_us);
+  EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _));
+  EXPECT_CALL(*network_change_visitor_, OnCongestionWindowChange(_));
+  EXPECT_CALL(*send_algorithm_, GetCongestionWindow())
+      .WillOnce(Return(100 * kDefaultTCPMSS));
+  manager_.SetFromConfig(config);
+
+  EXPECT_EQ(initial_rtt_us,
+            manager_.GetRttStats()->SmoothedRtt().ToMicroseconds());
 }
 
 }  // namespace

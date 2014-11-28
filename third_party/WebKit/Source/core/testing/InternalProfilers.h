@@ -39,13 +39,14 @@
 
 namespace blink {
 
-class InternalProfilers : public RefCountedWillBeGarbageCollected<InternalProfilers>, public ScriptWrappable {
+class InternalProfilers FINAL : public GarbageCollected<InternalProfilers>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     InternalProfilers();
 
-    static PassRefPtrWillBeRawPtr<InternalProfilers> create()
+    static InternalProfilers* create()
     {
-        return adoptRefWillBeNoop(new InternalProfilers());
+        return new InternalProfilers();
     }
 
     void startHeapProfiling(const String& prefix);
@@ -58,4 +59,4 @@ public:
 
 } // namespace blink
 
-#endif
+#endif // InternalProfilers_h

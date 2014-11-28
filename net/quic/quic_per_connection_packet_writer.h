@@ -5,13 +5,9 @@
 #ifndef NET_QUIC_QUIC_PER_CONNECTION_PACKET_WRITER_H_
 #define NET_QUIC_QUIC_PER_CONNECTION_PACKET_WRITER_H_
 
-#include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "net/base/ip_endpoint.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_packet_writer.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_types.h"
 
 namespace net {
 
@@ -21,16 +17,18 @@ class QuicServerPacketWriter;
 // writes to the shared QuicServerPacketWriter complete.
 // This class is necessary because multiple connections can share the same
 // QuicServerPacketWriter, so it has no way to know which connection to notify.
-// TODO(dmz) Try to merge with Chrome's default packet writer
 class QuicPerConnectionPacketWriter : public QuicPacketWriter {
  public:
-  QuicPerConnectionPacketWriter(QuicServerPacketWriter* writer);
+  // Does not take ownership of |shared_writer| or |connection|.
+  QuicPerConnectionPacketWriter(QuicServerPacketWriter* shared_writer,
+                                QuicConnection* connection);
   virtual ~QuicPerConnectionPacketWriter();
 
-  // Set the connection to notify after writes complete.
-  void set_connection(QuicConnection* connection) { connection_ = connection; }
+  QuicPacketWriter* shared_writer() const;
+  QuicConnection* connection() const { return connection_; }
 
-  // QuicPacketWriter
+  // Default implementation of the QuicPacketWriter interface: Passes everything
+  // to |shared_writer_|.
   virtual WriteResult WritePacket(const char* buffer,
                                   size_t buf_len,
                                   const IPAddressNumber& self_address,
@@ -42,9 +40,10 @@ class QuicPerConnectionPacketWriter : public QuicPacketWriter {
  private:
   void OnWriteComplete(WriteResult result);
 
+  QuicServerPacketWriter* shared_writer_;  // Not owned.
+  QuicConnection* connection_;  // Not owned.
+
   base::WeakPtrFactory<QuicPerConnectionPacketWriter> weak_factory_;
-  QuicServerPacketWriter* writer_;  // Not owned.
-  QuicConnection* connection_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicPerConnectionPacketWriter);
 };

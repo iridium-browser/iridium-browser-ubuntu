@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "extensions/shell/browser/shell_browser_context.h"
+
+#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/shell/browser/shell_special_storage_policy.h"
 
 namespace extensions {
@@ -17,7 +19,11 @@ ShellBrowserContext::ShellBrowserContext()
 ShellBrowserContext::~ShellBrowserContext() {
 }
 
-quota::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {
+content::BrowserPluginGuestManager* ShellBrowserContext::GetGuestManager() {
+  return GuestViewManager::FromBrowserContext(this);
+}
+
+storage::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {
   return storage_policy_.get();
 }
 

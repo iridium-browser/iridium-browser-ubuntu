@@ -267,7 +267,7 @@ TEST_F(ChannelManagerTest, SetAudioOptionsBeforeInit) {
   EXPECT_EQ(options, set_options);
   // At this point, the media engine should also be initialized.
   EXPECT_EQ(options, fme_->audio_options());
-  EXPECT_EQ(cricket::MediaEngineInterface::kDefaultAudioDelayOffset,
+  EXPECT_EQ(cricket::kDefaultAudioDelayOffset,
             fme_->audio_delay_offset());
 }
 
@@ -294,7 +294,7 @@ TEST_F(ChannelManagerTest, SetAudioOptions) {
             fme_->audio_in_device());
   EXPECT_EQ(std::string(cricket::DeviceManagerInterface::kDefaultDeviceName),
             fme_->audio_out_device());
-  EXPECT_EQ(cricket::MediaEngineInterface::kDefaultAudioDelayOffset,
+  EXPECT_EQ(cricket::kDefaultAudioDelayOffset,
             fme_->audio_delay_offset());
   // Test setting specific values.
   AudioOptions options;
@@ -306,7 +306,7 @@ TEST_F(ChannelManagerTest, SetAudioOptions) {
   EXPECT_TRUE(
       fme_->audio_options().auto_gain_control.Get(&auto_gain_control));
   EXPECT_TRUE(auto_gain_control);
-  EXPECT_EQ(cricket::MediaEngineInterface::kDefaultAudioDelayOffset,
+  EXPECT_EQ(cricket::kDefaultAudioDelayOffset,
             fme_->audio_delay_offset());
   // Test setting bad values.
   EXPECT_FALSE(cm_->SetAudioOptions("audio-in9", "audio-out2", options));
@@ -507,22 +507,6 @@ TEST_F(ChannelManagerTest, GetSetOutputVolume) {
   EXPECT_EQ(60, fme_->output_volume());
   EXPECT_TRUE(cm_->GetOutputVolume(&level));
   EXPECT_EQ(60, level);
-}
-
-// Test that a value set before Init is applied properly.
-TEST_F(ChannelManagerTest, SetLocalRendererBeforeInit) {
-  cricket::NullVideoRenderer renderer;
-  EXPECT_TRUE(cm_->SetLocalRenderer(&renderer));
-  EXPECT_TRUE(cm_->Init());
-  EXPECT_EQ(&renderer, fme_->local_renderer());
-}
-
-// Test that a value set after init is passed through properly.
-TEST_F(ChannelManagerTest, SetLocalRenderer) {
-  cricket::NullVideoRenderer renderer;
-  EXPECT_TRUE(cm_->Init());
-  EXPECT_TRUE(cm_->SetLocalRenderer(&renderer));
-  EXPECT_EQ(&renderer, fme_->local_renderer());
 }
 
 // Test that logging options set before Init are applied properly,

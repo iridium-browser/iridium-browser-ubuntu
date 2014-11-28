@@ -22,10 +22,10 @@ import com.google.ipc.invalidation.external.client.types.ObjectId;
 import com.google.ipc.invalidation.ticl.android2.AndroidClock;
 import com.google.ipc.invalidation.ticl.android2.AndroidTiclManifest;
 import com.google.ipc.invalidation.ticl.android2.channel.AndroidChannelConstants.AuthTokenConstants;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.RegistrationCommand;
-import com.google.protos.ipc.invalidation.AndroidListenerProtocol.StartCommand;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.RegistrationCommand;
+import com.google.ipc.invalidation.ticl.proto.AndroidListenerProtocol.StartCommand;
+import com.google.ipc.invalidation.util.Bytes;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
@@ -98,7 +98,7 @@ class AndroidListenerIntents {
     // Attempt to parse the extra.
     try {
       return RegistrationCommand.parseFrom(data);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.warning("Received invalid proto: %s", exception);
       return null;
     }
@@ -118,7 +118,7 @@ class AndroidListenerIntents {
     // Attempt to parse the extra.
     try {
       return StartCommand.parseFrom(data);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       logger.warning("Received invalid proto: %s", exception);
       return null;
     }
@@ -131,7 +131,7 @@ class AndroidListenerIntents {
 
   /** Issues a registration retry with delay. */
   static void issueDelayedRegistrationIntent(Context context, AndroidClock clock,
-      ByteString clientId, ObjectId objectId, boolean isRegister, int delayMs, int requestCode) {
+      Bytes clientId, ObjectId objectId, boolean isRegister, int delayMs, int requestCode) {
     RegistrationCommand command = isRegister ?
         AndroidListenerProtos.newDelayedRegisterCommand(clientId, objectId) :
             AndroidListenerProtos.newDelayedUnregisterCommand(clientId, objectId);
@@ -150,12 +150,12 @@ class AndroidListenerIntents {
   }
 
   /** Creates a 'start-client' intent. */
-  static Intent createStartIntent(Context context, int clientType, byte[] clientName,
+  static Intent createStartIntent(Context context, int clientType, Bytes clientName,
       boolean allowSuppression) {
     Intent intent = new Intent();
     // Create proto for the start command.
-    StartCommand command = AndroidListenerProtos.newStartCommand(clientType,
-        ByteString.copyFrom(clientName), allowSuppression);
+    StartCommand command =
+        AndroidListenerProtos.newStartCommand(clientType, clientName, allowSuppression);
     intent.putExtra(EXTRA_START, command.toByteArray());
     return setAndroidListenerClass(context, intent);
   }
@@ -177,13 +177,12 @@ class AndroidListenerIntents {
   }
 
   /** Constructs an intent with {@link RegistrationCommand} proto. */
-  static Intent createRegistrationIntent(Context context, byte[] clientId,
+  static Intent createRegistrationIntent(Context context, Bytes clientId,
       Iterable<ObjectId> objectIds, boolean isRegister) {
     // Registration intent has an extra containing the RegistrationCommand proto.
     Intent intent = new Intent();
-    RegistrationCommand command = isRegister
-        ? AndroidListenerProtos.newRegisterCommand(ByteString.copyFrom(clientId), objectIds)
-            : AndroidListenerProtos.newUnregisterCommand(ByteString.copyFrom(clientId), objectIds);
+    RegistrationCommand command =
+        AndroidListenerProtos.newRegistrationCommand(clientId, objectIds, isRegister);
     intent.putExtra(EXTRA_REGISTRATION, command.toByteArray());
     return setAndroidListenerClass(context, intent);
   }

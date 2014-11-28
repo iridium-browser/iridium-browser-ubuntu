@@ -20,6 +20,10 @@ class MediaStreamUIProxy::Core {
   ~Core();
 
   void RequestAccess(const MediaStreamRequest& request);
+  bool CheckAccess(const GURL& security_origin,
+                   MediaStreamType type,
+                   int process_id,
+                   int frame_id);
   void OnStarted(gfx::NativeViewId* window_id);
 
  private:
@@ -27,6 +31,8 @@ class MediaStreamUIProxy::Core {
                                     content::MediaStreamRequestResult result,
                                     scoped_ptr<MediaStreamUI> stream_ui);
   void ProcessStopRequestFromUI();
+  RenderFrameHostDelegate* GetRenderFrameHostDelegate(int render_process_id,
+                                                      int render_frame_id);
 
   base::WeakPtr<MediaStreamUIProxy> proxy_;
   scoped_ptr<MediaStreamUI> ui_;
@@ -55,27 +61,34 @@ void MediaStreamUIProxy::Core::RequestAccess(
     const MediaStreamRequest& request) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  RenderFrameHostDelegate* render_delegate;
-  if (test_render_delegate_) {
-    render_delegate = test_render_delegate_;
-  } else {
-    RenderFrameHostImpl* const host = RenderFrameHostImpl::FromID(
-        request.render_process_id, request.render_frame_id);
-    render_delegate = host ? host->delegate() : NULL;
-  }
+  RenderFrameHostDelegate* render_delegate = GetRenderFrameHostDelegate(
+      request.render_process_id, request.render_frame_id);
 
   // Tab may have gone away, or has no delegate from which to request access.
   if (!render_delegate) {
-    ProcessAccessRequestResponse(
-        MediaStreamDevices(),
-        MEDIA_DEVICE_INVALID_STATE,
-        scoped_ptr<MediaStreamUI>());
+    ProcessAccessRequestResponse(MediaStreamDevices(),
+                                 MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN,
+                                 scoped_ptr<MediaStreamUI>());
     return;
   }
 
   render_delegate->RequestMediaAccessPermission(
       request, base::Bind(&Core::ProcessAccessRequestResponse,
                           weak_factory_.GetWeakPtr()));
+}
+
+bool MediaStreamUIProxy::Core::CheckAccess(const GURL& security_origin,
+                                           MediaStreamType type,
+                                           int render_process_id,
+                                           int render_frame_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  RenderFrameHostDelegate* render_delegate =
+      GetRenderFrameHostDelegate(render_process_id, render_frame_id);
+  if (!render_delegate)
+    return false;
+
+  return render_delegate->CheckMediaAccessPermission(security_origin, type);
 }
 
 void MediaStreamUIProxy::Core::OnStarted(gfx::NativeViewId* window_id) {
@@ -107,6 +120,16 @@ void MediaStreamUIProxy::Core::ProcessStopRequestFromUI() {
       base::Bind(&MediaStreamUIProxy::ProcessStopRequestFromUI, proxy_));
 }
 
+RenderFrameHostDelegate* MediaStreamUIProxy::Core::GetRenderFrameHostDelegate(
+    int render_process_id,
+    int render_frame_id) {
+  if (test_render_delegate_)
+    return test_render_delegate_;
+  RenderFrameHostImpl* host =
+      RenderFrameHostImpl::FromID(render_process_id, render_frame_id);
+  return host ? host->delegate() : NULL;
+}
+
 // static
 scoped_ptr<MediaStreamUIProxy> MediaStreamUIProxy::Create() {
   return scoped_ptr<MediaStreamUIProxy>(new MediaStreamUIProxy(NULL));
@@ -128,7 +151,6 @@ MediaStreamUIProxy::MediaStreamUIProxy(
 
 MediaStreamUIProxy::~MediaStreamUIProxy() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, core_.release());
 }
 
 void MediaStreamUIProxy::RequestAccess(
@@ -140,6 +162,28 @@ void MediaStreamUIProxy::RequestAccess(
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&Core::RequestAccess, base::Unretained(core_.get()), request));
+}
+
+void MediaStreamUIProxy::CheckAccess(
+    const GURL& security_origin,
+    MediaStreamType type,
+    int render_process_id,
+    int render_frame_id,
+    const base::Callback<void(bool)>& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&Core::CheckAccess,
+                 base::Unretained(core_.get()),
+                 security_origin,
+                 type,
+                 render_process_id,
+                 render_frame_id),
+      base::Bind(&MediaStreamUIProxy::OnCheckedAccess,
+                 weak_factory_.GetWeakPtr(),
+                 callback));
 }
 
 void MediaStreamUIProxy::OnStarted(const base::Closure& stop_callback,
@@ -159,13 +203,6 @@ void MediaStreamUIProxy::OnStarted(const base::Closure& stop_callback,
                  weak_factory_.GetWeakPtr(),
                  window_id_callback,
                  base::Owned(window_id)));
-}
-
-void MediaStreamUIProxy::OnWindowId(const WindowIdCallback& window_id_callback,
-                                    gfx::NativeViewId* window_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!window_id_callback.is_null())
-    window_id_callback.Run(*window_id);
 }
 
 void MediaStreamUIProxy::ProcessAccessRequestResponse(
@@ -188,8 +225,25 @@ void MediaStreamUIProxy::ProcessStopRequestFromUI() {
   cb.Run();
 }
 
+void MediaStreamUIProxy::OnWindowId(const WindowIdCallback& window_id_callback,
+                                    gfx::NativeViewId* window_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!window_id_callback.is_null())
+    window_id_callback.Run(*window_id);
+}
+
+void MediaStreamUIProxy::OnCheckedAccess(
+    const base::Callback<void(bool)>& callback,
+    bool have_access) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!callback.is_null())
+    callback.Run(have_access);
+}
+
 FakeMediaStreamUIProxy::FakeMediaStreamUIProxy()
-  : MediaStreamUIProxy(NULL) {
+  : MediaStreamUIProxy(NULL),
+    mic_access_(true),
+    camera_access_(true) {
 }
 
 FakeMediaStreamUIProxy::~FakeMediaStreamUIProxy() {}
@@ -197,6 +251,14 @@ FakeMediaStreamUIProxy::~FakeMediaStreamUIProxy() {}
 void FakeMediaStreamUIProxy::SetAvailableDevices(
     const MediaStreamDevices& devices) {
   devices_ = devices;
+}
+
+void FakeMediaStreamUIProxy::SetMicAccess(bool access) {
+  mic_access_ = access;
+}
+
+void FakeMediaStreamUIProxy::SetCameraAccess(bool access) {
+  camera_access_ = access;
 }
 
 void FakeMediaStreamUIProxy::RequestAccess(
@@ -243,7 +305,7 @@ void FakeMediaStreamUIProxy::RequestAccess(
     }
   }
 
-  // Fail the request if a device exist for the requested type.
+  // Fail the request if a device doesn't exist for the requested type.
   if ((request.audio_type != MEDIA_NO_SERVICE && !accepted_audio) ||
       (request.video_type != MEDIA_NO_SERVICE && !accepted_video)) {
     devices_to_use.clear();
@@ -257,6 +319,33 @@ void FakeMediaStreamUIProxy::RequestAccess(
                  devices_to_use.empty() ?
                      MEDIA_DEVICE_NO_HARDWARE :
                      MEDIA_DEVICE_OK));
+}
+
+void FakeMediaStreamUIProxy::CheckAccess(
+    const GURL& security_origin,
+    MediaStreamType type,
+    int render_process_id,
+    int render_frame_id,
+    const base::Callback<void(bool)>& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(type == MEDIA_DEVICE_AUDIO_CAPTURE ||
+         type == MEDIA_DEVICE_VIDEO_CAPTURE);
+
+  bool have_access = false;
+  if (CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kUseFakeUIForMediaStream) != "deny") {
+    have_access =
+        type == MEDIA_DEVICE_AUDIO_CAPTURE ? mic_access_ : camera_access_;
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&MediaStreamUIProxy::OnCheckedAccess,
+                 weak_factory_.GetWeakPtr(),
+                 callback,
+                 have_access));
+  return;
 }
 
 void FakeMediaStreamUIProxy::OnStarted(

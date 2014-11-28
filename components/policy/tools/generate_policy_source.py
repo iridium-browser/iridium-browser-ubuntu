@@ -54,9 +54,15 @@ class PolicyDetails:
   def __init__(self, policy, os, is_chromium_os):
     self.id = policy['id']
     self.name = policy['name']
+    features = policy.get('features', {})
+    self.can_be_recommended = features.get('can_be_recommended', False)
+    self.can_be_mandatory = features.get('can_be_mandatory', True)
     self.is_deprecated = policy.get('deprecated', False)
     self.is_device_only = policy.get('device_only', False)
     self.schema = policy.get('schema', {})
+    self.has_enterprise_default = 'default_for_enterprise_users' in policy
+    if self.has_enterprise_default:
+      self.enterprise_default = policy['default_for_enterprise_users']
 
     expected_platform = 'chrome_os' if is_chromium_os else os.lower()
     self.platforms = []
@@ -216,6 +222,7 @@ def _WritePolicyConstantHeader(policies, os, f):
           '#include "base/basictypes.h"\n'
           '#include "base/values.h"\n'
           '#include "components/policy/core/common/policy_details.h"\n'
+          '#include "components/policy/core/common/policy_map.h"\n'
           '\n'
           'namespace policy {\n'
           '\n'
@@ -228,7 +235,12 @@ def _WritePolicyConstantHeader(policies, os, f):
             'configuration resides.\n'
             'extern const wchar_t kRegistryChromePolicyKey[];\n')
 
-  f.write('// Returns the PolicyDetails for |policy| if |policy| is a known\n'
+  f.write('#if defined (OS_CHROMEOS)\n'
+          '// Sets default values for enterprise users.\n'
+          'void SetEnterpriseUsersDefaults(PolicyMap* policy_map);\n'
+          '#endif\n'
+          '\n'
+          '// Returns the PolicyDetails for |policy| if |policy| is a known\n'
           '// Chrome policy, otherwise returns NULL.\n'
           'const PolicyDetails* GetChromePolicyDetails('
               'const std::string& policy);\n'
@@ -630,6 +642,35 @@ def _WritePolicyConstantSource(policies, os, f):
           '  return &kChromeSchemaData;\n'
           '}\n\n')
 
+  f.write('#if defined (OS_CHROMEOS)\n'
+          'void SetEnterpriseUsersDefaults(PolicyMap* policy_map) {\n')
+
+  for policy in policies:
+    if policy.has_enterprise_default:
+      if policy.policy_type == 'TYPE_BOOLEAN':
+        creation_expression = 'new base::FundamentalValue(%s)' %\
+                              ('true' if policy.enterprise_default else 'false')
+      elif policy.policy_type == 'TYPE_INTEGER':
+        creation_expression = 'new base::FundamentalValue(%s)' %\
+                              policy.enterprise_default
+      elif policy.policy_type == 'TYPE_STRING':
+        creation_expression = 'new base::StringValue("%s")' %\
+                              policy.enterprise_default
+      else:
+        raise RuntimeError('Type %s of policy %s is not supported at '
+                           'enterprise defaults' % (policy.policy_type,
+                                                    policy.name))
+      f.write('  if (!policy_map->Get(key::k%s)) {\n'
+              '    policy_map->Set(key::k%s,\n'
+              '                    POLICY_LEVEL_MANDATORY,\n'
+              '                    POLICY_SCOPE_USER,\n'
+              '                    %s,\n'
+              '                    NULL);\n'
+              '  }\n' % (policy.name, policy.name, creation_expression))
+
+  f.write('}\n'
+          '#endif\n\n')
+
   f.write('const PolicyDetails* GetChromePolicyDetails('
               'const std::string& policy) {\n'
           '  // First index in kPropertyNodes of the Chrome policies.\n'
@@ -747,6 +788,9 @@ def _WritePolicyProto(f, policy, fields):
                    json.dumps(policy.schema, sort_keys=True, indent=4,
                               separators=(',', ': ')))
   _OutputComment(f, '\nSupported on: %s' % ', '.join(policy.platforms))
+  if policy.can_be_recommended and not policy.can_be_mandatory:
+    _OutputComment(f, '\nNote: this policy must have a RECOMMENDED ' +\
+                      'PolicyMode set in PolicyOptions.')
   f.write('message %sProto {\n' % policy.name)
   f.write('  optional PolicyOptions policy_options = 1;\n')
   f.write('  optional %s %s = 2;\n' % (policy.protobuf_type, policy.name))

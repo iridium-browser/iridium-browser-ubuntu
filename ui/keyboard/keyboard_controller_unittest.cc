@@ -30,7 +30,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/keyboard/keyboard_controller_proxy.h"
-#include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/wm/core/default_activation_client.h"
 
@@ -229,6 +228,10 @@ class KeyboardControllerTest : public testing::Test {
     return controller_->WillHideKeyboard();
   }
 
+  bool ShouldEnableInsets(aura::Window* window) {
+    return controller_->ShouldEnableInsets(window);
+  }
+
   base::MessageLoopForUI message_loop_;
   scoped_ptr<aura::test::AuraTestHelper> aura_test_helper_;
   scoped_ptr<TestFocusController> focus_controller_;
@@ -422,6 +425,33 @@ TEST_F(KeyboardControllerTest, VisibilityChangeWithTextInputTypeChange) {
   EXPECT_TRUE(keyboard_container->IsVisible());
 }
 
+// Test to prevent spurious overscroll boxes when changing tabs during keyboard
+// hide. Refer to crbug.com/401670 for more context.
+TEST_F(KeyboardControllerTest, CheckOverscrollInsetDuringVisibilityChange) {
+  const gfx::Rect& root_bounds = root_window()->bounds();
+
+  ui::DummyTextInputClient input_client(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient no_input_client(ui::TEXT_INPUT_TYPE_NONE);
+
+  aura::Window* keyboard_container(controller()->GetContainerWindow());
+  keyboard_container->SetBounds(root_bounds);
+  root_window()->AddChild(keyboard_container);
+
+  // Enable touch keyboard / overscroll mode to test insets.
+  keyboard::SetTouchKeyboardEnabled(true);
+  EXPECT_TRUE(keyboard::IsKeyboardOverscrollEnabled());
+
+  SetFocus(&input_client);
+  SetFocus(&no_input_client);
+  // Insets should not be enabled for new windows while keyboard is in the
+  // process of hiding when overscroll is enabled.
+  EXPECT_FALSE(ShouldEnableInsets(proxy()->GetKeyboardWindow()));
+  // Cancel keyboard hide.
+  SetFocus(&input_client);
+  // Insets should be enabled for new windows as hide was cancelled.
+  EXPECT_TRUE(ShouldEnableInsets(proxy()->GetKeyboardWindow()));
+}
+
 TEST_F(KeyboardControllerTest, AlwaysVisibleWhenLocked) {
   const gfx::Rect& root_bounds = root_window()->bounds();
 
@@ -520,7 +550,7 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   EXPECT_TRUE(keyboard_window()->IsVisible());
   float show_start_opacity = layer->opacity();
   gfx::Transform transform;
-  transform.Translate(0, keyboard_window()->bounds().height());
+  transform.Translate(0, kAnimationDistance);
   EXPECT_EQ(transform, layer->transform());
   EXPECT_EQ(gfx::Rect(), notified_bounds());
 
@@ -570,40 +600,6 @@ TEST_F(KeyboardControllerAnimationTest, ContainerShowWhileHide) {
   EXPECT_TRUE(keyboard_window()->IsVisible());
   EXPECT_EQ(1.0, layer->opacity());
   EXPECT_EQ(gfx::Transform(), layer->transform());
-}
-
-class KeyboardControllerUsabilityTest : public KeyboardControllerTest {
- public:
-  KeyboardControllerUsabilityTest() {}
-  virtual ~KeyboardControllerUsabilityTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kKeyboardUsabilityExperiment);
-    KeyboardControllerTest::SetUp();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(KeyboardControllerUsabilityTest);
-};
-
-TEST_F(KeyboardControllerUsabilityTest, KeyboardAlwaysVisibleInUsabilityTest) {
-  const gfx::Rect& root_bounds = root_window()->bounds();
-
-  ui::DummyTextInputClient input_client(ui::TEXT_INPUT_TYPE_TEXT);
-  ui::DummyTextInputClient no_input_client(ui::TEXT_INPUT_TYPE_NONE);
-
-  aura::Window* keyboard_container(controller()->GetContainerWindow());
-  keyboard_container->SetBounds(root_bounds);
-  root_window()->AddChild(keyboard_container);
-
-  SetFocus(&input_client);
-  EXPECT_TRUE(keyboard_container->IsVisible());
-
-  SetFocus(&no_input_client);
-  // Keyboard should not hide itself after lost focus.
-  EXPECT_TRUE(keyboard_container->IsVisible());
-  EXPECT_FALSE(WillHideKeyboard());
 }
 
 }  // namespace keyboard

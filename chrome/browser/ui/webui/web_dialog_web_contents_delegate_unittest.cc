@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -17,6 +16,7 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/history_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -66,13 +66,13 @@ TEST_F(WebDialogWebContentsDelegateTest, DoNothingMethodsTest) {
   EXPECT_TRUE(test_web_contents_delegate_->IsPopupOrPanel(NULL));
   history::HistoryAddPageArgs should_add_args(
       GURL(), base::Time::Now(), 0, 0, GURL(), history::RedirectList(),
-      content::PAGE_TRANSITION_TYPED, history::SOURCE_SYNCED, false);
+      ui::PAGE_TRANSITION_TYPED, history::SOURCE_SYNCED, false);
   test_web_contents_delegate_->NavigationStateChanged(
       NULL, content::InvalidateTypes(0));
   test_web_contents_delegate_->ActivateContents(NULL);
   test_web_contents_delegate_->LoadingStateChanged(NULL, true);
   test_web_contents_delegate_->CloseContents(NULL);
-  test_web_contents_delegate_->UpdateTargetURL(NULL, 0, GURL());
+  test_web_contents_delegate_->UpdateTargetURL(NULL, GURL());
   test_web_contents_delegate_->MoveContents(NULL, gfx::Rect());
   EXPECT_EQ(0, browser()->tab_strip_model()->count());
   EXPECT_EQ(1U, chrome::GetTotalBrowserCount());
@@ -84,7 +84,7 @@ TEST_F(WebDialogWebContentsDelegateTest, OpenURLFromTabTest) {
       OpenURLParams(GURL(url::kAboutBlankURL),
                     Referrer(),
                     NEW_FOREGROUND_TAB,
-                    content::PAGE_TRANSITION_LINK,
+                    ui::PAGE_TRANSITION_LINK,
                     false));
   // This should create a new foreground tab in the existing browser.
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
@@ -111,7 +111,7 @@ TEST_F(WebDialogWebContentsDelegateTest, DetachTest) {
       OpenURLParams(GURL(url::kAboutBlankURL),
                     Referrer(),
                     NEW_FOREGROUND_TAB,
-                    content::PAGE_TRANSITION_LINK,
+                    ui::PAGE_TRANSITION_LINK,
                     false));
   test_web_contents_delegate_->AddNewContents(NULL, NULL, NEW_FOREGROUND_TAB,
                                               gfx::Rect(), false, NULL);

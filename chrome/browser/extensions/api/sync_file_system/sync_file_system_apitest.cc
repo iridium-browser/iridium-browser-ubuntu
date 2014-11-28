@@ -7,7 +7,6 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/sync_file_system/drive_backend_v1/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/file_status_observer.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
 #include "chrome/browser/sync_file_system/mock_remote_file_sync_service.h"
@@ -17,17 +16,17 @@
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/test/base/test_switches.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/quota/quota_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/quota/quota_manager.h"
 
 using ::testing::_;
 using ::testing::Eq;
 using ::testing::Ne;
 using ::testing::Property;
 using ::testing::Return;
-using fileapi::FileSystemURL;
+using storage::FileSystemURL;
 using sync_file_system::MockRemoteFileSyncService;
 using sync_file_system::RemoteFileSyncService;
 using sync_file_system::SyncFileSystemServiceFactory;
@@ -45,19 +44,21 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
     real_minimum_preserved_space_ =
-        quota::QuotaManager::kMinimumPreserveForSystem;
-    quota::QuotaManager::kMinimumPreserveForSystem = 0;
+        storage::QuotaManager::kMinimumPreserveForSystem;
+    storage::QuotaManager::kMinimumPreserveForSystem = 0;
 
     // TODO(calvinlo): Update test code after default quota is made const
     // (http://crbug.com/155488).
-    real_default_quota_ = quota::QuotaManager::kSyncableStorageDefaultHostQuota;
-    quota::QuotaManager::kSyncableStorageDefaultHostQuota = 123456;
+    real_default_quota_ =
+        storage::QuotaManager::kSyncableStorageDefaultHostQuota;
+    storage::QuotaManager::kSyncableStorageDefaultHostQuota = 123456;
   }
 
   virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
-    quota::QuotaManager::kMinimumPreserveForSystem =
+    storage::QuotaManager::kMinimumPreserveForSystem =
         real_minimum_preserved_space_;
-    quota::QuotaManager::kSyncableStorageDefaultHostQuota = real_default_quota_;
+    storage::QuotaManager::kSyncableStorageDefaultHostQuota =
+        real_default_quota_;
     ExtensionApiTest::TearDownInProcessBrowserTestFixture();
   }
 

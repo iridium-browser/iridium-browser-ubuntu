@@ -43,11 +43,12 @@ namespace blink {
 
 class Node;
 
-class LayerRect FINAL : public RefCountedWillBeGarbageCollectedFinalized<LayerRect>, public ScriptWrappable {
+class LayerRect FINAL : public GarbageCollectedFinalized<LayerRect>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<LayerRect> create(PassRefPtrWillBeRawPtr<Node> node, const String& layerType, int nodeOffsetX, int nodeOffsetY, PassRefPtrWillBeRawPtr<ClientRect> rect)
+    static LayerRect* create(PassRefPtrWillBeRawPtr<Node> node, const String& layerType, int nodeOffsetX, int nodeOffsetY, PassRefPtrWillBeRawPtr<ClientRect> rect)
     {
-        return adoptRefWillBeNoop(new LayerRect(node, layerType, nodeOffsetX, nodeOffsetY, rect));
+        return new LayerRect(node, layerType, nodeOffsetX, nodeOffsetY, rect);
     }
 
     Node* layerAssociatedNode() const { return m_layerAssociatedNode.get(); }
@@ -68,10 +69,7 @@ private:
         , m_layerType(layerName)
         , m_associatedNodeOffsetX(nodeOffsetX)
         , m_associatedNodeOffsetY(nodeOffsetY)
-        , m_rect(rect)
-    {
-        ScriptWrappable::init(this);
-    }
+        , m_rect(rect) { }
 
     RefPtrWillBeMember<Node> m_layerAssociatedNode;
     String m_layerType;
@@ -82,4 +80,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // LayerRect_h

@@ -6,9 +6,8 @@
 # in the file PATENTS.  All contributing project authors may
 # be found in the AUTHORS file in the root of the source tree.
 
-# TODO(kjellander): Rebase this to base.gyp changes after r6438.
-
 import("//build/config/crypto.gni")
+import("//build/config/ui.gni")
 import("../build/webrtc.gni")
 
 config("webrtc_base_config") {
@@ -19,7 +18,8 @@ config("webrtc_base_config") {
 
   defines = [
     "FEATURE_ENABLE_SSL",
-    "GTEST_RELATIVE_PATH",
+    "LOGGING=1",
+    "USE_WEBRTC_DEV_BRANCH",
   ]
 
   # TODO(henrike): issue 3307, make webrtc_base build without disabling
@@ -30,7 +30,6 @@ config("webrtc_base_config") {
 config("webrtc_base_chromium_config") {
   defines = [
     "NO_MAIN_THREAD_WRAPPING",
-    "SSL_USE_NSS",
   ]
 }
 
@@ -44,17 +43,6 @@ config("openssl_config") {
 config("no_openssl_config") {
   defines = [
     "SSL_USE_NSS",
-    "HAVE_NSS_SSL_H",
-    "SSL_USE_NSS_RNG",
-  ]
-}
-
-config("android_config") {
-  defines = [ "HAVE_OPENSSL_SSL_H" ]
-}
-
-config("no_android_config") {
-  defines = [
     "HAVE_NSS_SSL_H",
     "SSL_USE_NSS_RNG",
   ]
@@ -85,45 +73,63 @@ config("mac_x86_config") {
   ]
 }
 
-config("linux_system_ssl_config") {
-  visibility = ":*"  # Only targets in this file can depend on this.
+if (is_linux && !build_with_chromium) {
+  # Provides the same functionality as the //crypto:platform target, which
+  # WebRTC cannot use as we don't sync src/crypto from Chromium.
+  group("linux_system_ssl") {
+    if (use_openssl) {
+      deps = [ "//third_party/boringssl" ]
+    } else {
+      deps = [ "//net/third_party/nss/ssl:libssl" ]
 
-  # TODO(kjellander): Find out how to convert GYP include_dirs+ (i.e. insert
-  # first in the include path?).
-  include_dirs = [ "//net/third_party/nss/ssl" ]
-
-  configs = [ "//third_party/nss:system_nss_no_ssl_config" ]
-}
-
-# Provides the same functionality as the build/linux/system.gyp:ssl GYP target.
-# This cannot be in build/linux/BUILD.gn since targets in build/ are not allowed
-# to depend on targets outside of it. This could be replaced by the Chromium
-# //crypto:platform target, but as WebRTC currently don't sync src/crypto from
-# Chromium, it is not possible today.
-config("linux_system_ssl") {
-  if (use_openssl) {
-    deps = [ "//third_party/boringssl" ]
-  } else {
-    deps = [ "//net/third_party/nss/ssl:libssl" ]
-
-    direct_dependent_configs = [
-      ":linux_system_ssl_config",
-    ]
-
-    if (is_clang) {
-      cflags = [
-        # There is a broken header guard in /usr/include/nss/secmod.h:
-        # https://bugzilla.mozilla.org/show_bug.cgi?id=884072
-        "-Wno-header-guard",
+      direct_dependent_configs = [
+        "//net/third_party/nss/ssl:ssl_config",
+        "//third_party/nss:system_nss_no_ssl_config",
       ]
     }
   }
 }
 
+if (rtc_build_ssl == 0) {
+  config("external_ssl_library") {
+    assert(rtc_ssl_root != "",
+           "You must specify rtc_ssl_root when rtc_build_ssl==0.")
+    include_dirs = [ rtc_ssl_root ]
+  }
+}
+
+# The subset of rtc_base approved for use outside of libjingle.
+static_library("rtc_base_approved") {
+  configs += [ "..:common_config" ]
+  direct_dependent_configs = [ "..:common_inherited_config" ]
+
+  sources = [
+    "checks.cc",
+    "checks.h",
+    "exp_filter.cc",
+    "exp_filter.h",
+    "md5.cc",
+    "md5.h",
+    "md5digest.h",
+    "platform_file.cc",
+    "platform_file.h",
+    "stringencode.cc",
+    "stringencode.h",
+    "stringutils.cc",
+    "stringutils.h",
+    "thread_annotations.h",
+    "timeutils.cc",
+    "timeutils.h",
+  ]
+}
+
 static_library("webrtc_base") {
   cflags = []
   cflags_cc = []
-  deps= []
+  libs = []
+  deps = [
+    ":rtc_base_approved",
+  ]
 
   configs += [
     "..:common_config",
@@ -160,8 +166,6 @@ static_library("webrtc_base") {
     "bytebuffer.cc",
     "bytebuffer.h",
     "byteorder.h",
-    "checks.cc",
-    "checks.h",
     "common.cc",
     "common.h",
     "cpumonitor.cc",
@@ -197,9 +201,6 @@ static_library("webrtc_base") {
     "ipaddress.h",
     "linked_ptr.h",
     "mathutils.h",
-    "md5.cc",
-    "md5.h",
-    "md5digest.h",
     "messagedigest.cc",
     "messagedigest.h",
     "messagehandler.cc",
@@ -210,10 +211,6 @@ static_library("webrtc_base") {
     "nethelpers.h",
     "network.cc",
     "network.h",
-    "nssidentity.cc",
-    "nssidentity.h",
-    "nssstreamadapter.cc",
-    "nssstreamadapter.h",
     "nullsocketserver.h",
     "pathutils.cc",
     "pathutils.h",
@@ -266,10 +263,6 @@ static_library("webrtc_base") {
     "sslstreamadapterhelper.h",
     "stream.cc",
     "stream.h",
-    "stringencode.cc",
-    "stringencode.h",
-    "stringutils.cc",
-    "stringutils.h",
     "systeminfo.cc",
     "systeminfo.h",
     "task.cc",
@@ -280,8 +273,9 @@ static_library("webrtc_base") {
     "taskrunner.h",
     "thread.cc",
     "thread.h",
-    "timeutils.cc",
-    "timeutils.h",
+    "thread_checker.h",
+    "thread_checker_impl.cc",
+    "thread_checker_impl.h",
     "timing.cc",
     "timing.h",
     "urlencode.cc",
@@ -351,7 +345,6 @@ static_library("webrtc_base") {
       "natsocketfactory.h",
       "nattypes.cc",
       "nattypes.h",
-      "openssl.h",
       "optionsfile.cc",
       "optionsfile.h",
       "profiler.cc",
@@ -401,8 +394,6 @@ static_library("webrtc_base") {
         "libdbusglibsymboltable.h",
         "linuxfdwalk.c",
         "linuxfdwalk.h",
-        "linuxwindowpicker.cc",
-        "linuxwindowpicker.h",
       ]
     }
 
@@ -431,9 +422,22 @@ static_library("webrtc_base") {
         "win32socketserver.h",
       ]
     }
+    if (rtc_build_json) {
+      deps += [ "//third_party/jsoncpp" ]
+    } else {
+      include_dirs += [ rtc_jsoncpp_root ]
 
-    deps += [ "//third_party/jsoncpp" ]
+      # When defined changes the include path for json.h to where it is
+      # expected to be when building json outside of the standalone build.
+      defines += [ "WEBRTC_EXTERNAL_JSON" ]
+    }
   }  # !build_with_chromium
+
+  if (is_clang) {
+    # Suppress warnings from the Chrome Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
 
   # TODO(henrike): issue 3307, make webrtc_base build with the Chromium default
   # compiler settings.
@@ -444,10 +448,41 @@ static_library("webrtc_base") {
 
   if (use_openssl) {
     direct_dependent_configs += [ ":openssl_config" ]
-
-    deps += [ "//third_party/boringssl" ]
+    if (rtc_build_ssl) {
+      deps += [ "//third_party/boringssl" ]
+    } else {
+      configs += [ "external_ssl_library" ]
+    }
+    sources += [
+      "openssl.h",
+      "openssladapter.cc",
+      "openssladapter.h",
+      "openssldigest.cc",
+      "openssldigest.h",
+      "opensslidentity.cc",
+      "opensslidentity.h",
+      "opensslstreamadapter.cc",
+      "opensslstreamadapter.h",
+    ]
   } else {
     direct_dependent_configs += [ ":no_openssl_config" ]
+    sources += [
+      "nssidentity.cc",
+      "nssidentity.h",
+      "nssstreamadapter.cc",
+      "nssstreamadapter.h",
+    ]
+    if (is_mac || is_ios || is_win) {
+      if (rtc_build_ssl) {
+        deps += [
+          "//net/third_party/nss/ssl:libssl",
+          "//third_party/nss:nspr",
+          "//third_party/nss:nss",
+        ]
+      } else {
+        configs += [ "external_ssl_library" ]
+      }
+    }
   }
 
   if (is_android) {
@@ -456,25 +491,22 @@ static_library("webrtc_base") {
       "ifaddrs-android.h",
     ]
 
-    direct_dependent_configs += [ ":android_config" ]
-
-    libs = [
+    libs += [
       "log",
       "GLESv2"
     ]
-  } else {
-    direct_dependent_configs += [ ":no_android_config" ]
   }
 
   if (is_ios) {
     all_dependent_configs += [ ":ios_config" ]
-
-    deps += [ "//net/third_party/nss/ssl:libssl" ]
   }
 
-  if (is_linux) {
-    libs = [
-      "crypto",
+  if (use_x11) {
+    sources += [
+      "x11windowpicker.cc",
+      "x11windowpicker.h",
+    ]
+    libs += [
       "dl",
       "rt",
       "Xext",
@@ -482,7 +514,17 @@ static_library("webrtc_base") {
       "Xcomposite",
       "Xrender",
     ]
-    configs += [ "//third_party/nss:system_nss_no_ssl_config" ]
+  }
+
+  if (is_linux) {
+    libs += [
+      "crypto",
+      "dl",
+      "rt",
+    ]
+    if (rtc_build_ssl) {
+      configs += [ "//third_party/nss:system_nss_no_ssl_config" ]
+    }
   }
 
   if (is_mac) {
@@ -497,10 +539,6 @@ static_library("webrtc_base") {
 
     all_dependent_configs = [ ":mac_config" ]
 
-    libs = [
-      "crypto",  # $(SDKROOT)/usr/lib/libcrypto.dylib
-      "ssl",  # $(SDKROOT)/usr/lib/libssl.dylib
-    ]
     if (cpu_arch == "x86") {
       all_dependent_configs += [ ":mac_x86_config" ]
     }
@@ -525,7 +563,7 @@ static_library("webrtc_base") {
       "winping.h",
     ]
 
-    libs = [
+    libs += [
       "crypt32.lib",
       "iphlpapi.lib",
       "secur32.lib",
@@ -541,7 +579,7 @@ static_library("webrtc_base") {
   }
 
   if (is_posix && is_debug) {
-    # Chromium's build/common.gypi defines this for all posix
+    # The Chromium build/common.gypi defines this for all posix
     # _except_ for ios & mac.  We want it there as well, e.g.
     # because ASSERT and friends trigger off of it.
     defines += [ "_DEBUG" ]
@@ -551,20 +589,6 @@ static_library("webrtc_base") {
     defines += [ "CARBON_DEPRECATED=YES" ]
   }
 
-  if (!is_ios && is_posix) {
-    sources += [
-      "openssl.h",
-      "openssladapter.cc",
-      "openssladapter.h",
-      "openssldigest.cc",
-      "openssldigest.h",
-      "opensslidentity.cc",
-      "opensslidentity.h",
-      "opensslstreamadapter.cc",
-      "opensslstreamadapter.h",
-    ]
-  }
-
   if (is_linux || is_android) {
     sources += [
       "linux.cc",
@@ -572,15 +596,15 @@ static_library("webrtc_base") {
     ]
   }
 
-  if (is_mac || is_ios || is_win) {
-    deps += [
-      "//net/third_party/nss/ssl:libssl",
-      "//third_party/nss:nspr",
-      "//third_party/nss:nss",
-    ]
-  }
-
   if (is_posix && !is_mac && !is_ios && !is_android) {
-    configs += [ ":linux_system_ssl" ]
+    if (build_with_chromium) {
+      deps += [ "//crypto:platform" ]
+    } else {
+      if (rtc_build_ssl) {
+        deps += [ ":linux_system_ssl" ]
+      } else {
+        configs += [ "external_ssl_library" ]
+      }
+    }
   }
 }

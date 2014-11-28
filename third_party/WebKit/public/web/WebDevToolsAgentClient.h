@@ -57,6 +57,9 @@ public:
     // if the same client is reattached to another agent.
     virtual void saveAgentRuntimeState(const WebString&) { }
 
+    // Resume the inspected renderer that is waiting for DevTools front-end to initialize its state.
+    virtual void resumeStartup() { }
+
     class WebKitClientMessageLoop {
     public:
         virtual ~WebKitClientMessageLoop() { }
@@ -66,22 +69,6 @@ public:
     virtual WebKitClientMessageLoop* createClientMessageLoop() { return 0; }
     virtual void willEnterDebugLoop() { }
     virtual void didExitDebugLoop() { }
-
-    class AllocatedObjectVisitor {
-    public:
-        virtual bool visitObject(const void* ptr) = 0;
-    protected:
-        virtual ~AllocatedObjectVisitor() { }
-    };
-    virtual void visitAllocatedObjects(AllocatedObjectVisitor*) { }
-
-    class InstrumentedObjectSizeProvider {
-    public:
-        virtual size_t objectSize(const void* ptr) const = 0;
-    protected:
-        virtual ~InstrumentedObjectSizeProvider() { }
-    };
-    virtual void dumpUncountedAllocatedObjects(const InstrumentedObjectSizeProvider*) { }
 
     typedef void (*TraceEventCallback)(char phase, const unsigned char*, const char* name, unsigned long long id,
         int numArgs, const char* const* argNames, const unsigned char* argTypes, const unsigned long long* argValues,

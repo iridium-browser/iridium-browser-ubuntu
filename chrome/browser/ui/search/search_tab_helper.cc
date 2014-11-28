@@ -31,6 +31,7 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/search/search.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -44,11 +45,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
-#include "grit/generated_resources.h"
 #include "net/base/net_errors.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SearchTabHelper);
@@ -620,7 +620,7 @@ void SearchTabHelper::RedirectToLocalNTP() {
   content::NavigationController::LoadURLParams load_params(
       (GURL(chrome::kChromeSearchLocalNtpUrl)));
   load_params.referrer = content::Referrer();
-  load_params.transition_type = content::PAGE_TRANSITION_SERVER_REDIRECT;
+  load_params.transition_type = ui::PAGE_TRANSITION_SERVER_REDIRECT;
   // Don't push a history entry.
   load_params.should_replace_current_entry = true;
   web_contents_->GetController().LoadURLWithParams(load_params);

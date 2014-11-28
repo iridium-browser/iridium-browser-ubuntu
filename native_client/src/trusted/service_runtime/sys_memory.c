@@ -23,6 +23,7 @@
 #include "native_client/src/trusted/service_runtime/include/sys/stat.h"
 #include "native_client/src/trusted/service_runtime/internal_errno.h"
 #include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
+#include "native_client/src/trusted/service_runtime/nacl_copy.h"
 #include "native_client/src/trusted/service_runtime/nacl_syscall_common.h"
 #include "native_client/src/trusted/service_runtime/nacl_text.h"
 #include "native_client/src/trusted/service_runtime/sel_ldr.h"
@@ -354,10 +355,14 @@ int32_t NaClSysMmapIntern(struct NaClApp        *nap,
     goto cleanup;
   }
 
-  if (0 == length) {
-    map_result = -NACL_ABI_EINVAL;
-    goto cleanup;
-  }
+  /*
+   * Round up to a page size multiple.
+   *
+   * Note that if length > 0xffff0000 (i.e. -NACL_MAP_PAGESIZE), rounding
+   * up the length will wrap around to 0.  We check for length == 0 *after*
+   * rounding up the length to simultaneously check for the length
+   * originally being 0 and check for the wraparound.
+   */
   alloc_rounded_length = NaClRoundAllocPage(length);
   if (alloc_rounded_length != length) {
     if (mapping_code) {
@@ -369,6 +374,19 @@ int32_t NaClSysMmapIntern(struct NaClApp        *nap,
             "NaClSysMmap: rounded length to 0x%"NACL_PRIxS"\n",
             alloc_rounded_length);
   }
+  if (0 == (uint32_t) alloc_rounded_length) {
+    map_result = -NACL_ABI_EINVAL;
+    goto cleanup;
+  }
+  /*
+   * Sanity check in case any later code behaves badly if
+   * |alloc_rounded_length| is >=4GB.  This check shouldn't fail
+   * because |length| was <4GB and we've already checked for overflow
+   * when rounding it up.
+   * TODO(mseaborn): Remove the need for this by using uint32_t for
+   * untrusted sizes more consistently.
+   */
+  CHECK(alloc_rounded_length == (uint32_t) alloc_rounded_length);
 
   if (NULL == ndp) {
     /*
@@ -931,50 +949,26 @@ int32_t NaClSysMmapIntern(struct NaClApp        *nap,
 }
 
 int32_t NaClSysMmap(struct NaClAppThread  *natp,
-                    void                  *start,
+                    uint32_t              start,
                     size_t                length,
                     int                   prot,
                     int                   flags,
                     int                   d,
-                    nacl_abi_off_t        *offp) {
+                    uint32_t              offp) {
   struct NaClApp  *nap = natp->nap;
-  int32_t         retval;
-  uintptr_t       sysaddr;
   nacl_abi_off_t  offset;
 
   NaClLog(3,
-          "Entered NaClSysMmap(0x%08"NACL_PRIxPTR",0x%"NACL_PRIxS","
-          "0x%x,0x%x,%d,0x%08"NACL_PRIxPTR")\n",
-          (uintptr_t) start, length, prot, flags, d, (uintptr_t) offp);
+          "Entered NaClSysMmap(0x%08"NACL_PRIx32",0x%"NACL_PRIxS","
+          "0x%x,0x%x,%d,0x%08"NACL_PRIx32")\n",
+          start, length, prot, flags, d, offp);
 
-  if ((nacl_abi_off_t *) 0 == offp) {
-    /*
-     * This warning is really targetted towards trusted code,
-     * especially tests that didn't notice the argument type change.
-     * Unfortunatey, zero is a common and legitimate offset value, and
-     * the compiler will not complain since an automatic type
-     * conversion works.
-     */
-    NaClLog(LOG_WARNING,
-            "NaClSysMmap: NULL pointer used"
-            " for offset in/out argument\n");
-    return -NACL_ABI_EINVAL;
-  }
-
-  sysaddr = NaClUserToSysAddrRange(nap, (uintptr_t) offp, sizeof offset);
-  if (kNaClBadAddress == sysaddr) {
-    NaClLog(3,
-            "NaClSysMmap: offset in a bad untrusted memory location\n");
-    retval = -NACL_ABI_EFAULT;
-    goto cleanup;
-  }
-  offset = *(nacl_abi_off_t volatile *) sysaddr;
-
+  if (!NaClCopyInFromUser(nap, &offset, offp, sizeof(offset)))
+    return -NACL_ABI_EFAULT;
   NaClLog(4, " offset = 0x%08"NACL_PRIx64"\n", (uint64_t) offset);
 
-  retval = NaClSysMmapIntern(nap, start, length, prot, flags, d, offset);
-cleanup:
-  return retval;
+  return NaClSysMmapIntern(nap, (void *) (uintptr_t) start, length, prot,
+                           flags, d, offset);
 }
 
 #if NACL_WINDOWS
@@ -1068,8 +1062,8 @@ static int32_t MunmapInternal(struct NaClApp *nap,
 #endif
 
 int32_t NaClSysMunmap(struct NaClAppThread  *natp,
-                      void                  *start,
-                      size_t                length) {
+                      uint32_t              start,
+                      uint32_t              length) {
   struct NaClApp *nap = natp->nap;
   int32_t   retval = -NACL_ABI_EINVAL;
   uintptr_t sysaddr;
@@ -1077,13 +1071,26 @@ int32_t NaClSysMunmap(struct NaClAppThread  *natp,
   size_t    alloc_rounded_length;
 
   NaClLog(3, "Entered NaClSysMunmap(0x%08"NACL_PRIxPTR", "
-          "0x%08"NACL_PRIxPTR", 0x%"NACL_PRIxS")\n",
-          (uintptr_t) natp, (uintptr_t) start, length);
+          "0x%08"NACL_PRIx32", 0x%"NACL_PRIx32")\n",
+          (uintptr_t) natp, start, length);
 
-  if (!NaClIsAllocPageMultiple((uintptr_t) start)) {
+  if (!NaClIsAllocPageMultiple(start)) {
     NaClLog(4, "start addr not allocation multiple\n");
     retval = -NACL_ABI_EINVAL;
     goto cleanup;
+  }
+  /*
+   * Round up to a page size multiple.
+   *
+   * Note that if length > 0xffff0000 (i.e. -NACL_MAP_PAGESIZE), rounding
+   * up the length will wrap around to 0.  We check for length == 0 *after*
+   * rounding up the length to simultaneously check for the length
+   * originally being 0 and check for the wraparound.
+   */
+  alloc_rounded_length = NaClRoundAllocPage(length);
+  if (alloc_rounded_length != length) {
+    length = (uint32_t) alloc_rounded_length;
+    NaClLog(2, "munmap: rounded length to 0x%"NACL_PRIx32"\n", length);
   }
   if (0 == length) {
     /*
@@ -1099,12 +1106,7 @@ int32_t NaClSysMunmap(struct NaClAppThread  *natp,
     retval = -NACL_ABI_EINVAL;
     goto cleanup;
   }
-  alloc_rounded_length = NaClRoundAllocPage(length);
-  if (alloc_rounded_length != length) {
-    length = alloc_rounded_length;
-    NaClLog(2, "munmap: rounded length to 0x%"NACL_PRIxS"\n", length);
-  }
-  sysaddr = NaClUserToSysAddrRange(nap, (uintptr_t) start, length);
+  sysaddr = NaClUserToSysAddrRange(nap, start, length);
   if (kNaClBadAddress == sysaddr) {
     NaClLog(4, "munmap: region not user addresses\n");
     retval = -NACL_ABI_EFAULT;
@@ -1120,17 +1122,13 @@ int32_t NaClSysMunmap(struct NaClAppThread  *natp,
   /*
    * User should be unable to unmap any executable pages.  We check here.
    */
-  if (NaClSysCommonAddrRangeContainsExecutablePages(nap,
-                                                    (uintptr_t) start,
-                                                    length)) {
+  if (NaClSysCommonAddrRangeContainsExecutablePages(nap, start, length)) {
     NaClLog(2, "NaClSysMunmap: region contains executable pages\n");
     retval = -NACL_ABI_EINVAL;
     goto cleanup;
   }
 
-  NaClVmIoPendingCheck_mu(nap,
-                          (uint32_t) (uintptr_t) start,
-                          (uint32_t) ((uintptr_t) start + length - 1));
+  NaClVmIoPendingCheck_mu(nap, start, start + length - 1);
 
   retval = MunmapInternal(nap, sysaddr, length);
 cleanup:

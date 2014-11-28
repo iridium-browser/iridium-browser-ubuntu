@@ -322,6 +322,19 @@ below:
         Clear Recent Searches
       </message>
 
+      <message name="IDS_AX_CALENDAR_SHOW_MONTH_SELECTOR" desc="Accessible description of a button to show month selection panel in a calendar picker.">
+        Show month selection panel
+      </message>
+      <message name="IDS_AX_CALENDAR_SHOW_NEXT_MONTH" desc="Accessible description of a button to show next month in a calendar picker.">
+        Show next month
+      </message>
+      <message name="IDS_AX_CALENDAR_SHOW_PREVIOUS_MONTH" desc="Accessible description of a button to show previous month in a calendar picker.">
+        Show previous month
+      </message>
+      <message name="IDS_AX_CALENDAR_WEEK_DESCRIPTION" desc="Accessible description of a button to select a specific week.">
+        <ph name="WEEK">$1<ex>Week 38, 2014</ex></ph>, starting on <ph name="WEEK_START_DATE">$2<ex>September 15, 2014</ex></ph>
+      </message>
+
       <message name="IDS_AX_ROLE_WEB_AREA" desc="accessibility role description for web area">
         HTML content
       </message>
@@ -447,6 +460,14 @@ below:
       <message name="IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON" desc="accessibility role description for hide closed captions button">
         hide closed captions
       </message>
+      
+      <message name="IDS_AX_MEDIA_CAST_OFF_BUTTON" desc="accessibility role description for remote playback button">
+        play on remote device
+      </message>
+      
+      <message name="IDS_AX_MEDIA_CAST_ON_BUTTON" desc="accessibility role description for remote playback control button">
+        control remote playback
+      </message>
 
       <message name="IDS_AX_MEDIA_AUDIO_ELEMENT_HELP" desc="Accessible help of audio controls">
         audio
@@ -506,6 +527,14 @@ below:
 
       <message name="IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON_HELP" desc="accessibility help description for hide closed captions button">
         stop displaying closed captions
+      </message>
+
+      <message name="IDS_AX_MEDIA_CAST_OFF_BUTTON_HELP" desc="accessibility help description for remote playback button">
+        play on remote device
+      </message>
+      
+      <message name="IDS_AX_MEDIA_CAST_ON_BUTTON_HELP" desc="accessibility help description for remote playback control button">
+        control remote playback
       </message>
 
       <message name="IDS_AX_MILLISECOND_FIELD_TEXT" desc="Accessible description of the millisecond field in a date/time control">
@@ -663,22 +692,6 @@ below:
       </message>
       <message name="IDS_FORM_VALIDATION_TOO_LONG" desc="Heading or short sentence shown when a form control in a webpage needs to be shorter than a length specified by the page author, but a user specified long value.">
         Please shorten this text to <ph name="MAX_CHARACTERS">$2<ex>100</ex></ph> characters or less (you are currently using <ph name="CURRENT_LENGTH">$1<ex>101</ex></ph> characters).
-      </message>
-
-      <message name="IDS_PDF_NEED_PASSWORD" desc="A message asking the user for a password to open a PDF file.">
-        This document is password protected.  Please enter a password.
-      </message>
-
-      <message name="IDS_PDF_PAGE_LOADING" desc="A message displayed on the PDF page while page is loading.">
-        Loading...
-      </message>
-
-      <message name="IDS_PDF_PAGE_LOAD_FAILED" desc="A message displayed on the PDF control to indicate that the PDF document failed to load.">
-        Failed to load PDF document
-      </message>
-
-      <message name="IDS_PDF_PROGRESS_LOADING" desc="A message displayed on the progress control over PDF page during document loading.">
-        Loading
       </message>
 
       <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plug-in failed to load">

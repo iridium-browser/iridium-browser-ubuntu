@@ -23,7 +23,6 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service.h"
@@ -461,8 +460,6 @@ void TabLoader::HandleTabClosedOrLoaded(NavigationController* tab) {
   if (tabs_loading_.empty() && tabs_to_load_.empty()) {
     base::TimeDelta time_to_load =
         base::TimeTicks::Now() - restore_started_;
-    performance_monitor::StartupTimer::SetElapsedSessionRestoreTime(
-        time_to_load);
     UMA_HISTOGRAM_CUSTOM_TIMES(
         "SessionRestore.AllTabsLoaded",
         time_to_load,
@@ -1126,7 +1123,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
       if (i == 0)
         add_types |= TabStripModel::ADD_ACTIVE;
       chrome::NavigateParams params(browser, urls[i],
-                                    content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+                                    ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
       params.disposition = i == 0 ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
       params.tabstrip_add_types = add_types;
       chrome::Navigate(&params);

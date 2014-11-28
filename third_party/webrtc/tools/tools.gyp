@@ -135,9 +135,7 @@
             4267,  # size_t to int truncation.
           ],
           'conditions': [
-            # TODO(henrike): remove build_with_chromium==1 when the bots are
-            # using Chromium's buildbots.
-            ['build_with_chromium==1 and OS=="android"', {
+            ['OS=="android"', {
               'dependencies': [
                 '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
               ],
@@ -145,10 +143,8 @@
           ],
         }, # tools_unittests
       ], # targets
-      # TODO(henrike): remove build_with_chromium==1 when the bots are using
-      # Chromium's buildbots.
       'conditions': [
-        ['build_with_chromium==1 and OS=="android"', {
+        ['OS=="android"', {
           'targets': [
             {
               'target_name': 'tools_unittests_apk_target',

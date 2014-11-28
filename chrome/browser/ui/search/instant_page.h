@@ -13,7 +13,7 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/page_transition_types.h"
+#include "ui/base/page_transition_types.h"
 
 class GURL;
 class Profile;
@@ -55,9 +55,6 @@ class InstantPage : public content::WebContentsObserver,
   };
 
   virtual ~InstantPage();
-
-  // The WebContents corresponding to the page we're talking to. May be NULL.
-  content::WebContents* contents() const { return web_contents(); }
 
   // Returns the Instant URL that was loaded for this page. Returns the empty
   // string if no URL was explicitly loaded as is the case for InstantTab.
@@ -105,7 +102,7 @@ class InstantPage : public content::WebContentsObserver,
   virtual void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& url,
-      content::PageTransition transition_type) OVERRIDE;
+      ui::PageTransition transition_type) OVERRIDE;
 
   // Overridden from SearchModelObserver:
   virtual void ModelChanged(const SearchModel::State& old_state,

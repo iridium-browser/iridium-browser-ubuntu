@@ -15,14 +15,14 @@
  * @param {cr.ui.ArrayDataModel} dataModel Data model.
  * @param {cr.ui.ListSelectionModel} selectionModel Selection model.
  * @param {Object} context Context.
+ * @param {VolumeManager} volumeManager Volume manager.
  * @param {function(function())} toggleMode Function to toggle the Gallery mode.
  * @param {function(string):string} displayStringFunction String formatting
  *     function.
  * @constructor
  */
-function SlideMode(container, content, toolbar, prompt,
-                   dataModel, selectionModel, context,
-                   toggleMode, displayStringFunction) {
+function SlideMode(container, content, toolbar, prompt, dataModel,
+    selectionModel, context, volumeManager, toggleMode, displayStringFunction) {
   this.container_ = container;
   this.document_ = container.ownerDocument;
   this.content = content;
@@ -31,6 +31,7 @@ function SlideMode(container, content, toolbar, prompt,
   this.dataModel_ = dataModel;
   this.selectionModel_ = selectionModel;
   this.context_ = context;
+  this.volumeManager_ = volumeManager;
   this.metadataCache_ = context.metadataCache;
   this.toggleMode_ = toggleMode;
   this.displayStringFunction_ = displayStringFunction;
@@ -128,10 +129,11 @@ SlideMode.prototype.initDom_ = function() {
       overwriteOriginalBox, '', 'input');
   this.overwriteOriginal_.type = 'checkbox';
   this.overwriteOriginal_.id = 'overwrite-checkbox';
-  util.platform.getPreference(SlideMode.OVERWRITE_KEY, function(value) {
+  chrome.storage.local.get(SlideMode.OVERWRITE_KEY, function(values) {
+    var value = values[SlideMode.OVERWRITE_KEY];
     // Out-of-the box default is 'true'
     this.overwriteOriginal_.checked =
-        (typeof value !== 'string' || value === 'true');
+        (value === 'false' || value === false) ? false : true;
   }.bind(this));
   this.overwriteOriginal_.addEventListener('click',
       this.onOverwriteOriginalClick_.bind(this));
@@ -333,19 +335,19 @@ SlideMode.prototype.enter = function(
  */
 SlideMode.prototype.leave = function(zoomToRect, callback) {
   var commitDone = function() {
-      this.stopEditing_();
-      this.stopSlideshow_();
-      ImageUtil.setAttribute(this.arrowBox_, 'active', false);
-      this.selectionModel_.removeEventListener(
-          'change', this.onSelectionBound_);
-      this.dataModel_.removeEventListener('splice', this.onSpliceBound_);
-      this.ribbon_.disable();
-      this.active_ = false;
-      if (this.savedSelection_)
-        this.selectionModel_.selectedIndexes = this.savedSelection_;
-      this.unloadImage_(zoomToRect);
-      callback();
-    }.bind(this);
+    this.stopEditing_();
+    this.stopSlideshow_();
+    ImageUtil.setAttribute(this.arrowBox_, 'active', false);
+    this.selectionModel_.removeEventListener(
+        'change', this.onSelectionBound_);
+    this.dataModel_.removeEventListener('splice', this.onSpliceBound_);
+    this.ribbon_.disable();
+    this.active_ = false;
+    if (this.savedSelection_)
+      this.selectionModel_.selectedIndexes = this.savedSelection_;
+    this.unloadImage_(zoomToRect);
+    callback();
+  }.bind(this);
 
   this.viewport_.resetView();
   if (this.getItemCount_() === 0) {
@@ -729,14 +731,15 @@ SlideMode.prototype.loadItem_ = function(
     ImageUtil.setAttribute(this.options_, 'saved',
         !this.getSelectedItem().isOriginal());
 
-    util.platform.getPreference(SlideMode.OVERWRITE_BUBBLE_KEY,
-        function(value) {
-          var times = typeof value === 'string' ? parseInt(value, 10) : 0;
+    chrome.storage.local.get(SlideMode.OVERWRITE_BUBBLE_KEY,
+        function(values) {
+          var times = values[SlideMode.OVERWRITE_BUBBLE_KEY] || 0;
           if (times < SlideMode.OVERWRITE_BUBBLE_MAX_TIMES) {
             this.bubble_.hidden = false;
             if (this.isEditing()) {
-              util.platform.setPreference(
-                  SlideMode.OVERWRITE_BUBBLE_KEY, times + 1);
+              var items = {};
+              items[SlideMode.OVERWRITE_BUBBLE_KEY] = times + 1;
+              chrome.storage.local.set(items);
             }
           }
         }.bind(this));
@@ -966,6 +969,7 @@ SlideMode.prototype.saveCurrentImage_ = function(item, callback) {
   this.showSpinner_(true);
 
   var savedPromise = this.dataModel_.saveItem(
+      this.volumeManager_,
       item,
       this.imageView_.getCanvas(),
       this.shouldOverwriteOriginal_());
@@ -1030,7 +1034,7 @@ SlideMode.OVERWRITE_BUBBLE_MAX_TIMES = 5;
  * @private
  */
 SlideMode.prototype.shouldOverwriteOriginal_ = function() {
-   return this.overwriteOriginal_.checked;
+  return this.overwriteOriginal_.checked;
 };
 
 /**
@@ -1039,7 +1043,9 @@ SlideMode.prototype.shouldOverwriteOriginal_ = function() {
  * @private
  */
 SlideMode.prototype.onOverwriteOriginalClick_ = function(event) {
-  util.platform.setPreference(SlideMode.OVERWRITE_KEY, event.target.checked);
+  var items = {};
+  items[SlideMode.OVERWRITE_KEY] = event.target.checked;
+  chrome.storage.local.set(items);
 };
 
 /**
@@ -1048,8 +1054,10 @@ SlideMode.prototype.onOverwriteOriginalClick_ = function(event) {
  */
 SlideMode.prototype.onCloseBubble_ = function() {
   this.bubble_.hidden = true;
-  util.platform.setPreference(SlideMode.OVERWRITE_BUBBLE_KEY,
-      SlideMode.OVERWRITE_BUBBLE_MAX_TIMES);
+  var items = {};
+  items[SlideMode.OVERWRITE_BUBBLE_KEY] =
+      SlideMode.OVERWRITE_BUBBLE_MAX_TIMES;
+  chrome.storage.local.set(items);
 };
 
 // Slideshow
@@ -1183,10 +1191,9 @@ SlideMode.prototype.scheduleNextSlide_ = function(opt_interval) {
     clearTimeout(this.slideShowTimeout_);
 
   this.slideShowTimeout_ = setTimeout(function() {
-        this.slideShowTimeout_ = null;
-        this.selectNext(1);
-      }.bind(this),
-      opt_interval || SlideMode.SLIDESHOW_INTERVAL);
+    this.slideShowTimeout_ = null;
+    this.selectNext(1);
+  }.bind(this), opt_interval || SlideMode.SLIDESHOW_INTERVAL);
 };
 
 /**
@@ -1320,6 +1327,7 @@ function TouchHandler(targetElement, slideMode) {
   /**
    * Event source.
    * @type {DOMElement}
+   * @private
    */
   this.targetElement_ = targetElement;
 
@@ -1333,6 +1341,7 @@ function TouchHandler(targetElement, slideMode) {
   /**
    * Flag to enable/disable touch operation.
    * @type {boolean}
+   * @private
    */
   this.enabled_ = true;
 

@@ -23,7 +23,7 @@ callback CustomElementConstructor = Element ();
 typedef (CanvasRenderingContext2D or WebGLRenderingContext) RenderingContext;
 
 [
-    SpecialWrapFor=HTMLDocument|XMLDocument
+    SpecialWrapFor=(HTMLDocument,XMLDocument)
 ] interface Document : Node {
 
     // DOM Level 1 Core
@@ -80,7 +80,7 @@ typedef (CanvasRenderingContext2D or WebGLRenderingContext) RenderingContext;
 
     // DOM Level 2 Abstract Views (DocumentView interface)
 
-    [ImplementedAs=executingWindow] readonly attribute Window defaultView;
+    [ImplementedAs=domWindow] readonly attribute Window defaultView;
 
     // DOM Level 2 Style (DocumentStyle interface)
 

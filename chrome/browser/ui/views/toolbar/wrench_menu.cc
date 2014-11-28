@@ -25,6 +25,7 @@
 #include "chrome/browser/ui/views/toolbar/wrench_menu_observer.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/browser/ui/zoom/zoom_event_manager.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_observer.h"
@@ -34,8 +35,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/feature_switch.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -496,7 +495,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
         decrement_button_(NULL),
         fullscreen_button_(NULL),
         zoom_label_width_(0) {
-    content_zoom_subscription_ = HostZoomMap::GetForBrowserContext(
+    content_zoom_subscription_ = HostZoomMap::GetDefaultForBrowserContext(
         menu->browser_->profile())->AddZoomLevelChangedCallback(
             base::Bind(&WrenchMenu::ZoomView::OnZoomLevelChanged,
                        base::Unretained(this)));
@@ -726,16 +725,6 @@ class WrenchMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
 
   virtual ~RecentTabsMenuModelDelegate() {
     model_->SetMenuModelDelegate(NULL);
-  }
-
-  // Return the specific menu width of recent tabs submenu if |menu| is the
-  // recent tabs submenu, else return -1.
-  int GetMaxWidthForMenu(views::MenuItemView* menu) {
-    if (!menu_item_->HasSubmenu())
-      return -1;
-    const int kMaxMenuItemWidth = 320;
-    return menu->GetCommand() == menu_item_->GetCommand() ?
-        kMaxMenuItemWidth : -1;
   }
 
   const gfx::FontList* GetLabelFontListAt(int index) const {
@@ -985,15 +974,7 @@ int WrenchMenu::GetDragOperations(MenuItemView* sender) {
 int WrenchMenu::GetMaxWidthForMenu(MenuItemView* menu) {
   if (IsBookmarkCommand(menu->GetCommand()))
     return bookmark_menu_delegate_->GetMaxWidthForMenu(menu);
-  int max_width = -1;
-  // If recent tabs menu is available, it will decide if |menu| is one of recent
-  // tabs; if yes, it would return the menu width for recent tabs.
-  // otherwise, it would return -1.
-  if (recent_tabs_menu_model_delegate_.get())
-    max_width = recent_tabs_menu_model_delegate_->GetMaxWidthForMenu(menu);
-  if (max_width == -1)
-    max_width = MenuDelegate::GetMaxWidthForMenu(menu);
-  return max_width;
+  return MenuDelegate::GetMaxWidthForMenu(menu);
 }
 
 bool WrenchMenu::IsItemChecked(int command_id) const {
@@ -1138,7 +1119,7 @@ void WrenchMenu::PopulateMenu(MenuItemView* parent,
       case IDC_EXTENSIONS_OVERFLOW_MENU: {
         scoped_ptr<ExtensionToolbarMenuView> extension_toolbar(
             new ExtensionToolbarMenuView(browser_, this));
-        if (extension_toolbar->GetPreferredSize().height() > 0)
+        if (extension_toolbar->ShouldShow())
           item->AddChildView(extension_toolbar.release());
         else
           item->SetVisible(false);

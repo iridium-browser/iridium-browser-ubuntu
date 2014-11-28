@@ -44,6 +44,7 @@ RunLoop::RunLoop()
 
 RunLoop::~RunLoop() {
   assert(current() == this);
+  NotifyHandlers(MOJO_RESULT_ABORTED, IGNORE_DEADLINE);
   current_run_loop.Set(NULL);
 }
 
@@ -92,37 +93,40 @@ bool RunLoop::HasHandler(const Handle& handle) const {
 }
 
 void RunLoop::Run() {
-  assert(current() == this);
-  RunState* old_state = run_state_;
-  RunState run_state;
-  run_state_ = &run_state;
-  while (!run_state.should_quit) {
-    DoDelayedWork();
-    Wait(false);
-  }
-  run_state_ = old_state;
+  RunInternal(UNTIL_EMPTY);
 }
 
 void RunLoop::RunUntilIdle() {
+  RunInternal(UNTIL_IDLE);
+}
+
+void RunLoop::RunInternal(RunMode run_mode) {
   assert(current() == this);
   RunState* old_state = run_state_;
   RunState run_state;
   run_state_ = &run_state;
-  while (!run_state.should_quit) {
-    DoDelayedWork();
-    if (!Wait(true) && delayed_tasks_.empty())
+  for (;;) {
+    bool did_work = DoDelayedWork();
+    if (run_state.should_quit)
+      break;
+    did_work |= Wait(run_mode == UNTIL_IDLE);
+    if (run_state.should_quit)
+      break;
+    if (!did_work && run_mode == UNTIL_IDLE)
       break;
   }
   run_state_ = old_state;
 }
 
-void RunLoop::DoDelayedWork() {
+bool RunLoop::DoDelayedWork() {
   MojoTimeTicks now = GetTimeTicksNow();
   if (!delayed_tasks_.empty() && delayed_tasks_.top().run_time <= now) {
     PendingTask task = delayed_tasks_.top();
     delayed_tasks_.pop();
     task.task.Run();
+    return true;
   }
+  return false;
 }
 
 void RunLoop::Quit() {
@@ -161,14 +165,14 @@ bool RunLoop::Wait(bool non_blocking) {
     case MOJO_RESULT_FAILED_PRECONDITION:
       return RemoveFirstInvalidHandle(wait_state);
     case MOJO_RESULT_DEADLINE_EXCEEDED:
-      return NotifyDeadlineExceeded();
+      return NotifyHandlers(MOJO_RESULT_DEADLINE_EXCEEDED, CHECK_DEADLINE);
   }
 
   assert(false);
   return false;
 }
 
-bool RunLoop::NotifyDeadlineExceeded() {
+bool RunLoop::NotifyHandlers(MojoResult error, CheckDeadline check) {
   bool notified = false;
 
   // Make a copy in case someone tries to add/remove new handlers as part of
@@ -177,16 +181,23 @@ bool RunLoop::NotifyDeadlineExceeded() {
   const MojoTimeTicks now(GetTimeTicksNow());
   for (HandleToHandlerData::const_iterator i = cloned_handlers.begin();
        i != cloned_handlers.end(); ++i) {
-    // Since we're iterating over a clone of the handlers, verify the handler is
-    // still valid before notifying.
-    if (i->second.deadline != kInvalidTimeTicks &&
-        i->second.deadline < now &&
-        handler_data_.find(i->first) != handler_data_.end() &&
-        handler_data_[i->first].id == i->second.id) {
-      handler_data_.erase(i->first);
-      i->second.handler->OnHandleError(i->first, MOJO_RESULT_DEADLINE_EXCEEDED);
-      notified = true;
+    // Only check deadline exceeded if that's what we're notifying.
+    if (check == CHECK_DEADLINE && (i->second.deadline == kInvalidTimeTicks ||
+                                    i->second.deadline > now)) {
+      continue;
     }
+
+    // Since we're iterating over a clone of the handlers, verify the handler
+    // is still valid before notifying.
+    if (handler_data_.find(i->first) == handler_data_.end() ||
+        handler_data_[i->first].id != i->second.id) {
+      continue;
+    }
+
+    RunLoopHandler* handler = i->second.handler;
+    handler_data_.erase(i->first);
+    handler->OnHandleError(i->first, error);
+    notified = true;
   }
 
   return notified;

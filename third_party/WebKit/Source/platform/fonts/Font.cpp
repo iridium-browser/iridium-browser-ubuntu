@@ -25,6 +25,7 @@
 #include "platform/fonts/Font.h"
 
 #include "platform/LayoutUnit.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/Character.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/fonts/FontFallbackList.h"
@@ -34,6 +35,7 @@
 #include "platform/fonts/SimpleFontData.h"
 #include "platform/fonts/WidthIterator.h"
 #include "platform/geometry/FloatRect.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/text/TextRun.h"
 #include "wtf/MainThread.h"
 #include "wtf/StdLibExtras.h"
@@ -42,7 +44,6 @@
 
 using namespace WTF;
 using namespace Unicode;
-using namespace std;
 
 namespace blink {
 
@@ -102,24 +103,23 @@ void Font::update(PassRefPtrWillBeRawPtr<FontSelector> fontSelector) const
     m_fontFallbackList->invalidate(fontSelector);
 }
 
-void Font::drawText(GraphicsContext* context, const TextRunPaintInfo& runInfo, const FloatPoint& point, CustomFontNotReadyAction customFontNotReadyAction) const
+float Font::drawText(GraphicsContext* context, const TextRunPaintInfo& runInfo, const FloatPoint& point, CustomFontNotReadyAction customFontNotReadyAction) const
 {
     // Don't draw anything while we are using custom fonts that are in the process of loading,
     // except if the 'force' argument is set to true (in which case it will use a fallback
     // font).
     if (shouldSkipDrawing() && customFontNotReadyAction == DoNotPaintIfFontNotReady)
-        return;
+        return 0;
 
     CodePath codePathToUse = codePath(runInfo.run);
     // FIXME: Use the fast code path once it handles partial runs with kerning and ligatures. See http://webkit.org/b/100050
     if (codePathToUse != ComplexPath && fontDescription().typesettingFeatures() && (runInfo.from || runInfo.to != runInfo.run.length()))
         codePathToUse = ComplexPath;
 
-    if (codePathToUse != ComplexPath) {
-        drawSimpleText(context, runInfo, point);
-    } else {
-        drawComplexText(context, runInfo, point);
-    }
+    if (codePathToUse != ComplexPath)
+        return drawSimpleText(context, runInfo, point);
+
+    return drawComplexText(context, runInfo, point);
 }
 
 void Font::drawEmphasisMarks(GraphicsContext* context, const TextRunPaintInfo& runInfo, const AtomicString& mark, const FloatPoint& point) const
@@ -141,9 +141,9 @@ void Font::drawEmphasisMarks(GraphicsContext* context, const TextRunPaintInfo& r
 static inline void updateGlyphOverflowFromBounds(const IntRectExtent& glyphBounds,
     const FontMetrics& fontMetrics, GlyphOverflow* glyphOverflow)
 {
-    glyphOverflow->top = max<int>(glyphOverflow->top,
+    glyphOverflow->top = std::max<int>(glyphOverflow->top,
         glyphBounds.top() - (glyphOverflow->computeBounds ? 0 : fontMetrics.ascent()));
-    glyphOverflow->bottom = max<int>(glyphOverflow->bottom,
+    glyphOverflow->bottom = std::max<int>(glyphOverflow->bottom,
         glyphBounds.bottom() - (glyphOverflow->computeBounds ? 0 : fontMetrics.descent()));
     glyphOverflow->left = glyphBounds.left();
     glyphOverflow->right = glyphBounds.right();
@@ -153,9 +153,6 @@ float Font::width(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFo
 {
     CodePath codePathToUse = codePath(run);
     if (codePathToUse != ComplexPath) {
-        // The complex path is more restrictive about returning fallback fonts than the simple path, so we need an explicit test to make their behaviors match.
-        if (!FontPlatformFeatures::canReturnFallbackFontsForComplexText())
-            fallbackFonts = 0;
         // The simple path can optimize the case where glyph overflow is not observable.
         if (codePathToUse != SimpleWithGlyphOverflowPath && (glyphOverflow && !glyphOverflow->computeBounds))
             glyphOverflow = 0;
@@ -204,6 +201,42 @@ float Font::width(const TextRun& run, int& charsConsumed, Glyph& glyphId) const
     charsConsumed = run.length();
     glyphId = 0;
     return width(run);
+}
+
+PassTextBlobPtr Font::buildTextBlob(const TextRunPaintInfo& runInfo, const FloatPoint& textOrigin, bool couldUseLCDRenderedText, CustomFontNotReadyAction customFontNotReadyAction) const
+{
+    ASSERT(RuntimeEnabledFeatures::textBlobEnabled());
+
+    // FIXME: Some logic in common with Font::drawText. Would be nice to
+    // deduplicate.
+    if (shouldSkipDrawing() && customFontNotReadyAction == DoNotPaintIfFontNotReady)
+        return nullptr;
+
+    CodePath codePathToUse = codePath(runInfo.run);
+    // FIXME: Use the fast code path once it handles partial runs with kerning and ligatures. See http://webkit.org/b/100050
+    if (codePathToUse != ComplexPath && fontDescription().typesettingFeatures() && (runInfo.from || runInfo.to != runInfo.run.length()))
+        codePathToUse = ComplexPath;
+
+    if (codePathToUse != ComplexPath)
+        return buildTextBlobForSimpleText(runInfo, textOrigin, couldUseLCDRenderedText);
+
+    return nullptr;
+}
+
+PassTextBlobPtr Font::buildTextBlobForSimpleText(const TextRunPaintInfo& runInfo, const FloatPoint& textOrigin, bool couldUseLCDRenderedText) const
+{
+    GlyphBuffer glyphBuffer;
+    float initialAdvance = getGlyphsAndAdvancesForSimpleText(runInfo, glyphBuffer);
+    ASSERT(!glyphBuffer.hasVerticalAdvances());
+
+    if (glyphBuffer.isEmpty())
+        return nullptr;
+
+    FloatRect blobBounds = runInfo.bounds;
+    blobBounds.moveBy(-textOrigin);
+
+    float ignoredWidth;
+    return buildTextBlob(glyphBuffer, initialAdvance, blobBounds, ignoredWidth, couldUseLCDRenderedText);
 }
 
 FloatRect Font::selectionRectForText(const TextRun& run, const FloatPoint& point, int h, int from, int to, bool accountForGlyphBounds) const
@@ -259,10 +292,7 @@ CodePath Font::codePath(const TextRun& run) const
     if (run.length() > 1 && fontDescription().typesettingFeatures())
         return ComplexPath;
 
-    // FIXME: This really shouldn't be needed but for some reason the
-    // TextRendering setting doesn't propagate to typesettingFeatures in time
-    // for the prefs width calculation.
-    if (fontDescription().textRendering() == OptimizeLegibility || fontDescription().textRendering() == GeometricPrecision)
+    if (run.useComplexCodePath())
         return ComplexPath;
 
     if (!run.characterScanForCodePath())
@@ -376,11 +406,11 @@ static inline std::pair<GlyphData, GlyphPage*> glyphDataAndPageForNonCJKCharacte
             GlyphData uprightData = uprightPage->glyphDataForCharacter(character);
             // If the glyphs are the same, then we know we can just use the horizontal glyph rotated vertically to be upright.
             if (data.glyph == uprightData.glyph)
-                return make_pair(data, page);
+                return std::make_pair(data, page);
             // The glyphs are distinct, meaning that the font has a vertical-right glyph baked into it. We can't use that
             // glyph, so we fall back to the upright data and use the horizontal glyph.
             if (uprightData.fontData)
-                return make_pair(uprightData, uprightPage);
+                return std::make_pair(uprightData, uprightPage);
         }
     } else if (orientation == NonCJKGlyphOrientationVerticalRight) {
         RefPtr<SimpleFontData> verticalRightFontData = data.fontData->verticalRightOrientationFontData();
@@ -391,16 +421,16 @@ static inline std::pair<GlyphData, GlyphPage*> glyphDataAndPageForNonCJKCharacte
             // If the glyphs are distinct, we will make the assumption that the font has a vertical-right glyph baked
             // into it.
             if (data.glyph != verticalRightData.glyph)
-                return make_pair(data, page);
+                return std::make_pair(data, page);
             // The glyphs are identical, meaning that we should just use the horizontal glyph.
             if (verticalRightData.fontData)
-                return make_pair(verticalRightData, verticalRightPage);
+                return std::make_pair(verticalRightData, verticalRightPage);
         }
     }
-    return make_pair(data, page);
+    return std::make_pair(data, page);
 }
 
-std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, bool mirror, FontDataVariant variant) const
+std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32& c, bool mirror, bool normalizeSpace, FontDataVariant variant) const
 {
     ASSERT(isMainThread());
 
@@ -417,6 +447,9 @@ std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, b
             variant = NormalVariant;
         }
     }
+
+    if (normalizeSpace && Character::isNormalizedCanvasSpaceCharacter(c))
+        c = space;
 
     if (mirror)
         c = mirroredChar(c);
@@ -437,7 +470,7 @@ std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, b
             if (page) {
                 GlyphData data = page->glyphDataForCharacter(c);
                 if (data.fontData && (data.fontData->platformData().orientation() == Horizontal || data.fontData->isTextOrientationFallback()))
-                    return make_pair(data, page);
+                    return std::make_pair(data, page);
 
                 if (data.fontData) {
                     if (Character::isCJKIdeographOrSymbol(c)) {
@@ -451,7 +484,7 @@ std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, b
                         return glyphDataAndPageForNonCJKCharacterWithGlyphOrientation(c, m_fontDescription.nonCJKGlyphOrientation(), data, page, pageNumber);
                     }
 
-                    return make_pair(data, page);
+                    return std::make_pair(data, page);
                 }
 
                 if (node->isSystemFallback())
@@ -473,19 +506,19 @@ std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, b
                     // But if it does, we will just render the capital letter big.
                     RefPtr<SimpleFontData> variantFontData = data.fontData->variantFontData(m_fontDescription, variant);
                     if (!variantFontData)
-                        return make_pair(data, page);
+                        return std::make_pair(data, page);
 
                     GlyphPageTreeNode* variantNode = GlyphPageTreeNode::getRootChild(variantFontData.get(), pageNumber);
                     GlyphPage* variantPage = variantNode->page();
                     if (variantPage) {
                         GlyphData data = variantPage->glyphDataForCharacter(c);
                         if (data.fontData)
-                            return make_pair(data, variantPage);
+                            return std::make_pair(data, variantPage);
                     }
 
                     // Do not attempt system fallback off the variantFontData. This is the very unlikely case that
                     // a font has the lowercase character but the small caps font does not have its uppercase version.
-                    return make_pair(variantFontData->missingGlyphData(), page);
+                    return std::make_pair(variantFontData->missingGlyphData(), page);
                 }
 
                 if (node->isSystemFallback())
@@ -525,11 +558,11 @@ std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, b
         // Cache it so we don't have to do system fallback again next time.
         if (variant == NormalVariant) {
             page->setGlyphDataForCharacter(c, data.glyph, data.fontData);
-            data.fontData->setMaxGlyphPageTreeLevel(max(data.fontData->maxGlyphPageTreeLevel(), node->level()));
+            data.fontData->setMaxGlyphPageTreeLevel(std::max(data.fontData->maxGlyphPageTreeLevel(), node->level()));
             if (!Character::isCJKIdeographOrSymbol(c) && data.fontData->platformData().orientation() != Horizontal && !data.fontData->isTextOrientationFallback())
                 return glyphDataAndPageForNonCJKCharacterWithGlyphOrientation(c, m_fontDescription.nonCJKGlyphOrientation(), data, page, pageNumber);
         }
-        return make_pair(data, page);
+        return std::make_pair(data, page);
     }
 
     // Even system fallback can fail; use the missing glyph in that case.
@@ -537,9 +570,9 @@ std::pair<GlyphData, GlyphPage*> Font::glyphDataAndPageForCharacter(UChar32 c, b
     GlyphData data = primaryFont()->missingGlyphData();
     if (variant == NormalVariant) {
         page->setGlyphDataForCharacter(c, data.glyph, data.fontData);
-        data.fontData->setMaxGlyphPageTreeLevel(max(data.fontData->maxGlyphPageTreeLevel(), node->level()));
+        data.fontData->setMaxGlyphPageTreeLevel(std::max(data.fontData->maxGlyphPageTreeLevel(), node->level()));
     }
-    return make_pair(data, page);
+    return std::make_pair(data, page);
 }
 
 bool Font::primaryFontHasGlyphForCharacter(UChar32 character) const
@@ -575,7 +608,8 @@ bool Font::getEmphasisMarkGlyphData(const AtomicString& mark, GlyphData& glyphDa
         character = U16_GET_SUPPLEMENTARY(character, low);
     }
 
-    glyphData = glyphDataForCharacter(character, false, EmphasisMarkVariant);
+    bool normalizeSpace = false;
+    glyphData = glyphDataForCharacter(character, false, normalizeSpace, EmphasisMarkVariant);
     return true;
 }
 
@@ -652,18 +686,36 @@ float Font::getGlyphsAndAdvancesForSimpleText(const TextRunPaintInfo& runInfo, G
     return initialAdvance;
 }
 
-void Font::drawSimpleText(GraphicsContext* context, const TextRunPaintInfo& runInfo, const FloatPoint& point) const
+float Font::drawSimpleText(GraphicsContext* context, const TextRunPaintInfo& runInfo, const FloatPoint& point) const
 {
     // This glyph buffer holds our glyphs+advances+font data for each glyph.
     GlyphBuffer glyphBuffer;
-
-    float startX = point.x() + getGlyphsAndAdvancesForSimpleText(runInfo, glyphBuffer);
+    float initialAdvance = getGlyphsAndAdvancesForSimpleText(runInfo, glyphBuffer);
+    ASSERT(!glyphBuffer.hasVerticalAdvances());
 
     if (glyphBuffer.isEmpty())
-        return;
+        return 0;
 
-    FloatPoint startPoint(startX, point.y());
-    drawGlyphBuffer(context, runInfo, glyphBuffer, startPoint);
+    TextBlobPtr textBlob;
+    float advance = 0;
+    if (RuntimeEnabledFeatures::textBlobEnabled()) {
+        // Using text blob causes a small difference in how gradients and
+        // patterns are rendered.
+        // FIXME: Fix this, most likely in Skia.
+        if (!context->strokeGradient() && !context->strokePattern() && !context->fillGradient() && !context->fillPattern()) {
+            FloatRect blobBounds = runInfo.bounds;
+            blobBounds.moveBy(-point);
+            textBlob = buildTextBlob(glyphBuffer, initialAdvance, blobBounds, advance, context->couldUseLCDRenderedText());
+        }
+    }
+
+    if (textBlob) {
+        drawTextBlob(context, textBlob.get(), point.data());
+        return advance;
+    }
+
+    FloatPoint startPoint(point.x() + initialAdvance, point.y());
+    return drawGlyphBuffer(context, runInfo, glyphBuffer, startPoint);
 }
 
 void Font::drawEmphasisMarksForSimpleText(GraphicsContext* context, const TextRunPaintInfo& runInfo, const AtomicString& mark, const FloatPoint& point) const
@@ -677,7 +729,7 @@ void Font::drawEmphasisMarksForSimpleText(GraphicsContext* context, const TextRu
     drawEmphasisMarks(context, runInfo, glyphBuffer, mark, FloatPoint(point.x() + initialAdvance, point.y()));
 }
 
-void Font::drawGlyphBuffer(GraphicsContext* context, const TextRunPaintInfo& runInfo, const GlyphBuffer& glyphBuffer, const FloatPoint& point) const
+float Font::drawGlyphBuffer(GraphicsContext* context, const TextRunPaintInfo& runInfo, const GlyphBuffer& glyphBuffer, const FloatPoint& point) const
 {
     // Draw each contiguous run of glyphs that use the same font data.
     const SimpleFontData* fontData = glyphBuffer.fontDataAt(0);
@@ -688,6 +740,9 @@ void Font::drawGlyphBuffer(GraphicsContext* context, const TextRunPaintInfo& run
 #if ENABLE(SVG_FONTS)
     TextRun::RenderingContext* renderingContext = runInfo.run.renderingContext();
 #endif
+
+    float widthSoFar = 0;
+    widthSoFar += glyphBuffer.advanceAt(0).width();
     while (nextGlyph < glyphBuffer.size()) {
         const SimpleFontData* nextFontData = glyphBuffer.fontDataAt(nextGlyph);
 
@@ -704,6 +759,7 @@ void Font::drawGlyphBuffer(GraphicsContext* context, const TextRunPaintInfo& run
             startPoint = nextPoint;
         }
         nextPoint += glyphBuffer.advanceAt(nextGlyph);
+        widthSoFar += glyphBuffer.advanceAt(nextGlyph).width();
         nextGlyph++;
     }
 
@@ -713,6 +769,7 @@ void Font::drawGlyphBuffer(GraphicsContext* context, const TextRunPaintInfo& run
     else
 #endif
         drawGlyphs(context, fontData, glyphBuffer, lastFrom, nextGlyph - lastFrom, startPoint, runInfo.bounds);
+        return widthSoFar;
 }
 
 inline static float offsetToMiddleOfGlyph(const SimpleFontData* fontData, Glyph glyph)

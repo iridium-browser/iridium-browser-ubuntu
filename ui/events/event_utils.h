@@ -5,8 +5,10 @@
 #ifndef UI_EVENTS_EVENT_UTILS_H_
 #define UI_EVENTS_EVENT_UTILS_H_
 
+#include "base/basictypes.h"
 #include "base/event_types.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/string16.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/display.h"
@@ -87,6 +89,10 @@ EVENTS_EXPORT const char* CodeFromNative(
 EVENTS_EXPORT uint32 PlatformKeycodeFromNative(
     const base::NativeEvent& native_event);
 
+// Returns a control character sequences from a |windows_key_code|.
+EVENTS_EXPORT base::char16 GetControlCharacterForKeycode(int windows_key_code,
+                                                         bool shift);
+
 // Returns true if the keyboard event is a character event rather than
 // a keystroke event.
 EVENTS_EXPORT bool IsCharFromNative(const base::NativeEvent& native_event);
@@ -133,20 +139,20 @@ EVENTS_EXPORT float GetTouchForce(const base::NativeEvent& native_event);
 // Gets the fling velocity from a native event. is_cancel is set to true if
 // this was a tap down, intended to stop an ongoing fling.
 EVENTS_EXPORT bool GetFlingData(const base::NativeEvent& native_event,
-                            float* vx,
-                            float* vy,
-                            float* vx_ordinal,
-                            float* vy_ordinal,
-                            bool* is_cancel);
+                                float* vx,
+                                float* vy,
+                                float* vx_ordinal,
+                                float* vy_ordinal,
+                                bool* is_cancel);
 
 // Returns whether this is a scroll event and optionally gets the amount to be
 // scrolled. |x_offset|, |y_offset| and |finger_count| can be NULL.
 EVENTS_EXPORT bool GetScrollOffsets(const base::NativeEvent& native_event,
-                                float* x_offset,
-                                float* y_offset,
-                                float* x_offset_ordinal,
-                                float* y_offset_ordinal,
-                                int* finger_count);
+                                    float* x_offset,
+                                    float* y_offset,
+                                    float* x_offset_ordinal,
+                                    float* y_offset_ordinal,
+                                    int* finger_count);
 
 // Returns whether natural scrolling should be used for touchpad.
 EVENTS_EXPORT bool ShouldDefaultToNaturalScroll();

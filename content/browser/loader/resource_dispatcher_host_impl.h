@@ -49,7 +49,7 @@ namespace net {
 class URLRequestJobFactory;
 }
 
-namespace webkit_blob {
+namespace storage {
 class ShareableFileReference;
 }
 
@@ -164,10 +164,21 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   }
 
   // Called when a RenderViewHost is created.
-  void OnRenderViewHostCreated(int child_id, int route_id);
+  void OnRenderViewHostCreated(int child_id, int route_id, bool is_visible);
 
   // Called when a RenderViewHost is deleted.
   void OnRenderViewHostDeleted(int child_id, int route_id);
+
+  // Called when a RenderViewHost starts or stops loading.
+  void OnRenderViewHostSetIsLoading(int child_id,
+                                    int route_id,
+                                    bool is_loading);
+
+  // Called when a RenderViewHost is hidden.
+  void OnRenderViewHostWasHidden(int child_id, int route_id);
+
+  // Called when a RenderViewHost is shown.
+  void OnRenderViewHostWasShown(int child_id, int route_id);
 
   // Force cancels any pending requests for the given process.
   void CancelRequestsForProcess(int child_id);
@@ -216,7 +227,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // Must be called after the ResourceRequestInfo has been created
   // and associated with the request.  If |payload| is set to a non-empty value,
-  // the value will be sent to the old resource handler instead of cancelling
+  // the value will be sent to the old resource handler instead of canceling
   // it, except on HTTP errors.
   scoped_ptr<ResourceHandler> MaybeInterceptAsStream(
       net::URLRequest* request,
@@ -238,11 +249,20 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // elsewhere.
   void FinishedWithResourcesForRequest(const net::URLRequest* request_);
 
+  // PlzNavigate
   // Called by NavigationRequest to start a navigation request in the node
   // identified by |frame_node_id|.
-  void NavigationRequest(const NavigationRequestInfo& info,
-                         scoped_refptr<ResourceRequestBody> request_body,
-                         int64 frame_node_id);
+  void StartNavigationRequest(const NavigationRequestInfo& info,
+                              scoped_refptr<ResourceRequestBody> request_body,
+                              int64 navigation_request_id,
+                              int64 frame_node_id);
+
+  // PlzNavigate
+  // Called by NavigationRequest to cancel a navigation request with the
+  // provided |navigation_request_id| in the node identified by
+  // |frame_node_id|.
+  void CancelNavigationRequest(int64 navigation_request_id,
+                               int64 frame_node_id);
 
  private:
   friend class ResourceDispatcherHostTest;
@@ -434,7 +454,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // Collection of temp files downloaded for child processes via
   // the download_to_file mechanism. We avoid deleting them until
   // the client no longer needs them.
-  typedef std::map<int, scoped_refptr<webkit_blob::ShareableFileReference> >
+  typedef std::map<int, scoped_refptr<storage::ShareableFileReference> >
       DeletableFilesMap;  // key is request id
   typedef std::map<int, DeletableFilesMap>
       RegisteredTempFiles;  // key is child process id

@@ -7,9 +7,10 @@
 #include "base/strings/string_util.h"
 #include "chrome/common/extensions/api/webstore/webstore_api_constants.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -165,7 +166,7 @@ bool WebstoreBindings::GetWebstoreItemIdFromFrame(
 
     std::string candidate_webstore_item_id = webstore_url.path().substr(
         webstore_base_url.path().length());
-    if (!extensions::Extension::IdIsValid(candidate_webstore_item_id)) {
+    if (!crx_file::id_util::IdIsValid(candidate_webstore_item_id)) {
       *error = kInvalidWebstoreItemUrlError;
       return false;
     }

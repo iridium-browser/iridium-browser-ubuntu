@@ -11,6 +11,7 @@
 #include "cc/resources/returned_resource.h"
 #include "cc/surfaces/surface_aggregator.h"
 #include "cc/surfaces/surface_id.h"
+#include "cc/surfaces/surface_manager.h"
 #include "cc/surfaces/surfaces_export.h"
 
 namespace gfx {
@@ -19,6 +20,7 @@ class Size;
 
 namespace cc {
 
+class BlockingTaskRunner;
 class DirectRenderer;
 class DisplayClient;
 class OutputSurface;
@@ -28,13 +30,13 @@ class Surface;
 class SurfaceAggregator;
 class SurfaceIdAllocator;
 class SurfaceFactory;
-class SurfaceManager;
 
 // A Display produces a surface that can be used to draw to a physical display
 // (OutputSurface). The client is responsible for creating and sizing the
 // surface IDs used to draw into the display and deciding when to draw.
 class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
-                                   public RendererClient {
+                                   public RendererClient,
+                                   public SurfaceDamageObserver {
  public:
   Display(DisplayClient* client,
           SurfaceManager* manager,
@@ -45,16 +47,17 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
   bool Draw();
 
   SurfaceId CurrentSurfaceId();
+  int GetMaxFramesPending();
 
   // OutputSurfaceClient implementation.
   virtual void DeferredInitialize() OVERRIDE {}
   virtual void ReleaseGL() OVERRIDE {}
   virtual void CommitVSyncParameters(base::TimeTicks timebase,
-                                     base::TimeDelta interval) OVERRIDE {}
+                                     base::TimeDelta interval) OVERRIDE;
   virtual void SetNeedsRedrawRect(const gfx::Rect& damage_rect) OVERRIDE {}
   virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE {}
-  virtual void DidSwapBuffers() OVERRIDE {}
-  virtual void DidSwapBuffersComplete() OVERRIDE {}
+  virtual void DidSwapBuffers() OVERRIDE;
+  virtual void DidSwapBuffersComplete() OVERRIDE;
   virtual void ReclaimResources(const CompositorFrameAck* ack) OVERRIDE {}
   virtual void DidLoseOutputSurface() OVERRIDE {}
   virtual void SetExternalDrawConstraints(
@@ -70,7 +73,9 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
 
   // RendererClient implementation.
   virtual void SetFullRootLayerDamage() OVERRIDE {}
-  virtual void RunOnDemandRasterTask(Task* on_demand_raster_task) OVERRIDE {}
+
+  // SurfaceDamageObserver implementation.
+  virtual void OnSurfaceDamaged(SurfaceId surface) OVERRIDE;
 
  private:
   void InitializeOutputSurface();
@@ -85,6 +90,7 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<SurfaceAggregator> aggregator_;
   scoped_ptr<DirectRenderer> renderer_;
+  scoped_ptr<BlockingTaskRunner> blocking_main_thread_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(Display);
 };

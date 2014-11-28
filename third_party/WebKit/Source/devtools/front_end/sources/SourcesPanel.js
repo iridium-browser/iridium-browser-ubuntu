@@ -73,6 +73,10 @@ WebInspector.SourcesPanel = function(workspaceForTest)
     this._updateDebugSidebarResizeWidget();
     this._splitView.installResizer(this._debugSidebarResizeWidgetElement);
 
+    // FIXME: This is a temporary solution which should be removed as soon as the documentation module is released from experiment.
+    if (Runtime.experiments.isEnabled("documentation"))
+        self.runtime.loadModule("documentation");
+
     this.sidebarPanes = {};
     this.sidebarPanes.threads = new WebInspector.ThreadsSidebarPane();
     this.sidebarPanes.watchExpressions = new WebInspector.WatchExpressionsSidebarPane();
@@ -110,6 +114,8 @@ WebInspector.SourcesPanel = function(workspaceForTest)
 }
 
 WebInspector.SourcesPanel.minToolbarWidth = 215;
+
+WebInspector.SourcesPanel._infobarSymbol = Symbol("infobar");
 
 WebInspector.SourcesPanel.prototype = {
     /**
@@ -308,7 +314,7 @@ WebInspector.SourcesPanel.prototype = {
 
     /**
      * @param {!WebInspector.UISourceCode} uiSourceCode
-     * @param {number=} lineNumber
+     * @param {number=} lineNumber 0-based
      * @param {number=} columnNumber
      * @param {boolean=} forceShowInPanel
      */
@@ -476,7 +482,130 @@ WebInspector.SourcesPanel.prototype = {
     {
         var uiSourceCode = /** @type {!WebInspector.UISourceCode} */ (event.data);
         this._editorChanged(uiSourceCode);
-   },
+        if (Runtime.experiments.isEnabled("suggestUsingWorkspace")) {
+            if (this._editorSelectedTimer)
+                clearTimeout(this._editorSelectedTimer);
+            this._editorSelectedTimer = setTimeout(this._updateSuggestedMappingInfobar.bind(this, uiSourceCode), 3000);
+        }
+    },
+
+    /**
+     * @param {!WebInspector.UISourceCode} uiSourceCode
+     */
+    _updateSuggestedMappingInfobar: function(uiSourceCode)
+    {
+        if (!this.isShowing())
+            return;
+        if (uiSourceCode[WebInspector.SourcesPanel._infobarSymbol])
+            return;
+
+        // First try mapping filesystem -> network.
+        var uiSourceCodeFrame = this._sourcesView.viewForFile(uiSourceCode);
+        if (uiSourceCode.project().type() === WebInspector.projectTypes.FileSystem) {
+            var hasMappings = !!uiSourceCode.url;
+            if (hasMappings)
+                return;
+
+            var targets = WebInspector.targetManager.targets();
+            for (var i = 0; i < targets.length; ++i)
+                targets[i].resourceTreeModel.forAllResources(matchResource.bind(this));
+        }
+
+        /**
+         * @param {!WebInspector.Resource} resource
+         * @return {boolean}
+         * @this {WebInspector.SourcesPanel}
+         */
+        function matchResource(resource)
+        {
+            if (resource.contentURL().endsWith(uiSourceCode.name())) {
+                createMappingInfobar.call(this, false);
+                return true;
+            }
+            return false;
+        }
+
+        // Then map network -> filesystem.
+        if (uiSourceCode.project().type() === WebInspector.projectTypes.Network || uiSourceCode.project().type() === WebInspector.projectTypes.ContentScripts) {
+            if (this._workspace.uiSourceCodeForURL(uiSourceCode.url) !== uiSourceCode)
+                return;
+
+            var filesystemProjects = this._workspace.projectsForType(WebInspector.projectTypes.FileSystem);
+            for (var i = 0; i < filesystemProjects.length; ++i) {
+                var name = uiSourceCode.name();
+                var fsUiSourceCodes = filesystemProjects[i].uiSourceCodes();
+                for (var j = 0; j < fsUiSourceCodes.length; ++j) {
+                    if (fsUiSourceCodes[j].name() === name) {
+                        createMappingInfobar.call(this, true);
+                        return;
+                    }
+                }
+            }
+
+            // There are no matching filesystems. Suggest adding a filesystem in case of localhost.
+            var originURL = uiSourceCode.originURL().asParsedURL();
+            if (originURL && originURL.host === "localhost")
+                createWorkspaceInfobar();
+        }
+
+        /**
+         * @param {boolean} isNetwork
+         * @this {WebInspector.SourcesPanel}
+         */
+        function createMappingInfobar(isNetwork)
+        {
+            var title;
+            if (isNetwork)
+                title = WebInspector.UIString("Map network resource '%s' to workspace?", uiSourceCode.originURL());
+            else
+                title = WebInspector.UIString("Map workspace resource '%s' to network?", uiSourceCode.path());
+
+            var infobar = new WebInspector.UISourceCodeFrame.Infobar(WebInspector.UISourceCodeFrame.Infobar.Level.Info, title);
+            infobar.createDetailsRowMessage(WebInspector.UIString("You can map files in your workspace to the ones loaded over the network. As a result, changes made in DevTools will be persisted to disk."));
+            infobar.createDetailsRowMessage(WebInspector.UIString("Use context menu to establish the mapping at any time."));
+            var actionLink = infobar.createDetailsRowMessage("").createChild("a");
+            actionLink.href = "";
+            actionLink.onclick = establishTheMapping.bind(this);
+            actionLink.textContent = WebInspector.UIString("Establish the mapping now...");
+            appendInfobar(infobar);
+        }
+
+        /**
+         * @param {?Event} event
+         * @this {WebInspector.SourcesPanel}
+         */
+        function establishTheMapping(event)
+        {
+            event.consume(true);
+            if (uiSourceCode.project().type() === WebInspector.projectTypes.FileSystem)
+                this._mapFileSystemToNetwork(uiSourceCode);
+            else
+                this._mapNetworkToFileSystem(uiSourceCode);
+        }
+
+        function createWorkspaceInfobar()
+        {
+            var infobar = new WebInspector.UISourceCodeFrame.Infobar(WebInspector.UISourceCodeFrame.Infobar.Level.Info, WebInspector.UIString("Serving from the file system? Add your files into the workspace."));
+            infobar.createDetailsRowMessage(WebInspector.UIString("If you add files into your DevTools workspace, your changes will be persisted to disk."));
+            infobar.createDetailsRowMessage(WebInspector.UIString("To add a folder into the workspace, drag and drop it into the Sources panel."));
+            appendInfobar(infobar);
+        }
+
+        /**
+         * @param {!WebInspector.UISourceCodeFrame.Infobar} infobar
+         */
+        function appendInfobar(infobar)
+        {
+            infobar.createDetailsRowMessage("").createChild("br");
+            var rowElement = infobar.createDetailsRowMessage(WebInspector.UIString("For more information on workspaces, refer to the "));
+            var a = rowElement.createChild("a");
+            a.textContent = "workspaces documentation";
+            a.href = "https://developer.chrome.com/devtools/docs/workspaces";
+            rowElement.createTextChild(".");
+            uiSourceCode[WebInspector.SourcesPanel._infobarSymbol] = infobar;
+            uiSourceCodeFrame.attachInfobars([infobar]);
+        }
+    },
 
     /**
      * @param {!WebInspector.Event} event
@@ -872,13 +1001,14 @@ WebInspector.SourcesPanel.prototype = {
             return;
 
         var uiSourceCode = /** @type {!WebInspector.UISourceCode} */ (target);
-        var project = uiSourceCode.project();
-        if (project.type() !== WebInspector.projectTypes.FileSystem)
+        var projectType = uiSourceCode.project().type();
+        if (projectType !== WebInspector.projectTypes.FileSystem)
             contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Local modifications\u2026" : "Local Modifications\u2026"), this._showLocalHistory.bind(this, uiSourceCode));
         this._appendUISourceCodeMappingItems(contextMenu, uiSourceCode);
 
-        if (uiSourceCode.contentType() === WebInspector.resourceTypes.Script && project.type() !== WebInspector.projectTypes.Snippets)
-            this.sidebarPanes.callstack.appendBlackboxURLContextMenuItems(contextMenu, uiSourceCode.url);
+        var contentType = uiSourceCode.contentType();
+        if ((contentType === WebInspector.resourceTypes.Script || contentType === WebInspector.resourceTypes.Document) && projectType !== WebInspector.projectTypes.Snippets)
+            this.sidebarPanes.callstack.appendBlackboxURLContextMenuItems(contextMenu, uiSourceCode.url, projectType === WebInspector.projectTypes.ContentScripts);
 
         if (!event.target.isSelfOrDescendant(this.editorView.sidebarElement())) {
             contextMenu.appendSeparator();
@@ -918,7 +1048,7 @@ WebInspector.SourcesPanel.prototype = {
         if (!currentExecutionContext)
             return;
 
-        currentExecutionContext.evaluate("window", "", false, true, false, false, didGetGlobalObject.bind(null, currentExecutionContext.target()));
+        currentExecutionContext.evaluate("this", "", false, true, false, false, didGetGlobalObject.bind(null, currentExecutionContext.target()));
         /**
          * @param {!WebInspector.Target} target
          * @param {?WebInspector.RemoteObject} global
@@ -1059,8 +1189,6 @@ WebInspector.SourcesPanel.prototype = {
             sidebarPaneStack.addPane(this.sidebarPanes.domBreakpoints);
             sidebarPaneStack.addPane(this.sidebarPanes.xhrBreakpoints);
             sidebarPaneStack.addPane(this.sidebarPanes.eventListenerBreakpoints);
-            if (this.sidebarPanes.workerList)
-                sidebarPaneStack.addPane(this.sidebarPanes.workerList);
 
             var tabbedPane = new WebInspector.SidebarTabbedPane();
             tabbedPane.show(splitView.sidebarElement());
@@ -1291,7 +1419,7 @@ WebInspector.SourcesPanel.DisableJavaScriptSettingDelegate.prototype = {
         this._disableJSInfo = disableJSInfoParent.createChild("span", "object-info-state-note hidden");
         this._disableJSInfo.title = WebInspector.UIString("JavaScript is blocked on the inspected page (may be disabled in browser settings).");
 
-        WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._updateScriptDisabledCheckbox, this);
+        WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.MainFrameNavigated, this._updateScriptDisabledCheckbox, this);
         this._updateScriptDisabledCheckbox();
         return disableJSElement;
     },

@@ -19,20 +19,21 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "sql/init_status.h"
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/history/android/android_history_types.h"
+#include "components/history/core/android/android_history_types.h"
 #endif
 
 class HistoryURLProvider;
 struct HistoryURLProviderParams;
 struct ImportedFaviconUsage;
+class SkBitmap;
 class TestingProfile;
 struct ThumbnailScore;
 
@@ -118,6 +119,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     // there may be no in-memory database.
     virtual void SetInMemoryBackend(
         scoped_ptr<InMemoryHistoryBackend> backend) = 0;
+
+    // Notify HistoryService that some URLs favicon changed that will forward
+    // the events to the FaviconChangedObservers in the correct thread.
+    virtual void NotifyFaviconChanged(const std::set<GURL>& urls) = 0;
 
     // Broadcasts the specified notification to the notification service.
     // This is implemented here because notifications must only be sent from
@@ -266,8 +271,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   void SetFavicons(const GURL& page_url,
                    favicon_base::IconType icon_type,
-                   const std::vector<favicon_base::FaviconRawBitmapData>&
-                       favicon_bitmap_data);
+                   const GURL& icon_url,
+                   const std::vector<SkBitmap>& bitmaps);
 
   void SetFaviconsOutOfDateForPage(const GURL& page_url);
 
@@ -546,7 +551,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                            GetFaviconsFromDBNoFaviconBitmaps);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            GetFaviconsFromDBSelectClosestMatch);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBSingleIconURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBIconType);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBExpired);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
@@ -609,7 +613,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   std::pair<URLID, VisitID> AddPageVisit(const GURL& url,
                                          base::Time time,
                                          VisitID referring_visit,
-                                         content::PageTransition transition,
+                                         ui::PageTransition transition,
                                          VisitSource visit_source);
 
   // Returns a redirect chain in |redirects| for the VisitID
@@ -668,7 +672,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   SegmentID UpdateSegments(const GURL& url,
                            VisitID from_visit,
                            VisitID visit_id,
-                           content::PageTransition transition_type,
+                           ui::PageTransition transition_type,
                            const base::Time ts);
 
   // Favicons ------------------------------------------------------------------
@@ -689,28 +693,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       std::vector<favicon_base::FaviconRawBitmapResult>* results);
 
   // Set the favicon bitmaps for |icon_id|.
-  // For each entry in |favicon_bitmap_data|, if a favicon bitmap already
-  // exists at the entry's pixel size, replace the favicon bitmap's data with
-  // the entry's bitmap data. Otherwise add a new favicon bitmap.
-  // Any favicon bitmaps already mapped to |icon_id| whose pixel sizes are not
-  // in |favicon_bitmap_data| are deleted.
-  // If not NULL, |favicon_bitmaps_changed| is set to whether any of the bitmap
-  // data at |icon_id| is changed as a result of calling this method.
-  // Computing |favicon_bitmaps_changed| requires additional database queries
-  // so should be avoided if unnecessary.
-  void SetFaviconBitmaps(favicon_base::FaviconID icon_id,
-                         const std::vector<favicon_base::FaviconRawBitmapData>&
-                             favicon_bitmap_data,
-                         bool* favicon_bitmaps_changed);
-
-  // Returns true if |favicon_bitmap_data| passed to SetFavicons() is valid.
-  // Criteria:
-  // 1) |favicon_bitmap_data| contains no more than
-  //      kMaxFaviconsPerPage unique icon URLs.
-  //      kMaxFaviconBitmapsPerIconURL favicon bitmaps for each icon URL.
-  // 2) FaviconRawBitmapData::bitmap_data contains non NULL bitmap data.
-  bool ValidateSetFaviconsParams(const std::vector<
-      favicon_base::FaviconRawBitmapData>& favicon_bitmap_data) const;
+  // For each entry in |bitmaps|, if a favicon bitmap already exists at the
+  // entry's pixel size, replace the favicon bitmap's data with the entry's
+  // bitmap data. Otherwise add a new favicon bitmap.
+  // Any favicon bitmaps already mapped to |icon_id| whose pixel size does not
+  // match the pixel size of one of |bitmaps| is deleted.
+  // Returns true if any of the bitmap data at |icon_id| is changed as a result
+  // of calling this method.
+  bool SetFaviconBitmaps(favicon_base::FaviconID icon_id,
+                         const std::vector<SkBitmap>& bitmaps);
 
   // Returns true if the bitmap data at |bitmap_id| equals |new_bitmap_data|.
   bool IsFaviconBitmapDataEqual(

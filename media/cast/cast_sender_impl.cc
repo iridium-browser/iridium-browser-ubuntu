@@ -9,7 +9,6 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "media/base/video_frame.h"
-#include "media/cast/net/rtcp/rtcp_receiver.h"
 
 namespace media {
 namespace cast {
@@ -78,7 +77,7 @@ class LocalAudioFrameInput : public AudioFrameInput {
 scoped_ptr<CastSender> CastSender::Create(
     scoped_refptr<CastEnvironment> cast_environment,
     CastTransportSender* const transport_sender) {
-  CHECK(cast_environment);
+  CHECK(cast_environment.get());
   return scoped_ptr<CastSender>(
       new CastSenderImpl(cast_environment, transport_sender));
 }
@@ -89,7 +88,7 @@ CastSenderImpl::CastSenderImpl(
     : cast_environment_(cast_environment),
       transport_sender_(transport_sender),
       weak_factory_(this) {
-  CHECK(cast_environment);
+  CHECK(cast_environment.get());
 }
 
 void CastSenderImpl::InitializeAudio(
@@ -106,11 +105,14 @@ void CastSenderImpl::InitializeAudio(
 
   const CastInitializationStatus status = audio_sender_->InitializationResult();
   if (status == STATUS_AUDIO_INITIALIZED) {
-    ssrc_of_audio_sender_ = audio_config.incoming_feedback_ssrc;
     audio_frame_input_ =
         new LocalAudioFrameInput(cast_environment_, audio_sender_->AsWeakPtr());
   }
   cast_initialization_cb.Run(status);
+  if (video_sender_) {
+    DCHECK(audio_sender_->GetTargetPlayoutDelay() ==
+           video_sender_->GetTargetPlayoutDelay());
+  }
 }
 
 void CastSenderImpl::InitializeVideo(
@@ -124,19 +126,20 @@ void CastSenderImpl::InitializeVideo(
 
   VLOG(1) << "CastSenderImpl@" << this << "::InitializeVideo()";
 
-  video_sender_.reset(new VideoSender(cast_environment_,
-                                      video_config,
-                                      create_vea_cb,
-                                      create_video_encode_mem_cb,
-                                      transport_sender_));
-
-  const CastInitializationStatus status = video_sender_->InitializationResult();
-  if (status == STATUS_VIDEO_INITIALIZED) {
-    ssrc_of_video_sender_ = video_config.incoming_feedback_ssrc;
-    video_frame_input_ =
-        new LocalVideoFrameInput(cast_environment_, video_sender_->AsWeakPtr());
+  video_sender_.reset(new VideoSender(
+      cast_environment_,
+      video_config,
+      base::Bind(&CastSenderImpl::OnVideoInitialized,
+                 weak_factory_.GetWeakPtr(), cast_initialization_cb),
+      create_vea_cb,
+      create_video_encode_mem_cb,
+      transport_sender_,
+      base::Bind(&CastSenderImpl::SetTargetPlayoutDelay,
+                 weak_factory_.GetWeakPtr())));
+  if (audio_sender_) {
+    DCHECK(audio_sender_->GetTargetPlayoutDelay() ==
+           video_sender_->GetTargetPlayoutDelay());
   }
-  cast_initialization_cb.Run(status);
 }
 
 CastSenderImpl::~CastSenderImpl() {
@@ -149,6 +152,27 @@ scoped_refptr<AudioFrameInput> CastSenderImpl::audio_frame_input() {
 
 scoped_refptr<VideoFrameInput> CastSenderImpl::video_frame_input() {
   return video_frame_input_;
+}
+
+void CastSenderImpl::SetTargetPlayoutDelay(
+    base::TimeDelta new_target_playout_delay) {
+  VLOG(1) << "CastSenderImpl@" << this << "::SetTargetPlayoutDelay("
+          << new_target_playout_delay.InMilliseconds() << " ms)";
+  if (audio_sender_) {
+    audio_sender_->SetTargetPlayoutDelay(new_target_playout_delay);
+  }
+  if (video_sender_) {
+    video_sender_->SetTargetPlayoutDelay(new_target_playout_delay);
+  }
+}
+
+void CastSenderImpl::OnVideoInitialized(
+    const CastInitializationCallback& initialization_cb,
+    media::cast::CastInitializationStatus result) {
+  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
+  video_frame_input_ =
+      new LocalVideoFrameInput(cast_environment_, video_sender_->AsWeakPtr());
+  initialization_cb.Run(result);
 }
 
 }  // namespace cast

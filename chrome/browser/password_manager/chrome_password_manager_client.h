@@ -25,6 +25,7 @@ class WebContents;
 }
 
 namespace password_manager {
+struct CredentialInfo;
 class PasswordGenerationManager;
 class PasswordManager;
 }
@@ -45,7 +46,7 @@ class ChromePasswordManagerClient
   virtual bool IsSyncAccountCredential(
       const std::string& username, const std::string& origin) const OVERRIDE;
   virtual void AutofillResultsComputed() OVERRIDE;
-  virtual void PromptUserToSavePassword(
+  virtual bool PromptUserToSavePassword(
       scoped_ptr<password_manager::PasswordFormManager> form_to_save) OVERRIDE;
   virtual void AutomaticPasswordSave(
       scoped_ptr<password_manager::PasswordFormManager> saved_form_manager)
@@ -65,6 +66,17 @@ class ChromePasswordManagerClient
   virtual void OnLogRouterAvailabilityChanged(bool router_can_be_used) OVERRIDE;
   virtual void LogSavePasswordProgress(const std::string& text) OVERRIDE;
   virtual bool IsLoggingActive() const OVERRIDE;
+  virtual void OnNotifyFailedSignIn(
+      int request_id,
+      const password_manager::CredentialInfo&) OVERRIDE;
+  virtual void OnNotifySignedIn(
+      int request_id,
+      const password_manager::CredentialInfo&) OVERRIDE;
+  virtual void OnNotifySignedOut(int request_id) OVERRIDE;
+  virtual void OnRequestCredential(
+      int request_id,
+      bool zero_click_only,
+      const std::vector<GURL>& federations) OVERRIDE;
 
   // Hides any visible generation UI.
   void HidePasswordGenerationPopup();
@@ -156,9 +168,6 @@ class ChromePasswordManagerClient
   base::WeakPtr<
     autofill::PasswordGenerationPopupControllerImpl> popup_controller_;
 
-  // Allows authentication callbacks to be destroyed when this client is gone.
-  base::WeakPtrFactory<ChromePasswordManagerClient> weak_factory_;
-
   // True if |this| is registered with some LogRouter which can accept logs.
   bool can_use_log_router_;
 
@@ -168,6 +177,9 @@ class ChromePasswordManagerClient
   // If the sync credential was filtered during autofill. Used for statistics
   // reporting.
   bool sync_credential_was_filtered_;
+
+  // Allows authentication callbacks to be destroyed when this client is gone.
+  base::WeakPtrFactory<ChromePasswordManagerClient> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromePasswordManagerClient);
 };

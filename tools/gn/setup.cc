@@ -11,15 +11,15 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/process/launch.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "tools/gn/commands.h"
 #include "tools/gn/filesystem_utils.h"
-#include "tools/gn/header_checker.h"
 #include "tools/gn/input_file.h"
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/parser.h"
@@ -66,7 +66,7 @@ extern const char kDotfile_Help[] =
     "  secondary_source [optional]\n"
     "      Label of an alternate directory tree to find input files. When\n"
     "      searching for a BUILD.gn file (or the build config file discussed\n"
-    "      above), the file fill first be looked for in the source root.\n"
+    "      above), the file will first be looked for in the source root.\n"
     "      If it's not found, the secondary source root will be checked\n"
     "      (which would contain a parallel directory hierarchy).\n"
     "\n"
@@ -188,19 +188,12 @@ bool CommonSetup::RunPostMessageLoop() {
   }
 
   if (check_public_headers_) {
-    std::vector<const Target*> targets = builder_->GetAllResolvedTargets();
-    scoped_refptr<HeaderChecker> header_checker(
-        new HeaderChecker(&build_settings_, targets));
-
-    std::vector<Err> header_errors;
-    header_checker->Run(&header_errors);
-    for (size_t i = 0; i < header_errors.size(); i++) {
-      if (i > 0)
-        OutputString("___________________\n", DECORATION_YELLOW);
-      header_errors[i].PrintToStdout();
-    }
-    if (!header_errors.empty())
+    if (!commands::CheckPublicHeaders(&build_settings_,
+                                      builder_->GetAllResolvedTargets(),
+                                      std::vector<const Target*>(),
+                                      false)) {
       return false;
+    }
   }
 
   // Write out tracing and timing if requested.
@@ -232,7 +225,7 @@ Setup::Setup()
 Setup::~Setup() {
 }
 
-bool Setup::DoSetup(const std::string& build_dir) {
+bool Setup::DoSetup(const std::string& build_dir, bool force_create) {
   CommandLine* cmdline = CommandLine::ForCurrentProcess();
 
   scheduler_.set_verbose_logging(cmdline->HasSwitch(kSwitchVerbose));
@@ -248,8 +241,11 @@ bool Setup::DoSetup(const std::string& build_dir) {
     return false;
   if (!FillOtherConfig(*cmdline))
     return false;
-  if (!FillBuildDir(build_dir))  // Must be after FillSourceDir to resolve.
+
+  // Must be after FillSourceDir to resolve.
+  if (!FillBuildDir(build_dir, !force_create))
     return false;
+
   if (fill_arguments_) {
     if (!FillArguments(*cmdline))
       return false;
@@ -445,7 +441,7 @@ bool Setup::FillSourceDir(const CommandLine& cmdline) {
   return true;
 }
 
-bool Setup::FillBuildDir(const std::string& build_dir) {
+bool Setup::FillBuildDir(const std::string& build_dir, bool require_exists) {
   SourceDir resolved =
       SourceDirForCurrentDirectory(build_settings_.root_path()).
           ResolveRelativeDir(build_dir);
@@ -458,6 +454,21 @@ bool Setup::FillBuildDir(const std::string& build_dir) {
 
   if (scheduler_.verbose_logging())
     scheduler_.Log("Using build dir", resolved.value());
+
+  if (require_exists) {
+    base::FilePath build_dir_path = build_settings_.GetFullPath(resolved);
+    if (!base::PathExists(build_dir_path.Append(
+            FILE_PATH_LITERAL("build.ninja")))) {
+      Err(Location(), "Not a build directory.",
+          "This command requires an existing build directory. I interpreted "
+          "your input\n\"" + build_dir + "\" as:\n  " +
+          FilePathToUTF8(build_dir_path) +
+          "\nwhich doesn't seem to contain a previously-generated build.")
+          .PrintToStdout();
+      return false;
+    }
+  }
+
   build_settings_.SetBuildDir(resolved);
   return true;
 }

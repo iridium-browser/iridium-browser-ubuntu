@@ -81,10 +81,15 @@ void ServiceWorkerMessageFilter::OnStaleMessageReceived(
 void ServiceWorkerMessageFilter::OnStaleRegistered(
     int thread_id,
     int request_id,
-    int registration_handle_id,
-    const ServiceWorkerObjectInfo& info) {
-  SendServiceWorkerObjectDestroyed(thread_safe_sender_, info.handle_id);
-  SendRegistrationObjectDestroyed(thread_safe_sender_, registration_handle_id);
+    const ServiceWorkerRegistrationObjectInfo& info,
+    const ServiceWorkerVersionAttributes& attrs) {
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(),
+                                   attrs.installing.handle_id);
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(),
+                                   attrs.waiting.handle_id);
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(),
+                                   attrs.active.handle_id);
+  SendRegistrationObjectDestroyed(thread_safe_sender_.get(), info.handle_id);
 }
 
 void ServiceWorkerMessageFilter::OnStaleSetVersionAttributes(
@@ -92,21 +97,22 @@ void ServiceWorkerMessageFilter::OnStaleSetVersionAttributes(
     int provider_id,
     int registration_handle_id,
     int changed_mask,
-    const ServiceWorkerVersionAttributes& attributes) {
-  SendServiceWorkerObjectDestroyed(thread_safe_sender_,
-                                   attributes.installing.handle_id);
-  SendServiceWorkerObjectDestroyed(thread_safe_sender_,
-                                   attributes.waiting.handle_id);
-  SendServiceWorkerObjectDestroyed(thread_safe_sender_,
-                                   attributes.active.handle_id);
-  SendRegistrationObjectDestroyed(thread_safe_sender_, registration_handle_id);
+    const ServiceWorkerVersionAttributes& attrs) {
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(),
+                                   attrs.installing.handle_id);
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(),
+                                   attrs.waiting.handle_id);
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(),
+                                   attrs.active.handle_id);
+  SendRegistrationObjectDestroyed(thread_safe_sender_.get(),
+                                  registration_handle_id);
 }
 
 void ServiceWorkerMessageFilter::OnStaleSetControllerServiceWorker(
     int thread_id,
     int provider_id,
     const ServiceWorkerObjectInfo& info) {
-  SendServiceWorkerObjectDestroyed(thread_safe_sender_, info.handle_id);
+  SendServiceWorkerObjectDestroyed(thread_safe_sender_.get(), info.handle_id);
 }
 
 }  // namespace content

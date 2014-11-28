@@ -40,6 +40,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/locale_settings.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
@@ -51,9 +54,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/locale_settings.h"
+#include "grit/components_strings.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -310,8 +311,8 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
                                             bool passphrase_failed) {
   // Should never call this when we are not signed in.
-  DCHECK(!SigninManagerFactory::GetForProfile(
-      GetProfile())->GetAuthenticatedUsername().empty());
+  DCHECK(SigninManagerFactory::GetForProfile(
+      GetProfile())->IsAuthenticated());
   ProfileSyncService* service = GetSyncService();
   DCHECK(service);
   if (!service->sync_initialized()) {
@@ -355,16 +356,18 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
   // Tell the UI layer which data types are registered/enabled by the user.
   const syncer::ModelTypeSet registered_types =
       service->GetRegisteredDataTypes();
-  const syncer::ModelTypeSet preferred_types =
-      service->GetPreferredDataTypes();
+  const syncer::ModelTypeSet preferred_types = service->GetPreferredDataTypes();
+  const syncer::ModelTypeSet enforced_types = service->GetForcedDataTypes();
   ModelTypeNameMap type_names = GetSelectableTypeNameMap();
   for (ModelTypeNameMap::const_iterator it = type_names.begin();
        it != type_names.end(); ++it) {
     syncer::ModelType sync_type = it->first;
     const std::string key_name = it->second;
-    args.SetBoolean(key_name + "Registered",
-                    registered_types.Has(sync_type));
+    args.SetBoolean(key_name + "Registered", registered_types.Has(sync_type));
     args.SetBoolean(key_name + "Synced", preferred_types.Has(sync_type));
+    args.SetBoolean(key_name + "Enforced", enforced_types.Has(sync_type));
+    // TODO(treib): How do we want to handle pref groups, i.e. when only some of
+    // the sync types behind a checkbox are force-enabled? crbug.com/403326
   }
   sync_driver::SyncPrefs sync_prefs(GetProfile()->GetPrefs());
   args.SetBoolean("passphraseFailed", passphrase_failed);
@@ -372,7 +375,7 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
   args.SetBoolean("syncAllDataTypes", sync_prefs.HasKeepEverythingSynced());
   args.SetBoolean("syncNothing", false);  // Always false during initial setup.
   args.SetBoolean("encryptAllData", service->EncryptEverythingEnabled());
-  args.SetBoolean("isSupervised", GetProfile()->IsSupervised());
+  args.SetBoolean("encryptAllDataAllowed", service->EncryptEverythingAllowed());
 
   // We call IsPassphraseRequired() here, instead of calling
   // IsPassphraseRequiredForDecryption(), because we want to show the passphrase
@@ -508,19 +511,20 @@ void SyncSetupHandler::DisplayGaiaLogin() {
 void SyncSetupHandler::DisplayGaiaLoginInNewTabOrWindow() {
   Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
+  bool force_new_tab = false;
   if (!browser) {
     // Settings is not displayed in a browser window. Open a new window.
     browser = new Browser(Browser::CreateParams(
         Browser::TYPE_TABBED, GetProfile(), chrome::GetActiveDesktop()));
+    force_new_tab = true;
   }
 
   // If the signin manager already has an authenticated username, this is a
   // re-auth scenario, and we need to ensure that the user signs in with the
   // same email address.
   GURL url;
-  std::string email = SigninManagerFactory::GetForProfile(
-      browser->profile())->GetAuthenticatedUsername();
-  if (!email.empty()) {
+  if (SigninManagerFactory::GetForProfile(
+      browser->profile())->IsAuthenticated()) {
     UMA_HISTOGRAM_ENUMERATION("Signin.Reauth",
                               signin::HISTOGRAM_SHOWN,
                               signin::HISTOGRAM_MAX);
@@ -529,7 +533,7 @@ void SyncSetupHandler::DisplayGaiaLoginInNewTabOrWindow() {
         ProfileOAuth2TokenServiceFactory::GetForProfile(browser->profile())->
             signin_error_controller();
     DCHECK(error_controller->HasError());
-    if (switches::IsNewAvatarMenu()) {
+    if (switches::IsNewAvatarMenu() && !force_new_tab) {
       browser->window()->ShowAvatarBubbleFromAvatarButton(
           BrowserWindow::AVATAR_BUBBLE_MODE_REAUTH,
           signin::ManageAccountsParams());
@@ -538,7 +542,7 @@ void SyncSetupHandler::DisplayGaiaLoginInNewTabOrWindow() {
                                  error_controller->error_account_id());
     }
   } else {
-    if (switches::IsNewAvatarMenu()) {
+    if (switches::IsNewAvatarMenu() && !force_new_tab) {
       browser->window()->ShowAvatarBubbleFromAvatarButton(
           BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
           signin::ManageAccountsParams());
@@ -553,7 +557,6 @@ void SyncSetupHandler::DisplayGaiaLoginInNewTabOrWindow() {
 #endif
 
 bool SyncSetupHandler::PrepareSyncSetup() {
-
   // If the wizard is already visible, just focus that one.
   if (FocusExistingWizardIfPresent()) {
     if (!IsActiveLogin())
@@ -679,9 +682,10 @@ void SyncSetupHandler::HandleConfigure(const base::ListValue* args) {
     return;
   }
 
-  // Don't allow supervised users to enable "encrypt all". The UI is hidden,
-  // but the user may have enabled it e.g. by fiddling with the web inspector.
-  if (GetProfile()->IsSupervised())
+  // Don't allow "encrypt all" if the ProfileSyncService doesn't allow it.
+  // The UI is hidden, but the user may have enabled it e.g. by fiddling with
+  // the web inspector.
+  if (!service->EncryptEverythingAllowed())
     configuration.encrypt_all = false;
 
   // Note: Data encryption will not occur until configuration is complete
@@ -767,7 +771,7 @@ void SyncSetupHandler::HandleShowSetupUI(const base::ListValue* args) {
 
   SigninManagerBase* signin =
       SigninManagerFactory::GetForProfile(GetProfile());
-  if (signin->GetAuthenticatedUsername().empty()) {
+  if (!signin->IsAuthenticated()) {
     // For web-based signin, the signin page is not displayed in an overlay
     // on the settings page. So if we get here, it must be due to the user
     // cancelling signin (by reloading the sync settings page during initial
@@ -805,8 +809,8 @@ void SyncSetupHandler::HandleDoSignOutOnAuthError(const base::ListValue* args) {
 #if !defined(OS_CHROMEOS)
 void SyncSetupHandler::HandleStartSignin(const base::ListValue* args) {
   // Should only be called if the user is not already signed in.
-  DCHECK(SigninManagerFactory::GetForProfile(GetProfile())->
-      GetAuthenticatedUsername().empty());
+  DCHECK(!SigninManagerFactory::GetForProfile(GetProfile())->
+      IsAuthenticated());
   OpenSyncSetup();
 }
 
@@ -885,8 +889,7 @@ void SyncSetupHandler::OpenSyncSetup() {
 
   // There are several different UI flows that can bring the user here:
   // 1) Signin promo.
-  // 2) Normal signin through settings page (GetAuthenticatedUsername() is
-  //    empty).
+  // 2) Normal signin through settings page (IsAuthenticated() is false).
   // 3) Previously working credentials have expired.
   // 4) User is signed in, but has stopped sync via the google dashboard, and
   //    signout is prohibited by policy so we need to force a re-auth.
@@ -899,7 +902,7 @@ void SyncSetupHandler::OpenSyncSetup() {
   SigninManagerBase* signin =
       SigninManagerFactory::GetForProfile(GetProfile());
 
-  if (signin->GetAuthenticatedUsername().empty() ||
+  if (!signin->IsAuthenticated() ||
       ProfileOAuth2TokenServiceFactory::GetForProfile(GetProfile())->
           signin_error_controller()->HasError()) {
     // User is not logged in (cases 1-2), or login has been specially requested

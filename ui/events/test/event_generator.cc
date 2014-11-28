@@ -7,7 +7,8 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
 #include "ui/events/event.h"
 #include "ui/events/event_source.h"
@@ -47,7 +48,7 @@ class TestTouchEvent : public ui::TouchEvent {
                  int flags,
                  base::TimeDelta timestamp)
       : TouchEvent(type, root_location, flags, touch_id, timestamp,
-                   1.0f, 1.0f, 1.0f, 1.0f) {
+                   1.0f, 1.0f, 0.0f, 0.0f) {
   }
 
  private:
@@ -247,11 +248,7 @@ void EventGenerator::PressMoveAndReleaseTouchToCenterOf(EventTarget* window) {
 
 void EventGenerator::GestureEdgeSwipe() {
   ui::GestureEvent gesture(
-      0,
-      0,
-      0,
-      Now(),
-      ui::GestureEventDetails(ui::ET_GESTURE_WIN8_EDGE_SWIPE, 0, 0));
+      0, 0, 0, Now(), ui::GestureEventDetails(ui::ET_GESTURE_WIN8_EDGE_SWIPE));
   Dispatch(&gesture);
 }
 
@@ -589,7 +586,7 @@ void EventGenerator::DoDispatchEvent(ui::Event* event, bool async) {
       return;
     }
     if (pending_events_.empty()) {
-      base::MessageLoopProxy::current()->PostTask(
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(&EventGenerator::DispatchNextPendingEvent,
                      base::Unretained(this)));
@@ -611,7 +608,7 @@ void EventGenerator::DispatchNextPendingEvent() {
   pending_events_.pop_front();
   delete event;
   if (!pending_events_.empty()) {
-    base::MessageLoopProxy::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&EventGenerator::DispatchNextPendingEvent,
                    base::Unretained(this)));

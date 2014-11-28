@@ -19,7 +19,9 @@ GestureEventData CreateGesture(EventType type,
                                int motion_event_id,
                                MotionEvent::ToolType primary_tool_type,
                                const GestureEventDataPacket& packet) {
-  return GestureEventData(GestureEventDetails(type, 0, 0),
+  // As the event is purely synthetic, we needn't be strict with event flags.
+  int flags = EF_NONE;
+  return GestureEventData(GestureEventDetails(type),
                           motion_event_id,
                           primary_tool_type,
                           packet.timestamp(),
@@ -28,7 +30,8 @@ GestureEventData CreateGesture(EventType type,
                           packet.raw_touch_location().x(),
                           packet.raw_touch_location().y(),
                           1,
-                          gfx::RectF(packet.touch_location(), gfx::SizeF()));
+                          gfx::RectF(packet.touch_location(), gfx::SizeF()),
+                          flags);
 }
 
 enum RequiredTouches {
@@ -219,7 +222,7 @@ void TouchDispositionGestureFilter::FilterAndSendPacket(
   } else if (packet.gesture_source() == GestureEventDataPacket::TOUCH_START) {
     CancelTapIfNecessary(packet);
   }
-
+  int gesture_end_index = -1;
   for (size_t i = 0; i < packet.gesture_count(); ++i) {
     const GestureEventData& gesture = packet.gesture(i);
     DCHECK_GE(gesture.details.type(), ET_GESTURE_TYPE_START);
@@ -232,9 +235,20 @@ void TouchDispositionGestureFilter::FilterAndSendPacket(
       // Sending a timed gesture could delete |this|, so we need to return
       // directly after the |SendGesture| call.
       SendGesture(gesture, packet);
+      // We should not have a timeout gesture and other gestures in the same
+      // packet.
+      DCHECK_EQ(1U, packet.gesture_count());
       return;
     }
-
+    // Occasionally scroll or tap cancel events are synthesized when a touch
+    // sequence has been canceled or terminated, we want to make sure that
+    // ET_GESTURE_END always happens after them.
+    if (gesture.type() == ET_GESTURE_END) {
+      // Make sure there is at most one ET_GESTURE_END event in each packet.
+      DCHECK_EQ(-1, gesture_end_index);
+      gesture_end_index = static_cast<int>(i);
+      continue;
+    }
     SendGesture(gesture, packet);
   }
 
@@ -246,6 +260,9 @@ void TouchDispositionGestureFilter::FilterAndSendPacket(
              GestureEventDataPacket::TOUCH_SEQUENCE_END) {
     EndScrollIfNecessary(packet);
   }
+  // Always send the ET_GESTURE_END event as the last one for every touch event.
+  if (gesture_end_index >= 0)
+    SendGesture(packet.gesture(gesture_end_index), packet);
 }
 
 void TouchDispositionGestureFilter::SendGesture(

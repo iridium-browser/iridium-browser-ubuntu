@@ -50,7 +50,7 @@ WebInspector.CSSStyleModel = function(target)
     /** @type {!StringMap.<!Object.<!PageAgent.FrameId, !Array.<!CSSAgent.StyleSheetId>>>} */
     this._styleSheetIdsForURL = new StringMap();
 
-    if (WebInspector.experimentsSettings.disableAgentsWhenProfile.isEnabled())
+    if (Runtime.experiments.isEnabled("disableAgentsWhenProfile"))
         WebInspector.profilingLock().addEventListener(WebInspector.Lock.Events.StateChanged, this._profilingStateChanged, this);
 }
 
@@ -480,10 +480,10 @@ WebInspector.CSSStyleModel.prototype = {
     {
         console.assert(!this._styleSheetIdToHeader.get(header.styleSheetId));
         var styleSheetHeader = new WebInspector.CSSStyleSheetHeader(this, header);
-        this._styleSheetIdToHeader.put(header.styleSheetId, styleSheetHeader);
+        this._styleSheetIdToHeader.set(header.styleSheetId, styleSheetHeader);
         var url = styleSheetHeader.resourceURL();
         if (!this._styleSheetIdsForURL.get(url))
-            this._styleSheetIdsForURL.put(url, {});
+            this._styleSheetIdsForURL.set(url, {});
         var frameIdToStyleSheetIds = this._styleSheetIdsForURL.get(url);
         var styleSheetIds = frameIdToStyleSheetIds[styleSheetHeader.frameId];
         if (!styleSheetIds) {
@@ -1257,6 +1257,45 @@ WebInspector.CSSProperty.prototype = {
 
 /**
  * @constructor
+ * @param {!CSSAgent.MediaQuery} payload
+ */
+WebInspector.CSSMediaQuery = function(payload)
+{
+    this._active = payload.active;
+    this._expressions = [];
+    for (var j = 0; j < payload.expressions.length; ++j)
+        this._expressions.push(WebInspector.CSSMediaQueryExpression.parsePayload(payload.expressions[j]));
+}
+
+/**
+ * @param {!CSSAgent.MediaQuery} payload
+ * @return {!WebInspector.CSSMediaQuery}
+ */
+WebInspector.CSSMediaQuery.parsePayload = function(payload)
+{
+    return new WebInspector.CSSMediaQuery(payload);
+}
+
+WebInspector.CSSMediaQuery.prototype = {
+    /**
+     * @return {boolean}
+     */
+    active: function()
+    {
+        return this._active;
+    },
+
+    /**
+     * @return {!Array.<!WebInspector.CSSMediaQueryExpression>}
+     */
+    expressions: function()
+    {
+        return this._expressions;
+    }
+}
+
+/**
+ * @constructor
  * @param {!CSSAgent.MediaQueryExpression} payload
  */
 WebInspector.CSSMediaQueryExpression = function(payload)
@@ -1327,13 +1366,8 @@ WebInspector.CSSMedia = function(cssModel, payload)
     this.mediaList = null;
     if (payload.mediaList) {
         this.mediaList = [];
-        for (var i = 0; i < payload.mediaList.length; ++i) {
-            var mediaQueryPayload = payload.mediaList[i];
-            var mediaQueryExpressions = [];
-            for (var j = 0; j < mediaQueryPayload.length; ++j)
-                mediaQueryExpressions.push(WebInspector.CSSMediaQueryExpression.parsePayload(mediaQueryPayload[j]));
-            this.mediaList.push(mediaQueryExpressions);
-        }
+        for (var i = 0; i < payload.mediaList.length; ++i)
+            this.mediaList.push(WebInspector.CSSMediaQuery.parsePayload(payload.mediaList[i]));
     }
 }
 

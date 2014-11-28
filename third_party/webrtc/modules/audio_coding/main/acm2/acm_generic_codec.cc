@@ -622,13 +622,6 @@ int16_t ACMGenericCodec::CreateEncoder() {
   return status;
 }
 
-void ACMGenericCodec::DestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WriteLockScoped lockCodec(codec_wrapper_lock_);
-    InternalDestructEncoderInst(ptr_inst);
-  }
-}
-
 uint32_t ACMGenericCodec::EarliestTimestamp() const {
   ReadLockScoped cs(codec_wrapper_lock_);
   return in_timestamp_[0];
@@ -1000,9 +993,9 @@ int16_t ACMGenericCodec::REDPayloadISAC(const int32_t /* isac_rate */,
   return -1;
 }
 
-int ACMGenericCodec::SetOpusMaxBandwidth(int /* max_bandwidth */) {
+int ACMGenericCodec::SetOpusMaxPlaybackRate(int /* frequency_hz */) {
   WEBRTC_TRACE(webrtc::kTraceWarning, webrtc::kTraceAudioCoding, unique_id_,
-               "The send-codec is not Opus, failed to set maximum bandwidth.");
+      "The send-codec is not Opus, failed to set maximum playback rate.");
   return -1;
 }
 

@@ -235,6 +235,10 @@ OPENSSL_EXPORT long BIO_callback_ctrl(BIO *bio, int cmd, bio_info_cb fp);
 /* BIO_pending returns the number of bytes pending to be read. */
 OPENSSL_EXPORT size_t BIO_pending(const BIO *bio);
 
+/* BIO_ctrl_pending calls |BIO_pending| and exists only for compatibility with
+ * OpenSSL. */
+OPENSSL_EXPORT size_t BIO_ctrl_pending(const BIO *bio);
+
 /* BIO_wpending returns the number of bytes pending to be written. */
 OPENSSL_EXPORT size_t BIO_wpending(const BIO *bio);
 
@@ -255,6 +259,14 @@ OPENSSL_EXPORT void BIO_set_callback_arg(BIO *bio, char *arg);
 /* BIO_get_callback_arg returns the last value of the opaque callback pointer
  * set by |BIO_set_callback_arg|. */
 OPENSSL_EXPORT char *BIO_get_callback_arg(const BIO *bio);
+
+/* BIO_number_read returns the number of bytes that have been read from
+ * |bio|. */
+OPENSSL_EXPORT size_t BIO_number_read(const BIO *bio);
+
+/* BIO_number_written returns the number of bytes that have been written to
+ * |bio|. */
+OPENSSL_EXPORT size_t BIO_number_written(const BIO *bio);
 
 
 /* Managing chains of BIOs.
@@ -709,9 +721,7 @@ struct bio_st {
   /* next_bio points to the next |BIO| in a chain. This |BIO| owns a reference
    * to |next_bio|. */
   struct bio_st *next_bio; /* used by filter BIOs */
-  /* TODO(fork): either bring back BIO_number_read and write or remove these. */
-  unsigned long num_read;
-  unsigned long num_write;
+  size_t num_read, num_write;
 
   CRYPTO_EX_DATA ex_data;
 };

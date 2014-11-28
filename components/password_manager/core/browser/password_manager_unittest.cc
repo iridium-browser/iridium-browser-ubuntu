@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/password_manager/core/browser/password_manager.h"
+
+#include <string>
 #include <vector>
 
 #include "base/message_loop/message_loop.h"
@@ -12,7 +15,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
-#include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
@@ -52,9 +54,10 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
   MOCK_METHOD0(GetDriver, PasswordManagerDriver*());
 
   // Workaround for scoped_ptr<> lacking a copy constructor.
-  virtual void PromptUserToSavePassword(
+  virtual bool PromptUserToSavePassword(
       scoped_ptr<PasswordFormManager> manager) OVERRIDE {
     PromptUserToSavePasswordPtr(manager.release());
+    return false;
   }
   virtual void AutomaticPasswordSave(
       scoped_ptr<PasswordFormManager> manager) OVERRIDE {
@@ -93,14 +96,15 @@ class PasswordManagerTest : public testing::Test {
                                            true);
 
     store_ = new MockPasswordStore;
-    EXPECT_CALL(*store_, ReportMetrics(_)).Times(AnyNumber());
+    EXPECT_CALL(*store_.get(), ReportMetrics(_)).Times(AnyNumber());
     CHECK(store_->Init(syncer::SyncableService::StartSyncFlare(), ""));
 
     EXPECT_CALL(client_, IsPasswordManagerEnabledForCurrentPage())
         .WillRepeatedly(Return(true));
     EXPECT_CALL(client_, IsSyncAccountCredential(_, _))
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(client_, GetPasswordStore()).WillRepeatedly(Return(store_));
+    EXPECT_CALL(client_, GetPasswordStore())
+        .WillRepeatedly(Return(store_.get()));
     EXPECT_CALL(client_, GetPrefs()).WillRepeatedly(Return(&prefs_));
     EXPECT_CALL(client_, GetDriver()).WillRepeatedly(Return(&driver_));
 
@@ -171,6 +175,13 @@ class PasswordManagerTest : public testing::Test {
     form.password_autocomplete_set = true;
     form.submit_element = ASCIIToUTF16("signIn");
     form.signon_realm = "https://twitter.com";
+    return form;
+  }
+
+  PasswordForm MakeSimpleFormWithOnlyPasswordField() {
+    PasswordForm form(MakeSimpleForm());
+    form.username_element.clear();
+    form.username_value.clear();
     return form;
   }
 
@@ -756,6 +767,108 @@ TEST_F(PasswordManagerTest, SyncCredentialsNotSaved) {
   observed.clear();
   manager()->OnPasswordFormsParsed(observed);
   manager()->OnPasswordFormsRendered(observed, true);
+}
+
+// On failed login attempts, the retry-form can have action scheme changed from
+// HTTP to HTTPS (see http://crbug.com/400769). Check that such retry-form is
+// considered equal to the original login form, and the attempt recognised as a
+// failure.
+TEST_F(PasswordManagerTest,
+       SeeingFormActionWithOnlyHttpHttpsChangeIsLoginFailure) {
+  std::vector<PasswordForm*> result;  // Empty password store.
+  EXPECT_CALL(driver_, FillPasswordForm(_)).Times(Exactly(0));
+  EXPECT_CALL(*store_.get(), GetLogins(_, _, _))
+      .WillRepeatedly(DoAll(WithArg<2>(InvokeConsumer(result)), Return()));
+
+  PasswordForm first_form(MakeSimpleForm());
+  first_form.origin = GURL("http://www.xda-developers.com/");
+  first_form.action = GURL("http://forum.xda-developers.com/login.php");
+
+  // |second_form|'s action differs only with it's scheme i.e. *https://*.
+  PasswordForm second_form(first_form);
+  second_form.action = GURL("https://forum.xda-developers.com/login.php");
+
+  std::vector<PasswordForm> observed;
+  observed.push_back(first_form);
+  manager()->OnPasswordFormsParsed(observed);
+  manager()->OnPasswordFormsRendered(observed, true);
+  observed.clear();
+
+  // Now submit the |first_form|.
+  OnPasswordFormSubmitted(first_form);
+
+  // Simulate loading a page, which contains |second_form| instead of
+  // |first_form|.
+  observed.push_back(second_form);
+
+  // Verify that no prompt to save the password is shown.
+  EXPECT_CALL(client_, PromptUserToSavePasswordPtr(_)).Times(Exactly(0));
+  manager()->OnPasswordFormsParsed(observed);
+  manager()->OnPasswordFormsRendered(observed, true);
+  observed.clear();
+}
+
+// Create a form with a new_password_element. Submit the form with the empty
+// new password value. It shouldn't overwrite the existing password.
+TEST_F(PasswordManagerTest, DoNotUpdateWithEmptyPassword) {
+  std::vector<PasswordForm*> result;  // Empty password store.
+  EXPECT_CALL(*store_.get(), GetLogins(_, _, _))
+      .WillOnce(DoAll(WithArg<2>(InvokeConsumer(result)), Return()));
+  std::vector<PasswordForm> observed;
+  PasswordForm form(MakeSimpleForm());
+  form.new_password_element = ASCIIToUTF16("new_password_element");
+  form.new_password_value.clear();
+  observed.push_back(form);
+  manager()->OnPasswordFormsParsed(observed);    // The initial load.
+  manager()->OnPasswordFormsRendered(observed, true);  // The initial layout.
+
+  // And the form submit contract is to call ProvisionallySavePassword.
+  OnPasswordFormSubmitted(form);
+
+  scoped_ptr<PasswordFormManager> form_to_save;
+  EXPECT_CALL(client_, PromptUserToSavePasswordPtr(_)).Times(0);
+
+  // Now the password manager waits for the login to complete successfully.
+  observed.clear();
+  manager()->OnPasswordFormsParsed(observed);    // The post-navigation load.
+  manager()->OnPasswordFormsRendered(observed,
+                                     true);  // The post-navigation layout.
+}
+
+TEST_F(PasswordManagerTest, FormSubmitWithOnlyPassowrdField) {
+  // Test to verify that on submitting the HTML password form without having
+  // username input filed shows password save promt and saves the password to
+  // store.
+  std::vector<PasswordForm*> result;  // Empty password store.
+  EXPECT_CALL(driver_, FillPasswordForm(_)).Times(Exactly(0));
+  EXPECT_CALL(*store_.get(), GetLogins(_, _, _))
+      .WillOnce(DoAll(WithArg<2>(InvokeConsumer(result)), Return()));
+  std::vector<PasswordForm> observed;
+
+  // Loads passsword form without username input field.
+  PasswordForm form(MakeSimpleFormWithOnlyPasswordField());
+  observed.push_back(form);
+  manager()->OnPasswordFormsParsed(observed);          // The initial load.
+  manager()->OnPasswordFormsRendered(observed, true);  // The initial layout.
+
+  // And the form submit contract is to call ProvisionallySavePassword.
+  manager()->ProvisionallySavePassword(form);
+
+  scoped_ptr<PasswordFormManager> form_to_save;
+  EXPECT_CALL(client_, PromptUserToSavePasswordPtr(_))
+      .WillOnce(WithArg<0>(SaveToScopedPtr(&form_to_save)));
+
+  // Now the password manager waits for the navigation to complete.
+  observed.clear();
+  manager()->OnPasswordFormsParsed(observed);  // The post-navigation load.
+  manager()->OnPasswordFormsRendered(observed,
+                                     true);  // The post-navigation layout.
+
+  ASSERT_TRUE(form_to_save.get());
+  EXPECT_CALL(*store_.get(), AddLogin(FormMatches(form)));
+
+  // Simulate saving the form, as if the info bar was accepted.
+  form_to_save->Save();
 }
 
 }  // namespace password_manager

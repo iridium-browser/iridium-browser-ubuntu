@@ -4,15 +4,13 @@
 
 #include "chrome/browser/ui/cocoa/apps/quit_with_apps_controller_mac.h"
 
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
-#include "apps/ui/native_app_window.h"
 #include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/apps/app_window_registry_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -20,11 +18,13 @@
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/common/extension.h"
 #include "grit/chrome_unscaled_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -86,7 +86,7 @@ void QuitWithAppsController::Click() {
 void QuitWithAppsController::ButtonClick(int button_index) {
   g_browser_process->notification_ui_manager()->CancelById(id());
   if (button_index == kQuitAllAppsButtonIndex) {
-    apps::AppWindowRegistry::CloseAllAppWindows();
+    AppWindowRegistryUtil::CloseAllAppWindows();
   } else if (button_index == kDontShowAgainButtonIndex) {
     g_browser_process->local_state()->SetBoolean(
         prefs::kNotifyWhenAppsKeepChromeAlive, false);
@@ -113,7 +113,7 @@ bool QuitWithAppsController::ShouldQuit() {
 
   // Quit immediately if there are no windows or the confirmation has been
   // suppressed.
-  if (!apps::AppWindowRegistry::IsAppWindowRegisteredInAnyProfile(0))
+  if (!AppWindowRegistryUtil::IsAppWindowRegisteredInAnyProfile(0))
     return true;
 
   // If there are browser windows, and this notification has been suppressed for

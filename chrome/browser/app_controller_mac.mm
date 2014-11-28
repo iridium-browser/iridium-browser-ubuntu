@@ -4,8 +4,6 @@
 
 #import "chrome/browser/app_controller_mac.h"
 
-#include "apps/app_shim/extension_app_shim_handler_mac.h"
-#include "apps/app_window_registry.h"
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -19,6 +17,8 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/apps/app_shim/extension_app_shim_handler_mac.h"
+#include "chrome/browser/apps/app_window_registry_util.h"
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
@@ -70,6 +70,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/cloud_print/cloud_print_class_mac.h"
@@ -77,8 +78,10 @@
 #include "chrome/common/mac/app_mode_common.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -86,8 +89,6 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_system.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "net/base/filename_util.h"
 #include "ui/base/cocoa/focus_window_set.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -217,7 +218,6 @@ bool IsProfileSignedOut(Profile* profile) {
      withReply:(NSAppleEventDescriptor*)reply;
 - (void)windowLayeringDidChange:(NSNotification*)inNotification;
 - (void)activeSpaceDidChange:(NSNotification*)inNotification;
-- (void)windowChangedToProfile:(Profile*)profile;
 - (void)checkForAnyKeyWindows;
 - (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount;
 - (BOOL)shouldQuitWithInProgressDownloads;
@@ -393,8 +393,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
   // Check for active apps. If quitting is prevented, only close browsers and
   // sessions.
-  if (!browser_shutdown::IsTryingToQuit() &&
-      quitWithAppsController_ && !quitWithAppsController_->ShouldQuit()) {
+  if (!browser_shutdown::IsTryingToQuit() && quitWithAppsController_.get() &&
+      !quitWithAppsController_->ShouldQuit()) {
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
         content::NotificationService::AllSources(),
@@ -433,7 +433,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)app {
   // If there are no windows, quit immediately.
   if (chrome::BrowserIterator().done() &&
-      !apps::AppWindowRegistry::IsAppWindowRegisteredInAnyProfile(0)) {
+      !AppWindowRegistryUtil::IsAppWindowRegisteredInAnyProfile(0)) {
     return NSTerminateNow;
   }
 
@@ -639,44 +639,6 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   [self fixCloseMenuItemKeyEquivalents];
 }
 
-// Called when the user has changed browser windows, meaning the backing profile
-// may have changed. This can cause a rebuild of the user-data menus. This is a
-// no-op if the new profile is the same as the current one. This will always be
-// the original profile and never incognito.
-- (void)windowChangedToProfile:(Profile*)profile {
-  if (lastProfile_ == profile)
-    return;
-
-  // Before tearing down the menu controller bridges, return the Cocoa menus to
-  // their initial state.
-  if (bookmarkMenuBridge_.get())
-    bookmarkMenuBridge_->ResetMenu();
-  if (historyMenuBridge_.get())
-    historyMenuBridge_->ResetMenu();
-
-  // Rebuild the menus with the new profile.
-  lastProfile_ = profile;
-
-  bookmarkMenuBridge_.reset(new BookmarkMenuBridge(lastProfile_,
-      [[[NSApp mainMenu] itemWithTag:IDC_BOOKMARKS_MENU] submenu]));
-  // No need to |BuildMenu| here.  It is done lazily upon menu access.
-
-  historyMenuBridge_.reset(new HistoryMenuBridge(lastProfile_));
-  historyMenuBridge_->BuildMenu();
-
-  chrome::BrowserCommandController::
-      UpdateSharedCommandsForIncognitoAvailability(
-          menuState_.get(), lastProfile_);
-  profilePrefRegistrar_.reset(new PrefChangeRegistrar());
-  profilePrefRegistrar_->Init(lastProfile_->GetPrefs());
-  profilePrefRegistrar_->Add(
-      prefs::kIncognitoModeAvailability,
-      base::Bind(&chrome::BrowserCommandController::
-                     UpdateSharedCommandsForIncognitoAvailability,
-                 menuState_.get(),
-                 lastProfile_));
-}
-
 - (void)checkForAnyKeyWindows {
   if ([NSApp keyWindow])
     return;
@@ -827,9 +789,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
         IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
   } else {
     // Dialog text: warning and explanation.
-    titleText = l10n_util::GetNSStringF(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE,
-        base::IntToString16(downloadCount));
+    titleText = l10n_util::GetNSString(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE);
     explanationText = l10n_util::GetNSString(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
   }
@@ -1046,7 +1007,9 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // for a locked profile, we have to show the User Manager instead as the
   // locked profile needs authentication.
   if (IsProfileSignedOut(lastProfile)) {
-    chrome::ShowUserManager(lastProfile->GetPath());
+    UserManager::Show(lastProfile->GetPath(),
+                      profiles::USER_MANAGER_NO_TUTORIAL,
+                      profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
     return;
   }
 
@@ -1247,10 +1210,13 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // implemented as forced incognito, we can't open a new guest browser either,
   // so we have to show the User Manager as well.
   Profile* lastProfile = [self lastProfile];
-  if (lastProfile->IsGuestSession() || IsProfileSignedOut(lastProfile))
-    chrome::ShowUserManager(lastProfile->GetPath());
-  else
+  if (lastProfile->IsGuestSession() || IsProfileSignedOut(lastProfile)) {
+    UserManager::Show(lastProfile->GetPath(),
+                      profiles::USER_MANAGER_NO_TUTORIAL,
+                      profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
+  } else {
     CreateBrowser(lastProfile);
+  }
 
   // We've handled the reopen event, so return NO to tell AppKit not
   // to do anything.
@@ -1532,6 +1498,40 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 - (void)initAppShimMenuController {
   if (!appShimMenuController_)
     appShimMenuController_.reset([[AppShimMenuController alloc] init]);
+}
+
+- (void)windowChangedToProfile:(Profile*)profile {
+  if (lastProfile_ == profile)
+    return;
+
+  // Before tearing down the menu controller bridges, return the Cocoa menus to
+  // their initial state.
+  if (bookmarkMenuBridge_.get())
+    bookmarkMenuBridge_->ResetMenu();
+  if (historyMenuBridge_.get())
+    historyMenuBridge_->ResetMenu();
+
+  // Rebuild the menus with the new profile.
+  lastProfile_ = profile;
+
+  bookmarkMenuBridge_.reset(new BookmarkMenuBridge(lastProfile_,
+      [[[NSApp mainMenu] itemWithTag:IDC_BOOKMARKS_MENU] submenu]));
+  // No need to |BuildMenu| here.  It is done lazily upon menu access.
+
+  historyMenuBridge_.reset(new HistoryMenuBridge(lastProfile_));
+  historyMenuBridge_->BuildMenu();
+
+  chrome::BrowserCommandController::
+      UpdateSharedCommandsForIncognitoAvailability(
+          menuState_.get(), lastProfile_);
+  profilePrefRegistrar_.reset(new PrefChangeRegistrar());
+  profilePrefRegistrar_->Init(lastProfile_->GetPrefs());
+  profilePrefRegistrar_->Add(
+      prefs::kIncognitoModeAvailability,
+      base::Bind(&chrome::BrowserCommandController::
+                     UpdateSharedCommandsForIncognitoAvailability,
+                 menuState_.get(),
+                 lastProfile_));
 }
 
 - (void)applicationDidChangeScreenParameters:(NSNotification*)notification {

@@ -14,11 +14,11 @@
 #include "chrome/browser/download/download_danger_prompt.h"
 #include "chrome/browser/download/download_path_reservation_tracker.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
-#include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/common/extensions/api/downloads.h"
 #include "content/public/browser/download_manager.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/warning_set.h"
 
 class DownloadFileIconExtractor;
 class DownloadQuery;
@@ -46,7 +46,9 @@ extern const char kIconNotFound[];
 extern const char kInvalidDangerType[];
 extern const char kInvalidFilename[];
 extern const char kInvalidFilter[];
-extern const char kInvalidHeader[];
+extern const char kInvalidHeaderName[];
+extern const char kInvalidHeaderValue[];
+extern const char kInvalidHeaderUnsafe[];
 extern const char kInvalidId[];
 extern const char kInvalidOrderBy[];
 extern const char kInvalidQueryLimit[];
@@ -322,7 +324,7 @@ class ExtensionDownloadsEventRouter
       base::FilePath* determined_filename,
       extensions::api::downloads::FilenameConflictAction*
         determined_conflict_action,
-      extensions::ExtensionWarningSet* warnings);
+      extensions::WarningSet* warnings);
 
   // A downloads.onDeterminingFilename listener has returned. If the extension
   // wishes to override the download's filename, then |filename| will be

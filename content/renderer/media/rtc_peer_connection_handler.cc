@@ -40,6 +40,9 @@
 #include "third_party/WebKit/public/platform/WebRTCVoidRequest.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 
+using webrtc::StatsReport;
+using webrtc::StatsReports;
+
 namespace content {
 
 // Converter functions from libjingle types to WebKit types.
@@ -255,13 +258,12 @@ class StatsResponse : public webrtc::StatsObserver {
     TRACE_EVENT_ASYNC_BEGIN0("webrtc", "getStats_Native", this);
   }
 
-  virtual void OnComplete(
-      const std::vector<webrtc::StatsReport>& reports) OVERRIDE {
+  virtual void OnComplete(const StatsReports& reports) OVERRIDE {
     TRACE_EVENT0("webrtc", "StatsResponse::OnComplete")
-    for (std::vector<webrtc::StatsReport>::const_iterator it = reports.begin();
+    for (StatsReports::const_iterator it = reports.begin();
          it != reports.end(); ++it) {
-      if (it->values.size() > 0) {
-        AddReport(*it);
+      if ((*it)->values.size() > 0) {
+        AddReport(*(*it));
       }
     }
 
@@ -274,12 +276,11 @@ class StatsResponse : public webrtc::StatsObserver {
   }
 
  private:
-  void AddReport(const webrtc::StatsReport& report) {
+  void AddReport(const StatsReport& report) {
     int idx = response_->addReport(blink::WebString::fromUTF8(report.id),
                                    blink::WebString::fromUTF8(report.type),
                                    report.timestamp);
-    for (webrtc::StatsReport::Values::const_iterator value_it =
-         report.values.begin();
+    for (StatsReport::Values::const_iterator value_it = report.values.begin();
          value_it != report.values.end(); ++value_it) {
       AddStatistic(idx, value_it->display_name(), value_it->value);
     }
@@ -389,7 +390,9 @@ RTCPeerConnectionHandler::RTCPeerConnectionHandler(
       dependency_factory_(dependency_factory),
       frame_(NULL),
       peer_connection_tracker_(NULL),
-      num_data_channels_created_(0) {
+      num_data_channels_created_(0),
+      num_local_candidates_ipv4_(0),
+      num_local_candidates_ipv6_(0) {
   g_peer_connection_handlers.Get().insert(this);
 }
 
@@ -640,19 +643,20 @@ bool RTCPeerConnectionHandler::addICECandidate(
           base::UTF16ToUTF8(candidate.sdpMid()),
           candidate.sdpMLineIndex(),
           base::UTF16ToUTF8(candidate.candidate())));
-  if (!native_candidate) {
+  bool return_value = false;
+
+  if (native_candidate) {
+    return_value =
+        native_peer_connection_->AddIceCandidate(native_candidate.get());
+    LOG_IF(ERROR, !return_value) << "Error processing ICE candidate.";
+  } else {
     LOG(ERROR) << "Could not create native ICE candidate.";
-    return false;
   }
 
-  bool return_value =
-      native_peer_connection_->AddIceCandidate(native_candidate.get());
-  LOG_IF(ERROR, !return_value) << "Error processing ICE candidate.";
-
-  if (peer_connection_tracker_)
+  if (peer_connection_tracker_) {
     peer_connection_tracker_->TrackAddIceCandidate(
-        this, candidate, PeerConnectionTracker::SOURCE_REMOTE);
-
+        this, candidate, PeerConnectionTracker::SOURCE_REMOTE, return_value);
+  }
   return return_value;
 }
 
@@ -713,15 +717,15 @@ void RTCPeerConnectionHandler::removeStream(
       break;
     }
   }
-  DCHECK(webrtc_stream);
-  native_peer_connection_->RemoveStream(webrtc_stream);
+  DCHECK(webrtc_stream.get());
+  native_peer_connection_->RemoveStream(webrtc_stream.get());
 
   if (peer_connection_tracker_)
     peer_connection_tracker_->TrackRemoveStream(
         this, stream, PeerConnectionTracker::SOURCE_LOCAL);
   PerSessionWebRTCAPIMetrics::GetInstance()->DecrementStreamCounter();
   track_metrics_.RemoveStream(MediaStreamTrackMetrics::SENT_STREAM,
-                              webrtc_stream);
+                              webrtc_stream.get());
 }
 
 void RTCPeerConnectionHandler::getStats(
@@ -758,8 +762,7 @@ void RTCPeerConnectionHandler::getStats(LocalRTCStatsRequest* request) {
     if (!track) {
       DVLOG(1) << "GetStats: Track not found.";
       // TODO(hta): Consider how to get an error back.
-      std::vector<webrtc::StatsReport> no_reports;
-      observer->OnComplete(no_reports);
+      observer->OnComplete(StatsReports());
       return;
     }
   }
@@ -776,10 +779,13 @@ void RTCPeerConnectionHandler::GetStats(
   if (!native_peer_connection_->GetStats(observer, track, level)) {
     DVLOG(1) << "GetStats failed.";
     // TODO(hta): Consider how to get an error back.
-    std::vector<webrtc::StatsReport> no_reports;
-    observer->OnComplete(no_reports);
+    observer->OnComplete(StatsReports());
     return;
   }
+}
+
+void RTCPeerConnectionHandler::CloseClientPeerConnection() {
+  client_->closePeerConnection();
 }
 
 blink::WebRTCDataChannelHandler* RTCPeerConnectionHandler::createDataChannel(
@@ -890,6 +896,18 @@ void RTCPeerConnectionHandler::OnIceGatheringChange(
     // to signal end of candidates.
     blink::WebRTCICECandidate null_candidate;
     client_->didGenerateICECandidate(null_candidate);
+
+    UMA_HISTOGRAM_COUNTS_100("WebRTC.PeerConnection.IPv4LocalCandidates",
+                             num_local_candidates_ipv4_);
+
+    UMA_HISTOGRAM_COUNTS_100("WebRTC.PeerConnection.IPv6LocalCandidates",
+                             num_local_candidates_ipv6_);
+  } else if (new_state ==
+             webrtc::PeerConnectionInterface::kIceGatheringGathering) {
+    // ICE restarts will change gathering state back to "gathering",
+    // reset the counter.
+    num_local_candidates_ipv6_ = 0;
+    num_local_candidates_ipv4_ = 0;
   }
 
   blink::WebRTCPeerConnectionHandlerClient::ICEGatheringState state =
@@ -962,8 +980,20 @@ void RTCPeerConnectionHandler::OnIceCandidate(
                            candidate->sdp_mline_index());
   if (peer_connection_tracker_)
     peer_connection_tracker_->TrackAddIceCandidate(
-        this, web_candidate, PeerConnectionTracker::SOURCE_LOCAL);
+        this, web_candidate, PeerConnectionTracker::SOURCE_LOCAL, true);
 
+  // Only the first m line's first component is tracked to avoid
+  // miscounting when doing BUNDLE or rtcp mux.
+  if (candidate->sdp_mline_index() == 0 &&
+      candidate->candidate().component() == 1) {
+    if (candidate->candidate().address().family() == AF_INET) {
+      num_local_candidates_ipv4_++;
+    } else if (candidate->candidate().address().family() == AF_INET6) {
+      num_local_candidates_ipv6_++;
+    } else {
+      NOTREACHED();
+    }
+  }
   client_->didGenerateICECandidate(web_candidate);
 }
 

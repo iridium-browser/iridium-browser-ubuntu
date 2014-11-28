@@ -10,21 +10,19 @@
 namespace content {
 
 // static
-scoped_ptr<GpuMemoryBufferImpl> GpuMemoryBufferImpl::Create(
-    const gfx::Size& size,
-    unsigned internalformat,
-    unsigned usage) {
+void GpuMemoryBufferImpl::Create(const gfx::Size& size,
+                                 unsigned internalformat,
+                                 unsigned usage,
+                                 int client_id,
+                                 const CreationCallback& callback) {
   if (GpuMemoryBufferImplSharedMemory::IsConfigurationSupported(
           size, internalformat, usage)) {
-    scoped_ptr<GpuMemoryBufferImplSharedMemory> buffer(
-        new GpuMemoryBufferImplSharedMemory(size, internalformat));
-    if (!buffer->Initialize())
-      return scoped_ptr<GpuMemoryBufferImpl>();
-
-    return buffer.PassAs<GpuMemoryBufferImpl>();
+    GpuMemoryBufferImplSharedMemory::Create(
+        size, internalformat, usage, callback);
+    return;
   }
 
-  return scoped_ptr<GpuMemoryBufferImpl>();
+  callback.Run(scoped_ptr<GpuMemoryBufferImpl>());
 }
 
 // static
@@ -33,10 +31,11 @@ void GpuMemoryBufferImpl::AllocateForChildProcess(
     unsigned internalformat,
     unsigned usage,
     base::ProcessHandle child_process,
+    int child_client_id,
     const AllocationCallback& callback) {
   if (GpuMemoryBufferImplSharedMemory::IsConfigurationSupported(
           size, internalformat, usage)) {
-    GpuMemoryBufferImplSharedMemory::AllocateSharedMemoryForChildProcess(
+    GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
         size, internalformat, child_process, callback);
     return;
   }
@@ -55,24 +54,15 @@ void GpuMemoryBufferImpl::DeletedByChildProcess(
 scoped_ptr<GpuMemoryBufferImpl> GpuMemoryBufferImpl::CreateFromHandle(
     const gfx::GpuMemoryBufferHandle& handle,
     const gfx::Size& size,
-    unsigned internalformat) {
+    unsigned internalformat,
+    const DestructionCallback& callback) {
   switch (handle.type) {
-    case gfx::SHARED_MEMORY_BUFFER: {
-      scoped_ptr<GpuMemoryBufferImplSharedMemory> buffer(
-          new GpuMemoryBufferImplSharedMemory(size, internalformat));
-      if (!buffer->InitializeFromHandle(handle))
-        return scoped_ptr<GpuMemoryBufferImpl>();
-
-      return buffer.PassAs<GpuMemoryBufferImpl>();
-    }
-    case gfx::SURFACE_TEXTURE_BUFFER: {
-      scoped_ptr<GpuMemoryBufferImplSurfaceTexture> buffer(
-          new GpuMemoryBufferImplSurfaceTexture(size, internalformat));
-      if (!buffer->InitializeFromHandle(handle))
-        return scoped_ptr<GpuMemoryBufferImpl>();
-
-      return buffer.PassAs<GpuMemoryBufferImpl>();
-    }
+    case gfx::SHARED_MEMORY_BUFFER:
+      return GpuMemoryBufferImplSharedMemory::CreateFromHandle(
+          handle, size, internalformat, callback);
+    case gfx::SURFACE_TEXTURE_BUFFER:
+      return GpuMemoryBufferImplSurfaceTexture::CreateFromHandle(
+          handle, size, internalformat, callback);
     default:
       return scoped_ptr<GpuMemoryBufferImpl>();
   }

@@ -4,6 +4,7 @@
 
 import logging
 import os
+import pipes
 import re
 import subprocess
 import sys
@@ -24,28 +25,29 @@ from pylib.device import intent  # pylint: disable=F0401
 
 class AndroidBrowserBackendSettings(object):
 
-  def __init__(self, adb, activity, cmdline_file, package, pseudo_exec_name,
+  def __init__(self, activity, cmdline_file, package, pseudo_exec_name,
                supports_tab_control, relax_ssl_check=False):
-    self.adb = adb
     self.activity = activity
-    self.cmdline_file = cmdline_file
+    self._cmdline_file = cmdline_file
     self.package = package
     self.pseudo_exec_name = pseudo_exec_name
     self.supports_tab_control = supports_tab_control
     self.relax_ssl_check = relax_ssl_check
 
-  def GetDevtoolsRemotePort(self):
+  def GetCommandLineFile(self, is_user_debug_build):  # pylint: disable=W0613
+    return self._cmdline_file
+
+  def GetDevtoolsRemotePort(self, adb):
     raise NotImplementedError()
 
-  def RemoveProfile(self):
-    files = self.adb.device().RunShellCommand(
+  def RemoveProfile(self, adb):
+    files = adb.device().RunShellCommand(
         'ls "%s"' % self.profile_dir, as_root=True)
     # Don't delete lib, since it is created by the installer.
     paths = ['"%s/%s"' % (self.profile_dir, f) for f in files if f != 'lib']
-    self.adb.device().RunShellCommand('rm -r %s' % ' '.join(paths),
-                                      as_root=True)
+    adb.device().RunShellCommand('rm -r %s' % ' '.join(paths), as_root=True)
 
-  def PushProfile(self, _):
+  def PushProfile(self, _new_profile_dir, _adb):
     logging.critical('Profiles cannot be overriden with current configuration')
     sys.exit(1)
 
@@ -58,26 +60,24 @@ class ChromeBackendSettings(AndroidBrowserBackendSettings):
   # Stores a default Preferences file, re-used to speed up "--page-repeat".
   _default_preferences_file = None
 
-  @staticmethod
-  def _GetCommandLineFile(adb):
-    if adb.IsUserBuild():
+  def GetCommandLineFile(self, is_user_debug_build):
+    if is_user_debug_build:
       return '/data/local/tmp/chrome-command-line'
     else:
       return '/data/local/chrome-command-line'
 
-  def __init__(self, adb, package):
+  def __init__(self, package):
     super(ChromeBackendSettings, self).__init__(
-        adb=adb,
         activity='com.google.android.apps.chrome.Main',
-        cmdline_file=ChromeBackendSettings._GetCommandLineFile(adb),
+        cmdline_file=None,
         package=package,
         pseudo_exec_name='chrome',
         supports_tab_control=True)
 
-  def GetDevtoolsRemotePort(self):
+  def GetDevtoolsRemotePort(self, adb):
     return 'localabstract:chrome_devtools_remote'
 
-  def PushProfile(self, new_profile_dir):
+  def PushProfile(self, new_profile_dir, adb):
     # Pushing the profile is slow, so we don't want to do it every time.
     # Avoid this by pushing to a safe location using PushChangedFiles, and
     # then copying into the correct location on each test run.
@@ -89,68 +89,65 @@ class ChromeBackendSettings(AndroidBrowserBackendSettings):
       profile_base = os.path.basename(profile_parent)
 
     saved_profile_location = '/sdcard/profile/%s' % profile_base
-    self.adb.device().PushChangedFiles(new_profile_dir, saved_profile_location)
+    adb.device().PushChangedFiles(new_profile_dir, saved_profile_location)
 
-    self.adb.device().old_interface.EfficientDeviceDirectoryCopy(
+    adb.device().old_interface.EfficientDeviceDirectoryCopy(
         saved_profile_location, self.profile_dir)
-    dumpsys = self.adb.device().RunShellCommand(
+    dumpsys = adb.device().RunShellCommand(
         'dumpsys package %s' % self.package)
     id_line = next(line for line in dumpsys if 'userId=' in line)
     uid = re.search('\d+', id_line).group()
-    files = self.adb.device().RunShellCommand(
+    files = adb.device().RunShellCommand(
         'ls "%s"' % self.profile_dir, as_root=True)
     files.remove('lib')
     paths = ['%s/%s' % (self.profile_dir, f) for f in files]
     for path in paths:
       extended_path = '%s %s/* %s/*/* %s/*/*/*' % (path, path, path, path)
-      self.adb.device().RunShellCommand(
+      adb.device().RunShellCommand(
           'chown %s.%s %s' % (uid, uid, extended_path))
 
 class ContentShellBackendSettings(AndroidBrowserBackendSettings):
-  def __init__(self, adb, package):
+  def __init__(self, package):
     super(ContentShellBackendSettings, self).__init__(
-        adb=adb,
         activity='org.chromium.content_shell_apk.ContentShellActivity',
         cmdline_file='/data/local/tmp/content-shell-command-line',
         package=package,
         pseudo_exec_name='content_shell',
         supports_tab_control=False)
 
-  def GetDevtoolsRemotePort(self):
+  def GetDevtoolsRemotePort(self, adb):
     return 'localabstract:content_shell_devtools_remote'
 
 
 class ChromeShellBackendSettings(AndroidBrowserBackendSettings):
-  def __init__(self, adb, package):
+  def __init__(self, package):
     super(ChromeShellBackendSettings, self).__init__(
-          adb=adb,
           activity='org.chromium.chrome.shell.ChromeShellActivity',
           cmdline_file='/data/local/tmp/chrome-shell-command-line',
           package=package,
           pseudo_exec_name='chrome_shell',
           supports_tab_control=False)
 
-  def GetDevtoolsRemotePort(self):
+  def GetDevtoolsRemotePort(self, adb):
     return 'localabstract:chrome_shell_devtools_remote'
 
-
 class WebviewBackendSettings(AndroidBrowserBackendSettings):
-  def __init__(self, adb, package):
+  def __init__(self, package,
+               activity='org.chromium.telemetry_shell.TelemetryActivity'):
     super(WebviewBackendSettings, self).__init__(
-        adb=adb,
-        activity='org.chromium.telemetry_shell.TelemetryActivity',
+        activity=activity,
         cmdline_file='/data/local/tmp/webview-command-line',
         package=package,
         pseudo_exec_name='webview',
         supports_tab_control=False)
 
-  def GetDevtoolsRemotePort(self):
+  def GetDevtoolsRemotePort(self, adb):
     # The DevTools socket name for WebView depends on the activity PID's.
     retries = 0
     timeout = 1
     pid = None
     while True:
-      pids = self.adb.ExtractPid(self.package)
+      pids = adb.ExtractPid(self.package)
       if (len(pids) > 0):
         pid = pids[-1]
         break
@@ -166,11 +163,17 @@ class WebviewBackendSettings(AndroidBrowserBackendSettings):
                                               'Timeout waiting for PID.')
     return 'localabstract:webview_devtools_remote_%s' % str(pid)
 
+class WebviewShellBackendSettings(WebviewBackendSettings):
+  def __init__(self, package):
+    super(WebviewShellBackendSettings, self).__init__(
+        activity='org.chromium.android_webview.shell.AwShellActivity',
+        package=package)
 
 class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   """The backend for controlling a browser instance running on Android."""
   def __init__(self, browser_options, backend_settings, use_rndis_forwarder,
-               output_profile_path, extensions_to_load, target_arch):
+               output_profile_path, extensions_to_load, target_arch,
+               android_platform_backend):
     super(AndroidBrowserBackend, self).__init__(
         supports_tab_control=backend_settings.supports_tab_control,
         supports_extensions=False, browser_options=browser_options,
@@ -181,7 +184,7 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
           'Android browser does not support extensions.')
 
     # Initialize fields so that an explosion during init doesn't break in Close.
-    self._adb = backend_settings.adb
+    self._android_platform_backend = android_platform_backend
     self._backend_settings = backend_settings
     self._saved_cmdline = ''
     self._target_arch = target_arch
@@ -191,14 +194,22 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     # allocates. Need to fix this.
     self._port = adb_commands.AllocateTestServerPort()
 
+    # Disables android.net SSL certificate check.  This is necessary for
+    # applications using the android.net stack to work with proxy HTTPS server
+    # created by telemetry
+    if self._backend_settings.relax_ssl_check:
+      self._saved_sslflag = self._adb.device().GetProp('socket.relaxsslcheck')
+      self._adb.device().SetProp('socket.relaxsslcheck', 'yes')
+
     # Kill old browser.
-    self._adb.device().ForceStop(self._backend_settings.package)
+    self._KillBrowser()
 
     if self._adb.device().old_interface.CanAccessProtectedFileContents():
       if self.browser_options.profile_dir:
-        self._backend_settings.PushProfile(self.browser_options.profile_dir)
+        self._backend_settings.PushProfile(self.browser_options.profile_dir,
+                                           self._adb)
       elif not self.browser_options.dont_override_profile:
-        self._backend_settings.RemoveProfile()
+        self._backend_settings.RemoveProfile(self._adb)
 
     self._forwarder_factory = android_forwarder.AndroidForwarderFactory(
         self._adb, use_rndis_forwarder)
@@ -216,10 +227,21 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       self._adb.device().RunShellCommand(
           'am set-debug-app --persistent %s' % self._backend_settings.package)
 
+  @property
+  def _adb(self):
+    return self._android_platform_backend.adb
+
+  def _KillBrowser(self):
+    # We use KillAll rather than ForceStop for efficiency reasons.
+    try:
+      self._adb.device().KillAll(self._backend_settings.package, retries=0)
+    except device_errors.CommandFailedError:
+      pass
+
   def _SetUpCommandLine(self):
     def QuoteIfNeeded(arg):
-      # Escape 'key=valueA valueB' to 'key="valueA valueB"'
-      # Already quoted values, or values without space are left untouched.
+      # Properly escape "key=valueA valueB" to "key='valueA valueB'"
+      # Values without spaces, or that seem to be quoted are left untouched.
       # This is required so CommandLine.java can parse valueB correctly rather
       # than as a separate switch.
       params = arg.split('=', 1)
@@ -230,48 +252,37 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         return arg
       if values[0] in '"\'' and values[-1] == values[0]:
         return arg
-      return '%s="%s"' % (key, values)
+      return '%s=%s' % (key, pipes.quote(values))
     args = [self._backend_settings.pseudo_exec_name]
     args.extend(self.GetBrowserStartupArgs())
-    args = ' '.join(map(QuoteIfNeeded, args))
+    content = ' '.join(QuoteIfNeeded(arg) for arg in args)
+    cmdline_file = self._backend_settings.GetCommandLineFile(
+        self._adb.IsUserBuild())
+    as_root = self._adb.device().old_interface.CanAccessProtectedFileContents()
 
-    self._SetCommandLineFile(args)
-
-  def _SetCommandLineFile(self, file_contents):
-    logging.debug('Using command line: ' + file_contents)
-    def IsProtectedFile(name):
-      if self._adb.device().old_interface.FileExistsOnDevice(name):
-        return not self._adb.device().old_interface.IsFileWritableOnDevice(name)
-      else:
-        parent_name = os.path.dirname(name)
-        if parent_name != '':
-          return IsProtectedFile(parent_name)
-        else:
-          return True
-
-    protected = IsProtectedFile(self._backend_settings.cmdline_file)
     try:
-      self._saved_cmdline = ''.join(
-          self._adb.device().ReadFile(
-              self._backend_settings.cmdline_file, as_root=protected)
-          or [])
-      self._adb.device().WriteFile(
-          self._backend_settings.cmdline_file, file_contents,
-          as_root=protected)
+      # Save the current command line to restore later, except if it appears to
+      # be a  Telemetry created one. This is to prevent a common bug where
+      # --host-resolver-rules borks people's browsers if something goes wrong
+      # with Telemetry.
+      self._saved_cmdline = ''.join(self._adb.device().ReadFile(cmdline_file))
+      if '--host-resolver-rules' in self._saved_cmdline:
+        self._saved_cmdline = ''
+      self._adb.device().WriteTextFile(cmdline_file, content, as_root=as_root)
     except device_errors.CommandFailedError:
       logging.critical('Cannot set Chrome command line. '
                        'Fix this by flashing to a userdebug build.')
       sys.exit(1)
 
+  def _RestoreCommandLine(self):
+    cmdline_file = self._backend_settings.GetCommandLineFile(
+        self._adb.IsUserBuild())
+    as_root = self._adb.device().old_interface.CanAccessProtectedFileContents()
+    self._adb.device().WriteTextFile(cmdline_file, self._saved_cmdline,
+                                     as_root=as_root)
+
   def Start(self):
     self._SetUpCommandLine()
-
-    # Disables android.net SSL certificate check.  This is necessary for
-    # applications using the android.net stack to work with proxy HTTPS server
-    # created by telemetry
-    if self._backend_settings.relax_ssl_check:
-      self._saved_sslflag = self._adb.device().GetProp('socket.relaxsslcheck')
-      self._adb.device().SetProp('socket.relaxsslcheck', 'yes')
 
     self._adb.device().RunShellCommand('logcat -c')
     if self.browser_options.startup_url:
@@ -294,7 +305,7 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         blocking=True)
 
     self._adb.Forward('tcp:%d' % self._port,
-                      self._backend_settings.GetDevtoolsRemotePort())
+                      self._backend_settings.GetDevtoolsRemotePort(self._adb))
 
     try:
       self._WaitForBrowserToComeUp()
@@ -313,13 +324,7 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       self.Close()
       raise
     finally:
-      # Restore the saved command line if it appears to have come from a user.
-      # If it appears to be a Telemetry created command line, then don't restore
-      # it. This is to prevent a common bug where --host-resolver-rules borks
-      # people's browsers if something goes wrong with Telemetry.
-      self._SetCommandLineFile(
-          self._saved_cmdline
-          if '--host-resolver-rules' not in self._saved_cmdline else '')
+      self._RestoreCommandLine()
 
   def GetBrowserStartupArgs(self):
     args = super(AndroidBrowserBackend, self).GetBrowserStartupArgs()
@@ -367,7 +372,7 @@ class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   def Close(self):
     super(AndroidBrowserBackend, self).Close()
-    self._adb.device().ForceStop(self._backend_settings.package)
+    self._KillBrowser()
 
     # Restore android.net SSL check
     if self._backend_settings.relax_ssl_check:

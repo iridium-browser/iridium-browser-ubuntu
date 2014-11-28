@@ -1,8 +1,10 @@
 {
-  "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDltVl1k15pjRzuZfMc3B69inxwm2bZeZ2O8/zFO+NluHnBm3GJ3fzdOoFGJd+M16I8p7zxxQyHeDMfWYASyCeB8XnUEDKjqNLQfCnncsANzHsYoEbYj2nEUML2P13b9q+AAvpCBpAJ4cZp81e9n1y/vbSXHE4385cgkKueItzikQIDAQAB",
+{%if key is defined %}
+  "key": "{{key}}",
+{% endif %}
   "manifest_version": 2,
   "name": "ChromeVox",
-  "version": "1.0",
+  "version": "{{set_version}}",
   "description": "ChromeVox - Giving Voice to Chrome.",
 {% if is_guest_manifest == '1' %}
   "incognito": "split",
@@ -18,6 +20,9 @@
     "accessibilityPrivate",
     "bookmarks",
     "brailleDisplayPrivate",
+{% if use_chromevox_next == '1' %}
+    "commands.accessibility",
+{% endif %}
     "commandLinePrivate",
     "experimental",
     "history",
@@ -28,24 +33,19 @@
     "virtualKeyboardPrivate",
     "<all_urls>"
   ],
+{% if use_chromevox_next == '0' %}
   "content_scripts": [
     {
       "matches": [ "<all_urls>" ],
       "exclude_globs": [ "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief/chromevox/background/background.html" ],
       "all_frames": true,
       "js": [
-{% if use_chromevox_next == '1' %}
-        "closure/closure_preinit.js",
-        "closure/base.js",
-        "deps.js",
-        "cvox2/injected/loader.js"
-{% else %}
         "chromeVoxChromePageScript.js"
-{% endif %}
       ]
     }
   ],
-  "web_accessible_resources": [
+{% endif %}
+"web_accessible_resources": [
     "chromevox/injected/api.js",
     "chromevox/injected/api_util.js",
     "chromevox/injected/mathjax.js",
@@ -55,6 +55,33 @@
   "automation": {
     "desktop": true
   },
+  "commands": {
+    "nextElement": {
+      "description": "Moves to the next element",
+      "suggested_key": {
+        "chromeos": "Search+Shift+Right"
+      }
+    },
+    "previousElement": {
+      "description": "Moves to the previous element",
+      "suggested_key": {
+        "chromeos": "Search+Shift+Left"
+      }
+    },
+    "nextLine": {
+      "description": "Moves to the next line",
+      "suggested_key": {
+        "chromeos": "Search+Shift+Down"
+      }
+    },
+    "previousLine": {
+      "description": "Moves to the previous line",
+      "suggested_key": {
+        "chromeos": "Search+Shift+Up"
+      }
+    }
+  },
 {% endif %}
+  "options_page": "chromevox/background/options.html",
   "default_locale": "en"
 }

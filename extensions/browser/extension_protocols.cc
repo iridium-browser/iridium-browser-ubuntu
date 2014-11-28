@@ -10,8 +10,8 @@
 
 #include "base/base64.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
@@ -37,6 +37,7 @@
 #include "extensions/browser/content_verify_job.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/info_map.h"
+#include "extensions/browser/url_request_util.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_resource.h"
@@ -213,13 +214,18 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
     DCHECK(posted);
   }
 
+  virtual bool IsRedirectResponse(GURL* location,
+                                  int* http_status_code) override {
+    return false;
+  }
+
   virtual void SetExtraRequestHeaders(
       const net::HttpRequestHeaders& headers) OVERRIDE {
     // TODO(asargent) - we'll need to add proper support for range headers.
     // crbug.com/369895.
     std::string range_header;
     if (headers.GetHeader(net::HttpRequestHeaders::kRange, &range_header)) {
-      if (verify_job_)
+      if (verify_job_.get())
         verify_job_ = NULL;
     }
     URLRequestFileJob::SetExtraRequestHeaders(headers);
@@ -230,7 +236,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
     seek_position_ = result;
     // TODO(asargent) - we'll need to add proper support for range headers.
     // crbug.com/369895.
-    if (result > 0 && verify_job_)
+    if (result > 0 && verify_job_.get())
       verify_job_ = NULL;
   }
 
@@ -242,7 +248,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
                                   -result);
     if (result > 0) {
       bytes_read_ += result;
-      if (verify_job_) {
+      if (verify_job_.get()) {
         verify_job_->BytesRead(result, buffer->data());
         if (!remaining_bytes())
           verify_job_->DoneReading();
@@ -430,7 +436,7 @@ ExtensionProtocolHandler::MaybeCreateJob(
     std::string resource_path = request->url().path();
 
     // Use default CSP for <webview>.
-    if (!ExtensionsBrowserClient::Get()->IsWebViewRequest(request)) {
+    if (!url_request_util::IsWebViewRequest(request)) {
       content_security_policy =
           extensions::CSPInfo::GetResourceContentSecurityPolicy(extension,
                                                                 resource_path);

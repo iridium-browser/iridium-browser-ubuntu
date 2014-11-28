@@ -13,6 +13,7 @@ class TestFacebookCredentialsBackend(
     self._credentials_type = 'facebook'
 
   def testLoginUsingMock(self):
-    self._LoginUsingMock(
-        facebook_credentials_backend.FacebookCredentialsBackend(),
-        'http://www.facebook.com/', 'email', 'pass')
+    backend = facebook_credentials_backend.FacebookCredentialsBackend()
+    self._LoginUsingMock(backend, backend.url, backend.login_input_id,
+                         backend.password_input_id, backend.login_form_id,
+                         backend.logged_in_javascript)

@@ -35,16 +35,15 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<MediaStreamAudioDestinationNode> MediaStreamAudioDestinationNode::create(AudioContext* context, size_t numberOfChannels)
+MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::create(AudioContext* context, size_t numberOfChannels)
 {
-    return adoptRefWillBeNoop(new MediaStreamAudioDestinationNode(context, numberOfChannels));
+    return adoptRefCountedGarbageCollectedWillBeNoop(new MediaStreamAudioDestinationNode(context, numberOfChannels));
 }
 
 MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext* context, size_t numberOfChannels)
     : AudioBasicInspectorNode(context, context->sampleRate(), numberOfChannels)
     , m_mixBus(AudioBus::create(numberOfChannels, ProcessingSizeInFrames))
 {
-    ScriptWrappable::init(this);
     setNodeType(NodeTypeMediaStreamAudioDestination);
 
     m_source = MediaStreamSource::create("WebAudio-" + createCanonicalUUIDString(), MediaStreamSource::TypeAudio, "MediaStreamAudioDestinationNode", MediaStreamSource::ReadyStateLive, true);

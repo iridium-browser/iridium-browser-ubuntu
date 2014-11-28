@@ -889,10 +889,8 @@ bool CallClient::PlaceCall(const std::string& name,
     AddSession(call_->InitiateSession(jid, media_client_->jid(), options));
   }
   media_client_->SetFocus(call_);
-  if (call_->has_video() && render_) {
-    if (!options.is_muc) {
-      call_->SetLocalRenderer(local_renderer_);
-    }
+  if (call_->has_video() && render_ && !options.is_muc) {
+    // TODO(pthatcher): Hookup local_render_ to the local capturer.
   }
   if (options.is_muc) {
     const std::string& nick = mucs_[jid]->local_jid().resource();
@@ -1086,7 +1084,7 @@ void CallClient::Accept(const cricket::CallOptions& options) {
   call_->AcceptSession(session, options);
   media_client_->SetFocus(call_);
   if (call_->has_video() && render_) {
-    call_->SetLocalRenderer(local_renderer_);
+    // TODO(pthatcher): Hookup local_render_ to the local capturer.
     RenderAllStreams(call_, session, true);
   }
   SetupAcceptedCall();
@@ -1285,8 +1283,9 @@ void CallClient::OnMucStatusUpdate(const buzz::Jid& jid,
     return;
   }
 
-  if (!status.available()) {
-    // Remove them from the room.
+  if (status.available()) {
+    muc->members()[status.jid().resource()] = status;
+  } else {
     muc->members().erase(status.jid().resource());
   }
 }

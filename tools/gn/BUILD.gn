@@ -26,7 +26,9 @@ static_library("gn_lib") {
     "command_check.cc",
     "command_desc.cc",
     "command_gen.cc",
+    "command_format.cc",
     "command_help.cc",
+    "command_ls.cc",
     "command_refs.cc",
     "commands.cc",
     "commands.h",
@@ -40,6 +42,8 @@ static_library("gn_lib") {
     "config_values_generator.h",
     "copy_target_generator.cc",
     "copy_target_generator.h",
+    "deps_iterator.cc",
+    "deps_iterator.h",
     "err.cc",
     "err.h",
     "escape.cc",
@@ -78,6 +82,8 @@ static_library("gn_lib") {
     "item.h",
     "label.cc",
     "label.h",
+    "label_pattern.cc",
+    "label_pattern.h",
     "label_ptr.h",
     "loader.cc",
     "loader.h",
@@ -93,8 +99,8 @@ static_library("gn_lib") {
     "ninja_copy_target_writer.h",
     "ninja_group_target_writer.cc",
     "ninja_group_target_writer.h",
-    "ninja_helper.cc",
-    "ninja_helper.h",
+    "ninja_utils.cc",
+    "ninja_utils.h",
     "ninja_target_writer.cc",
     "ninja_target_writer.h",
     "ninja_toolchain_writer.cc",
@@ -103,6 +109,7 @@ static_library("gn_lib") {
     "ninja_writer.h",
     "operators.cc",
     "operators.h",
+    "output_file.cc",
     "output_file.h",
     "parse_tree.cc",
     "parse_tree.h",
@@ -126,6 +133,8 @@ static_library("gn_lib") {
     "source_dir.h",
     "source_file.cc",
     "source_file.h",
+    "source_file_type.cc",
+    "source_file_type.h",
     "standard_out.cc",
     "standard_out.h",
     "string_utils.cc",
@@ -147,6 +156,8 @@ static_library("gn_lib") {
     "token.cc",
     "token.h",
     "tokenizer.cc",
+    "tool.cc",
+    "tool.h",
     "tokenizer.h",
     "toolchain.cc",
     "toolchain.h",
@@ -169,6 +180,22 @@ static_library("gn_lib") {
   ]
 }
 
+action("last_commit_position") {
+  script = "last_commit_position.py"
+
+  # This dependency forces a re-run when the code is synced.
+  inputs = [ "//build/util/LASTCHANGE" ]
+
+  outfile = "$target_gen_dir/last_commit_position.h"
+  outputs = [ outfile ]
+
+  args = [
+    rebase_path("//", root_build_dir),
+    rebase_path(outfile, root_build_dir),
+    "TOOLS_GN_LAST_COMMIT_POSITION_H_",
+  ]
+}
+
 executable("gn") {
   sources = [
     "gn_main.cc",
@@ -176,7 +203,7 @@ executable("gn") {
 
   deps = [
     ":gn_lib",
-    "//build/util:last_change",
+    ":last_commit_position",
   ]
 }
 
@@ -185,6 +212,7 @@ test("gn_unittests") {
     "action_target_generator_unittest.cc",
     "builder_unittest.cc",
     "c_include_iterator_unittest.cc",
+    "command_format_unittest.cc",
     "config_values_extractors_unittest.cc",
     "escape_unittest.cc",
     "filesystem_utils_unittest.cc",
@@ -199,13 +227,15 @@ test("gn_unittests") {
     "functions_unittest.cc",
     "header_checker_unittest.cc",
     "input_conversion_unittest.cc",
+    "label_pattern_unittest.cc",
     "label_unittest.cc",
     "loader_unittest.cc",
     "ninja_action_target_writer_unittest.cc",
     "ninja_binary_target_writer_unittest.cc",
     "ninja_copy_target_writer_unittest.cc",
-    "ninja_helper_unittest.cc",
+    "ninja_group_target_writer_unittest.cc",
     "ninja_target_writer_unittest.cc",
+    "ninja_toolchain_writer_unittest.cc",
     "operators_unittest.cc",
     "parse_tree_unittest.cc",
     "parser_unittest.cc",

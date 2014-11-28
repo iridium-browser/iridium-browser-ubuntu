@@ -11,12 +11,13 @@
 #include "platform/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "wtf/MainThread.h"
-#include "wtf/ThreadingPrimitives.h"
-
 
 namespace blink {
 
 namespace {
+
+// The time we should stay in CompositorPriority mode for, after a touch event.
+double kLowSchedulerPolicyAfterTouchTimeSeconds = 0.1;
 
 // Can be created from any thread.
 // Note if the scheduler gets shutdown, this may be run after.
@@ -63,7 +64,9 @@ public:
         ASSERT(scheduler);
         if (!scheduler)
             return;
-        scheduler->runHighPriorityTasks();
+        // NOTE we must unconditionally execute high priority tasks here, since if we're not in CompositorPriority
+        // mode, then this is the only place where high priority tasks will be executed.
+        scheduler->swapQueuesRunPendingTasksAndAllowHighPriorityTaskRunnerPosting();
     }
 };
 
@@ -73,8 +76,8 @@ public:
 class Scheduler::MainThreadPendingTaskRunner : public WebThread::Task {
 public:
     MainThreadPendingTaskRunner(
-        const Scheduler::Task& task, const TraceLocation& location)
-        : m_task(task, location)
+        const Scheduler::Task& task, const TraceLocation& location, const char* traceName)
+        : m_task(task, location, traceName)
     {
         ASSERT(Scheduler::shared());
     }
@@ -86,11 +89,11 @@ public:
         // FIXME: This check should't be necessary, tasks should not outlive blink.
         ASSERT(scheduler);
         if (scheduler)
-            Scheduler::shared()->runHighPriorityTasks();
+            Scheduler::shared()->runPendingHighPriorityTasksIfInCompositorPriority();
         m_task.run();
     }
 
-    Scheduler::TracedTask m_task;
+    TracedTask m_task;
 };
 
 Scheduler* Scheduler::s_sharedScheduler = nullptr;
@@ -114,15 +117,28 @@ Scheduler* Scheduler::shared()
 Scheduler::Scheduler()
     : m_sharedTimerFunction(nullptr)
     , m_mainThread(blink::Platform::current()->currentThread())
+    , m_compositorPriorityPolicyEndTimeSeconds(0)
     , m_highPriorityTaskCount(0)
+    , m_highPriorityTaskRunnerPosted(false)
+    , m_schedulerPolicy(Normal)
 {
 }
 
 Scheduler::~Scheduler()
 {
     while (hasPendingHighPriorityWork()) {
-        runHighPriorityTasks();
+        swapQueuesAndRunPendingTasks();
     }
+}
+
+void Scheduler::willBeginFrame(const WebBeginFrameArgs& args)
+{
+    // TODO: Use frame deadline and interval to schedule idle tasks.
+}
+
+void Scheduler::didCommitFrameToCompositor()
+{
+    // TODO: Trigger the frame deadline immediately.
 }
 
 void Scheduler::scheduleIdleTask(const TraceLocation& location, const IdleTask& idleTask)
@@ -131,25 +147,50 @@ void Scheduler::scheduleIdleTask(const TraceLocation& location, const IdleTask& 
     m_mainThread->postTask(new MainThreadIdleTaskAdapter(idleTask, 0, location));
 }
 
+void Scheduler::postHighPriorityTaskInternal(const TraceLocation& location, const Task& task, const char* traceName)
+{
+    Locker<Mutex> lock(m_pendingTasksMutex);
+
+    m_pendingHighPriorityTasks.append(TracedTask(task, location, traceName));
+    atomicIncrement(&m_highPriorityTaskCount);
+    maybePostMainThreadPendingHighPriorityTaskRunner();
+    TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("blink.scheduler"), "PendingHighPriorityTasks", m_highPriorityTaskCount);
+}
+
 void Scheduler::postTask(const TraceLocation& location, const Task& task)
 {
-    m_mainThread->postTask(new MainThreadPendingTaskRunner(task, location));
+    m_mainThread->postTask(new MainThreadPendingTaskRunner(task, location, "Scheduler::MainThreadTask"));
 }
 
 void Scheduler::postInputTask(const TraceLocation& location, const Task& task)
 {
-    Locker<Mutex> lock(m_pendingTasksMutex);
-    m_pendingInputTasks.append(TracedTask(task, location));
-    atomicIncrement(&m_highPriorityTaskCount);
-    m_mainThread->postTask(new MainThreadPendingHighPriorityTaskRunner());
+    postHighPriorityTaskInternal(location, task, "Scheduler::InputTask");
+}
+
+void Scheduler::didReceiveInputEvent()
+{
+    enterSchedulerPolicy(CompositorPriority);
 }
 
 void Scheduler::postCompositorTask(const TraceLocation& location, const Task& task)
 {
-    Locker<Mutex> lock(m_pendingTasksMutex);
-    m_pendingCompositorTasks.append(TracedTask(task, location));
-    atomicIncrement(&m_highPriorityTaskCount);
+    postHighPriorityTaskInternal(location, task, "Scheduler::CompositorTask");
+}
+
+void Scheduler::postIpcTask(const TraceLocation& location, const Task& task)
+{
+    // FIXME: we want IPCs to be high priority, but we can't currently do that because some of them can take a very long
+    // time to process. These need refactoring but we need to add some infrastructure to identify them.
+    m_mainThread->postTask(new MainThreadPendingTaskRunner(task, location, "Scheduler::IpcTask"));
+}
+
+void Scheduler::maybePostMainThreadPendingHighPriorityTaskRunner()
+{
+    ASSERT(m_pendingTasksMutex.locked());
+    if (m_highPriorityTaskRunnerPosted)
+        return;
     m_mainThread->postTask(new MainThreadPendingHighPriorityTaskRunner());
+    m_highPriorityTaskRunnerPosted = true;
 }
 
 void Scheduler::postIdleTask(const TraceLocation& location, const IdleTask& idleTask)
@@ -162,39 +203,74 @@ void Scheduler::tickSharedTimer()
     TRACE_EVENT0("blink", "Scheduler::tickSharedTimer");
 
     // Run any high priority tasks that are queued up, otherwise the blink timers will yield immediately.
-    runHighPriorityTasks();
+    bool workDone = runPendingHighPriorityTasksIfInCompositorPriority();
     m_sharedTimerFunction();
 
     // The blink timers may have just yielded, so run any high priority tasks that where queued up
     // while the blink timers were executing.
-    runHighPriorityTasks();
+    if (!workDone)
+        runPendingHighPriorityTasksIfInCompositorPriority();
 }
 
-void Scheduler::runHighPriorityTasks()
+bool Scheduler::runPendingHighPriorityTasksIfInCompositorPriority()
 {
     ASSERT(isMainThread());
-    TRACE_EVENT0("blink", "Scheduler::runHighPriorityTasks");
+    if (schedulerPolicy() != CompositorPriority)
+        return false;
+
+    return swapQueuesAndRunPendingTasks();
+}
+
+bool Scheduler::swapQueuesAndRunPendingTasks()
+{
+    ASSERT(isMainThread());
 
     // These locks guard against another thread posting input or compositor tasks while we swap the buffers.
     // One the buffers have been swapped we can safely access the returned deque without having to lock.
     m_pendingTasksMutex.lock();
-    Deque<TracedTask>& inputTasks = m_pendingInputTasks.swapBuffers();
-    Deque<TracedTask>& compositorTasks = m_pendingCompositorTasks.swapBuffers();
+    Deque<TracedTask>& highPriorityTasks = m_pendingHighPriorityTasks.swapBuffers();
+    maybeEnterNormalSchedulerPolicy();
     m_pendingTasksMutex.unlock();
+    return executeHighPriorityTasks(highPriorityTasks);
+}
 
+void Scheduler::swapQueuesRunPendingTasksAndAllowHighPriorityTaskRunnerPosting()
+{
+    ASSERT(isMainThread());
+
+    // These locks guard against another thread posting input or compositor tasks while we swap the buffers.
+    // One the buffers have been swapped we can safely access the returned deque without having to lock.
+    m_pendingTasksMutex.lock();
+    Deque<TracedTask>& highPriorityTasks = m_pendingHighPriorityTasks.swapBuffers();
+    m_highPriorityTaskRunnerPosted = false;
+    maybeEnterNormalSchedulerPolicy();
+    m_pendingTasksMutex.unlock();
+    executeHighPriorityTasks(highPriorityTasks);
+}
+
+void Scheduler::maybeEnterNormalSchedulerPolicy()
+{
+    ASSERT(isMainThread());
+    ASSERT(m_pendingTasksMutex.locked());
+
+    // Go back to the normal scheduler policy if enough time has elapsed.
+    if (schedulerPolicy() == CompositorPriority && Platform::current()->monotonicallyIncreasingTime() > m_compositorPriorityPolicyEndTimeSeconds)
+        enterSchedulerPolicyLocked(Normal);
+}
+
+bool Scheduler::executeHighPriorityTasks(Deque<TracedTask>& highPriorityTasks)
+{
+    TRACE_EVENT0("blink", "Scheduler::executeHighPriorityTasks");
     int highPriorityTasksExecuted = 0;
-    while (!inputTasks.isEmpty()) {
-        inputTasks.takeFirst().run();
-        highPriorityTasksExecuted++;
-    }
-
-    while (!compositorTasks.isEmpty()) {
-        compositorTasks.takeFirst().run();
+    while (!highPriorityTasks.isEmpty()) {
+        highPriorityTasks.takeFirst().run();
         highPriorityTasksExecuted++;
     }
 
     int highPriorityTaskCount = atomicSubtract(&m_highPriorityTaskCount, highPriorityTasksExecuted);
     ASSERT_UNUSED(highPriorityTaskCount, highPriorityTaskCount >= 0);
+    TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("blink.scheduler"), "PendingHighPriorityTasks", m_highPriorityTaskCount);
+    return highPriorityTasksExecuted > 0;
 }
 
 void Scheduler::sharedTimerAdapter()
@@ -220,6 +296,10 @@ void Scheduler::stopSharedTimer()
 
 bool Scheduler::shouldYieldForHighPriorityWork() const
 {
+    // It's only worthwhile yielding in CompositorPriority mode.
+    if (schedulerPolicy() != CompositorPriority)
+        return false;
+
     return hasPendingHighPriorityWork();
 }
 
@@ -233,12 +313,29 @@ bool Scheduler::hasPendingHighPriorityWork() const
     return acquireLoad(&m_highPriorityTaskCount) != 0;
 }
 
-void Scheduler::TracedTask::run()
+Scheduler::SchedulerPolicy Scheduler::schedulerPolicy() const
 {
-    TRACE_EVENT2("blink", "TracedTask::run",
-        "src_file", m_location.fileName(),
-        "src_func", m_location.functionName());
-    m_task();
+    ASSERT(isMainThread());
+    // It's important not to miss the transition from normal to low latency mode, otherwise we're likely to
+    // delay the processing of input tasks. Since that transition is triggered by a different thread, we
+    // need either a lock or a memory barrier, and the memory barrier is probably cheaper.
+    return static_cast<SchedulerPolicy>(acquireLoad(&m_schedulerPolicy));
+}
+
+void Scheduler::enterSchedulerPolicy(SchedulerPolicy schedulerPolicy)
+{
+    Locker<Mutex> lock(m_pendingTasksMutex);
+    enterSchedulerPolicyLocked(schedulerPolicy);
+}
+
+void Scheduler::enterSchedulerPolicyLocked(SchedulerPolicy schedulerPolicy)
+{
+    ASSERT(m_pendingTasksMutex.locked());
+    if (schedulerPolicy == CompositorPriority)
+        m_compositorPriorityPolicyEndTimeSeconds = Platform::current()->monotonicallyIncreasingTime() + kLowSchedulerPolicyAfterTouchTimeSeconds;
+
+    releaseStore(&m_schedulerPolicy, schedulerPolicy);
+    TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("blink.scheduler"), "SchedulerPolicy", schedulerPolicy);
 }
 
 } // namespace blink

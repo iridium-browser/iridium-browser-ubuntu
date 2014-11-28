@@ -52,7 +52,6 @@ inline HTMLObjectElement::HTMLObjectElement(Document& document, HTMLFormElement*
     : HTMLPlugInElement(objectTag, document, createdByParser, ShouldNotPreferPlugInsForImages)
     , m_useFallbackContent(false)
 {
-    ScriptWrappable::init(this);
     associateByParser(form);
 }
 
@@ -340,7 +339,7 @@ void HTMLObjectElement::childrenChanged(const ChildrenChange& change)
 bool HTMLObjectElement::isURLAttribute(const Attribute& attribute) const
 {
     return attribute.name() == codebaseAttr || attribute.name() == dataAttr
-        || (attribute.name() == usemapAttr && attribute.value().string()[0] != '#')
+        || (attribute.name() == usemapAttr && attribute.value()[0] != '#')
         || HTMLPlugInElement::isURLAttribute(attribute);
 }
 

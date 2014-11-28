@@ -5,13 +5,17 @@
 
 """Unittests for the gs.py module."""
 
+from __future__ import print_function
+
 import functools
 import datetime
 import os
+import string # pylint: disable=W0402
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 
+from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
@@ -147,6 +151,12 @@ class VersionTest(AbstractGSContextTest):
     """Simple gsutil_version fetch test from cache."""
     self.ctx._gsutil_version = '3.37'
     self.assertEquals('3.37', self.ctx.gsutil_version)
+
+  def testGetVersionNewFormat(self):
+    """Simple gsutil_version fetch test for new gsutil output format."""
+    self.gs_mock.AddCmdResult(partial_mock.In('version'), returncode=0,
+                              output='gsutil version: 4.5\n')
+    self.assertEquals('4.5', self.ctx.gsutil_version)
 
   def testGetVersionBadOutput(self):
     """Simple gsutil_version fetch test from cache."""
@@ -446,10 +456,10 @@ class GSRetryFilterTest(cros_test_lib.TestCase):
                  '-rc2/packages/chromeos-base/autotest-tests-0.0.1-r4679.tbz2')
   GSUTIL_TRACKER_DIR = '/foo'
   UPLOAD_TRACKER_FILE = (
-      'upload_TRACKER_e0cae4d515c757f78a6d1f44a37d2f2ee236f3b8.1-r4679.tbz2.url'
+      'upload_TRACKER_9263880a80e4a582aec54eaa697bfcdd9c5621ea.9.tbz2__JSON.url'
       )
   DOWNLOAD_TRACKER_FILE = (
-      'download_TRACKER_1e6cb2935097b207b634d86f91584d0b66de354e.___tmp_file.'
+      'download_TRACKER_5a695131f3ef6e4c903f594783412bb996a7f375._file__JSON.'
       'etag')
   RETURN_CODE = 3
 
@@ -478,20 +488,18 @@ class GSRetryFilterTest(cros_test_lib.TestCase):
   def testRetryOnlyFlakyErrors(self):
     """Test that we retry only flaky errors."""
     cmd = ['gsutil', 'ls', self.REMOTE_PATH]
-    e = self._getException(cmd, 'GSResponseError: status=502')
+    e = self._getException(cmd, 'ServiceException: 503')
     self.assertTrue(self.ctx._RetryFilter(e))
 
-    e = self._getException(cmd, 'GSResponseError: status=603')
+    e = self._getException(cmd, 'UnknownException: 603')
     self.assertFalse(self.ctx._RetryFilter(e))
 
   def testRaiseGSErrors(self):
     """Test that we raise appropriate exceptions."""
-    self.assertNoSuchKey('GSResponseError: status=404, code=NoSuchKey')
-    self.assertNoSuchKey('InvalidUriError: Unrecognized scheme "http".')
-    self.assertNoSuchKey('Attempt to get key for gs://foo failed')
-    self.assertNoSuchKey('CommandException: No URIs matched.')
+    self.assertNoSuchKey('CommandException: No URLs matched.')
+    self.assertNoSuchKey('NotFoundException: 404')
     self.assertPreconditionFailed(
-        'GSResponseError: code=PreconditionFailed')
+        'PreconditionException: 412 Precondition Failed')
 
   @mock.patch('chromite.lib.osutils.SafeUnlink')
   @mock.patch('chromite.lib.osutils.ReadFile')
@@ -528,22 +536,32 @@ class GSRetryFilterTest(cros_test_lib.TestCase):
     cmd = ['gsutil', 'ls', self.REMOTE_PATH]
     e = self._getException(cmd, self.ctx.RESUMABLE_DOWNLOAD_ERROR)
 
-    with mock.MagicMock() as self.ctx._GetTrackerFilenames:
+    with mock.MagicMock() as self.ctx.GetTrackerFilenames:
       self.ctx._RetryFilter(e)
-      self.assertFalse(self.ctx._GetTrackerFilenames.called)
+      self.assertFalse(self.ctx.GetTrackerFilenames.called)
 
   def testNoRemoveTrackerFileOnOtherErrors(self):
     """Test that we do not attempt to delete tracker files for other errors."""
     cmd = ['gsutil', 'cp', self.REMOTE_PATH, self.LOCAL_PATH]
-    e = self._getException(cmd, 'InvalidUriError:')
+    e = self._getException(cmd, 'One or more URLs matched no objects')
 
-    with mock.MagicMock() as self.ctx._GetTrackerFilenames:
+    with mock.MagicMock() as self.ctx.GetTrackerFilenames:
       self.assertRaises(gs.GSNoSuchKey, self.ctx._RetryFilter, e)
-      self.assertFalse(self.ctx._GetTrackerFilenames.called)
+      self.assertFalse(self.ctx.GetTrackerFilenames.called)
 
 
 class GSContextTest(AbstractGSContextTest):
   """Tests for GSContext()"""
+
+  def testTemporaryUrl(self):
+    """Just verify the url helper generates valid URLs."""
+    with gs.TemporaryURL('mock') as url:
+      base = url[0:len(constants.TRASH_BUCKET)]
+      self.assertEqual(base, constants.TRASH_BUCKET)
+
+      valid_chars = set(string.ascii_letters + string.digits + '/-')
+      used_chars = set(url[len(base) + 1:])
+      self.assertEqual(used_chars - valid_chars, set())
 
   def testSetAclError(self):
     """Ensure SetACL blows up if the acl isn't specified."""
@@ -610,7 +628,7 @@ class GSContextTest(AbstractGSContextTest):
     """Test ability to get the generation of a file."""
     ctx = gs.GSContext()
     ctx.GetGeneration('gs://abc/1')
-    self.gs_mock.assertCommandContains(['acl', 'get', 'gs://abc/1'])
+    self.gs_mock.assertCommandContains(['stat', 'gs://abc/1'])
 
   def testCreateCached(self):
     """Test that the function runs through."""
@@ -641,7 +659,7 @@ class GSContextTest(AbstractGSContextTest):
     """Test for waiting, but not all paths exist so we timeout."""
     self.gs_mock.AddCmdResult(['stat', '/path1'],
                               returncode=1,
-                              error='GSResponseError code=NoSuchKey')
+                              output='No URLs matched')
     ctx = gs.GSContext()
     self.assertRaises(gs.timeout_util.TimeoutError,
                       ctx.WaitForGsPaths, ['/path1', '/path2'],

@@ -10,16 +10,26 @@
 #include "chrome/browser/devtools/device/usb/usb_device_provider.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "components/usb_service/usb_device.h"
-#include "components/usb_service/usb_device_handle.h"
-#include "components/usb_service/usb_interface.h"
-#include "components/usb_service/usb_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
+#include "device/usb/usb_descriptors.h"
+#include "device/usb/usb_device.h"
+#include "device/usb/usb_device_handle.h"
+#include "device/usb/usb_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
-using namespace usb_service;
+using device::UsbConfigDescriptor;
+using device::UsbDevice;
+using device::UsbDeviceHandle;
+using device::UsbEndpointDescriptor;
+using device::UsbEndpointDirection;
+using device::UsbInterfaceDescriptor;
+using device::UsbService;
+using device::UsbSynchronizationType;
+using device::UsbTransferCallback;
+using device::UsbTransferType;
+using device::UsbUsageType;
 
 namespace {
 
@@ -93,125 +103,6 @@ const char* GetMockShellResponse(std::string command) {
   return "";
 }
 
-class MockUsbEndpointDescriptor : public UsbEndpointDescriptor {
- public:
-  virtual int GetAddress() const OVERRIDE { return address_; }
-
-  virtual UsbEndpointDirection GetDirection() const OVERRIDE {
-    return direction_;
-  }
-
-  virtual int GetMaximumPacketSize() const OVERRIDE {
-    return maximum_packet_size_;
-  }
-
-  virtual UsbSynchronizationType GetSynchronizationType() const OVERRIDE {
-    return usb_synchronization_type_;
-  }
-
-  virtual UsbTransferType GetTransferType() const OVERRIDE {
-    return usb_transfer_type_;
-  }
-  virtual UsbUsageType GetUsageType() const OVERRIDE { return usb_usage_type_; }
-
-  virtual int GetPollingInterval() const OVERRIDE { return polling_interval_; }
-
-  int address_;
-  UsbEndpointDirection direction_;
-  int maximum_packet_size_;
-  UsbSynchronizationType usb_synchronization_type_;
-  UsbTransferType usb_transfer_type_;
-  UsbUsageType usb_usage_type_;
-  int polling_interval_;
-
- private:
-  virtual ~MockUsbEndpointDescriptor() {}
-};
-
-template <class T>
-class MockUsbInterfaceAltSettingDescriptor
-    : public UsbInterfaceAltSettingDescriptor {
- public:
-  MockUsbInterfaceAltSettingDescriptor(int interface_number,
-                                       int alternate_setting)
-      : interface_number_(interface_number),
-        alternate_setting_(alternate_setting) {}
-
-  virtual size_t GetNumEndpoints() const OVERRIDE {
-    // See IsAndroidInterface function in android_usb_device.cc
-    return 2;
-  }
-
-  virtual scoped_refptr<const UsbEndpointDescriptor> GetEndpoint(
-      size_t index) const OVERRIDE {
-    EXPECT_GT(static_cast<size_t>(2), index);
-    MockUsbEndpointDescriptor* result = new MockUsbEndpointDescriptor();
-    result->address_ = index + 1;
-    result->usb_transfer_type_ = USB_TRANSFER_BULK;
-    result->direction_ =
-        ((index == 0) ? USB_DIRECTION_INBOUND : USB_DIRECTION_OUTBOUND);
-    result->maximum_packet_size_ = 1 << 20;  // 1Mb maximum packet size
-    return result;
-  }
-
-  virtual int GetInterfaceNumber() const OVERRIDE { return interface_number_; }
-
-  virtual int GetAlternateSetting() const OVERRIDE {
-    return alternate_setting_;
-  }
-
-  virtual int GetInterfaceClass() const OVERRIDE { return T::kClass; }
-
-  virtual int GetInterfaceSubclass() const OVERRIDE { return T::kSubclass; }
-
-  virtual int GetInterfaceProtocol() const OVERRIDE { return T::kProtocol; }
-
- protected:
-  virtual ~MockUsbInterfaceAltSettingDescriptor() {};
-
- private:
-  const int interface_number_;
-  const int alternate_setting_;
-};
-
-template <class T>
-class MockUsbInterfaceDescriptor : public UsbInterfaceDescriptor {
- public:
-  explicit MockUsbInterfaceDescriptor(int interface_number)
-      : interface_number_(interface_number) {}
-
-  virtual size_t GetNumAltSettings() const OVERRIDE {
-    // See IsAndroidInterface function in android_usb_device.cc
-    return 1;
-  }
-  virtual scoped_refptr<const UsbInterfaceAltSettingDescriptor> GetAltSetting(
-      size_t index) const OVERRIDE {
-    EXPECT_EQ(static_cast<size_t>(0), index);
-    return new MockUsbInterfaceAltSettingDescriptor<T>(interface_number_, 0);
-  }
-
- protected:
-  const int interface_number_;
-  virtual ~MockUsbInterfaceDescriptor() {}
-};
-
-template <class T>
-class MockUsbConfigDescriptor : public UsbConfigDescriptor {
- public:
-  MockUsbConfigDescriptor() {}
-
-  virtual size_t GetNumInterfaces() const OVERRIDE { return 1; }
-
-  virtual scoped_refptr<const UsbInterfaceDescriptor> GetInterface(
-      size_t index) const OVERRIDE {
-    EXPECT_EQ(static_cast<size_t>(0), index);
-    return new MockUsbInterfaceDescriptor<T>(index);
-  }
-
- protected:
-  virtual ~MockUsbConfigDescriptor() {};
-};
-
 template <class T>
 class MockUsbDevice;
 
@@ -229,7 +120,7 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
 
   virtual void Close() OVERRIDE { device_ = NULL; }
 
-  bool ClaimInterface(const int interface_number) {
+  bool ClaimInterface(int interface_number) {
     if (device_->claimed_interfaces_.find(interface_number) !=
         device_->claimed_interfaces_.end())
       return false;
@@ -238,7 +129,7 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
     return true;
   }
 
-  bool ReleaseInterface(const int interface_number) {
+  bool ReleaseInterface(int interface_number) {
     if (device_->claimed_interfaces_.find(interface_number) ==
         device_->claimed_interfaces_.end())
       return false;
@@ -247,48 +138,35 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
     return true;
   }
 
-  virtual bool SetInterfaceAlternateSetting(
-      const int interface_number,
-      const int alternate_setting) OVERRIDE {
+  virtual bool SetInterfaceAlternateSetting(int interface_number,
+                                            int alternate_setting) OVERRIDE {
     return true;
   }
 
   virtual bool ResetDevice() OVERRIDE { return true; }
-
-  virtual bool GetManufacturer(base::string16* manufacturer) OVERRIDE {
-    *manufacturer = base::UTF8ToUTF16(kDeviceManufacturer);
-    return true;
-  }
-
-  virtual bool GetProduct(base::string16* product) OVERRIDE {
-    *product = base::UTF8ToUTF16(kDeviceModel);
-    return true;
-  }
-
-  virtual bool GetSerial(base::string16* serial) OVERRIDE {
-    *serial = base::UTF8ToUTF16(kDeviceSerial);
-    return true;
+  virtual bool GetStringDescriptor(uint8_t string_id, base::string16* content) {
+    return false;
   }
 
   // Async IO. Can be called on any thread.
-  virtual void ControlTransfer(const UsbEndpointDirection direction,
-                               const TransferRequestType request_type,
-                               const TransferRecipient recipient,
-                               const uint8 request,
-                               const uint16 value,
-                               const uint16 index,
+  virtual void ControlTransfer(UsbEndpointDirection direction,
+                               TransferRequestType request_type,
+                               TransferRecipient recipient,
+                               uint8 request,
+                               uint16 value,
+                               uint16 index,
                                net::IOBuffer* buffer,
-                               const size_t length,
-                               const unsigned int timeout,
+                               size_t length,
+                               unsigned int timeout,
                                const UsbTransferCallback& callback) OVERRIDE {}
 
-  virtual void BulkTransfer(const UsbEndpointDirection direction,
-                            const uint8 endpoint,
+  virtual void BulkTransfer(UsbEndpointDirection direction,
+                            uint8 endpoint,
                             net::IOBuffer* buffer,
-                            const size_t length,
-                            const unsigned int timeout,
+                            size_t length,
+                            unsigned int timeout,
                             const UsbTransferCallback& callback) OVERRIDE {
-    if (direction == USB_DIRECTION_OUTBOUND) {
+    if (direction == device::USB_DIRECTION_OUTBOUND) {
       if (remaining_body_length_ == 0) {
         std::vector<uint32> header(6);
         memcpy(&header[0], buffer->data(), length);
@@ -300,7 +178,7 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
           return;
         }
       } else {
-        DCHECK(current_message_);
+        DCHECK(current_message_.get());
         current_message_->body += std::string(buffer->data(), length);
         remaining_body_length_ -= length;
       }
@@ -312,11 +190,11 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(callback,
-                     usb_service::USB_TRANSFER_COMPLETED,
+                     device::USB_TRANSFER_COMPLETED,
                      scoped_refptr<net::IOBuffer>(),
                      0));
 
-    } else if (direction == USB_DIRECTION_INBOUND) {
+    } else if (direction == device::USB_DIRECTION_INBOUND) {
       queries_.push(Query(callback, make_scoped_refptr(buffer), length));
       ProcessQueries();
     }
@@ -340,7 +218,7 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
   }
 
   void ProcessIncoming() {
-    DCHECK(current_message_);
+    DCHECK(current_message_.get());
     switch (current_message_->command) {
       case AdbMessage::kCommandCNXN:
         WriteResponse(new AdbMessage(AdbMessage::kCommandCNXN,
@@ -408,27 +286,27 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(query.callback,
-                   usb_service::USB_TRANSFER_COMPLETED,
+                   device::USB_TRANSFER_COMPLETED,
                    query.buffer,
                    query.size));
   }
 
-  virtual void InterruptTransfer(const UsbEndpointDirection direction,
-                                 const uint8 endpoint,
+  virtual void InterruptTransfer(UsbEndpointDirection direction,
+                                 uint8 endpoint,
                                  net::IOBuffer* buffer,
-                                 const size_t length,
-                                 const unsigned int timeout,
+                                 size_t length,
+                                 unsigned int timeout,
                                  const UsbTransferCallback& callback) OVERRIDE {
   }
 
   virtual void IsochronousTransfer(
-      const UsbEndpointDirection direction,
-      const uint8 endpoint,
+      UsbEndpointDirection direction,
+      uint8 endpoint,
       net::IOBuffer* buffer,
-      const size_t length,
-      const unsigned int packets,
-      const unsigned int packet_length,
-      const unsigned int timeout,
+      size_t length,
+      unsigned int packets,
+      unsigned int packet_length,
+      unsigned int timeout,
       const UsbTransferCallback& callback) OVERRIDE {}
 
  protected:
@@ -456,14 +334,52 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
 template <class T>
 class MockUsbDevice : public UsbDevice {
  public:
-  MockUsbDevice() : UsbDevice(0, 0, 0) {}
+  MockUsbDevice() : UsbDevice(0, 0, 0) {
+    UsbEndpointDescriptor bulk_in;
+    bulk_in.address = 0x81;
+    bulk_in.direction = device::USB_DIRECTION_INBOUND;
+    bulk_in.maximum_packet_size = 512;
+    bulk_in.transfer_type = device::USB_TRANSFER_BULK;
+
+    UsbEndpointDescriptor bulk_out;
+    bulk_out.address = 0x01;
+    bulk_out.direction = device::USB_DIRECTION_OUTBOUND;
+    bulk_out.maximum_packet_size = 512;
+    bulk_out.transfer_type = device::USB_TRANSFER_BULK;
+
+    UsbInterfaceDescriptor interface_desc;
+    interface_desc.interface_number = 0;
+    interface_desc.alternate_setting = 0;
+    interface_desc.interface_class = T::kClass;
+    interface_desc.interface_subclass = T::kSubclass;
+    interface_desc.interface_protocol = T::kProtocol;
+    interface_desc.endpoints.push_back(bulk_in);
+    interface_desc.endpoints.push_back(bulk_out);
+
+    config_desc_.interfaces.push_back(interface_desc);
+  }
 
   virtual scoped_refptr<UsbDeviceHandle> Open() OVERRIDE {
     return new MockUsbDeviceHandle<T>(this);
   }
 
-  virtual scoped_refptr<UsbConfigDescriptor> ListInterfaces() OVERRIDE {
-    return new MockUsbConfigDescriptor<T>();
+  virtual const UsbConfigDescriptor& GetConfiguration() OVERRIDE {
+    return config_desc_;
+  }
+
+  virtual bool GetManufacturer(base::string16* manufacturer) OVERRIDE {
+    *manufacturer = base::UTF8ToUTF16(kDeviceManufacturer);
+    return true;
+  }
+
+  virtual bool GetProduct(base::string16* product) OVERRIDE {
+    *product = base::UTF8ToUTF16(kDeviceModel);
+    return true;
+  }
+
+  virtual bool GetSerialNumber(base::string16* serial) OVERRIDE {
+    *serial = base::UTF8ToUTF16(kDeviceSerial);
+    return true;
   }
 
   virtual bool Close(scoped_refptr<UsbDeviceHandle> handle) OVERRIDE {
@@ -486,6 +402,9 @@ class MockUsbDevice : public UsbDevice {
 
  protected:
   virtual ~MockUsbDevice() {}
+
+ private:
+  UsbConfigDescriptor config_desc_;
 };
 
 class MockUsbService : public UsbService {
@@ -585,7 +504,7 @@ class AndroidUsbDiscoveryTest : public InProcessBrowserTest {
 
     adb_bridge_ =
         DevToolsAndroidBridge::Factory::GetForProfile(browser()->profile());
-    DCHECK(adb_bridge_);
+    DCHECK(adb_bridge_.get());
     adb_bridge_->set_task_scheduler_for_test(base::Bind(
         &AndroidUsbDiscoveryTest::ScheduleDeviceCountRequest, this));
 

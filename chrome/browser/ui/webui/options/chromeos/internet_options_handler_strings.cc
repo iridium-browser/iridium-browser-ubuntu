@@ -6,10 +6,8 @@
 
 #include "base/macros.h"
 #include "base/values.h"
+#include "chrome/grit/generated_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -49,13 +47,36 @@ StringResource kStringResources[] = {
     {"dataRoamingDisableToggleTooltip",
      IDS_OPTIONS_SETTINGS_TOGGLE_DATA_ROAMING_RESTRICTION},
 
-    // ONC network states.
-    {"OncStateNotConnected", IDS_CHROMEOS_NETWORK_STATE_NOT_CONNECTED},
-    {"OncStateConnecting", IDS_CHROMEOS_NETWORK_STATE_CONNECTING},
-    {"OncStateConnected", IDS_CHROMEOS_NETWORK_STATE_CONNECTED},
-    {"OncStateUnknown", IDS_CHROMEOS_NETWORK_STATE_UNKNOWN},
+    // ONC network states. Format is 'Onc' + key + value.
+    // Note: '.' must be replaced with '-', e.g. VPN.Type -> OncVPN-Type
+    {"OncCellular-ActivationStateActivated",
+     IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATED},
+    {"OncCellular-ActivationStateActivating",
+     IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATING},
+    {"OncCellular-ActivationStateNotActivated",
+     IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_NOT_ACTIVATED},
+    {"OncCellular-ActivationStatePartiallyActivated",
+     IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_PARTIALLY_ACTIVATED},
+    {"OncConnectionStateConnected", IDS_CHROMEOS_NETWORK_STATE_CONNECTED},
+    {"OncConnectionStateConnecting", IDS_CHROMEOS_NETWORK_STATE_CONNECTING},
+    {"OncConnectionStateNotConnected",
+     IDS_CHROMEOS_NETWORK_STATE_NOT_CONNECTED},
+    {"OncCellular-RoamingStateHome", IDS_CHROMEOS_NETWORK_ROAMING_STATE_HOME},
+    {"OncCellular-RoamingStateRoaming",
+     IDS_CHROMEOS_NETWORK_ROAMING_STATE_ROAMING},
+    {"OncTypeCellular", IDS_NETWORK_TYPE_CELLULAR},
+    {"OncTypeEthernet", IDS_NETWORK_TYPE_ETHERNET},
+    {"OncTypeWiFi", IDS_NETWORK_TYPE_WIFI},
+    {"OncTypeWimax", IDS_NETWORK_TYPE_WIMAX},
+    {"OncVPN-TypeL2TP-IPsecCert",
+     IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_L2TP_IPSEC_USER_CERT},
+    {"OncVPN-TypeL2TP-IPsecPSK",
+     IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_L2TP_IPSEC_PSK},
+    {"OncVPN-TypeOpenVPN", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_OPEN_VPN},
 
     // Internet details dialog.
+    {"restrictedNo", IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL},
+    {"restrictedYes", IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL},
     {"managedNetwork", IDS_OPTIONS_SETTINGS_MANAGED_NETWORK},
     {"wifiNetworkTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION},
     {"vpnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_VPN},
@@ -65,6 +86,9 @@ StringResource kStringResources[] = {
     {"securityTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_SECURITY},
     {"proxyTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_PROXY},
     {"connectionState", IDS_OPTIONS_SETTINGS_INTERNET_CONNECTION_STATE},
+    // TODO(stevenjb): Rename the IDS constant when we redesign the UI.
+    {"restrictedConnectivity",
+     IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_RESTRICTED_POOL},
     {"inetAddress", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADDRESS},
     {"inetNetmask", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SUBNETMASK},
     {"inetGateway", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_GATEWAY},
@@ -82,7 +106,6 @@ StringResource kStringResources[] = {
     {"hardwareAddress", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_HARDWARE_ADDRESS},
     {"detailsInternetDismiss", IDS_CLOSE},
     {"activateButton", IDS_OPTIONS_SETTINGS_ACTIVATE},
-    {"buyplanButton", IDS_OPTIONS_SETTINGS_BUY_PLAN},
     {"connectButton", IDS_OPTIONS_SETTINGS_CONNECT},
     {"configureButton", IDS_OPTIONS_SETTINGS_CONFIGURE},
     {"disconnectButton", IDS_OPTIONS_SETTINGS_DISCONNECT},
@@ -125,7 +148,6 @@ StringResource kStringResources[] = {
     {"activationState",
      IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ACTIVATION_STATE},
     {"roamingState", IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ROAMING_STATE},
-    {"restrictedPool", IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_RESTRICTED_POOL},
     {"errorState", IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ERROR_STATE},
     {"cellularManufacturer",
      IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_MANUFACTURER},
@@ -164,74 +186,6 @@ void RegisterLocalizedStrings(base::DictionaryValue* localized_strings) {
         kStringResources[i].name,
         l10n_util::GetStringUTF16(kStringResources[i].id));
   }
-}
-
-std::string ActivationStateString(const std::string& activation_state) {
-  int id;
-  if (activation_state == shill::kActivationStateActivated)
-    id = IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATED;
-  else if (activation_state == shill::kActivationStateActivating)
-    id = IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATING;
-  else if (activation_state == shill::kActivationStateNotActivated)
-    id = IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_NOT_ACTIVATED;
-  else if (activation_state == shill::kActivationStatePartiallyActivated)
-    id = IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_PARTIALLY_ACTIVATED;
-  else
-    id = IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_UNKNOWN;
-  return l10n_util::GetStringUTF8(id);
-}
-
-std::string RoamingStateString(const std::string& roaming_state) {
-  int id;
-  if (roaming_state == shill::kRoamingStateHome)
-    id = IDS_CHROMEOS_NETWORK_ROAMING_STATE_HOME;
-  else if (roaming_state == shill::kRoamingStateRoaming)
-    id = IDS_CHROMEOS_NETWORK_ROAMING_STATE_ROAMING;
-  else
-    id = IDS_CHROMEOS_NETWORK_ROAMING_STATE_UNKNOWN;
-  return l10n_util::GetStringUTF8(id);
-}
-
-std::string ProviderTypeString(
-    const std::string& provider_type,
-    const base::DictionaryValue& provider_properties) {
-  int id;
-  if (provider_type == shill::kProviderL2tpIpsec) {
-    std::string client_cert_id;
-    provider_properties.GetStringWithoutPathExpansion(
-        shill::kL2tpIpsecClientCertIdProperty, &client_cert_id);
-    if (client_cert_id.empty())
-      id = IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_L2TP_IPSEC_PSK;
-    else
-      id = IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_L2TP_IPSEC_USER_CERT;
-  } else if (provider_type == shill::kProviderOpenVpn) {
-    id = IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_OPEN_VPN;
-  } else {
-    id = IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN;
-  }
-  return l10n_util::GetStringUTF8(id);
-}
-
-std::string RestrictedStateString(const std::string& connection_state) {
-  int id;
-  if (connection_state == shill::kStatePortal)
-    id = IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL;
-  else
-    id = IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL;
-  return l10n_util::GetStringUTF8(id);
-}
-
-std::string NetworkDeviceTypeString(const std::string& network_type) {
-  int id;
-  if (network_type == shill::kTypeEthernet)
-    id = IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET;
-  else if (network_type == shill::kTypeWifi)
-    id = IDS_STATUSBAR_NETWORK_DEVICE_WIFI;
-  else if (network_type == shill::kTypeCellular)
-    id = IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR;
-  else
-    id = IDS_STATUSBAR_NETWORK_DEVICE_UNKNOWN;
-  return l10n_util::GetStringUTF8(id);
 }
 
 }  // namespace internet_options_strings

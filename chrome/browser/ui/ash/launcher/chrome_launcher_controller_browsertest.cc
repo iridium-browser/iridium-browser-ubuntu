@@ -4,9 +4,6 @@
 
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
-#include "apps/ui/native_app_window.h"
 #include "ash/ash_switches.h"
 #include "ash/display/display_controller.h"
 #include "ash/shelf/shelf.h"
@@ -30,7 +27,6 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
@@ -52,9 +48,13 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_registry.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/switches.h"
+#include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/aura/client/aura_constants.h"
@@ -62,7 +62,7 @@
 #include "ui/events/event.h"
 #include "ui/events/test/event_generator.h"
 
-using apps::AppWindow;
+using extensions::AppWindow;
 using extensions::Extension;
 using content::WebContents;
 
@@ -80,15 +80,16 @@ class TestEvent : public ui::Event {
   DISALLOW_COPY_AND_ASSIGN(TestEvent);
 };
 
-class TestAppWindowRegistryObserver : public apps::AppWindowRegistry::Observer {
+class TestAppWindowRegistryObserver
+    : public extensions::AppWindowRegistry::Observer {
  public:
   explicit TestAppWindowRegistryObserver(Profile* profile)
       : profile_(profile), icon_updates_(0) {
-    apps::AppWindowRegistry::Get(profile_)->AddObserver(this);
+    extensions::AppWindowRegistry::Get(profile_)->AddObserver(this);
   }
 
   virtual ~TestAppWindowRegistryObserver() {
-    apps::AppWindowRegistry::Get(profile_)->RemoveObserver(this);
+    extensions::AppWindowRegistry::Get(profile_)->RemoveObserver(this);
   }
 
   // Overridden from AppWindowRegistry::Observer:
@@ -2065,16 +2066,16 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, OverflowBubble) {
 // still gets detected properly.
 IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, V1AppNavigation) {
   // We assume that the web store is always there (which it apparently is).
-  controller_->PinAppWithID(extension_misc::kWebStoreAppId);
+  controller_->PinAppWithID(extensions::kWebStoreAppId);
   ash::ShelfID id = controller_->GetShelfIDForAppID(
-      extension_misc::kWebStoreAppId);
+      extensions::kWebStoreAppId);
   ASSERT_NE(0, id);
   EXPECT_EQ(ash::STATUS_CLOSED, model_->ItemByID(id)->status);
 
   // Create a windowed application.
   AppLaunchParams params(
       profile(),
-      controller_->GetExtensionForAppID(extension_misc::kWebStoreAppId),
+      controller_->GetExtensionForAppID(extensions::kWebStoreAppId),
       0,
       chrome::HOST_DESKTOP_TYPE_ASH);
   params.container = extensions::LAUNCH_CONTAINER_WINDOW;

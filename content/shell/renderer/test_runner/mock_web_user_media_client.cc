@@ -5,13 +5,16 @@
 #include "content/shell/renderer/test_runner/mock_web_user_media_client.h"
 
 #include "base/logging.h"
-#include "content/shell/renderer/test_runner/WebTestDelegate.h"
+#include "base/macros.h"
 #include "content/shell/renderer/test_runner/mock_constraints.h"
+#include "content/shell/renderer/test_runner/web_test_delegate.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/WebKit/public/platform/WebMediaDeviceInfo.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
+#include "third_party/WebKit/public/platform/WebMediaStreamTrackSourcesRequest.h"
+#include "third_party/WebKit/public/platform/WebSourceInfo.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebMediaDevicesRequest.h"
@@ -24,6 +27,8 @@ using blink::WebMediaDevicesRequest;
 using blink::WebMediaStream;
 using blink::WebMediaStreamSource;
 using blink::WebMediaStreamTrack;
+using blink::WebMediaStreamTrackSourcesRequest;
+using blink::WebSourceInfo;
 using blink::WebString;
 using blink::WebUserMediaRequest;
 using blink::WebVector;
@@ -41,13 +46,13 @@ class UserMediaRequestTask : public WebMethodTask<MockWebUserMediaClient> {
     DCHECK(!result_.isNull());
   }
 
-  virtual void runIfValid() OVERRIDE {
-    request_.requestSucceeded(result_);
-  }
+  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
 
  private:
   WebUserMediaRequest request_;
   WebMediaStream result_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserMediaRequestTask);
 };
 
 class UserMediaRequestConstraintFailedTask
@@ -60,13 +65,15 @@ class UserMediaRequestConstraintFailedTask
         request_(request),
         constraint_(constraint) {}
 
-  virtual void runIfValid() OVERRIDE {
+  virtual void RunIfValid() OVERRIDE {
     request_.requestFailedConstraint(constraint_);
   }
 
  private:
   WebUserMediaRequest request_;
   WebString constraint_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserMediaRequestConstraintFailedTask);
 };
 
 class UserMediaRequestPermissionDeniedTask
@@ -77,12 +84,12 @@ class UserMediaRequestPermissionDeniedTask
       : WebMethodTask<MockWebUserMediaClient>(object),
         request_(request) {}
 
-  virtual void runIfValid() OVERRIDE {
-    request_.requestFailed();
-  }
+  virtual void RunIfValid() OVERRIDE { request_.requestFailed(); }
 
  private:
   WebUserMediaRequest request_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserMediaRequestPermissionDeniedTask);
 };
 
 class MediaDevicesRequestTask : public WebMethodTask<MockWebUserMediaClient> {
@@ -94,13 +101,31 @@ class MediaDevicesRequestTask : public WebMethodTask<MockWebUserMediaClient> {
         request_(request),
         result_(result) {}
 
-  virtual void runIfValid() OVERRIDE {
-    request_.requestSucceeded(result_);
-  }
+  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
 
  private:
   WebMediaDevicesRequest request_;
   WebVector<WebMediaDeviceInfo> result_;
+
+  DISALLOW_COPY_AND_ASSIGN(MediaDevicesRequestTask);
+};
+
+class SourcesRequestTask : public WebMethodTask<MockWebUserMediaClient> {
+ public:
+  SourcesRequestTask(MockWebUserMediaClient* object,
+                     const WebMediaStreamTrackSourcesRequest& request,
+                     const WebVector<WebSourceInfo>& result)
+      : WebMethodTask<MockWebUserMediaClient>(object),
+        request_(request),
+        result_(result) {}
+
+  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
+
+ private:
+  WebMediaStreamTrackSourcesRequest request_;
+  WebVector<WebSourceInfo> result_;
+
+  DISALLOW_COPY_AND_ASSIGN(SourcesRequestTask);
 };
 
 class MockExtraData : public WebMediaStream::ExtraData {
@@ -117,7 +142,7 @@ void MockWebUserMediaClient::requestUserMedia(
     WebUserMediaRequest request = stream_request;
 
     if (request.ownerDocument().isNull() || !request.ownerDocument().frame()) {
-      delegate_->postTask(
+      delegate_->PostTask(
           new UserMediaRequestPermissionDeniedTask(this, request));
         return;
     }
@@ -126,14 +151,14 @@ void MockWebUserMediaClient::requestUserMedia(
     WebString failed_constraint;
     if (!constraints.isNull() &&
         !MockConstraints::VerifyConstraints(constraints, &failed_constraint)) {
-      delegate_->postTask(new UserMediaRequestConstraintFailedTask(
+      delegate_->PostTask(new UserMediaRequestConstraintFailedTask(
           this, request, failed_constraint));
       return;
     }
     constraints = request.videoConstraints();
     if (!constraints.isNull() &&
         !MockConstraints::VerifyConstraints(constraints, &failed_constraint)) {
-      delegate_->postTask(new UserMediaRequestConstraintFailedTask(
+      delegate_->PostTask(new UserMediaRequestConstraintFailedTask(
           this, request, failed_constraint));
       return;
     }
@@ -164,7 +189,7 @@ void MockWebUserMediaClient::requestUserMedia(
 
     stream.setExtraData(new MockExtraData());
 
-    delegate_->postTask(new UserMediaRequestTask(this, request, stream));
+    delegate_->PostTask(new UserMediaRequestTask(this, request, stream));
 }
 
 void MockWebUserMediaClient::cancelUserMediaRequest(
@@ -173,27 +198,78 @@ void MockWebUserMediaClient::cancelUserMediaRequest(
 
 void MockWebUserMediaClient::requestMediaDevices(
     const WebMediaDevicesRequest& request) {
-  const size_t three = 3;
-  WebVector<WebMediaDeviceInfo> devices(three);
+  struct {
+    const char* device_id;
+    WebMediaDeviceInfo::MediaDeviceKind kind;
+    const char* label;
+    const char* group_id;
+  } test_devices[] = {
+    {
+      "device1",
+      WebMediaDeviceInfo::MediaDeviceKindAudioInput,
+      "Built-in microphone",
+      "group1",
+    },
+    {
+      "device2",
+      WebMediaDeviceInfo::MediaDeviceKindAudioOutput,
+      "Built-in speakers",
+      "group1",
+    },
+    {
+      "device3",
+      WebMediaDeviceInfo::MediaDeviceKindVideoInput,
+      "Build-in webcam",
+      "group2",
+    },
+  };
 
-  devices[0].initialize("device1",
-                        WebMediaDeviceInfo::MediaDeviceKindAudioInput,
-                        "Built-in microphone",
-                        "group1");
-  devices[1].initialize("device2",
-                        WebMediaDeviceInfo::MediaDeviceKindAudioOutput,
-                        "Built-in speakers",
-                        "group1");
-  devices[2].initialize("device3",
-                        WebMediaDeviceInfo::MediaDeviceKindVideoInput,
-                        "Build-in webcam",
-                        "group2");
+  WebVector<WebMediaDeviceInfo> devices(ARRAYSIZE_UNSAFE(test_devices));
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_devices); ++i) {
+    devices[i].initialize(WebString::fromUTF8(test_devices[i].device_id),
+                          test_devices[i].kind,
+                          WebString::fromUTF8(test_devices[i].label),
+                          WebString::fromUTF8(test_devices[i].group_id));
+  }
 
-  delegate_->postTask(new MediaDevicesRequestTask(this, request, devices));
+  delegate_->PostTask(new MediaDevicesRequestTask(this, request, devices));
 }
 
 void MockWebUserMediaClient::cancelMediaDevicesRequest(
     const WebMediaDevicesRequest&) {
+}
+
+void MockWebUserMediaClient::requestSources(
+    const blink::WebMediaStreamTrackSourcesRequest& request) {
+  struct {
+    const char* id;
+    WebSourceInfo::SourceKind kind;
+    const char* label;
+    WebSourceInfo::VideoFacingMode facing;
+  } test_sources[] = {
+    {
+      "device1",
+      WebSourceInfo::SourceKindAudio,
+      "Built-in microphone",
+      WebSourceInfo::VideoFacingModeNone,
+    },
+    {
+      "device2",
+      WebSourceInfo::SourceKindVideo,
+      "Build-in webcam",
+      WebSourceInfo::VideoFacingModeEnvironment,
+    },
+  };
+
+  WebVector<WebSourceInfo> sources(ARRAYSIZE_UNSAFE(test_sources));
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_sources); ++i) {
+  sources[i].initialize(WebString::fromUTF8(test_sources[i].id),
+                        test_sources[i].kind,
+                        WebString::fromUTF8(test_sources[i].label),
+                        test_sources[i].facing);
+  }
+
+  delegate_->PostTask(new SourcesRequestTask(this, request, sources));
 }
 
 }  // namespace content

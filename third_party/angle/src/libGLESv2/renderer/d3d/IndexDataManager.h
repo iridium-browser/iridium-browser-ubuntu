@@ -11,6 +11,10 @@
 #define LIBGLESV2_INDEXDATAMANAGER_H_
 
 #include "common/angleutils.h"
+#include "common/mathutil.h"
+#include "libGLESv2/Error.h"
+
+#include <GLES2/gl2.h>
 
 namespace
 {
@@ -24,6 +28,7 @@ class Buffer;
 
 namespace rx
 {
+class IndexBufferInterface;
 class StaticIndexBufferInterface;
 class StreamingIndexBufferInterface;
 class IndexBuffer;
@@ -32,8 +37,7 @@ class Renderer;
 
 struct TranslatedIndexData
 {
-    unsigned int minIndex;
-    unsigned int maxIndex;
+    RangeUI indexRange;
     unsigned int startIndex;
     unsigned int startOffset;   // In bytes
 
@@ -49,17 +53,17 @@ class IndexDataManager
     explicit IndexDataManager(Renderer *renderer);
     virtual ~IndexDataManager();
 
-    GLenum prepareIndexData(GLenum type, GLsizei count, gl::Buffer *arrayElementBuffer, const GLvoid *indices, TranslatedIndexData *translated);
-    StaticIndexBufferInterface *getCountingIndices(GLsizei count);
+    gl::Error prepareIndexData(GLenum type, GLsizei count, gl::Buffer *arrayElementBuffer, const GLvoid *indices, TranslatedIndexData *translated);
 
   private:
+     gl::Error getStreamingIndexBuffer(GLenum destinationIndexType, IndexBufferInterface **outBuffer);
+
     DISALLOW_COPY_AND_ASSIGN(IndexDataManager);
 
     Renderer *const mRenderer;
 
     StreamingIndexBufferInterface *mStreamingBufferShort;
     StreamingIndexBufferInterface *mStreamingBufferInt;
-    StaticIndexBufferInterface *mCountingBuffer;
 };
 
 }

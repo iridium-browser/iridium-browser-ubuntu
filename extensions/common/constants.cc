@@ -4,8 +4,6 @@
 
 #include "extensions/common/constants.h"
 
-#include "base/files/file_path.h"
-
 namespace extensions {
 
 const char kExtensionScheme[] = "chrome-extension";
@@ -54,6 +52,10 @@ const char kSyncExtensionSettingsDirectoryName[] = "Sync Extension Settings";
 const char kManagedSettingsDirectoryName[] = "Managed Extension Settings";
 const char kStateStoreName[] = "Extension State";
 const char kRulesStoreName[] = "Extension Rules";
+const char kWebStoreAppId[] = "ahfgeienlihckogmohjhadlkjgocpleb";
+
+const char kMimeTypeJpeg[] = "image/jpeg";
+const char kMimeTypePng[] = "image/png";
 
 }  // namespace extensions
 
@@ -73,11 +75,13 @@ const int kExtensionIconSizes[] = {EXTENSION_ICON_GIGANTOR,     // 512
 
 const size_t kNumExtensionIconSizes = arraysize(kExtensionIconSizes);
 
-const int kExtensionActionIconSizes[] = {EXTENSION_ICON_ACTION,     // 19,
-                                         2 * EXTENSION_ICON_ACTION  // 38
+const IconRepresentationInfo kExtensionActionIconSizes[] = {
+  { EXTENSION_ICON_ACTION, "19", ui::SCALE_FACTOR_100P },
+  { 2 * EXTENSION_ICON_ACTION, "38", ui::SCALE_FACTOR_200P }
 };
 
-const size_t kNumExtensionActionIconSizes =
-    arraysize(kExtensionActionIconSizes);
+COMPILE_ASSERT(kNumExtensionActionIconSizes ==
+               arraysize(kExtensionActionIconSizes),
+               num_action_icon_sizes_must_be_in_sync_with_action_icon_sizes);
 
 }  // namespace extension_misc

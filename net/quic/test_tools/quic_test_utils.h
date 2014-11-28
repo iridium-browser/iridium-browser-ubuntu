@@ -16,7 +16,9 @@
 #include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_client_session_base.h"
 #include "net/quic/quic_connection.h"
+#include "net/quic/quic_dispatcher.h"
 #include "net/quic/quic_framer.h"
+#include "net/quic/quic_per_connection_packet_writer.h"
 #include "net/quic/quic_sent_packet_manager.h"
 #include "net/quic/quic_session.h"
 #include "net/quic/test_tools/mock_clock.h"
@@ -237,6 +239,7 @@ class MockConnectionVisitor : public QuicConnectionVisitorInterface {
   MOCK_METHOD2(OnConnectionClosed, void(QuicErrorCode error, bool from_peer));
   MOCK_METHOD0(OnWriteBlocked, void());
   MOCK_METHOD0(OnCanWrite, void());
+  MOCK_METHOD1(OnCongestionWindowChange, void(QuicTime now));
   MOCK_CONST_METHOD0(WillingAndAbleToWrite, bool());
   MOCK_CONST_METHOD0(HasPendingHandshake, bool());
   MOCK_CONST_METHOD0(HasOpenDataStreams, bool());
@@ -328,9 +331,7 @@ class PacketSavingConnection : public MockConnection {
 
   virtual ~PacketSavingConnection();
 
-  virtual bool SendOrQueuePacket(EncryptionLevel level,
-                                 const SerializedPacket& packet,
-                                 TransmissionType transmission_type) OVERRIDE;
+  virtual void SendOrQueuePacket(QueuedPacket packet) OVERRIDE;
 
   std::vector<QuicPacket*> packets_;
   std::vector<QuicEncryptedPacket*> encrypted_packets_;
@@ -445,8 +446,8 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
                     QuicTime feedback_receive_time));
   MOCK_METHOD4(OnCongestionEvent, void(bool rtt_updated,
                                        QuicByteCount bytes_in_flight,
-                                       const CongestionMap& acked_packets,
-                                       const CongestionMap& lost_packets));
+                                       const CongestionVector& acked_packets,
+                                       const CongestionVector& lost_packets));
   MOCK_METHOD5(OnPacketSent,
                bool(QuicTime, QuicByteCount, QuicPacketSequenceNumber,
                     QuicByteCount, HasRetransmittableData));
@@ -462,6 +463,7 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
   MOCK_CONST_METHOD0(RetransmissionDelay, QuicTime::Delta(void));
   MOCK_CONST_METHOD0(GetCongestionWindow, QuicByteCount());
   MOCK_CONST_METHOD0(InSlowStart, bool());
+  MOCK_CONST_METHOD0(InRecovery, bool());
   MOCK_CONST_METHOD0(GetSlowStartThreshold, QuicByteCount());
   MOCK_CONST_METHOD0(GetCongestionControlType, CongestionControlType());
 
@@ -540,6 +542,46 @@ class MockNetworkChangeVisitor :
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockNetworkChangeVisitor);
+};
+
+// Creates per-connection packet writers that register themselves with the
+// TestWriterFactory on each write so that TestWriterFactory::OnPacketSent can
+// be routed to the appropriate QuicConnection.
+class TestWriterFactory : public QuicDispatcher::PacketWriterFactory {
+ public:
+  TestWriterFactory();
+  virtual ~TestWriterFactory();
+
+  virtual QuicPacketWriter* Create(QuicServerPacketWriter* writer,
+                                   QuicConnection* connection) OVERRIDE;
+
+  // Calls OnPacketSent on the last QuicConnection to write through one of the
+  // packet writers created by this factory.
+  void OnPacketSent(WriteResult result);
+
+ private:
+  class PerConnectionPacketWriter : public QuicPerConnectionPacketWriter {
+   public:
+    PerConnectionPacketWriter(TestWriterFactory* factory,
+                              QuicServerPacketWriter* writer,
+                              QuicConnection* connection);
+    virtual ~PerConnectionPacketWriter();
+
+    virtual WriteResult WritePacket(
+        const char* buffer,
+        size_t buf_len,
+        const IPAddressNumber& self_address,
+        const IPEndPoint& peer_address) OVERRIDE;
+
+   private:
+    TestWriterFactory* factory_;
+  };
+
+  // If an asynchronous write is happening and |writer| gets deleted, this
+  // clears the pointer to it to prevent use-after-free.
+  void Unregister(PerConnectionPacketWriter* writer);
+
+  PerConnectionPacketWriter* current_writer_;
 };
 
 }  // namespace test

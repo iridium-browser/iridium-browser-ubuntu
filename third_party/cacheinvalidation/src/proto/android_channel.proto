@@ -23,10 +23,10 @@ package com.google.protos.ipc.invalidation;
 
 option optimize_for = LITE_RUNTIME;
 
-option java_outer_classname = "AndroidChannel";
 
 
-
+option java_outer_classname = "NanoAndroidChannel";
+option java_package = "com.google.protos.ipc.invalidation";
 
 
 import "client_protocol.proto";
@@ -57,7 +57,7 @@ enum MajorVersion {
 
 // An id that specifies how to route a message to a Ticl on an Android device
 // via C2DM.
-message EndpointId {
+message AndroidEndpointId {
   // Field 1 was once the ProtocolVersion of this message.
 
   // The "registration_id" returned when the client registers with c2dm.  This

@@ -58,10 +58,6 @@ extern const char kZoomSettingsScope[];
 // Value consts.
 extern const char kCanOnlyMoveTabsWithinNormalWindowsError[];
 extern const char kCanOnlyMoveTabsWithinSameProfileError[];
-extern const char kFormatValueJpeg[];
-extern const char kFormatValuePng[];
-extern const char kMimeTypeJpeg[];
-extern const char kMimeTypePng[];
 extern const char kShowStateValueNormal[];
 extern const char kShowStateValueMinimized[];
 extern const char kShowStateValueMaximized[];
@@ -97,9 +93,6 @@ extern const char kInvalidWindowTypeError[];
 extern const char kInvalidWindowStateError[];
 extern const char kScreenshotsDisabled[];
 
-extern const char kNoCodeOrFileToExecuteError[];
-extern const char kMoreThanOneValuesError[];
-extern const char kLoadFileError[];
 extern const char kCannotDetermineLanguageOfUnloadedTab[];
 
 };  // namespace tabs_constants

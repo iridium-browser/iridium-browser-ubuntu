@@ -18,7 +18,6 @@ package com.google.ipc.invalidation.ticl;
 
 import static com.google.ipc.invalidation.external.client.SystemResources.Scheduler.NO_DELAY;
 
-import com.google.common.base.Preconditions;
 import com.google.ipc.invalidation.external.client.InvalidationClient;
 import com.google.ipc.invalidation.external.client.InvalidationListener;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
@@ -29,6 +28,7 @@ import com.google.ipc.invalidation.external.client.types.Invalidation;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
 import com.google.ipc.invalidation.ticl.Statistics.ListenerEventType;
 import com.google.ipc.invalidation.util.NamedRunnable;
+import com.google.ipc.invalidation.util.Preconditions;
 
 
 /**

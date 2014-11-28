@@ -5,7 +5,7 @@
 #ifndef WebSelectionBound_h
 #define WebSelectionBound_h
 
-#include "public/platform/WebRect.h"
+#include "public/platform/WebPoint.h"
 
 namespace blink {
 
@@ -30,9 +30,10 @@ struct WebSelectionBound {
     // The id of the platform layer to which the bound should be anchored.
     int layerId;
 
-    // The one-dimensional rect of the bound's edge in layer coordinates, not to
-    // be confused with the selection region.
-    WebRect edgeRectInLayer;
+    // The bottom and top coordinates of the edge (caret), in layer coordinates,
+    // that define the selection bound.
+    WebPoint edgeTopInLayer;
+    WebPoint edgeBottomInLayer;
 };
 
 } // namespace blink

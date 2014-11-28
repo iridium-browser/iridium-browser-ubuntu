@@ -5,12 +5,13 @@
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
@@ -34,12 +35,11 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_constants.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
-#include "webkit/browser/fileapi/file_system_url.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 using content::BrowserThread;
 
@@ -169,34 +169,6 @@ DriveServiceInterface* GetDriveServiceByProfile(Profile* profile) {
   return integration_service ? integration_service->drive_service() : NULL;
 }
 
-GURL FilePathToDriveURL(const base::FilePath& path) {
-  std::string url(base::StringPrintf("%s:%s",
-                                     chrome::kDriveScheme,
-                                     path.AsUTF8Unsafe().c_str()));
-  return GURL(url);
-}
-
-base::FilePath DriveURLToFilePath(const GURL& url) {
-  if (!url.is_valid() || url.scheme() != chrome::kDriveScheme)
-    return base::FilePath();
-  std::string path_string = net::UnescapeURLComponent(
-      url.GetContent(), net::UnescapeRule::NORMAL);
-  return base::FilePath::FromUTF8Unsafe(path_string);
-}
-
-void MaybeSetDriveURL(Profile* profile, const base::FilePath& path, GURL* url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (!IsUnderDriveMountPoint(path))
-    return;
-
-  FileSystemInterface* file_system = GetFileSystemByProfile(profile);
-  if (!file_system)
-    return;
-
-  *url = FilePathToDriveURL(util::ExtractDrivePath(path));
-}
-
 bool IsUnderDriveMountPoint(const base::FilePath& path) {
   return !ExtractDrivePath(path).empty();
 }
@@ -237,8 +209,8 @@ Profile* ExtractProfileFromPath(const base::FilePath& path) {
 }
 
 base::FilePath ExtractDrivePathFromFileSystemUrl(
-    const fileapi::FileSystemURL& url) {
-  if (!url.is_valid() || url.type() != fileapi::kFileSystemTypeDrive)
+    const storage::FileSystemURL& url) {
+  if (!url.is_valid() || url.type() != storage::kFileSystemTypeDrive)
     return base::FilePath();
   return ExtractDrivePath(url.path());
 }
@@ -308,7 +280,7 @@ void PrepareWritableFileAndRun(Profile* profile,
 
   WriteOnCacheFile(file_system,
                    ExtractDrivePath(path),
-                   std::string(), // mime_type
+                   std::string(),  // mime_type
                    callback);
 }
 

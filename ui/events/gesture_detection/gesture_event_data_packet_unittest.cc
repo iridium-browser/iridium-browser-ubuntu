@@ -16,7 +16,7 @@ const float kTouchX = 13.7f;
 const float kTouchY = 14.2f;
 
 GestureEventData CreateGesture(EventType type) {
-  return GestureEventData(GestureEventDetails(type, 0, 0),
+  return GestureEventData(GestureEventDetails(type),
                           0,
                           MotionEvent::TOOL_TYPE_FINGER,
                           base::TimeTicks(),
@@ -25,7 +25,8 @@ GestureEventData CreateGesture(EventType type) {
                           kTouchX + 5.f,
                           kTouchY + 10.f,
                           1,
-                          gfx::RectF(kTouchX - 1.f, kTouchY - 1.f, 2.f, 2.f));
+                          gfx::RectF(kTouchX - 1.f, kTouchY - 1.f, 2.f, 2.f),
+                          EF_NONE);
 }
 
 }  // namespace

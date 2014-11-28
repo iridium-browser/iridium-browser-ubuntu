@@ -44,11 +44,13 @@ public:
     virtual FloatRect strokeBoundingBox() const OVERRIDE { return FloatRect(FloatPoint(), m_viewport.size()); }
     virtual FloatRect paintInvalidationRectInLocalCoordinates() const OVERRIDE { return FloatRect(FloatPoint(), m_viewport.size()); }
 
-    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, ViewportConstrainedPosition, const PaintInvalidationState*) const OVERRIDE;
+    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const OVERRIDE;
     virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction) OVERRIDE;
     virtual bool isSVGForeignObject() const OVERRIDE { return true; }
 
     virtual void setNeedsTransformUpdate() OVERRIDE { m_needsTransformUpdate = true; }
+
+    FloatRect viewportRect() { return m_viewport; }
 
 private:
     virtual void updateLogicalWidth() OVERRIDE;

@@ -175,11 +175,11 @@ static inline SkFontStyle fontStyle(const FontDescription& fontDescription)
     return SkFontStyle(weight, width, slant);
 }
 
-COMPILE_ASSERT(FontStretchUltraCondensed == SkFontStyle::kUltraCondensed_Width,
+COMPILE_ASSERT(static_cast<int>(FontStretchUltraCondensed) == static_cast<int>(SkFontStyle::kUltraCondensed_Width),
     FontStretchUltraCondensedMapsTokUltraCondensed_Width);
-COMPILE_ASSERT(FontStretchNormal == SkFontStyle::kNormal_Width,
+COMPILE_ASSERT(static_cast<int>(FontStretchNormal) == static_cast<int>(SkFontStyle::kNormal_Width),
     FontStretchNormalMapsTokNormal_Width);
-COMPILE_ASSERT(FontStretchUltraExpanded == SkFontStyle::kUltaExpanded_Width,
+COMPILE_ASSERT(static_cast<int>(FontStretchUltraExpanded) == static_cast<int>(SkFontStyle::kUltaExpanded_Width),
     FontStretchUltraExpandedMapsTokUltaExpanded_Width);
 #endif
 
@@ -220,10 +220,10 @@ PassRefPtr<SkTypeface> FontCache::createTypeface(const FontDescription& fontDesc
 
 #if OS(WIN)
     if (s_sideloadedFonts) {
-        HashMap<String, SkTypeface*>::iterator sideloadedFont =
+        HashMap<String, RefPtr<SkTypeface> >::iterator sideloadedFont =
             s_sideloadedFonts->find(name.data());
         if (sideloadedFont != s_sideloadedFonts->end())
-            return adoptRef(sideloadedFont->value);
+            return sideloadedFont->value;
     }
 
     if (m_fontManager) {

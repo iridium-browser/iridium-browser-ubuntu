@@ -10,16 +10,30 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 using autofill::PasswordFormMap;
 using content::WebContents;
 namespace metrics_util = password_manager::metrics_util;
 
 namespace {
+
+enum FieldType { USERNAME_FIELD, PASSWORD_FIELD };
+
+const int kUsernameFieldSize = 30;
+const int kPasswordFieldSize = 22;
+
+// Returns the width of |type| field.
+int GetFieldWidth(FieldType type) {
+  return ui::ResourceBundle::GetSharedInstance()
+      .GetFontList(ui::ResourceBundle::SmallFont)
+      .GetExpectedTextWidth(type == USERNAME_FIELD ? kUsernameFieldSize
+                                                   : kPasswordFieldSize);
+}
 
 void SetupLinkifiedText(const base::string16& string_with_separator,
                         base::string16* text,
@@ -153,16 +167,6 @@ void ManagePasswordsBubbleModel::OnManageLinkClicked() {
       ->NavigateToPasswordManagerSettingsPage();
 }
 
-// TODO(gcasto): Is it worth having a new dismissal reason to distinguish
-// the two management cases? User intention is pretty similar between the two,
-// but the context in which they are shown is pretty different since one is
-// from an explict action and the other isn't.
-void ManagePasswordsBubbleModel::OnRemoteManageLinkClicked() {
-  dismissal_reason_ = metrics_util::CLICKED_MANAGE;
-  ManagePasswordsUIController::FromWebContents(web_contents())
-      ->NavigateToAccountCentralManagementPage();
-}
-
 void ManagePasswordsBubbleModel::OnPasswordAction(
     const autofill::PasswordForm& password_form,
     PasswordAction action) {
@@ -178,4 +182,14 @@ void ManagePasswordsBubbleModel::OnPasswordAction(
     password_store->RemoveLogin(password_form);
   else
     password_store->AddLogin(password_form);
+}
+
+// static
+int ManagePasswordsBubbleModel::UsernameFieldWidth() {
+  return GetFieldWidth(USERNAME_FIELD);
+}
+
+// static
+int ManagePasswordsBubbleModel::PasswordFieldWidth() {
+  return GetFieldWidth(PASSWORD_FIELD);
 }

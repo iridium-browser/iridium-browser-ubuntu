@@ -36,9 +36,13 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    resource_provider_ = ResourceProvider::Create(
-        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
-        false);
+    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                  shared_bitmap_manager_.get(),
+                                                  NULL,
+                                                  0,
+                                                  false,
+                                                  1,
+                                                  false);
     renderer_ = SoftwareRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider());
   }
@@ -51,7 +55,6 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
 
   // RendererClient implementation.
   virtual void SetFullRootLayerDamage() OVERRIDE {}
-  virtual void RunOnDemandRasterTask(Task* on_demand_raster_task) OVERRIDE {}
 
   scoped_ptr<SkBitmap> DrawAndCopyOutput(RenderPassList* list,
                                          float device_scale_factor,
@@ -100,7 +103,7 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
 
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
-  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
+  RenderPassId root_render_pass_id = RenderPassId(1, 1);
   scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
   root_render_pass->SetNew(
       root_render_pass_id, outer_rect, outer_rect, gfx::Transform());
@@ -151,15 +154,17 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
   ResourceProvider::ResourceId resource_yellow =
-      resource_provider()->CreateResource(outer_size,
-                                          GL_CLAMP_TO_EDGE,
-                                          ResourceProvider::TextureUsageAny,
-                                          RGBA_8888);
+      resource_provider()->CreateResource(
+          outer_size,
+          GL_CLAMP_TO_EDGE,
+          ResourceProvider::TextureHintImmutable,
+          RGBA_8888);
   ResourceProvider::ResourceId resource_cyan =
-      resource_provider()->CreateResource(inner_size,
-                                          GL_CLAMP_TO_EDGE,
-                                          ResourceProvider::TextureUsageAny,
-                                          RGBA_8888);
+      resource_provider()->CreateResource(
+          inner_size,
+          GL_CLAMP_TO_EDGE,
+          ResourceProvider::TextureHintImmutable,
+          RGBA_8888);
 
   SkBitmap yellow_tile;
   yellow_tile.allocN32Pixels(outer_size.width(), outer_size.height());
@@ -183,7 +188,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
 
   gfx::Rect root_rect = outer_rect;
 
-  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
+  RenderPassId root_render_pass_id = RenderPassId(1, 1);
   scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
   root_render_pass->SetNew(
       root_render_pass_id, root_rect, root_rect, gfx::Transform());
@@ -244,10 +249,11 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
   ResourceProvider::ResourceId resource_cyan =
-      resource_provider()->CreateResource(tile_size,
-                                          GL_CLAMP_TO_EDGE,
-                                          ResourceProvider::TextureUsageAny,
-                                          RGBA_8888);
+      resource_provider()->CreateResource(
+          tile_size,
+          GL_CLAMP_TO_EDGE,
+          ResourceProvider::TextureHintImmutable,
+          RGBA_8888);
 
   SkBitmap cyan_tile;  // The lowest five rows are yellow.
   cyan_tile.allocN32Pixels(tile_size.width(), tile_size.height());
@@ -265,7 +271,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
 
   gfx::Rect root_rect(tile_size);
 
-  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
+  RenderPassId root_render_pass_id = RenderPassId(1, 1);
   scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
   root_render_pass->SetNew(
       root_render_pass_id, root_rect, root_rect, gfx::Transform());
@@ -331,7 +337,7 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
   RenderPassList list;
 
   // Draw a fullscreen green quad in a first frame.
-  RenderPass::Id root_clear_pass_id(1, 0);
+  RenderPassId root_clear_pass_id(1, 0);
   TestRenderPass* root_clear_pass = AddRenderPass(
       &list, root_clear_pass_id, device_viewport_rect, gfx::Transform());
   AddQuad(root_clear_pass, device_viewport_rect, SK_ColorGREEN);
@@ -354,7 +360,7 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
   // frame.
   gfx::Rect smaller_rect(20, 20, 60, 60);
 
-  RenderPass::Id root_smaller_pass_id(2, 0);
+  RenderPassId root_smaller_pass_id(2, 0);
   TestRenderPass* root_smaller_pass = AddRenderPass(
       &list, root_smaller_pass_id, device_viewport_rect, gfx::Transform());
   AddQuad(root_smaller_pass, smaller_rect, SK_ColorMAGENTA);
@@ -387,13 +393,13 @@ TEST_F(SoftwareRendererTest, RenderPassVisibleRect) {
 
   // Pass drawn as inner quad is magenta.
   gfx::Rect smaller_rect(20, 20, 60, 60);
-  RenderPass::Id smaller_pass_id(2, 1);
+  RenderPassId smaller_pass_id(2, 1);
   TestRenderPass* smaller_pass =
       AddRenderPass(&list, smaller_pass_id, smaller_rect, gfx::Transform());
   AddQuad(smaller_pass, smaller_rect, SK_ColorMAGENTA);
 
   // Root pass is green.
-  RenderPass::Id root_clear_pass_id(1, 0);
+  RenderPassId root_clear_pass_id(1, 0);
   TestRenderPass* root_clear_pass = AddRenderPass(
       &list, root_clear_pass_id, device_viewport_rect, gfx::Transform());
   AddRenderPassQuad(root_clear_pass, smaller_pass);
@@ -401,7 +407,7 @@ TEST_F(SoftwareRendererTest, RenderPassVisibleRect) {
 
   // Interior pass quad has smaller visible rect.
   gfx::Rect interior_visible_rect(30, 30, 40, 40);
-  root_clear_pass->quad_list[0]->visible_rect = interior_visible_rect;
+  root_clear_pass->quad_list.front()->visible_rect = interior_visible_rect;
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
 

@@ -27,6 +27,8 @@
 #include "core/CSSPropertyNames.h"
 #include "core/HTMLNames.h"
 #include "core/html/HTMLLegendElement.h"
+#include "core/paint/BoxDecorationData.h"
+#include "core/paint/BoxPainter.h"
 #include "core/rendering/PaintInfo.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 
@@ -159,12 +161,12 @@ void RenderFieldset::paintBoxDecorationBackground(PaintInfo& paintInfo, const La
         paintRect.setX(paintRect.x() + xOff);
     }
 
-    BoxDecorationData boxDecorationData(*style());
+    BoxDecorationData boxDecorationData(*style(), canRenderBorderImage(), backgroundHasOpaqueTopLayer(), paintInfo.context);
 
-    if (!boxShadowShouldBeAppliedToBackground(determineBackgroundBleedAvoidance(paintInfo.context, boxDecorationData)))
-        paintBoxShadow(paintInfo, paintRect, style(), Normal);
-    paintFillLayers(paintInfo, boxDecorationData.backgroundColor, style()->backgroundLayers(), paintRect);
-    paintBoxShadow(paintInfo, paintRect, style(), Inset);
+    if (boxDecorationData.bleedAvoidance() == BackgroundBleedNone)
+        BoxPainter::paintBoxShadow(paintInfo, paintRect, style(), Normal);
+    BoxPainter(*this).paintFillLayers(paintInfo, boxDecorationData.backgroundColor, style()->backgroundLayers(), paintRect);
+    BoxPainter::paintBoxShadow(paintInfo, paintRect, style(), Inset);
 
     if (!boxDecorationData.hasBorder)
         return;
@@ -186,7 +188,7 @@ void RenderFieldset::paintBoxDecorationBackground(PaintInfo& paintInfo, const La
         graphicsContext->clipOut(pixelSnappedIntRect(clipLeft, paintRect.y() + legend->y(), clipWidth, legend->height()));
     }
 
-    paintBorder(paintInfo, paintRect, style());
+    BoxPainter::paintBorder(*this, paintInfo, paintRect, style());
 }
 
 void RenderFieldset::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -212,7 +214,7 @@ void RenderFieldset::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOff
         paintRect.move(xOff, 0);
     }
 
-    paintMaskImages(paintInfo, paintRect);
+    BoxPainter(*this).paintMaskImages(paintInfo, paintRect);
 }
 
 } // namespace blink

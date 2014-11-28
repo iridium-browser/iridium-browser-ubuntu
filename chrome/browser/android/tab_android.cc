@@ -21,6 +21,8 @@
 #include "chrome/browser/printing/print_view_manager_basic.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
@@ -45,6 +47,7 @@
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/Tab_jni.h"
@@ -306,6 +309,34 @@ void TabAndroid::SwapTabContents(content::WebContents* old_contents,
       did_finish_load);
 }
 
+void TabAndroid::DefaultSearchProviderChanged() {
+  // TODO(kmadhusu): Move this function definition to a common place and update
+  // BrowserInstantController::DefaultSearchProviderChanged to use the same.
+  if (!web_contents())
+    return;
+
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(GetProfile());
+  if (!instant_service)
+    return;
+
+  // Send new search URLs to the renderer.
+  content::RenderProcessHost* rph = web_contents()->GetRenderProcessHost();
+  instant_service->SendSearchURLsToRenderer(rph);
+
+  // Reload the contents to ensure that it gets assigned to a non-previledged
+  // renderer.
+  if (!instant_service->IsInstantProcess(rph->GetID()))
+    return;
+  web_contents()->GetController().Reload(false);
+
+  // As the reload was not triggered by the user we don't want to close any
+  // infobars. We have to tell the InfoBarService after the reload, otherwise it
+  // would ignore this call when
+  // WebContentsObserver::DidStartNavigationToPendingEntry is invoked.
+  InfoBarService::FromWebContents(web_contents())->set_ignore_next_reload();
+}
+
 void TabAndroid::OnWebContentsInstantSupportDisabled(
     const content::WebContents* contents) {
   DCHECK(contents);
@@ -408,6 +439,11 @@ void TabAndroid::InitWebContents(JNIEnv* env,
   // Verify that the WebContents this tab represents matches the expected
   // off the record state.
   CHECK_EQ(GetProfile()->IsOffTheRecord(), incognito);
+
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(GetProfile());
+  if (instant_service)
+    instant_service->AddObserver(this);
 }
 
 void TabAndroid::DestroyWebContents(JNIEnv* env,
@@ -429,6 +465,11 @@ void TabAndroid::DestroyWebContents(JNIEnv* env,
       content::Source<content::NavigationController>(
            &web_contents()->GetController()));
 
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(GetProfile());
+  if (instant_service)
+    instant_service->RemoveObserver(this);
+
   web_contents()->SetDelegate(NULL);
 
   if (delete_native) {
@@ -438,14 +479,6 @@ void TabAndroid::DestroyWebContents(JNIEnv* env,
     // Release the WebContents so it does not get deleted by the scoped_ptr.
     ignore_result(web_contents_.release());
   }
-}
-
-base::android::ScopedJavaLocalRef<jobject> TabAndroid::GetWebContents(
-    JNIEnv* env,
-    jobject obj) {
-  if (!web_contents_.get())
-    return base::android::ScopedJavaLocalRef<jobject>();
-  return web_contents_->GetJavaWebContents();
 }
 
 base::android::ScopedJavaLocalRef<jobject> TabAndroid::GetProfileAndroid(
@@ -470,8 +503,7 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(JNIEnv* env,
                                               jstring j_referrer_url,
                                               jint referrer_policy,
                                               jboolean is_renderer_initiated) {
-  content::ContentViewCore* content_view = GetContentViewCore();
-  if (!content_view)
+  if (!web_contents())
     return PAGE_LOAD_FAILED;
 
   GURL gurl(base::android::ConvertJavaStringToUTF8(env, url));
@@ -520,7 +552,7 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(JNIEnv* env,
     // GoogleURLTracker uses the navigation pending notification to trigger the
     // infobar.
     if (google_util::IsGoogleSearchUrl(fixed_url) &&
-        (page_transition & content::PAGE_TRANSITION_GENERATED)) {
+        (page_transition & ui::PAGE_TRANSITION_GENERATED)) {
       GoogleURLTracker* tracker =
           GoogleURLTrackerFactory::GetForProfile(GetProfile());
       if (tracker)
@@ -548,7 +580,7 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(JNIEnv* env,
           base::RefCountedBytes::TakeVector(&post_data);
     }
     load_params.transition_type =
-        content::PageTransitionFromInt(page_transition);
+        ui::PageTransitionFromInt(page_transition);
     if (j_referrer_url) {
       load_params.referrer = content::Referrer(
           GURL(base::android::ConvertJavaStringToUTF8(env, j_referrer_url)),
@@ -564,7 +596,7 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(JNIEnv* env,
       return DEFAULT_PAGE_LOAD;
     }
     load_params.is_renderer_initiated = is_renderer_initiated;
-    content_view->LoadUrl(load_params);
+    web_contents()->GetController().LoadURLWithParams(load_params);
   }
   return DEFAULT_PAGE_LOAD;
 }
@@ -615,8 +647,8 @@ ScopedJavaLocalRef<jobject> TabAndroid::GetFavicon(JNIEnv* env, jobject obj) {
 
   if (!favicon_tab_helper)
     return bitmap;
-  if (!favicon_tab_helper->FaviconIsValid())
-    return bitmap;
+
+  // If the favicon isn't valid, it will return a default bitmap.
 
   SkBitmap favicon =
       favicon_tab_helper->GetFavicon()
@@ -645,6 +677,11 @@ ScopedJavaLocalRef<jobject> TabAndroid::GetFavicon(JNIEnv* env, jobject obj) {
     bitmap = gfx::ConvertToJavaBitmap(&favicon);
   }
   return bitmap;
+}
+
+jboolean TabAndroid::IsFaviconValid(JNIEnv* env, jobject jobj) {
+  return web_contents() &&
+      FaviconTabHelper::FromWebContents(web_contents())->FaviconIsValid();
 }
 
 prerender::PrerenderManager* TabAndroid::GetPrerenderManager() const {

@@ -26,22 +26,23 @@ import com.google.ipc.invalidation.external.client.types.SimplePair;
 import com.google.ipc.invalidation.external.client.types.Status;
 import com.google.ipc.invalidation.ticl.InvalidationClientCore;
 import com.google.ipc.invalidation.ticl.PersistenceUtils;
-import com.google.ipc.invalidation.ticl.ProtoConverter;
+import com.google.ipc.invalidation.ticl.ProtoWrapperConverter;
 import com.google.ipc.invalidation.ticl.android2.AndroidInvalidationClientImpl.IntentForwardingListener;
 import com.google.ipc.invalidation.ticl.android2.ResourcesFactory.AndroidResources;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protos.ipc.invalidation.AndroidService.AndroidSchedulerEvent;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.ClientDowncall.RegistrationDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.InternalDowncall;
-import com.google.protos.ipc.invalidation.AndroidService.InternalDowncall.CreateClient;
-import com.google.protos.ipc.invalidation.Client.PersistentTiclState;
-import com.google.protos.ipc.invalidation.ClientProtocol.ServerToClientMessage;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.AndroidSchedulerEvent;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.ClientDowncall.RegistrationDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.InternalDowncall;
+import com.google.ipc.invalidation.ticl.proto.AndroidService.InternalDowncall.CreateClient;
+import com.google.ipc.invalidation.ticl.proto.Client.PersistentTiclState;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ServerToClientMessage;
+import com.google.ipc.invalidation.util.Bytes;
+import com.google.ipc.invalidation.util.ProtoWrapper.ValidationException;
 
 import android.app.IntentService;
 import android.content.Intent;
 
-import java.util.List;
+import java.util.Collection;
 
 
 /**
@@ -59,9 +60,6 @@ public class TiclService extends IntentService {
 
   /** Resources for the created Ticls. */
   private AndroidResources resources;
-
-  /** Validator for received messages. */
-  private AndroidIntentProtocolValidator validator;
 
   /** The function for computing persistence state digests when rewriting them. */
   private final DigestFunction digestFn = new ObjectIdDigestUtils.Sha1DigestFunction();
@@ -95,8 +93,7 @@ public class TiclService extends IntentService {
     // We create resources anew each time.
     resources = createResources();
     resources.start();
-    resources.getLogger().fine("onHandleIntent(%s)", AndroidStrings.toLazyCompactString(intent));
-    validator = new AndroidIntentProtocolValidator(resources.getLogger());
+    resources.getLogger().fine("onHandleIntent(%s)", intent);
 
     try {
       // Dispatch the appropriate handler function based on which extra key is set.
@@ -110,30 +107,25 @@ public class TiclService extends IntentService {
         resources.getLogger().warning("Received Intent without any recognized extras: %s", intent);
       }
     } finally {
-      // Null out resources and validator to prevent accidentally using them in the future before
-      // they have been properly re-created.
+      // Null out resources to prevent accidentally using them in the future before they have been
+      // properly re-created.
       resources.stop();
       resources = null;
-      validator = null;
     }
   }
 
   /** Handles a request to call a function on the ticl. */
   private void handleClientDowncall(byte[] clientDowncallBytes) {
-    // Parse the request.
+    // Parse and validate the request.
     final ClientDowncall downcall;
     try {
       downcall = ClientDowncall.parseFrom(clientDowncallBytes);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       resources.getLogger().warning("Failed parsing ClientDowncall from %s: %s",
-          clientDowncallBytes, exception.getMessage());
+          Bytes.toLazyCompactString(clientDowncallBytes), exception.getMessage());
       return;
     }
-    // Validate the request.
-    if (!validator.isDowncallValid(downcall)) {
-      resources.getLogger().warning("Ignoring invalid downcall message: %s", downcall);
-      return;
-    }
+
     resources.getLogger().fine("Handle client downcall: %s", downcall);
 
     // Restore the appropriate Ticl.
@@ -145,22 +137,23 @@ public class TiclService extends IntentService {
     }
 
     // Call the appropriate method.
-    if (downcall.hasAck()) {
-      ticl.acknowledge(AckHandle.newInstance(downcall.getAck().getAckHandle().toByteArray()));
+    if (downcall.getNullableAck() != null) {
+      ticl.acknowledge(
+          AckHandle.newInstance(downcall.getNullableAck().getAckHandle().getByteArray()));
     } else if (downcall.hasStart()) {
       ticl.start();
     } else if (downcall.hasStop()) {
       ticl.stop();
-    } else if (downcall.hasRegistrations()) {
-      RegistrationDowncall regDowncall = downcall.getRegistrations();
-      if (regDowncall.getRegistrationsCount() > 0) {
-        List<ObjectId> objects = ProtoConverter.convertToObjectIdList(
-            regDowncall.getRegistrationsList());
+    } else if (downcall.getNullableRegistrations() != null) {
+      RegistrationDowncall regDowncall = downcall.getNullableRegistrations();
+      if (!regDowncall.getRegistrations().isEmpty()) {
+        Collection<ObjectId> objects =
+            ProtoWrapperConverter.convertFromObjectIdProtoCollection(regDowncall.getRegistrations());
         ticl.register(objects);
       }
-      if (regDowncall.getUnregistrationsCount() > 0) {
-        List<ObjectId> objects = ProtoConverter.convertToObjectIdList(
-            regDowncall.getUnregistrationsList());
+      if (!regDowncall.getUnregistrations().isEmpty()) {
+        Collection<ObjectId> objects = ProtoWrapperConverter.convertFromObjectIdProtoCollection(
+            regDowncall.getUnregistrations());
         ticl.unregister(objects);
       }
     } else {
@@ -178,29 +171,26 @@ public class TiclService extends IntentService {
 
   /** Handles an internal downcall on the Ticl. */
   private void handleInternalDowncall(byte[] internalDowncallBytes) {
-    // Parse the request.
+    // Parse and validate the request.
     final InternalDowncall downcall;
     try {
       downcall = InternalDowncall.parseFrom(internalDowncallBytes);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       resources.getLogger().warning("Failed parsing InternalDowncall from %s: %s",
-          internalDowncallBytes, exception.getMessage());
-      return;
-    }
-    // Validate the request.
-    if (!validator.isInternalDowncallValid(downcall)) {
-      resources.getLogger().warning("Ignoring invalid internal downcall message: %s", downcall);
+          Bytes.toLazyCompactString(internalDowncallBytes),
+          exception.getMessage());
       return;
     }
     resources.getLogger().fine("Handle internal downcall: %s", downcall);
 
     // Message from the data center; just forward it to the Ticl.
-    if (downcall.hasServerMessage()) {
+    if (downcall.getNullableServerMessage() != null) {
       // We deliver the message regardless of whether the Ticl existed, since we'll want to
       // rewrite persistent state in the case where it did not.
       // TODO: what if this is the "wrong" Ticl?
       AndroidInvalidationClientImpl ticl = TiclStateManager.restoreTicl(this, resources);
-      handleServerMessage((ticl != null), downcall.getServerMessage().getData().toByteArray());
+      handleServerMessage((ticl != null),
+          downcall.getNullableServerMessage().getData().getByteArray());
       if (ticl != null) {
         TiclStateManager.saveTicl(this, resources.getLogger(), ticl);
       }
@@ -208,13 +198,13 @@ public class TiclService extends IntentService {
     }
 
     // Network online/offline status change; just forward it to the Ticl.
-    if (downcall.hasNetworkStatus()) {
+    if (downcall.getNullableNetworkStatus() != null) {
       // Network status changes only make sense for Ticls that do exist.
       // TODO: what if this is the "wrong" Ticl?
       AndroidInvalidationClientImpl ticl = TiclStateManager.restoreTicl(this, resources);
       if (ticl != null) {
         resources.getNetworkListener().onOnlineStatusChange(
-            downcall.getNetworkStatus().getIsOnline());
+            downcall.getNullableNetworkStatus().getIsOnline());
         TiclStateManager.saveTicl(this, resources.getLogger(), ticl);
       }
       return;
@@ -231,11 +221,12 @@ public class TiclService extends IntentService {
     }
 
     // Client creation request (meta operation).
-    if (downcall.hasCreateClient()) {
-      handleCreateClient(downcall.getCreateClient());
+    if (downcall.getNullableCreateClient() != null) {
+      handleCreateClient(downcall.getNullableCreateClient());
       return;
     }
-    throw new RuntimeException("Invalid internal downcall passed validation: " + downcall);
+    throw new RuntimeException(
+        "Invalid internal downcall passed validation: " + downcall);
   }
 
   /** Handles a {@code createClient} request. */
@@ -246,7 +237,7 @@ public class TiclService extends IntentService {
     // Create the requested Ticl.
     resources.getLogger().fine("Create client: creating");
     TiclStateManager.createTicl(this, resources, createClient.getClientType(),
-        createClient.getClientName().toByteArray(), createClient.getClientConfig(),
+        createClient.getClientName().getByteArray(), createClient.getClientConfig(),
         createClient.getSkipStartForTest());
   }
 
@@ -288,15 +279,16 @@ public class TiclService extends IntentService {
         PersistentTiclState state = PersistenceUtils.deserializeState(
             resources.getLogger(), stateBytes, digestFn);
         if (state == null) {
-          resources.getLogger().warning("Ignoring invalid Ticl state: %s", stateBytes);
+          resources.getLogger().warning("Ignoring invalid Ticl state: %s",
+              Bytes.toLazyCompactString(stateBytes));
           return;
         }
-        PersistentTiclState newState = PersistentTiclState.newBuilder(state)
-            .setLastMessageSendTimeMs(0)
-            .build();
+        PersistentTiclState.Builder stateBuilder = state.toBuilder();
+        stateBuilder.lastMessageSendTimeMs = 0L;
+        state = stateBuilder.build();
 
         // Serialize the new state and write it to storage.
-        byte[] newClientState = PersistenceUtils.serializeState(newState, digestFn);
+        byte[] newClientState = PersistenceUtils.serializeState(state, digestFn);
         resources.getStorage().writeKey(InvalidationClientCore.CLIENT_TOKEN_KEY, newClientState,
             new Callback<Status>() {
               @Override
@@ -324,13 +316,13 @@ public class TiclService extends IntentService {
     if (backgroundServiceClass != null) {
       try {
         ServerToClientMessage s2cMessage = ServerToClientMessage.parseFrom(message);
-        if (s2cMessage.hasInvalidationMessage()) {
-          Intent intent =
-              ProtocolIntents.newBackgroundInvalidationIntent(s2cMessage.getInvalidationMessage());
+        if (s2cMessage.getNullableInvalidationMessage() != null) {
+          Intent intent = ProtocolIntents.newBackgroundInvalidationIntent(
+              s2cMessage.getNullableInvalidationMessage());
           intent.setClassName(getApplicationContext(), backgroundServiceClass);
           startService(intent);
         }
-      } catch (InvalidProtocolBufferException exception) {
+      } catch (ValidationException exception) {
         resources.getLogger().info("Failed to parse message: %s", exception.getMessage());
       }
     }
@@ -338,20 +330,16 @@ public class TiclService extends IntentService {
 
   /** Handles a request to call a particular recurring task on the Ticl. */
   private void handleSchedulerEvent(byte[] schedulerEventBytes) {
-    // Parse the request.
+    // Parse and validate the request.
     final AndroidSchedulerEvent event;
     try {
       event = AndroidSchedulerEvent.parseFrom(schedulerEventBytes);
-    } catch (InvalidProtocolBufferException exception) {
+    } catch (ValidationException exception) {
       resources.getLogger().warning("Failed parsing SchedulerEvent from %s: %s",
-          schedulerEventBytes, exception.getMessage());
+          Bytes.toLazyCompactString(schedulerEventBytes), exception.getMessage());
       return;
     }
-    // Validate the request.
-    if (!validator.isSchedulerEventValid(event)) {
-      resources.getLogger().warning("Ignoring invalid scheduler event: %s", event);
-      return;
-    }
+
     resources.getLogger().fine("Handle scheduler event: %s", event);
 
     // Restore the appropriate Ticl.

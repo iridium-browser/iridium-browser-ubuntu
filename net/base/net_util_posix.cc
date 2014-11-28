@@ -9,6 +9,7 @@
 
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -140,9 +141,13 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
     CHECK(base::StringToUint(network_tokenizer.token(), &index));
 
     networks->push_back(
-        NetworkInterface(name, name, index,
+        NetworkInterface(name,
+                         name,
+                         index,
                          NetworkChangeNotifier::CONNECTION_UNKNOWN,
-                         address, network_prefix));
+                         address,
+                         network_prefix,
+                         IP_ADDRESS_ATTRIBUTE_NONE));
   }
   return true;
 #else
@@ -247,9 +252,13 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
           net_mask = MaskPrefixLength(netmask.address());
         }
       }
-      network_info.interface = NetworkInterface(
-          name, name, if_nametoindex(name.c_str()),
-          connection_type, address.address(), net_mask);
+      network_info.interface = NetworkInterface(name,
+                                                name,
+                                                if_nametoindex(name.c_str()),
+                                                connection_type,
+                                                address.address(),
+                                                net_mask,
+                                                IP_ADDRESS_ATTRIBUTE_NONE);
 
       network_infos.push_back(NetworkInterfaceInfo(network_info));
     }
@@ -275,5 +284,10 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
 WifiPHYLayerProtocol GetWifiPHYLayerProtocol() {
   return WIFI_PHY_LAYER_PROTOCOL_UNKNOWN;
 }
+
+scoped_ptr<ScopedWifiOptions> SetWifiOptions(int options) {
+  return scoped_ptr<ScopedWifiOptions>();
+}
+
 
 }  // namespace net

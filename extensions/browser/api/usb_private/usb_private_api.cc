@@ -9,26 +9,30 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/usb_service/usb_device_filter.h"
-#include "components/usb_service/usb_device_handle.h"
-#include "components/usb_service/usb_service.h"
+#include "device/core/device_client.h"
+#include "device/usb/usb_device_filter.h"
+#include "device/usb/usb_device_handle.h"
 #include "device/usb/usb_ids.h"
+#include "device/usb/usb_service.h"
 #include "extensions/common/api/usb_private.h"
 
+namespace usb = extensions::core_api::usb;
 namespace usb_private = extensions::core_api::usb_private;
 namespace GetDevices = usb_private::GetDevices;
 namespace GetDeviceInfo = usb_private::GetDeviceInfo;
 
-using usb_service::UsbDevice;
-using usb_service::UsbDeviceFilter;
-using usb_service::UsbDeviceHandle;
-using usb_service::UsbService;
+using content::BrowserThread;
+using device::UsbDevice;
+using device::UsbDeviceFilter;
+using device::UsbDeviceHandle;
+using device::UsbService;
+
+typedef std::vector<scoped_refptr<UsbDevice> > DeviceVector;
 
 namespace {
 
 const char kErrorInitService[] = "Failed to initialize USB service.";
 const char kErrorNoDevice[] = "No such device.";
-const char kErrorOpen[] = "Failed to open device.";
 
 }  // namespace
 
@@ -47,7 +51,7 @@ bool UsbPrivateGetDevicesFunction::Prepare() {
 }
 
 void UsbPrivateGetDevicesFunction::AsyncWorkStart() {
-  UsbService* service = UsbService::GetInstance();
+  UsbService* service = device::DeviceClient::Get()->GetUsbService();
   if (!service) {
     CompleteWithError(kErrorInitService);
     return;
@@ -56,46 +60,16 @@ void UsbPrivateGetDevicesFunction::AsyncWorkStart() {
   std::vector<UsbDeviceFilter> filters;
   filters.resize(parameters_->filters.size());
   for (size_t i = 0; i < parameters_->filters.size(); ++i) {
-    UsbDeviceFilter& filter = filters[i];
-    const usb_private::DeviceFilter* filter_param =
-        parameters_->filters[i].get();
-
-    if (filter_param->vendor_id) {
-      filter.SetVendorId(*filter_param->vendor_id);
-    }
-    if (filter_param->product_id) {
-      filter.SetProductId(*filter_param->product_id);
-    }
-    if (filter_param->interface_class) {
-      filter.SetInterfaceClass(*filter_param->interface_class);
-    }
-    if (filter_param->interface_subclass) {
-      filter.SetInterfaceSubclass(*filter_param->interface_subclass);
-    }
-    if (filter_param->interface_protocol) {
-      filter.SetInterfaceProtocol(*filter_param->interface_protocol);
-    }
+    CreateDeviceFilter(*parameters_->filters[i].get(), &filters[i]);
   }
 
-  std::vector<scoped_refptr<UsbDevice> > devices;
+  DeviceVector devices;
   service->GetDevices(&devices);
 
   scoped_ptr<base::ListValue> result(new base::ListValue());
-  for (size_t i = 0; i < devices.size(); ++i) {
-    scoped_refptr<UsbDevice> device = devices[i];
-    bool matched = false;
-
-    if (filters.empty()) {
-      matched = true;
-    } else {
-      for (size_t j = 0; !matched && j < filters.size(); ++j) {
-        if (filters[j].Matches(device)) {
-          matched = true;
-        }
-      }
-    }
-
-    if (matched) {
+  for (DeviceVector::iterator it = devices.begin(); it != devices.end(); ++it) {
+    scoped_refptr<UsbDevice> device = *it;
+    if (filters.empty() || UsbDeviceFilter::MatchesAny(device, filters)) {
       result->Append(new base::FundamentalValue((int)device->unique_id()));
     }
   }
@@ -117,7 +91,7 @@ bool UsbPrivateGetDeviceInfoFunction::Prepare() {
 }
 
 void UsbPrivateGetDeviceInfoFunction::AsyncWorkStart() {
-  UsbService* service = UsbService::GetInstance();
+  UsbService* service = device::DeviceClient::Get()->GetUsbService();
   if (!service) {
     CompleteWithError(kErrorInitService);
     return;
@@ -125,7 +99,7 @@ void UsbPrivateGetDeviceInfoFunction::AsyncWorkStart() {
 
   scoped_refptr<UsbDevice> device =
       service->GetDeviceById(parameters_->device_id);
-  if (!device) {
+  if (!device.get()) {
     CompleteWithError(kErrorNoDevice);
     return;
   }
@@ -145,23 +119,17 @@ void UsbPrivateGetDeviceInfoFunction::AsyncWorkStart() {
     device_info.product_name.reset(new std::string(name));
   }
 
-  scoped_refptr<UsbDeviceHandle> device_handle = device->Open();
-  if (!device_handle) {
-    CompleteWithError(kErrorOpen);
-    return;
-  }
-
   base::string16 utf16;
-  if (device_handle->GetManufacturer(&utf16)) {
+  if (device->GetManufacturer(&utf16)) {
     device_info.manufacturer_string.reset(
         new std::string(base::UTF16ToUTF8(utf16)));
   }
 
-  if (device_handle->GetProduct(&utf16)) {
+  if (device->GetProduct(&utf16)) {
     device_info.product_string.reset(new std::string(base::UTF16ToUTF8(utf16)));
   }
 
-  if (device_handle->GetSerial(&utf16)) {
+  if (device->GetSerialNumber(&utf16)) {
     device_info.serial_string.reset(new std::string(base::UTF16ToUTF8(utf16)));
   }
 

@@ -16,7 +16,6 @@
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "content/public/common/gpu_memory_stats.h"
@@ -182,7 +181,6 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   base::string16 GetResourceVideoMemory(int index) const;
   base::string16 GetResourceSqliteMemoryUsed(int index) const;
   base::string16 GetResourceIdleWakeupsPerSecond(int index) const;
-  base::string16 GetResourceGoatsTeleported(int index) const;
   base::string16 GetResourceV8MemoryAllocatedSize(int index) const;
 
   // Gets the private memory (in bytes) that should be displayed for the passed
@@ -229,9 +227,6 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
 
   // Returns true if resource for the given row can be activated.
   bool CanActivate(int index) const;
-
-  // See design doc at http://go/at-teleporter for more information.
-  int GetGoatsTeleported(int index) const;
 
   // Returns true if the resource is first/last in its group (resources
   // rendered by the same process are groupped together).
@@ -347,9 +342,6 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
     bool is_process_id_valid;
     base::ProcessId process_id;
 
-    bool is_goats_teleported_valid;
-    int goats_teleported;
-
     bool is_webcore_stats_valid;
     blink::WebCache::ResourceTypeStats webcore_stats;
 
@@ -450,6 +442,9 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // for each one is expensive.
   void NotifyMultipleBytesRead();
 
+  // Called on the IO thread to start/stop updating byte counts.
+  void SetUpdatingByteCount(bool is_updating);
+
   // Returns the network usage (in byte per second) that should be displayed for
   // the passed |resource|.  -1 means the information is not available for that
   // resource.
@@ -533,8 +528,9 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Whether we are currently in the process of updating.
   UpdateState update_state_;
 
-  // A salt lick for the goats.
-  uint64 goat_salt_;
+  // Whether the IO thread is currently in the process of updating; accessed
+  // only on the IO thread.
+  bool is_updating_byte_count_;
 
   // Buffer for coalescing BytesReadParam so we don't have to post a task on
   // each NotifyBytesRead() call.

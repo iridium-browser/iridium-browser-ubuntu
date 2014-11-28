@@ -3,14 +3,13 @@
 # found in the LICENSE file.
 
 import("//mojo/public/tools/bindings/mojom.gni")
-import("//mojo/system.gni")
 
 config("mojo_use_gles2") {
   defines = [ "MOJO_USE_GLES2_IMPL" ]
 }
 
 config("gles2_use_mojo") {
-  defines = [ "USE_MOJO_GLES2" ]
+  defines = [ "GLES2_USE_MOJO" ]
 }
 
 # GYP version: mojo/mojo_base.gyp:mojo_gles2_impl
@@ -23,14 +22,15 @@ component("gles2") {
     "//gpu/command_buffer/client",
     "//gpu/command_buffer/common",
     "//gpu/command_buffer/client:gles2_implementation",
-    "//mojo/public/gles2",
+    "//gpu/command_buffer/client:gles2_interface",
+    "//mojo/public/c/system:for_component",
     "//mojo/services/gles2:bindings",
     "//mojo/services/gles2:interfaces",
     "//mojo/environment:chromium",
   ]
-  deps += mojo_system_for_component
 
   defines = [
+    "GL_GLEXT_PROTOTYPES",
     "MOJO_GLES2_IMPL_IMPLEMENTATION",
     "MOJO_GLES2_IMPLEMENTATION",
   ]
@@ -39,7 +39,7 @@ component("gles2") {
     ":gles2_use_mojo",
     ":mojo_use_gles2",
   ]
-  direct_dependent_configs = [ ":gles2_use_mojo" ]
+  public_configs = [ ":gles2_use_mojo" ]
   all_dependent_configs = [ ":mojo_use_gles2" ]
 
   sources = [

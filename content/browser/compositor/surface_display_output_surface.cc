@@ -33,6 +33,12 @@ SurfaceDisplayOutputSurface::~SurfaceDisplayOutputSurface() {
   }
 }
 
+void SurfaceDisplayOutputSurface::ReceivedVSyncParameters(
+    base::TimeTicks timebase,
+    base::TimeDelta interval) {
+  CommitVSyncParameters(timebase, interval);
+}
+
 void SurfaceDisplayOutputSurface::SwapBuffers(cc::CompositorFrame* frame) {
   gfx::Size frame_size =
       frame->delegated_frame_data->render_pass_list.back()->output_rect.size();
@@ -48,13 +54,13 @@ void SurfaceDisplayOutputSurface::SwapBuffers(cc::CompositorFrame* frame) {
 
   scoped_ptr<cc::CompositorFrame> frame_copy(new cc::CompositorFrame());
   frame->AssignTo(frame_copy.get());
-  factory_.SubmitFrame(surface_id_, frame_copy.Pass());
-
-  if (!display_->Draw())
-    return;
+  factory_.SubmitFrame(
+      surface_id_,
+      frame_copy.Pass(),
+      base::Bind(&SurfaceDisplayOutputSurface::SwapBuffersComplete,
+                 base::Unretained(this)));
 
   client_->DidSwapBuffers();
-  client_->DidSwapBuffersComplete();
 }
 
 void SurfaceDisplayOutputSurface::ReturnResources(
@@ -63,6 +69,10 @@ void SurfaceDisplayOutputSurface::ReturnResources(
   ack.resources = resources;
   if (client_)
     client_->ReclaimResources(&ack);
+}
+
+void SurfaceDisplayOutputSurface::SwapBuffersComplete() {
+  client_->DidSwapBuffersComplete();
 }
 
 }  // namespace content

@@ -24,12 +24,12 @@
 #include "content/public/common/user_agent.h"
 #include "content/shell/browser/shell.h"
 #include "grit/shell_resources.h"
-#include "net/socket/tcp_listen_socket.h"
+#include "net/socket/tcp_server_socket.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_ANDROID)
 #include "content/public/browser/android/devtools_auth.h"
-#include "net/socket/unix_domain_listen_socket_posix.h"
+#include "net/socket/unix_domain_server_socket_posix.h"
 #endif
 
 using content::DevToolsAgentHost;
@@ -43,8 +43,48 @@ const char kFrontEndURL[] =
     "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
 #endif
 const char kTargetTypePage[] = "page";
+const char kTargetTypeServiceWorker[] = "service_worker";
+const char kTargetTypeOther[] = "other";
 
-net::StreamListenSocketFactory* CreateSocketFactory() {
+#if defined(OS_ANDROID)
+class UnixDomainServerSocketFactory
+    : public content::DevToolsHttpHandler::ServerSocketFactory {
+ public:
+  explicit UnixDomainServerSocketFactory(const std::string& socket_name)
+      : content::DevToolsHttpHandler::ServerSocketFactory(socket_name, 0, 1) {}
+
+ private:
+  // content::DevToolsHttpHandler::ServerSocketFactory.
+  virtual scoped_ptr<net::ServerSocket> Create() const OVERRIDE {
+    return scoped_ptr<net::ServerSocket>(
+        new net::UnixDomainServerSocket(
+            base::Bind(&content::CanUserConnectToDevTools),
+            true /* use_abstract_namespace */));
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(UnixDomainServerSocketFactory);
+};
+#else
+class TCPServerSocketFactory
+    : public content::DevToolsHttpHandler::ServerSocketFactory {
+ public:
+  TCPServerSocketFactory(const std::string& address, int port, int backlog)
+      : content::DevToolsHttpHandler::ServerSocketFactory(
+            address, port, backlog) {}
+
+ private:
+  // content::DevToolsHttpHandler::ServerSocketFactory.
+  virtual scoped_ptr<net::ServerSocket> Create() const OVERRIDE {
+    return scoped_ptr<net::ServerSocket>(
+        new net::TCPServerSocket(NULL, net::NetLog::Source()));
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(TCPServerSocketFactory);
+};
+#endif
+
+scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory>
+CreateSocketFactory() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 #if defined(OS_ANDROID)
   std::string socket_name = "content_shell_devtools_remote";
@@ -52,9 +92,8 @@ net::StreamListenSocketFactory* CreateSocketFactory() {
     socket_name = command_line.GetSwitchValueASCII(
         switches::kRemoteDebuggingSocketName);
   }
-  return new net::deprecated::
-      UnixDomainListenSocketWithAbstractNamespaceFactory(
-          socket_name, "", base::Bind(&content::CanUserConnectToDevTools));
+  return scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory>(
+      new UnixDomainServerSocketFactory(socket_name));
 #else
   // See if the user specified a port on the command line (useful for
   // automation). If not, use an ephemeral port by specifying 0.
@@ -70,20 +109,33 @@ net::StreamListenSocketFactory* CreateSocketFactory() {
       DLOG(WARNING) << "Invalid http debugger port number " << temp_port;
     }
   }
-  return new net::TCPListenSocketFactory("127.0.0.1", port);
+  return scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory>(
+      new TCPServerSocketFactory("127.0.0.1", port, 1));
 #endif
 }
 
 class Target : public content::DevToolsTarget {
  public:
-  explicit Target(WebContents* web_contents);
+  explicit Target(scoped_refptr<DevToolsAgentHost> agent_host);
 
-  virtual std::string GetId() const OVERRIDE { return id_; }
+  virtual std::string GetId() const OVERRIDE { return agent_host_->GetId(); }
   virtual std::string GetParentId() const OVERRIDE { return std::string(); }
-  virtual std::string GetType() const OVERRIDE { return kTargetTypePage; }
-  virtual std::string GetTitle() const OVERRIDE { return title_; }
+  virtual std::string GetType() const OVERRIDE {
+    switch (agent_host_->GetType()) {
+      case DevToolsAgentHost::TYPE_WEB_CONTENTS:
+        return kTargetTypePage;
+      case DevToolsAgentHost::TYPE_SERVICE_WORKER:
+        return kTargetTypeServiceWorker;
+      default:
+        break;
+    }
+    return kTargetTypeOther;
+  }
+  virtual std::string GetTitle() const OVERRIDE {
+    return agent_host_->GetTitle();
+  }
   virtual std::string GetDescription() const OVERRIDE { return std::string(); }
-  virtual GURL GetURL() const OVERRIDE { return url_; }
+  virtual GURL GetURL() const OVERRIDE { return agent_host_->GetURL(); }
   virtual GURL GetFaviconURL() const OVERRIDE { return favicon_url_; }
   virtual base::TimeTicks GetLastActivityTime() const OVERRIDE {
     return last_activity_time_;
@@ -99,44 +151,34 @@ class Target : public content::DevToolsTarget {
 
  private:
   scoped_refptr<DevToolsAgentHost> agent_host_;
-  std::string id_;
-  std::string title_;
-  GURL url_;
   GURL favicon_url_;
   base::TimeTicks last_activity_time_;
 };
 
-Target::Target(WebContents* web_contents) {
-  agent_host_ = DevToolsAgentHost::GetOrCreateFor(web_contents);
-  id_ = agent_host_->GetId();
-  title_ = base::UTF16ToUTF8(web_contents->GetTitle());
-  url_ = web_contents->GetURL();
-  content::NavigationController& controller = web_contents->GetController();
-  content::NavigationEntry* entry = controller.GetActiveEntry();
-  if (entry != NULL && entry->GetURL().is_valid())
-    favicon_url_ = entry->GetFavicon().url;
-  last_activity_time_ = web_contents->GetLastActiveTime();
+Target::Target(scoped_refptr<DevToolsAgentHost> agent_host)
+    : agent_host_(agent_host) {
+  if (WebContents* web_contents = agent_host_->GetWebContents()) {
+    content::NavigationController& controller = web_contents->GetController();
+    content::NavigationEntry* entry = controller.GetActiveEntry();
+    if (entry != NULL && entry->GetURL().is_valid())
+      favicon_url_ = entry->GetFavicon().url;
+    last_activity_time_ = web_contents->GetLastActiveTime();
+  }
 }
 
 bool Target::Activate() const {
-  WebContents* web_contents = agent_host_->GetWebContents();
-  if (!web_contents)
-    return false;
-  web_contents->GetDelegate()->ActivateContents(web_contents);
-  return true;
+  return agent_host_->Activate();
 }
 
 bool Target::Close() const {
-  WebContents* web_contents = agent_host_->GetWebContents();
-  if (!web_contents)
-    return false;
-  web_contents->GetRenderViewHost()->ClosePage();
-  return true;
+  return agent_host_->Close();
 }
 
 }  // namespace
 
 namespace content {
+
+// ShellDevToolsDelegate ----------------------------------------------------
 
 ShellDevToolsDelegate::ShellDevToolsDelegate(BrowserContext* browser_context)
     : browser_context_(browser_context) {
@@ -178,37 +220,54 @@ base::FilePath ShellDevToolsDelegate::GetDebugFrontendDir() {
   return base::FilePath();
 }
 
-std::string ShellDevToolsDelegate::GetPageThumbnailData(const GURL& url) {
-  return std::string();
-}
-
-scoped_ptr<DevToolsTarget>
-ShellDevToolsDelegate::CreateNewTarget(const GURL& url) {
-  Shell* shell = Shell::CreateNewWindow(browser_context_,
-                                        url,
-                                        NULL,
-                                        MSG_ROUTING_NONE,
-                                        gfx::Size());
-  return scoped_ptr<DevToolsTarget>(new Target(shell->web_contents()));
-}
-
-void ShellDevToolsDelegate::EnumerateTargets(TargetCallback callback) {
-  TargetList targets;
-  std::vector<WebContents*> wc_list =
-      content::DevToolsAgentHost::GetInspectableWebContents();
-  for (std::vector<WebContents*>::iterator it = wc_list.begin();
-       it != wc_list.end();
-       ++it) {
-    targets.push_back(new Target(*it));
-  }
-  callback.Run(targets);
-}
-
 scoped_ptr<net::StreamListenSocket>
 ShellDevToolsDelegate::CreateSocketForTethering(
     net::StreamListenSocket::Delegate* delegate,
     std::string* name) {
   return scoped_ptr<net::StreamListenSocket>();
+}
+
+// ShellDevToolsManagerDelegate ----------------------------------------------
+
+ShellDevToolsManagerDelegate::ShellDevToolsManagerDelegate(
+    BrowserContext* browser_context)
+    : browser_context_(browser_context) {
+}
+
+ShellDevToolsManagerDelegate::~ShellDevToolsManagerDelegate() {
+}
+
+base::DictionaryValue* ShellDevToolsManagerDelegate::HandleCommand(
+    DevToolsAgentHost* agent_host,
+    base::DictionaryValue* command) {
+  return NULL;
+}
+
+std::string ShellDevToolsManagerDelegate::GetPageThumbnailData(
+    const GURL& url) {
+  return std::string();
+}
+
+scoped_ptr<DevToolsTarget>
+ShellDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
+  Shell* shell = Shell::CreateNewWindow(browser_context_,
+                                        url,
+                                        NULL,
+                                        MSG_ROUTING_NONE,
+                                        gfx::Size());
+  return scoped_ptr<DevToolsTarget>(
+      new Target(DevToolsAgentHost::GetOrCreateFor(shell->web_contents())));
+}
+
+void ShellDevToolsManagerDelegate::EnumerateTargets(TargetCallback callback) {
+  TargetList targets;
+  content::DevToolsAgentHost::List agents =
+      content::DevToolsAgentHost::GetOrCreateAll();
+  for (content::DevToolsAgentHost::List::iterator it = agents.begin();
+       it != agents.end(); ++it) {
+    targets.push_back(new Target(*it));
+  }
+  callback.Run(targets);
 }
 
 }  // namespace content

@@ -44,7 +44,7 @@ SchedulerStateMachine::SchedulerStateMachine(const SchedulerSettings& settings)
       pending_tree_is_ready_for_activation_(false),
       active_tree_needs_first_draw_(false),
       did_create_and_initialize_first_output_surface_(false),
-      smoothness_takes_priority_(false),
+      impl_latency_takes_priority_(false),
       skip_next_begin_main_frame_to_reduce_latency_(false),
       skip_begin_main_frame_to_reduce_latency_(false),
       continuous_painting_(false) {
@@ -152,11 +152,12 @@ scoped_refptr<base::debug::ConvertableToTraceFormat>
 SchedulerStateMachine::AsValue() const {
   scoped_refptr<base::debug::TracedValue> state =
       new base::debug::TracedValue();
-  AsValueInto(state);
+  AsValueInto(state.get(), gfx::FrameTime::Now());
   return state;
 }
 
-void SchedulerStateMachine::AsValueInto(base::debug::TracedValue* state) const {
+void SchedulerStateMachine::AsValueInto(base::debug::TracedValue* state,
+                                        base::TimeTicks now) const {
   state->BeginDictionary("major_state");
   state->SetString("next_action", ActionToString(NextAction()));
   state->SetString("begin_impl_frame_state",
@@ -169,7 +170,6 @@ void SchedulerStateMachine::AsValueInto(base::debug::TracedValue* state) const {
   state->EndDictionary();
 
   state->BeginDictionary("major_timestamps_in_ms");
-  base::TimeTicks now = gfx::FrameTime::Now();
   state->SetDouble("0_interval",
                    begin_impl_frame_args_.interval.InMicroseconds() / 1000.0L);
   state->SetDouble(
@@ -229,7 +229,8 @@ void SchedulerStateMachine::AsValueInto(base::debug::TracedValue* state) const {
                     active_tree_needs_first_draw_);
   state->SetBoolean("did_create_and_initialize_first_output_surface",
                     did_create_and_initialize_first_output_surface_);
-  state->SetBoolean("smoothness_takes_priority", smoothness_takes_priority_);
+  state->SetBoolean("impl_latency_takes_priority",
+                    impl_latency_takes_priority_);
   state->SetBoolean("main_thread_is_in_high_latency_mode",
                     MainThreadIsInHighLatencyMode());
   state->SetBoolean("skip_begin_main_frame_to_reduce_latency",
@@ -281,21 +282,26 @@ bool SchedulerStateMachine::PendingDrawsShouldBeAborted() const {
     return true;
 
   // Additional states where we should abort draws.
-  // Note: We don't force activation in these cases because doing so would
-  // result in checkerboarding on resize, becoming visible, etc.
   if (!can_draw_)
-    return true;
-  if (!visible_)
     return true;
   return false;
 }
 
 bool SchedulerStateMachine::PendingActivationsShouldBeForced() const {
-  // These are all the cases where, if we do not force activations to make
-  // forward progress, we might deadlock with the main thread.
-
   // There is no output surface to trigger our activations.
+  // If we do not force activations to make forward progress, we might deadlock
+  // with the main thread.
   if (output_surface_state_ == OUTPUT_SURFACE_LOST)
+    return true;
+
+  // If we're not visible, we should force activation.
+  // Since we set RequiresHighResToDraw when becoming visible, we ensure that we
+  // don't checkerboard until all visible resources are done. Furthermore, if we
+  // do keep the pending tree around, when becoming visible we might activate
+  // prematurely causing RequiresHighResToDraw flag to be reset. In all cases,
+  // we can simply activate on becoming invisible since we don't need to draw
+  // the active tree when we're in this state.
+  if (!visible_)
     return true;
 
   return false;
@@ -438,8 +444,8 @@ bool SchedulerStateMachine::ShouldSendBeginMainFrame() const {
     return false;
 
   // Don't send BeginMainFrame early if we are prioritizing the active tree
-  // because of smoothness_takes_priority.
-  if (smoothness_takes_priority_ &&
+  // because of impl_latency_takes_priority_.
+  if (impl_latency_takes_priority_ &&
       (has_pending_tree_ || active_tree_needs_first_draw_)) {
     return false;
   }
@@ -869,8 +875,8 @@ bool SchedulerStateMachine::ShouldTriggerBeginImplFrameDeadlineEarly() const {
   if (commit_state_ == COMMIT_STATE_IDLE && !has_pending_tree_)
     return true;
 
-  // Prioritize impl-thread draws in smoothness mode.
-  if (smoothness_takes_priority_)
+  // Prioritize impl-thread draws in impl_latency_takes_priority_ mode.
+  if (impl_latency_takes_priority_)
     return true;
 
   return false;
@@ -965,9 +971,9 @@ void SchedulerStateMachine::DidSwapBuffersComplete() {
   pending_swaps_--;
 }
 
-void SchedulerStateMachine::SetSmoothnessTakesPriority(
-    bool smoothness_takes_priority) {
-  smoothness_takes_priority_ = smoothness_takes_priority;
+void SchedulerStateMachine::SetImplLatencyTakesPriority(
+    bool impl_latency_takes_priority) {
+  impl_latency_takes_priority_ = impl_latency_takes_priority;
 }
 
 void SchedulerStateMachine::DidDrawIfPossibleCompleted(DrawResult result) {
@@ -1084,6 +1090,19 @@ bool SchedulerStateMachine::HasInitializedOutputSurface() const {
   }
   NOTREACHED();
   return false;
+}
+
+std::string SchedulerStateMachine::GetStatesForDebugging() const {
+  return base::StringPrintf("%c %d %d %d %c %c %c %d %d",
+      needs_commit_ ? 'T' : 'F',
+      static_cast<int>(output_surface_state_),
+      static_cast<int>(begin_impl_frame_state_),
+      static_cast<int>(commit_state_),
+      has_pending_tree_ ? 'T' : 'F',
+      pending_tree_is_ready_for_activation_ ? 'T' : 'F',
+      active_tree_needs_first_draw_ ? 'T' : 'F',
+      max_pending_swaps_,
+      pending_swaps_);
 }
 
 }  // namespace cc

@@ -636,9 +636,9 @@ PassRefPtr<JSONObject> buildElementInfo(Element* element)
     }
     if (pseudoElement) {
         if (pseudoElement->pseudoId() == BEFORE)
-            classNames.append("::before");
+            classNames.appendLiteral("::before");
         else if (pseudoElement->pseudoId() == AFTER)
-            classNames.append("::after");
+            classNames.appendLiteral("::after");
     }
     if (!classNames.isEmpty())
         elementInfo->setString("className", classNames.toString());
@@ -733,7 +733,7 @@ Page* InspectorOverlay::overlayPage()
     // through some non-composited paint function.
     overlaySettings.setAcceleratedCompositingEnabled(false);
 
-    RefPtr<LocalFrame> frame = LocalFrame::create(dummyFrameLoaderClient, &m_overlayPage->frameHost(), 0);
+    RefPtrWillBeRawPtr<LocalFrame> frame = LocalFrame::create(dummyFrameLoaderClient, &m_overlayPage->frameHost(), 0);
     frame->setView(FrameView::create(frame.get()));
     frame->init();
     FrameLoader& loader = frame->loader();
@@ -745,7 +745,7 @@ Page* InspectorOverlay::overlayPage()
     loader.load(FrameLoadRequest(0, blankURL(), SubstituteData(data, "text/html", "UTF-8", KURL(), ForceSynchronousLoad)));
     v8::Isolate* isolate = toIsolate(frame.get());
     ScriptState* scriptState = ScriptState::forMainWorld(frame.get());
-    ASSERT(!scriptState->contextIsEmpty());
+    ASSERT(!scriptState->contextIsValid());
     ScriptState::Scope scope(scriptState);
     v8::Handle<v8::Object> global = scriptState->context()->Global();
     v8::Handle<v8::Value> overlayHostObj = toV8(m_overlayHost.get(), global, isolate);

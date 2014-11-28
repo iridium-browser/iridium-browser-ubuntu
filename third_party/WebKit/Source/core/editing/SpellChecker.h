@@ -29,6 +29,7 @@
 #include "core/dom/DocumentMarker.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/VisibleSelection.h"
+#include "platform/heap/Handle.h"
 #include "platform/text/TextChecking.h"
 
 namespace blink {
@@ -41,12 +42,13 @@ class TextCheckerClient;
 class TextCheckingParagraph;
 struct TextCheckingResult;
 
-class SpellChecker {
+class SpellChecker FINAL : public NoBaseWillBeGarbageCollectedFinalized<SpellChecker> {
     WTF_MAKE_NONCOPYABLE(SpellChecker);
 public:
-    static PassOwnPtr<SpellChecker> create(LocalFrame&);
+    static PassOwnPtrWillBeRawPtr<SpellChecker> create(LocalFrame&);
 
     ~SpellChecker();
+    void trace(Visitor*);
 
     SpellCheckerClient& spellCheckerClient() const;
     TextCheckerClient& textChecker() const;
@@ -62,7 +64,7 @@ public:
     void markMisspellings(const VisibleSelection&, RefPtrWillBeRawPtr<Range>& firstMisspellingRange);
     void markBadGrammar(const VisibleSelection&);
     void markMisspellingsAndBadGrammar(const VisibleSelection& spellingSelection, bool markGrammar, const VisibleSelection& grammarSelection);
-    void markAndReplaceFor(PassRefPtr<SpellCheckRequest>, const Vector<TextCheckingResult>&);
+    void markAndReplaceFor(PassRefPtrWillBeRawPtr<SpellCheckRequest>, const Vector<TextCheckingResult>&);
     void markAllMisspellingsAndBadGrammarInRanges(TextCheckingTypeMask, Range* spellingRange, Range* grammarRange);
     void advanceToNextMisspelling(bool startBeforeSelection = false);
     void showSpellingGuessPanel();
@@ -72,6 +74,7 @@ public:
     void respondToChangedSelection(const VisibleSelection& oldSelection, FrameSelection::SetSelectionOptions);
     void replaceMisspelledRange(const String&);
     void removeSpellingMarkers();
+    void removeSpellingMarkersUnderWords(const Vector<String>& words);
     void spellCheckAfterBlur();
     void spellCheckOldSelection(const VisibleSelection& oldSelection, const VisibleSelection& newAdjacentWords);
 
@@ -87,10 +90,13 @@ public:
     SpellCheckRequester& spellCheckRequester() const { return *m_spellCheckRequester; }
 
 private:
-    LocalFrame& m_frame;
-    const OwnPtr<SpellCheckRequester> m_spellCheckRequester;
-
     explicit SpellChecker(LocalFrame&);
+
+    LocalFrame& frame() const
+    {
+        ASSERT(m_frame);
+        return *m_frame;
+    }
 
     void markMisspellingsOrBadGrammar(const VisibleSelection&, bool checkSpelling, RefPtrWillBeRawPtr<Range>& firstMisspellingRange);
     TextCheckingTypeMask resolveTextCheckingTypeMask(TextCheckingTypeMask);
@@ -99,6 +105,9 @@ private:
 
     void chunkAndMarkAllMisspellingsAndBadGrammar(TextCheckingTypeMask textCheckingOptions, const TextCheckingParagraph& fullParagraphToCheck, bool asynchronous);
     void markAllMisspellingsAndBadGrammarInRanges(TextCheckingTypeMask textCheckingOptions, Range* checkingRange, Range* paragraphRange, bool asynchronous, int requestNumber, int* checkingLength = 0);
+
+    RawPtrWillBeMember<LocalFrame> m_frame;
+    const OwnPtrWillBeMember<SpellCheckRequester> m_spellCheckRequester;
 };
 
 } // namespace blink

@@ -14,16 +14,15 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "webrtc/base/thread_annotations.h"
 #include "webrtc/call.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
-#include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
 #include "webrtc/system_wrappers/interface/clock.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/system_wrappers/interface/sleep.h"
-#include "webrtc/system_wrappers/interface/thread_annotations.h"
 #include "webrtc/test/call_test.h"
 #include "webrtc/test/direct_transport.h"
 #include "webrtc/test/encoder_settings.h"
@@ -388,12 +387,13 @@ void FullStackTest::RunTest(const FullStackTestParams& params) {
 
   CreateSendConfig(1);
 
-  scoped_ptr<VP8Encoder> encoder(VP8Encoder::Create());
+  scoped_ptr<VideoEncoder> encoder(
+      VideoEncoder::Create(VideoEncoder::kVp8));
   send_config_.encoder_settings.encoder = encoder.get();
   send_config_.encoder_settings.payload_name = "VP8";
   send_config_.encoder_settings.payload_type = 124;
 
-  VideoStream* stream = &video_streams_[0];
+  VideoStream* stream = &encoder_config_.streams[0];
   stream->width = params.clip.width;
   stream->height = params.clip.height;
   stream->min_bitrate_bps = params.min_bitrate_bps;

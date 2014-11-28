@@ -8,54 +8,31 @@
 #include <vector>
 
 #include "athena/home/public/app_model_builder.h"
+#include "athena/strings/grit/athena_strings.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/strings/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_provider.h"
 #include "ui/app_list/search_result.h"
 #include "ui/app_list/speech_ui_model.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/views/background.h"
-#include "ui/views/view.h"
+#include "ui/resources/grit/ui_resources.h"
+#include "ui/views/controls/image_view.h"
 
 namespace athena {
 
-namespace {
-
-// A view to draw the logo area of app-list centered view.
-// TODO(mukai): replace this by the actual start page webview.
-class DummyLogoView : public views::View {
- public:
-  explicit DummyLogoView(const gfx::Size& size)
-      : size_(size) {
-    set_background(views::Background::CreateSolidBackground(
-        SK_ColorLTGRAY));
-  }
-
- private:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
-    return size_;
-  }
-
-  const gfx::Size size_;
-
-  DISALLOW_COPY_AND_ASSIGN(DummyLogoView);
-};
-
-}
-
 AppListViewDelegate::AppListViewDelegate(AppModelBuilder* model_builder)
     : model_(new app_list::AppListModel),
-      speech_ui_(new app_list::SpeechUIModel(
-          app_list::SPEECH_RECOGNITION_OFF)) {
+      speech_ui_(new app_list::SpeechUIModel) {
   model_builder->PopulateApps(model_.get());
-  // TODO(mukai): get the text from the resources.
-  model_->search_box()->SetHintText(base::ASCIIToUTF16("Search"));
+  model_->search_box()->SetHintText(
+      l10n_util::GetStringUTF16(IDS_ATHENA_SEARCH_BOX_HINT));
 }
 
 AppListViewDelegate::~AppListViewDelegate() {
@@ -182,7 +159,14 @@ void AppListViewDelegate::ShowForProfileByPath(
 
 views::View* AppListViewDelegate::CreateStartPageWebView(
     const gfx::Size& size) {
-  return new DummyLogoView(size);
+  // A static image of the logo. This needs to support dynamic Doodles
+  // eventually.
+  views::ImageView* logo_image = new views::ImageView();
+  logo_image->SetImage(ui::ResourceBundle::GetSharedInstance().
+                       GetImageSkiaNamed(IDR_LOCAL_NTP_IMAGES_LOGO_PNG));
+  logo_image->SetHorizontalAlignment(views::ImageView::CENTER);
+  logo_image->SetVerticalAlignment(views::ImageView::CENTER);
+  return logo_image;
 }
 
 std::vector<views::View*> AppListViewDelegate::CreateCustomPageWebViews(

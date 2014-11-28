@@ -61,6 +61,7 @@ class TestHttpServer : public net::HttpServer::Delegate {
   GURL web_socket_url() const;
 
   // Overridden from net::HttpServer::Delegate:
+  virtual void OnConnect(int connection_id) OVERRIDE;
   virtual void OnHttpRequest(int connection_id,
                              const net::HttpServerRequestInfo& info) OVERRIDE {}
   virtual void OnWebSocketRequest(
@@ -77,7 +78,7 @@ class TestHttpServer : public net::HttpServer::Delegate {
   base::Thread thread_;
 
   // Access only on the server thread.
-  scoped_refptr<net::HttpServer> server_;
+  scoped_ptr<net::HttpServer> server_;
 
   // Access only on the server thread.
   std::set<int> connections_;

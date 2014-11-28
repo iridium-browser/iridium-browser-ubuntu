@@ -6,6 +6,7 @@
 
 #include "base/big_endian.h"
 #include "base/bind.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/message_loop/message_loop.h"
 #include "media/cast/logging/logging_impl.h"
 
@@ -18,11 +19,17 @@ static const int64 kPacingIntervalMs = 10;
 // Each frame will be split into no more than kPacingMaxBurstsPerFrame
 // bursts of packets.
 static const size_t kPacingMaxBurstsPerFrame = 3;
-static const size_t kTargetBurstSize = 10;
-static const size_t kMaxBurstSize = 20;
 static const size_t kMaxDedupeWindowMs = 500;
 
+// "Impossible" upper-bound on the maximum number of packets that should ever be
+// enqueued in the pacer.  This is used to detect bugs, reported as crash dumps.
+static const size_t kHugeQueueLengthSeconds = 10;
+static const size_t kRidiculousNumberOfPackets =
+    kHugeQueueLengthSeconds * (kMaxBurstSize * 1000 / kPacingIntervalMs);
+
 }  // namespace
+
+DedupInfo::DedupInfo() : last_byte_acked_for_audio(0) {}
 
 // static
 PacketKey PacedPacketSender::MakePacketKey(const base::TimeTicks& ticks,
@@ -31,7 +38,12 @@ PacketKey PacedPacketSender::MakePacketKey(const base::TimeTicks& ticks,
   return std::make_pair(ticks, std::make_pair(ssrc, packet_id));
 }
 
+PacedSender::PacketSendRecord::PacketSendRecord()
+    : last_byte_sent(0), last_byte_sent_for_audio(0) {}
+
 PacedSender::PacedSender(
+    size_t target_burst_size,
+    size_t max_burst_size,
     base::TickClock* clock,
     LoggingImpl* logging,
     PacketSender* transport,
@@ -42,11 +54,14 @@ PacedSender::PacedSender(
       transport_task_runner_(transport_task_runner),
       audio_ssrc_(0),
       video_ssrc_(0),
-      max_burst_size_(kTargetBurstSize),
-      next_max_burst_size_(kTargetBurstSize),
-      next_next_max_burst_size_(kTargetBurstSize),
+      target_burst_size_(target_burst_size),
+      max_burst_size_(max_burst_size),
+      current_max_burst_size_(target_burst_size_),
+      next_max_burst_size_(target_burst_size_),
+      next_next_max_burst_size_(target_burst_size_),
       current_burst_size_(0),
       state_(State_Unblocked),
+      has_reached_upper_bound_once_(false),
       weak_factory_(this) {
 }
 
@@ -62,6 +77,20 @@ void PacedSender::RegisterVideoSsrc(uint32 video_ssrc) {
 
 void PacedSender::RegisterPrioritySsrc(uint32 ssrc) {
   priority_ssrcs_.push_back(ssrc);
+}
+
+int64 PacedSender::GetLastByteSentForPacket(const PacketKey& packet_key) {
+  PacketSendHistory::const_iterator it = send_history_.find(packet_key);
+  if (it == send_history_.end())
+    return 0;
+  return it->second.last_byte_sent;
+}
+
+int64 PacedSender::GetLastByteSentForSsrc(uint32 ssrc) {
+  std::map<uint32, int64>::const_iterator it = last_byte_sent_.find(ssrc);
+  if (it == last_byte_sent_.end())
+    return 0;
+  return it->second;
 }
 
 bool PacedSender::SendPackets(const SendPacketVector& packets) {
@@ -85,18 +114,42 @@ bool PacedSender::SendPackets(const SendPacketVector& packets) {
   return true;
 }
 
+bool PacedSender::ShouldResend(const PacketKey& packet_key,
+                               const DedupInfo& dedup_info,
+                               const base::TimeTicks& now) {
+  PacketSendHistory::const_iterator it = send_history_.find(packet_key);
+
+  // No history of previous transmission. It might be sent too long ago.
+  if (it == send_history_.end())
+    return true;
+
+  // Suppose there is request to retransmit X and there is an audio
+  // packet Y sent just before X. Reject retransmission of X if ACK for
+  // Y has not been received.
+  // Only do this for video packets.
+  if (packet_key.second.first == video_ssrc_) {
+    if (dedup_info.last_byte_acked_for_audio &&
+        it->second.last_byte_sent_for_audio &&
+        dedup_info.last_byte_acked_for_audio <
+        it->second.last_byte_sent_for_audio) {
+      return false;
+    }
+  }
+  // Retransmission interval has to be greater than |resend_interval|.
+  if (now - it->second.time < dedup_info.resend_interval)
+    return false;
+  return true;
+}
+
 bool PacedSender::ResendPackets(const SendPacketVector& packets,
-                                base::TimeDelta dedupe_window) {
+                                const DedupInfo& dedup_info) {
   if (packets.empty()) {
     return true;
   }
   const bool high_priority = IsHighPriority(packets.begin()->first);
-  base::TimeTicks now = clock_->NowTicks();
+  const base::TimeTicks now = clock_->NowTicks();
   for (size_t i = 0; i < packets.size(); i++) {
-    std::map<PacketKey, base::TimeTicks>::const_iterator j =
-        sent_time_.find(packets[i].first);
-
-    if (j != sent_time_.end() && now - j->second < dedupe_window) {
+    if (!ShouldResend(packets[i].first, dedup_info, now)) {
       LogPacketEvent(packets[i].second->data, PACKET_RTX_REJECTED);
       continue;
     }
@@ -177,6 +230,15 @@ void PacedSender::SendStoredPackets() {
     return;
   }
 
+  // If the queue ever becomes impossibly long, send a crash dump without
+  // actually crashing the process.
+  if (size() > kRidiculousNumberOfPackets && !has_reached_upper_bound_once_) {
+    NOTREACHED();
+    // Please use Cr=Internals-Cast label in bug reports:
+    base::debug::DumpWithoutCrashing();
+    has_reached_upper_bound_once_ = true;
+  }
+
   base::TimeTicks now = clock_->NowTicks();
   // I don't actually trust that PostDelayTask(x - now) will mean that
   // now >= x when the call happens, so check if the previous state was
@@ -197,17 +259,9 @@ void PacedSender::SendStoredPackets() {
     // which is more bandwidth than the cast library should need, and sending
     // out more data per second is unlikely to be helpful.
     size_t max_burst_size = std::min(
-        kMaxBurstSize,
-        std::max(kTargetBurstSize, size() / kPacingMaxBurstsPerFrame));
-
-    // If the queue is long, issue a warning. Try to limit the number of
-    // warnings issued by only issuing the warning when the burst size
-    // grows. Otherwise we might get 100 warnings per second.
-    if (max_burst_size > next_next_max_burst_size_ && size() > 100) {
-      LOG(WARNING) << "Packet queue is very long:" << size();
-    }
-
-    max_burst_size_ = std::max(next_max_burst_size_, max_burst_size);
+        max_burst_size_,
+        std::max(target_burst_size_, size() / kPacingMaxBurstsPerFrame));
+    current_max_burst_size_ = std::max(next_max_burst_size_, max_burst_size);
     next_max_burst_size_ = std::max(next_next_max_burst_size_, max_burst_size);
     next_next_max_burst_size_ = max_burst_size;
   }
@@ -215,7 +269,7 @@ void PacedSender::SendStoredPackets() {
   base::Closure cb = base::Bind(&PacedSender::SendStoredPackets,
                                 weak_factory_.GetWeakPtr());
   while (!empty()) {
-    if (current_burst_size_ >= max_burst_size_) {
+    if (current_burst_size_ >= current_max_burst_size_) {
       transport_task_runner_->PostDelayedTask(FROM_HERE,
                                               cb,
                                               burst_end_ - now);
@@ -225,8 +279,8 @@ void PacedSender::SendStoredPackets() {
     PacketType packet_type;
     PacketKey packet_key;
     PacketRef packet = PopNextPacket(&packet_type, &packet_key);
-    sent_time_[packet_key] = now;
-    sent_time_buffer_[packet_key] = now;
+    PacketSendRecord send_record;
+    send_record.time = now;
 
     switch (packet_type) {
       case PacketType_Resend:
@@ -238,20 +292,31 @@ void PacedSender::SendStoredPackets() {
       case PacketType_RTCP:
         break;
     }
-    if (!transport_->SendPacket(packet, cb)) {
+
+    const bool socket_blocked = !transport_->SendPacket(packet, cb);
+
+    // Save the send record.
+    send_record.last_byte_sent = transport_->GetBytesSent();
+    send_record.last_byte_sent_for_audio = GetLastByteSentForSsrc(audio_ssrc_);
+    send_history_[packet_key] = send_record;
+    send_history_buffer_[packet_key] = send_record;
+    last_byte_sent_[packet_key.second.first] = send_record.last_byte_sent;
+
+    if (socket_blocked) {
       state_ = State_TransportBlocked;
       return;
     }
     current_burst_size_++;
   }
-  // Keep ~0.5 seconds of data (1000 packets)
-  if (sent_time_buffer_.size() >=
-      kMaxBurstSize * kMaxDedupeWindowMs / kPacingIntervalMs) {
-    sent_time_.swap(sent_time_buffer_);
-    sent_time_buffer_.clear();
+
+  // Keep ~0.5 seconds of data (1000 packets).
+  if (send_history_buffer_.size() >=
+      max_burst_size_ * kMaxDedupeWindowMs / kPacingIntervalMs) {
+    send_history_.swap(send_history_buffer_);
+    send_history_buffer_.clear();
   }
-  DCHECK_LE(sent_time_buffer_.size(),
-            kMaxBurstSize * kMaxDedupeWindowMs / kPacingIntervalMs);
+  DCHECK_LE(send_history_buffer_.size(),
+            max_burst_size_ * kMaxDedupeWindowMs / kPacingIntervalMs);
   state_ = State_Unblocked;
 }
 

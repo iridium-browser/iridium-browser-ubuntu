@@ -4,6 +4,8 @@
 
 """Module containing the build stages."""
 
+from __future__ import print_function
+
 import functools
 import glob
 import os
@@ -14,6 +16,7 @@ from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import repository
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import test_stages
+from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import git
 from chromite.lib import osutils
@@ -177,28 +180,27 @@ class SetupBoardStage(generic_stages.BoardSpecificBuilderStage, InitSDKStage):
   option_name = 'build'
 
   def PerformStage(self):
-    # Calculate whether we should use binary packages.
-    usepkg = (self._run.config.usepkg_setup_board and
-              not self._latest_toolchain)
-
     # We need to run chroot updates on most builders because they uprev after
     # the InitSDK stage. For the SDK builder, we can skip updates because uprev
     # is run prior to InitSDK. This is not just an optimization: It helps
     # workaround http://crbug.com/225509
-    chroot_upgrade = (
-      self._run.config.build_type != constants.CHROOT_BUILDER_TYPE)
-
-    # Iterate through boards to setup.
-    chroot_path = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
+    if self._run.config.build_type != constants.CHROOT_BUILDER_TYPE:
+      usepkg_toolchain = (self._run.config.usepkg_toolchain and
+                          not self._latest_toolchain)
+      commands.UpdateChroot(
+          self._build_root, toolchain_boards=[self._current_board],
+          usepkg=usepkg_toolchain)
 
     # Only update the board if we need to do so.
+    chroot_path = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
     board_path = os.path.join(chroot_path, 'build', self._current_board)
-    if not os.path.isdir(board_path) or chroot_upgrade:
+    if not os.path.isdir(board_path):
+      usepkg = self._run.config.usepkg_build_packages
       commands.SetupBoard(
           self._build_root, board=self._current_board, usepkg=usepkg,
           chrome_binhost_only=self._run.config.chrome_binhost_only,
           force=self._run.config.board_replace,
-          extra_env=self._portage_extra_env, chroot_upgrade=chroot_upgrade,
+          extra_env=self._portage_extra_env, chroot_upgrade=False,
           profile=self._run.options.profile or self._run.config.profile)
 
 
@@ -208,23 +210,34 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'build'
   def __init__(self, builder_run, board, afdo_generate_min=False,
-               afdo_use=False, **kwargs):
+               afdo_use=False, update_metadata=False, **kwargs):
     super(BuildPackagesStage, self).__init__(builder_run, board, **kwargs)
     self._afdo_generate_min = afdo_generate_min
+    self._update_metadata = update_metadata
     assert not afdo_generate_min or not afdo_use
 
-    useflags = self._run.config.useflags[:]
+    useflags = self._portage_extra_env.get('USE', '').split()
     if afdo_use:
       self.name += ' [%s]' % constants.USE_AFDO_USE
       useflags.append(constants.USE_AFDO_USE)
 
     if useflags:
-      self._portage_extra_env.setdefault('USE', '')
-      self._portage_extra_env['USE'] += ' ' + ' '.join(useflags)
+      self._portage_extra_env['USE'] = ' '.join(useflags)
+
+  def VerifyChromeBinpkg(self):
+    # Sanity check: If we didn't check out Chrome, we should be building Chrome
+    # from a binary package.
+    if not self._run.options.managed_chrome:
+      commands.VerifyBinpkg(self._build_root,
+                            self._current_board,
+                            constants.CHROME_CP,
+                            extra_env=self._portage_extra_env)
 
   def PerformStage(self):
     # If we have rietveld patches, always compile Chrome from source.
     noworkon = not self._run.options.rietveld_patches
+
+    self.VerifyChromeBinpkg()
 
     commands.Build(self._build_root,
                    self._current_board,
@@ -236,6 +249,25 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
                    chrome_root=self._run.options.chrome_root,
                    noworkon=noworkon,
                    extra_env=self._portage_extra_env)
+
+    if self._update_metadata:
+      # TODO: Consider moving this into its own stage if there are other similar
+      # things to do after build_packages.
+
+      # Extract firmware version information from the newly created updater.
+      main, ec = commands.GetFirmwareVersions(self._build_root,
+                                              self._current_board)
+      update_dict = {'main-firmware-version': main, 'ec-firmware-version': ec}
+      self._run.attrs.metadata.UpdateBoardDictWithDict(
+          self._current_board, update_dict)
+
+      # Write board metadata update to cidb
+      if cidb.CIDBConnectionFactory.IsCIDBSetup():
+        db = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
+        if db:
+          build_id = self._run.attrs.metadata.GetValue('build_id')
+          db.UpdateBoardPerBuildMetadata(build_id, self._current_board,
+                                         update_dict)
 
 
 class BuildImageStage(BuildPackagesStage):
@@ -285,7 +317,6 @@ class BuildImageStage(BuildPackagesStage):
       commands.BuildVMImageForTesting(
           self._build_root,
           self._current_board,
-          disk_layout=self._run.config.disk_vm_layout,
           extra_env=self._portage_extra_env)
 
   def _GenerateAuZip(self, image_dir):

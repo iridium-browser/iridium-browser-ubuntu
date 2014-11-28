@@ -164,6 +164,13 @@ class TabDragController : public content::NotificationObserver,
     DETACH_ABOVE_OR_BELOW
   };
 
+  // Specifies what should happen when a drag motion exits the tab strip region
+  // in an attempt to detach a tab.
+  enum DetachBehavior {
+    DETACHABLE,
+    NOT_DETACHABLE
+  };
+
   // Indicates what should happen after invoking DragBrowserToNewTabStrip().
   enum DragBrowserResultType {
     // The caller should return immediately. This return value is used if a
@@ -461,9 +468,10 @@ class TabDragController : public content::NotificationObserver,
   // object.
   chrome::HostDesktopType host_desktop_type_;
 
-  // Aura mouse capture and release is used on Ash platforms as well as on
-  // Linux to ensure that pointer grab is not released prematurely.
-  bool use_aura_capture_policy_;
+  // Whether capture can be released during the drag. When false, capture should
+  // not be released when transferring capture between widgets and when starting
+  // the move loop.
+  bool can_release_capture_;
 
   // The position of the mouse (in screen coordinates) at the start of the drag
   // operation. This is used to calculate minimum elasticity before a
@@ -532,6 +540,10 @@ class TabDragController : public content::NotificationObserver,
   // Initial x-coordinates of the tabs when the drag started. Only used for
   // touch mode.
   std::vector<int> initial_tab_positions_;
+
+  // What should occur during ConinueDragging when a tab is attempted to be
+  // detached.
+  DetachBehavior detach_behavior_;
 
   MoveBehavior move_behavior_;
 

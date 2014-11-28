@@ -10,9 +10,9 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
@@ -23,6 +23,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_file_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -44,6 +45,7 @@
 #include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/net/prediction_options.h"
+#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/policy/cloud/test_request_interceptor.h"
@@ -71,14 +73,15 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/infobars/core/infobar.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/external_data_fetcher.h"
@@ -110,7 +113,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_paths.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
@@ -120,8 +122,6 @@
 #include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "content/test/net/url_request_failed_job.h"
-#include "content/test/net/url_request_mock_http_job.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
@@ -129,11 +129,14 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "grit/generated_resources.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/url_util.h"
 #include "net/http/http_stream_factory.h"
+#include "net/ssl/ssl_config.h"
+#include "net/ssl/ssl_config_service.h"
+#include "net/test/url_request/url_request_failed_job.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "policy/policy_constants.h"
@@ -141,6 +144,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
@@ -158,17 +162,17 @@
 #endif
 
 #if !defined(OS_MACOSX)
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
-#include "apps/ui/native_app_window.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/app_window_registry.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "ui/base/window_open_disposition.h"
 #endif
 
 using content::BrowserThread;
-using content::URLRequestMockHTTPJob;
+using net::URLRequestMockHTTPJob;
 using testing::Mock;
 using testing::Return;
 using testing::_;
@@ -223,8 +227,9 @@ void RedirectHostsToTestData(const char* const urls[], size_t size) {
   for (size_t i = 0; i < size; ++i) {
     const GURL url(urls[i]);
     EXPECT_TRUE(url.is_valid());
-    filter->AddUrlInterceptor(
-        url, URLRequestMockHTTPJob::CreateInterceptor(base_path));
+    filter->AddUrlInterceptor(url,
+                              URLRequestMockHTTPJob::CreateInterceptor(
+                                  base_path, BrowserThread::GetBlockingPool()));
   }
 }
 
@@ -244,7 +249,7 @@ net::URLRequestJob* FailedJobFactory(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate,
     const std::string& scheme) {
-  return new content::URLRequestFailedJob(
+  return new net::URLRequestFailedJob(
       request, network_delegate, net::ERR_CONNECTION_RESET);
 }
 
@@ -292,9 +297,11 @@ void CheckCanOpenURL(Browser* browser, const char* spec) {
   ui_test_utils::NavigateToURL(browser, url);
   content::WebContents* contents =
       browser->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(url, contents->GetURL());
-  base::string16 title = base::UTF8ToUTF16(url.spec() + " was blocked");
-  EXPECT_NE(title, contents->GetTitle());
+  ASSERT_EQ(url, contents->GetURL());
+  base::string16 spec16 = base::UTF8ToUTF16(url.spec());
+  base::string16 title =
+      l10n_util::GetStringFUTF16(IDS_ERRORPAGES_TITLE_BLOCKED, spec16);
+  ASSERT_NE(title, contents->GetTitle());
 }
 
 // Verifies that access to the given url |spec| is blocked.
@@ -303,19 +310,21 @@ void CheckURLIsBlocked(Browser* browser, const char* spec) {
   ui_test_utils::NavigateToURL(browser, url);
   content::WebContents* contents =
       browser->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(url, contents->GetURL());
-  base::string16 title = base::UTF8ToUTF16(url.spec() + " was blocked");
-  EXPECT_EQ(title, contents->GetTitle());
+  ASSERT_EQ(url, contents->GetURL());
+  base::string16 spec16 = base::UTF8ToUTF16(url.spec());
+  base::string16 title =
+      l10n_util::GetStringFUTF16(IDS_ERRORPAGES_TITLE_BLOCKED, spec16);
+  ASSERT_EQ(title, contents->GetTitle());
 
   // Verify that the expected error page is being displayed.
   bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
       contents,
       "var textContent = document.body.textContent;"
       "var hasError = textContent.indexOf('ERR_BLOCKED_BY_ADMINISTRATOR') >= 0;"
       "domAutomationController.send(hasError);",
       &result));
-  EXPECT_TRUE(result);
+  ASSERT_TRUE(result);
 }
 
 // Downloads a file named |file| and expects it to be saved to |dir|, which
@@ -452,9 +461,9 @@ int CountPlugins() {
 
 void FlushBlacklistPolicy() {
   // Updates of the URLBlacklist are done on IO, after building the blacklist
-  // on FILE, which is initiated from IO.
+  // on the blocking pool, which is initiated from IO.
   content::RunAllPendingInMessageLoop(BrowserThread::IO);
-  content::RunAllPendingInMessageLoop(BrowserThread::FILE);
+  BrowserThread::GetBlockingPool()->FlushForTesting();
   content::RunAllPendingInMessageLoop(BrowserThread::IO);
 }
 
@@ -540,26 +549,27 @@ void WebContentsLoadedOrDestroyedWatcher::DidStopLoading(
 #if !defined(OS_MACOSX)
 
 // Observer used to wait for the creation of a new app window.
-class TestAddAppWindowObserver : public apps::AppWindowRegistry::Observer {
+class TestAddAppWindowObserver
+    : public extensions::AppWindowRegistry::Observer {
  public:
-  explicit TestAddAppWindowObserver(apps::AppWindowRegistry* registry);
+  explicit TestAddAppWindowObserver(extensions::AppWindowRegistry* registry);
   virtual ~TestAddAppWindowObserver();
 
-  // apps::AppWindowRegistry::Observer:
-  virtual void OnAppWindowAdded(apps::AppWindow* app_window) OVERRIDE;
+  // extensions::AppWindowRegistry::Observer:
+  virtual void OnAppWindowAdded(extensions::AppWindow* app_window) OVERRIDE;
 
-  apps::AppWindow* WaitForAppWindow();
+  extensions::AppWindow* WaitForAppWindow();
 
  private:
-  apps::AppWindowRegistry* registry_;  // Not owned.
-  apps::AppWindow* window_;            // Not owned.
+  extensions::AppWindowRegistry* registry_;  // Not owned.
+  extensions::AppWindow* window_;            // Not owned.
   base::RunLoop run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAddAppWindowObserver);
 };
 
 TestAddAppWindowObserver::TestAddAppWindowObserver(
-    apps::AppWindowRegistry* registry)
+    extensions::AppWindowRegistry* registry)
     : registry_(registry), window_(NULL) {
   registry_->AddObserver(this);
 }
@@ -568,12 +578,13 @@ TestAddAppWindowObserver::~TestAddAppWindowObserver() {
   registry_->RemoveObserver(this);
 }
 
-void TestAddAppWindowObserver::OnAppWindowAdded(apps::AppWindow* app_window) {
+void TestAddAppWindowObserver::OnAppWindowAdded(
+    extensions::AppWindow* app_window) {
   window_ = app_window;
   run_loop_.Quit();
 }
 
-apps::AppWindow* TestAddAppWindowObserver::WaitForAppWindow() {
+extensions::AppWindow* TestAddAppWindowObserver::WaitForAppWindow() {
   run_loop_.Run();
   return window_;
 }
@@ -611,8 +622,11 @@ class PolicyTest : public InProcessBrowserTest {
     base::FilePath root_http;
     PathService::Get(content::DIR_TEST_DATA, &root_http);
     BrowserThread::PostTaskAndReply(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(URLRequestMockHTTPJob::AddUrlHandler, root_http),
+        BrowserThread::IO,
+        FROM_HERE,
+        base::Bind(URLRequestMockHTTPJob::AddUrlHandler,
+                   root_http,
+                   make_scoped_refptr(BrowserThread::GetBlockingPool())),
         base::MessageLoop::current()->QuitWhenIdleClosure());
     content::RunMessageLoop();
   }
@@ -805,8 +819,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, BookmarkBarEnabled) {
 
   // Test starts in about:blank.
   PrefService* prefs = browser()->profile()->GetPrefs();
-  EXPECT_FALSE(prefs->IsManagedPreference(prefs::kShowBookmarkBar));
-  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowBookmarkBar));
+  EXPECT_FALSE(prefs->IsManagedPreference(bookmarks::prefs::kShowBookmarkBar));
+  EXPECT_FALSE(prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 
   PolicyMap policies;
@@ -816,8 +830,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, BookmarkBarEnabled) {
                new base::FundamentalValue(true),
                NULL);
   UpdateProviderPolicy(policies);
-  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kShowBookmarkBar));
-  EXPECT_TRUE(prefs->GetBoolean(prefs::kShowBookmarkBar));
+  EXPECT_TRUE(prefs->IsManagedPreference(bookmarks::prefs::kShowBookmarkBar));
+  EXPECT_TRUE(prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
   EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
 
   // The NTP has special handling of the bookmark bar.
@@ -830,15 +844,15 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, BookmarkBarEnabled) {
                new base::FundamentalValue(false),
                NULL);
   UpdateProviderPolicy(policies);
-  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kShowBookmarkBar));
-  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowBookmarkBar));
+  EXPECT_TRUE(prefs->IsManagedPreference(bookmarks::prefs::kShowBookmarkBar));
+  EXPECT_FALSE(prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
   // The bookmark bar is hidden in the NTP when disabled by policy.
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 
   policies.Clear();
   UpdateProviderPolicy(policies);
-  EXPECT_FALSE(prefs->IsManagedPreference(prefs::kShowBookmarkBar));
-  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowBookmarkBar));
+  EXPECT_FALSE(prefs->IsManagedPreference(bookmarks::prefs::kShowBookmarkBar));
+  EXPECT_FALSE(prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
   // The bookmark bar is shown detached in the NTP, when disabled by prefs only.
   EXPECT_EQ(BookmarkBar::DETACHED, browser()->bookmark_bar_state());
 }
@@ -1524,9 +1538,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DownloadDirectory) {
   EXPECT_FALSE(base::PathExists(initial_dir.path().Append(file)));
 }
 
-// Flaky: http://crbug.com/388340
-IN_PROC_BROWSER_TEST_F(PolicyTest,
-                       DISABLED_ExtensionInstallBlacklistSelective) {
+IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSelective) {
   // Verifies that blacklisted extensions can't be installed.
   ExtensionService* service = extension_service();
   ASSERT_FALSE(service->GetExtensionById(kGoodCrxId, true));
@@ -2090,7 +2102,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   }
 
   // Verify that "bbb.com" opens before applying the blacklist.
-  CheckCanOpenURL(browser(), kURLS[1]);
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), kURLS[1]));
 
   // Set a blacklist.
   base::ListValue blacklist;
@@ -2101,9 +2113,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   UpdateProviderPolicy(policies);
   FlushBlacklistPolicy();
   // All bbb.com URLs are blocked, and "aaa.com" is still unblocked.
-  CheckCanOpenURL(browser(), kURLS[0]);
-  for (size_t i = 1; i < arraysize(kURLS); ++i)
-    CheckURLIsBlocked(browser(), kURLS[i]);
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), kURLS[0]));
+  for (size_t i = 1; i < arraysize(kURLS); ++i) {
+    EXPECT_NO_FATAL_FAILURE(CheckURLIsBlocked(browser(), kURLS[i]));
+  }
 
   // Whitelist some sites of bbb.com.
   base::ListValue whitelist;
@@ -2113,9 +2126,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
                POLICY_SCOPE_USER, whitelist.DeepCopy(), NULL);
   UpdateProviderPolicy(policies);
   FlushBlacklistPolicy();
-  CheckURLIsBlocked(browser(), kURLS[1]);
-  CheckCanOpenURL(browser(), kURLS[2]);
-  CheckCanOpenURL(browser(), kURLS[3]);
+  EXPECT_NO_FATAL_FAILURE(CheckURLIsBlocked(browser(), kURLS[1]));
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), kURLS[2]));
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), kURLS[3]));
 
   {
     base::RunLoop loop;
@@ -2127,8 +2140,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   }
 }
 
-// This test is flaky on all platforms; see http://crbug.com/339240
-IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_FileURLBlacklist) {
+IN_PROC_BROWSER_TEST_F(PolicyTest, FileURLBlacklist) {
   // Check that FileURLs can be blacklisted and DisabledSchemes works together
   // with URLblacklisting and URLwhitelisting.
 
@@ -2139,8 +2151,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_FileURLBlacklist) {
   const std::string file_path1 = base_path + "title1.html";
   const std::string file_path2 = folder_path + "basic.html";
 
-  CheckCanOpenURL(browser(), file_path1.c_str());
-  CheckCanOpenURL(browser(), file_path2.c_str());
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), file_path1.c_str()));
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), file_path2.c_str()));
 
   // Set a blacklist for all the files.
   base::ListValue blacklist;
@@ -2151,8 +2163,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_FileURLBlacklist) {
   UpdateProviderPolicy(policies);
   FlushBlacklistPolicy();
 
-  CheckURLIsBlocked(browser(), file_path1.c_str());
-  CheckURLIsBlocked(browser(), file_path2.c_str());
+  EXPECT_NO_FATAL_FAILURE(CheckURLIsBlocked(browser(), file_path1.c_str()));
+  EXPECT_NO_FATAL_FAILURE(CheckURLIsBlocked(browser(), file_path2.c_str()));
 
   // Replace the URLblacklist with disabling the file scheme.
   blacklist.Remove(base::StringValue("file://*"), NULL);
@@ -2188,8 +2200,65 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_FileURLBlacklist) {
   UpdateProviderPolicy(policies);
   FlushBlacklistPolicy();
 
-  CheckCanOpenURL(browser(), file_path1.c_str());
-  CheckURLIsBlocked(browser(), file_path2.c_str());
+  EXPECT_NO_FATAL_FAILURE(CheckCanOpenURL(browser(), file_path1.c_str()));
+  EXPECT_NO_FATAL_FAILURE(CheckURLIsBlocked(browser(), file_path2.c_str()));
+}
+
+static bool IsMinSSLVersionTLS12(Profile* profile) {
+  scoped_refptr<net::SSLConfigService> config_service(
+      profile->GetSSLConfigService());
+  net::SSLConfig config;
+  config_service->GetSSLConfig(&config);
+  return config.version_min == net::SSL_PROTOCOL_VERSION_TLS1_2;
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionMin) {
+  PrefService* prefs = g_browser_process->local_state();
+
+  const std::string new_value("tls1.2");
+  const std::string default_value(prefs->GetString(prefs::kSSLVersionMin));
+
+  EXPECT_NE(default_value, new_value);
+  EXPECT_FALSE(IsMinSSLVersionTLS12(browser()->profile()));
+
+  PolicyMap policies;
+  policies.Set(key::kSSLVersionMin,
+               POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               new base::StringValue(new_value),
+               NULL);
+  UpdateProviderPolicy(policies);
+
+  EXPECT_TRUE(IsMinSSLVersionTLS12(browser()->profile()));
+}
+
+static bool IsMinSSLFallbackVersionTLS12(Profile* profile) {
+  scoped_refptr<net::SSLConfigService> config_service(
+      profile->GetSSLConfigService());
+  net::SSLConfig config;
+  config_service->GetSSLConfig(&config);
+  return config.version_fallback_min == net::SSL_PROTOCOL_VERSION_TLS1_2;
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
+  PrefService* prefs = g_browser_process->local_state();
+
+  const std::string new_value("tls1.2");
+  const std::string default_value(
+      prefs->GetString(prefs::kSSLVersionFallbackMin));
+
+  EXPECT_NE(default_value, new_value);
+  EXPECT_FALSE(IsMinSSLFallbackVersionTLS12(browser()->profile()));
+
+  PolicyMap policies;
+  policies.Set(key::kSSLVersionFallbackMin,
+               POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               new base::StringValue(new_value),
+               NULL);
+  UpdateProviderPolicy(policies);
+
+  EXPECT_TRUE(IsMinSSLFallbackVersionTLS12(browser()->profile()));
 }
 
 #if !defined(OS_MACOSX)
@@ -2225,12 +2294,12 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, FullscreenAllowedApp) {
 
   // Launch an app that tries to open a fullscreen window.
   TestAddAppWindowObserver add_window_observer(
-      apps::AppWindowRegistry::Get(browser()->profile()));
+      extensions::AppWindowRegistry::Get(browser()->profile()));
   OpenApplication(AppLaunchParams(browser()->profile(),
                                   extension,
                                   extensions::LAUNCH_CONTAINER_NONE,
                                   NEW_WINDOW));
-  apps::AppWindow* window = add_window_observer.WaitForAppWindow();
+  extensions::AppWindow* window = add_window_observer.WaitForAppWindow();
   ASSERT_TRUE(window);
 
   // Verify that the window is not in fullscreen mode.
@@ -2682,9 +2751,14 @@ class RestoreOnStartupPolicyTest
     command_line->InitFromArgv(argv);
     ASSERT_TRUE(std::equal(argv.begin(), argv.end(),
                            command_line->argv().begin()));
+  }
 
-    // Redirect the test URLs to the test data directory.
-    RedirectHostsToTestData(kRestoredURLs, arraysize(kRestoredURLs));
+  virtual void SetUpOnMainThread() OVERRIDE {
+    BrowserThread::PostTask(
+        BrowserThread::IO,
+        FROM_HERE,
+        base::Bind(
+            RedirectHostsToTestData, kRestoredURLs, arraysize(kRestoredURLs)));
   }
 
   void HomepageIsNotNTP() {
@@ -2791,7 +2865,7 @@ IN_PROC_BROWSER_TEST_P(RestoreOnStartupPolicyTest, PRE_RunTest) {
         content::NOTIFICATION_LOAD_STOP,
         content::NotificationService::AllSources());
     chrome::AddSelectedTabWithURL(browser(), GURL(kRestoredURLs[i]),
-                                  content::PAGE_TRANSITION_LINK);
+                                  ui::PAGE_TRANSITION_LINK);
     observer.Wait();
   }
 }

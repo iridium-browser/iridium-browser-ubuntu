@@ -15,30 +15,25 @@
  */
 package com.google.ipc.invalidation.ticl.android2.channel;
 
-import com.google.ipc.invalidation.common.CommonProtos2;
-import com.google.protos.ipc.invalidation.AndroidChannel.MajorVersion;
-import com.google.protos.ipc.invalidation.ClientProtocol.Version;
+import com.google.ipc.invalidation.ticl.proto.AndroidChannel.MajorVersion;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.Version;
 
 /**
  * Constants used by the network channel.
  *
  */
-
 public final class AndroidChannelConstants {
 
   /** Constants used in Intents sent to retrieve auth tokens from the application. */
-  
   public static class AuthTokenConstants {
     /**
      * Action requesting that an auth token to send a message be provided. This is the action
      * used in the intent to the application.
      */
-    
     public static final String ACTION_REQUEST_AUTH_TOKEN =
         "com.google.ipc.invalidation.AUTH_TOKEN_REQUEST";
 
     /** Extra in an auth token request response providing the pending intent. */
-    
     public static final String EXTRA_PENDING_INTENT =
         "com.google.ipc.invalidation.AUTH_TOKEN_PENDING_INTENT";
 
@@ -46,12 +41,10 @@ public final class AndroidChannelConstants {
      * Extra in an auth token request message indicating that the token provided as the value
      * was invalid when last used. This may be set on the intent to the application.
      */
-    
     public static final String EXTRA_INVALIDATE_AUTH_TOKEN =
         "com.google.ipc.invalidaton.AUTH_TOKEN_INVALIDATE";
 
     /** Extra in the intent from the application that provides the auth token string. */
-    
     public static final String EXTRA_AUTH_TOKEN = "com.google.ipc.invalidation.AUTH_TOKEN";
 
     /**
@@ -61,7 +54,6 @@ public final class AndroidChannelConstants {
      * then this value must have the form "oauth2:{scope}", where {scope} is a Google API
      * authentication scope such as "https://www.googleapis.com/auth/chromesync".
      */
-    
     public static final String EXTRA_AUTH_TOKEN_TYPE =
         "com.google.ipc.invalidation.AUTH_TOKEN_TYPE";
 
@@ -105,23 +97,19 @@ public final class AndroidChannelConstants {
   }
 
   /** Constants used in C2DM messages. */
-  
-  public static class C2dmConstants {
+   public static class C2dmConstants {
     /**
      * Name of C2DM parameter containing message content.  If not set, data is retrieved via
      * the mailbox frontend
      */
-    
     public static final String CONTENT_PARAM = "content";
 
     /** Name of the C2DM parameter containing an opaque token to be echoed on HTTP requests. */
-    
     public static final String ECHO_PARAM = "echo-token";
   }
 
   /** The channel version expected by this channel implementation. */
-  public static final Version CHANNEL_VERSION =
-      CommonProtos2.newVersion(MajorVersion.INITIAL.getNumber(), 0);
+  public static final Version CHANNEL_VERSION = Version.create(MajorVersion.INITIAL, 0);
 
   /**
    * An extra set on an intent to the AndroidMessageSenderService to inform it that a GCM

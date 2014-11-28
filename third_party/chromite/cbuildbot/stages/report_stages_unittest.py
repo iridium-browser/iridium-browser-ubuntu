@@ -5,18 +5,23 @@
 
 """Unittests for report stages."""
 
+from __future__ import print_function
+
+import mox
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath('%s/../../..' % os.path.dirname(__file__)))
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
+from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.cbuildbot_unittest import BuilderRunMock
 from chromite.cbuildbot.stages import sync_stages
 from chromite.cbuildbot.stages import sync_stages_unittest
 from chromite.cbuildbot.stages import report_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
+from chromite.lib import cidb
 from chromite.lib import cros_test_lib
 from chromite.lib import alerts
 from chromite.lib import osutils
@@ -25,6 +30,71 @@ from chromite.lib import osutils
 # TODO(build): Finish test wrapper (http://crosbug.com/37517).
 # Until then, this has to be after the chromite imports.
 import mock
+
+
+# pylint: disable=R0901,W0212
+class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
+  """Tests that BuildStartStage behaves as expected."""
+
+  def setUp(self):
+    self.mock_cidb = mox.MockObject(cidb.CIDBConnection)
+    cidb.CIDBConnectionFactory.SetupMockCidb(self.mock_cidb)
+    os.environ['BUILDBOT_MASTERNAME'] = 'chromiumos'
+    self._Prepare(build_id = None)
+
+  def tearDown(self):
+    mox.Verify(self.mock_cidb)
+
+  def testUnknownWaterfall(self):
+    """Test that an assertion is thrown is master name is not valid."""
+    os.environ['BUILDBOT_MASTERNAME'] = 'gibberish'
+    self.assertRaises(failures_lib.StepFailure, self.RunStage)
+
+  def testPerformStage(self):
+    """Test that a normal run of the stage does a database insert."""
+    self.mock_cidb.InsertBuild(bot_hostname=mox.IgnoreArg(),
+                               build_config='x86-generic-paladin',
+                               build_number=1234321,
+                               builder_name=mox.IgnoreArg(),
+                               master_build_id=None,
+                               waterfall='chromiumos').AndReturn(31337)
+    mox.Replay(self.mock_cidb)
+    self.RunStage()
+    self.assertEqual(self._run.attrs.metadata.GetValue('build_id'), 31337)
+    self.assertEqual(self._run.attrs.metadata.GetValue('db_type'),
+                     cidb.CIDBConnectionFactory._CONNECTION_TYPE_MOCK)
+
+  def testHandleSkipWithInstanceChange(self):
+    """Test that HandleSkip disables cidb and dies when necessary."""
+    # This test verifies that switching to a 'mock' database type once
+    # metadata already has an id in 'previous_db_type' will fail.
+    self._run.attrs.metadata.UpdateWithDict({'build_id': 31337,
+                                             'db_type': 'previous_db_type'})
+    stage = self.ConstructStage()
+    self.assertRaises(AssertionError, stage.HandleSkip)
+    self.assertEqual(cidb.CIDBConnectionFactory.GetCIDBConnectionType(),
+                     cidb.CIDBConnectionFactory._CONNECTION_TYPE_INV)
+    # The above test has the side effect of invalidating CIDBConnectionFactory.
+    # Undo that side effect so other unit tests can run.
+    cidb.CIDBConnectionFactory._ClearCIDBSetup()
+    cidb.CIDBConnectionFactory.SetupMockCidb()
+
+  def testHandleSkipWithNoDbType(self):
+    """Test that HandleSkip passes when db_type is missing."""
+    self._run.attrs.metadata.UpdateWithDict({'build_id': 31337})
+    stage = self.ConstructStage()
+    stage.HandleSkip()
+
+  def testHandleSkipWithDbType(self):
+    """Test that HandleSkip passes when db_type is specified."""
+    self._run.attrs.metadata.UpdateWithDict(
+        {'build_id': 31337,
+         'db_type': cidb.CIDBConnectionFactory._CONNECTION_TYPE_MOCK})
+    stage = self.ConstructStage()
+    stage.HandleSkip()
+
+  def ConstructStage(self):
+    return report_stages.BuildStartStage(self._run)
 
 
 # pylint: disable=R0901,W0212
@@ -43,6 +113,12 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
     self.cq = sync_stages_unittest.CLStatusMock()
     self.StartPatcher(self.cq)
     self.sync_stage = None
+
+    # Set up a general purpose cidb mock. Tests with more specific
+    # mock requirements can replace this with a separate call to
+    # SetupMockCidb
+    mock_cidb = mox.MockObject(cidb.CIDBConnection)
+    cidb.CIDBConnectionFactory.SetupMockCidb(mock_cidb)
 
     self._Prepare()
 
@@ -87,7 +163,7 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
   def testAlertEmail(self):
     """Send out alerts when streak counter reaches the threshold."""
     self._Prepare(extra_config={'health_threshold': 3,
-                                'health_alert_recipients': ['fake_recipient']})
+                                'health_alert_recipients': ['foo@bar.org']})
     self._SetupUpdateStreakCounter(counter_value=-3)
     self._SetupCommitQueueSyncPool()
     self.RunStage()
@@ -98,7 +174,7 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
   def testAlertEmailOnFailingStreak(self):
     """Continue sending out alerts when streak counter exceeds the threshold."""
     self._Prepare(extra_config={'health_threshold': 3,
-                                'health_alert_recipients': ['fake_recipient']})
+                                'health_alert_recipients': ['foo@bar.org']})
     self._SetupUpdateStreakCounter(counter_value=-5)
     self._SetupCommitQueueSyncPool()
     self.RunStage()

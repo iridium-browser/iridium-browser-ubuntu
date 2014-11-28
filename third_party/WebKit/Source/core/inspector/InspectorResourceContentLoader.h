@@ -16,13 +16,15 @@ class Page;
 class Resource;
 class VoidCallback;
 
-class InspectorResourceContentLoader FINAL {
+class InspectorResourceContentLoader FINAL : public NoBaseWillBeGarbageCollectedFinalized<InspectorResourceContentLoader> {
     WTF_MAKE_NONCOPYABLE(InspectorResourceContentLoader);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
-    InspectorResourceContentLoader(Page*);
-    void ensureResourcesContentLoaded(PassOwnPtr<VoidCallback>);
+    explicit InspectorResourceContentLoader(Page*);
+    void ensureResourcesContentLoaded(VoidCallback*);
     ~InspectorResourceContentLoader();
+    void trace(Visitor*);
+    void dispose();
     bool hasFinished();
     void stop();
 
@@ -33,10 +35,10 @@ private:
     void checkDone();
     void start();
 
-    Vector<OwnPtr<VoidCallback> > m_callbacks;
+    PersistentHeapVectorWillBeHeapVector<Member<VoidCallback> > m_callbacks;
     bool m_allRequestsStarted;
     bool m_started;
-    Page* m_page;
+    RawPtrWillBeMember<Page> m_page;
     HashSet<ResourceClient*> m_pendingResourceClients;
     Vector<ResourcePtr<Resource> > m_resources;
 

@@ -10,8 +10,8 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
+#include "storage/browser/fileapi/file_system_url.h"
 #include "url/gurl.h"
-#include "webkit/browser/fileapi/file_system_url.h"
 
 using ::testing::_;
 using ::testing::Invoke;
@@ -70,7 +70,7 @@ void MockRemoteFileSyncService::NotifyRemoteServiceStateUpdated(
 }
 
 void MockRemoteFileSyncService::NotifyFileStatusChanged(
-    const fileapi::FileSystemURL& url,
+    const storage::FileSystemURL& url,
     SyncFileStatus sync_status,
     SyncAction action_taken,
     SyncDirection direction) {
@@ -109,8 +109,8 @@ void MockRemoteFileSyncService::ProcessRemoteChangeStub(
     const SyncFileCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(callback, SYNC_STATUS_NO_CHANGE_TO_SYNC,
-                 fileapi::FileSystemURL()));
+      base::Bind(
+          callback, SYNC_STATUS_NO_CHANGE_TO_SYNC, storage::FileSystemURL()));
 }
 
 RemoteServiceState MockRemoteFileSyncService::GetCurrentStateStub() const {

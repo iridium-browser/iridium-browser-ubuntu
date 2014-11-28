@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profile_resetter/profile_resetter.h"
 
@@ -25,7 +26,7 @@ class ResettableSettingsSnapshot {
  public:
   // ExtensionList is a vector of pairs. The first component is the extension
   // id, the second is the name.
-  typedef std::vector<std::pair<std::string, std::string> > ExtensionList;
+  typedef base::StringPairs ExtensionList;
   // All types of settings handled by this class.
   enum Field {
     STARTUP_MODE = 1 << 0,
@@ -114,6 +115,12 @@ class ResettableSettingsSnapshot {
   DISALLOW_COPY_AND_ASSIGN(ResettableSettingsSnapshot);
 };
 
+// The caller of ResettableSettingsSnapshot.
+enum SnapshotCaller {
+  PROFILE_RESET_WEBUI = 0,
+  PROFILE_RESET_PROMPT,
+};
+
 // Serializes specified |snapshot| members to JSON format. |field_mask| is a bit
 // mask of ResettableSettingsSnapshot::Field values.
 std::string SerializeSettingsReport(const ResettableSettingsSnapshot& snapshot,
@@ -122,7 +129,8 @@ std::string SerializeSettingsReport(const ResettableSettingsSnapshot& snapshot,
 // Sends |report| as a feedback. |report| is supposed to be result of
 // SerializeSettingsReport().
 void SendSettingsFeedback(const std::string& report,
-                          Profile* profile);
+                          Profile* profile,
+                          SnapshotCaller caller);
 
 // Returns list of key/value pairs for all available reported information
 // from the |profile| and some additional fields.

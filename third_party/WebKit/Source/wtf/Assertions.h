@@ -46,12 +46,12 @@
 // Users must test "#if ENABLE(ASSERT)", which helps ensure that code
 // testing this macro has included this header.
 #ifndef ENABLE_ASSERT
-#ifdef NDEBUG
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
 /* Disable ASSERT* macros in release mode by default. */
 #define ENABLE_ASSERT 0
 #else
 #define ENABLE_ASSERT 1
-#endif /* NDEBUG */
+#endif /* defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON) */
 #endif
 
 #ifndef BACKTRACE_DISABLED
@@ -89,10 +89,6 @@
 
 /* These helper functions are always declared, but not necessarily always defined if the corresponding function is disabled. */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 typedef enum { WTFLogChannelOff, WTFLogChannelOn } WTFLogChannelState;
 
 typedef struct {
@@ -117,9 +113,6 @@ WTF_EXPORT void WTFSetCrashHook(WTFCrashHookFunction);
 WTF_EXPORT void WTFInvokeCrashHook();
 WTF_EXPORT void WTFInstallReportBacktraceOnCrashHook();
 
-#ifdef __cplusplus
-}
-
 namespace WTF {
 
 class WTF_EXPORT FrameToNameScope {
@@ -136,7 +129,6 @@ private:
 } // namespace WTF
 
 using WTF::FrameToNameScope;
-#endif
 
 /* IMMEDIATE_CRASH() - Like CRASH() below but crashes in the fastest, simplest possible way with no attempt at logging. */
 #ifndef IMMEDIATE_CRASH

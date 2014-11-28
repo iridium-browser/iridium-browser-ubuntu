@@ -4,7 +4,7 @@
 
 #include "components/search_provider_logos/logo_cache.h"
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
@@ -196,7 +196,7 @@ void LogoCache::WriteLogo(scoped_refptr<base::RefCountedMemory> encoded_image) {
   if (!EnsureCacheDirectoryExists())
     return;
 
-  if (!metadata_ || !encoded_image) {
+  if (!metadata_ || !encoded_image.get()) {
     DeleteLogoAndMetadata();
     return;
   }

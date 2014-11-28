@@ -30,8 +30,15 @@ StreamHandleImpl::StreamHandleImpl(
       url_(stream->url()),
       original_url_(original_url),
       mime_type_(mime_type),
-      response_headers_(response_headers),
-      stream_message_loop_(base::MessageLoopProxy::current().get()) {}
+      response_headers_(NULL),
+      stream_message_loop_(base::MessageLoopProxy::current().get()) {
+  // Make a copy of the response headers so it is safe to pass this across
+  // threads.
+  if (response_headers.get()) {
+    response_headers_ =
+        new net::HttpResponseHeaders(response_headers->raw_headers());
+  }
+}
 
 StreamHandleImpl::~StreamHandleImpl() {
   stream_message_loop_->PostTaskAndReply(FROM_HERE,

@@ -4,6 +4,8 @@
 
 """Module containing the test stages."""
 
+from __future__ import print_function
+
 import collections
 import logging
 import os
@@ -15,7 +17,6 @@ from chromite.cbuildbot import constants
 from chromite.cbuildbot import lab_status
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.stages import generic_stages
-from chromite.cros.tests import image_test
 from chromite.lib import cgroups
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
@@ -350,16 +351,21 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
 
   def PerformStage(self):
     test_results_dir = commands.CreateTestRoot(self._build_root)
+    # CreateTestRoot returns a temp directory inside chroot.
+    # We bring that back out to the build root.
+    test_results_dir = os.path.join(self._build_root, test_results_dir[1:])
     test_results_dir = os.path.join(test_results_dir, 'image_test_results')
     osutils.SafeMakedirs(test_results_dir)
-    with timeout_util.Timeout(self.IMAGE_TEST_TIMEOUT):
-      commands.RunTestImage(
-          self._build_root,
-          self._current_board,
-          self.GetImageDirSymlink(),
-          test_results_dir,
-      )
-    self.SendPerfValues(test_results_dir)
+    try:
+      with timeout_util.Timeout(self.IMAGE_TEST_TIMEOUT):
+        commands.RunTestImage(
+            self._build_root,
+            self._current_board,
+            self.GetImageDirSymlink(),
+            test_results_dir,
+        )
+    finally:
+      self.SendPerfValues(test_results_dir)
 
   def SendPerfValues(self, test_results_dir):
     """Gather all perf values in |test_results_dir| and send them to chromeperf.
@@ -369,6 +375,9 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
     Args:
       test_results_dir: A path to the directory with perf files.
     """
+    # Import image_test here so that extra imports from image_test does not
+    # affect cbuildbot in bootstrap.
+    from chromite.cros.tests import image_test
     # A dict of list of perf values, keyed by test name.
     perf_entries = collections.defaultdict(list)
     for root, _, filenames in os.walk(test_results_dir):

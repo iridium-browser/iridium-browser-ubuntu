@@ -7,10 +7,9 @@ import("//third_party/WebKit/Source/build/scripts/scripts.gni")
 import("//third_party/WebKit/Source/config.gni")
 import("//third_party/WebKit/Source/platform/platform.gni")
 import("//third_party/WebKit/Source/platform/platform_generated.gni")
-import("//third_party/yasm/yasm_assemble.gni")
 
 # Most targets in this file are private actions so use that as the default.
-visibility = ":*"
+visibility = [ ":*" ]
 
 heap_gypi = exec_script(
     "//build/gypi_to_gn.py",
@@ -28,7 +27,8 @@ blink_platform_neon_files = [
 
 # blink_common in blink_platform.gyp
 component("blink_common") {
-  visibility = "//third_party/WebKit/*"
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "//third_party/WebKit/*" ]
   sources = [
     "exported/WebCString.cpp",
     "exported/WebString.cpp",
@@ -150,7 +150,8 @@ action("color_data") {
 # This isn't strictly necessary since we can just add the deps to "platform",
 # but it helps to have the targets match the GYP build.
 group("make_platform_generated") {
-  visibility = "//third_party/WebKit/Source/*"
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "//third_party/WebKit/Source/*" ]
   deps = [
     ":blink_common",
     ":color_data",
@@ -162,7 +163,8 @@ group("make_platform_generated") {
 # TODO(brettw) Objective C Renaming postbuild steps on Mac.
 # blink_platform target in blink_platform.gyp
 component("platform") {
-  visibility = "//third_party/WebKit/*"
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "//third_party/WebKit/*" ]
   output_name = "blink_platform"
 
   sources = platform_files
@@ -189,42 +191,29 @@ component("platform") {
     "$root_gen_dir/blink",
   ]
 
-  deps = [
-    ":heap_asm_stubs",
-    ":make_platform_generated",
+  public_deps = [
     "//gpu/command_buffer/client:gles2_c_lib",
     "//skia",
     "//third_party:jpeg",
-    "//third_party/harfbuzz-ng",
     "//third_party/iccjpeg",
-    "//third_party/icu",
     "//third_party/libpng",
     "//third_party/libwebp",
     "//third_party/ots",
     "//third_party/qcms",
-    "//third_party/WebKit/Source/wtf",
-    "//third_party/WebKit/Source/platform/heap",
     "//url",
     "//v8",
   ]
-
-  forward_dependent_configs_from = [
-    "//gpu/command_buffer/client:gles2_c_lib",
-    "//skia",
-    "//third_party:jpeg",
-    "//third_party/iccjpeg",
-    "//third_party/libpng",
-    "//third_party/libwebp",
-    "//third_party/ots",
-    "//third_party/qcms",
-    "//url",
-    "//v8",
+  deps = [
+    ":make_platform_generated",
+    "//third_party/harfbuzz-ng",
+    "//third_party/icu",
+    "//third_party/WebKit/Source/wtf",
+    "//third_party/WebKit/Source/platform/heap",
   ]
 
   if (is_mac) {
     sources -= [
       "fonts/harfbuzz/FontHarfBuzz.cpp",
-      "fonts/harfbuzz/FontPlatformDataHarfBuzz.cpp",
       "fonts/harfbuzz/HarfBuzzFaceSkia.cpp",
       "fonts/opentype/OpenTypeTypes.h",
       "fonts/opentype/OpenTypeVerticalData.cpp",
@@ -261,9 +250,6 @@ component("platform") {
     ]
   } else {
     sources -= [
-      # FIXME: We will eventually compile this too, but for now it's
-      # only used on mac.
-      "fonts/FontPlatformData.cpp",
       "fonts/harfbuzz/HarfBuzzFaceCoreText.cpp",
       "geometry/cg/FloatPointCG.cpp",
       "geometry/cg/FloatRectCG.cpp",
@@ -309,7 +295,7 @@ component("platform") {
   }
 
   if (is_linux) {
-    direct_dependent_configs = [ "//build/config/linux:fontconfig" ]
+    public_configs = [ "//build/config/linux:fontconfig" ]
   }
 
   if (!use_default_render_theme) {
@@ -334,39 +320,9 @@ component("platform") {
   }
 }
 
-yasm_assemble("heap_asm_stubs") {
-  if (cpu_arch == "x86" || cpu_arch == "x64") {
-    sources = [ "heap/asm/SaveRegisters_x86.asm" ]
-  } else if (cpu_arch == "arm") {
-    sources = [ "heap/asm/SaveRegisters_arm.S" ]
-  } else if (cpu_arch == "arm64") {
-    sources = [ "heap/asm/SaveRegisters_arm64.S" ]
-  } else if (cpu_arch == "mipsel") {
-    sources = [ "heap/asm/SaveRegisters_mips.S" ]
-  }
-
-  yasm_flags = []
-  if (is_mac) {
-    # Necessary to ensure symbols end up with a _ prefix; added by
-    # yasm_compile.gypi for Windows, but not Mac.
-    yasm_flags += [ "-DPREFIX" ]
-  }
-  if (cpu_arch == "x64") {
-    if (is_win) {
-      yasm_flags += [ "-DX64WIN=1" ]
-    } else {
-      yasm_flags += [ "-DX64POSIX=1" ]
-    }
-  } else if (cpu_arch == "x86") {
-    yasm_flags += [ "-DIA32=1" ]
-  } else if (cpu_arch == "arm") {
-    yasm_flags += [ "-DARM=1" ]
-  }
-}
-
-
 test("heap_unittests") {
-  visibility = "//third_party/WebKit/*"
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "//third_party/WebKit/*" ]
   output_name = "blink_heap_unittests"
 
   sources = rebase_path(heap_gypi.platform_heap_test_files, ".", "heap")
@@ -386,11 +342,13 @@ test("heap_unittests") {
     "//testing/gtest",
     "//third_party/WebKit/Source/wtf",
     "//third_party/WebKit/Source/wtf:test_support",
+    "//content/test:test_support",
   ]
 }
 
 test("platform_unittests") {
-  visibility = "//third_party/WebKit/*"
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "//third_party/WebKit/*" ]
   output_name = "blink_platform_unittests"
 
   sources = platform_test_files

@@ -25,11 +25,14 @@ component("dbus") {
     "object_proxy.h",
     "property.cc",
     "property.h",
+    "scoped_dbus_error.cc",
     "scoped_dbus_error.h",
     "string_util.cc",
     "string_util.h",
     "values_util.cc",
     "values_util.h",
+    "util.cc",
+    "util.h",
   ]
 
   defines = [
@@ -41,7 +44,7 @@ component("dbus") {
     "//third_party/protobuf:protobuf_lite",
   ]
 
-  direct_dependent_configs = [
+  public_configs = [
     "//build/config/linux:dbus",
   ]
 }
@@ -53,6 +56,7 @@ proto_library("test_proto") {
 # This target contains mocks that can be used to write unit tests without
 # issuing actual D-Bus calls.
 source_set("test_support") {
+  testonly = true
   sources = [
     "mock_bus.cc",
     "mock_bus.h",
@@ -90,6 +94,7 @@ test("dbus_unittests") {
     "string_util_unittest.cc",
     "test_service.cc",
     "test_service.h",
+    "util_unittest.cc",
     "values_util_unittest.cc",
   ]
 
@@ -109,6 +114,7 @@ test("dbus_unittests") {
 }
 
 executable("dbus_test_server") {
+  testonly = true
   sources = [
     "test_server.cc",
     "test_service.cc",

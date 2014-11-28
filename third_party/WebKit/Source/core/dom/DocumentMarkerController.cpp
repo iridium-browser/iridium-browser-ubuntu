@@ -31,6 +31,7 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Range.h"
 #include "core/dom/RenderedDocumentMarker.h"
+#include "core/dom/Text.h"
 #include "core/editing/TextIterator.h"
 #include "core/rendering/RenderObject.h"
 
@@ -39,6 +40,20 @@
 #endif
 
 namespace blink {
+
+MarkerRemoverPredicate::MarkerRemoverPredicate(const Vector<String>& words)
+    : m_words(words)
+{
+}
+
+bool MarkerRemoverPredicate::operator()(const DocumentMarker& documentMarker, const Text& textNode) const
+{
+    unsigned start  = documentMarker.startOffset();
+    unsigned length = documentMarker.endOffset() - documentMarker.startOffset();
+
+    String markerText = textNode.data().substring(start, length);
+    return m_words.contains(markerText);
+}
 
 namespace {
 
@@ -83,44 +98,31 @@ void DocumentMarkerController::addMarker(Range* range, DocumentMarker::MarkerTyp
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
     for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        RefPtrWillBeRawPtr<Range> textPiece = markedText.range();
-        addMarker(textPiece->startContainer(), DocumentMarker(type, textPiece->startOffset(), textPiece->endOffset(), description, hash));
+        addMarker(markedText.startContainer(), DocumentMarker(type, markedText.startOffset(), markedText.endOffset(), description, hash));
     }
 }
 
-void DocumentMarkerController::addMarker(Range* range, DocumentMarker::MarkerType type, const String& description)
+void DocumentMarkerController::addMarker(const Position& start, const Position& end, DocumentMarker::MarkerType type, const String& description, uint32_t hash)
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
-    for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        RefPtrWillBeRawPtr<Range> textPiece = markedText.range();
-        addMarker(textPiece->startContainer(), DocumentMarker(type, textPiece->startOffset(), textPiece->endOffset(), description));
+    for (TextIterator markedText(start, end); !markedText.atEnd(); markedText.advance()) {
+        addMarker(markedText.startContainer(), DocumentMarker(type, markedText.startOffset(), markedText.endOffset(), description, hash));
     }
-}
-
-void DocumentMarkerController::addMarker(Range* range, DocumentMarker::MarkerType type)
-{
-    // Use a TextIterator to visit the potentially multiple nodes the range covers.
-    for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        RefPtrWillBeRawPtr<Range> textPiece = markedText.range();
-        addMarker(textPiece->startContainer(), DocumentMarker(type, textPiece->startOffset(), textPiece->endOffset()));
-    }
-
 }
 
 void DocumentMarkerController::addTextMatchMarker(const Range* range, bool activeMatch)
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
     for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        RefPtrWillBeRawPtr<Range> textPiece = markedText.range();
-        unsigned startOffset = textPiece->startOffset();
-        unsigned endOffset = textPiece->endOffset();
-        addMarker(textPiece->startContainer(), DocumentMarker(startOffset, endOffset, activeMatch));
+        unsigned startOffset = markedText.startOffset();
+        unsigned endOffset = markedText.endOffset();
+        addMarker(markedText.startContainer(), DocumentMarker(startOffset, endOffset, activeMatch));
         if (endOffset > startOffset) {
             // Rendered rects for markers in WebKit are not populated until each time
             // the markers are painted. However, we need it to happen sooner, because
             // the whole purpose of tickmarks on the scrollbar is to show where
             // matches off-screen are (that haven't been painted yet).
-            Node* node = textPiece->startContainer();
+            Node* node = markedText.startContainer();
             DocumentMarkerVector markers = markersFor(node);
             toRenderedDocumentMarker(markers[markers.size() - 1])->setRenderedRect(range->boundingBox());
         }
@@ -132,18 +134,29 @@ void DocumentMarkerController::prepareForDestruction()
     clear();
 }
 
-void DocumentMarkerController::removeMarkers(Range* range, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
+void DocumentMarkerController::removeMarkers(TextIterator& markedText, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
 {
-    for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
+    for (; !markedText.atEnd(); markedText.advance()) {
         if (!possiblyHasMarkers(markerTypes))
             return;
         ASSERT(!m_markers.isEmpty());
 
-        RefPtrWillBeRawPtr<Range> textPiece = markedText.range();
-        int startOffset = textPiece->startOffset();
-        int endOffset = textPiece->endOffset();
-        removeMarkers(textPiece->startContainer(), startOffset, endOffset - startOffset, markerTypes, shouldRemovePartiallyOverlappingMarker);
+        int startOffset = markedText.startOffset();
+        int endOffset = markedText.endOffset();
+        removeMarkers(markedText.startContainer(), startOffset, endOffset - startOffset, markerTypes, shouldRemovePartiallyOverlappingMarker);
     }
+}
+
+void DocumentMarkerController::removeMarkers(Range* range, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
+{
+    TextIterator markedText(range);
+    DocumentMarkerController::removeMarkers(markedText, markerTypes, shouldRemovePartiallyOverlappingMarker);
+}
+
+void DocumentMarkerController::removeMarkers(const Position& start, const Position& end, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
+{
+    TextIterator markedText(start, end);
+    DocumentMarkerController::removeMarkers(markedText, markerTypes, shouldRemovePartiallyOverlappingMarker);
 }
 
 static bool startsFurther(const OwnPtrWillBeMember<RenderedDocumentMarker>& lhv, const DocumentMarker* rhv)
@@ -213,7 +226,7 @@ void DocumentMarkerController::addMarker(Node* node, const DocumentMarker& newMa
 
     // repaint the affected node
     if (node->renderer())
-        node->renderer()->paintInvalidationForWholeRenderer();
+        node->renderer()->setShouldDoFullPaintInvalidation(true);
 }
 
 void DocumentMarkerController::mergeOverlapping(MarkerList* list, DocumentMarker& toInsert)
@@ -274,7 +287,7 @@ void DocumentMarkerController::copyMarkers(Node* srcNode, unsigned startOffset, 
 
     // repaint the affected node
     if (docDirty && dstNode->renderer())
-        dstNode->renderer()->paintInvalidationForWholeRenderer();
+        dstNode->renderer()->setShouldDoFullPaintInvalidation(true);
 }
 
 void DocumentMarkerController::removeMarkers(Node* node, unsigned startOffset, int length, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
@@ -355,7 +368,7 @@ void DocumentMarkerController::removeMarkers(Node* node, unsigned startOffset, i
 
     // repaint the affected node
     if (docDirty && node->renderer())
-        node->renderer()->paintInvalidationForWholeRenderer();
+        node->renderer()->setShouldDoFullPaintInvalidation(true);
 }
 
 DocumentMarker* DocumentMarkerController::markerContainingPoint(const LayoutPoint& point, DocumentMarker::MarkerType markerType)
@@ -494,6 +507,25 @@ void DocumentMarkerController::removeMarkers(Node* node, DocumentMarker::MarkerT
         removeMarkersFromList(iterator, markerTypes);
 }
 
+void DocumentMarkerController::removeMarkers(const MarkerRemoverPredicate& shouldRemoveMarker)
+{
+    for (MarkerMap::iterator i = m_markers.begin(); i != m_markers.end(); ++i) {
+        MarkerLists* markers = i->value.get();
+        for (size_t markerListIndex = 0; markerListIndex < DocumentMarker::MarkerTypeIndexesCount; ++markerListIndex) {
+            OwnPtrWillBeMember<MarkerList>& list = (*markers)[markerListIndex];
+
+            WillBeHeapVector<RawPtrWillBeMember<RenderedDocumentMarker> > markersToBeRemoved;
+            for (size_t j = 0; list.get() && j < list->size(); ++j) {
+                if (i->key->isTextNode() && shouldRemoveMarker(*list->at(j).get(), static_cast<const Text&>(*i->key)))
+                    markersToBeRemoved.append(list->at(j).get());
+            }
+
+            for (size_t j = 0; j < markersToBeRemoved.size(); ++j)
+                list->remove(list->find(markersToBeRemoved[j].get()));
+        }
+    }
+}
+
 void DocumentMarkerController::removeMarkers(DocumentMarker::MarkerTypes markerTypes)
 {
     if (!possiblyHasMarkers(markerTypes))
@@ -545,7 +577,7 @@ void DocumentMarkerController::removeMarkersFromList(MarkerMap::iterator iterato
 
     if (needsRepainting) {
         if (RenderObject* renderer = iterator->key->renderer())
-            renderer->paintInvalidationForWholeRenderer();
+            renderer->setShouldDoFullPaintInvalidation(true);
     }
 
     if (nodeCanBeRemoved) {
@@ -575,7 +607,7 @@ void DocumentMarkerController::repaintMarkers(DocumentMarker::MarkerTypes marker
 
             // cause the node to be redrawn
             if (RenderObject* renderer = node->renderer()) {
-                renderer->paintInvalidationForWholeRenderer();
+                renderer->setShouldDoFullPaintInvalidation(true);
                 break;
             }
         }
@@ -629,7 +661,7 @@ void DocumentMarkerController::shiftMarkers(Node* node, unsigned startOffset, in
 
     // repaint the affected node
     if (docDirty && node->renderer())
-        node->renderer()->paintInvalidationForWholeRenderer();
+        node->renderer()->setShouldDoFullPaintInvalidation(true);
 }
 
 void DocumentMarkerController::setMarkersActive(Range* range, bool active)
@@ -673,7 +705,7 @@ void DocumentMarkerController::setMarkersActive(Node* node, unsigned startOffset
 
     // repaint the affected node
     if (docDirty && node->renderer())
-        node->renderer()->paintInvalidationForWholeRenderer();
+        node->renderer()->setShouldDoFullPaintInvalidation(true);
 }
 
 bool DocumentMarkerController::hasMarkers(Range* range, DocumentMarker::MarkerTypes markerTypes)

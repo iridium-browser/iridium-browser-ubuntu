@@ -36,9 +36,6 @@
 namespace blink {
 class Range;
 class RenderObject;
-}
-
-namespace blink {
 
 // Find-in-page coordinate conversion methods.
 //
@@ -53,8 +50,8 @@ namespace blink {
 // are scroll-independent, representing any contents scaled to the visible area of their container.
 // The provided methods support scroll:overflow and are CSS position and transform-friendly.
 
-blink::FloatRect findInPageRectFromAbsoluteRect(const blink::FloatRect&, const blink::RenderObject*);
-blink::FloatRect findInPageRectFromRange(blink::Range*);
+FloatRect findInPageRectFromAbsoluteRect(const FloatRect&, const RenderObject*);
+FloatRect findInPageRectFromRange(Range*);
 
 } // namespace blink
 

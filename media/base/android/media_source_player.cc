@@ -27,13 +27,11 @@ MediaSourcePlayer::MediaSourcePlayer(
     int player_id,
     MediaPlayerManager* manager,
     const RequestMediaResourcesCB& request_media_resources_cb,
-    const ReleaseMediaResourcesCB& release_media_resources_cb,
     scoped_ptr<DemuxerAndroid> demuxer,
     const GURL& frame_url)
     : MediaPlayerAndroid(player_id,
                          manager,
                          request_media_resources_cb,
-                         release_media_resources_cb,
                          frame_url),
       demuxer_(demuxer.Pass()),
       pending_event_(NO_EVENT_PENDING),
@@ -46,6 +44,7 @@ MediaSourcePlayer::MediaSourcePlayer(
       is_waiting_for_key_(false),
       is_waiting_for_audio_decoder_(false),
       is_waiting_for_video_decoder_(false),
+      prerolling_(false),
       weak_factory_(this) {
   audio_decoder_job_.reset(new AudioDecoderJob(
       base::Bind(&DemuxerAndroid::RequestDemuxerData,
@@ -58,7 +57,6 @@ MediaSourcePlayer::MediaSourcePlayer(
                  base::Unretained(demuxer_.get()),
                  DemuxerStream::VIDEO),
       base::Bind(request_media_resources_cb_, player_id),
-      base::Bind(release_media_resources_cb_, player_id),
       base::Bind(&MediaSourcePlayer::OnDemuxerConfigsChanged,
                  weak_factory_.GetWeakPtr())));
   demuxer_->Initialize(this);
@@ -152,11 +150,11 @@ bool MediaSourcePlayer::IsPlaying() {
 }
 
 int MediaSourcePlayer::GetVideoWidth() {
-  return video_decoder_job_->width();
+  return video_decoder_job_->output_width();
 }
 
 int MediaSourcePlayer::GetVideoHeight() {
-  return video_decoder_job_->height();
+  return video_decoder_job_->output_height();
 }
 
 void MediaSourcePlayer::SeekTo(base::TimeDelta timestamp) {
@@ -189,7 +187,6 @@ base::TimeDelta MediaSourcePlayer::GetDuration() {
 void MediaSourcePlayer::Release() {
   DVLOG(1) << __FUNCTION__;
 
-  is_surface_in_use_ = false;
   audio_decoder_job_->ReleaseDecoderResources();
   video_decoder_job_->ReleaseDecoderResources();
 
@@ -197,14 +194,11 @@ void MediaSourcePlayer::Release() {
   playing_ = false;
 
   decoder_starvation_callback_.Cancel();
+  DetachListener();
 }
 
 void MediaSourcePlayer::SetVolume(double volume) {
   audio_decoder_job_->SetVolume(volume);
-}
-
-bool MediaSourcePlayer::IsSurfaceInUse() const {
-  return is_surface_in_use_;
 }
 
 bool MediaSourcePlayer::CanPause() {
@@ -233,6 +227,7 @@ void MediaSourcePlayer::StartInternal() {
   // be clear (not encrypted) or encrypted with different keys. So
   // |is_waiting_for_key_| condition may not be true anymore.
   is_waiting_for_key_ = false;
+  AttachListener(NULL);
 
   SetPendingEvent(PREFETCH_REQUEST_EVENT_PENDING);
   ProcessPendingEvents();
@@ -350,6 +345,7 @@ void MediaSourcePlayer::OnDemuxerSeekDone(
     audio_decoder_job_->BeginPrerolling(preroll_timestamp_);
   if (HasVideo())
     video_decoder_job_->BeginPrerolling(preroll_timestamp_);
+  prerolling_ = true;
 
   if (!doing_browser_seek_)
     manager()->OnSeekComplete(player_id(), current_time);
@@ -362,7 +358,9 @@ void MediaSourcePlayer::UpdateTimestamps(
     base::TimeDelta max_presentation_timestamp) {
   interpolator_.SetBounds(current_presentation_timestamp,
                           max_presentation_timestamp);
-  manager()->OnTimeUpdate(player_id(), GetCurrentTime());
+  manager()->OnTimeUpdate(player_id(),
+                          GetCurrentTime(),
+                          base::TimeTicks::Now());
 }
 
 void MediaSourcePlayer::ProcessPendingEvents() {
@@ -483,8 +481,11 @@ void MediaSourcePlayer::MediaDecoderCallback(
                      max_presentation_timestamp);
   }
 
-  if (status == MEDIA_CODEC_OUTPUT_END_OF_STREAM)
+  if (status == MEDIA_CODEC_OUTPUT_END_OF_STREAM) {
     PlaybackCompleted(is_audio);
+    if (is_clock_manager)
+      interpolator_.StopInterpolating();
+  }
 
   if (pending_event_ != NO_EVENT_PENDING) {
     ProcessPendingEvents();
@@ -511,6 +512,14 @@ void MediaSourcePlayer::MediaDecoderCallback(
   if (status == MEDIA_CODEC_STOPPED)
     return;
 
+  if (prerolling_ && IsPrerollFinished(is_audio)) {
+    if (IsPrerollFinished(!is_audio)) {
+      prerolling_ = false;
+      StartInternal();
+    }
+    return;
+  }
+
   if (is_clock_manager) {
     // If we have a valid timestamp, start the starvation callback. Otherwise,
     // reset the |start_time_ticks_| so that the next frame will not suffer
@@ -526,6 +535,12 @@ void MediaSourcePlayer::MediaDecoderCallback(
     DecodeMoreAudio();
   else
     DecodeMoreVideo();
+}
+
+bool MediaSourcePlayer::IsPrerollFinished(bool is_audio) const {
+  if (is_audio)
+    return !HasAudio() || !audio_decoder_job_->prerolling();
+  return !HasVideo() || !video_decoder_job_->prerolling();
 }
 
 void MediaSourcePlayer::DecodeMoreAudio() {
@@ -578,7 +593,6 @@ void MediaSourcePlayer::PlaybackCompleted(bool is_audio) {
 
   if (AudioFinished() && VideoFinished()) {
     playing_ = false;
-    interpolator_.StopInterpolating();
     start_time_ticks_ = base::TimeTicks();
     manager()->OnPlaybackComplete(player_id());
   }
@@ -591,11 +605,11 @@ void MediaSourcePlayer::ClearDecodingData() {
   start_time_ticks_ = base::TimeTicks();
 }
 
-bool MediaSourcePlayer::HasVideo() {
+bool MediaSourcePlayer::HasVideo() const {
   return video_decoder_job_->HasStream();
 }
 
-bool MediaSourcePlayer::HasAudio() {
+bool MediaSourcePlayer::HasAudio() const {
   return audio_decoder_job_->HasStream();
 }
 
@@ -751,14 +765,15 @@ void MediaSourcePlayer::OnKeyAdded() {
 
 void MediaSourcePlayer::OnCdmUnset() {
   DVLOG(1) << __FUNCTION__;
-  // TODO(xhwang): Support detachment of CDM. This will be needed when we start
-  // to support setMediaKeys(0) (see http://crbug.com/330324), or when we
-  // release MediaDrm when the video is paused, or when the device goes to
-  // sleep (see http://crbug.com/272421).
-  NOTREACHED() << "CDM detachment not supported.";
   DCHECK(drm_bridge_);
+  // TODO(xhwang): Currently this is only called during teardown. Support full
+  // detachment of CDM during playback. This will be needed when we start to
+  // support setMediaKeys(0) (see http://crbug.com/330324), or when we release
+  // MediaDrm when the video is paused, or when the device goes to sleep (see
+  // http://crbug.com/272421).
   audio_decoder_job_->SetDrmBridge(NULL);
   video_decoder_job_->SetDrmBridge(NULL);
+  cdm_registration_id_ = 0;
   drm_bridge_ = NULL;
 }
 

@@ -13,6 +13,7 @@
         '../content/content.gyp:content_browser',
         '../skia/skia.gyp:skia',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        '../ui/base/ui_base.gyp:ui_base',
         '../url/url.gyp:url_lib',
       ],
       'include_dirs': [
@@ -25,6 +26,8 @@
         # Note: sources list duplicated in GN build.
         'sessions/serialized_navigation_entry.cc',
         'sessions/serialized_navigation_entry.h',
+        'sessions/session_id.cc',
+        'sessions/session_id.h',
       ],
       'conditions': [
         ['android_webview_build == 0', {

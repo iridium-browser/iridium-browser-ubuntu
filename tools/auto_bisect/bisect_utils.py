@@ -85,7 +85,7 @@ REPO_PARAMS = [
 
 
 def OutputAnnotationStepStart(name):
-  """Outputs annotation to signal the start of a step to a trybot.
+  """Outputs annotation to signal the start of a step to a try bot.
 
   Args:
     name: The name of the step.
@@ -99,7 +99,7 @@ def OutputAnnotationStepStart(name):
 
 
 def OutputAnnotationStepClosed():
-  """Outputs annotation to signal the closing of a step to a trybot."""
+  """Outputs annotation to signal the closing of a step to a try bot."""
   print
   print '@@@STEP_CLOSED@@@'
   print
@@ -111,7 +111,7 @@ def OutputAnnotationStepLink(label, url):
 
   Args:
     label: The name to print.
-    url: The url to print.
+    url: The URL to print.
   """
   print
   print '@@@STEP_LINK@%s@%s@@@' % (label, url)
@@ -172,10 +172,10 @@ def _CreateAndChangeToSourceDirectory(working_directory):
 
 
 def _SubprocessCall(cmd, cwd=None):
-  """Runs a subprocess with specified parameters.
+  """Runs a command in a subprocess.
 
   Args:
-    params: A list of parameters to pass to gclient.
+    cmd: The command to run.
     cwd: Working directory to run from.
 
   Returns:
@@ -281,22 +281,9 @@ def RunGClientAndCreateConfig(opts, custom_deps=None, cwd=None):
     spec += GCLIENT_SPEC_ANDROID
 
   return_code = RunGClient(
-      ['config', '--spec=%s' % spec, '--git-deps'], cwd=cwd)
+      ['config', '--spec=%s' % spec], cwd=cwd)
   return return_code
 
-
-def IsDepsFileBlink():
-  """Reads .DEPS.git and returns whether or not we're using blink.
-
-  Returns:
-    True if blink, false if webkit.
-  """
-  locals = {
-      'Var': lambda _: locals["vars"][_],
-      'From': lambda *args: None
-  }
-  execfile(FILE_DEPS_GIT, {}, locals)
-  return 'blink.git' in locals['vars']['webkit_url']
 
 
 def OnAccessError(func, path, _):
@@ -392,10 +379,6 @@ def SetupGitDepot(opts, custom_deps):
     if os.path.isfile(os.path.join('src', FILE_DEPS_GIT)):
       cwd = os.getcwd()
       os.chdir('src')
-      if not IsDepsFileBlink():
-        passed_deps_check = RemoveThirdPartyDirectory('Webkit')
-      else:
-        passed_deps_check = True
       if passed_deps_check:
         passed_deps_check = RemoveThirdPartyDirectory('libjingle')
       if passed_deps_check:
@@ -457,7 +440,6 @@ def RunGit(command, cwd=None):
     A tuple of the output and return code.
   """
   command = ['git'] + command
-
   return RunProcessAndRetrieveOutput(command, cwd=cwd)
 
 

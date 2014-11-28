@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_validator.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "components/ownership/owner_settings_service.h"
 #include "net/cert/x509_util_nss.h"
 
 namespace enterprise_management {
@@ -19,9 +20,13 @@ class PolicyData;
 class PolicyFetchResponse;
 }
 
+namespace ownership {
+class OwnerKeyUtil;
+class PublicKey;
+}
+
 namespace chromeos {
 
-class OwnerKeyUtil;
 class SessionManagerClient;
 
 // Handles a single transaction with session manager. This is a virtual base
@@ -38,8 +43,8 @@ class SessionManagerOperation {
 
   // Starts the operation.
   void Start(SessionManagerClient* session_manager_client,
-             scoped_refptr<OwnerKeyUtil> owner_key_util,
-             scoped_refptr<PublicKey> public_key);
+             scoped_refptr<ownership::OwnerKeyUtil> owner_key_util,
+             scoped_refptr<ownership::PublicKey> public_key);
 
   // Restarts a load operation (if that part is already in progress).
   void RestartLoad(bool key_changed);
@@ -54,7 +59,7 @@ class SessionManagerOperation {
   }
 
   // Public part of the owner key as configured/loaded from disk.
-  scoped_refptr<PublicKey> public_key() { return public_key_; }
+  scoped_refptr<ownership::PublicKey> public_key() { return public_key_; }
 
   // Whether the load operation is underway.
   bool is_loading() const { return is_loading_; }
@@ -65,9 +70,9 @@ class SessionManagerOperation {
 
   void set_username(const std::string& username) { username_ = username; }
 
-  void set_delegate(const base::WeakPtr<
-      DeviceSettingsService::PrivateKeyDelegate>& delegate) {
-    delegate_ = delegate;
+  void set_owner_settings_service(const base::WeakPtr<
+      ownership::OwnerSettingsService>& owner_settings_service) {
+    owner_settings_service_ = owner_settings_service;
   }
 
  protected:
@@ -88,17 +93,17 @@ class SessionManagerOperation {
     return session_manager_client_;
   }
 
-  base::WeakPtr<DeviceSettingsService::PrivateKeyDelegate> delegate_;
+  base::WeakPtr<ownership::OwnerSettingsService> owner_settings_service_;
 
  private:
   // Loads the owner key from disk. Must be run on a thread that can do I/O.
-  static scoped_refptr<PublicKey> LoadPublicKey(
-      scoped_refptr<OwnerKeyUtil> util,
-      scoped_refptr<PublicKey> current_key);
+  static scoped_refptr<ownership::PublicKey> LoadPublicKey(
+      scoped_refptr<ownership::OwnerKeyUtil> util,
+      scoped_refptr<ownership::PublicKey> current_key);
 
   // Stores the owner key loaded by LoadOwnerKey and calls |callback|.
   void StorePublicKey(const base::Closure& callback,
-                      scoped_refptr<PublicKey> new_key);
+                      scoped_refptr<ownership::PublicKey> new_key);
 
   // Triggers a device settings load.
   void RetrieveDeviceSettings();
@@ -110,19 +115,19 @@ class SessionManagerOperation {
   void ReportValidatorStatus(policy::DeviceCloudPolicyValidator* validator);
 
   SessionManagerClient* session_manager_client_;
-  scoped_refptr<OwnerKeyUtil> owner_key_util_;
-
-  base::WeakPtrFactory<SessionManagerOperation> weak_factory_;
+  scoped_refptr<ownership::OwnerKeyUtil> owner_key_util_;
 
   Callback callback_;
 
-  scoped_refptr<PublicKey> public_key_;
+  scoped_refptr<ownership::PublicKey> public_key_;
   bool force_key_load_;
   std::string username_;
 
   bool is_loading_;
   scoped_ptr<enterprise_management::PolicyData> policy_data_;
   scoped_ptr<enterprise_management::ChromeDeviceSettingsProto> device_settings_;
+
+  base::WeakPtrFactory<SessionManagerOperation> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionManagerOperation);
 };

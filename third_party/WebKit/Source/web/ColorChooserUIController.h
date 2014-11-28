@@ -26,30 +26,28 @@
 #ifndef ColorChooserUIController_h
 #define ColorChooserUIController_h
 
-#include "platform/ColorChooser.h"
+#include "core/html/forms/ColorChooser.h"
 #include "platform/text/PlatformLocale.h"
 #include "public/web/WebColorChooserClient.h"
 #include "wtf/OwnPtr.h"
 
 namespace blink {
+
 class ColorChooserClient;
 class LocalFrame;
-}
-
-namespace blink {
-
 class WebColorChooser;
 
-class ColorChooserUIController : public WebColorChooserClient, public blink::ColorChooser {
+class ColorChooserUIController : public WebColorChooserClient, public ColorChooser {
 public:
-    ColorChooserUIController(blink::LocalFrame*, blink::ColorChooserClient*);
+    ColorChooserUIController(LocalFrame*, ColorChooserClient*);
     virtual ~ColorChooserUIController();
 
     virtual void openUI();
 
     // ColorChooser functions:
-    virtual void setSelectedColor(const blink::Color&) OVERRIDE FINAL;
+    virtual void setSelectedColor(const Color&) OVERRIDE FINAL;
     virtual void endChooser() OVERRIDE;
+    virtual AXObject* rootAXObject() OVERRIDE;
 
     // WebColorChooserClient functions:
     virtual void didChooseColor(const WebColor&) OVERRIDE FINAL;
@@ -60,9 +58,8 @@ protected:
     OwnPtr<WebColorChooser> m_chooser;
 
 private:
-
-    blink::LocalFrame* m_frame;
-    blink::ColorChooserClient* m_client;
+    LocalFrame* m_frame;
+    ColorChooserClient* m_client;
 };
 
 }

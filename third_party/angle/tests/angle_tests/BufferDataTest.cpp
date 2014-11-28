@@ -48,7 +48,7 @@ class BufferDataTest : public ANGLETest
         glGenBuffers(1, &mBuffer);
         ASSERT_NE(mBuffer, 0U);
 
-        mProgram = compileProgram(vsSource, fsSource);
+        mProgram = CompileProgram(vsSource, fsSource);
         ASSERT_NE(mProgram, 0U);
 
         mAttribLocation = glGetAttribLocation(mProgram, "in_attrib");
@@ -114,6 +114,19 @@ TEST_F(BufferDataTest, ZeroNonNULLData)
     delete [] zeroData;
 }
 
+TEST_F(BufferDataTest, NULLResolvedData)
+{
+    glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
+    glBufferData(GL_ARRAY_BUFFER, 128, NULL, GL_DYNAMIC_DRAW);
+
+    glUseProgram(mProgram);
+    glVertexAttribPointer(mAttribLocation, 1, GL_FLOAT, GL_FALSE, 4, NULL);
+    glEnableVertexAttribArray(mAttribLocation);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    drawQuad(mProgram, "position", 0.5f);
+}
+
 TEST_F(BufferDataTest, HugeSetDataShouldNotCrash)
 {
     glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
@@ -128,7 +141,7 @@ TEST_F(BufferDataTest, HugeSetDataShouldNotCrash)
 
         if (data == NULL)
         {
-            allocSize <<= 1;
+            allocSize >>= 1;
         }
     }
 
@@ -231,7 +244,7 @@ class IndexedBufferCopyTest : public ANGLETest
         glGenBuffers(1, &mElementBuffer);
         ASSERT_NE(mElementBuffer, 0U);
 
-        mProgram = compileProgram(vsSource, fsSource);
+        mProgram = CompileProgram(vsSource, fsSource);
         ASSERT_NE(mProgram, 0U);
 
         mAttribLocation = glGetAttribLocation(mProgram, "in_attrib");

@@ -105,16 +105,14 @@ public:
 };
 
 WorkerScriptController::WorkerScriptController(WorkerGlobalScope& workerGlobalScope)
-    : m_isolate(v8::Isolate::New())
+    : m_isolate(0)
     , m_workerGlobalScope(workerGlobalScope)
     , m_executionForbidden(false)
     , m_executionScheduledToTerminate(false)
     , m_globalScopeExecutionState(0)
 {
-    m_isolate->Enter();
+    m_isolate = V8PerIsolateData::initialize();
     V8Initializer::initializeWorker(m_isolate);
-    v8::V8::Initialize();
-    V8PerIsolateData::ensureInitialized(m_isolate);
     m_world = DOMWrapperWorld::create(WorkerWorldId);
     m_interruptor = adoptPtr(new V8IsolateInterruptor(m_isolate));
     ThreadState::current()->addInterruptor(m_interruptor.get());
@@ -132,9 +130,7 @@ public:
 
     virtual void postCleanup()
     {
-        V8PerIsolateData::dispose(m_isolate);
-        m_isolate->Exit();
-        m_isolate->Dispose();
+        V8PerIsolateData::destroy(m_isolate);
     }
 
 private:
@@ -156,6 +152,8 @@ WorkerScriptController::~WorkerScriptController()
 
     if (isContextInitialized())
         m_scriptState->disposePerContextData();
+
+    V8PerIsolateData::willBeDestroyed(m_isolate);
 
     ThreadState::current()->addCleanupTask(IsolateCleanupTask::create(m_isolate));
 }
@@ -179,19 +177,15 @@ bool WorkerScriptController::initializeContextIfNeeded()
     context->SetEmbedderData(0, v8AtomicString(m_isolate, "worker"));
 
     // Create a new JS object and use it as the prototype for the shadow global object.
-    const WrapperTypeInfo* contextType = &V8DedicatedWorkerGlobalScope::wrapperTypeInfo;
-    if (m_workerGlobalScope.isServiceWorkerGlobalScope())
-        contextType = &V8ServiceWorkerGlobalScope::wrapperTypeInfo;
-    else if (!m_workerGlobalScope.isDedicatedWorkerGlobalScope())
-        contextType = &V8SharedWorkerGlobalScope::wrapperTypeInfo;
-    v8::Handle<v8::Function> workerGlobalScopeConstructor = m_scriptState->perContextData()->constructorForType(contextType);
+    const WrapperTypeInfo* wrapperTypeInfo = m_workerGlobalScope.wrapperTypeInfo();
+    v8::Handle<v8::Function> workerGlobalScopeConstructor = m_scriptState->perContextData()->constructorForType(wrapperTypeInfo);
     v8::Local<v8::Object> jsWorkerGlobalScope = V8ObjectConstructor::newInstance(m_isolate, workerGlobalScopeConstructor);
     if (jsWorkerGlobalScope.IsEmpty()) {
         m_scriptState->disposePerContextData();
         return false;
     }
 
-    V8DOMWrapper::associateObjectWithWrapper<V8WorkerGlobalScope>(PassRefPtrWillBeRawPtr<WorkerGlobalScope>(&m_workerGlobalScope), contextType, jsWorkerGlobalScope, m_isolate, WrapperConfiguration::Dependent);
+    V8DOMWrapper::associateObjectWithWrapperNonTemplate(&m_workerGlobalScope, wrapperTypeInfo, jsWorkerGlobalScope, m_isolate);
 
     // Insert the object instance as the prototype of the shadow object.
     v8::Handle<v8::Object> globalObject = v8::Handle<v8::Object>::Cast(m_scriptState->context()->Global()->GetPrototype());
@@ -216,7 +210,7 @@ ScriptValue WorkerScriptController::evaluate(const String& script, const String&
     v8::TryCatch block;
 
     v8::Handle<v8::String> scriptString = v8String(m_isolate, script);
-    v8::Handle<v8::Script> compiledScript = V8ScriptRunner::compileScript(scriptString, fileName, scriptStartPosition, 0, m_isolate);
+    v8::Handle<v8::Script> compiledScript = V8ScriptRunner::compileScript(scriptString, fileName, scriptStartPosition, 0, 0, m_isolate);
     v8::Local<v8::Value> result = V8ScriptRunner::runCompiledScript(compiledScript, &m_workerGlobalScope, m_isolate);
 
     if (!block.CanContinue()) {
@@ -270,7 +264,7 @@ void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, RefPtr
                 event = state.m_errorEventFromImportedScript.release();
             else
                 event = ErrorEvent::create(state.errorMessage, state.sourceURL, state.lineNumber, state.columnNumber, m_world.get());
-            m_workerGlobalScope.reportException(event, nullptr, NotSharableCrossOrigin);
+            m_workerGlobalScope.reportException(event, 0, nullptr, NotSharableCrossOrigin);
         }
     }
 }

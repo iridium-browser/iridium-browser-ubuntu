@@ -33,6 +33,7 @@
         'backend/print_backend_consts.cc',
         'backend/print_backend_consts.h',
         'backend/print_backend_dummy.cc',
+        'backend/print_backend_win.cc',
         'backend/printing_info_win.cc',
         'backend/printing_info_win.h',
         'emf_win.cc',
@@ -43,8 +44,8 @@
         'image_linux.cc',
         'image_mac.cc',
         'image_win.cc',
+        'metafile.cc',
         'metafile.h',
-        'metafile_impl.h',
         'metafile_skia_wrapper.cc',
         'metafile_skia_wrapper.h',
         'page_number.cc',
@@ -58,8 +59,6 @@
         'pdf_metafile_cg_mac.h',
         'pdf_metafile_skia.cc',
         'pdf_metafile_skia.h',
-        'print_destination_interface.h',
-        'print_destination_none.cc',
         'print_dialog_gtk_interface.h',
         'print_job_constants.cc',
         'print_job_constants.h',
@@ -81,6 +80,10 @@
         'printed_pages_source.h',
         'printing_context.cc',
         'printing_context.h',
+        'printing_context_system_dialog_win.cc',
+        'printing_context_system_dialog_win.h',
+        'printing_context_win.cc',
+        'printing_context_win.h',
         'printing_utils.cc',
         'printing_utils.h',
         'units.cc',
@@ -123,9 +126,6 @@
           'sources': [
             'backend/win_helper.cc',
             'backend/win_helper.h',
-            'backend/print_backend_win.cc',
-            'printing_context_win.cc',
-            'printing_context_win.h',
           ],
         }],
         ['chromeos==1',{
@@ -254,6 +254,7 @@
       'msvs_disabled_warnings': [ 4267, ],
     },
     {
+      # GN version: //printing:cups (config, not a target).
       'target_name': 'cups',
       'type': 'none',
       'conditions': [

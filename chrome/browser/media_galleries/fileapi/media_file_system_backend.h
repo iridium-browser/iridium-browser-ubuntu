@@ -12,13 +12,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
-#include "webkit/browser/fileapi/file_system_backend.h"
+#include "storage/browser/fileapi/file_system_backend.h"
+#include "storage/browser/fileapi/task_runner_bound_observer_list.h"
 
 namespace base {
 class SequencedTaskRunner;
 }
 
-namespace fileapi {
+namespace storage {
 class FileSystemURL;
 }
 
@@ -29,7 +30,7 @@ class URLRequest;
 class MediaPathFilter;
 class DeviceMediaAsyncFileUtil;
 
-class MediaFileSystemBackend : public fileapi::FileSystemBackend {
+class MediaFileSystemBackend : public storage::FileSystemBackend {
  public:
   static const char kMediaTaskRunnerName[];
 
@@ -49,38 +50,48 @@ class MediaFileSystemBackend : public fileapi::FileSystemBackend {
 
   static bool AttemptAutoMountForURLRequest(
       const net::URLRequest* url_request,
-      const fileapi::FileSystemURL& filesystem_url,
+      const storage::FileSystemURL& filesystem_url,
       const std::string& storage_domain,
       const base::Callback<void(base::File::Error result)>& callback);
 
   // FileSystemBackend implementation.
-  virtual bool CanHandleType(fileapi::FileSystemType type) const OVERRIDE;
-  virtual void Initialize(fileapi::FileSystemContext* context) OVERRIDE;
-  virtual void ResolveURL(const fileapi::FileSystemURL& url,
-                          fileapi::OpenFileSystemMode mode,
+  virtual bool CanHandleType(storage::FileSystemType type) const OVERRIDE;
+  virtual void Initialize(storage::FileSystemContext* context) OVERRIDE;
+  virtual void ResolveURL(const storage::FileSystemURL& url,
+                          storage::OpenFileSystemMode mode,
                           const OpenFileSystemCallback& callback) OVERRIDE;
-  virtual fileapi::AsyncFileUtil* GetAsyncFileUtil(
-      fileapi::FileSystemType type) OVERRIDE;
-  virtual fileapi::CopyOrMoveFileValidatorFactory*
-  GetCopyOrMoveFileValidatorFactory(
-      fileapi::FileSystemType type,
-      base::File::Error* error_code) OVERRIDE;
-  virtual fileapi::FileSystemOperation* CreateFileSystemOperation(
-      const fileapi::FileSystemURL& url,
-      fileapi::FileSystemContext* context,
+  virtual storage::AsyncFileUtil* GetAsyncFileUtil(
+      storage::FileSystemType type) OVERRIDE;
+  virtual storage::WatcherManager* GetWatcherManager(
+      storage::FileSystemType type) OVERRIDE;
+  virtual storage::CopyOrMoveFileValidatorFactory*
+      GetCopyOrMoveFileValidatorFactory(storage::FileSystemType type,
+                                        base::File::Error* error_code) OVERRIDE;
+  virtual storage::FileSystemOperation* CreateFileSystemOperation(
+      const storage::FileSystemURL& url,
+      storage::FileSystemContext* context,
       base::File::Error* error_code) const OVERRIDE;
   virtual bool SupportsStreaming(
-      const fileapi::FileSystemURL& url) const OVERRIDE;
-  virtual scoped_ptr<webkit_blob::FileStreamReader> CreateFileStreamReader(
-      const fileapi::FileSystemURL& url,
+      const storage::FileSystemURL& url) const OVERRIDE;
+  virtual bool HasInplaceCopyImplementation(
+      storage::FileSystemType type) const OVERRIDE;
+  virtual scoped_ptr<storage::FileStreamReader> CreateFileStreamReader(
+      const storage::FileSystemURL& url,
       int64 offset,
+      int64 max_bytes_to_read,
       const base::Time& expected_modification_time,
-      fileapi::FileSystemContext* context) const OVERRIDE;
-  virtual scoped_ptr<fileapi::FileStreamWriter> CreateFileStreamWriter(
-      const fileapi::FileSystemURL& url,
+      storage::FileSystemContext* context) const OVERRIDE;
+  virtual scoped_ptr<storage::FileStreamWriter> CreateFileStreamWriter(
+      const storage::FileSystemURL& url,
       int64 offset,
-      fileapi::FileSystemContext* context) const OVERRIDE;
-  virtual fileapi::FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+      storage::FileSystemContext* context) const OVERRIDE;
+  virtual storage::FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+  virtual const storage::UpdateObserverList* GetUpdateObservers(
+      storage::FileSystemType type) const OVERRIDE;
+  virtual const storage::ChangeObserverList* GetChangeObservers(
+      storage::FileSystemType type) const OVERRIDE;
+  virtual const storage::AccessObserverList* GetAccessObservers(
+      storage::FileSystemType type) const OVERRIDE;
 
  private:
   // Store the profile path. We need this to create temporary snapshot files.
@@ -89,17 +100,17 @@ class MediaFileSystemBackend : public fileapi::FileSystemBackend {
   scoped_refptr<base::SequencedTaskRunner> media_task_runner_;
 
   scoped_ptr<MediaPathFilter> media_path_filter_;
-  scoped_ptr<fileapi::CopyOrMoveFileValidatorFactory>
+  scoped_ptr<storage::CopyOrMoveFileValidatorFactory>
       media_copy_or_move_file_validator_factory_;
 
-  scoped_ptr<fileapi::AsyncFileUtil> native_media_file_util_;
+  scoped_ptr<storage::AsyncFileUtil> native_media_file_util_;
   scoped_ptr<DeviceMediaAsyncFileUtil> device_media_async_file_util_;
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  scoped_ptr<fileapi::AsyncFileUtil> picasa_file_util_;
-  scoped_ptr<fileapi::AsyncFileUtil> itunes_file_util_;
+  scoped_ptr<storage::AsyncFileUtil> picasa_file_util_;
+  scoped_ptr<storage::AsyncFileUtil> itunes_file_util_;
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 #if defined(OS_MACOSX)
-  scoped_ptr<fileapi::AsyncFileUtil> iphoto_file_util_;
+  scoped_ptr<storage::AsyncFileUtil> iphoto_file_util_;
 #endif  // defined(OS_MACOSX)
 
   DISALLOW_COPY_AND_ASSIGN(MediaFileSystemBackend);

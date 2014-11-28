@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -26,17 +26,16 @@
 #include "extensions/common/extension.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/gdata_wapi_parser.h"
-#include "webkit/common/fileapi/file_system_util.h"
+#include "storage/common/fileapi/file_system_util.h"
 
 namespace sync_file_system {
 namespace drive_backend {
 
 namespace {
 
-bool BuildFileSystemURL(
-    MetadataDatabase* metadata_database,
-    const FileTracker& tracker,
-    fileapi::FileSystemURL* url) {
+bool BuildFileSystemURL(MetadataDatabase* metadata_database,
+                        const FileTracker& tracker,
+                        storage::FileSystemURL* url) {
   base::FilePath path;
   if (!metadata_database->BuildPathForTracker(
           tracker.tracker_id(), &path))
@@ -80,16 +79,15 @@ scoped_ptr<FileMetadata> GetFileMetadata(MetadataDatabase* database,
 
 // Creates a temporary file in |dir_path|.  This must be called on an
 // IO-allowed task runner, and the runner must be given as |file_task_runner|.
-webkit_blob::ScopedFile CreateTemporaryFile(
-    base::TaskRunner* file_task_runner) {
+storage::ScopedFile CreateTemporaryFile(
+    const scoped_refptr<base::TaskRunner>& file_task_runner) {
   base::FilePath temp_file_path;
   if (!base::CreateTemporaryFile(&temp_file_path))
-    return webkit_blob::ScopedFile();
+    return storage::ScopedFile();
 
-  return webkit_blob::ScopedFile(
-      temp_file_path,
-      webkit_blob::ScopedFile::DELETE_ON_SCOPE_OUT,
-      file_task_runner);
+  return storage::ScopedFile(temp_file_path,
+                             storage::ScopedFile::DELETE_ON_SCOPE_OUT,
+                             file_task_runner);
 }
 
 }  // namespace
@@ -108,15 +106,6 @@ RemoteToLocalSyncer::~RemoteToLocalSyncer() {
 void RemoteToLocalSyncer::RunPreflight(scoped_ptr<SyncTaskToken> token) {
   token->InitializeTaskLog("Remote -> Local");
 
-  scoped_ptr<BlockingFactor> blocking_factor(new BlockingFactor);
-  blocking_factor->exclusive = true;
-  SyncTaskManager::UpdateBlockingFactor(
-      token.Pass(), blocking_factor.Pass(),
-      base::Bind(&RemoteToLocalSyncer::RunExclusive,
-                 weak_ptr_factory_.GetWeakPtr()));
-}
-
-void RemoteToLocalSyncer::RunExclusive(scoped_ptr<SyncTaskToken> token) {
   if (!drive_service() || !metadata_database() || !remote_change_processor()) {
     token->RecordLog("Context not ready.");
     SyncTaskManager::NotifyTaskDone(token.Pass(), SYNC_STATUS_FAILED);
@@ -124,11 +113,10 @@ void RemoteToLocalSyncer::RunExclusive(scoped_ptr<SyncTaskToken> token) {
   }
 
   dirty_tracker_ = make_scoped_ptr(new FileTracker);
-  if (metadata_database()->GetNormalPriorityDirtyTracker(
-          dirty_tracker_.get())) {
+  if (metadata_database()->GetDirtyTracker(dirty_tracker_.get())) {
     token->RecordLog(base::StringPrintf(
         "Start: tracker_id=%" PRId64, dirty_tracker_->tracker_id()));
-    metadata_database()->LowerTrackerPriority(dirty_tracker_->tracker_id());
+    metadata_database()->DemoteTracker(dirty_tracker_->tracker_id());
     ResolveRemoteChange(token.Pass());
     return;
   }
@@ -149,7 +137,11 @@ void RemoteToLocalSyncer::ResolveRemoteChange(scoped_ptr<SyncTaskToken> token) {
       NOTREACHED();
     }
     token->RecordLog("Missing remote metadata case.");
-    HandleMissingRemoteMetadata(token.Pass());
+
+    MoveToBackground(
+        token.Pass(),
+        base::Bind(&RemoteToLocalSyncer::HandleMissingRemoteMetadata,
+                   weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
@@ -186,7 +178,8 @@ void RemoteToLocalSyncer::ResolveRemoteChange(scoped_ptr<SyncTaskToken> token) {
         synced_details.title() != remote_details.title() ||
         remote_details.parent_folder_ids_size()) {
       token->RecordLog("Sync-root deletion.");
-      HandleSyncRootDeletion(token.Pass());
+      sync_root_deletion_ = true;
+      SyncCompleted(token.Pass(), SYNC_STATUS_OK);
       return;
     }
     token->RecordLog("Trivial sync-root change.");
@@ -197,10 +190,20 @@ void RemoteToLocalSyncer::ResolveRemoteChange(scoped_ptr<SyncTaskToken> token) {
   DCHECK_NE(dirty_tracker_->tracker_id(),
             metadata_database()->GetSyncRootTrackerID());
 
+  if (!BuildFileSystemURL(metadata_database(), *dirty_tracker_, &url_)) {
+    NOTREACHED();
+    SyncCompleted(token.Pass(), SYNC_STATUS_FAILED);
+    return;
+  }
+
+  DCHECK(url_.is_valid());
+
   if (remote_details.missing()) {
     if (!synced_details.missing()) {
       token->RecordLog("Remote file deletion.");
-      HandleDeletion(token.Pass());
+      MoveToBackground(token.Pass(),
+                       base::Bind(&RemoteToLocalSyncer::HandleDeletion,
+                                  weak_ptr_factory_.GetWeakPtr()));
       return;
     }
 
@@ -241,9 +244,10 @@ void RemoteToLocalSyncer::ResolveRemoteChange(scoped_ptr<SyncTaskToken> token) {
   if (synced_details.title() != remote_details.title()) {
     // Handle rename as deletion + addition.
     token->RecordLog("Detected file rename.");
-    Prepare(base::Bind(&RemoteToLocalSyncer::DidPrepareForDeletion,
-                       weak_ptr_factory_.GetWeakPtr(),
-                       base::Passed(&token)));
+
+    MoveToBackground(token.Pass(),
+                     base::Bind(&RemoteToLocalSyncer::HandleFileMove,
+                                weak_ptr_factory_.GetWeakPtr()));
     return;
   }
   DCHECK_EQ(synced_details.title(), remote_details.title());
@@ -261,28 +265,35 @@ void RemoteToLocalSyncer::ResolveRemoteChange(scoped_ptr<SyncTaskToken> token) {
   if (!HasFolderAsParent(remote_details, parent_tracker.file_id())) {
     // Handle reorganize as deletion + addition.
     token->RecordLog("Detected file reorganize.");
-    Prepare(base::Bind(&RemoteToLocalSyncer::DidPrepareForDeletion,
-                       weak_ptr_factory_.GetWeakPtr(),
-                       base::Passed(&token)));
+
+    MoveToBackground(token.Pass(),
+                     base::Bind(&RemoteToLocalSyncer::HandleFileMove,
+                                weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
   if (synced_details.file_kind() == FILE_KIND_FILE) {
     if (synced_details.md5() != remote_details.md5()) {
       token->RecordLog("Detected file content update.");
-      HandleContentUpdate(token.Pass());
+      MoveToBackground(token.Pass(),
+                       base::Bind(&RemoteToLocalSyncer::HandleContentUpdate,
+                                  weak_ptr_factory_.GetWeakPtr()));
       return;
     }
   } else {
     DCHECK_EQ(FILE_KIND_FOLDER, synced_details.file_kind());
     if (synced_details.missing()) {
       token->RecordLog("Detected folder update.");
-      HandleFolderUpdate(token.Pass());
+      MoveToBackground(token.Pass(),
+                       base::Bind(&RemoteToLocalSyncer::HandleFolderUpdate,
+                                  weak_ptr_factory_.GetWeakPtr()));
       return;
     }
     if (dirty_tracker_->needs_folder_listing()) {
       token->RecordLog("Needs listing folder.");
-      ListFolderContent(token.Pass());
+      MoveToBackground(token.Pass(),
+                       base::Bind(&RemoteToLocalSyncer::ListFolderContent,
+                                  weak_ptr_factory_.GetWeakPtr()));
       return;
     }
     SyncCompleted(token.Pass(), SYNC_STATUS_OK);
@@ -291,6 +302,89 @@ void RemoteToLocalSyncer::ResolveRemoteChange(scoped_ptr<SyncTaskToken> token) {
 
   token->RecordLog("Trivial file change.");
   SyncCompleted(token.Pass(), SYNC_STATUS_OK);
+}
+
+void RemoteToLocalSyncer::MoveToBackground(scoped_ptr<SyncTaskToken> token,
+                                           const Continuation& continuation) {
+  DCHECK(dirty_tracker_);
+
+  scoped_ptr<TaskBlocker> blocker(new TaskBlocker);
+  blocker->app_id = dirty_tracker_->app_id();
+  if (url_.is_valid())
+    blocker->paths.push_back(url_.path());
+  blocker->file_ids.push_back(dirty_tracker_->file_id());
+  blocker->tracker_ids.push_back(dirty_tracker_->tracker_id());
+
+  SyncTaskManager::UpdateTaskBlocker(
+      token.Pass(), blocker.Pass(),
+      base::Bind(&RemoteToLocalSyncer::ContinueAsBackgroundTask,
+                 weak_ptr_factory_.GetWeakPtr(), continuation));
+}
+
+void RemoteToLocalSyncer::ContinueAsBackgroundTask(
+    const Continuation& continuation,
+    scoped_ptr<SyncTaskToken> token) {
+  DCHECK(dirty_tracker_);
+
+  // The SyncTask runs as a background task beyond this point.
+  // Not that any task can run between MoveToBackground() and
+  // ContinueAsBackgroundTask(), so we need to make sure other tasks didn't
+  // affect to the current RemoteToLocalSyncer task.
+  //
+  // - For LocalToRemoteSyncer, it may update or delete any of FileTracker and
+  //   FileMetadata. When it updates FileMetadata or FileDetails in FileTracker,
+  //   it also updates |change_id|.  So, ensure the target FileTracker and
+  //   FileMetadata exist and their |change_id|s are not updated.
+  // - For ListChangesTask, it may update FileMetadata together with |change_id|
+  //   and may delete FileTracker.
+  // - For UninstallAppTask, it may delete FileMetadata and FileTracker.
+  //   Check if FileTracker still exists.
+  // - For other RemoteToLocalSyncer, it may delete the FileTracker of parent.
+  //   Note that since RemoteToLocalSyncer demotes the target FileTracker first,
+  //   any other RemoteToLocalSyncer does not run for current |dirty_tracker_|.
+  // - Others, SyncEngineInitializer and RegisterAppTask doesn't affect to
+
+  FileTracker latest_dirty_tracker;
+  if (!metadata_database()->FindTrackerByTrackerID(
+          dirty_tracker_->tracker_id(), &latest_dirty_tracker) ||
+      dirty_tracker_->active() != latest_dirty_tracker.active() ||
+      !latest_dirty_tracker.dirty()) {
+    SyncCompleted(token.Pass(), SYNC_STATUS_RETRY);
+    return;
+  }
+
+  int64 current_change_id = kint64min;
+  int64 latest_change_id = kint64min;
+  if (dirty_tracker_->has_synced_details())
+    current_change_id = dirty_tracker_->synced_details().change_id();
+  if (latest_dirty_tracker.has_synced_details())
+    latest_change_id = latest_dirty_tracker.synced_details().change_id();
+  if (current_change_id != latest_change_id) {
+    SyncCompleted(token.Pass(), SYNC_STATUS_RETRY);
+    return;
+  }
+
+  FileMetadata latest_file_metadata;
+  if (metadata_database()->FindFileByFileID(dirty_tracker_->file_id(),
+                                            &latest_file_metadata)) {
+    if (!remote_metadata_) {
+      SyncCompleted(token.Pass(), SYNC_STATUS_RETRY);
+      return;
+    }
+
+    int64 change_id = remote_metadata_->details().change_id();
+    int64 latest_change_id = latest_file_metadata.details().change_id();
+    if (change_id != latest_change_id) {
+      SyncCompleted(token.Pass(), SYNC_STATUS_RETRY);
+      return;
+    }
+  } else {
+    if (remote_metadata_) {
+      SyncCompleted(token.Pass(), SYNC_STATUS_RETRY);
+      return;
+    }
+  }
+  continuation.Run(token.Pass());
 }
 
 void RemoteToLocalSyncer::HandleMissingRemoteMetadata(
@@ -318,8 +412,9 @@ void RemoteToLocalSyncer::DidGetRemoteMetadata(
   }
 
   if (error == google_apis::HTTP_NOT_FOUND) {
-    metadata_database()->UpdateByDeletedRemoteFile(
-        dirty_tracker_->file_id(), SyncCompletedCallback(token.Pass()));
+    status = metadata_database()->UpdateByDeletedRemoteFile(
+        dirty_tracker_->file_id());
+    SyncCompleted(token.Pass(), status);
     return;
   }
 
@@ -329,16 +424,7 @@ void RemoteToLocalSyncer::DidGetRemoteMetadata(
     return;
   }
 
-  metadata_database()->UpdateByFileResource(
-      *entry,
-      base::Bind(&RemoteToLocalSyncer::DidUpdateDatabaseForRemoteMetadata,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&token)));
-}
-
-void RemoteToLocalSyncer::DidUpdateDatabaseForRemoteMetadata(
-    scoped_ptr<SyncTaskToken> token,
-    SyncStatusCode status) {
+  status = metadata_database()->UpdateByFileResource(*entry);
   if (status != SYNC_STATUS_OK) {
     SyncCompleted(token.Pass(), status);
     return;
@@ -455,12 +541,6 @@ void RemoteToLocalSyncer::DidPrepareForFolderUpdate(
   CreateFolder(token.Pass());
 }
 
-void RemoteToLocalSyncer::HandleSyncRootDeletion(
-    scoped_ptr<SyncTaskToken> token) {
-  sync_root_deletion_ = true;
-  SyncCompleted(token.Pass(), SYNC_STATUS_OK);
-}
-
 void RemoteToLocalSyncer::HandleDeletion(
     scoped_ptr<SyncTaskToken> token) {
   DCHECK(dirty_tracker_);
@@ -472,6 +552,21 @@ void RemoteToLocalSyncer::HandleDeletion(
   DCHECK(remote_metadata_);
   DCHECK(remote_metadata_->has_details());
   DCHECK(remote_metadata_->details().missing());
+
+  Prepare(base::Bind(&RemoteToLocalSyncer::DidPrepareForDeletion,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::Passed(&token)));
+}
+
+void RemoteToLocalSyncer::HandleFileMove(scoped_ptr<SyncTaskToken> token) {
+  DCHECK(dirty_tracker_);
+  DCHECK(dirty_tracker_->active());
+  DCHECK(!HasDisabledAppRoot(metadata_database(), *dirty_tracker_));
+  DCHECK(dirty_tracker_->has_synced_details());
+
+  DCHECK(remote_metadata_);
+  DCHECK(remote_metadata_->has_details());
+  DCHECK(!remote_metadata_->details().missing());
 
   Prepare(base::Bind(&RemoteToLocalSyncer::DidPrepareForDeletion,
                      weak_ptr_factory_.GetWeakPtr(),
@@ -587,9 +682,9 @@ void RemoteToLocalSyncer::DidListFolderContent(
     return;
   }
 
-  metadata_database()->PopulateFolderByChildList(
-      dirty_tracker_->file_id(), *children,
-      SyncCompletedCallback(token.Pass()));
+  status = metadata_database()->PopulateFolderByChildList(
+      dirty_tracker_->file_id(), *children);
+  SyncCompleted(token.Pass(), status);
 }
 
 void RemoteToLocalSyncer::SyncCompleted(scoped_ptr<SyncTaskToken> token,
@@ -630,12 +725,10 @@ void RemoteToLocalSyncer::SyncCompleted(scoped_ptr<SyncTaskToken> token,
       updated_details.set_missing(true);
     }
   }
-  metadata_database()->UpdateTracker(
-      dirty_tracker_->tracker_id(),
-      updated_details,
-      base::Bind(&RemoteToLocalSyncer::FinalizeSync,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&token)));
+
+  status = metadata_database()->UpdateTracker(
+      dirty_tracker_->tracker_id(), updated_details);
+  FinalizeSync(token.Pass(), status);
 }
 
 void RemoteToLocalSyncer::FinalizeSync(scoped_ptr<SyncTaskToken> token,
@@ -652,9 +745,6 @@ void RemoteToLocalSyncer::FinalizeSync(scoped_ptr<SyncTaskToken> token,
 }
 
 void RemoteToLocalSyncer::Prepare(const SyncStatusCallback& callback) {
-  bool should_success = BuildFileSystemURL(
-      metadata_database(), *dirty_tracker_, &url_);
-  DCHECK(should_success);
   DCHECK(url_.is_valid());
   remote_change_processor()->PrepareForProcessRemoteChange(
       url_,
@@ -690,7 +780,7 @@ void RemoteToLocalSyncer::DeleteLocalFile(scoped_ptr<SyncTaskToken> token) {
 void RemoteToLocalSyncer::DownloadFile(scoped_ptr<SyncTaskToken> token) {
   DCHECK(sync_context_->GetWorkerTaskRunner()->RunsTasksOnCurrentThread());
 
-  webkit_blob::ScopedFile file = CreateTemporaryFile(
+  storage::ScopedFile file = CreateTemporaryFile(
       make_scoped_refptr(sync_context_->GetWorkerTaskRunner()));
 
   base::FilePath path = file.path();
@@ -704,7 +794,7 @@ void RemoteToLocalSyncer::DownloadFile(scoped_ptr<SyncTaskToken> token) {
 }
 
 void RemoteToLocalSyncer::DidDownloadFile(scoped_ptr<SyncTaskToken> token,
-                                          webkit_blob::ScopedFile file,
+                                          storage::ScopedFile file,
                                           google_apis::GDataErrorCode error,
                                           const base::FilePath&) {
   DCHECK(sync_context_->GetWorkerTaskRunner()->RunsTasksOnCurrentThread());
@@ -737,7 +827,7 @@ void RemoteToLocalSyncer::DidDownloadFile(scoped_ptr<SyncTaskToken> token,
 }
 
 void RemoteToLocalSyncer::DidApplyDownload(scoped_ptr<SyncTaskToken> token,
-                                           webkit_blob::ScopedFile,
+                                           storage::ScopedFile,
                                            SyncStatusCode status) {
   SyncCompleted(token.Pass(), status);
 }

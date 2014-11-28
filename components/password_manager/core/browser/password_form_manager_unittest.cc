@@ -67,8 +67,6 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
     return false;
   }
 
-  virtual void PromptUserToSavePassword(
-      scoped_ptr<PasswordFormManager> form_to_save) OVERRIDE {}
   virtual PrefService* GetPrefs() OVERRIDE { return &prefs_; }
   virtual PasswordStore* GetPasswordStore() OVERRIDE { return password_store_; }
   virtual PasswordManagerDriver* GetDriver() OVERRIDE { return &driver_; }
@@ -155,7 +153,7 @@ class PasswordFormManagerTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    if (mock_store_)
+    if (mock_store_.get())
       mock_store_->Shutdown();
   }
 
@@ -624,13 +622,13 @@ TEST_F(PasswordFormManagerTest, TestValidForms) {
   credentials.username_element.clear();
   PasswordFormManager manager4(NULL, NULL, NULL, credentials, false);
   SimulateMatchingPhase(&manager4, RESULT_NO_MATCH);
-  EXPECT_FALSE(manager4.HasValidPasswordForm());
+  EXPECT_TRUE(manager4.HasValidPasswordForm());
 
   // Form without a username_element but with a new_password_element.
   new_credentials.username_element.clear();
   PasswordFormManager manager5(NULL, NULL, NULL, new_credentials, false);
   SimulateMatchingPhase(&manager5, RESULT_NO_MATCH);
-  EXPECT_FALSE(manager5.HasValidPasswordForm());
+  EXPECT_TRUE(manager5.HasValidPasswordForm());
 
   // Form without a password_element but with a username_element.
   credentials.username_element = saved_match()->username_element;
@@ -716,6 +714,27 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
   // We need add heap allocated objects to result.
   result.push_back(CreateSavedMatch(false));
   SimulateResponseFromPasswordStore(&manager_creds, result);
+  Mock::VerifyAndClearExpectations(client()->GetMockDriver());
+
+  // There are cases, such as when a form is explicitly for creating a new
+  // password, where we may ignore saved credentials. Make sure that we still
+  // allow generation in that case.
+  PasswordForm signup_form(*observed_form());
+  signup_form.new_password_element = base::ASCIIToUTF16("new_password_field");
+
+  PasswordFormManager manager_dropped_creds(&password_manager,
+                                            client(),
+                                            client()->GetDriver(),
+                                            signup_form,
+                                            false);
+  EXPECT_CALL(*(client()->GetMockDriver()), AllowPasswordGenerationForForm(_))
+      .Times(1);
+  EXPECT_CALL(*(client()->GetMockDriver()), IsOffTheRecord())
+      .WillRepeatedly(Return(false));
+  SimulateFetchMatchingLoginsFromPasswordStore(&manager_dropped_creds);
+  result.clear();
+  result.push_back(CreateSavedMatch(false));
+  SimulateResponseFromPasswordStore(&manager_dropped_creds, result);
   Mock::VerifyAndClearExpectations(client()->GetMockDriver());
 
   // Signing up on a previously visited site. Credentials are found in the
@@ -1219,6 +1238,56 @@ TEST_F(PasswordFormManagerTest, UploadFormData_AccountCreationPassword) {
       form_to_save,
       PasswordFormManager::IGNORE_OTHER_POSSIBLE_USERNAMES);
   form_manager.Save();
+}
+
+TEST_F(PasswordFormManagerTest, CorrectlySavePasswordWithoutUsernameFields) {
+  // Need a MessageLoop for callbacks.
+  base::MessageLoop message_loop;
+  scoped_refptr<TestPasswordStore> password_store = new TestPasswordStore;
+  CHECK(password_store->Init(syncer::SyncableService::StartSyncFlare(), ""));
+
+  TestPasswordManagerClient client_with_store(password_store.get());
+  TestPasswordManager password_manager(&client_with_store);
+  EXPECT_CALL(*client_with_store.GetMockDriver(),
+              AllowPasswordGenerationForForm(_)).Times(2);
+  EXPECT_CALL(*client_with_store.GetMockDriver(), IsOffTheRecord())
+      .WillRepeatedly(Return(false));
+
+  PasswordForm form(*observed_form());
+  form.username_element.clear();
+  form.password_value = ASCIIToUTF16("password");
+  form.preferred = true;
+
+  PasswordFormManager storing_manager(&password_manager,
+                                      &client_with_store,
+                                      client_with_store.GetDriver(),
+                                      *observed_form(),
+                                      false);
+  storing_manager.FetchMatchingLoginsFromPasswordStore(
+      PasswordStore::ALLOW_PROMPT);
+  RunAllPendingTasks();
+
+  storing_manager.ProvisionallySave(
+      form, PasswordFormManager::IGNORE_OTHER_POSSIBLE_USERNAMES);
+
+  EXPECT_TRUE(storing_manager.IsNewLogin());
+  storing_manager.Save();
+  RunAllPendingTasks();
+
+  PasswordFormManager retrieving_manager(&password_manager,
+                                         &client_with_store,
+                                         client_with_store.GetDriver(),
+                                         *observed_form(),
+                                         false);
+
+  retrieving_manager.FetchMatchingLoginsFromPasswordStore(
+      PasswordStore::ALLOW_PROMPT);
+  RunAllPendingTasks();
+
+  // Make sure that the preferred match is updated appropriately.
+  EXPECT_EQ(ASCIIToUTF16("password"),
+            retrieving_manager.preferred_match()->password_value);
+  password_store->Shutdown();
 }
 
 }  // namespace password_manager

@@ -241,7 +241,7 @@ void RenderSVGRoot::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paint
 
     // Make a copy of the PaintInfo because applyTransform will modify the damage rect.
     PaintInfo childPaintInfo(paintInfo);
-    childPaintInfo.context->save();
+    GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
 
     // Apply initial viewport clip
     if (shouldApplyViewportClip())
@@ -252,21 +252,14 @@ void RenderSVGRoot::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paint
     IntPoint adjustedPaintOffset = roundedIntPoint(paintOffset);
     childPaintInfo.applyTransform(AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()) * localToBorderBoxTransform());
 
-    // SVGRenderingContext must be destroyed before we restore the childPaintInfo.context, because a filter may have
-    // changed the context and it is only reverted when the SVGRenderingContext destructor finishes applying the filter.
-    {
-        SVGRenderingContext renderingContext;
-        bool continueRendering = true;
-        if (childPaintInfo.phase == PaintPhaseForeground) {
-            renderingContext.prepareToRenderSVGContent(this, childPaintInfo);
-            continueRendering = renderingContext.isRenderingPrepared();
-        }
-
-        if (continueRendering)
-            RenderBox::paint(childPaintInfo, LayoutPoint());
+    SVGRenderingContext renderingContext;
+    if (childPaintInfo.phase == PaintPhaseForeground) {
+        renderingContext.prepareToRenderSVGContent(this, childPaintInfo);
+        if (!renderingContext.isRenderingPrepared())
+            return;
     }
 
-    childPaintInfo.context->restore();
+    RenderBox::paint(childPaintInfo, LayoutPoint());
 }
 
 void RenderSVGRoot::willBeDestroyed()
@@ -376,7 +369,7 @@ LayoutRect RenderSVGRoot::clippedOverflowRectForPaintInvalidation(const RenderLa
 
     // Compute the paint invalidation rect in the parent coordinate space.
     LayoutRect rect = enclosingIntRect(paintInvalidationRect);
-    RenderReplaced::mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, ViewportConstraintDoesNotMatter, paintInvalidationState);
+    RenderReplaced::mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, paintInvalidationState);
     return rect;
 }
 
@@ -391,7 +384,7 @@ void RenderSVGRoot::computeFloatRectForPaintInvalidation(const RenderLayerModelO
         paintInvalidationRect.intersect(pixelSnappedBorderBoxRect());
 
     LayoutRect rect = enclosingIntRect(paintInvalidationRect);
-    RenderReplaced::mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, ViewportConstraintDoesNotMatter, paintInvalidationState);
+    RenderReplaced::mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, paintInvalidationState);
     paintInvalidationRect = rect;
 }
 

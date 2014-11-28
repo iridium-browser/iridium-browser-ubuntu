@@ -13,6 +13,8 @@ FrameBuffer::FrameBuffer()
     : frame_id_(0),
       max_packet_id_(0),
       num_packets_received_(0),
+      max_seen_packet_id_(0),
+      new_playout_delay_ms_(0),
       is_key_frame_(false),
       total_data_size_(0),
       last_referenced_frame_id_(0),
@@ -20,7 +22,7 @@ FrameBuffer::FrameBuffer()
 
 FrameBuffer::~FrameBuffer() {}
 
-void FrameBuffer::InsertPacket(const uint8* payload_data,
+bool FrameBuffer::InsertPacket(const uint8* payload_data,
                                size_t payload_size,
                                const RtpCastHeader& rtp_header) {
   // Is this the first packet in the frame?
@@ -28,6 +30,7 @@ void FrameBuffer::InsertPacket(const uint8* payload_data,
     frame_id_ = rtp_header.frame_id;
     max_packet_id_ = rtp_header.max_packet_id;
     is_key_frame_ = rtp_header.is_key_frame;
+    new_playout_delay_ms_ = rtp_header.new_playout_delay_ms;
     if (is_key_frame_)
       DCHECK_EQ(rtp_header.frame_id, rtp_header.reference_frame_id);
     last_referenced_frame_id_ = rtp_header.reference_frame_id;
@@ -35,11 +38,11 @@ void FrameBuffer::InsertPacket(const uint8* payload_data,
   }
   // Is this the correct frame?
   if (rtp_header.frame_id != frame_id_)
-    return;
+    return false;
 
   // Insert every packet only once.
   if (packets_.find(rtp_header.packet_id) != packets_.end()) {
-    return;
+    return false;
   }
 
   std::vector<uint8> data;
@@ -52,7 +55,9 @@ void FrameBuffer::InsertPacket(const uint8* payload_data,
       payload_data, payload_data + payload_size, retval.first->second.begin());
 
   ++num_packets_received_;
+  max_seen_packet_id_ = std::max(max_seen_packet_id_, rtp_header.packet_id);
   total_data_size_ += payload_size;
+  return true;
 }
 
 bool FrameBuffer::Complete() const {
@@ -73,6 +78,7 @@ bool FrameBuffer::AssembleEncodedFrame(EncodedFrame* frame) const {
   frame->frame_id = frame_id_;
   frame->referenced_frame_id = last_referenced_frame_id_;
   frame->rtp_timestamp = rtp_timestamp_;
+  frame->new_playout_delay_ms = new_playout_delay_ms_;
 
   // Build the data vector.
   frame->data.clear();
@@ -82,6 +88,29 @@ bool FrameBuffer::AssembleEncodedFrame(EncodedFrame* frame) const {
     frame->data.insert(frame->data.end(), it->second.begin(), it->second.end());
   return true;
 }
+
+void FrameBuffer::GetMissingPackets(bool newest_frame,
+                                    PacketIdSet* missing_packets) const {
+  // Missing packets capped by max_seen_packet_id_.
+  // (Iff it's the latest frame)
+  int maximum = newest_frame ? max_seen_packet_id_ : max_packet_id_;
+  int packet = 0;
+  for (PacketMap::const_iterator i = packets_.begin();
+       i != packets_.end() && packet <= maximum;
+       ++i) {
+    int end = std::min<int>(i->first, maximum + 1);
+    while (packet < end) {
+      missing_packets->insert(packet);
+      packet++;
+    }
+    packet++;
+  }
+  while (packet <= maximum) {
+    missing_packets->insert(packet);
+    packet++;
+  }
+}
+
 
 }  // namespace cast
 }  // namespace media

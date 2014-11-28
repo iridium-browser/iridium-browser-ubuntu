@@ -15,9 +15,9 @@
  */
 package com.google.ipc.invalidation.ticl;
 
+import com.google.ipc.invalidation.ticl.proto.Client.ExponentialBackoffState;
 import com.google.ipc.invalidation.util.ExponentialBackoffDelayGenerator;
 import com.google.ipc.invalidation.util.Marshallable;
-import com.google.protos.ipc.invalidation.Client.ExponentialBackoffState;
 
 import java.util.Random;
 
@@ -52,9 +52,6 @@ public class TiclExponentialBackoffDelayGenerator
 
   @Override
   public ExponentialBackoffState marshal() {
-    return ExponentialBackoffState.newBuilder()
-      .setCurrentMaxDelay(getCurrentMaxDelay())
-      .setInRetryMode(getInRetryMode())
-      .build();
+    return ExponentialBackoffState.create(getCurrentMaxDelay(), getInRetryMode());
   }
 }

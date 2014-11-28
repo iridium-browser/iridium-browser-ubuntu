@@ -6,15 +6,16 @@
 
 #if V8_TARGET_ARCH_ARM
 
+#include "src/code-factory.h"
 #include "src/code-stubs.h"
 #include "src/codegen.h"
 #include "src/compiler.h"
 #include "src/debug.h"
 #include "src/full-codegen.h"
+#include "src/ic/ic.h"
 #include "src/isolate-inl.h"
 #include "src/parser.h"
 #include "src/scopes.h"
-#include "src/stub-cache.h"
 
 #include "src/arm/code-stubs-arm.h"
 #include "src/arm/macro-assembler-arm.h"
@@ -346,7 +347,11 @@ void FullCodeGenerator::EmitProfilingCounterDecrement(int delta) {
 }
 
 
+#ifdef CAN_USE_ARMV7_INSTRUCTIONS
 static const int kProfileCounterResetSequenceLength = 5 * Assembler::kInstrSize;
+#else
+static const int kProfileCounterResetSequenceLength = 7 * Assembler::kInstrSize;
+#endif
 
 
 void FullCodeGenerator::EmitProfilingCounterReset() {
@@ -361,10 +366,13 @@ void FullCodeGenerator::EmitProfilingCounterReset() {
     reset_value = FLAG_interrupt_budget >> 4;
   }
   __ mov(r2, Operand(profiling_counter_));
-  // The mov instruction above can be either 1, 2 or 3 instructions depending
-  // upon whether it is an extended constant pool - insert nop to compensate.
-  DCHECK(masm_->InstructionsGeneratedSince(&start) <= 3);
-  while (masm_->InstructionsGeneratedSince(&start) != 3) {
+  // The mov instruction above can be either 1 to 3 (for ARMv7) or 1 to 5
+  // instructions (for ARMv6) depending upon whether it is an extended constant
+  // pool - insert nop to compensate.
+  int expected_instr_count =
+      (kProfileCounterResetSequenceLength / Assembler::kInstrSize) - 2;
+  DCHECK(masm_->InstructionsGeneratedSince(&start) <= expected_instr_count);
+  while (masm_->InstructionsGeneratedSince(&start) != expected_instr_count) {
     __ nop();
   }
   __ mov(r3, Operand(Smi::FromInt(reset_value)));
@@ -448,9 +456,11 @@ void FullCodeGenerator::EmitReturnSequence() {
       PredictableCodeSizeScope predictable(masm_, -1);
       __ RecordJSReturn();
       int no_frame_start = __ LeaveFrame(StackFrame::JAVA_SCRIPT);
-      __ add(sp, sp, Operand(sp_delta));
-      __ Jump(lr);
-      info_->AddNoFrameRange(no_frame_start, masm_->pc_offset());
+      { ConstantPoolUnavailableScope constant_pool_unavailable(masm_);
+        __ add(sp, sp, Operand(sp_delta));
+        __ Jump(lr);
+        info_->AddNoFrameRange(no_frame_start, masm_->pc_offset());
+      }
     }
 
 #ifdef DEBUG
@@ -1045,7 +1055,8 @@ void FullCodeGenerator::VisitSwitchStatement(SwitchStatement* stmt) {
 
     // Record position before stub call for type feedback.
     SetSourcePosition(clause->position());
-    Handle<Code> ic = CompareIC::GetUninitialized(isolate(), Token::EQ_STRICT);
+    Handle<Code> ic =
+        CodeFactory::CompareIC(isolate(), Token::EQ_STRICT).code();
     CallIC(ic, clause->CompareId());
     patch_site.EmitPatchInfo();
 
@@ -1182,7 +1193,7 @@ void FullCodeGenerator::VisitForInStatement(ForInStatement* stmt) {
   __ bind(&fixed_array);
 
   __ Move(r1, FeedbackVector());
-  __ mov(r2, Operand(TypeFeedbackInfo::MegamorphicSentinel(isolate())));
+  __ mov(r2, Operand(TypeFeedbackVector::MegamorphicSentinel(isolate())));
   __ str(r2, FieldMemOperand(r1, FixedArray::OffsetOfElementAt(slot)));
 
   __ mov(r1, Operand(Smi::FromInt(1)));  // Smi indicates slow check
@@ -1324,9 +1335,7 @@ void FullCodeGenerator::EmitNewClosure(Handle<SharedFunctionInfo> info,
       !pretenure &&
       scope()->is_function_scope() &&
       info->num_literals() == 0) {
-    FastNewClosureStub stub(isolate(),
-                            info->strict_mode(),
-                            info->is_generator());
+    FastNewClosureStub stub(isolate(), info->strict_mode(), info->kind());
     __ mov(r2, Operand(info));
     __ CallStub(&stub);
   } else {
@@ -1343,6 +1352,25 @@ void FullCodeGenerator::EmitNewClosure(Handle<SharedFunctionInfo> info,
 void FullCodeGenerator::VisitVariableProxy(VariableProxy* expr) {
   Comment cmnt(masm_, "[ VariableProxy");
   EmitVariableLoad(expr);
+}
+
+
+void FullCodeGenerator::EmitLoadHomeObject(SuperReference* expr) {
+  Comment cnmt(masm_, "[ SuperReference ");
+
+  __ ldr(LoadDescriptor::ReceiverRegister(),
+         MemOperand(fp, JavaScriptFrameConstants::kFunctionOffset));
+
+  Handle<Symbol> home_object_symbol(isolate()->heap()->home_object_symbol());
+  __ Move(LoadDescriptor::NameRegister(), home_object_symbol);
+
+  CallLoadIC(NOT_CONTEXTUAL, expr->HomeObjectFeedbackId());
+
+  __ cmp(r0, Operand(isolate()->factory()->undefined_value()));
+  Label done;
+  __ b(ne, &done);
+  __ CallRuntime(Runtime::kThrowNonMethodError, 0);
+  __ bind(&done);
 }
 
 
@@ -1394,10 +1422,10 @@ void FullCodeGenerator::EmitLoadGlobalCheckExtensions(VariableProxy* proxy,
     __ bind(&fast);
   }
 
-  __ ldr(LoadIC::ReceiverRegister(), GlobalObjectOperand());
-  __ mov(LoadIC::NameRegister(), Operand(proxy->var()->name()));
+  __ ldr(LoadDescriptor::ReceiverRegister(), GlobalObjectOperand());
+  __ mov(LoadDescriptor::NameRegister(), Operand(proxy->var()->name()));
   if (FLAG_vector_ics) {
-    __ mov(LoadIC::SlotRegister(),
+    __ mov(VectorLoadICDescriptor::SlotRegister(),
            Operand(Smi::FromInt(proxy->VariableFeedbackSlot())));
   }
 
@@ -1483,10 +1511,10 @@ void FullCodeGenerator::EmitVariableLoad(VariableProxy* proxy) {
   switch (var->location()) {
     case Variable::UNALLOCATED: {
       Comment cmnt(masm_, "[ Global variable");
-      __ ldr(LoadIC::ReceiverRegister(), GlobalObjectOperand());
-      __ mov(LoadIC::NameRegister(), Operand(var->name()));
+      __ ldr(LoadDescriptor::ReceiverRegister(), GlobalObjectOperand());
+      __ mov(LoadDescriptor::NameRegister(), Operand(var->name()));
       if (FLAG_vector_ics) {
-        __ mov(LoadIC::SlotRegister(),
+        __ mov(VectorLoadICDescriptor::SlotRegister(),
                Operand(Smi::FromInt(proxy->VariableFeedbackSlot())));
       }
       CallLoadIC(CONTEXTUAL);
@@ -1694,9 +1722,9 @@ void FullCodeGenerator::VisitObjectLiteral(ObjectLiteral* expr) {
         if (key->value()->IsInternalizedString()) {
           if (property->emit_store()) {
             VisitForAccumulatorValue(value);
-            DCHECK(StoreIC::ValueRegister().is(r0));
-            __ mov(StoreIC::NameRegister(), Operand(key->value()));
-            __ ldr(StoreIC::ReceiverRegister(), MemOperand(sp));
+            DCHECK(StoreDescriptor::ValueRegister().is(r0));
+            __ mov(StoreDescriptor::NameRegister(), Operand(key->value()));
+            __ ldr(StoreDescriptor::ReceiverRegister(), MemOperand(sp));
             CallStoreIC(key->LiteralFeedbackId());
             PrepareForBailoutForId(key->id(), NO_REGISTERS);
           } else {
@@ -1875,7 +1903,7 @@ void FullCodeGenerator::VisitAssignment(Assignment* expr) {
       if (expr->is_compound()) {
         // We need the receiver both on the stack and in the register.
         VisitForStackValue(property->obj());
-        __ ldr(LoadIC::ReceiverRegister(), MemOperand(sp, 0));
+        __ ldr(LoadDescriptor::ReceiverRegister(), MemOperand(sp, 0));
       } else {
         VisitForStackValue(property->obj());
       }
@@ -1884,8 +1912,9 @@ void FullCodeGenerator::VisitAssignment(Assignment* expr) {
       if (expr->is_compound()) {
         VisitForStackValue(property->obj());
         VisitForStackValue(property->key());
-        __ ldr(LoadIC::ReceiverRegister(), MemOperand(sp, 1 * kPointerSize));
-        __ ldr(LoadIC::NameRegister(), MemOperand(sp, 0));
+        __ ldr(LoadDescriptor::ReceiverRegister(),
+               MemOperand(sp, 1 * kPointerSize));
+        __ ldr(LoadDescriptor::NameRegister(), MemOperand(sp, 0));
       } else {
         VisitForStackValue(property->obj());
         VisitForStackValue(property->key());
@@ -1966,12 +1995,12 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
   VisitForStackValue(expr->expression());
 
   switch (expr->yield_kind()) {
-    case Yield::SUSPEND:
+    case Yield::kSuspend:
       // Pop value from top-of-stack slot; box result into result register.
       EmitCreateIteratorResult(false);
       __ push(result_register());
       // Fall through.
-    case Yield::INITIAL: {
+    case Yield::kInitial: {
       Label suspend, continuation, post_runtime, resume;
 
       __ jmp(&suspend);
@@ -2003,7 +2032,7 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
       break;
     }
 
-    case Yield::FINAL: {
+    case Yield::kFinal: {
       VisitForAccumulatorValue(expr->generator_object());
       __ mov(r1, Operand(Smi::FromInt(JSGeneratorObject::kGeneratorClosed)));
       __ str(r1, FieldMemOperand(result_register(),
@@ -2015,7 +2044,7 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
       break;
     }
 
-    case Yield::DELEGATING: {
+    case Yield::kDelegating: {
       VisitForStackValue(expr->generator_object());
 
       // Initial stack layout is as follows:
@@ -2024,8 +2053,8 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
 
       Label l_catch, l_try, l_suspend, l_continuation, l_resume;
       Label l_next, l_call, l_loop;
-      Register load_receiver = LoadIC::ReceiverRegister();
-      Register load_name = LoadIC::NameRegister();
+      Register load_receiver = LoadDescriptor::ReceiverRegister();
+      Register load_name = LoadDescriptor::NameRegister();
 
       // Initial send value is undefined.
       __ LoadRoot(r0, Heap::kUndefinedValueRootIndex);
@@ -2080,10 +2109,10 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
       __ ldr(load_receiver, MemOperand(sp, kPointerSize));
       __ ldr(load_name, MemOperand(sp, 2 * kPointerSize));
       if (FLAG_vector_ics) {
-        __ mov(LoadIC::SlotRegister(),
+        __ mov(VectorLoadICDescriptor::SlotRegister(),
                Operand(Smi::FromInt(expr->KeyedLoadFeedbackSlot())));
       }
-      Handle<Code> ic = isolate()->builtins()->KeyedLoadIC_Initialize();
+      Handle<Code> ic = CodeFactory::KeyedLoadIC(isolate()).code();
       CallIC(ic, TypeFeedbackId::None());
       __ mov(r1, r0);
       __ str(r1, MemOperand(sp, 2 * kPointerSize));
@@ -2100,7 +2129,7 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
       __ push(load_receiver);                               // save result
       __ LoadRoot(load_name, Heap::kdone_stringRootIndex);  // "done"
       if (FLAG_vector_ics) {
-        __ mov(LoadIC::SlotRegister(),
+        __ mov(VectorLoadICDescriptor::SlotRegister(),
                Operand(Smi::FromInt(expr->DoneFeedbackSlot())));
       }
       CallLoadIC(NOT_CONTEXTUAL);                           // r0=result.done
@@ -2113,7 +2142,7 @@ void FullCodeGenerator::VisitYield(Yield* expr) {
       __ pop(load_receiver);                                 // result
       __ LoadRoot(load_name, Heap::kvalue_stringRootIndex);  // "value"
       if (FLAG_vector_ics) {
-        __ mov(LoadIC::SlotRegister(),
+        __ mov(VectorLoadICDescriptor::SlotRegister(),
                Operand(Smi::FromInt(expr->ValueFeedbackSlot())));
       }
       CallLoadIC(NOT_CONTEXTUAL);                            // r0=result.value
@@ -2290,9 +2319,10 @@ void FullCodeGenerator::EmitCreateIteratorResult(bool done) {
 void FullCodeGenerator::EmitNamedPropertyLoad(Property* prop) {
   SetSourcePosition(prop->position());
   Literal* key = prop->key()->AsLiteral();
-  __ mov(LoadIC::NameRegister(), Operand(key->value()));
+
+  __ mov(LoadDescriptor::NameRegister(), Operand(key->value()));
   if (FLAG_vector_ics) {
-    __ mov(LoadIC::SlotRegister(),
+    __ mov(VectorLoadICDescriptor::SlotRegister(),
            Operand(Smi::FromInt(prop->PropertyFeedbackSlot())));
     CallLoadIC(NOT_CONTEXTUAL);
   } else {
@@ -2301,11 +2331,26 @@ void FullCodeGenerator::EmitNamedPropertyLoad(Property* prop) {
 }
 
 
+void FullCodeGenerator::EmitNamedSuperPropertyLoad(Property* prop) {
+  SetSourcePosition(prop->position());
+  Literal* key = prop->key()->AsLiteral();
+  DCHECK(!key->value()->IsSmi());
+  DCHECK(prop->IsSuperAccess());
+
+  SuperReference* super_ref = prop->obj()->AsSuperReference();
+  EmitLoadHomeObject(super_ref);
+  __ Push(r0);
+  VisitForStackValue(super_ref->this_var());
+  __ Push(key->value());
+  __ CallRuntime(Runtime::kLoadFromSuper, 3);
+}
+
+
 void FullCodeGenerator::EmitKeyedPropertyLoad(Property* prop) {
   SetSourcePosition(prop->position());
-  Handle<Code> ic = isolate()->builtins()->KeyedLoadIC_Initialize();
+  Handle<Code> ic = CodeFactory::KeyedLoadIC(isolate()).code();
   if (FLAG_vector_ics) {
-    __ mov(LoadIC::SlotRegister(),
+    __ mov(VectorLoadICDescriptor::SlotRegister(),
            Operand(Smi::FromInt(prop->PropertyFeedbackSlot())));
     CallIC(ic);
   } else {
@@ -2336,8 +2381,8 @@ void FullCodeGenerator::EmitInlineSmiBinaryOp(BinaryOperation* expr,
   patch_site.EmitJumpIfSmi(scratch1, &smi_case);
 
   __ bind(&stub_call);
-  BinaryOpICStub stub(isolate(), op, mode);
-  CallIC(stub.GetCode(), expr->BinaryOperationFeedbackId());
+  Handle<Code> code = CodeFactory::BinaryOpIC(isolate(), op, mode).code();
+  CallIC(code, expr->BinaryOperationFeedbackId());
   patch_site.EmitPatchInfo();
   __ jmp(&done);
 
@@ -2412,9 +2457,9 @@ void FullCodeGenerator::EmitBinaryOp(BinaryOperation* expr,
                                      Token::Value op,
                                      OverwriteMode mode) {
   __ pop(r1);
-  BinaryOpICStub stub(isolate(), op, mode);
+  Handle<Code> code = CodeFactory::BinaryOpIC(isolate(), op, mode).code();
   JumpPatchSite patch_site(masm_);    // unbound, signals no inlined smi code.
-  CallIC(stub.GetCode(), expr->BinaryOperationFeedbackId());
+  CallIC(code, expr->BinaryOperationFeedbackId());
   patch_site.EmitPatchInfo();
   context()->Plug(r0);
 }
@@ -2444,9 +2489,9 @@ void FullCodeGenerator::EmitAssignment(Expression* expr) {
     case NAMED_PROPERTY: {
       __ push(r0);  // Preserve value.
       VisitForAccumulatorValue(prop->obj());
-      __ Move(StoreIC::ReceiverRegister(), r0);
-      __ pop(StoreIC::ValueRegister());  // Restore value.
-      __ mov(StoreIC::NameRegister(),
+      __ Move(StoreDescriptor::ReceiverRegister(), r0);
+      __ pop(StoreDescriptor::ValueRegister());  // Restore value.
+      __ mov(StoreDescriptor::NameRegister(),
              Operand(prop->key()->AsLiteral()->value()));
       CallStoreIC();
       break;
@@ -2455,11 +2500,11 @@ void FullCodeGenerator::EmitAssignment(Expression* expr) {
       __ push(r0);  // Preserve value.
       VisitForStackValue(prop->obj());
       VisitForAccumulatorValue(prop->key());
-      __ Move(KeyedStoreIC::NameRegister(), r0);
-      __ Pop(KeyedStoreIC::ValueRegister(), KeyedStoreIC::ReceiverRegister());
-      Handle<Code> ic = strict_mode() == SLOPPY
-          ? isolate()->builtins()->KeyedStoreIC_Initialize()
-          : isolate()->builtins()->KeyedStoreIC_Initialize_Strict();
+      __ Move(StoreDescriptor::NameRegister(), r0);
+      __ Pop(StoreDescriptor::ValueRegister(),
+             StoreDescriptor::ReceiverRegister());
+      Handle<Code> ic =
+          CodeFactory::KeyedStoreIC(isolate(), strict_mode()).code();
       CallIC(ic);
       break;
     }
@@ -2484,8 +2529,8 @@ void FullCodeGenerator::EmitStoreToStackLocalOrContextSlot(
 void FullCodeGenerator::EmitVariableAssignment(Variable* var, Token::Value op) {
   if (var->IsUnallocated()) {
     // Global var, const, or let.
-    __ mov(StoreIC::NameRegister(), Operand(var->name()));
-    __ ldr(StoreIC::ReceiverRegister(), GlobalObjectOperand());
+    __ mov(StoreDescriptor::NameRegister(), Operand(var->name()));
+    __ ldr(StoreDescriptor::ReceiverRegister(), GlobalObjectOperand());
     CallStoreIC();
 
   } else if (op == Token::INIT_CONST_LEGACY) {
@@ -2557,8 +2602,9 @@ void FullCodeGenerator::EmitNamedPropertyAssignment(Assignment* expr) {
 
   // Record source code position before IC call.
   SetSourcePosition(expr->position());
-  __ mov(StoreIC::NameRegister(), Operand(prop->key()->AsLiteral()->value()));
-  __ pop(StoreIC::ReceiverRegister());
+  __ mov(StoreDescriptor::NameRegister(),
+         Operand(prop->key()->AsLiteral()->value()));
+  __ pop(StoreDescriptor::ReceiverRegister());
   CallStoreIC(expr->AssignmentFeedbackId());
 
   PrepareForBailoutForId(expr->AssignmentId(), TOS_REG);
@@ -2571,12 +2617,10 @@ void FullCodeGenerator::EmitKeyedPropertyAssignment(Assignment* expr) {
 
   // Record source code position before IC call.
   SetSourcePosition(expr->position());
-  __ Pop(KeyedStoreIC::ReceiverRegister(), KeyedStoreIC::NameRegister());
-  DCHECK(KeyedStoreIC::ValueRegister().is(r0));
+  __ Pop(StoreDescriptor::ReceiverRegister(), StoreDescriptor::NameRegister());
+  DCHECK(StoreDescriptor::ValueRegister().is(r0));
 
-  Handle<Code> ic = strict_mode() == SLOPPY
-      ? isolate()->builtins()->KeyedStoreIC_Initialize()
-      : isolate()->builtins()->KeyedStoreIC_Initialize_Strict();
+  Handle<Code> ic = CodeFactory::KeyedStoreIC(isolate(), strict_mode()).code();
   CallIC(ic, expr->AssignmentFeedbackId());
 
   PrepareForBailoutForId(expr->AssignmentId(), TOS_REG);
@@ -2589,16 +2633,20 @@ void FullCodeGenerator::VisitProperty(Property* expr) {
   Expression* key = expr->key();
 
   if (key->IsPropertyName()) {
-    VisitForAccumulatorValue(expr->obj());
-    __ Move(LoadIC::ReceiverRegister(), r0);
-    EmitNamedPropertyLoad(expr);
+    if (!expr->IsSuperAccess()) {
+      VisitForAccumulatorValue(expr->obj());
+      __ Move(LoadDescriptor::ReceiverRegister(), r0);
+      EmitNamedPropertyLoad(expr);
+    } else {
+      EmitNamedSuperPropertyLoad(expr);
+    }
     PrepareForBailoutForId(expr->LoadId(), TOS_REG);
     context()->Plug(r0);
   } else {
     VisitForStackValue(expr->obj());
     VisitForAccumulatorValue(expr->key());
-    __ Move(LoadIC::NameRegister(), r0);
-    __ pop(LoadIC::ReceiverRegister());
+    __ Move(LoadDescriptor::NameRegister(), r0);
+    __ pop(LoadDescriptor::ReceiverRegister());
     EmitKeyedPropertyLoad(expr);
     context()->Plug(r0);
   }
@@ -2619,12 +2667,11 @@ void FullCodeGenerator::CallIC(Handle<Code> code,
 void FullCodeGenerator::EmitCallWithLoadIC(Call* expr) {
   Expression* callee = expr->expression();
 
-  CallIC::CallType call_type = callee->IsVariableProxy()
-      ? CallIC::FUNCTION
-      : CallIC::METHOD;
+  CallICState::CallType call_type =
+      callee->IsVariableProxy() ? CallICState::FUNCTION : CallICState::METHOD;
 
   // Get the target function.
-  if (call_type == CallIC::FUNCTION) {
+  if (call_type == CallICState::FUNCTION) {
     { StackValueContext context(this);
       EmitVariableLoad(callee->AsVariableProxy());
       PrepareForBailout(callee, NO_REGISTERS);
@@ -2635,7 +2682,8 @@ void FullCodeGenerator::EmitCallWithLoadIC(Call* expr) {
   } else {
     // Load the function from the receiver.
     DCHECK(callee->IsProperty());
-    __ ldr(LoadIC::ReceiverRegister(), MemOperand(sp, 0));
+    DCHECK(!callee->AsProperty()->IsSuperAccess());
+    __ ldr(LoadDescriptor::ReceiverRegister(), MemOperand(sp, 0));
     EmitNamedPropertyLoad(callee->AsProperty());
     PrepareForBailoutForId(callee->AsProperty()->LoadId(), TOS_REG);
     // Push the target function under the receiver.
@@ -2645,6 +2693,45 @@ void FullCodeGenerator::EmitCallWithLoadIC(Call* expr) {
   }
 
   EmitCall(expr, call_type);
+}
+
+
+void FullCodeGenerator::EmitSuperCallWithLoadIC(Call* expr) {
+  Expression* callee = expr->expression();
+  DCHECK(callee->IsProperty());
+  Property* prop = callee->AsProperty();
+  DCHECK(prop->IsSuperAccess());
+
+  SetSourcePosition(prop->position());
+  Literal* key = prop->key()->AsLiteral();
+  DCHECK(!key->value()->IsSmi());
+  // Load the function from the receiver.
+  const Register scratch = r1;
+  SuperReference* super_ref = prop->obj()->AsSuperReference();
+  EmitLoadHomeObject(super_ref);
+  __ Push(r0);
+  VisitForAccumulatorValue(super_ref->this_var());
+  __ Push(r0);
+  __ ldr(scratch, MemOperand(sp, kPointerSize));
+  __ Push(scratch);
+  __ Push(r0);
+  __ Push(key->value());
+
+  // Stack here:
+  //  - home_object
+  //  - this (receiver)
+  //  - home_object <-- LoadFromSuper will pop here and below.
+  //  - this (receiver)
+  //  - key
+  __ CallRuntime(Runtime::kLoadFromSuper, 3);
+
+  // Replace home_object with target function.
+  __ str(r0, MemOperand(sp, kPointerSize));
+
+  // Stack here:
+  // - target function
+  // - this (receiver)
+  EmitCall(expr, CallICState::METHOD);
 }
 
 
@@ -2658,8 +2745,8 @@ void FullCodeGenerator::EmitKeyedCallWithLoadIC(Call* expr,
 
   // Load the function from the receiver.
   DCHECK(callee->IsProperty());
-  __ ldr(LoadIC::ReceiverRegister(), MemOperand(sp, 0));
-  __ Move(LoadIC::NameRegister(), r0);
+  __ ldr(LoadDescriptor::ReceiverRegister(), MemOperand(sp, 0));
+  __ Move(LoadDescriptor::NameRegister(), r0);
   EmitKeyedPropertyLoad(callee->AsProperty());
   PrepareForBailoutForId(callee->AsProperty()->LoadId(), TOS_REG);
 
@@ -2668,11 +2755,11 @@ void FullCodeGenerator::EmitKeyedCallWithLoadIC(Call* expr,
   __ push(ip);
   __ str(r0, MemOperand(sp, kPointerSize));
 
-  EmitCall(expr, CallIC::METHOD);
+  EmitCall(expr, CallICState::METHOD);
 }
 
 
-void FullCodeGenerator::EmitCall(Call* expr, CallIC::CallType call_type) {
+void FullCodeGenerator::EmitCall(Call* expr, CallICState::CallType call_type) {
   // Load the arguments.
   ZoneList<Expression*>* args = expr->arguments();
   int arg_count = args->length();
@@ -2700,12 +2787,15 @@ void FullCodeGenerator::EmitCall(Call* expr, CallIC::CallType call_type) {
 
 
 void FullCodeGenerator::EmitResolvePossiblyDirectEval(int arg_count) {
-  // r4: copy of the first argument or undefined if it doesn't exist.
+  // r5: copy of the first argument or undefined if it doesn't exist.
   if (arg_count > 0) {
-    __ ldr(r4, MemOperand(sp, arg_count * kPointerSize));
+    __ ldr(r5, MemOperand(sp, arg_count * kPointerSize));
   } else {
-    __ LoadRoot(r4, Heap::kUndefinedValueRootIndex);
+    __ LoadRoot(r5, Heap::kUndefinedValueRootIndex);
   }
+
+  // r4: the receiver of the enclosing function.
+  __ ldr(r4, MemOperand(fp, JavaScriptFrameConstants::kFunctionOffset));
 
   // r3: the receiver of the enclosing function.
   int receiver_offset = 2 + info_->scope()->num_parameters();
@@ -2718,8 +2808,9 @@ void FullCodeGenerator::EmitResolvePossiblyDirectEval(int arg_count) {
   __ mov(r1, Operand(Smi::FromInt(scope()->start_position())));
 
   // Do the runtime call.
+  __ Push(r5);
   __ Push(r4, r3, r2, r1);
-  __ CallRuntime(Runtime::kResolvePossiblyDirectEval, 5);
+  __ CallRuntime(Runtime::kResolvePossiblyDirectEval, 6);
 }
 
 
@@ -2817,13 +2908,20 @@ void FullCodeGenerator::VisitCall(Call* expr) {
     EmitCall(expr);
   } else if (call_type == Call::PROPERTY_CALL) {
     Property* property = callee->AsProperty();
-    { PreservePositionScope scope(masm()->positions_recorder());
-      VisitForStackValue(property->obj());
-    }
-    if (property->key()->IsPropertyName()) {
-      EmitCallWithLoadIC(expr);
+    bool is_named_call = property->key()->IsPropertyName();
+    // super.x() is handled in EmitCallWithLoadIC.
+    if (property->IsSuperAccess() && is_named_call) {
+      EmitSuperCallWithLoadIC(expr);
     } else {
-      EmitKeyedCallWithLoadIC(expr, property->key());
+      {
+        PreservePositionScope scope(masm()->positions_recorder());
+        VisitForStackValue(property->obj());
+      }
+      if (is_named_call) {
+        EmitCallWithLoadIC(expr);
+      } else {
+        EmitKeyedCallWithLoadIC(expr, property->key());
+      }
     }
   } else {
     DCHECK(call_type == Call::OTHER_CALL);
@@ -3318,7 +3416,7 @@ void FullCodeGenerator::EmitClassOf(CallRuntime* expr) {
 
   // Functions have class 'Function'.
   __ bind(&function);
-  __ LoadRoot(r0, Heap::kfunction_class_stringRootIndex);
+  __ LoadRoot(r0, Heap::kFunction_stringRootIndex);
   __ jmp(&done);
 
   // Objects with a non-function constructor have class 'Object'.
@@ -3436,9 +3534,9 @@ void FullCodeGenerator::EmitOneByteSeqStringSetChar(CallRuntime* expr) {
   Register index = r1;
   Register value = r2;
 
-  VisitForStackValue(args->at(1));  // index
-  VisitForStackValue(args->at(2));  // value
-  VisitForAccumulatorValue(args->at(0));  // string
+  VisitForStackValue(args->at(0));        // index
+  VisitForStackValue(args->at(1));        // value
+  VisitForAccumulatorValue(args->at(2));  // string
   __ Pop(index, value);
 
   if (FLAG_debug_code) {
@@ -3469,9 +3567,9 @@ void FullCodeGenerator::EmitTwoByteSeqStringSetChar(CallRuntime* expr) {
   Register index = r1;
   Register value = r2;
 
-  VisitForStackValue(args->at(1));  // index
-  VisitForStackValue(args->at(2));  // value
-  VisitForAccumulatorValue(args->at(0));  // string
+  VisitForStackValue(args->at(0));        // index
+  VisitForStackValue(args->at(1));        // value
+  VisitForAccumulatorValue(args->at(2));  // string
   __ Pop(index, value);
 
   if (FLAG_debug_code) {
@@ -3812,7 +3910,7 @@ void FullCodeGenerator::EmitGetCachedArrayIndex(CallRuntime* expr) {
 }
 
 
-void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
+void FullCodeGenerator::EmitFastOneByteArrayJoin(CallRuntime* expr) {
   Label bailout, done, one_char_separator, long_separator, non_trivial_array,
       not_size_one_array, loop, empty_separator_loop, one_char_separator_loop,
       one_char_separator_loop_entry, long_separator_loop;
@@ -3859,7 +3957,7 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   __ ldr(elements, FieldMemOperand(array, JSArray::kElementsOffset));
   array = no_reg;  // End of array's live range.
 
-  // Check that all array elements are sequential ASCII strings, and
+  // Check that all array elements are sequential one-byte strings, and
   // accumulate the sum of their lengths, as a smi-encoded value.
   __ mov(string_length, Operand::Zero());
   __ add(element,
@@ -3875,14 +3973,14 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   //   elements_end: Array end.
   if (generate_debug_code_) {
     __ cmp(array_length, Operand::Zero());
-    __ Assert(gt, kNoEmptyArraysHereInEmitFastAsciiArrayJoin);
+    __ Assert(gt, kNoEmptyArraysHereInEmitFastOneByteArrayJoin);
   }
   __ bind(&loop);
   __ ldr(string, MemOperand(element, kPointerSize, PostIndex));
   __ JumpIfSmi(string, &bailout);
   __ ldr(scratch, FieldMemOperand(string, HeapObject::kMapOffset));
   __ ldrb(scratch, FieldMemOperand(scratch, Map::kInstanceTypeOffset));
-  __ JumpIfInstanceTypeIsNotSequentialAscii(scratch, scratch, &bailout);
+  __ JumpIfInstanceTypeIsNotSequentialOneByte(scratch, scratch, &bailout);
   __ ldr(scratch, FieldMemOperand(string, SeqOneByteString::kLengthOffset));
   __ add(string_length, string_length, Operand(scratch), SetCC);
   __ b(vs, &bailout);
@@ -3903,11 +4001,11 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   //   string_length: Sum of string lengths (smi).
   //   elements: FixedArray of strings.
 
-  // Check that the separator is a flat ASCII string.
+  // Check that the separator is a flat one-byte string.
   __ JumpIfSmi(separator, &bailout);
   __ ldr(scratch, FieldMemOperand(separator, HeapObject::kMapOffset));
   __ ldrb(scratch, FieldMemOperand(scratch, Map::kInstanceTypeOffset));
-  __ JumpIfInstanceTypeIsNotSequentialAscii(scratch, scratch, &bailout);
+  __ JumpIfInstanceTypeIsNotSequentialOneByte(scratch, scratch, &bailout);
 
   // Add (separator length times array_length) - separator length to the
   // string_length to get the length of the result string. array_length is not
@@ -3936,12 +4034,10 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   //   separator: Separator string
   //   string_length: Length of result string (not smi)
   //   array_length: Length of the array.
-  __ AllocateAsciiString(result,
-                         string_length,
-                         scratch,
-                         string,  // used as scratch
-                         elements_end,  // used as scratch
-                         &bailout);
+  __ AllocateOneByteString(result, string_length, scratch,
+                           string,        // used as scratch
+                           elements_end,  // used as scratch
+                           &bailout);
   // Prepare for looping. Set up elements_end to end of the array. Set
   // result_pos to the position of the result where to write the first
   // character.
@@ -3980,7 +4076,7 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
 
   // One-character separator case
   __ bind(&one_char_separator);
-  // Replace separator with its ASCII character value.
+  // Replace separator with its one-byte character value.
   __ ldrb(separator, FieldMemOperand(separator, SeqOneByteString::kHeaderSize));
   // Jump into the loop after the code that copies the separator, so the first
   // element is not preceded by a separator
@@ -3991,7 +4087,7 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   //   result_pos: the position to which we are currently copying characters.
   //   element: Current array element.
   //   elements_end: Array end.
-  //   separator: Single separator ASCII char (in lower byte).
+  //   separator: Single separator one-byte char (in lower byte).
 
   // Copy the separator character to the result.
   __ strb(separator, MemOperand(result_pos, 1, PostIndex));
@@ -4072,15 +4168,15 @@ void FullCodeGenerator::VisitCallRuntime(CallRuntime* expr) {
 
   if (expr->is_jsruntime()) {
     // Push the builtins object as the receiver.
-    Register receiver = LoadIC::ReceiverRegister();
+    Register receiver = LoadDescriptor::ReceiverRegister();
     __ ldr(receiver, GlobalObjectOperand());
     __ ldr(receiver, FieldMemOperand(receiver, GlobalObject::kBuiltinsOffset));
     __ push(receiver);
 
     // Load the function from the receiver.
-    __ mov(LoadIC::NameRegister(), Operand(expr->name()));
+    __ mov(LoadDescriptor::NameRegister(), Operand(expr->name()));
     if (FLAG_vector_ics) {
-      __ mov(LoadIC::SlotRegister(),
+      __ mov(VectorLoadICDescriptor::SlotRegister(),
              Operand(Smi::FromInt(expr->CallRuntimeFeedbackSlot())));
       CallLoadIC(NOT_CONTEXTUAL);
     } else {
@@ -4263,13 +4359,14 @@ void FullCodeGenerator::VisitCountOperation(CountOperation* expr) {
     if (assign_type == NAMED_PROPERTY) {
       // Put the object both on the stack and in the register.
       VisitForStackValue(prop->obj());
-      __ ldr(LoadIC::ReceiverRegister(), MemOperand(sp, 0));
+      __ ldr(LoadDescriptor::ReceiverRegister(), MemOperand(sp, 0));
       EmitNamedPropertyLoad(prop);
     } else {
       VisitForStackValue(prop->obj());
       VisitForStackValue(prop->key());
-      __ ldr(LoadIC::ReceiverRegister(), MemOperand(sp, 1 * kPointerSize));
-      __ ldr(LoadIC::NameRegister(), MemOperand(sp, 0));
+      __ ldr(LoadDescriptor::ReceiverRegister(),
+             MemOperand(sp, 1 * kPointerSize));
+      __ ldr(LoadDescriptor::NameRegister(), MemOperand(sp, 0));
       EmitKeyedPropertyLoad(prop);
     }
   }
@@ -4349,8 +4446,9 @@ void FullCodeGenerator::VisitCountOperation(CountOperation* expr) {
   // Record position before stub call.
   SetSourcePosition(expr->position());
 
-  BinaryOpICStub stub(isolate(), Token::ADD, NO_OVERWRITE);
-  CallIC(stub.GetCode(), expr->CountBinOpFeedbackId());
+  Handle<Code> code =
+      CodeFactory::BinaryOpIC(isolate(), Token::ADD, NO_OVERWRITE).code();
+  CallIC(code, expr->CountBinOpFeedbackId());
   patch_site.EmitPatchInfo();
   __ bind(&done);
 
@@ -4377,9 +4475,9 @@ void FullCodeGenerator::VisitCountOperation(CountOperation* expr) {
       }
       break;
     case NAMED_PROPERTY: {
-      __ mov(StoreIC::NameRegister(),
+      __ mov(StoreDescriptor::NameRegister(),
              Operand(prop->key()->AsLiteral()->value()));
-      __ pop(StoreIC::ReceiverRegister());
+      __ pop(StoreDescriptor::ReceiverRegister());
       CallStoreIC(expr->CountStoreFeedbackId());
       PrepareForBailoutForId(expr->AssignmentId(), TOS_REG);
       if (expr->is_postfix()) {
@@ -4392,10 +4490,10 @@ void FullCodeGenerator::VisitCountOperation(CountOperation* expr) {
       break;
     }
     case KEYED_PROPERTY: {
-      __ Pop(KeyedStoreIC::ReceiverRegister(), KeyedStoreIC::NameRegister());
-      Handle<Code> ic = strict_mode() == SLOPPY
-          ? isolate()->builtins()->KeyedStoreIC_Initialize()
-          : isolate()->builtins()->KeyedStoreIC_Initialize_Strict();
+      __ Pop(StoreDescriptor::ReceiverRegister(),
+             StoreDescriptor::NameRegister());
+      Handle<Code> ic =
+          CodeFactory::KeyedStoreIC(isolate(), strict_mode()).code();
       CallIC(ic, expr->CountStoreFeedbackId());
       PrepareForBailoutForId(expr->AssignmentId(), TOS_REG);
       if (expr->is_postfix()) {
@@ -4417,10 +4515,10 @@ void FullCodeGenerator::VisitForTypeofValue(Expression* expr) {
   VariableProxy* proxy = expr->AsVariableProxy();
   if (proxy != NULL && proxy->var()->IsUnallocated()) {
     Comment cmnt(masm_, "[ Global variable");
-    __ ldr(LoadIC::ReceiverRegister(), GlobalObjectOperand());
-    __ mov(LoadIC::NameRegister(), Operand(proxy->name()));
+    __ ldr(LoadDescriptor::ReceiverRegister(), GlobalObjectOperand());
+    __ mov(LoadDescriptor::NameRegister(), Operand(proxy->name()));
     if (FLAG_vector_ics) {
-      __ mov(LoadIC::SlotRegister(),
+      __ mov(VectorLoadICDescriptor::SlotRegister(),
              Operand(Smi::FromInt(proxy->VariableFeedbackSlot())));
     }
     // Use a regular load, not a contextual load, to avoid a reference
@@ -4585,7 +4683,7 @@ void FullCodeGenerator::VisitCompareOperation(CompareOperation* expr) {
 
       // Record position and call the compare IC.
       SetSourcePosition(expr->position());
-      Handle<Code> ic = CompareIC::GetUninitialized(isolate(), op);
+      Handle<Code> ic = CodeFactory::CompareIC(isolate(), op).code();
       CallIC(ic, expr->CompareOperationFeedbackId());
       patch_site.EmitPatchInfo();
       PrepareForBailoutBeforeSplit(expr, true, if_true, if_false);
@@ -4785,14 +4883,35 @@ static Address GetInterruptImmediateLoadAddress(Address pc) {
     DCHECK(Assembler::IsLdrPcImmediateOffset(Memory::int32_at(load_address)));
   } else if (Assembler::IsLdrPpRegOffset(Memory::int32_at(load_address))) {
     // This is an extended constant pool lookup.
-    load_address -= 2 * Assembler::kInstrSize;
-    DCHECK(Assembler::IsMovW(Memory::int32_at(load_address)));
-    DCHECK(Assembler::IsMovT(
-        Memory::int32_at(load_address + Assembler::kInstrSize)));
-  } else if (Assembler::IsMovT(Memory::int32_at(load_address))) {
-    // This is a movw_movt immediate load.
+    if (CpuFeatures::IsSupported(ARMv7)) {
+      load_address -= 2 * Assembler::kInstrSize;
+      DCHECK(Assembler::IsMovW(Memory::int32_at(load_address)));
+      DCHECK(Assembler::IsMovT(
+          Memory::int32_at(load_address + Assembler::kInstrSize)));
+    } else {
+      load_address -= 4 * Assembler::kInstrSize;
+      DCHECK(Assembler::IsMovImmed(Memory::int32_at(load_address)));
+      DCHECK(Assembler::IsOrrImmed(
+          Memory::int32_at(load_address + Assembler::kInstrSize)));
+      DCHECK(Assembler::IsOrrImmed(
+          Memory::int32_at(load_address + 2 * Assembler::kInstrSize)));
+      DCHECK(Assembler::IsOrrImmed(
+          Memory::int32_at(load_address + 3 * Assembler::kInstrSize)));
+    }
+  } else if (CpuFeatures::IsSupported(ARMv7) &&
+             Assembler::IsMovT(Memory::int32_at(load_address))) {
+    // This is a movw / movt immediate load.
     load_address -= Assembler::kInstrSize;
     DCHECK(Assembler::IsMovW(Memory::int32_at(load_address)));
+  } else if (!CpuFeatures::IsSupported(ARMv7) &&
+             Assembler::IsOrrImmed(Memory::int32_at(load_address))) {
+    // This is a mov / orr immediate load.
+    load_address -= 3 * Assembler::kInstrSize;
+    DCHECK(Assembler::IsMovImmed(Memory::int32_at(load_address)));
+    DCHECK(Assembler::IsOrrImmed(
+        Memory::int32_at(load_address + Assembler::kInstrSize)));
+    DCHECK(Assembler::IsOrrImmed(
+        Memory::int32_at(load_address + 2 * Assembler::kInstrSize)));
   } else {
     // This is a small constant pool lookup.
     DCHECK(Assembler::IsLdrPpImmediateOffset(Memory::int32_at(load_address)));
@@ -4813,11 +4932,17 @@ void BackEdgeTable::PatchAt(Code* unoptimized_code,
     {
       //  <decrement profiling counter>
       //   bpl ok
-      //   ; load interrupt stub address into ip - either of:
+      //   ; load interrupt stub address into ip - either of (for ARMv7):
       //   ; <small cp load>      |  <extended cp load> |  <immediate load>
       //   ldr ip, [pc/pp, #imm]  |   movw ip, #imm     |   movw ip, #imm
-      //                          |   movt ip, #imm>    |   movw ip, #imm
+      //                          |   movt ip, #imm     |   movw ip, #imm
       //                          |   ldr  ip, [pp, ip]
+      //   ; or (for ARMv6):
+      //   ; <small cp load>      |  <extended cp load> |  <immediate load>
+      //   ldr ip, [pc/pp, #imm]  |   mov ip, #imm      |   mov ip, #imm
+      //                          |   orr ip, ip, #imm> |   orr ip, ip, #imm
+      //                          |   orr ip, ip, #imm> |   orr ip, ip, #imm
+      //                          |   orr ip, ip, #imm> |   orr ip, ip, #imm
       //   blx ip
       //  <reset profiling counter>
       //  ok-label
@@ -4834,11 +4959,17 @@ void BackEdgeTable::PatchAt(Code* unoptimized_code,
     case OSR_AFTER_STACK_CHECK:
       //  <decrement profiling counter>
       //   mov r0, r0 (NOP)
-      //   ; load on-stack replacement address into ip - either of:
+      //   ; load on-stack replacement address into ip - either of (for ARMv7):
       //   ; <small cp load>      |  <extended cp load> |  <immediate load>
       //   ldr ip, [pc/pp, #imm]  |   movw ip, #imm     |   movw ip, #imm
       //                          |   movt ip, #imm>    |   movw ip, #imm
       //                          |   ldr  ip, [pp, ip]
+      //   ; or (for ARMv6):
+      //   ; <small cp load>      |  <extended cp load> |  <immediate load>
+      //   ldr ip, [pc/pp, #imm]  |   mov ip, #imm      |   mov ip, #imm
+      //                          |   orr ip, ip, #imm> |   orr ip, ip, #imm
+      //                          |   orr ip, ip, #imm> |   orr ip, ip, #imm
+      //                          |   orr ip, ip, #imm> |   orr ip, ip, #imm
       //   blx ip
       //  <reset profiling counter>
       //  ok-label

@@ -45,7 +45,7 @@ public:
     virtual void removeAllClientsFromCache(bool markForInvalidation = true) OVERRIDE;
     virtual void removeClientFromCache(RenderObject*, bool markForInvalidation = true) OVERRIDE;
     virtual bool applyResource(RenderObject*, RenderStyle*, GraphicsContext*&, unsigned short resourceMode) OVERRIDE;
-    virtual void postApplyResource(RenderObject*, GraphicsContext*&, unsigned short, const Path*, const RenderSVGShape*) OVERRIDE;
+    virtual void postApplyResource(RenderObject*, GraphicsContext*&) OVERRIDE;
     FloatRect resourceBoundingBox(const RenderObject*);
 
     SVGUnitTypes::SVGUnitType maskUnits() const { return toSVGMaskElement(element())->maskUnits()->currentValue()->enumValue(); }
@@ -57,7 +57,7 @@ public:
 private:
     void calculateMaskContentPaintInvalidationRect();
     void drawMaskForRenderer(GraphicsContext*, const FloatRect& targetBoundingBox);
-    PassRefPtr<DisplayList> asDisplayList(GraphicsContext*, const AffineTransform&);
+    void createDisplayList(GraphicsContext*, const AffineTransform&);
 
     RefPtr<DisplayList> m_maskContentDisplayList;
     FloatRect m_maskContentBoundaries;

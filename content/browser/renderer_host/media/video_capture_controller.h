@@ -96,7 +96,15 @@ class CONTENT_EXPORT VideoCaptureController {
   int RemoveClient(const VideoCaptureControllerID& id,
                    VideoCaptureControllerEventHandler* event_handler);
 
-  int GetClientCount();
+  // Pause or resume the video capture for specified client.
+  void PauseOrResumeClient(const VideoCaptureControllerID& id,
+                           VideoCaptureControllerEventHandler* event_handler,
+                           bool pause);
+
+  int GetClientCount() const;
+
+  // Return the number of clients that aren't paused.
+  int GetActiveClientCount() const;
 
   // API called directly by VideoCaptureManager in case the device is
   // prematurely closed.
@@ -150,6 +158,9 @@ class CONTENT_EXPORT VideoCaptureController {
   // Takes on only the states 'STARTED' and 'ERROR'. 'ERROR' is an absorbing
   // state which stops the flow of data to clients.
   VideoCaptureState state_;
+
+  // True if the controller has received a video frame from the device.
+  bool frame_received_;
 
   media::VideoCaptureFormat video_capture_format_;
 

@@ -7,7 +7,6 @@
 #import <Cocoa/Cocoa.h>
 #include <sys/sysctl.h>
 
-#include "apps/app_shim/app_shim_host_manager_mac.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/mac/bundle_locations.h"
@@ -16,6 +15,7 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #import "chrome/browser/app_controller_mac.h"
+#include "chrome/browser/apps/app_shim/app_shim_host_manager_mac.h"
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/mac/install_from_dmg.h"
@@ -24,7 +24,7 @@
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/breakpad/app/breakpad_mac.h"
+#include "components/crash/app/breakpad_mac.h"
 #include "components/metrics/metrics_service.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/result_codes.h"
@@ -137,9 +137,9 @@ CatSixtyFour CatSixtyFourValue() {
 void RecordCatSixtyFour() {
   CatSixtyFour cat_sixty_four = CatSixtyFourValue();
 
-  // Set this higher than the highest value in the CatSixtyFour enum to
-  // provide some headroom and then leave it alone. See HISTOGRAM_ENUMERATION
-  // in base/metrics/histogram.h.
+  // Set this higher than the highest value in the CatSixtyFour enum to provide
+  // some headroom and then leave it alone. See UMA_HISTOGRAM_ENUMERATION in
+  // base/metrics/histogram.h.
   const int kMaxCatsAndSixtyFours = 32;
   COMPILE_ASSERT(kMaxCatsAndSixtyFours >= CAT_SIXTY_FOUR_MAX,
                  CatSixtyFour_enum_grew_too_large);

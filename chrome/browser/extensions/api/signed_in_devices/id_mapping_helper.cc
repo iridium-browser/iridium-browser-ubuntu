@@ -11,12 +11,12 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/signed_in_devices/signed_in_devices_api.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/device_info.h"
-#include "extensions/common/extension.h"
+#include "components/crx_file/id_util.h"
+#include "components/sync_driver/device_info.h"
 
 using base::DictionaryValue;
 using base::Value;
-using browser_sync::DeviceInfo;
+using sync_driver::DeviceInfo;
 
 namespace extensions {
 
@@ -68,7 +68,7 @@ std::string GetRandomId(
 }
 
 void CreateMappingForUnmappedDevices(
-    std::vector<browser_sync::DeviceInfo*>* device_info,
+    std::vector<DeviceInfo*>* device_info,
     base::DictionaryValue* value) {
   for (unsigned int i = 0; i < device_info->size(); ++i) {
     DeviceInfo* device = (*device_info)[i];
@@ -88,8 +88,8 @@ scoped_ptr<DeviceInfo> GetDeviceInfoForClientId(
     const std::string& client_id,
     const std::string& extension_id,
     Profile* profile) {
-  DCHECK(Extension::IdIsValid(extension_id)) << extension_id
-                                             << " is not valid";
+  DCHECK(crx_file::id_util::IdIsValid(extension_id)) << extension_id
+                                                     << " is not valid";
   ScopedVector<DeviceInfo> devices = GetAllSignedInDevices(extension_id,
                                                            profile);
   for (ScopedVector<DeviceInfo>::iterator it = devices.begin();

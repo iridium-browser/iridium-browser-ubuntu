@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
@@ -47,9 +47,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
-#include "chrome/browser/safe_browsing/download_feedback_service.h"
-#include "chrome/browser/safe_browsing/download_protection_service.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -63,6 +60,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -80,31 +78,37 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
-#include "content/public/common/page_transition_types.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_file_error_injector.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "content/test/net/url_request_mock_http_job.h"
 #include "content/test/net/url_request_slow_download_job.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/feature_switch.h"
-#include "grit/generated_resources.h"
 #include "net/base/filename_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
+
+#if defined(FULL_SAFE_BROWSING)
+#include "chrome/browser/safe_browsing/download_feedback_service.h"
+#include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "chrome/browser/safe_browsing/safe_browsing_database.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#endif
 
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::DownloadUrlParameters;
-using content::URLRequestMockHTTPJob;
 using content::URLRequestSlowDownloadJob;
 using content::WebContents;
 using extensions::Extension;
 using extensions::FeatureSwitch;
+using net::URLRequestMockHTTPJob;
 
 namespace {
 
@@ -572,11 +576,10 @@ class DownloadTest : public InProcessBrowserTest {
       Browser* browser,
       int num_downloads,
       content::DownloadTestObserver::DangerousDownloadAction
-      dangerous_download_action) {
+          dangerous_download_action) {
     DownloadManager* download_manager = DownloadManagerForBrowser(browser);
     return new content::DownloadTestObserverTerminal(
-        download_manager, num_downloads,
-        dangerous_download_action);
+        download_manager, num_downloads, dangerous_download_action);
   }
 
   void CheckDownloadStatesForBrowser(Browser* browser,
@@ -1339,7 +1342,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, PerWindowShelf) {
   EXPECT_NE(static_cast<WebContents*>(NULL),
             chrome::AddSelectedTabWithURL(browser(),
                                           GURL(url::kAboutBlankURL),
-                                          content::PAGE_TRANSITION_TYPED));
+                                          ui::PAGE_TRANSITION_TYPED));
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
@@ -1914,6 +1917,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, PRE_DownloadTest_History) {
 }
 
 #if defined(OS_CHROMEOS)
+// Times out on ChromeOS: http://crbug.com/217810
 #define MAYBE_DownloadTest_History DISABLED_DownloadTest_History
 #else
 #define MAYBE_DownloadTest_History DownloadTest_History
@@ -3192,8 +3196,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_NoPrompt) {
   EnableFileChooser(true);
 
   DownloadItem* download = StartMockDownloadAndInjectError(
-      error_injector,
-      content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED);
+      error_injector.get(), content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED);
   ASSERT_TRUE(download);
 
   download->Resume();
@@ -3218,8 +3221,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_WithPrompt) {
   EnableFileChooser(true);
 
   DownloadItem* download = StartMockDownloadAndInjectError(
-      error_injector,
-      content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE);
+      error_injector.get(), content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE);
   ASSERT_TRUE(download);
 
   download->Resume();
@@ -3245,8 +3247,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_WithPromptAlways) {
   EnableFileChooser(true);
 
   DownloadItem* download = StartMockDownloadAndInjectError(
-      error_injector,
-      content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED);
+      error_injector.get(), content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED);
   ASSERT_TRUE(download);
 
   // Prompts the user initially because of the kPromptForDownload preference.
@@ -3271,7 +3272,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_Automatic) {
           DownloadManagerForBrowser(browser())));
 
   DownloadItem* download = StartMockDownloadAndInjectError(
-      error_injector,
+      error_injector.get(),
       content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR);
   ASSERT_TRUE(download);
 
@@ -3299,8 +3300,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_MultipleAttempts) {
 
   EnableFileChooser(true);
   DownloadItem* download = StartMockDownloadAndInjectError(
-      error_injector,
-      content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED);
+      error_injector.get(), content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED);
   ASSERT_TRUE(download);
 
   content::TestFileErrorInjector::FileErrorInfo error_info;
@@ -3347,10 +3347,147 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_GZipWithNoContent) {
 }
 
 #if defined(FULL_SAFE_BROWSING)
+
+// The following two tests are only meaningful on OS_WIN since that's the only
+// platform where client download checks are currently performed.
+// TODO(asanka): Relax this restriction as other platforms are added.
+#if defined(OS_WIN)
+namespace {
+
+// This is a custom DownloadTestObserver for
+// DangerousFileWithSBDisabledBeforeCompletion test that disables the
+// SafeBrowsing service when a single download is IN_PROGRESS and has a target
+// path assigned.  DownloadItemImpl is expected to call MaybeCompleteDownload
+// soon afterwards and we want to disable the service before then.
+class DisableSafeBrowsingOnInProgressDownload
+    : public content::DownloadTestObserver {
+ public:
+  explicit DisableSafeBrowsingOnInProgressDownload(Browser* browser)
+      : DownloadTestObserver(DownloadManagerForBrowser(browser),
+                             1,
+                             ON_DANGEROUS_DOWNLOAD_QUIT),
+        browser_(browser),
+        final_state_seen_(false) {
+    Init();
+  }
+  virtual ~DisableSafeBrowsingOnInProgressDownload() {}
+
+  virtual bool IsDownloadInFinalState(DownloadItem* download) OVERRIDE {
+    if (download->GetState() != DownloadItem::IN_PROGRESS ||
+        download->GetTargetFilePath().empty())
+      return false;
+
+    if (final_state_seen_)
+      return true;
+
+    final_state_seen_ = true;
+    browser_->profile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled,
+                                                false);
+    EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT,
+              download->GetDangerType());
+    EXPECT_FALSE(download->IsDangerous());
+    EXPECT_TRUE(DownloadItemModel(download).IsDangerousFileBasedOnType());
+    return true;
+  }
+
+ private:
+  Browser* browser_;
+  bool final_state_seen_;
+};
+
+}  // namespace
+
+IN_PROC_BROWSER_TEST_F(DownloadTest,
+                       DangerousFileWithSBDisabledBeforeCompletion) {
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled,
+                                               true);
+  ASSERT_TRUE(test_server()->Start());
+  GURL download_url(
+      test_server()->GetURL("files/downloads/dangerous/dangerous.exe"));
+  scoped_ptr<content::DownloadTestObserver> dangerous_observer(
+      DangerousDownloadWaiter(
+          browser(),
+          1,
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_QUIT));
+  scoped_ptr<content::DownloadTestObserver> in_progress_observer(
+      new DisableSafeBrowsingOnInProgressDownload(browser()));
+  ui_test_utils::NavigateToURLWithDisposition(browser(),
+                                              download_url,
+                                              NEW_BACKGROUND_TAB,
+                                              ui_test_utils::BROWSER_TEST_NONE);
+  in_progress_observer->WaitForFinished();
+
+  // SafeBrowsing should have been disabled by our observer.
+  ASSERT_FALSE(browser()->profile()->GetPrefs()->GetBoolean(
+      prefs::kSafeBrowsingEnabled));
+
+  std::vector<DownloadItem*> downloads;
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+  DownloadItem* download = downloads[0];
+
+  dangerous_observer->WaitForFinished();
+
+  EXPECT_TRUE(download->IsDangerous());
+  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE,
+            download->GetDangerType());
+  download->Cancel(true);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, DangerousFileWithSBDisabledBeforeStart) {
+  // Disable SafeBrowsing
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled,
+                                               false);
+
+  ASSERT_TRUE(test_server()->Start());
+  GURL download_url(
+      test_server()->GetURL("files/downloads/dangerous/dangerous.exe"));
+  scoped_ptr<content::DownloadTestObserver> dangerous_observer(
+      DangerousDownloadWaiter(
+          browser(),
+          1,
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_QUIT));
+  ui_test_utils::NavigateToURLWithDisposition(browser(),
+                                              download_url,
+                                              NEW_BACKGROUND_TAB,
+                                              ui_test_utils::BROWSER_TEST_NONE);
+  dangerous_observer->WaitForFinished();
+
+  std::vector<DownloadItem*> downloads;
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+
+  DownloadItem* download = downloads[0];
+  EXPECT_TRUE(download->IsDangerous());
+  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE,
+            download->GetDangerType());
+
+  download->Cancel(true);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, SafeSupportedFile) {
+  ASSERT_TRUE(test_server()->Start());
+  GURL download_url(test_server()->GetURL("files/downloads/a_zip_file.zip"));
+  DownloadAndWait(browser(), download_url);
+
+  std::vector<DownloadItem*> downloads;
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+
+  DownloadItem* download = downloads[0];
+  EXPECT_FALSE(download->IsDangerous());
+  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT,
+            download->GetDangerType());
+
+  download->Cancel(true);
+}
+
+#endif // OS_WIN
+
 IN_PROC_BROWSER_TEST_F(DownloadTest, FeedbackService) {
   // Make a dangerous file.
   base::FilePath file(FILE_PATH_LITERAL("downloads/dangerous/dangerous.swf"));
-  GURL download_url(content::URLRequestMockHTTPJob::GetMockUrl(file));
+  GURL download_url(net::URLRequestMockHTTPJob::GetMockUrl(file));
   scoped_ptr<content::DownloadTestObserverInterrupted> observer(
       new content::DownloadTestObserverInterrupted(
           DownloadManagerForBrowser(browser()), 1,

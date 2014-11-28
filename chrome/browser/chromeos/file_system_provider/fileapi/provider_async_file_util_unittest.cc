@@ -22,12 +22,12 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_file_system_context.h"
 #include "extensions/browser/extension_registry.h"
+#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/common/blob/shareable_file_reference.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/async_file_util.h"
-#include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/common/blob/shareable_file_reference.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -66,7 +66,7 @@ class EventLogger {
   }
 
   void OnReadDirectory(base::File::Error error,
-                       const fileapi::AsyncFileUtil::EntryList& file_list,
+                       const storage::AsyncFileUtil::EntryList& file_list,
                        bool has_more) {
     result_.reset(new base::File::Error(error));
   }
@@ -75,7 +75,7 @@ class EventLogger {
       base::File::Error error,
       const base::File::Info& file_info,
       const base::FilePath& platform_path,
-      const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref) {
+      const scoped_refptr<storage::ShareableFileReference>& file_ref) {
     result_.reset(new base::File::Error(error));
   }
 
@@ -89,14 +89,14 @@ class EventLogger {
 };
 
 // Creates a cracked FileSystemURL for tests.
-fileapi::FileSystemURL CreateFileSystemURL(const std::string& mount_point_name,
+storage::FileSystemURL CreateFileSystemURL(const std::string& mount_point_name,
                                            const base::FilePath& file_path) {
   const std::string origin = std::string("chrome-extension://") + kExtensionId;
-  const fileapi::ExternalMountPoints* const mount_points =
-      fileapi::ExternalMountPoints::GetSystemInstance();
+  const storage::ExternalMountPoints* const mount_points =
+      storage::ExternalMountPoints::GetSystemInstance();
   return mount_points->CreateCrackedFileSystemURL(
       GURL(origin),
-      fileapi::kFileSystemTypeExternal,
+      storage::kFileSystemTypeExternal,
       base::FilePath::FromUTF8Unsafe(mount_point_name).Append(file_path));
 }
 
@@ -164,20 +164,20 @@ class FileSystemProviderProviderAsyncFileUtilTest : public testing::Test {
     ServiceFactory::GetInstance()->SetTestingFactory(profile_, NULL);
   }
 
-  scoped_ptr<fileapi::FileSystemOperationContext> CreateOperationContext() {
+  scoped_ptr<storage::FileSystemOperationContext> CreateOperationContext() {
     return make_scoped_ptr(
-        new fileapi::FileSystemOperationContext(file_system_context_.get()));
+        new storage::FileSystemOperationContext(file_system_context_.get()));
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
   base::ScopedTempDir data_dir_;
   scoped_ptr<TestingProfileManager> profile_manager_;
   TestingProfile* profile_;  // Owned by TestingProfileManager.
-  scoped_ptr<fileapi::AsyncFileUtil> async_file_util_;
-  scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  fileapi::FileSystemURL file_url_;
-  fileapi::FileSystemURL directory_url_;
-  fileapi::FileSystemURL root_url_;
+  scoped_ptr<storage::AsyncFileUtil> async_file_util_;
+  scoped_refptr<storage::FileSystemContext> file_system_context_;
+  storage::FileSystemURL file_url_;
+  storage::FileSystemURL directory_url_;
+  storage::FileSystemURL root_url_;
 };
 
 TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateOrOpen_Create) {
@@ -335,7 +335,7 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CopyFileLocal) {
       CreateOperationContext(),
       file_url_,  // src_url
       file_url_,  // dst_url
-      fileapi::FileSystemOperation::OPTION_NONE,
+      storage::FileSystemOperation::OPTION_NONE,
       base::Bind(&EventLogger::OnCopyFileProgress, base::Unretained(&logger)),
       base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
@@ -351,7 +351,7 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, MoveFileLocal) {
       CreateOperationContext(),
       file_url_,  // src_url
       file_url_,  // dst_url
-      fileapi::FileSystemOperation::OPTION_NONE,
+      storage::FileSystemOperation::OPTION_NONE,
       base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 

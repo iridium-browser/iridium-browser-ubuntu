@@ -28,6 +28,10 @@ ARCH_MAP = {
     }
 
 
+def RunningOnBuildbot():
+  return os.environ.get('BUILDBOT_SLAVE_TYPE') is not None
+
+
 def GetHostPlatform():
   sys_platform = sys.platform.lower()
   if sys_platform.startswith('linux'):
@@ -111,27 +115,32 @@ def SetupWindowsEnvironment(context):
   # Needed for finding devenv.
   context['msvc'] = msvc
 
-  # The context on other systems has GYP_DEFINES set, set it for windows to be
-  # able to save and restore without KeyError.
-  context.SetEnv('GYP_DEFINES', '')
+  SetupGyp(context, [])
 
 
-def SetupGypDefines(context, extra_vars=[]):
-  context.SetEnv('GYP_DEFINES', ' '.join(context['gyp_vars'] + extra_vars))
+def SetupGyp(context, extra_vars=[]):
+  context.SetEnv('GYP_GENERATORS', 'ninja')
+  if RunningOnBuildbot():
+    goma_opts = [
+        'use_goma=1',
+        'gomadir=/b/build/goma',
+    ]
+  else:
+    goma_opts = []
+  context.SetEnv('GYP_DEFINES', ' '.join(
+      context['gyp_vars'] + goma_opts + extra_vars))
 
 
 def SetupLinuxEnvironment(context):
-  SetupGypDefines(context, ['target_arch='+context['gyp_arch']])
-  context.SetEnv('GYP_GENERATORS', 'ninja')
+  SetupGyp(context, ['target_arch='+context['gyp_arch']])
 
 
 def SetupMacEnvironment(context):
-  SetupGypDefines(context, ['target_arch='+context['gyp_arch']])
-  context.SetEnv('GYP_GENERATORS', 'ninja')
+  SetupGyp(context, ['target_arch='+context['gyp_arch']])
 
 
 def SetupAndroidEnvironment(context):
-  SetupGypDefines(context, ['OS=android', 'target_arch='+context['gyp_arch']])
+  SetupGyp(context, ['OS=android', 'target_arch='+context['gyp_arch']])
   context.SetEnv('GYP_GENERATORS', 'ninja')
   context.SetEnv('GYP_CROSSCOMPILE', '1')
 
@@ -169,6 +178,8 @@ def ParseStandardCommandLine(context):
                     help='Append SUFFIX to buildbot step names.')
   parser.add_option('--no-gyp', dest='no_gyp', default=False,
                     action='store_true', help='Do not run the gyp build')
+  parser.add_option('--no-goma', dest='no_goma', default=False,
+                    action='store_true', help='Do not run with goma')
   parser.add_option('--use-breakpad-tools', dest='use_breakpad_tools',
                     default=False, action='store_true',
                     help='Use breakpad tools for testing')
@@ -224,6 +235,7 @@ def ParseStandardCommandLine(context):
   context['inside_toolchain'] = options.inside_toolchain
   context['step_suffix'] = options.step_suffix
   context['no_gyp'] = options.no_gyp
+  context['no_goma'] = options.no_goma
   context['coverage'] = options.coverage
   context['use_breakpad_tools'] = options.use_breakpad_tools
   context['scons_args'] = options.scons_args

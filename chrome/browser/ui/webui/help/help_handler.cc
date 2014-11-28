@@ -24,14 +24,15 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/user_agent.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "v8/include/v8.h"
 
@@ -48,6 +49,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/help/help_utils_chromeos.h"
+#include "chrome/browser/ui/webui/help/version_updater_chromeos.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
@@ -143,6 +145,7 @@ void HelpHandler::GetLocalizedValues(base::DictionaryValue* localized_strings) {
     { "upToDate", IDS_UPGRADE_UP_TO_DATE },
     { "updating", IDS_UPGRADE_UPDATING },
 #if defined(OS_CHROMEOS)
+    { "updateButton", IDS_UPGRADE_BUTTON },
     { "updatingChannelSwitch", IDS_UPGRADE_UPDATING_CHANNEL_SWITCH },
 #endif
     { "updateAlmostDone", IDS_UPGRADE_SUCCESSFUL_RELAUNCH },
@@ -283,6 +286,8 @@ void HelpHandler::RegisterMessages() {
       base::Bind(&HelpHandler::SetChannel, base::Unretained(this)));
   web_ui()->RegisterMessageCallback("relaunchAndPowerwash",
       base::Bind(&HelpHandler::RelaunchAndPowerwash, base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("requestUpdate",
+      base::Bind(&HelpHandler::RequestUpdate, base::Unretained(this)));
 #endif
 #if defined(OS_MACOSX)
   web_ui()->RegisterMessageCallback("promoteUpdater",
@@ -296,12 +301,7 @@ void HelpHandler::Observe(int type, const content::NotificationSource& source,
     case chrome::NOTIFICATION_UPGRADE_RECOMMENDED: {
       // A version update is installed and ready to go. Refresh the UI so the
       // correct state will be shown.
-      version_updater_->CheckForUpdate(
-          base::Bind(&HelpHandler::SetUpdateStatus, base::Unretained(this))
-#if defined(OS_MACOSX)
-          , base::Bind(&HelpHandler::SetPromotionState, base::Unretained(this))
-#endif
-          );
+      RequestUpdate(NULL);
       break;
     }
     default:
@@ -314,23 +314,17 @@ base::string16 HelpHandler::BuildBrowserVersionString() {
   chrome::VersionInfo version_info;
   DCHECK(version_info.is_valid());
 
-  std::string browser_version = version_info.Version();
-  std::string version_modifier =
-      chrome::VersionInfo::GetVersionStringModifier();
-  if (!version_modifier.empty())
-    browser_version += " " + version_modifier;
+  std::string version = version_info.Version();
 
-#if !defined(GOOGLE_CHROME_BUILD)
-  browser_version += " (";
-  browser_version += version_info.LastChange();
-  browser_version += ")";
-#endif
+  std::string modifier = chrome::VersionInfo::GetVersionStringModifier();
+  if (!modifier.empty())
+    version += " " + modifier;
 
 #if defined(ARCH_CPU_64_BITS)
-  browser_version += " (64-bit)";
+  version += " (64-bit)";
 #endif
 
-  return base::UTF8ToUTF16(browser_version);
+  return base::UTF8ToUTF16(version);
 }
 
 void HelpHandler::OnPageLoaded(const base::ListValue* args) {
@@ -354,12 +348,13 @@ void HelpHandler::OnPageLoaded(const base::ListValue* args) {
                                    base::StringValue(build_date));
 #endif  // defined(OS_CHROMEOS)
 
-  version_updater_->CheckForUpdate(
-      base::Bind(&HelpHandler::SetUpdateStatus, base::Unretained(this))
-#if defined(OS_MACOSX)
-      , base::Bind(&HelpHandler::SetPromotionState, base::Unretained(this))
+  // On Chrome OS, do not check for an update automatically.
+#if defined(OS_CHROMEOS)
+  static_cast<VersionUpdaterCros*>(version_updater_.get())->GetUpdateStatus(
+      base::Bind(&HelpHandler::SetUpdateStatus, base::Unretained(this)));
+#else
+  RequestUpdate(NULL);
 #endif
-      );
 
 #if defined(OS_MACOSX)
   web_ui()->CallJavascriptFunction(
@@ -454,6 +449,15 @@ void HelpHandler::RelaunchAndPowerwash(const base::ListValue* args) {
 }
 
 #endif  // defined(OS_CHROMEOS)
+
+void HelpHandler::RequestUpdate(const base::ListValue* args) {
+  version_updater_->CheckForUpdate(
+      base::Bind(&HelpHandler::SetUpdateStatus, base::Unretained(this))
+#if defined(OS_MACOSX)
+      , base::Bind(&HelpHandler::SetPromotionState, base::Unretained(this))
+#endif
+      );
+}
 
 void HelpHandler::SetUpdateStatus(VersionUpdater::Status status,
                                   int progress, const base::string16& message) {

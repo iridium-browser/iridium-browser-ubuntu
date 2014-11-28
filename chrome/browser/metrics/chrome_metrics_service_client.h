@@ -14,17 +14,15 @@
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/network_stats_uploader.h"
-#include "chrome/browser/metrics/tracking_synchronizer_observer.h"
 #include "components/metrics/metrics_service_client.h"
+#include "components/metrics/profiler/tracking_synchronizer_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 class ChromeOSMetricsProvider;
 class GoogleUpdateMetricsProviderWin;
-class MetricsService;
 class PluginMetricsProvider;
 class PrefRegistrySimple;
-class ProfilerMetricsProvider;
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
 class SigninStatusMetricsProvider;
@@ -35,14 +33,16 @@ class FilePath;
 }
 
 namespace metrics {
+class MetricsService;
 class MetricsStateManager;
+class ProfilerMetricsProvider;
 }
 
 // ChromeMetricsServiceClient provides an implementation of MetricsServiceClient
 // that depends on chrome/.
 class ChromeMetricsServiceClient
     : public metrics::MetricsServiceClient,
-      public chrome_browser_metrics::TrackingSynchronizerObserver,
+      public metrics::TrackingSynchronizerObserver,
       public content::NotificationObserver {
  public:
   virtual ~ChromeMetricsServiceClient();
@@ -71,8 +71,9 @@ class ChromeMetricsServiceClient
       const std::string& server_url,
       const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) OVERRIDE;
+  virtual base::string16 GetRegistryBackupKey() OVERRIDE;
 
-  MetricsService* metrics_service() { return metrics_service_.get(); }
+  metrics::MetricsService* metrics_service() { return metrics_service_.get(); }
 
   void LogPluginLoadingError(const base::FilePath& plugin_path);
 
@@ -131,7 +132,7 @@ class ChromeMetricsServiceClient
   metrics::MetricsStateManager* metrics_state_manager_;
 
   // The MetricsService that |this| is a client of.
-  scoped_ptr<MetricsService> metrics_service_;
+  scoped_ptr<metrics::MetricsService> metrics_service_;
 
   content::NotificationRegistrar registrar_;
 
@@ -152,7 +153,7 @@ class ChromeMetricsServiceClient
 
   // The ProfilerMetricsProvider instance that was registered with
   // MetricsService. Has the same lifetime as |metrics_service_|.
-  ProfilerMetricsProvider* profiler_metrics_provider_;
+  metrics::ProfilerMetricsProvider* profiler_metrics_provider_;
 
 #if defined(ENABLE_PLUGINS)
   // The PluginMetricsProvider instance that was registered with
@@ -164,12 +165,6 @@ class ChromeMetricsServiceClient
   // The GoogleUpdateMetricsProviderWin instance that was registered with
   // MetricsService. Has the same lifetime as |metrics_service_|.
   GoogleUpdateMetricsProviderWin* google_update_metrics_provider_;
-#endif
-
-#if !defined(OS_CHROMEOS) && !defined(OS_IOS)
-  // The SigninStatusMetricsProvider instance that was registered with
-  // MetricsService. Has the same lifetime as |metrics_service_|.
-  SigninStatusMetricsProvider* signin_status_metrics_provider_;
 #endif
 
   // Callback that is called when initial metrics gathering is complete.

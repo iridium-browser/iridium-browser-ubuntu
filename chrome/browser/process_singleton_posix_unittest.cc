@@ -16,8 +16,8 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "base/posix/eintr_wrapper.h"
@@ -160,9 +160,7 @@ class ProcessSingletonPosixTest : public testing::Test {
     EXPECT_EQ(cookie, std::string(buf, len));
   }
 
-  ProcessSingleton::NotifyResult NotifyOtherProcess(
-      bool override_kill,
-      base::TimeDelta timeout) {
+  ProcessSingleton::NotifyResult NotifyOtherProcess(bool override_kill) {
     scoped_ptr<TestableProcessSingleton> process_singleton(
         CreateProcessSingleton());
     CommandLine command_line(CommandLine::ForCurrentProcess()->GetProgram());
@@ -176,19 +174,18 @@ class ProcessSingletonPosixTest : public testing::Test {
     }
 
     return process_singleton->NotifyOtherProcessWithTimeout(
-        command_line, timeout.InSeconds(), true);
+        command_line, kRetryAttempts, timeout(), true);
   }
 
   // A helper method to call ProcessSingleton::NotifyOtherProcessOrCreate().
   ProcessSingleton::NotifyResult NotifyOtherProcessOrCreate(
-      const std::string& url,
-      base::TimeDelta timeout) {
+      const std::string& url) {
     scoped_ptr<TestableProcessSingleton> process_singleton(
         CreateProcessSingleton());
     CommandLine command_line(CommandLine::ForCurrentProcess()->GetProgram());
     command_line.AppendArg(url);
     return process_singleton->NotifyOtherProcessWithTimeoutOrCreate(
-        command_line, timeout.InSeconds());
+        command_line, kRetryAttempts, timeout());
   }
 
   void CheckNotified() {
@@ -232,6 +229,12 @@ class ProcessSingletonPosixTest : public testing::Test {
   int kill_callbacks_;
 
  private:
+  static const int kRetryAttempts = 2;
+
+  base::TimeDelta timeout() const {
+    return TestTimeouts::tiny_timeout() * kRetryAttempts;
+  }
+
   void CreateProcessSingletonInternal() {
     ASSERT_TRUE(!process_singleton_on_thread_);
     process_singleton_on_thread_ = CreateProcessSingleton();
@@ -271,8 +274,7 @@ TEST_F(ProcessSingletonPosixTest, CheckSocketFile) {
 // Test success case of NotifyOtherProcess().
 TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessSuccess) {
   CreateProcessSingletonOnThread();
-  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED,
-            NotifyOtherProcess(true, TestTimeouts::action_timeout()));
+  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED, NotifyOtherProcess(true));
   CheckNotified();
 }
 
@@ -281,9 +283,7 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessFailure) {
   CreateProcessSingletonOnThread();
 
   BlockWorkerThread();
-  EXPECT_EQ(ProcessSingleton::PROCESS_NONE,
-            NotifyOtherProcess(true, TestTimeouts::action_timeout()));
-
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE, NotifyOtherProcess(true));
   ASSERT_EQ(1, kill_callbacks_);
   UnblockWorkerThread();
 }
@@ -304,8 +304,7 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessNoSuicide) {
   // Remove socket so that we will not be able to notify the existing browser.
   EXPECT_EQ(0, unlink(socket_path_.value().c_str()));
 
-  EXPECT_EQ(ProcessSingleton::PROCESS_NONE,
-            NotifyOtherProcess(false, TestTimeouts::action_timeout()));
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE, NotifyOtherProcess(false));
   // If we've gotten to this point without killing ourself, the test succeeded.
 }
 
@@ -316,8 +315,7 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessHostChanged) {
   EXPECT_EQ(0, unlink(lock_path_.value().c_str()));
   EXPECT_EQ(0, symlink("FAKEFOOHOST-1234", lock_path_.value().c_str()));
 
-  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED,
-            NotifyOtherProcess(false, TestTimeouts::action_timeout()));
+  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED, NotifyOtherProcess(false));
   CheckNotified();
 }
 
@@ -331,8 +329,7 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessDifferingHost) {
   EXPECT_EQ(0, unlink(lock_path_.value().c_str()));
   EXPECT_EQ(0, symlink("FAKEFOOHOST-1234", lock_path_.value().c_str()));
 
-  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE,
-            NotifyOtherProcess(false, TestTimeouts::action_timeout()));
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, NotifyOtherProcess(false));
 
   ASSERT_EQ(0, unlink(lock_path_.value().c_str()));
 
@@ -350,8 +347,7 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessOrCreate_DifferingHost) {
   EXPECT_EQ(0, symlink("FAKEFOOHOST-1234", lock_path_.value().c_str()));
 
   std::string url("about:blank");
-  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE,
-            NotifyOtherProcessOrCreate(url, TestTimeouts::action_timeout()));
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, NotifyOtherProcessOrCreate(url));
 
   ASSERT_EQ(0, unlink(lock_path_.value().c_str()));
 
@@ -402,8 +398,7 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessOrCreate_BadCookie) {
   EXPECT_EQ(0, symlink("FAKEFOOHOST-1234", lock_path_.value().c_str()));
 
   std::string url("about:blank");
-  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE,
-            NotifyOtherProcessOrCreate(url, TestTimeouts::action_timeout()));
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, NotifyOtherProcessOrCreate(url));
 }
 
 #if defined(OS_MACOSX)

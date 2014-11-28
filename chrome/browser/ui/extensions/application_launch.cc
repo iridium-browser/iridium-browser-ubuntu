@@ -29,7 +29,6 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -41,6 +40,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
+#include "extensions/common/manifest_handlers/options_page_info.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/rect.h"
 
@@ -123,33 +123,6 @@ const Extension* GetExtension(const AppLaunchParams& params) {
                                         ExtensionRegistry::TERMINATED);
 }
 
-// Get the launch URL for a given extension, with optional override/fallback.
-// |override_url|, if non-empty, will be preferred over the extension's
-// launch url.
-GURL UrlForExtension(const Extension* extension,
-                     const GURL& override_url) {
-  if (!extension)
-    return override_url;
-
-  GURL url;
-  if (!override_url.is_empty()) {
-    DCHECK(extension->web_extent().MatchesURL(override_url) ||
-           override_url.GetOrigin() == extension->url());
-    url = override_url;
-  } else {
-    url = extensions::AppLaunchInfo::GetFullLaunchURL(extension);
-  }
-
-  // For extensions lacking launch urls, determine a reasonable fallback.
-  if (!url.is_valid()) {
-    url = extensions::ManifestURL::GetOptionsPage(extension);
-    if (!url.is_valid())
-      url = GURL(chrome::kChromeUIExtensionsURL);
-  }
-
-  return url;
-}
-
 ui::WindowShowState DetermineWindowShowState(
     Profile* profile,
     extensions::LaunchContainer container,
@@ -209,7 +182,7 @@ WebContents* OpenApplicationWindow(const AppLaunchParams& params) {
   Browser* browser = new Browser(browser_params);
 
   WebContents* web_contents = chrome::AddSelectedTabWithURL(
-      browser, url, content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+      browser, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
   web_contents->GetMutableRendererPrefs()->can_accept_load_drops = false;
   web_contents->GetRenderViewHost()->SyncRendererPrefs();
 
@@ -255,7 +228,7 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params) {
 
   GURL extension_url = UrlForExtension(extension, launch_params.override_url);
   chrome::NavigateParams params(browser, extension_url,
-                                content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
   params.tabstrip_add_types = add_type;
   params.disposition = disposition;
 
@@ -269,7 +242,7 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params) {
           extension_url,
           content::Referrer(existing_tab->GetURL(),
                             blink::WebReferrerPolicyDefault),
-          disposition, content::PAGE_TRANSITION_LINK, false));
+          disposition, ui::PAGE_TRANSITION_LINK, false));
     // Reset existing_tab as OpenURL() may have clobbered it.
     existing_tab = browser->tab_strip_model()->GetActiveWebContents();
     if (params.tabstrip_add_types & TabStripModel::ADD_PINNED) {
@@ -466,4 +439,27 @@ bool CanLaunchViaEvent(const extensions::Extension* extension) {
       extensions::FeatureProvider::GetAPIFeatures();
   extensions::Feature* feature = feature_provider->GetFeature("app.runtime");
   return feature->IsAvailableToExtension(extension).is_available();
+}
+
+GURL UrlForExtension(const Extension* extension, const GURL& override_url) {
+  if (!extension)
+    return override_url;
+
+  GURL url;
+  if (!override_url.is_empty()) {
+    DCHECK(extension->web_extent().MatchesURL(override_url) ||
+           override_url.GetOrigin() == extension->url());
+    url = override_url;
+  } else {
+    url = extensions::AppLaunchInfo::GetFullLaunchURL(extension);
+  }
+
+  // For extensions lacking launch urls, determine a reasonable fallback.
+  if (!url.is_valid()) {
+    url = extensions::OptionsPageInfo::GetOptionsPage(extension);
+    if (!url.is_valid())
+      url = GURL(chrome::kChromeUIExtensionsURL);
+  }
+
+  return url;
 }

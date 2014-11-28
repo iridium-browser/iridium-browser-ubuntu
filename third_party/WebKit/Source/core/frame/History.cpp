@@ -46,7 +46,11 @@ History::History(LocalFrame* frame)
     : DOMWindowProperty(frame)
     , m_lastStateObjectRequested(nullptr)
 {
-    ScriptWrappable::init(this);
+}
+
+void History::trace(Visitor* visitor)
+{
+    DOMWindowProperty::trace(visitor);
 }
 
 unsigned History::length() const

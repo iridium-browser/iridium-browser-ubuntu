@@ -32,6 +32,7 @@
 #include "public/web/WebSearchableFormData.h"
 
 #include "core/HTMLNames.h"
+#include "core/InputTypeNames.h"
 #include "core/dom/Document.h"
 #include "core/html/FormDataList.h"
 #include "core/html/HTMLFormControlElement.h"
@@ -44,7 +45,8 @@
 #include "public/web/WebInputElement.h"
 #include "wtf/text/TextEncoding.h"
 
-using namespace blink;
+namespace blink {
+
 using namespace HTMLNames;
 
 namespace {
@@ -138,7 +140,7 @@ bool IsInDefaultState(HTMLFormControlElement* formElement)
     ASSERT(formElement);
     if (isHTMLInputElement(*formElement)) {
         const HTMLInputElement& inputElement = toHTMLInputElement(*formElement);
-        if (inputElement.isCheckbox() || inputElement.isRadioButton())
+        if (inputElement.type() == InputTypeNames::checkbox || inputElement.type() == InputTypeNames::radio)
             return inputElement.checked() == inputElement.hasAttribute(checkedAttr);
     } else if (isHTMLSelectElement(*formElement)) {
         return IsSelectInDefaultState(toHTMLSelectElement(formElement));
@@ -172,7 +174,7 @@ HTMLInputElement* findSuitableSearchInputElement(const HTMLFormElement* form)
             const HTMLInputElement& input = toHTMLInputElement(*control);
 
             // Return nothing if a file upload field or a password field are found.
-            if (input.isFileUpload() || input.isPasswordField())
+            if (input.type() == InputTypeNames::file || input.type() == InputTypeNames::password)
                 return 0;
 
             if (input.isTextField()) {
@@ -208,11 +210,11 @@ bool buildSearchString(const HTMLFormElement* form, Vector<char>* encodedString,
         if (control->isDisabledFormControl() || control->name().isNull())
             continue;
 
-        FormDataList dataList(*encoding);
-        if (!control->appendFormData(dataList, false))
+        RefPtrWillBeRawPtr<FormDataList> dataList = FormDataList::create(*encoding);
+        if (!control->appendFormData(*dataList, false))
             continue;
 
-        const WillBeHeapVector<FormDataList::Item>& items = dataList.items();
+        const WillBeHeapVector<FormDataList::Item>& items = dataList->items();
 
         for (WillBeHeapVector<FormDataList::Item>::const_iterator j(items.begin()); j != items.end(); ++j) {
             if (!encodedString->isEmpty())
@@ -230,8 +232,6 @@ bool buildSearchString(const HTMLFormElement* form, Vector<char>* encodedString,
     return isElementFound;
 }
 } // namespace
-
-namespace blink {
 
 WebSearchableFormData::WebSearchableFormData(const WebFormElement& form, const WebInputElement& selectedInputElement)
 {

@@ -55,7 +55,6 @@ class MockContentLayerClient : public ContentLayerClient {
   virtual void PaintContents(
       SkCanvas* canvas,
       const gfx::Rect& clip,
-      gfx::RectF* opaque,
       ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE {}
   virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
   virtual bool FillsBoundsCompletely() const OVERRIDE { return false; }
@@ -86,7 +85,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForNoOpLayer) {
   parent->AddChild(child);
   child->AddChild(grand_child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   gfx::Transform identity_matrix;
@@ -130,7 +129,7 @@ TEST_F(LayerTreeHostCommonTest, DoNotSkipLayersWithHandlers) {
   parent->AddChild(child);
   child->AddChild(grand_child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   gfx::Transform identity_matrix;
@@ -183,7 +182,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForSingleLayer) {
                                false);
   root->AddChild(layer);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // Case 2: Setting the bounds of the layer should not affect either the draw
@@ -392,7 +391,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForSimpleHierarchy) {
   parent->AddChild(child);
   child->AddChild(grand_child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // One-time setup of root layer
@@ -519,7 +518,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForSingleRenderSurface) {
   parent->AddChild(child);
   child->AddChild(grand_child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // One-time setup of root layer
@@ -581,7 +580,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForSingleRenderSurface) {
 
   // Render surface should have been created now.
   ASSERT_TRUE(child->render_surface());
-  ASSERT_EQ(child, child->render_target());
+  ASSERT_EQ(child.get(), child->render_target());
 
   // The child layer's draw transform should refer to its new render surface.
   // The screen-space transform, however, should still refer to the root.
@@ -616,7 +615,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForReplica) {
   child->AddChild(grand_child);
   child->SetReplicaLayer(child_replica.get());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // One-time setup of root layer
@@ -686,7 +685,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForReplica) {
 
   // Render surface should have been created now.
   ASSERT_TRUE(child->render_surface());
-  ASSERT_EQ(child, child->render_target());
+  ASSERT_EQ(child.get(), child->render_target());
 
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       replica_composite_transform,
@@ -737,7 +736,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForRenderSurfaceHierarchy) {
   render_surface1->SetReplicaLayer(replica_of_rs1.get());
   render_surface2->SetReplicaLayer(replica_of_rs2.get());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // In combination with descendant draws content, opacity != 1 forces the layer
@@ -889,17 +888,17 @@ TEST_F(LayerTreeHostCommonTest, TransformsForRenderSurfaceHierarchy) {
   ASSERT_FALSE(grand_child_of_rs2->render_surface());
 
   // Verify all render target accessors
-  EXPECT_EQ(root, parent->render_target());
-  EXPECT_EQ(root, child_of_root->render_target());
-  EXPECT_EQ(root, grand_child_of_root->render_target());
+  EXPECT_EQ(root.get(), parent->render_target());
+  EXPECT_EQ(root.get(), child_of_root->render_target());
+  EXPECT_EQ(root.get(), grand_child_of_root->render_target());
 
-  EXPECT_EQ(render_surface1, render_surface1->render_target());
-  EXPECT_EQ(render_surface1, child_of_rs1->render_target());
-  EXPECT_EQ(render_surface1, grand_child_of_rs1->render_target());
+  EXPECT_EQ(render_surface1.get(), render_surface1->render_target());
+  EXPECT_EQ(render_surface1.get(), child_of_rs1->render_target());
+  EXPECT_EQ(render_surface1.get(), grand_child_of_rs1->render_target());
 
-  EXPECT_EQ(render_surface2, render_surface2->render_target());
-  EXPECT_EQ(render_surface2, child_of_rs2->render_target());
-  EXPECT_EQ(render_surface2, grand_child_of_rs2->render_target());
+  EXPECT_EQ(render_surface2.get(), render_surface2->render_target());
+  EXPECT_EQ(render_surface2.get(), child_of_rs2->render_target());
+  EXPECT_EQ(render_surface2.get(), grand_child_of_rs2->render_target());
 
   // Verify layer draw transforms note that draw transforms are described with
   // respect to the nearest ancestor render surface but screen space transforms
@@ -1032,7 +1031,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForFlatteningLayer) {
   child->AddChild(grand_child);
   child->SetForceRenderSurface(true);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // No layers in this test should preserve 3d.
@@ -1111,7 +1110,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsForDegenerateIntermediateLayer) {
   child->AddChild(grand_child);
   child->SetForceRenderSurface(true);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -1136,7 +1135,7 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
   child->SetScrollClipLayerId(root->id());
   root->AddChild(child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   SetLayerPropertiesForTesting(root.get(),
@@ -1283,7 +1282,7 @@ TEST_F(LayerTreeHostCommonTest,
   scoped_refptr<LayerWithForcedDrawsContent> child =
       make_scoped_refptr(new LayerWithForcedDrawsContent());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   const gfx::Transform identity_matrix;
@@ -1337,7 +1336,7 @@ TEST_F(LayerTreeHostCommonTest, RenderSurfaceListForTransparentChild) {
   scoped_refptr<LayerWithForcedDrawsContent> child =
       make_scoped_refptr(new LayerWithForcedDrawsContent());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   const gfx::Transform identity_matrix;
@@ -1384,7 +1383,7 @@ TEST_F(LayerTreeHostCommonTest, ForceRenderSurface) {
       make_scoped_refptr(new LayerWithForcedDrawsContent());
   render_surface1->SetForceRenderSurface(true);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   const gfx::Transform identity_matrix;
@@ -1473,7 +1472,7 @@ TEST_F(LayerTreeHostCommonTest, ClipRectCullsRenderSurfaces) {
   child->AddChild(grand_child);
   grand_child->AddChild(great_grand_child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // leaf_node1 ensures that parent and child are kept on the
@@ -1571,7 +1570,7 @@ TEST_F(LayerTreeHostCommonTest, ClipRectCullsSurfaceWithoutVisibleContent) {
   child->AddChild(grand_child);
   grand_child->AddChild(leaf_node);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   SetLayerPropertiesForTesting(parent.get(),
@@ -1673,7 +1672,7 @@ TEST_F(LayerTreeHostCommonTest, IsClippedIsSetCorrectly) {
   child2->AddChild(leaf_node2);
   grand_child->AddChild(leaf_node1);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   child2->SetForceRenderSurface(true);
@@ -1831,7 +1830,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableContentRectForLayers) {
   child->AddChild(grand_child3);
   child->AddChild(grand_child4);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   SetLayerPropertiesForTesting(parent.get(),
@@ -1932,7 +1931,7 @@ TEST_F(LayerTreeHostCommonTest, ClipRectIsPropagatedCorrectlyToSurfaces) {
   child->AddChild(grand_child3);
   child->AddChild(grand_child4);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // the leaf nodes ensure that these grand_children become render surfaces for
@@ -2069,7 +2068,7 @@ TEST_F(LayerTreeHostCommonTest, AnimationsForRenderSurfaceHierarchy) {
   child_of_rs1->AddChild(grand_child_of_rs1);
   child_of_rs2->AddChild(grand_child_of_rs2);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // Make our render surfaces.
@@ -2179,17 +2178,17 @@ TEST_F(LayerTreeHostCommonTest, AnimationsForRenderSurfaceHierarchy) {
   ASSERT_FALSE(grand_child_of_rs2->render_surface());
 
   // Verify all render target accessors
-  EXPECT_EQ(parent, parent->render_target());
-  EXPECT_EQ(parent, child_of_root->render_target());
-  EXPECT_EQ(parent, grand_child_of_root->render_target());
+  EXPECT_EQ(parent.get(), parent->render_target());
+  EXPECT_EQ(parent.get(), child_of_root->render_target());
+  EXPECT_EQ(parent.get(), grand_child_of_root->render_target());
 
-  EXPECT_EQ(render_surface1, render_surface1->render_target());
-  EXPECT_EQ(render_surface1, child_of_rs1->render_target());
-  EXPECT_EQ(render_surface1, grand_child_of_rs1->render_target());
+  EXPECT_EQ(render_surface1.get(), render_surface1->render_target());
+  EXPECT_EQ(render_surface1.get(), child_of_rs1->render_target());
+  EXPECT_EQ(render_surface1.get(), grand_child_of_rs1->render_target());
 
-  EXPECT_EQ(render_surface2, render_surface2->render_target());
-  EXPECT_EQ(render_surface2, child_of_rs2->render_target());
-  EXPECT_EQ(render_surface2, grand_child_of_rs2->render_target());
+  EXPECT_EQ(render_surface2.get(), render_surface2->render_target());
+  EXPECT_EQ(render_surface2.get(), child_of_rs2->render_target());
+  EXPECT_EQ(render_surface2.get(), grand_child_of_rs2->render_target());
 
   // Verify draw_opacity_is_animating values
   EXPECT_FALSE(parent->draw_opacity_is_animating());
@@ -2557,7 +2556,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableAndVisibleContentRectsForSimpleLayers) {
   root->AddChild(child2);
   root->AddChild(child3);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -2625,7 +2624,7 @@ TEST_F(LayerTreeHostCommonTest,
   child->AddChild(grand_child2);
   child->AddChild(grand_child3);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -2706,7 +2705,7 @@ TEST_F(LayerTreeHostCommonTest,
   render_surface1->AddChild(child2);
   render_surface1->AddChild(child3);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -2782,7 +2781,7 @@ TEST_F(LayerTreeHostCommonTest,
       make_scoped_refptr(new LayerWithForcedDrawsContent());
   root->AddChild(child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // Case 1: a truly degenerate matrix
@@ -2856,7 +2855,7 @@ TEST_F(LayerTreeHostCommonTest,
       make_scoped_refptr(new LayerWithForcedDrawsContent());
   root->AddChild(child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -2900,7 +2899,7 @@ TEST_F(LayerTreeHostCommonTest,
        SingularNonAnimatingTransformDoesNotPreventClearingDrawProperties) {
   scoped_refptr<Layer> root = Layer::Create();
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -2939,7 +2938,7 @@ TEST_F(LayerTreeHostCommonTest,
   render_surface1->AddChild(child2);
   render_surface1->AddChild(child3);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -3029,7 +3028,7 @@ TEST_F(LayerTreeHostCommonTest,
   render_surface2->AddChild(child2);
   render_surface2->AddChild(child3);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -3129,7 +3128,7 @@ TEST_F(LayerTreeHostCommonTest,
   root->AddChild(render_surface1);
   render_surface1->AddChild(child1);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -3200,7 +3199,7 @@ TEST_F(LayerTreeHostCommonTest,
   root->AddChild(render_surface1);
   render_surface1->AddChild(child1);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -3275,7 +3274,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableAndVisibleContentRectsInHighDPI) {
   render_surface2->AddChild(child2);
   render_surface2->AddChild(child3);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -3402,7 +3401,7 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithoutPreserves3d) {
   back_facing_surface->AddChild(front_facing_child_of_back_facing_surface);
   back_facing_surface->AddChild(back_facing_child_of_back_facing_surface);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // Nothing is double-sided
@@ -3608,7 +3607,7 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithPreserves3d) {
   back_facing_surface->AddChild(front_facing_child_of_back_facing_surface);
   back_facing_surface->AddChild(back_facing_child_of_back_facing_surface);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // Nothing is double-sided
@@ -3774,7 +3773,7 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithAnimatingTransforms) {
   parent->AddChild(animating_child);
   parent->AddChild(child2);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // Nothing is double-sided
@@ -3920,7 +3919,7 @@ TEST_F(LayerTreeHostCommonTest,
   front_facing_surface->AddChild(child1);
   back_facing_surface->AddChild(child2);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   // RenderSurfaces are not double-sided
@@ -4088,7 +4087,7 @@ TEST_F(LayerTreeHostCommonTest, LayerTransformsInHighDPI) {
   parent->AddChild(child_empty);
   parent->AddChild(child_no_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   float device_scale_factor = 2.5f;
@@ -4226,7 +4225,7 @@ TEST_F(LayerTreeHostCommonTest, SurfaceLayerTransformsInHighDPI) {
   parent->AddChild(scale_surface);
   root->AddChild(parent);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   float device_scale_factor = 2.5f;
@@ -4237,7 +4236,7 @@ TEST_F(LayerTreeHostCommonTest, SurfaceLayerTransformsInHighDPI) {
       root.get(), parent->bounds(), &render_surface_layer_list);
   inputs.device_scale_factor = device_scale_factor;
   inputs.page_scale_factor = page_scale_factor;
-  inputs.page_scale_application_layer = root;
+  inputs.page_scale_application_layer = root.get();
   inputs.can_adjust_raster_scales = true;
   LayerTreeHostCommon::CalculateDrawProperties(&inputs);
 
@@ -4325,7 +4324,7 @@ TEST_F(LayerTreeHostCommonTest,
   parent->AddChild(child);
   parent->AddChild(child_no_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   float device_scale_factor = 1.7f;
@@ -4463,7 +4462,7 @@ TEST_F(LayerTreeHostCommonTest, ContentsScale) {
   parent->AddChild(child_empty);
   parent->AddChild(child_no_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   float device_scale_factor = 2.5f;
@@ -4647,7 +4646,7 @@ TEST_F(LayerTreeHostCommonTest,
   parent->AddChild(child_empty);
   parent->AddChild(child_no_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -4729,7 +4728,7 @@ TEST_F(LayerTreeHostCommonTest, SmallContentsScale) {
 
   parent->AddChild(child_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   float device_scale_factor = 2.5f;
@@ -4877,7 +4876,7 @@ TEST_F(LayerTreeHostCommonTest, ContentsScaleForSurfaces) {
   surface_no_scale->AddChild(surface_no_scale_child_scale);
   surface_no_scale->AddChild(surface_no_scale_child_no_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   SkMScalar device_scale_factor = 5;
@@ -5078,7 +5077,7 @@ TEST_F(LayerTreeHostCommonTest,
   surface_no_scale->AddChild(surface_no_scale_child_scale);
   surface_no_scale->AddChild(surface_no_scale_child_no_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -5221,7 +5220,7 @@ TEST_F(LayerTreeHostCommonTest, ContentsScaleForAnimatingLayer) {
 
   parent->AddChild(child_scale);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // Now put an animating transform on child.
@@ -5266,7 +5265,7 @@ TEST_F(LayerTreeHostCommonTest,
   scoped_refptr<Layer> child = CreateDrawableContentLayer(&delegate);
   root->AddChild(child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   gfx::Transform identity_matrix;
@@ -5360,7 +5359,7 @@ TEST_F(LayerTreeHostCommonTest, RenderSurfaceTransformsInHighDPI) {
   child->AddChild(duplicate_child_non_owner);
   child->SetReplicaLayer(replica.get());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -5495,7 +5494,7 @@ TEST_F(LayerTreeHostCommonTest,
   child->AddChild(duplicate_child_non_owner);
   child->SetReplicaLayer(replica.get());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(parent);
 
   float device_scale_factor = 1.7f;
@@ -5560,22 +5559,22 @@ TEST_F(LayerTreeHostCommonTest, SubtreeSearch) {
   child->SetMaskLayer(mask_layer.get());
   root->AddChild(child.get());
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   int nonexistent_id = -1;
-  EXPECT_EQ(root,
+  EXPECT_EQ(root.get(),
             LayerTreeHostCommon::FindLayerInSubtree(root.get(), root->id()));
-  EXPECT_EQ(child,
+  EXPECT_EQ(child.get(),
             LayerTreeHostCommon::FindLayerInSubtree(root.get(), child->id()));
   EXPECT_EQ(
-      grand_child,
+      grand_child.get(),
       LayerTreeHostCommon::FindLayerInSubtree(root.get(), grand_child->id()));
   EXPECT_EQ(
-      mask_layer,
+      mask_layer.get(),
       LayerTreeHostCommon::FindLayerInSubtree(root.get(), mask_layer->id()));
   EXPECT_EQ(
-      replica_layer,
+      replica_layer.get(),
       LayerTreeHostCommon::FindLayerInSubtree(root.get(), replica_layer->id()));
   EXPECT_EQ(
       0, LayerTreeHostCommon::FindLayerInSubtree(root.get(), nonexistent_id));
@@ -5614,7 +5613,7 @@ TEST_F(LayerTreeHostCommonTest, TransparentChildRenderSurfaceCreation) {
   child->AddChild(grand_child);
   child->SetOpacity(0.5f);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -5707,7 +5706,7 @@ class LCDTextTest
 
     child_->SetForceRenderSurface(std::tr1::get<1>(GetParam()));
 
-    host_ = FakeLayerTreeHost::Create();
+    host_ = CreateFakeLayerTreeHost();
     host_->SetRootLayer(root_);
   }
 
@@ -5863,7 +5862,7 @@ TEST_F(LayerTreeHostCommonTest, SubtreeHidden_SingleLayer) {
   child->AddChild(grand_child);
   root->AddChild(child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -5977,7 +5976,7 @@ TEST_F(LayerTreeHostCommonTest, SubtreeHidden_TwoLayers) {
   child->AddChild(grand_child);
   root->AddChild(child);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -6135,7 +6134,7 @@ TEST_F(LayerTreeHostCommonTest, SubtreeHiddenWithCopyRequest) {
   root->AddChild(copy_grand_parent);
   root->AddChild(copy_grand_parent_sibling_after);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   // Hide the copy_grand_parent and its subtree. But make a copy request in that
@@ -6249,7 +6248,7 @@ TEST_F(LayerTreeHostCommonTest, ClippedOutCopyRequest) {
   copy_parent->AddChild(copy_layer);
   root->AddChild(copy_parent);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   copy_layer->RequestCopyOfOutput(CopyOutputRequest::CreateRequest(
@@ -6313,7 +6312,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleContentRectInsideSurface) {
   surface->AddChild(surface_child);
   root->AddChild(surface);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -6400,7 +6399,7 @@ TEST_F(LayerTreeHostCommonTest, TransformedClipParent) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -6511,7 +6510,7 @@ TEST_F(LayerTreeHostCommonTest, ClipParentWithInterveningRenderSurface) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -6640,7 +6639,7 @@ TEST_F(LayerTreeHostCommonTest, ClipParentScrolledInterveningLayer) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -6749,7 +6748,7 @@ TEST_F(LayerTreeHostCommonTest, DescendantsOfClipChildren) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -6846,7 +6845,7 @@ TEST_F(LayerTreeHostCommonTest,
   render_surface1->SetForceRenderSurface(true);
   render_surface2->SetForceRenderSurface(true);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7002,7 +7001,7 @@ TEST_F(LayerTreeHostCommonTest, DoNotIncludeBackfaceInvisibleSurfaces) {
   render_surface->SetDoubleSided(false);
   render_surface->SetForceRenderSurface(true);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7093,7 +7092,7 @@ TEST_F(LayerTreeHostCommonTest, ClippedByScrollParent) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7142,7 +7141,7 @@ TEST_F(LayerTreeHostCommonTest, SingularTransformSubtreesDoNotDraw) {
                                true);
   child->SetForceRenderSurface(true);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7234,7 +7233,7 @@ TEST_F(LayerTreeHostCommonTest, ClippedByOutOfOrderScrollParent) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7347,7 +7346,7 @@ TEST_F(LayerTreeHostCommonTest, ClippedByOutOfOrderScrollGrandparent) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7362,11 +7361,11 @@ TEST_F(LayerTreeHostCommonTest, ClippedByOutOfOrderScrollGrandparent) {
   // correct clip, the layer lists should be unaffected.
   EXPECT_EQ(3u, root->render_surface()->layer_list().size());
   EXPECT_EQ(scroll_child.get(),
-            root->render_surface()->layer_list().at(0));
+            root->render_surface()->layer_list().at(0).get());
   EXPECT_EQ(scroll_parent.get(),
-            root->render_surface()->layer_list().at(1));
+            root->render_surface()->layer_list().at(1).get());
   EXPECT_EQ(scroll_grandparent.get(),
-            root->render_surface()->layer_list().at(2));
+            root->render_surface()->layer_list().at(2).get());
 }
 
 TEST_F(LayerTreeHostCommonTest, OutOfOrderClippingRequiresRSLLSorting) {
@@ -7496,7 +7495,7 @@ TEST_F(LayerTreeHostCommonTest, OutOfOrderClippingRequiresRSLLSorting) {
                                true,
                                false);
 
-  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  scoped_ptr<FakeLayerTreeHost> host(CreateFakeLayerTreeHost());
   host->SetRootLayer(root);
 
   RenderSurfaceLayerList render_surface_layer_list;
@@ -8557,6 +8556,63 @@ TEST_F(LayerTreeHostCommonTest, DrawPropertyScales) {
                       ->draw_properties()
                       .device_scale_factor);
   EXPECT_FLOAT_EQ(4.f, child2_layer->draw_properties().device_scale_factor);
+}
+
+TEST_F(LayerTreeHostCommonTest, VisibleContentRectInChildRenderSurface) {
+  scoped_refptr<Layer> root = Layer::Create();
+  SetLayerPropertiesForTesting(root.get(),
+                               gfx::Transform(),
+                               gfx::Point3F(),
+                               gfx::PointF(),
+                               gfx::Size(768 / 2, 3000),
+                               true,
+                               false);
+  root->SetIsDrawable(true);
+
+  scoped_refptr<Layer> clip = Layer::Create();
+  SetLayerPropertiesForTesting(clip.get(),
+                               gfx::Transform(),
+                               gfx::Point3F(),
+                               gfx::PointF(),
+                               gfx::Size(768 / 2, 10000),
+                               true,
+                               false);
+  clip->SetMasksToBounds(true);
+
+  scoped_refptr<Layer> content = Layer::Create();
+  SetLayerPropertiesForTesting(content.get(),
+                               gfx::Transform(),
+                               gfx::Point3F(),
+                               gfx::PointF(),
+                               gfx::Size(768 / 2, 10000),
+                               true,
+                               false);
+  content->SetIsDrawable(true);
+  content->SetForceRenderSurface(true);
+
+  root->AddChild(clip);
+  clip->AddChild(content);
+
+  FakeLayerTreeHostClient client(FakeLayerTreeHostClient::DIRECT_3D);
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create(&client);
+  host->SetRootLayer(root);
+
+  gfx::Size device_viewport_size(768, 582);
+  RenderSurfaceLayerList render_surface_layer_list;
+  LayerTreeHostCommon::CalcDrawPropsMainInputsForTesting inputs(
+      host->root_layer(), device_viewport_size, &render_surface_layer_list);
+  inputs.device_scale_factor = 2.f;
+  inputs.page_scale_factor = 1.f;
+  inputs.page_scale_application_layer = NULL;
+  LayerTreeHostCommon::CalculateDrawProperties(&inputs);
+
+  // Layers in the root render surface have their visible content rect clipped
+  // by the viewport.
+  EXPECT_EQ(gfx::Rect(768 / 2, 582 / 2), root->visible_content_rect());
+
+  // Layers drawing to a child render surface should still have their visible
+  // content rect clipped by the viewport.
+  EXPECT_EQ(gfx::Rect(768 / 2, 582 / 2), content->visible_content_rect());
 }
 
 }  // namespace

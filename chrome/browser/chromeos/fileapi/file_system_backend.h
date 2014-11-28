@@ -11,15 +11,17 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "webkit/browser/fileapi/file_system_backend.h"
-#include "webkit/browser/quota/special_storage_policy.h"
-#include "webkit/common/fileapi/file_system_types.h"
+#include "storage/browser/fileapi/file_system_backend.h"
+#include "storage/browser/fileapi/task_runner_bound_observer_list.h"
+#include "storage/browser/quota/special_storage_policy.h"
+#include "storage/common/fileapi/file_system_types.h"
 
-namespace fileapi {
+namespace storage {
 class CopyOrMoveFileValidatorFactory;
 class ExternalMountPoints;
 class FileSystemURL;
-}  // namespace fileapi
+class WatcherManager;
+}  // namespace storage
 
 namespace chromeos {
 
@@ -58,9 +60,9 @@ class FileAccessPermissions;
 //
 //   filesystem:<origin>/external/<mount_name>/...
 //
-class FileSystemBackend : public fileapi::ExternalFileSystemBackend {
+class FileSystemBackend : public storage::ExternalFileSystemBackend {
  public:
-  using fileapi::FileSystemBackend::OpenFileSystemCallback;
+  using storage::FileSystemBackend::OpenFileSystemCallback;
 
   // FileSystemBackend will take an ownership of a |mount_points|
   // reference. On the other hand, |system_mount_points| will be kept as a raw
@@ -71,9 +73,9 @@ class FileSystemBackend : public fileapi::ExternalFileSystemBackend {
       FileSystemBackendDelegate* drive_delegate,
       FileSystemBackendDelegate* file_system_provider_delegate,
       FileSystemBackendDelegate* mtp_delegate,
-      scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy,
-      scoped_refptr<fileapi::ExternalMountPoints> mount_points,
-      fileapi::ExternalMountPoints* system_mount_points);
+      scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
+      scoped_refptr<storage::ExternalMountPoints> mount_points,
+      storage::ExternalMountPoints* system_mount_points);
   virtual ~FileSystemBackend();
 
   // Adds system mount points, such as "archive", and "removable". This
@@ -83,40 +85,50 @@ class FileSystemBackend : public fileapi::ExternalFileSystemBackend {
   // Returns true if CrosMountpointProvider can handle |url|, i.e. its
   // file system type matches with what this provider supports.
   // This could be called on any threads.
-  static bool CanHandleURL(const fileapi::FileSystemURL& url);
+  static bool CanHandleURL(const storage::FileSystemURL& url);
 
-  // fileapi::FileSystemBackend overrides.
-  virtual bool CanHandleType(fileapi::FileSystemType type) const OVERRIDE;
-  virtual void Initialize(fileapi::FileSystemContext* context) OVERRIDE;
-  virtual void ResolveURL(const fileapi::FileSystemURL& url,
-                          fileapi::OpenFileSystemMode mode,
+  // storage::FileSystemBackend overrides.
+  virtual bool CanHandleType(storage::FileSystemType type) const OVERRIDE;
+  virtual void Initialize(storage::FileSystemContext* context) OVERRIDE;
+  virtual void ResolveURL(const storage::FileSystemURL& url,
+                          storage::OpenFileSystemMode mode,
                           const OpenFileSystemCallback& callback) OVERRIDE;
-  virtual fileapi::AsyncFileUtil* GetAsyncFileUtil(
-      fileapi::FileSystemType type) OVERRIDE;
-  virtual fileapi::CopyOrMoveFileValidatorFactory*
-      GetCopyOrMoveFileValidatorFactory(
-          fileapi::FileSystemType type,
-          base::File::Error* error_code) OVERRIDE;
-  virtual fileapi::FileSystemOperation* CreateFileSystemOperation(
-      const fileapi::FileSystemURL& url,
-      fileapi::FileSystemContext* context,
+  virtual storage::AsyncFileUtil* GetAsyncFileUtil(
+      storage::FileSystemType type) OVERRIDE;
+  virtual storage::WatcherManager* GetWatcherManager(
+      storage::FileSystemType type) OVERRIDE;
+  virtual storage::CopyOrMoveFileValidatorFactory*
+      GetCopyOrMoveFileValidatorFactory(storage::FileSystemType type,
+                                        base::File::Error* error_code) OVERRIDE;
+  virtual storage::FileSystemOperation* CreateFileSystemOperation(
+      const storage::FileSystemURL& url,
+      storage::FileSystemContext* context,
       base::File::Error* error_code) const OVERRIDE;
   virtual bool SupportsStreaming(
-      const fileapi::FileSystemURL& url) const OVERRIDE;
-  virtual scoped_ptr<webkit_blob::FileStreamReader> CreateFileStreamReader(
-      const fileapi::FileSystemURL& path,
+      const storage::FileSystemURL& url) const OVERRIDE;
+  virtual bool HasInplaceCopyImplementation(
+      storage::FileSystemType type) const OVERRIDE;
+  virtual scoped_ptr<storage::FileStreamReader> CreateFileStreamReader(
+      const storage::FileSystemURL& path,
       int64 offset,
+      int64 max_bytes_to_read,
       const base::Time& expected_modification_time,
-      fileapi::FileSystemContext* context) const OVERRIDE;
-  virtual scoped_ptr<fileapi::FileStreamWriter> CreateFileStreamWriter(
-      const fileapi::FileSystemURL& url,
+      storage::FileSystemContext* context) const OVERRIDE;
+  virtual scoped_ptr<storage::FileStreamWriter> CreateFileStreamWriter(
+      const storage::FileSystemURL& url,
       int64 offset,
-      fileapi::FileSystemContext* context) const OVERRIDE;
-  virtual fileapi::FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+      storage::FileSystemContext* context) const OVERRIDE;
+  virtual storage::FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+  virtual const storage::UpdateObserverList* GetUpdateObservers(
+      storage::FileSystemType type) const OVERRIDE;
+  virtual const storage::ChangeObserverList* GetChangeObservers(
+      storage::FileSystemType type) const OVERRIDE;
+  virtual const storage::AccessObserverList* GetAccessObservers(
+      storage::FileSystemType type) const OVERRIDE;
 
-  // fileapi::ExternalFileSystemBackend overrides.
-  virtual bool IsAccessAllowed(const fileapi::FileSystemURL& url)
-      const OVERRIDE;
+  // storage::ExternalFileSystemBackend overrides.
+  virtual bool IsAccessAllowed(
+      const storage::FileSystemURL& url) const OVERRIDE;
   virtual std::vector<base::FilePath> GetRootDirectories() const OVERRIDE;
   virtual void GrantFullAccessToExtension(
       const std::string& extension_id) OVERRIDE;
@@ -127,11 +139,14 @@ class FileSystemBackend : public fileapi::ExternalFileSystemBackend {
       const std::string& extension_id) OVERRIDE;
   virtual bool GetVirtualPath(const base::FilePath& filesystem_path,
                               base::FilePath* virtual_path) OVERRIDE;
+  virtual void GetRedirectURLForContents(
+      const storage::FileSystemURL& url,
+      const storage::URLCallback& callback) OVERRIDE;
 
  private:
-  scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
   scoped_ptr<FileAccessPermissions> file_access_permissions_;
-  scoped_ptr<fileapi::AsyncFileUtil> local_file_util_;
+  scoped_ptr<storage::AsyncFileUtil> local_file_util_;
 
   // The delegate instance for the drive file system related operations.
   scoped_ptr<FileSystemBackendDelegate> drive_delegate_;
@@ -153,11 +168,11 @@ class FileSystemBackend : public fileapi::ExternalFileSystemBackend {
   // |file_system_mount_points_| map 'xxx' to '/foo/foo1/xxx', |GetVirtualPaths|
   // will resolve '/foo/foo1/xxx/yyy' as 'foo1/xxx/yyy' (i.e. the mapping from
   // |mount_points_| will be used).
-  scoped_refptr<fileapi::ExternalMountPoints> mount_points_;
+  scoped_refptr<storage::ExternalMountPoints> mount_points_;
 
   // Globally visible mount points. System MountPonts instance should outlive
   // all FileSystemBackend instances, so raw pointer is safe.
-  fileapi::ExternalMountPoints* system_mount_points_;
+  storage::ExternalMountPoints* system_mount_points_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemBackend);
 };

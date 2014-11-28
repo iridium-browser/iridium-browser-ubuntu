@@ -14,6 +14,7 @@ class PrefService;
 
 namespace password_manager {
 
+struct CredentialInfo;
 class PasswordFormManager;
 class PasswordManagerDriver;
 class PasswordStore;
@@ -51,7 +52,8 @@ class PasswordManagerClient {
   // Informs the embedder of a password form that can be saved if the user
   // allows it. The embedder is not required to prompt the user if it decides
   // that this form doesn't need to be saved.
-  virtual void PromptUserToSavePassword(
+  // Returns true if the prompt was indeed displayed.
+  virtual bool PromptUserToSavePassword(
       scoped_ptr<PasswordFormManager> form_to_save) = 0;
 
   // Called when a password is saved in an automated fashion. Embedder may
@@ -113,6 +115,24 @@ class PasswordManagerClient {
   // Only relevant on OSX.
   virtual PasswordStore::AuthorizationPromptPolicy GetAuthorizationPromptPolicy(
       const autofill::PasswordForm& form);
+
+  // Called in response to an IPC from the renderer, triggered by a page's call
+  // to 'navigator.credentials.notifyFailedSignIn'.
+  virtual void OnNotifyFailedSignIn(int request_id, const CredentialInfo&) {}
+
+  // Called in response to an IPC from the renderer, triggered by a page's call
+  // to 'navigator.credentials.notifySignedIn'.
+  virtual void OnNotifySignedIn(int request_id, const CredentialInfo&) {}
+
+  // Called in response to an IPC from the renderer, triggered by a page's call
+  // to 'navigator.credentials.notifySignedOut'.
+  virtual void OnNotifySignedOut(int request_id) {}
+
+  // Called in response to an IPC from the renderer, triggered by a page's call
+  // to 'navigator.credentials.request'.
+  virtual void OnRequestCredential(int request_id,
+                                   bool zero_click_only,
+                                   const std::vector<GURL>& federations) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

@@ -14,9 +14,9 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/tuple.h"
-#include "chrome/browser/content_settings/content_settings_provider.h"
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_pattern.h"
+#include "components/content_settings/core/browser/content_settings_provider.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "extensions/browser/extension_prefs_scope.h"
 
 namespace base {

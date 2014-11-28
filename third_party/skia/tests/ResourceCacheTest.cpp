@@ -7,9 +7,10 @@
 
 #if SK_SUPPORT_GPU
 
+#include "SkCanvas.h"
 #include "GrContextFactory.h"
 #include "GrResourceCache.h"
-#include "SkGpuDevice.h"
+#include "SkSurface.h"
 #include "Test.h"
 
 static const int gWidth = 640;
@@ -69,11 +70,12 @@ public:
         , fToDelete(NULL)
         , fSize(size) {
         ++fAlive;
+        this->registerWithCache();
     }
 
     ~TestResource() {
         --fAlive;
-        if (NULL != fToDelete) {
+        if (fToDelete) {
             // Breaks our little 2-element cycle below.
             fToDelete->setDeleteWhenDestroyed(NULL, NULL);
             fCache->deleteResource(fToDelete->getCacheEntry());
@@ -273,7 +275,7 @@ static void test_resource_size_changed(skiatest::Reporter* reporter,
 
         REPORTER_ASSERT(reporter, 300 == cache.getCachedResourceBytes());
         REPORTER_ASSERT(reporter, 2 == cache.getCachedResourceCount());
-        REPORTER_ASSERT(reporter, NULL != cache.find(key1));
+        REPORTER_ASSERT(reporter, cache.find(key1));
         // Internal resource cache validation will test the detached size (debug mode only).
     }
 }
@@ -295,12 +297,10 @@ DEF_GPUTEST(ResourceCache, reporter, factory) {
         desc.fFlags = kRenderTarget_GrTextureFlagBit;
         desc.fWidth = gWidth;
         desc.fHeight = gHeight;
+        SkImageInfo info = SkImageInfo::MakeN32Premul(gWidth, gHeight);
+        SkAutoTUnref<SkSurface> surface(SkSurface::NewRenderTarget(context, info));
 
-        SkAutoTUnref<GrTexture> texture(context->createUncachedTexture(desc, NULL, 0));
-        SkAutoTUnref<SkGpuDevice> device(SkNEW_ARGS(SkGpuDevice, (context, texture.get())));
-        SkCanvas canvas(device.get());
-
-        test_cache(reporter, context, &canvas);
+        test_cache(reporter, context, surface->getCanvas());
         test_purge_invalidated(reporter, context);
         test_cache_delete_on_destruction(reporter, context);
         test_resource_size_changed(reporter, context);

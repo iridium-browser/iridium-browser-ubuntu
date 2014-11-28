@@ -48,9 +48,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   explicit EmbeddedWorkerTestHelper(int mock_render_process_id);
   virtual ~EmbeddedWorkerTestHelper();
 
-  // Call this to simulate add/associate a process to a worker.
+  // Call this to simulate add/associate a process to a pattern.
   // This also registers this sender for the process.
-  void SimulateAddProcessToWorker(int embedded_worker_id, int process_id);
+  void SimulateAddProcessToPattern(const GURL& pattern, int process_id);
 
   // IPC::Sender implementation.
   virtual bool Send(IPC::Message* message) OVERRIDE;
@@ -102,8 +102,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   // These functions simulate sending an EmbeddedHostMsg message to the
   // browser.
   void SimulatePausedAfterDownload(int embedded_worker_id);
-  void SimulateWorkerScriptLoaded(int embedded_worker_id);
-  void SimulateWorkerStarted(int thread_id, int embedded_worker_id);
+  void SimulateWorkerReadyForInspection(int embedded_worker_id);
+  void SimulateWorkerScriptLoaded(int thread_id, int embedded_worker_id);
+  void SimulateWorkerStarted(int embedded_worker_id);
   void SimulateWorkerStopped(int embedded_worker_id);
   void SimulateSend(IPC::Message* message);
 

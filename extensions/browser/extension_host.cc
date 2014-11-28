@@ -200,7 +200,7 @@ const GURL& ExtensionHost::GetURL() const {
 
 void ExtensionHost::LoadInitialURL() {
   host_contents_->GetController().LoadURL(
-      initial_url_, content::Referrer(), content::PAGE_TRANSITION_LINK,
+      initial_url_, content::Referrer(), ui::PAGE_TRANSITION_LINK,
       std::string());
 }
 
@@ -426,6 +426,14 @@ void ExtensionHost::RequestMediaAccessPermission(
     const content::MediaResponseCallback& callback) {
   delegate_->ProcessMediaAccessRequest(
       web_contents, request, callback, extension());
+}
+
+bool ExtensionHost::CheckMediaAccessPermission(
+    content::WebContents* web_contents,
+    const GURL& security_origin,
+    content::MediaStreamType type) {
+  return delegate_->CheckMediaAccessPermission(
+      web_contents, security_origin, type, extension());
 }
 
 bool ExtensionHost::IsNeverVisible(content::WebContents* web_contents) {

@@ -30,6 +30,8 @@
 #include "core/dom/Document.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLTableElement.h"
+#include "core/paint/BoxPainter.h"
+#include "core/paint/TablePainter.h"
 #include "core/rendering/AutoTableLayout.h"
 #include "core/rendering/FixedTableLayout.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
@@ -411,7 +413,7 @@ void RenderTable::layout()
 
     SubtreeLayoutScope layouter(*this);
 
-    // If any table section moved vertically, we will just repaint everything from that
+    // If any table section moved vertically, we will just issue paint invalidations for everything from that
     // section down (it is quite unlikely that any of the following sections
     // did not shift).
     bool sectionMoved = false;
@@ -585,7 +587,6 @@ void RenderTable::recalcCollapsedBorders()
     RenderTableCell::sortBorderValues(m_collapsedBorders);
 }
 
-
 void RenderTable::addOverflowFromChildren()
 {
     // Add overflow from borders.
@@ -614,75 +615,12 @@ void RenderTable::addOverflowFromChildren()
 
 void RenderTable::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, this);
-
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
-
-    PaintPhase paintPhase = paintInfo.phase;
-
-    if (!isDocumentElement()) {
-        LayoutRect overflowBox = visualOverflowRect();
-        flipForWritingMode(overflowBox);
-        overflowBox.moveBy(adjustedPaintOffset);
-        if (!overflowBox.intersects(paintInfo.rect))
-            return;
-    }
-
-    bool pushedClip = pushContentsClip(paintInfo, adjustedPaintOffset, ForceContentsClip);
-    paintObject(paintInfo, adjustedPaintOffset);
-    if (pushedClip)
-        popContentsClip(paintInfo, paintPhase, adjustedPaintOffset);
+    TablePainter(*this).paint(paintInfo, paintOffset);
 }
 
 void RenderTable::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    PaintPhase paintPhase = paintInfo.phase;
-    if ((paintPhase == PaintPhaseBlockBackground || paintPhase == PaintPhaseChildBlockBackground) && hasBoxDecorationBackground() && style()->visibility() == VISIBLE)
-        paintBoxDecorationBackground(paintInfo, paintOffset);
-
-    if (paintPhase == PaintPhaseMask) {
-        paintMask(paintInfo, paintOffset);
-        return;
-    }
-
-    // We're done.  We don't bother painting any children.
-    if (paintPhase == PaintPhaseBlockBackground)
-        return;
-
-    // We don't paint our own background, but we do let the kids paint their backgrounds.
-    if (paintPhase == PaintPhaseChildBlockBackgrounds)
-        paintPhase = PaintPhaseChildBlockBackground;
-
-    PaintInfo info(paintInfo);
-    info.phase = paintPhase;
-    info.updatePaintingRootForChildren(this);
-
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
-        if (child->isBox() && !toRenderBox(child)->hasSelfPaintingLayer() && (child->isTableSection() || child->isTableCaption())) {
-            LayoutPoint childPoint = flipForWritingModeForChild(toRenderBox(child), paintOffset);
-            child->paint(info, childPoint);
-        }
-    }
-
-    if (collapseBorders() && paintPhase == PaintPhaseChildBlockBackground && style()->visibility() == VISIBLE) {
-        recalcCollapsedBorders();
-        // Using our cached sorted styles, we then do individual passes,
-        // painting each style of border from lowest precedence to highest precedence.
-        info.phase = PaintPhaseCollapsedTableBorders;
-        size_t count = m_collapsedBorders.size();
-        for (size_t i = 0; i < count; ++i) {
-            m_currentBorder = &m_collapsedBorders[i];
-            for (RenderTableSection* section = bottomSection(); section; section = sectionAbove(section)) {
-                LayoutPoint childPoint = flipForWritingModeForChild(section, paintOffset);
-                section->paint(info, childPoint);
-            }
-        }
-        m_currentBorder = 0;
-    }
-
-    // Paint outline.
-    if ((paintPhase == PaintPhaseOutline || paintPhase == PaintPhaseSelfOutline) && hasOutline() && style()->visibility() == VISIBLE)
-        paintOutline(paintInfo, LayoutRect(paintOffset, size()));
+    TablePainter(*this).paintObject(paintInfo, paintOffset);
 }
 
 void RenderTable::subtractCaptionRect(LayoutRect& rect) const
@@ -704,23 +642,12 @@ void RenderTable::subtractCaptionRect(LayoutRect& rect) const
 
 void RenderTable::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (!paintInfo.shouldPaintWithinRoot(this))
-        return;
-
-    LayoutRect rect(paintOffset, size());
-    subtractCaptionRect(rect);
-    paintBoxDecorationBackgroundWithRect(paintInfo, paintOffset, rect);
+    TablePainter(*this).paintBoxDecorationBackground(paintInfo, paintOffset);
 }
 
 void RenderTable::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (style()->visibility() != VISIBLE || paintInfo.phase != PaintPhaseMask)
-        return;
-
-    LayoutRect rect(paintOffset, size());
-    subtractCaptionRect(rect);
-
-    paintMaskImages(paintInfo, rect);
+    TablePainter(*this).paintMask(paintInfo, paintOffset);
 }
 
 void RenderTable::computeIntrinsicLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth) const

@@ -25,8 +25,10 @@
 #include "config.h"
 #include "core/dom/Node.h"
 
+#include "bindings/core/v8/DOMDataStore.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptCallStackFactory.h"
+#include "bindings/core/v8/V8DOMWrapper.h"
 #include "core/HTMLNames.h"
 #include "core/XMLNames.h"
 #include "core/accessibility/AXObjectCache.h"
@@ -75,6 +77,7 @@
 #include "core/events/WheelEvent.h"
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLDialogElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
@@ -82,7 +85,6 @@
 #include "core/page/ContextMenuController.h"
 #include "core/page/EventHandler.h"
 #include "core/page/Page.h"
-#include "core/frame/Settings.h"
 #include "core/rendering/FlowThreadController.h"
 #include "core/rendering/RenderBox.h"
 #include "core/svg/graphics/SVGImage.h"
@@ -268,7 +270,6 @@ Node::Node(TreeScope* treeScope, ConstructionType type)
     , m_next(nullptr)
 {
     ASSERT(m_treeScope || type == CreateDocument || type == CreateShadowRoot);
-    ScriptWrappable::init(this);
 #if !ENABLE(OILPAN)
     if (m_treeScope)
         m_treeScope->guardRef();
@@ -505,6 +506,8 @@ void Node::remove(ExceptionState& exceptionState)
 
 void Node::normalize()
 {
+    document().updateDistributionForNodeIfNeeded(this);
+
     // Go through the subtree beneath us, normalizing all nodes. This means that
     // any two adjacent text nodes are merged and any empty text nodes are removed.
 
@@ -587,7 +590,7 @@ bool Node::isEditableToAccessibility(EditableLevel editableLevel) const
     if (editableLevel == RichlyEditable)
         return false;
 
-    ASSERT(AXObjectCache::accessibilityEnabled());
+    ASSERT(document().settings() && document().settings()->accessibilityEnabled());
     ASSERT(document().existingAXObjectCache());
 
     if (AXObjectCache* cache = document().existingAXObjectCache())
@@ -1602,34 +1605,6 @@ unsigned short Node::compareDocumentPosition(const Node* otherNode, ShadowTreesT
                DOCUMENT_POSITION_PRECEDING | DOCUMENT_POSITION_CONTAINS | connection;
 }
 
-FloatPoint Node::convertToPage(const FloatPoint& p) const
-{
-    // If there is a renderer, just ask it to do the conversion
-    if (renderer())
-        return renderer()->localToAbsolute(p, UseTransforms);
-
-    // Otherwise go up the tree looking for a renderer
-    if (Element* parent = parentElement())
-        return parent->convertToPage(p);
-
-    // No parent - no conversion needed
-    return p;
-}
-
-FloatPoint Node::convertFromPage(const FloatPoint& p) const
-{
-    // If there is a renderer, just ask it to do the conversion
-    if (renderer())
-        return renderer()->absoluteToLocal(p, UseTransforms);
-
-    // Otherwise go up the tree looking for a renderer
-    if (Element* parent = parentElement())
-        return parent->convertFromPage(p);
-
-    // No parent - no conversion needed
-    return p;
-}
-
 String Node::debugName() const
 {
     StringBuilder name;
@@ -1669,9 +1644,9 @@ static void appendAttributeDesc(const Node* node, StringBuilder& stringBuilder, 
         return;
 
     stringBuilder.append(attrDesc);
-    stringBuilder.append("=\"");
+    stringBuilder.appendLiteral("=\"");
     stringBuilder.append(attr);
-    stringBuilder.append("\"");
+    stringBuilder.appendLiteral("\"");
 }
 
 void Node::showNode(const char* prefix) const
@@ -1876,7 +1851,8 @@ void Node::didMoveToNewDocument(Document& oldDocument)
         }
     }
 
-    if (AXObjectCache::accessibilityEnabled()) {
+    Settings* settings = document().settings();
+    if (settings && settings->accessibilityEnabled()) {
         if (AXObjectCache* cache = oldDocument.existingAXObjectCache())
             cache->remove(this);
     }
@@ -2492,6 +2468,30 @@ unsigned Node::lengthOfContents() const
     }
     ASSERT_NOT_REACHED();
     return 0;
+}
+
+v8::Handle<v8::Object> Node::wrap(v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
+{
+    // It's possible that no one except for the new wrapper owns this object at
+    // this moment, so we have to prevent GC to collect this object until the
+    // object gets associated with the wrapper.
+    RefPtrWillBeRawPtr<Node> protect(this);
+
+    ASSERT(!DOMDataStore::containsWrapperNonTemplate(this, isolate));
+
+    const WrapperTypeInfo* wrapperType = wrapperTypeInfo();
+
+    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(creationContext, wrapperType, toScriptWrappableBase(), isolate);
+    if (UNLIKELY(wrapper.IsEmpty()))
+        return wrapper;
+
+    wrapperType->installConditionallyEnabledProperties(wrapper, isolate);
+    return associateWithWrapper(wrapperType, wrapper, isolate);
+}
+
+v8::Handle<v8::Object> Node::associateWithWrapper(const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate)
+{
+    return V8DOMWrapper::associateObjectWithWrapperNonTemplate(this, wrapperType, wrapper, isolate);
 }
 
 } // namespace blink

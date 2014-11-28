@@ -9,12 +9,20 @@ cr.define('options', function() {
   /**
    * Encapsulated handling of a search bubble.
    * @constructor
+   * @extends {HTMLDivElement}
    */
   function SearchBubble(text) {
     var el = cr.doc.createElement('div');
     SearchBubble.decorate(el);
     el.content = text;
     return el;
+  }
+
+  /**
+   * Prohibit search for guests on desktop.
+   */
+  function ShouldEnableSearch() {
+    return !loadTimeData.getBoolean('profileIsGuest') || cr.isChromeOS;
   }
 
   SearchBubble.decorate = function(el) {
@@ -113,6 +121,7 @@ cr.define('options', function() {
   /**
    * Encapsulated handling of the search page.
    * @constructor
+   * @extends {cr.ui.pageManager.Page}
    */
   function SearchPage() {
     Page.call(this, 'search',
@@ -155,24 +164,24 @@ cr.define('options', function() {
       return true;
     },
 
-    /**
-     * Called after this page has shown.
-     */
+    /** @override */
     didShowPage: function() {
-      // This method is called by the Options page after all pages have
-      // had their visibilty attribute set.  At this point we can perform the
-      // search specific DOM manipulation.
+      // This method is called by the PageManager after all pages have had their
+      // visibility attribute set. At this point we can perform the
+      // search-specific DOM manipulation.
       this.setSearchActive_(true);
     },
 
-    /**
-     * Called before this page will be hidden.
-     */
+    /** @override */
+    didChangeHash: function() {
+      this.setSearchActive_(true);
+    },
+
+    /** @override */
     willHidePage: function() {
-      // This method is called by the Options page before all pages have
-      // their visibilty attribute set.  Before that happens, we need to
-      // undo the search specific DOM manipulation that was performed in
-      // didShowPage.
+      // This method is called by the PageManager before all pages have their
+      // visibility attribute set. Before that happens, we need to undo the
+      // search-specific DOM manipulation that was performed in didShowPage.
       this.setSearchActive_(false);
     },
 
@@ -187,14 +196,13 @@ cr.define('options', function() {
       if (!this.searchActive_ && !active)
         return;
 
-      // Guest users should never have active search.
-      if (loadTimeData.getBoolean('profileIsGuest'))
+      if (!ShouldEnableSearch())
         return;
 
       this.searchActive_ = active;
 
       if (active) {
-        var hash = location.hash;
+        var hash = this.hash;
         if (hash) {
           this.searchField.value =
               decodeURIComponent(hash.slice(1).replace(/\+/g, ' '));
@@ -213,6 +221,8 @@ cr.define('options', function() {
           for (var i = 0, section; section = this.advancedSections_[i]; i++)
             $('settings').appendChild(section);
         }
+      } else {
+        this.searchField.value = '';
       }
 
       var pagesToSearch = this.getSearchablePages_();
@@ -264,8 +274,7 @@ cr.define('options', function() {
      * @private
      */
     setSearchText_: function(text) {
-      // Guest users should never have search text.
-      if (loadTimeData.getBoolean('profileIsGuest'))
+      if (!ShouldEnableSearch())
         return;
 
       // Prevent recursive execution of this method.
@@ -275,23 +284,21 @@ cr.define('options', function() {
       // Cleanup the search query string.
       text = SearchPage.canonicalizeQuery(text);
 
-      // Set the hash on the current page, and the enclosing uber page. Only do
-      // this if the page is not current. See https://crbug.com/401004.
-      var hash = text ? '#' + encodeURIComponent(text) : '';
-      var path = text ? this.name : '';
-      if (location.hash != hash || location.pathname != '/' + path)
-        uber.pushState({}, path + hash);
-
-      // Toggle the search page if necessary.
-      if (text) {
-        if (!this.searchActive_)
-          PageManager.showPageByName(this.name, false);
-      } else {
+      // If the search string becomes empty, flip back to the default page.
+      if (!text) {
         if (this.searchActive_)
-          PageManager.showDefaultPage(false);
-
+          PageManager.showDefaultPage();
         this.insideSetSearchText_ = false;
         return;
+      }
+
+      // Toggle the search page if necessary. Otherwise, update the hash.
+      var hash = '#' + encodeURIComponent(text);
+      if (this.searchActive_) {
+        if (this.hash != hash)
+          this.setHash(hash);
+      } else {
+        PageManager.showPageByName(this.name, true, {hash: hash});
       }
 
       var foundMatches = false;
@@ -354,7 +361,7 @@ cr.define('options', function() {
       $('searchPageNoMatches').hidden = foundMatches;
 
       // Create search balloons for sub-page results.
-      length = bubbleControls.length;
+      var length = bubbleControls.length;
       for (var i = 0; i < length; i++)
         this.createSearchBubble_(bubbleControls[i], text);
 
@@ -539,7 +546,7 @@ cr.define('options', function() {
 
     /**
      * A function to handle key press events.
-     * @return {Event} a keydown event.
+     * @param {Event} event A keydown event.
      * @private
      */
     keyDownEventHandler_: function(event) {
@@ -569,7 +576,7 @@ cr.define('options', function() {
 
   /**
    * Standardizes a user-entered text query by removing extra whitespace.
-   * @param {string} The user-entered text.
+   * @param {string} text The user-entered text.
    * @return {string} The trimmed query.
    */
   SearchPage.canonicalizeQuery = function(text) {

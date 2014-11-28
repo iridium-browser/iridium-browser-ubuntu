@@ -4,7 +4,7 @@
 
 #include "base/auto_reset.h"
 #include "base/callback.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_writer.h"
 #include "base/numerics/safe_conversions.h"
@@ -28,6 +28,7 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
+#include "extensions/test/result_catcher.h"
 #include "media/base/test_data_util.h"
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
@@ -468,7 +469,7 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppPpapiTest, SendFilesystem) {
   const extensions::Extension* extension = LoadExtension(app_dir());
   ASSERT_TRUE(extension);
 
-  ResultCatcher catcher;
+  extensions::ResultCatcher catcher;
   AppLaunchParams params(browser()->profile(),
                          extension,
                          extensions::LAUNCH_CONTAINER_NONE,
@@ -514,8 +515,9 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
   ASSERT_TRUE(RunMediaGalleriesTest("no_galleries_copy_to")) << message_;
 }
 
+// Test is flaky. crbug.com/416128
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
-                       MediaGalleriesRead) {
+                       DISABLED_MediaGalleriesRead) {
   RemoveAllGalleries();
   MakeSingleFakeGallery(NULL);
   base::ListValue custom_args;

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/search/hotword_service.h"
 
+#include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
@@ -19,9 +20,12 @@
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service_factory.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
@@ -30,7 +34,6 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/one_shot_event.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::BrowserContextKeyedAPIFactory;
@@ -140,14 +143,15 @@ ExtensionService* GetExtensionService(Profile* profile) {
 }
 
 std::string GetCurrentLocale(Profile* profile) {
-  std::string locale =
 #if defined(OS_CHROMEOS)
-      // On ChromeOS locale is per-profile.
+  std::string profile_locale =
       profile->GetPrefs()->GetString(prefs::kApplicationLocale);
-#else
-      g_browser_process->GetApplicationLocale();
+  if (!profile_locale.empty()) {
+    // On ChromeOS locale is per-profile, but only if set.
+    return profile_locale;
+  }
 #endif
-  return locale;
+  return g_browser_process->GetApplicationLocale();
 }
 
 }  // namespace
@@ -171,6 +175,12 @@ bool HotwordService::DoesHotwordSupportLanguage(Profile* profile) {
       return true;
   }
   return false;
+}
+
+// static
+bool HotwordService::IsExperimentalHotwordingEnabled() {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  return command_line->HasSwitch(switches::kEnableExperimentalHotwording);
 }
 
 HotwordService::HotwordService(Profile* profile)
@@ -374,8 +384,16 @@ bool HotwordService::IsServiceAvailable() {
   ExtensionService* service = system->extension_service();
   // Include disabled extensions (true parameter) since it may not be enabled
   // if the user opted out.
+  std::string extensionId;
+  if (IsExperimentalHotwordingEnabled()) {
+    // TODO(amistry): Handle reloading on language change as the old extension
+    // does.
+    extensionId = extension_misc::kHotwordSharedModuleId;
+  } else {
+    extensionId = extension_misc::kHotwordExtensionId;
+  }
   const extensions::Extension* extension =
-      service->GetExtensionById(extension_misc::kHotwordExtensionId, true);
+      service->GetExtensionById(extensionId, true);
   if (!extension)
     error_message_ = IDS_HOTWORD_GENERIC_ERROR_MESSAGE;
 
@@ -435,6 +453,27 @@ void HotwordService::DisableHotwordExtension(
   }
 }
 
+void HotwordService::LaunchHotwordAudioVerificationApp(
+    const LaunchMode& launch_mode) {
+  hotword_audio_verification_launch_mode_ = launch_mode;
+
+  ExtensionService* extension_service = GetExtensionService(profile_);
+  if (!extension_service)
+    return;
+  const extensions::Extension* extension = extension_service->GetExtensionById(
+      extension_misc::kHotwordAudioVerificationAppId, true);
+  if (!extension)
+    return;
+
+  OpenApplication(AppLaunchParams(
+      profile_, extension, extensions::LAUNCH_CONTAINER_WINDOW, NEW_WINDOW));
+}
+
+HotwordService::LaunchMode
+HotwordService::GetHotwordAudioVerificationLaunchMode() {
+  return hotword_audio_verification_launch_mode_;
+}
+
 void HotwordService::OnHotwordSearchEnabledChanged(
     const std::string& pref_name) {
   DCHECK_EQ(pref_name, std::string(prefs::kHotwordSearchEnabled));
@@ -447,7 +486,7 @@ void HotwordService::OnHotwordSearchEnabledChanged(
 }
 
 void HotwordService::RequestHotwordSession(HotwordClient* client) {
-  if (!IsServiceAvailable() || client_)
+  if (!IsServiceAvailable() || (client_ && client_ != client))
     return;
 
   client_ = client;

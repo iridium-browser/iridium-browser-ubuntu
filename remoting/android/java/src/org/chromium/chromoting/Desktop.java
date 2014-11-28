@@ -47,8 +47,8 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.desktop);
-        mRemoteHostDesktop = (DesktopView)findViewById(R.id.desktop_view);
-        mOverlayButton = (ImageButton)findViewById(R.id.desktop_overlay_button);
+        mRemoteHostDesktop = (DesktopView) findViewById(R.id.desktop_view);
+        mOverlayButton = (ImageButton) findViewById(R.id.desktop_overlay_button);
         mRemoteHostDesktop.setDesktop(this);
 
         // Ensure the button is initially hidden.
@@ -142,7 +142,7 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
 
     public void showActionBar() {
         mOverlayButton.setVisibility(View.INVISIBLE);
-        getActionBar().show();
+        getSupportActionBar().show();
 
         View decorView = getWindow().getDecorView();
         decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
@@ -151,7 +151,7 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
     @SuppressLint("InlinedApi")
     public void hideActionBar() {
         mOverlayButton.setVisibility(View.VISIBLE);
-        getActionBar().hide();
+        getSupportActionBar().hide();
 
         View decorView = getWindow().getDecorView();
 
@@ -184,7 +184,7 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         mActivityLifecycleListener.onActivityOptionsItemSelected(this, item);
 
         if (id == R.id.actionbar_keyboard) {
-            ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).toggleSoftInput(0, 0);
+            ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).toggleSoftInput(0, 0);
             return true;
         }
         if (id == R.id.actionbar_hide) {

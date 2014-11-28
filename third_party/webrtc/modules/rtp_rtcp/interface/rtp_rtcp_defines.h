@@ -63,6 +63,11 @@ enum RTPAliveType
     kRtpAlive  = 2
 };
 
+enum ProtectionType {
+  kUnprotectedPacket,
+  kProtectedPacket
+};
+
 enum StorageType {
   kDontStore,
   kDontRetransmit,
@@ -355,7 +360,7 @@ class NullRtpData : public RtpData {
   }
 
   virtual bool OnRecoveredPacket(const uint8_t* packet,
-                                 int packet_length) {
+                                 int packet_length) OVERRIDE {
     return true;
   }
 };

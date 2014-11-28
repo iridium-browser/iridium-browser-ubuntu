@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
@@ -436,7 +436,7 @@ void UserImageManagerImpl::Job::SaveImageAndUpdateLocalState() {
   image_path_ = user_data_dir.Append(user_id() + kSafeImagePathExtension);
 
   base::PostTaskAndReplyWithResult(
-      parent_->background_task_runner_,
+      parent_->background_task_runner_.get(),
       FROM_HERE,
       base::Bind(&SaveImage, user_image_, image_path_),
       base::Bind(&Job::OnSaveImageDone, weak_factory_.GetWeakPtr()));

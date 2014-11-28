@@ -121,7 +121,7 @@ SearchBox.AutocompleteListItem_ = function(document, item) {
     var iconType = FileType.getIcon(item.entry);
     icon.setAttribute('file-type-icon', iconType);
     // highlightedBaseName is a piece of HTML with meta characters properly
-    // escaped. See the comment at fileBrowserPrivate.searchDriveMetadata().
+    // escaped. See the comment at fileManagerPrivate.searchDriveMetadata().
     text.innerHTML = item.highlightedBaseName;
   }
   li.appendChild(icon);
@@ -195,5 +195,5 @@ SearchBox.prototype.onDragEnd_ = function() {
  */
 SearchBox.prototype.updateStyles_ = function() {
   this.element.classList.toggle('has-text',
-                                 !!this.inputElement.value);
+                                !!this.inputElement.value);
 };

@@ -52,7 +52,6 @@ using namespace HTMLNames;
 inline HTMLVideoElement::HTMLVideoElement(Document& document)
     : HTMLMediaElement(videoTag, document)
 {
-    ScriptWrappable::init(this);
     if (document.settings())
         m_defaultPosterURL = AtomicString(document.settings()->defaultVideoPosterURL());
 }
@@ -129,8 +128,9 @@ void HTMLVideoElement::parseAttribute(const QualifiedName& name, const AtomicStr
         // Notify the player when the poster image URL changes.
         if (webMediaPlayer())
             webMediaPlayer()->setPoster(posterImageURL());
-    } else
+    } else {
         HTMLMediaElement::parseAttribute(name, value);
+    }
 }
 
 bool HTMLVideoElement::supportsFullscreen() const
@@ -138,7 +138,7 @@ bool HTMLVideoElement::supportsFullscreen() const
     if (!document().page())
         return false;
 
-    if (!player())
+    if (!webMediaPlayer())
         return false;
 
     return true;
@@ -205,7 +205,8 @@ void HTMLVideoElement::paintCurrentFrameInContext(GraphicsContext* context, cons
         return;
 
     WebCanvas* canvas = context->canvas();
-    webMediaPlayer()->paint(canvas, destRect, context->getNormalizedAlpha());
+    SkXfermode::Mode mode = WebCoreCompositeToSkiaComposite(context->compositeOperation(), context->blendModeOperation());
+    webMediaPlayer()->paint(canvas, destRect, context->getNormalizedAlpha(), mode);
 }
 
 bool HTMLVideoElement::copyVideoTextureToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLint level, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
@@ -213,7 +214,7 @@ bool HTMLVideoElement::copyVideoTextureToPlatformTexture(WebGraphicsContext3D* c
     if (!webMediaPlayer())
         return false;
 
-    if (!Extensions3DUtil::canUseCopyTextureCHROMIUM(internalFormat, type, level) || !context->makeContextCurrent())
+    if (!Extensions3DUtil::canUseCopyTextureCHROMIUM(internalFormat, type, level))
         return false;
 
     return webMediaPlayer()->copyVideoTextureToPlatformTexture(context, texture, level, internalFormat, type, premultiplyAlpha, flipY);

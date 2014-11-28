@@ -36,13 +36,6 @@
 #include "platform/heap/Handle.h"
 #include <v8.h>
 
-// Helper to call webCoreInitializeScriptWrappableForInterface in the global namespace.
-template <class C> inline void initializeScriptWrappableHelper(C* object)
-{
-    void webCoreInitializeScriptWrappableForInterface(C*);
-    webCoreInitializeScriptWrappableForInterface(object);
-}
-
 namespace blink {
 
 /**
@@ -52,79 +45,95 @@ namespace blink {
  * and its conversions from / to the DOM instances.
  *
  * Note that this class must not have vtbl (any virtual function) or any member
- * variable which increase the size of instances.  Some of the classes sensitive
- * to the size inherit from this class.  So this class must be zero size.
+ * variable which increase the size of instances. Some of the classes sensitive
+ * to the size inherit from this class. So this class must be zero size.
  */
+#if COMPILER(MSVC)
+// VC++ 2013 doesn't support EBCO (Empty Base Class Optimization). It causes
+// that not always pointers to an empty base class are aligned to 4 byte
+// alignment. For example,
+//
+//   class EmptyBase1 {};
+//   class EmptyBase2 {};
+//   class Derived : public EmptyBase1, public EmptyBase2 {};
+//   Derived d;
+//   // &d                           == 0x1000
+//   // static_cast<EmptyBase1*>(&d) == 0x1000
+//   // static_cast<EmptyBase2*>(&d) == 0x1001  // Not 4 byte alignment!
+//
+// This doesn't happen with other compilers which support EBCO. All the
+// addresses in the above example will be 0x1000 with EBCO supported.
+//
+// Since v8::Object::SetAlignedPointerInInternalField requires the pointers to
+// be aligned, we need a hack to specify at least 4 byte alignment to MSVC.
+__declspec(align(4))
+#endif
 class ScriptWrappableBase {
 public:
-    template <class T> static T* fromInternalPointer(ScriptWrappableBase* internalPointer)
+    template<typename T>
+    T* toImpl()
     {
         // Check if T* is castable to ScriptWrappableBase*, which means T
         // doesn't have two or more ScriptWrappableBase as superclasses.
         // If T has two ScriptWrappableBase as superclasses, conversions
         // from T* to ScriptWrappableBase* are ambiguous.
-        ASSERT(static_cast<ScriptWrappableBase*>(static_cast<T*>(internalPointer)));
-        return static_cast<T*>(internalPointer);
+        ASSERT(static_cast<ScriptWrappableBase*>(static_cast<T*>(this)));
+        // The internal pointers must be aligned to at least 4 byte alignment.
+        ASSERT((reinterpret_cast<intptr_t>(this) & 0x3) == 0);
+        return static_cast<T*>(this);
     }
-    ScriptWrappableBase* toInternalPointer() { return this; }
+    ScriptWrappableBase* toScriptWrappableBase()
+    {
+        // The internal pointers must be aligned to at least 4 byte alignment.
+        ASSERT((reinterpret_cast<intptr_t>(this) & 0x3) == 0);
+        return this;
+    }
+
+    void assertWrapperSanity(v8::Local<v8::Object> object)
+    {
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(object.IsEmpty()
+            || object->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == toScriptWrappableBase());
+    }
 };
 
 /**
  * ScriptWrappable wraps a V8 object and its WrapperTypeInfo.
  *
  * ScriptWrappable acts much like a v8::Persistent<> in that it keeps a
- * V8 object alive. Under the hood, however, it keeps either a TypeInfo
- * object or an actual v8 persistent (or is empty).
- *
- * The physical state space of ScriptWrappable is:
- * - uintptr_t m_wrapperOrTypeInfo;
- *   - if 0: the ScriptWrappable is uninitialized/empty.
- *   - if even: a pointer to blink::TypeInfo
- *   - if odd: a pointer to v8::Persistent<v8::Object> + 1.
- *
- * In other words, one integer represents one of two object pointers,
- * depending on its least signficiant bit, plus an uninitialized state.
- * This class is meant to mask the logistics behind this.
- *
- * typeInfo() and newLocalWrapper will return appropriate values (possibly
- * 0/empty) in all physical states.
+ * V8 object alive.
  *
  *  The state transitions are:
- *  - new: an empty and invalid ScriptWrappable.
- *  - init (to be called by all subclasses in their constructor):
- *        needs to call setTypeInfo
- *  - setTypeInfo: install a WrapperTypeInfo
+ *  - new: an empty ScriptWrappable.
  *  - setWrapper: install a v8::Persistent (or empty)
  *  - disposeWrapper (via setWeakCallback, triggered by V8 garbage collecter):
- *        remove v8::Persistent and install a TypeInfo of the previous value.
+ *        remove v8::Persistent and become empty.
  */
 class ScriptWrappable : public ScriptWrappableBase {
 public:
-    ScriptWrappable() : m_wrapperOrTypeInfo(0) { }
+    ScriptWrappable() : m_wrapper(0) { }
 
-    // Wrappables need to be initialized with their most derrived type for which
-    // bindings exist, in much the same way that certain other types need to be
-    // adopted and so forth. The overloaded initializeScriptWrappableForInterface()
-    // functions are implemented by the generated V8 bindings code. Declaring the
-    // extern function in the template avoids making a centralized header of all
-    // the bindings in the universe. C++11's extern template feature may provide
-    // a cleaner solution someday.
-    template <class C> static void init(C* object)
-    {
-        initializeScriptWrappableHelper(object);
-    }
+    // Returns the WrapperTypeInfo of the instance.
+    //
+    // This method must be overridden by DEFINE_WRAPPERTYPEINFO macro.
+    virtual const WrapperTypeInfo* wrapperTypeInfo() const = 0;
 
-    void setWrapper(v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperConfiguration& configuration)
+    // Creates and returns a new wrapper object.
+    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*);
+
+    // Associates the instance with the existing wrapper. Returns |wrapper|.
+    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*);
+
+    void setWrapper(v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
         ASSERT(!containsWrapper());
         if (!*wrapper) {
-            m_wrapperOrTypeInfo = 0;
+            m_wrapper = 0;
             return;
         }
         v8::Persistent<v8::Object> persistent(isolate, wrapper);
-        configuration.configureWrapper(&persistent);
+        wrapperTypeInfo->configureWrapper(&persistent);
         persistent.SetWeak(this, &setWeakCallback);
-        m_wrapperOrTypeInfo = reinterpret_cast<uintptr_t>(persistent.ClearAndLeak()) | 1;
+        m_wrapper = persistent.ClearAndLeak();
         ASSERT(containsWrapper());
     }
 
@@ -133,26 +142,6 @@ public:
         v8::Persistent<v8::Object> persistent;
         getPersistent(&persistent);
         return v8::Local<v8::Object>::New(isolate, persistent);
-    }
-
-    const WrapperTypeInfo* typeInfo()
-    {
-        if (containsTypeInfo())
-            return reinterpret_cast<const WrapperTypeInfo*>(m_wrapperOrTypeInfo);
-
-        if (containsWrapper()) {
-            v8::Persistent<v8::Object> persistent;
-            getPersistent(&persistent);
-            return toWrapperTypeInfo(persistent);
-        }
-
-        return 0;
-    }
-
-    void setTypeInfo(const WrapperTypeInfo* typeInfo)
-    {
-        m_wrapperOrTypeInfo = reinterpret_cast<uintptr_t>(typeInfo);
-        ASSERT(containsTypeInfo());
     }
 
     bool isEqualTo(const v8::Local<v8::Object>& other) const
@@ -189,7 +178,7 @@ public:
         ASSERT(containsWrapper());
         ASSERT(groupRoot && groupRoot->containsWrapper());
 
-        v8::UniqueId groupId(groupRoot->m_wrapperOrTypeInfo);
+        v8::UniqueId groupId(reinterpret_cast<intptr_t>(groupRoot->m_wrapper));
         v8::Persistent<v8::Object> wrapper;
         getPersistent(&wrapper);
         wrapper.MarkPartiallyDependent();
@@ -208,7 +197,7 @@ public:
     {
         ASSERT(objectAsT);
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(object.IsEmpty()
-            || object->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == V8T::toInternalPointer(objectAsT));
+            || object->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == V8T::toScriptWrappableBase(objectAsT));
     }
 
     template<typename V8T, typename T>
@@ -222,13 +211,14 @@ public:
     {
         ASSERT(object);
         ASSERT(objectAsT);
-        v8::Object* value = object->getRawValue();
+        v8::Object* value = object->m_wrapper;
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(value == 0
-            || value->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == V8T::toInternalPointer(objectAsT));
+            || value->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == V8T::toScriptWrappableBase(objectAsT));
     }
 
-    inline bool containsWrapper() const { return (m_wrapperOrTypeInfo & 1); }
-    inline bool containsTypeInfo() const { return m_wrapperOrTypeInfo && !(m_wrapperOrTypeInfo & 1); }
+    using ScriptWrappableBase::assertWrapperSanity;
+
+    bool containsWrapper() const { return m_wrapper; }
 
 #if !ENABLE(OILPAN)
 protected:
@@ -237,8 +227,7 @@ protected:
         // We must not get deleted as long as we contain a wrapper. If this happens, we screwed up ref
         // counting somewhere. Crash here instead of crashing during a later gc cycle.
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(!containsWrapper());
-        ASSERT(m_wrapperOrTypeInfo); // Assert initialization via init() even if not subsequently wrapped.
-        m_wrapperOrTypeInfo = 0; // Break UAF attempts to wrap.
+        m_wrapper = 0; // Break UAF attempts to wrap.
     }
 #endif
     // With Oilpan we don't need a ScriptWrappable destructor.
@@ -250,7 +239,7 @@ protected:
     // Assuming that Oilpan's GC is correct (If we cannot assume this, a lot of more things are
     // already broken), we must not hit the RELEASE_ASSERT.
     //
-    // - 'm_wrapperOrTypeInfo = 0' is not needed because Oilpan's GC zeroes out memory when
+    // - 'm_wrapper = 0' is not needed because Oilpan's GC zeroes out memory when
     // the memory is collected and added to a free list.
 
 private:
@@ -262,16 +251,10 @@ private:
         // that we can inject the wrapped value. This only works because
         // we previously 'stole' the object pointer from a Persistent in
         // the setWrapper() method.
-        *reinterpret_cast<v8::Object**>(persistent) = getRawValue();
+        *reinterpret_cast<v8::Object**>(persistent) = m_wrapper;
     }
 
-    inline v8::Object* getRawValue() const
-    {
-        v8::Object* object = containsWrapper() ? reinterpret_cast<v8::Object*>(m_wrapperOrTypeInfo & ~1) : 0;
-        return object;
-    }
-
-    inline void disposeWrapper(v8::Local<v8::Object> wrapper)
+    void disposeWrapper(v8::Local<v8::Object> wrapper)
     {
         ASSERT(containsWrapper());
 
@@ -280,13 +263,8 @@ private:
 
         ASSERT(wrapper == persistent);
         persistent.Reset();
-        setTypeInfo(toWrapperTypeInfo(wrapper));
+        m_wrapper = 0;
     }
-
-    // If zero, then this contains nothing, otherwise:
-    //   If the bottom bit it set, then this contains a pointer to a wrapper object in the remainging bits.
-    //   If the bottom bit is clear, then this contains a pointer to the wrapper type info in the remaining bits.
-    uintptr_t m_wrapperOrTypeInfo;
 
     static void setWeakCallback(const v8::WeakCallbackData<v8::Object, ScriptWrappable>& data)
     {
@@ -300,7 +278,33 @@ private:
         // make Node destructions incremental.
         releaseObject(data.GetValue());
     }
+
+    v8::Object* m_wrapper;
 };
+
+// Defines 'wrapperTypeInfo' virtual method which returns the WrapperTypeInfo of
+// the instance. Also declares a static member of type WrapperTypeInfo, of which
+// the definition is given by the IDL code generator.
+//
+// Every DOM Class T must meet either of the following conditions:
+// - T.idl inherits from [NotScriptWrappable].
+// - T inherits from ScriptWrappable and has DEFINE_WRAPPERTYPEINFO().
+//
+// If a DOM class T does not inherit from ScriptWrappable, you have to write
+// [NotScriptWrappable] in the IDL file as an extended attribute in order to let
+// IDL code generator know that T does not inherit from ScriptWrappable. Note
+// that [NotScriptWrappable] is inheritable.
+//
+// All the derived classes of ScriptWrappable, regardless of directly or
+// indirectly, must write this macro in the class definition.
+#define DEFINE_WRAPPERTYPEINFO() \
+public: \
+    virtual const WrapperTypeInfo* wrapperTypeInfo() const OVERRIDE \
+    { \
+        return &s_wrapperTypeInfo; \
+    } \
+private: \
+    static const WrapperTypeInfo& s_wrapperTypeInfo
 
 } // namespace blink
 

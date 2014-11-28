@@ -20,9 +20,6 @@ class Checker(object):
 
   _COMMON_CLOSURE_ARGS = [
     "--accept_const_keyword",
-    "--language_in=ECMASCRIPT5",
-    "--summary_detail_level=3",
-    "--warning_level=VERBOSE",
     "--jscomp_error=accessControls",
     "--jscomp_error=ambiguousFunctionDecl",
     "--jscomp_error=checkStructDictInheritance",
@@ -45,13 +42,15 @@ class Checker(object):
     "--jscomp_error=visibility",
     # TODO(dbeam): happens when the same file is <include>d multiple times.
     "--jscomp_off=duplicate",
+    "--language_in=ECMASCRIPT5_STRICT",
+    "--summary_detail_level=3",
   ]
 
   _JAR_COMMAND = [
     "java",
     "-jar",
     "-Xms1024m",
-    "-server",
+    "-client",
     "-XX:+TieredCompilation"
   ]
 
@@ -234,8 +233,9 @@ if __name__ == "__main__":
 
   checker = Checker(verbose=opts.verbose)
   for source in opts.sources:
-    if not checker.check(source, depends=opts.depends, externs=opts.externs):
-      sys.exit(1)
+    exit, _ = checker.check(source, depends=opts.depends, externs=opts.externs)
+    if exit != 0:
+      sys.exit(exit)
 
     if opts.out_file:
       out_dir = os.path.dirname(opts.out_file)

@@ -19,7 +19,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "content/common/gpu/client/gl_helper.h"
@@ -61,7 +61,7 @@ class GLHelperTest : public testing::Test {
     bool lose_context_when_out_of_memory = false;
     context_ = webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl::
         CreateOffscreenContext(attributes, lose_context_when_out_of_memory);
-    context_->makeContextCurrent();
+    context_->InitializeOnCurrentThread();
 
     helper_.reset(
         new content::GLHelper(context_->GetGLInterface(),

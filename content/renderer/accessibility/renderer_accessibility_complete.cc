@@ -13,17 +13,21 @@
 #include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/public/web/WebAXObject.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
+#include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/accessibility/ax_tree.h"
 
 using blink::WebAXObject;
 using blink::WebDocument;
+using blink::WebFrame;
 using blink::WebNode;
 using blink::WebPoint;
 using blink::WebRect;
+using blink::WebSettings;
 using blink::WebView;
 
 namespace content {
@@ -31,18 +35,21 @@ namespace content {
 RendererAccessibilityComplete::RendererAccessibilityComplete(
     RenderFrameImpl* render_frame)
     : RendererAccessibility(render_frame),
-      weak_factory_(this),
       tree_source_(render_frame),
       serializer_(&tree_source_),
       last_scroll_offset_(gfx::Size()),
-      ack_pending_(false) {
-  WebAXObject::enableAccessibility();
+      ack_pending_(false),
+      reset_token_(0),
+      weak_factory_(this) {
+  WebView* web_view = render_frame_->GetRenderView()->GetWebView();
+  WebSettings* settings = web_view->settings();
+  settings->setAccessibilityEnabled(true);
 
 #if !defined(OS_ANDROID)
   // Skip inline text boxes on Android - since there are no native Android
   // APIs that compute the bounds of a range of text, it's a waste to
   // include these in the AX tree.
-  WebAXObject::enableInlineTextBoxAccessibility();
+  settings->setInlineTextBoxAccessibilityEnabled(true);
 #endif
 
   const WebDocument& document = GetMainDocument();
@@ -74,6 +81,7 @@ bool RendererAccessibilityComplete::OnMessageReceived(
     IPC_MESSAGE_HANDLER(AccessibilityMsg_SetTextSelection,
                         OnSetTextSelection)
     IPC_MESSAGE_HANDLER(AccessibilityMsg_HitTest, OnHitTest)
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_Reset, OnReset)
     IPC_MESSAGE_HANDLER(AccessibilityMsg_FatalError, OnFatalError)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -201,6 +209,9 @@ void RendererAccessibilityComplete::SendPendingAccessibilityEvents() {
     }
 
     AccessibilityHostMsg_EventParams event_msg;
+    tree_source_.CollectChildFrameIdMapping(
+        &event_msg.node_to_frame_routing_id_map,
+        &event_msg.node_to_browser_plugin_instance_id_map);
     event_msg.event_type = event.event_type;
     event_msg.id = event.id;
     serializer_.SerializeChanges(obj, &event_msg.update);
@@ -218,7 +229,8 @@ void RendererAccessibilityComplete::SendPendingAccessibilityEvents() {
             << "\n" << event_msg.update.ToString();
   }
 
-  Send(new AccessibilityHostMsg_Events(routing_id(), event_msgs));
+  Send(new AccessibilityHostMsg_Events(routing_id(), event_msgs, reset_token_));
+  reset_token_ = 0;
 
   if (had_layout_complete_messages)
     SendLocationChanges();
@@ -403,6 +415,16 @@ void RendererAccessibilityComplete::OnSetFocus(int acc_obj_id) {
     render_frame_->GetRenderView()->GetWebView()->clearFocusedElement();
   else
     obj.setFocused(true);
+}
+
+void RendererAccessibilityComplete::OnReset(int reset_token) {
+  reset_token_ = reset_token;
+  serializer_.Reset();
+  pending_events_.clear();
+
+  const WebDocument& document = GetMainDocument();
+  if (!document.isNull())
+    HandleAXEvent(document.accessibilityObject(), ui::AX_EVENT_LAYOUT_COMPLETE);
 }
 
 void RendererAccessibilityComplete::OnFatalError() {

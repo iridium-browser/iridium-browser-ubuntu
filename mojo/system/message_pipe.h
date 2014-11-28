@@ -25,7 +25,7 @@
 namespace mojo {
 namespace system {
 
-class Channel;
+class ChannelEndpoint;
 class Waiter;
 
 // |MessagePipe| is the secondary object implementing a message pipe (see the
@@ -34,12 +34,23 @@ class Waiter;
 class MOJO_SYSTEM_IMPL_EXPORT MessagePipe
     : public base::RefCountedThreadSafe<MessagePipe> {
  public:
-  MessagePipe(scoped_ptr<MessagePipeEndpoint> endpoint0,
-              scoped_ptr<MessagePipeEndpoint> endpoint1);
+  // Creates a |MessagePipe| with two new |LocalMessagePipeEndpoint|s.
+  static MessagePipe* CreateLocalLocal();
 
-  // Convenience constructor that constructs a |MessagePipe| with two new
-  // |LocalMessagePipeEndpoint|s.
-  MessagePipe();
+  // Creates a |MessagePipe| with a |LocalMessagePipeEndpoint| on port 0 and a
+  // |ProxyMessagePipeEndpoint| on port 1. |*channel_endpoint| is set to the
+  // (newly-created) |ChannelEndpoint| for the latter.
+  static MessagePipe* CreateLocalProxy(
+      scoped_refptr<ChannelEndpoint>* channel_endpoint);
+
+  // Creates a |MessagePipe| with a |ProxyMessagePipeEndpoint| on port 0 and a
+  // |LocalMessagePipeEndpoint| on port 1. |*channel_endpoint| is set to the
+  // (newly-created) |ChannelEndpoint| for the former.
+  // Note: This is really only needed in tests (outside of tests, this
+  // configuration arises from a local message pipe having its port 0
+  // "converted" using |ConvertLocalToProxy()|).
+  static MessagePipe* CreateProxyLocal(
+      scoped_refptr<ChannelEndpoint>* channel_endpoint);
 
   // Gets the other port number (i.e., 0 -> 1, 1 -> 0).
   static unsigned GetPeerPort(unsigned port);
@@ -76,7 +87,7 @@ class MOJO_SYSTEM_IMPL_EXPORT MessagePipe
 
   // This is called by the dispatcher to convert a local endpoint to a proxy
   // endpoint.
-  void ConvertLocalToProxy(unsigned port);
+  scoped_refptr<ChannelEndpoint> ConvertLocalToProxy(unsigned port);
 
   // This is used by |Channel| to enqueue messages (typically to a
   // |LocalMessagePipeEndpoint|). Unlike |WriteMessage()|, |port| is the
@@ -84,14 +95,13 @@ class MOJO_SYSTEM_IMPL_EXPORT MessagePipe
   MojoResult EnqueueMessage(unsigned port,
                             scoped_ptr<MessageInTransit> message);
 
-  // These are used by |Channel|.
-  bool Attach(unsigned port,
-              scoped_refptr<Channel> channel,
-              MessageInTransit::EndpointId local_id);
-  void Run(unsigned port, MessageInTransit::EndpointId remote_id);
+  // This is used by |Channel|. TODO(vtl): Rename it (and have the
+  // |ChannelEndpoint| call it instead).
   void OnRemove(unsigned port);
 
  private:
+  MessagePipe();
+
   friend class base::RefCountedThreadSafe<MessagePipe>;
   virtual ~MessagePipe();
 

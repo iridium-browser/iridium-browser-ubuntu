@@ -50,7 +50,7 @@ function ArrayIteratorIterator() {
 function ArrayIteratorNext() {
   var iterator = ToObject(this);
 
-  if (!HAS_PRIVATE(iterator, arrayIteratorObjectSymbol)) {
+  if (!HAS_DEFINED_PRIVATE(iterator, arrayIteratorNextIndexSymbol)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Array Iterator.prototype.next']);
   }
@@ -120,8 +120,8 @@ function ExtendArrayPrototype() {
   %CheckIsBootstrapping();
 
   InstallFunctions($Array.prototype, DONT_ENUM, $Array(
+    // No 'values' since it breaks webcompat: http://crbug.com/409858
     'entries', ArrayEntries,
-    'values', ArrayValues,
     'keys', ArrayKeys
   ));
 

@@ -20,12 +20,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 
 namespace {
 
@@ -165,8 +165,10 @@ void TermsOfServiceScreenHandler::DoShow() {
     // If the user has a preferred input method, enable it and switch to it.
     chromeos::input_method::InputMethodManager* input_method_manager =
         chromeos::input_method::InputMethodManager::Get();
-    input_method_manager->EnableInputMethod(input_methods.front());
-    input_method_manager->ChangeInputMethod(input_methods.front());
+    input_method_manager->GetActiveIMEState()->EnableInputMethod(
+        input_methods.front());
+    input_method_manager->GetActiveIMEState()->ChangeInputMethod(
+        input_methods.front(), false /* show_message */);
   }
 
   // Updates the domain name shown in the UI.

@@ -66,7 +66,6 @@ class WebClipboard;
 class WebCompositorSupport;
 class WebConvertableToTraceFormat;
 class WebCookieJar;
-class WebCredentialManager;
 class WebCrypto;
 class WebDatabaseObserver;
 class WebDiscardableMemory;
@@ -75,6 +74,7 @@ class WebFallbackThemeEngine;
 class WebFileSystem;
 class WebFileUtilities;
 class WebFlingAnimator;
+class WebGeofencingProvider;
 class WebGestureCurveTarget;
 class WebGestureCurve;
 class WebGraphicsContext3DProvider;
@@ -170,10 +170,6 @@ public:
 
     // Must return non-null.
     virtual WebBlobRegistry* blobRegistry() { return 0; }
-
-    // Credential Management -----------------------------------------------
-
-    virtual WebCredentialManager* credentialManager() { return 0; }
 
     // Database ------------------------------------------------------------
 
@@ -360,6 +356,9 @@ public:
     // Returns an interface to the current thread. This is owned by the
     // embedder.
     virtual WebThread* currentThread() { return 0; }
+
+    // Yield the current thread so another thread can be scheduled.
+    virtual void yieldCurrentThread() { }
 
 
     // WaitableEvent -------------------------------------------------------
@@ -635,6 +634,10 @@ public:
 
     virtual WebNotificationPresenter* notificationPresenter() { return 0; }
 
+
+    // Geofencing ---------------------------------------------------------
+
+    virtual WebGeofencingProvider* geofencingProvider() { return 0; }
 
 protected:
     virtual ~Platform() { }

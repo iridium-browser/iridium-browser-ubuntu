@@ -26,15 +26,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
-#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/checkbox.h"
@@ -153,7 +152,7 @@ void SessionCrashedBubbleView::Show(Browser* browser) {
 void SessionCrashedBubbleView::ShowForReal(
     scoped_ptr<BrowserRemovalObserver> browser_observer,
     bool uma_opted_in_already) {
-  // Determine whether or not the uma opt-in option should be offered. It is
+  // Determine whether or not the UMA opt-in option should be offered. It is
   // offered only when it is a Google chrome build, user hasn't opted in yet,
   // and the preference is modifiable by the user.
   bool offer_uma_optin = false;
@@ -282,25 +281,38 @@ void SessionCrashedBubbleView::Init() {
   layout->AddView(restore_button_);
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
+  int bottom_margin = 1;
+
   // Metrics reporting option.
   if (offer_uma_optin_) {
-    CreateUmaOptinView(layout);
+    const int kUMAOptionColumnSetId = 2;
+    cs = layout->AddColumnSet(kUMAOptionColumnSetId);
+    cs->AddColumn(
+        GridLayout::FILL, GridLayout::FILL, 1, GridLayout::USE_PREF, 0, 0);
+    layout->StartRow(1, kUMAOptionColumnSetId);
+    layout->AddView(new views::Separator(views::Separator::HORIZONTAL));
+    layout->StartRow(1, kUMAOptionColumnSetId);
+    layout->AddView(CreateUMAOptinView());
+
+    // Since the UMA optin row has a different background than the default
+    // background color of bubbles, the bottom margin has to be 0 to make sure
+    // the background extends to the bottom edge of the bubble.
+    bottom_margin = 0;
+
     RecordBubbleHistogramValue(SESSION_CRASHED_BUBBLE_OPTIN_BAR_SHOWN);
   }
 
-  set_margins(gfx::Insets());
+  set_margins(gfx::Insets(1, 0, bottom_margin, 0));
   Layout();
 }
 
-void SessionCrashedBubbleView::CreateUmaOptinView(GridLayout* layout) {
+views::View* SessionCrashedBubbleView::CreateUMAOptinView() {
   // Checkbox for metric reporting setting.
   // Since the text to the right of the checkbox can't be a simple string (needs
   // a hyperlink in it), this checkbox contains an empty string as its label,
   // and the real text will be added as a separate view.
   uma_option_ = new views::Checkbox(base::string16());
   uma_option_->SetChecked(false);
-  uma_option_->set_background(
-      views::Background::CreateSolidBackground(kBackgroundColor));
 
   // The text to the right of the checkbox.
   size_t offset;
@@ -311,8 +323,6 @@ void SessionCrashedBubbleView::CreateUmaOptinView(GridLayout* layout) {
       link_text,
       &offset);
   views::StyledLabel* uma_label = new views::StyledLabel(uma_text, this);
-  uma_label->set_background(
-      views::Background::CreateSolidBackground(kBackgroundColor));
   views::StyledLabel::RangeStyleInfo link_style =
       views::StyledLabel::RangeStyleInfo::CreateForLink();
   link_style.font_style = gfx::Font::NORMAL;
@@ -327,35 +337,30 @@ void SessionCrashedBubbleView::CreateUmaOptinView(GridLayout* layout) {
   if (!after_link_range.is_empty())
     uma_label->AddStyleRange(after_link_range, uma_style);
 
-  // We use a border instead of padding so that the background color reaches
-  // the edges of the bubble.
-  const gfx::Insets title_insets = GetBubbleFrameView()->GetTitleInsets();
-  uma_option_->SetBorder(views::Border::CreateSolidSidedBorder(
-      0, title_insets.left(), 0, 0, kBackgroundColor));
-  uma_label->SetBorder(views::Border::CreateSolidSidedBorder(
-      views::kRelatedControlVerticalSpacing, kCheckboxTextDistance,
-      views::kRelatedControlVerticalSpacing, title_insets.left(),
-      kBackgroundColor));
+  // Create a view to hold the checkbox and the text.
+  views::View* uma_view = new views::View();
+  GridLayout* uma_layout = new GridLayout(uma_view);
+  uma_view->SetLayoutManager(uma_layout);
 
-  // Separator.
-  const int kSeparatorColumnSetId = 2;
-  views::ColumnSet* cs = layout->AddColumnSet(kSeparatorColumnSetId);
-  cs->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                GridLayout::USE_PREF, 0, 0);
+  uma_view->set_background(
+      views::Background::CreateSolidBackground(kBackgroundColor));
+  int inset_left = GetBubbleFrameView()->GetTitleInsets().left();
+  uma_layout->SetInsets(views::kRelatedControlVerticalSpacing, inset_left,
+                        views::kRelatedControlVerticalSpacing, inset_left);
 
-  // Reporting row.
-  const int kReportColumnSetId = 3;
-  cs = layout->AddColumnSet(kReportColumnSetId);
-  cs->AddColumn(GridLayout::CENTER, GridLayout::FILL, 0,
+  const int kReportColumnSetId = 0;
+  views::ColumnSet* cs = uma_layout->AddColumnSet(kReportColumnSetId);
+  cs->AddColumn(GridLayout::CENTER, GridLayout::LEADING, 0,
                 GridLayout::USE_PREF, 0, 0);
+  cs->AddPaddingColumn(0, kCheckboxTextDistance);
   cs->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
                 GridLayout::FIXED, kWidthOfDescriptionText, 0);
 
-  layout->StartRow(0, kSeparatorColumnSetId);
-  layout->AddView(new views::Separator(views::Separator::HORIZONTAL));
-  layout->StartRow(0, kReportColumnSetId);
-  layout->AddView(uma_option_);
-  layout->AddView(uma_label);
+  uma_layout->StartRow(0, kReportColumnSetId);
+  uma_layout->AddView(uma_option_);
+  uma_layout->AddView(uma_label);
+
+  return uma_view;
 }
 
 void SessionCrashedBubbleView::ButtonPressed(views::Button* sender,
@@ -370,7 +375,7 @@ void SessionCrashedBubbleView::StyledLabelLinkClicked(const gfx::Range& range,
       GURL("https://support.google.com/chrome/answer/96817"),
       content::Referrer(),
       NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK,
+      ui::PAGE_TRANSITION_LINK,
       false));
   RecordBubbleHistogramValue(SESSION_CRASHED_BUBBLE_HELP);
 }
@@ -418,11 +423,7 @@ void SessionCrashedBubbleView::RestorePreviousSession(views::Button* sender) {
   // Record user's choice for opting in to UMA.
   // There's no opting-out choice in the crash restore bubble.
   if (uma_option_ && uma_option_->checked()) {
-    // TODO: Clean up function ResolveMetricsReportingEnabled so that user pref
-    // is stored automatically.
-    ResolveMetricsReportingEnabled(true);
-    g_browser_process->local_state()->SetBoolean(
-        prefs::kMetricsReportingEnabled, true);
+    InitiateMetricsReportingChange(true, OnMetricsReportingCallbackType());
     RecordBubbleHistogramValue(SESSION_CRASHED_BUBBLE_UMA_OPTIN);
   }
   CloseBubble();

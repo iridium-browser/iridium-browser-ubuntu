@@ -29,7 +29,6 @@ namespace blink {
 inline SVGVKernElement::SVGVKernElement(Document& document)
     : SVGElement(SVGNames::vkernTag, document)
 {
-    ScriptWrappable::init(this);
 }
 
 DEFINE_NODE_FACTORY(SVGVKernElement)
@@ -68,7 +67,7 @@ void SVGVKernElement::buildVerticalKerningPair(KerningPairVector& kerningPairs)
         && parseGlyphName(g2, kerningPair.glyphName2)
         && parseKerningUnicodeString(u1, kerningPair.unicodeRange1, kerningPair.unicodeName1)
         && parseKerningUnicodeString(u2, kerningPair.unicodeRange2, kerningPair.unicodeName2)) {
-        kerningPair.kerning = fastGetAttribute(SVGNames::kAttr).string().toFloat();
+        kerningPair.kerning = fastGetAttribute(SVGNames::kAttr).toFloat();
         kerningPairs.append(kerningPair);
     }
 }

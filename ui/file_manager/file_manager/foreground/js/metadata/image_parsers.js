@@ -14,24 +14,25 @@ function SimpleImageParser(parent, type, urlFilter, headerSize) {
 SimpleImageParser.prototype = {__proto__: ImageParser.prototype};
 
 /**
- * @param {File} file  // TODO(JSDOC).
- * @param {Object} metadata  // TODO(JSDOC).
- * @param {function(Object)} callback  // TODO(JSDOC).
- * @param {function(string)} errorCallback  // TODO(JSDOC).
+ * @param {File} file File to be parses.
+ * @param {Object} metadata Metadata object of the file.
+ * @param {function(Object)} callback Success callback.
+ * @param {function(string)} errorCallback Error callback.
  */
 SimpleImageParser.prototype.parse = function(
     file, metadata, callback, errorCallback) {
   var self = this;
-  util.readFileBytes(file, 0, this.headerSize,
-    function(file, br) {
-      try {
-        self.parseHeader(metadata, br);
-        callback(metadata);
-      } catch (e) {
-        errorCallback(e.toString());
-      }
-    },
-    errorCallback);
+  util.readFileBytes(
+      file, 0, this.headerSize,
+      function(file, br) {
+        try {
+          self.parseHeader(metadata, br);
+          callback(metadata);
+        } catch (e) {
+          errorCallback(e.toString());
+        }
+      },
+      errorCallback);
 };
 
 
@@ -42,8 +43,8 @@ function PngParser(parent) {
 PngParser.prototype = {__proto__: SimpleImageParser.prototype};
 
 /**
- * @param {Object} metadata  // TODO(JSDOC).
- * @param {ByteReader} br  // TODO(JSDOC).
+ * @param {Object} metadata Metadata object.
+ * @param {ByteReader} br Byte reader to read from.
  */
 PngParser.prototype.parseHeader = function(metadata, br) {
   br.setByteOrder(ByteReader.BIG_ENDIAN);
@@ -71,8 +72,8 @@ function BmpParser(parent) {
 BmpParser.prototype = {__proto__: SimpleImageParser.prototype};
 
 /**
- * @param {Object} metadata  // TODO(JSDOC).
- * @param {ByteReader} br  // TODO(JSDOC).
+ * @param {Object} metadata Metadata object.
+ * @param {ByteReader} br Byte reader to read from.
  */
 BmpParser.prototype.parseHeader = function(metadata, br) {
   br.setByteOrder(ByteReader.LITTLE_ENDIAN);
@@ -96,8 +97,8 @@ function GifParser(parent) {
 GifParser.prototype = {__proto__: SimpleImageParser.prototype};
 
 /**
- * @param {Object} metadata  // TODO(JSDOC).
- * @param {ByteReader} br  // TODO(JSDOC).
+ * @param {Object} metadata Metadata object.
+ * @param {ByteReader} br Byte reader to read from.
  */
 GifParser.prototype.parseHeader = function(metadata, br) {
   br.setByteOrder(ByteReader.LITTLE_ENDIAN);
@@ -120,8 +121,8 @@ function WebpParser(parent) {
 WebpParser.prototype = {__proto__: SimpleImageParser.prototype};
 
 /**
- * @param {Object} metadata  // TODO(JSDOC).
- * @param {ByteReader} br  // TODO(JSDOC).
+ * @param {Object} metadata Metadata object.
+ * @param {ByteReader} br Byte reader to read from.
  */
 WebpParser.prototype.parseHeader = function(metadata, br) {
   br.setByteOrder(ByteReader.LITTLE_ENDIAN);
@@ -143,7 +144,7 @@ WebpParser.prototype.parseHeader = function(metadata, br) {
       var lossySignature = br.readScalar(2) | (br.readScalar(1) << 16);
       if (lossySignature != 0x2a019d) {
         throw new Error('Invalid VP8 lossy bitstream signature: ' +
-          lossySignature);
+            lossySignature);
       }
       var dimensionBits = br.readScalar(4);
       metadata.width = dimensionBits & 0x3fff;
@@ -156,7 +157,7 @@ WebpParser.prototype.parseHeader = function(metadata, br) {
       var losslessSignature = br.readScalar(1);
       if (losslessSignature != 0x2f) {
         throw new Error('Invalid VP8 lossless bitstream signature: ' +
-          losslessSignature);
+            losslessSignature);
       }
       var dimensionBits = br.readScalar(4);
       metadata.width = (dimensionBits & 0x3fff) + 1;
@@ -182,7 +183,7 @@ MetadataDispatcher.registerParserClass(WebpParser);
  * Parser for the header of .ico icon files.
  * @param {MetadataDispatcher} parent Parent metadata dispatcher object.
  * @constructor
- * @extends SimpleImageParser
+ * @extends {SimpleImageParser}
  */
 function IcoParser(parent) {
   SimpleImageParser.call(this, parent, 'ico', /\.ico$/i, 8);

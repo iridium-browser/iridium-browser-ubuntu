@@ -60,7 +60,6 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
     , m_registeredWithParentShadowRoot(false)
     , m_descendantInsertionPointsIsValid(false)
 {
-    ScriptWrappable::init(this);
 }
 
 ShadowRoot::~ShadowRoot()
@@ -140,26 +139,10 @@ void ShadowRoot::recalcStyle(StyleRecalcChange change)
     if (styleChangeType() >= SubtreeStyleChange)
         change = Force;
 
-    if (change < Force && hasRareData() && childNeedsStyleRecalc())
-        checkForChildrenAdjacentRuleChanges();
-
     // There's no style to update so just calling recalcStyle means we're updated.
     clearNeedsStyleRecalc();
 
-    // FIXME: This doesn't handle :hover + div properly like Element::recalcStyle does.
-    Text* lastTextNode = 0;
-    for (Node* child = lastChild(); child; child = child->previousSibling()) {
-        if (child->isTextNode()) {
-            toText(child)->recalcTextStyle(change, lastTextNode);
-            lastTextNode = toText(child);
-        } else if (child->isElementNode()) {
-            if (child->shouldCallRecalcStyle(change))
-                toElement(child)->recalcStyle(change, lastTextNode);
-            if (child->renderer())
-                lastTextNode = 0;
-        }
-    }
-
+    recalcChildStyle(change);
     clearChildNeedsStyleRecalc();
 }
 

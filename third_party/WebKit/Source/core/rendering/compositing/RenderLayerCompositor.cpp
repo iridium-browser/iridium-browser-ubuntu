@@ -28,7 +28,7 @@
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 
 #include "core/animation/DocumentAnimations.h"
-#include "core/dom/FullscreenElementStack.h"
+#include "core/dom/Fullscreen.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
@@ -158,7 +158,7 @@ bool RenderLayerCompositor::layerSquashingEnabled() const
     return true;
 }
 
-bool RenderLayerCompositor::acceleratedCompositingForOverflowScrollEnabled() const
+bool RenderLayerCompositor::preferCompositingToLCDTextEnabled() const
 {
     return m_compositingReasonFinder.hasOverflowScrollTrigger();
 }
@@ -166,16 +166,16 @@ bool RenderLayerCompositor::acceleratedCompositingForOverflowScrollEnabled() con
 static RenderVideo* findFullscreenVideoRenderer(Document& document)
 {
     // Recursively find the document that is in fullscreen.
-    Element* fullscreenElement = FullscreenElementStack::fullscreenElementFrom(document);
+    Element* fullscreenElement = Fullscreen::fullscreenElementFrom(document);
     Document* contentDocument = &document;
     while (fullscreenElement && fullscreenElement->isFrameOwnerElement()) {
         contentDocument = toHTMLFrameOwnerElement(fullscreenElement)->contentDocument();
         if (!contentDocument)
             return 0;
-        fullscreenElement = FullscreenElementStack::fullscreenElementFrom(*contentDocument);
+        fullscreenElement = Fullscreen::fullscreenElementFrom(*contentDocument);
     }
     // Get the current fullscreen element from the document.
-    fullscreenElement = FullscreenElementStack::currentFullScreenElementFrom(*contentDocument);
+    fullscreenElement = Fullscreen::currentFullScreenElementFrom(*contentDocument);
     if (!isHTMLVideoElement(fullscreenElement))
         return 0;
     RenderObject* renderer = fullscreenElement->renderer();
@@ -296,6 +296,22 @@ void RenderLayerCompositor::updateWithoutAcceleratedCompositing(CompositingUpdat
 #endif
 }
 
+static void forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendants(RenderObject* renderer)
+{
+    // We clear the previous paint invalidation rect as it's wrong (paint invaliation container
+    // changed, ...). Forcing a full invalidation will make us recompute it. Also we are not
+    // changing the previous position from our paint invalidation container, which is fine as
+    // we want a full paint invalidation anyway.
+    renderer->setPreviousPaintInvalidationRect(LayoutRect());
+    renderer->setShouldDoFullPaintInvalidation(true);
+
+    for (RenderObject* child = renderer->slowFirstChild(); child; child = child->nextSibling()) {
+        if (!child->isPaintInvalidationContainer())
+            forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendants(child);
+    }
+}
+
+
 void RenderLayerCompositor::updateIfNeeded()
 {
     CompositingUpdateType updateType = m_pendingUpdateType;
@@ -376,12 +392,8 @@ void RenderLayerCompositor::updateIfNeeded()
         m_needsUpdateFixedBackground = false;
     }
 
-    for (unsigned i = 0; i < layersNeedingPaintInvalidation.size(); i++) {
-        RenderLayer* layer = layersNeedingPaintInvalidation[i];
-        layer->paintInvalidator().computePaintInvalidationRectsIncludingNonCompositingDescendants();
-
-        paintInvalidationOnCompositingChange(layer);
-    }
+    for (unsigned i = 0; i < layersNeedingPaintInvalidation.size(); i++)
+        forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendants(layersNeedingPaintInvalidation[i]->renderer());
 
     // Inform the inspector that the layer tree has changed.
     if (m_renderView.frame()->isMainFrame())
@@ -476,7 +488,12 @@ void RenderLayerCompositor::paintInvalidationOnCompositingChange(RenderLayer* la
     if (layer->renderer() != &m_renderView && !layer->renderer()->parent())
         return;
 
-    layer->paintInvalidator().paintInvalidationIncludingNonCompositingDescendants();
+    // For querying RenderLayer::compositingState()
+    // Eager invalidation here is correct, since we are invalidating with respect to the previous frame's
+    // compositing state when changing the compositing backing of the layer.
+    DisableCompositingQueryAsserts disabler;
+
+    layer->renderer()->invalidatePaintIncludingNonCompositingDescendants();
 }
 
 void RenderLayerCompositor::frameViewDidChangeLocation(const IntPoint& contentsOffset)
@@ -515,7 +532,7 @@ void RenderLayerCompositor::frameViewDidScroll()
     bool scrollingCoordinatorHandlesOffset = false;
     if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator()) {
         if (Settings* settings = m_renderView.document().settings()) {
-            if (m_renderView.frame()->isLocalRoot() || settings->compositedScrollingForFramesEnabled())
+            if (m_renderView.frame()->isLocalRoot() || settings->preferCompositingToLCDTextEnabled())
                 scrollingCoordinatorHandlesOffset = scrollingCoordinator->scrollableAreaScrollLayerDidChange(frameView);
         }
     }
@@ -752,11 +769,13 @@ bool RenderLayerCompositor::clipsCompositingDescendants(const RenderLayer* layer
     return layer->hasCompositingDescendant() && layer->renderer()->hasClipOrOverflowClip();
 }
 
-// If an element has negative z-index children, those children render in front of the
+// If an element has composited negative z-index children, those children render in front of the
 // layer background, so we need an extra 'contents' layer for the foreground of the layer
 // object.
 bool RenderLayerCompositor::needsContentsCompositingLayer(const RenderLayer* layer) const
 {
+    if (!layer->hasCompositingDescendant())
+        return false;
     return layer->stackingNode()->hasNegativeZOrderList();
 }
 
@@ -793,10 +812,8 @@ void RenderLayerCompositor::paintContents(const GraphicsLayer* graphicsLayer, Gr
 
 bool RenderLayerCompositor::supportsFixedRootBackgroundCompositing() const
 {
-    if (Settings* settings = m_renderView.document().settings()) {
-        if (settings->acceleratedCompositingForFixedRootBackgroundEnabled())
-            return true;
-    }
+    if (Settings* settings = m_renderView.document().settings())
+        return settings->preferCompositingToLCDTextEnabled();
     return false;
 }
 
@@ -978,15 +995,17 @@ void RenderLayerCompositor::ensureRootLayer()
         // Create a layer to host the clipping layer and the overflow controls layers.
         m_overflowControlsHostLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
 
+        // Clip iframe's overflow controls layer.
+        bool containerMasksToBounds = !m_renderView.frame()->isLocalRoot();
+        m_overflowControlsHostLayer->setMasksToBounds(containerMasksToBounds);
+
         // Create a clipping layer if this is an iframe or settings require to clip.
         m_containerLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
-        bool containerMasksToBounds = !m_renderView.frame()->isLocalRoot();
         if (Settings* settings = m_renderView.document().settings()) {
             if (settings->mainFrameClipsContent())
                 containerMasksToBounds = true;
         }
         m_containerLayer->setMasksToBounds(containerMasksToBounds);
-        m_overflowControlsHostLayer->setMasksToBounds(containerMasksToBounds);
 
         m_scrollLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
         if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())

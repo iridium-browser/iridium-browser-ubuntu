@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "cc/output/gl_renderer.h"
 #include "cc/output/software_renderer.h"
 #include "cc/quads/render_pass.h"
@@ -45,6 +45,7 @@ class PixelTest : public testing::Test, RendererClient {
   scoped_ptr<FakeOutputSurfaceClient> output_surface_client_;
   scoped_ptr<OutputSurface> output_surface_;
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
+  scoped_ptr<BlockingTaskRunner> main_thread_task_runner_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<TextureMailboxDeleter> texture_mailbox_deleter_;
   scoped_ptr<DirectRenderer> renderer_;
@@ -62,7 +63,6 @@ class PixelTest : public testing::Test, RendererClient {
 
   // RendererClient implementation.
   virtual void SetFullRootLayerDamage() OVERRIDE {}
-  virtual void RunOnDemandRasterTask(Task* on_demand_raster_task) OVERRIDE;
 
  private:
   void ReadbackResult(base::Closure quit_run_loop,

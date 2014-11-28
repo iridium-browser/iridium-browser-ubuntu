@@ -52,6 +52,8 @@ public:
         return create(data.code(), data.message());
     }
 
+    SQLErrorData(const SQLErrorData& data) : m_code(data.m_code), m_message(data.m_message.isolatedCopy()) { }
+
     unsigned code() const { return m_code; }
     String message() const { return m_message.isolatedCopy(); }
 
@@ -63,6 +65,7 @@ private:
 };
 
 class SQLError : public ThreadSafeRefCountedWillBeGarbageCollectedFinalized<SQLError>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<SQLError> create(const SQLErrorData& data) { return adoptRefWillBeNoop(new SQLError(data)); }
     void trace(Visitor*) { }
@@ -86,14 +89,12 @@ public:
     static const char versionErrorMessage[];
 
 private:
-    explicit SQLError(const SQLErrorData& data) : m_data(data)
-    {
-        ScriptWrappable::init(this);
-    }
+    explicit SQLError(const SQLErrorData& data)
+        : m_data(data) { }
 
     const SQLErrorData m_data;
 };
 
-}
+} // namespace blink
 
 #endif // SQLError_h

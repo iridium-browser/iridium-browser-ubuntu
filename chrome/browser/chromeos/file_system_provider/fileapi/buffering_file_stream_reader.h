@@ -9,7 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "webkit/browser/blob/file_stream_reader.h"
+#include "storage/browser/blob/file_stream_reader.h"
 
 namespace net {
 class IOBuffer;
@@ -20,20 +20,22 @@ namespace file_system_provider {
 
 // Wraps the file stream reader implementation with a prefetching buffer.
 // Reads data from the internal file stream reader in chunks of size at least
-// |buffer_size| bytes (or less for the last chunk, because of EOF).
+// |preloading_buffer_length| bytes (or less for the last chunk, because of
+// EOF). Up to |max_bytes_to_read| of bytes can be requested in total.
 //
-// The underlying inner file stream reader *must not* return any values
+// The underlying internal file stream reader *must not* return any values
 // synchronously. Instead, results must be returned by a callback, including
 // errors.
-class BufferingFileStreamReader : public webkit_blob::FileStreamReader {
+class BufferingFileStreamReader : public storage::FileStreamReader {
  public:
   BufferingFileStreamReader(
-      scoped_ptr<webkit_blob::FileStreamReader> file_stream_reader,
-      int buffer_size);
+      scoped_ptr<storage::FileStreamReader> file_stream_reader,
+      int preloading_buffer_length,
+      int64 max_bytes_to_read);
 
   virtual ~BufferingFileStreamReader();
 
-  // webkit_blob::FileStreamReader overrides.
+  // storage::FileStreamReader overrides.
   virtual int Read(net::IOBuffer* buf,
                    int buf_len,
                    const net::CompletionCallback& callback) OVERRIDE;
@@ -49,6 +51,8 @@ class BufferingFileStreamReader : public webkit_blob::FileStreamReader {
   // Preloads data from the internal stream reader and calls the |callback|.
   void Preload(const net::CompletionCallback& callback);
 
+  void OnReadCompleted(const net::CompletionCallback& callback, int result);
+
   // Called when preloading of a buffer chunk is finished. Updates state of the
   // preloading buffer and copied requested data to the |buffer|.
   void OnPreloadCompleted(scoped_refptr<net::IOBuffer> buffer,
@@ -56,11 +60,13 @@ class BufferingFileStreamReader : public webkit_blob::FileStreamReader {
                           const net::CompletionCallback& callback,
                           int result);
 
-  scoped_ptr<webkit_blob::FileStreamReader> file_stream_reader_;
-  int buffer_size_;
+  scoped_ptr<storage::FileStreamReader> file_stream_reader_;
+  int preloading_buffer_length_;
+  int64 max_bytes_to_read_;
+  int64 bytes_read_;
   scoped_refptr<net::IOBuffer> preloading_buffer_;
   int preloading_buffer_offset_;
-  int buffered_bytes_;
+  int preloaded_bytes_;
 
   base::WeakPtrFactory<BufferingFileStreamReader> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(BufferingFileStreamReader);

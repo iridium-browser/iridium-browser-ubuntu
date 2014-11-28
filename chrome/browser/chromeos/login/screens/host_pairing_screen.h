@@ -18,13 +18,12 @@ class HostPairingScreen :
   public pairing_chromeos::HostPairingController::Observer,
   public HostPairingScreenActor::Delegate {
  public:
-  HostPairingScreen(ScreenObserver* observer, HostPairingScreenActor* actor);
+  HostPairingScreen(ScreenObserver* observer, HostPairingScreenActor* actor,
+                    pairing_chromeos::HostPairingController* controller);
   virtual ~HostPairingScreen();
 
  private:
   typedef pairing_chromeos::HostPairingController::Stage Stage;
-  typedef pairing_chromeos::HostPairingController::UpdateProgress
-      UpdateProgress;
 
   void CommitContextChanges();
 
@@ -34,9 +33,14 @@ class HostPairingScreen :
   virtual void Hide() OVERRIDE;
   virtual std::string GetName() const OVERRIDE;
 
-  // Overridden from pairing_chromeos::HostPairingController::Observer:
+  // pairing_chromeos::HostPairingController::Observer:
   virtual void PairingStageChanged(Stage new_stage) OVERRIDE;
-  virtual void UpdateAdvanced(const UpdateProgress& progress) OVERRIDE;
+  virtual void ConfigureHost(bool accepted_eula,
+                             const std::string& lang,
+                             const std::string& timezone,
+                             bool send_reports,
+                             const std::string& keyboard_layout) OVERRIDE;
+  virtual void EnrollHost(const std::string& auth_token) OVERRIDE;
 
   // Overridden from ControllerPairingView::Delegate:
   virtual void OnActorDestroyed(HostPairingScreenActor* actor) OVERRIDE;
@@ -47,9 +51,8 @@ class HostPairingScreen :
 
   HostPairingScreenActor* actor_;
 
-  // Controller performing pairing. Owned by the screen for now.
-  // TODO(dzhioev): move to proper place later.
-  scoped_ptr<pairing_chromeos::HostPairingController> controller_;
+  // Controller performing pairing. Owned by the wizard controller.
+  pairing_chromeos::HostPairingController* controller_;
 
   // Current stage of pairing process.
   Stage current_stage_;

@@ -1,4 +1,3 @@
-#include "precompiled.h"
 //
 // Copyright (c) 2012-2014 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -9,15 +8,15 @@
 // classes TextureStorage9_2D and TextureStorage9_Cube, which act as the interface to the
 // D3D9 texture.
 
-#include "libGLESv2/main.h"
-#include "libGLESv2/renderer/d3d/TextureD3D.h"
-#include "libGLESv2/renderer/d3d/d3d9/Renderer9.h"
 #include "libGLESv2/renderer/d3d/d3d9/TextureStorage9.h"
+#include "libGLESv2/renderer/d3d/d3d9/Renderer9.h"
 #include "libGLESv2/renderer/d3d/d3d9/SwapChain9.h"
 #include "libGLESv2/renderer/d3d/d3d9/RenderTarget9.h"
 #include "libGLESv2/renderer/d3d/d3d9/renderer9_utils.h"
 #include "libGLESv2/renderer/d3d/d3d9/formatutils9.h"
+#include "libGLESv2/renderer/d3d/TextureD3D.h"
 #include "libGLESv2/Texture.h"
+#include "libGLESv2/main.h"
 
 namespace rx
 {
@@ -96,6 +95,7 @@ TextureStorage9_2D::TextureStorage9_2D(Renderer *renderer, SwapChain9 *swapchain
     mRenderTarget = NULL;
 
     initializeRenderTarget();
+    initializeSerials(1, 1);
 }
 
 TextureStorage9_2D::TextureStorage9_2D(Renderer *renderer, GLenum internalformat, bool renderTarget, GLsizei width, GLsizei height, int levels)
@@ -122,6 +122,7 @@ TextureStorage9_2D::TextureStorage9_2D(Renderer *renderer, GLenum internalformat
     }
 
     initializeRenderTarget();
+    initializeSerials(getLevelCount(), 1);
 }
 
 TextureStorage9_2D::~TextureStorage9_2D()
@@ -158,23 +159,28 @@ IDirect3DSurface9 *TextureStorage9_2D::getSurfaceLevel(int level, bool dirty)
     return surface;
 }
 
-RenderTarget *TextureStorage9_2D::getRenderTarget(int level)
+RenderTarget *TextureStorage9_2D::getRenderTarget(const gl::ImageIndex &/*index*/)
 {
     return mRenderTarget;
 }
 
-void TextureStorage9_2D::generateMipmap(int level)
+void TextureStorage9_2D::generateMipmaps()
 {
-    IDirect3DSurface9 *upper = getSurfaceLevel(level - 1, false);
-    IDirect3DSurface9 *lower = getSurfaceLevel(level, true);
+    // Base level must already be defined
 
-    if (upper != NULL && lower != NULL)
+    for (int level = 1; level < getLevelCount(); level++)
     {
-        mRenderer->boxFilter(upper, lower);
-    }
+        IDirect3DSurface9 *upper = getSurfaceLevel(level - 1, false);
+        IDirect3DSurface9 *lower = getSurfaceLevel(level, true);
 
-    SafeRelease(upper);
-    SafeRelease(lower);
+        if (upper != NULL && lower != NULL)
+        {
+            mRenderer->boxFilter(upper, lower);
+        }
+
+        SafeRelease(upper);
+        SafeRelease(lower);
+    }
 }
 
 IDirect3DBaseTexture9 *TextureStorage9_2D::getBaseTexture() const
@@ -223,6 +229,7 @@ TextureStorage9_Cube::TextureStorage9_Cube(Renderer *renderer, GLenum internalfo
     }
 
     initializeRenderTarget();
+    initializeSerials(getLevelCount() * 6, 6);
 }
 
 TextureStorage9_Cube::~TextureStorage9_Cube()
@@ -264,23 +271,31 @@ IDirect3DSurface9 *TextureStorage9_Cube::getCubeMapSurface(GLenum faceTarget, in
     return surface;
 }
 
-RenderTarget *TextureStorage9_Cube::getRenderTargetFace(GLenum faceTarget, int level)
+RenderTarget *TextureStorage9_Cube::getRenderTarget(const gl::ImageIndex &index)
 {
-    return mRenderTarget[gl::TextureCubeMap::targetToLayerIndex(faceTarget)];
+    return mRenderTarget[index.layerIndex];
 }
 
-void TextureStorage9_Cube::generateMipmap(int faceIndex, int level)
+void TextureStorage9_Cube::generateMipmaps()
 {
-    IDirect3DSurface9 *upper = getCubeMapSurface(GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex, level - 1, false);
-    IDirect3DSurface9 *lower = getCubeMapSurface(GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex, level, true);
+    // Base level must already be defined
 
-    if (upper != NULL && lower != NULL)
+    for (int faceIndex = 0; faceIndex < 6; faceIndex++)
     {
-        mRenderer->boxFilter(upper, lower);
-    }
+        for (int level = 1; level < getLevelCount(); level++)
+        {
+            IDirect3DSurface9 *upper = getCubeMapSurface(GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex, level - 1, false);
+            IDirect3DSurface9 *lower = getCubeMapSurface(GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex, level, true);
 
-    SafeRelease(upper);
-    SafeRelease(lower);
+            if (upper != NULL && lower != NULL)
+            {
+                mRenderer->boxFilter(upper, lower);
+            }
+
+            SafeRelease(upper);
+            SafeRelease(lower);
+        }
+    }
 }
 
 IDirect3DBaseTexture9 *TextureStorage9_Cube::getBaseTexture() const

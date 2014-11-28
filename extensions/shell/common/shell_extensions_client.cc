@@ -7,8 +7,8 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "extensions/common/api/generated_schemas.h"
-#include "extensions/common/api/sockets/sockets_manifest_handler.h"
 #include "extensions/common/common_manifest_handlers.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/features/api_feature.h"
 #include "extensions/common/features/base_feature_provider.h"
 #include "extensions/common/features/json_feature_provider_source.h"
@@ -20,8 +20,6 @@
 #include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/permissions/permissions_provider.h"
 #include "extensions/common/url_pattern_set.h"
-#include "extensions/shell/common/api/generated_schemas.h"
-#include "grit/app_shell_resources.h"
 #include "grit/extensions_resources.h"
 
 namespace extensions {
@@ -86,12 +84,6 @@ ShellExtensionsClient::~ShellExtensionsClient() {
 
 void ShellExtensionsClient::Initialize() {
   RegisterCommonManifestHandlers();
-
-  // TODO(rockot): API manifest handlers which move out to src/extensions
-  // should either end up in RegisterCommonManifestHandlers or some new
-  // initialization step specifically for API manifest handlers.
-  (new SocketsManifestHandler)->Register();
-
   ManifestHandler::FinalizeRegistration();
   // TODO(jamescook): Do we need to whitelist any extensions?
 
@@ -102,6 +94,10 @@ const PermissionMessageProvider&
 ShellExtensionsClient::GetPermissionMessageProvider() const {
   NOTIMPLEMENTED();
   return g_permission_message_provider.Get();
+}
+
+const std::string ShellExtensionsClient::GetProductName() {
+  return "app_shell";
 }
 
 scoped_ptr<FeatureProvider> ShellExtensionsClient::CreateFeatureProvider(
@@ -131,7 +127,6 @@ ShellExtensionsClient::CreateFeatureProviderSource(
       new JSONFeatureProviderSource(name));
   if (name == "api") {
     source->LoadJSON(IDR_EXTENSION_API_FEATURES);
-    source->LoadJSON(IDR_SHELL_EXTENSION_API_FEATURES);
   } else if (name == "manifest") {
     source->LoadJSON(IDR_EXTENSION_MANIFEST_FEATURES);
   } else if (name == "permission") {
@@ -176,20 +171,11 @@ bool ShellExtensionsClient::IsScriptableURL(const GURL& url,
 
 bool ShellExtensionsClient::IsAPISchemaGenerated(
     const std::string& name) const {
-  // TODO(rockot): Remove dependency on src/chrome once we have some core APIs
-  // moved out. See http://crbug.com/349042.
-  // Special-case our simplified app.runtime implementation because we don't
-  // have the Chrome app APIs available.
-  return core_api::GeneratedSchemas::IsGenerated(name) ||
-         shell_api::GeneratedSchemas::IsGenerated(name);
+  return core_api::GeneratedSchemas::IsGenerated(name);
 }
 
 base::StringPiece ShellExtensionsClient::GetAPISchema(
     const std::string& name) const {
-  // Schema for chrome.shell APIs.
-  if (shell_api::GeneratedSchemas::IsGenerated(name))
-    return shell_api::GeneratedSchemas::Get(name);
-
   return core_api::GeneratedSchemas::Get(name);
 }
 
@@ -198,6 +184,20 @@ void ShellExtensionsClient::RegisterAPISchemaResources(
 }
 
 bool ShellExtensionsClient::ShouldSuppressFatalErrors() const {
+  return true;
+}
+
+std::string ShellExtensionsClient::GetWebstoreBaseURL() const {
+  return extension_urls::kChromeWebstoreBaseURL;
+}
+
+std::string ShellExtensionsClient::GetWebstoreUpdateURL() const {
+  return extension_urls::kChromeWebstoreUpdateURL;
+}
+
+bool ShellExtensionsClient::IsBlacklistUpdateURL(const GURL& url) const {
+  // TODO(rockot): Maybe we want to do something else here. For now we accept
+  // any URL as a blacklist URL because we don't really care.
   return true;
 }
 

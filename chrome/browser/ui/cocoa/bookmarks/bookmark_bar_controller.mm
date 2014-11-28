@@ -48,6 +48,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
@@ -56,13 +57,12 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/resources/grit/ui_resources.h"
 
 using base::UserMetricsAction;
 using bookmarks::BookmarkNodeData;
@@ -606,7 +606,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 - (BOOL)canEditBookmarks {
   PrefService* prefs = browser_->profile()->GetPrefs();
-  return prefs->GetBoolean(prefs::kEditBookmarksEnabled);
+  return prefs->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled);
 }
 
 - (BOOL)canEditBookmark:(const BookmarkNode*)node {
@@ -716,11 +716,26 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     RecordBookmarkFolderOpen([self bookmarkLaunchLocation]);
   showFolderMenus_ = !showFolderMenus_;
 
-  if (sender == offTheSideButton_)
+  // Middle click on chevron should not open bookmarks under it, instead just
+  // open its folder menu.
+  if (sender == offTheSideButton_) {
     [[sender cell] setStartingChildIndex:displayedButtonCount_];
-
+    NSEvent* event = [NSApp currentEvent];
+    if ([event type] == NSOtherMouseUp) {
+      [self openOrCloseBookmarkFolderForOffTheSideButton];
+      return;
+    }
+  }
   // Toggle presentation of bar folder menus.
   [folderTarget_ openBookmarkFolderFromButton:sender];
+}
+
+- (void)openOrCloseBookmarkFolderForOffTheSideButton {
+  // If clicked on already opened folder, then close it and return.
+  if ([folderController_ parentButton] == offTheSideButton_)
+    [self closeBookmarkFolder:self];
+  else
+    [self addNewFolderControllerWithParentButton:offTheSideButton_];
 }
 
 // Click on a bookmark folder button.
@@ -949,7 +964,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // override.
 - (void)openURL:(GURL)url disposition:(WindowOpenDisposition)disposition {
   OpenURLParams params(
-      url, Referrer(), disposition, content::PAGE_TRANSITION_AUTO_BOOKMARK,
+      url, Referrer(), disposition, ui::PAGE_TRANSITION_AUTO_BOOKMARK,
       false);
   browser_->OpenURL(params);
 }
@@ -1178,8 +1193,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     return NO;
 
   PrefService* prefs = browser_->profile()->GetPrefs();
-  BOOL visible = ![managedBookmarksButton_ bookmarkNode]->empty() &&
-                 prefs->GetBoolean(prefs::kShowManagedBookmarksInBookmarkBar);
+  BOOL visible =
+      ![managedBookmarksButton_ bookmarkNode]->empty() &&
+      prefs->GetBoolean(bookmarks::prefs::kShowManagedBookmarksInBookmarkBar);
   BOOL currentVisibility = ![managedBookmarksButton_ isHidden];
   if (currentVisibility != visible) {
     [managedBookmarksButton_ setHidden:!visible];

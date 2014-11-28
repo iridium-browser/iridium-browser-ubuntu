@@ -44,7 +44,7 @@ size_t GetReceivedFlowControlWindow(QuicSession* session) {
     return kDefaultFlowControlSendWindow;
   }
 
-  // Version must be >= QUIC_VERSION_20, so we check for stream specific flow
+  // Version must be >= QUIC_VERSION_21, so we check for stream specific flow
   // control window.
   if (session->config()->HasReceivedInitialStreamFlowControlWindowBytes()) {
     return session->config()->ReceivedInitialStreamFlowControlWindowBytes();
@@ -479,7 +479,6 @@ void ReliableQuicStream::OnWindowUpdateFrame(
     DLOG(DFATAL) << "Flow control not enabled! " << version();
     return;
   }
-
   if (flow_controller_.UpdateSendWindowOffset(frame.byte_offset)) {
     // We can write again!
     // TODO(rjshade): This does not respect priorities (e.g. multiple
@@ -530,6 +529,12 @@ void ReliableQuicStream::AddBytesConsumed(uint64 bytes) {
     if (stream_contributes_to_connection_flow_control_) {
       connection_flow_controller_->AddBytesConsumed(bytes);
     }
+  }
+}
+
+void ReliableQuicStream::UpdateSendWindowOffset(uint64 new_window) {
+  if (flow_controller_.UpdateSendWindowOffset(new_window)) {
+    OnCanWrite();
   }
 }
 

@@ -35,6 +35,7 @@
 namespace blink {
 
 class WebGLActiveInfo FINAL : public RefCountedWillBeGarbageCollectedFinalized<WebGLActiveInfo>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<WebGLActiveInfo> create(const String& name, GLenum type, GLint size)
     {
@@ -55,13 +56,12 @@ private:
         ASSERT(name.length());
         ASSERT(type);
         ASSERT(size);
-        ScriptWrappable::init(this);
     }
     String m_name;
     GLenum m_type;
     GLint m_size;
 };
 
-}
+} // namespace blink
 
 #endif // WebGLActiveInfo_h

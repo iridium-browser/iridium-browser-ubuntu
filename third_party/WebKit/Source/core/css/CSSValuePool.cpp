@@ -26,8 +26,8 @@
 #include "config.h"
 #include "core/css/CSSValuePool.h"
 
-#include "core/css/parser/BisonCSSParser.h"
 #include "core/css/CSSValueList.h"
+#include "core/css/parser/CSSParser.h"
 #include "core/rendering/style/RenderStyle.h"
 
 namespace blink {
@@ -141,8 +141,11 @@ PassRefPtrWillBeRawPtr<CSSValueList> CSSValuePool::createFontFaceValue(const Ato
         m_fontFaceValueCache.clear();
 
     RefPtrWillBeMember<CSSValueList>& value = m_fontFaceValueCache.add(string, nullptr).storedValue->value;
-    if (!value)
-        value = BisonCSSParser::parseFontFaceValue(string);
+    if (!value) {
+        RefPtrWillBeRawPtr<CSSValue> parsedValue = CSSParser::parseSingleValue(CSSPropertyFontFamily, string);
+        if (parsedValue && parsedValue->isValueList())
+            value = toCSSValueList(parsedValue.get());
+    }
     return value;
 }
 

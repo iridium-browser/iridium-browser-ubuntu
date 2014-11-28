@@ -35,6 +35,8 @@ void SettingsWindowManager::RemoveObserver(
 
 void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
                                                      const GURL& gurl) {
+  // Use the original (non off-the-record) profile for settings.
+  profile = profile->GetOriginalProfile();
   // Look for an existing browser window.
   Browser* browser = FindBrowserForProfile(profile);
   if (browser) {
@@ -46,7 +48,7 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
       return;
     }
     NavigateParams params(browser, gurl,
-                          content::PAGE_TRANSITION_AUTO_BOOKMARK);
+                          ui::PAGE_TRANSITION_AUTO_BOOKMARK);
     params.window_action = NavigateParams::SHOW_WINDOW;
     params.user_gesture = true;
     chrome::Navigate(&params);
@@ -54,7 +56,7 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
   }
 
   // No existing browser window, create one.
-  NavigateParams params(profile, gurl, content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  NavigateParams params(profile, gurl, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = NEW_POPUP;
   params.trusted_source = true;
   params.window_action = NavigateParams::SHOW_WINDOW;
@@ -62,6 +64,7 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   chrome::Navigate(&params);
   settings_session_map_[profile] = params.browser->session_id().id();
+  DCHECK(params.browser->is_trusted_source());
 
   FOR_EACH_OBSERVER(SettingsWindowManagerObserver,
                     observers_, OnNewSettingsWindow(params.browser));

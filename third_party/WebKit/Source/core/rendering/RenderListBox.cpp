@@ -35,11 +35,13 @@
 #include "core/css/CSSFontSelector.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
+#include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeRenderStyle.h"
 #include "core/dom/StyleEngine.h"
 #include "core/editing/FrameSelection.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/html/HTMLDivElement.h"
 #include "core/html/HTMLOptGroupElement.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
@@ -50,6 +52,7 @@
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderScrollbar.h"
+#include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderText.h"
 #include "core/rendering/RenderTheme.h"
 #include "core/rendering/RenderView.h"
@@ -63,10 +66,6 @@
 namespace blink {
 
 using namespace HTMLNames;
-
-// The minSize constant was originally defined to render scrollbars correctly.
-// This might vary for different platforms.
-const int minSize = 4;
 
 // Default size when the multiple attribute is present but size attribute is absent.
 const int defaultSize = 4;
@@ -93,8 +92,8 @@ inline HTMLSelectElement* RenderListBox::selectElement() const
 int RenderListBox::size() const
 {
     int specifiedSize = selectElement()->size();
-    if (specifiedSize > 1)
-        return max(minSize, specifiedSize);
+    if (specifiedSize >= 1)
+        return specifiedSize;
 
     return defaultSize;
 }
@@ -109,11 +108,16 @@ LayoutUnit RenderListBox::itemHeight() const
     HTMLSelectElement* select = selectElement();
     if (!select)
         return 0;
-    RenderObject* baseItemRenderer = firstChild();
+    Element* baseItem = ElementTraversal::firstChild(*select);
+    if (!baseItem)
+        return defaultItemHeight();
+    if (isHTMLOptGroupElement(baseItem))
+        baseItem = &toHTMLOptGroupElement(baseItem)->optGroupLabelElement();
+    else if (!isHTMLOptionElement(baseItem))
+        return defaultItemHeight();
+    RenderObject* baseItemRenderer = baseItem->renderer();
     if (!baseItemRenderer)
         return defaultItemHeight();
-    if (baseItemRenderer->node() && isHTMLOptGroupElement(baseItemRenderer->node()))
-        baseItemRenderer = baseItemRenderer->slowFirstChild();
     if (!baseItemRenderer || !baseItemRenderer->isBox())
         return defaultItemHeight();
     return toRenderBox(baseItemRenderer)->height();
@@ -136,6 +140,22 @@ void RenderListBox::stopAutoscroll()
     if (select->isDisabledFormControl())
         return;
     select->handleMouseRelease();
+}
+
+void RenderListBox::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const
+{
+    RenderBlockFlow::computeIntrinsicLogicalWidths(minLogicalWidth, maxLogicalWidth);
+    if (style()->width().isPercent())
+        minLogicalWidth = 0;
+}
+
+void RenderListBox::scrollToRect(const LayoutRect& rect)
+{
+    if (hasOverflowClip()) {
+        ASSERT(layer());
+        ASSERT(layer()->scrollableArea());
+        layer()->scrollableArea()->exposeRect(rect, ScrollAlignment::alignToEdgeIfNeeded, ScrollAlignment::alignToEdgeIfNeeded);
+    }
 }
 
 } // namespace blink

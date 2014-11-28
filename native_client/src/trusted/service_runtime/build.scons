@@ -16,20 +16,8 @@ env.Append(CPPPATH=['${TARGET_ROOT}/gen'])
 #  env.FilterOut(CCFLAGS=['-pedantic'])
 #  env.FilterOut(CCFLAGS=['-Wall'])
 
-if env.Bit('windows'):
-  syscall_impl = 'win/nacl_syscall_impl.c'
-else:
-  syscall_impl = 'posix/nacl_syscall_impl.c'
 
-
-# TODO GENERATED CODE
 GENERATED='${TARGET_ROOT}/gen/native_client/src/trusted/service_runtime'
-env.Command(target=env.File(GENERATED + '/nacl_syscall_handlers.c'),
-            source=[syscall_impl, 'nacl_syscall_handlers_gen.py'],
-            action=[Action('${PYTHON} ${SOURCES[1]} ${SYSCALL_GEN_FLAGS}'
-                           ' -i ${SOURCE} -o ${TARGET}'),
-                    ],
-            )
 
 
 # ----------------------------------------------------------
@@ -57,11 +45,10 @@ ldr_inputs = [
     'nacl_signal_common.c',
     'nacl_stack_safety.c',
     'nacl_syscall_common.c',
-    GENERATED + '/nacl_syscall_handlers.c',
     'nacl_syscall_hook.c',
+    'nacl_syscall_list.c',
     'nacl_text.c',
     'nacl_valgrind_hooks.c',
-    'name_service/default_name_service.c',
     'name_service/name_service.c',
     'sel_addrspace.c',
     'sel_ldr.c',
@@ -79,6 +66,7 @@ ldr_inputs = [
     'sys_list_mappings.c',
     'sys_memory.c',
     'sys_parallel_io.c',
+    'sys_random.c',
     'thread_suspension_common.c',
     'thread_suspension_unwind.c',
 ]
@@ -273,9 +261,15 @@ if env.Bit('mac'):
     raise Exception("Unsupported target")
 
 if env.Bit('windows'):
-  ldr_inputs += ['win/vm_hole.c']
+  ldr_inputs += [
+      'win/nacl_syscall_impl.c',
+      'win/vm_hole.c',
+      ]
 else:
-  ldr_inputs += ['generic/vm_hole.c']
+  ldr_inputs += [
+      'generic/vm_hole.c',
+      'posix/nacl_syscall_impl.c',
+      ]
 
 
 syscall_gen_flags = '-a ${TARGET_ARCHITECTURE} -s ${TARGET_SUBARCH}'
@@ -329,7 +323,6 @@ sel_ldr_libs = ['sel',
                 'manifest_proxy',
                 'simple_service',
                 'thread_interface',
-                'gio_wrapped_desc',
                 'nonnacl_srpc',
                 'nrd_xfer',
                 'nacl_perf_counter',
@@ -367,7 +360,6 @@ if not env.Bit('coverage_enabled') or not env.Bit('windows'):
                          EXTRA_LIBS=['sel',
                                      'env_cleanser',
                                      'nacl_perf_counter',
-                                     'gio_wrapped_desc',
                                      'nacl_fault_inject',
                                      'platform',
                                      ])
@@ -492,7 +484,6 @@ if not env.Bit('coverage_enabled') or not env.Bit('windows'):
                   'manifest_proxy',
                   'simple_service',
                   'thread_interface',
-                  'gio_wrapped_desc',
                   'nonnacl_srpc',
                   'nrd_xfer',
                   'nacl_perf_counter',
@@ -551,7 +542,6 @@ if ((not env.Bit('windows') or not env.Bit('coverage_enabled')) and
                   'manifest_proxy',
                   'simple_service',
                   'thread_interface',
-                  'gio_wrapped_desc',
                   'nonnacl_srpc',
                   'nrd_xfer',
                   'nacl_perf_counter',
@@ -600,7 +590,6 @@ nacl_sync_cond_test_exe = env.ComponentProgram(
                 'manifest_proxy',
                 'simple_service',
                 'thread_interface',
-                'gio_wrapped_desc',
                 'nonnacl_srpc',
                 'nrd_xfer',
                 'nacl_perf_counter',
@@ -621,9 +610,7 @@ env.AddNodeToTestSuite(node,
 
 env_cleanser_test_exe = env.ComponentProgram('env_cleanser_test',
                                              ['env_cleanser_test.c'],
-                                             EXTRA_LIBS=['env_cleanser',
-                                                         'gio_wrapped_desc',
-                                                         ])
+                                             EXTRA_LIBS=['env_cleanser'])
 node = env.CommandTest(
     'env_cleanser_test.out',
     command=[env_cleanser_test_exe])
@@ -696,7 +683,6 @@ check_test_exe = env.ComponentProgram('nacl_check_test',
                                       EXTRA_LIBS=['sel',
                                                   'env_cleanser',
                                                   'nacl_perf_counter',
-                                                  'gio_wrapped_desc',
                                                   'nacl_fault_inject',
                                                   'nacl_interval',
                                                   'platform',
@@ -920,7 +906,7 @@ if env.Bit('target_x86') and env.Bit('nacl_static_link'):
 # ----------------------------------------------------------
 # Death Tests With Canned x86 Binaries
 # ----------------------------------------------------------
-ERROR_WHILE_LOADING = '"^(Error while loading).*' + '(:[^:]*)"'
+ERROR_WHILE_LOADING = r'"^(?:\[[^\]]+\]\s*)?(Error while loading).*(:[^:]*)"'
 
 # TODO: Create death test nexes for arm.
 DEATH_TESTS_X86 = [ 'old_abi',  # hello_world.nexe with an old ABI version
@@ -985,7 +971,6 @@ if not env.Bit('coverage_enabled') or not env.Bit('windows'):
                   'manifest_proxy',
                   'simple_service',
                   'thread_interface',
-                  'gio_wrapped_desc',
                   'nonnacl_srpc',
                   'nrd_xfer',
                   'nacl_perf_counter',

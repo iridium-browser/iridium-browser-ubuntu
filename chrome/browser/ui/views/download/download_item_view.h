@@ -38,6 +38,10 @@
 class DownloadShelfView;
 class DownloadShelfContextMenuView;
 
+namespace extensions {
+class ExperienceSamplingEvent;
+}
+
 namespace gfx {
 class Image;
 class ImageSkia;
@@ -324,10 +328,6 @@ class DownloadItemView : public views::ButtonListener,
   // The time at which a dangerous download warning was displayed.
   base::Time time_download_warning_shown_;
 
-  // Method factory used to delay reenabling of the item when opening the
-  // downloaded file.
-  base::WeakPtrFactory<DownloadItemView> weak_ptr_factory_;
-
   // The currently running download context menu.
   scoped_ptr<DownloadShelfContextMenuView> context_menu_;
 
@@ -338,6 +338,14 @@ class DownloadItemView : public views::ButtonListener,
   // item.  Store the path used, so that we can detect a change in the path
   // and reload the icon.
   base::FilePath last_download_item_path_;
+
+  // ExperienceSampling: This tracks dangerous/malicious downloads warning UI
+  // and the user's decisions about it.
+  scoped_ptr<extensions::ExperienceSamplingEvent> sampling_event_;
+
+  // Method factory used to delay reenabling of the item when opening the
+  // downloaded file.
+  base::WeakPtrFactory<DownloadItemView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadItemView);
 };

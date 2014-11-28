@@ -1,9 +1,14 @@
 include_rules = [
+  "+cc",
+  "+media",
+  "+mojo/cc",
+  "+mojo/application",
   "+mojo/services",
   "+net/base",
   "+skia",
   "+third_party/WebKit/public",
   "+third_party/skia/include",
+  "+ui/base",
   "+ui/events",
   "+ui/native_theme",
 ]

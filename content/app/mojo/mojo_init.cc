@@ -4,15 +4,15 @@
 
 #include "content/app/mojo/mojo_init.h"
 
-#include "base/logging.h"
-#include "mojo/application_manager/application_manager.h"
+#include "base/memory/scoped_ptr.h"
 #include "mojo/embedder/embedder.h"
+#include "mojo/embedder/simple_platform_support.h"
 
 namespace content {
 
 void InitializeMojo() {
-  mojo::embedder::Init();
-  mojo::ApplicationManager::GetInstance();
+  mojo::embedder::Init(scoped_ptr<mojo::embedder::PlatformSupport>(
+      new mojo::embedder::SimplePlatformSupport()));
 }
 
 }  // namespace content

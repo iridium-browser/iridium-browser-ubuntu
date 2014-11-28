@@ -19,18 +19,17 @@
 class SkBitmap;
 
 namespace mojo {
-class ApplicationConnection;
 class ViewManager;
 class ViewManagerDelegate;
 class ViewManagerTransaction;
+class Shell;
 
 // Manages the connection with the View Manager service.
 class ViewManagerClientImpl : public ViewManager,
                               public InterfaceImpl<ViewManagerClient>,
                               public WindowManagerClient {
  public:
-  ViewManagerClientImpl(ViewManagerDelegate* delegate,
-                        ApplicationConnection* app_connection);
+  ViewManagerClientImpl(ViewManagerDelegate* delegate, Shell* shell);
   virtual ~ViewManagerClientImpl();
 
   bool connected() const { return connected_; }
@@ -53,7 +52,7 @@ class ViewManagerClientImpl : public ViewManager,
   bool OwnsView(Id id) const;
 
   void SetBounds(Id view_id, const gfx::Rect& bounds);
-  void SetViewContents(Id view_id, const SkBitmap& contents);
+  void SetSurfaceId(Id view_id, SurfaceIdPtr surface_id);
   void SetFocus(Id view_id);
   void SetVisible(Id view_id, bool visible);
 
@@ -73,6 +72,8 @@ class ViewManagerClientImpl : public ViewManager,
   // ViewManager::GetViewById.
   void AddView(View* view);
   void RemoveView(Id view_id);
+
+  Shell* shell() { return shell_; }
 
  private:
   friend class RootObserver;
@@ -106,7 +107,9 @@ class ViewManagerClientImpl : public ViewManager,
                                Id relative_view_id,
                                OrderDirection direction) OVERRIDE;
   virtual void OnViewDeleted(Id view_id) OVERRIDE;
-  virtual void OnViewInputEvent(Id view,
+  virtual void OnViewVisibilityChanged(Id view_id, bool visible) OVERRIDE;
+  virtual void OnViewDrawnStateChanged(Id view_id, bool drawn) OVERRIDE;
+  virtual void OnViewInputEvent(Id view_id,
                                 EventPtr event,
                                 const Callback<void()>& callback) OVERRIDE;
   virtual void Embed(
@@ -127,6 +130,8 @@ class ViewManagerClientImpl : public ViewManager,
 
   void OnActionCompleted(bool success);
   void OnActionCompletedWithErrorCode(ErrorCode code);
+
+  BitmapUploader* BitmapUploaderForView(Id view_id);
 
   base::Callback<void(bool)> ActionCompletedCallback();
   base::Callback<void(ErrorCode)> ActionCompletedCallbackWithErrorCode();
@@ -149,6 +154,10 @@ class ViewManagerClientImpl : public ViewManager,
   ViewManagerService* service_;
 
   WindowManagerServicePtr window_manager_;
+
+  // TODO(jamesr): Remove once all callers switch from SetContents to
+  // SetSurfaceId.
+  Shell* shell_;
 
   DISALLOW_COPY_AND_ASSIGN(ViewManagerClientImpl);
 };

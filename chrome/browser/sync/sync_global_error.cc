@@ -15,9 +15,8 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 SyncGlobalError::SyncGlobalError(SyncErrorController* error_controller,
@@ -32,7 +31,7 @@ SyncGlobalError::SyncGlobalError(SyncErrorController* error_controller,
 
 SyncGlobalError::~SyncGlobalError() {
   DCHECK(!error_controller_)
-      << "SigninGlobalError::Shutdown() was not called";
+      << "SyncGlobalError::Shutdown() was not called";
 }
 
 void SyncGlobalError::Shutdown() {

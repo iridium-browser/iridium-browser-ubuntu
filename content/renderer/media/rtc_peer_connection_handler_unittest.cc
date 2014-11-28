@@ -40,6 +40,7 @@
 #include "third_party/WebKit/public/platform/WebRTCStatsRequest.h"
 #include "third_party/WebKit/public/platform/WebRTCVoidRequest.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
+#include "third_party/WebKit/public/web/WebHeap.h"
 #include "third_party/libjingle/source/talk/app/webrtc/peerconnectioninterface.h"
 
 static const char kDummySdp[] = "dummy sdp";
@@ -145,10 +146,11 @@ class MockPeerConnectionTracker : public PeerConnectionTracker {
       void(RTCPeerConnectionHandler* pc_handler,
            const webrtc::PeerConnectionInterface::RTCConfiguration& config,
            const RTCMediaConstraints& options));
-  MOCK_METHOD3(TrackAddIceCandidate,
+  MOCK_METHOD4(TrackAddIceCandidate,
                void(RTCPeerConnectionHandler* pc_handler,
                     const blink::WebRTCICECandidate& candidate,
-                    Source source));
+                    Source source,
+                    bool succeeded));
   MOCK_METHOD3(TrackAddStream,
                void(RTCPeerConnectionHandler* pc_handler,
                     const blink::WebMediaStream& stream,
@@ -216,6 +218,14 @@ class RTCPeerConnectionHandlerTest : public ::testing::Test {
 
     mock_peer_connection_ = pc_handler_->native_peer_connection();
     ASSERT_TRUE(mock_peer_connection_);
+  }
+
+  virtual void TearDown() {
+    pc_handler_.reset();
+    mock_tracker_.reset();
+    mock_dependency_factory_.reset();
+    mock_client_.reset();
+    blink::WebHeap::collectAllGarbageForTesting();
   }
 
   // Creates a WebKit local MediaStream.
@@ -388,16 +398,17 @@ TEST_F(RTCPeerConnectionHandlerTest, updateICE) {
 
 TEST_F(RTCPeerConnectionHandlerTest, addICECandidate) {
   blink::WebRTCICECandidate candidate;
-  candidate.initialize(kDummySdp, "mid", 1);
+  candidate.initialize(kDummySdp, "sdpMid", 1);
 
   EXPECT_CALL(*mock_tracker_.get(),
               TrackAddIceCandidate(pc_handler_.get(),
                                    testing::Ref(candidate),
-                                   PeerConnectionTracker::SOURCE_REMOTE));
+                                   PeerConnectionTracker::SOURCE_REMOTE,
+                                   true));
   EXPECT_TRUE(pc_handler_->addICECandidate(candidate));
   EXPECT_EQ(kDummySdp, mock_peer_connection_->ice_sdp());
   EXPECT_EQ(1, mock_peer_connection_->sdp_mline_index());
-  EXPECT_EQ("mid", mock_peer_connection_->sdp_mid());
+  EXPECT_EQ("sdpMid", mock_peer_connection_->sdp_mid());
 }
 
 TEST_F(RTCPeerConnectionHandlerTest, addAndRemoveStream) {
@@ -760,6 +771,8 @@ TEST_F(RTCPeerConnectionHandlerTest, RemoveAndAddAudioTrackFromRemoteStream) {
     EXPECT_EQ(0u, modified_audio_tracks1.size());
   }
 
+  blink::WebHeap::collectGarbageForTesting();
+
   // Add the WebRtc audio track again.
   remote_stream->AddTrack(webrtc_track.get());
   blink::WebVector<blink::WebMediaStreamTrack> modified_audio_tracks2;
@@ -796,6 +809,8 @@ TEST_F(RTCPeerConnectionHandlerTest, RemoveAndAddVideoTrackFromRemoteStream) {
     EXPECT_EQ(0u, modified_video_tracks1.size());
   }
 
+  blink::WebHeap::collectGarbageForTesting();
+
   // Add the WebRtc video track again.
   remote_stream->AddTrack(webrtc_track.get());
   blink::WebVector<blink::WebMediaStreamTrack> modified_video_tracks2;
@@ -807,13 +822,13 @@ TEST_F(RTCPeerConnectionHandlerTest, OnIceCandidate) {
   testing::InSequence sequence;
   EXPECT_CALL(*mock_tracker_.get(),
               TrackAddIceCandidate(pc_handler_.get(), _,
-                                   PeerConnectionTracker::SOURCE_LOCAL));
+                                   PeerConnectionTracker::SOURCE_LOCAL, true));
   EXPECT_CALL(*mock_client_.get(), didGenerateICECandidate(_));
 
   scoped_ptr<webrtc::IceCandidateInterface> native_candidate(
-      mock_dependency_factory_->CreateIceCandidate("mid", 1, kDummySdp));
+      mock_dependency_factory_->CreateIceCandidate("sdpMid", 1, kDummySdp));
   pc_handler_->OnIceCandidate(native_candidate.get());
-  EXPECT_EQ("mid", mock_client_->candidate_mid());
+  EXPECT_EQ("sdpMid", mock_client_->candidate_mid());
   EXPECT_EQ(1, mock_client_->candidate_mlineindex());
   EXPECT_EQ(kDummySdp, mock_client_->candidate_sdp());
 }

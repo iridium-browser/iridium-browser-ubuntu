@@ -17,7 +17,7 @@
 package com.google.ipc.invalidation.ticl;
 
 import com.google.ipc.invalidation.external.client.SystemResources;
-import com.google.protos.ipc.invalidation.ChannelCommon.NetworkEndpointId;
+import com.google.ipc.invalidation.ticl.proto.ChannelCommon.NetworkEndpointId;
 
 /**
  * Extension of {@link com.google.ipc.invalidation.external.client.SystemResources.NetworkChannel}

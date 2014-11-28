@@ -9,8 +9,8 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
@@ -569,7 +569,7 @@ TEST_F(CertDatabaseNSSTest, DISABLED_ImportServerCert) {
 
 TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned) {
   CertificateList certs;
-  ASSERT_TRUE(ReadCertIntoList("punycodetest.der", &certs));
+  ASSERT_TRUE(ReadCertIntoList("punycodetest.pem", &certs));
 
   NSSCertDatabase::ImportCertFailureList failed;
   EXPECT_TRUE(cert_db_->ImportServerCert(certs, NSSCertDatabase::TRUST_DEFAULT,
@@ -600,7 +600,7 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned) {
 
 TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned_Trusted) {
   CertificateList certs;
-  ASSERT_TRUE(ReadCertIntoList("punycodetest.der", &certs));
+  ASSERT_TRUE(ReadCertIntoList("punycodetest.pem", &certs));
 
   NSSCertDatabase::ImportCertFailureList failed;
   EXPECT_TRUE(cert_db_->ImportServerCert(certs, NSSCertDatabase::TRUSTED_SSL,

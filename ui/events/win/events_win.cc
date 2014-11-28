@@ -151,6 +151,10 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
     case WM_SYSKEYDOWN:
     case WM_CHAR:
       return ET_KEY_PRESSED;
+    // The WM_DEADCHAR message is posted to the window with the keyboard focus
+    // when a WM_KEYUP message is translated. This happens for special keyboard
+    // sequences.
+    case WM_DEADCHAR:
     case WM_KEYUP:
     case WM_SYSKEYUP:
       return ET_KEY_RELEASED;
@@ -241,9 +245,10 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
 
 gfx::Point EventSystemLocationFromNative(
     const base::NativeEvent& native_event) {
-  // TODO(ben): Needs to always return screen position here. Returning normal
-  // origin for now since that's obviously wrong.
-  return gfx::Point(0, 0);
+  POINT global_point = { static_cast<short>(LOWORD(native_event.lParam)),
+                         static_cast<short>(HIWORD(native_event.lParam)) };
+  ClientToScreen(native_event.hwnd, &global_point);
+  return gfx::Point(global_point);
 }
 
 KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {

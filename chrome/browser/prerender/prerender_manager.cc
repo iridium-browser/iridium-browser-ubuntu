@@ -15,7 +15,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
@@ -27,7 +26,6 @@
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
-#include "chrome/browser/prerender/prerender_condition.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
@@ -57,6 +55,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
@@ -238,8 +237,7 @@ struct PrerenderManager::NavigationRecord {
 
 PrerenderManager::PrerenderManager(Profile* profile,
                                    PrerenderTracker* prerender_tracker)
-    : enabled_(true),
-      profile_(profile),
+    : profile_(profile),
       prerender_tracker_(prerender_tracker),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
       last_prerender_start_time_(GetCurrentTimeTicks() -
@@ -317,7 +315,6 @@ PrerenderManager::~PrerenderManager() {
 
 void PrerenderManager::Shutdown() {
   DestroyAllContents(FINAL_STATUS_MANAGER_SHUTDOWN);
-  STLDeleteElements(&prerender_conditions_);
   on_close_web_contents_deleters_.clear();
   // Must happen before |profile_| is set to NULL as
   // |local_predictor_| accesses it.
@@ -694,7 +691,8 @@ void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry,
       entry->match_complete_status() ==
           PrerenderContents::MATCH_COMPLETE_DEFAULT &&
       NeedMatchCompleteDummyForFinalStatus(final_status) &&
-      ActuallyPrerendering()) {
+      ActuallyPrerendering() &&
+      GetMode() == PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP) {
     // TODO(tburkard): I'd like to DCHECK that we are actually prerendering.
     // However, what if new conditions are added and
     // NeedMatchCompleteDummyForFinalStatus is not being updated.  Not sure
@@ -741,11 +739,6 @@ void PrerenderManager::RecordPerceivedPageLoadTime(
   }
 }
 
-void PrerenderManager::set_enabled(bool enabled) {
-  DCHECK(CalledOnValidThread());
-  enabled_ = enabled;
-}
-
 // static
 PrerenderManager::PrerenderManagerMode PrerenderManager::GetMode() {
   return mode_;
@@ -772,6 +765,8 @@ const char* PrerenderManager::GetModeString() {
       return "_15MinTTL";
     case PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP:
       return "_NoUse";
+    case PRERENDER_MODE_EXPERIMENT_MATCH_COMPLETE_GROUP:
+      return "_MatchComplete";
     case PRERENDER_MODE_MAX:
     default:
       NOTREACHED() << "Invalid PrerenderManager mode.";
@@ -933,7 +928,7 @@ base::DictionaryValue* PrerenderManager::GetAsValue() const {
   base::DictionaryValue* dict_value = new base::DictionaryValue();
   dict_value->Set("history", prerender_history_->GetEntriesAsValue());
   dict_value->Set("active", GetActivePrerendersAsValue());
-  dict_value->SetBoolean("enabled", enabled_);
+  dict_value->SetBoolean("enabled", IsEnabled());
   dict_value->SetBoolean("omnibox_enabled", IsOmniboxEnabled(profile_));
   // If prerender is disabled via a flag this method is not even called.
   std::string enabled_note;
@@ -967,10 +962,6 @@ void PrerenderManager::RecordFinalStatusWithMatchCompleteStatus(
                                  experiment_id,
                                  mc_status,
                                  final_status);
-}
-
-void PrerenderManager::AddCondition(const PrerenderCondition* condition) {
-  prerender_conditions_.push_back(condition);
 }
 
 void PrerenderManager::RecordNavigation(const GURL& url) {
@@ -1068,16 +1059,12 @@ PrerenderManager::PendingSwap::~PendingSwap() {
       target_route_id_, swap_successful_);
 }
 
-WebContents* PrerenderManager::PendingSwap::target_contents() const {
-  return web_contents();
-}
-
 void PrerenderManager::PendingSwap::BeginSwap() {
   if (g_hang_session_storage_merges_for_testing)
     return;
 
   SessionStorageNamespace* target_namespace =
-      target_contents()->GetController().GetDefaultSessionStorageNamespace();
+      web_contents()->GetController().GetDefaultSessionStorageNamespace();
   SessionStorageNamespace* prerender_namespace =
       prerender_data_->contents()->GetSessionStorageNamespace();
 
@@ -1110,21 +1097,26 @@ void PrerenderManager::PendingSwap::AboutToNavigateRenderView(
       target_route_id_, url_);
 }
 
-void PrerenderManager::PendingSwap::ProvisionalChangeToMainFrameUrl(
-        const GURL& url,
-        content::RenderFrameHost* render_frame_host) {
-  // We must only cancel the pending swap if the |url| navigated to is not
+void PrerenderManager::PendingSwap::DidStartProvisionalLoadForFrame(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& validated_url,
+    bool is_error_page,
+    bool is_iframe_srcdoc) {
+  if (render_frame_host->GetParent())
+    return;
+
+  // We must only cancel the pending swap if the url navigated to is not
   // the URL being attempted to be swapped in. That's because in the normal
   // flow, a ProvisionalChangeToMainFrameUrl will happen for the URL attempted
   // to be swapped in immediately after the pending swap has issued its merge.
-  if (url != url_)
+  if (validated_url != url_)
     prerender_data_->ClearPendingSwap();
 }
 
 void PrerenderManager::PendingSwap::DidCommitProvisionalLoadForFrame(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
-    content::PageTransition transition_type) {
+    ui::PageTransition transition_type) {
   if (render_frame_host->GetParent())
     return;
   prerender_data_->ClearPendingSwap();
@@ -1198,9 +1190,11 @@ void PrerenderManager::PendingSwap::OnMergeCompleted(
   // TODO(davidben): Can we make this less fragile?
   PrerenderManager* manager = manager_;
   PrerenderData* prerender_data = prerender_data_;
-  WebContents* new_web_contents = manager_->SwapInternal(
-        GURL(url_), target_contents(), prerender_data_,
-        should_replace_current_entry_);
+  WebContents* new_web_contents =
+      manager_->SwapInternal(GURL(url_),
+                             web_contents(),
+                             prerender_data_,
+                             should_replace_current_entry_);
   if (!new_web_contents) {
     manager->RecordEvent(prerender_data->contents(),
                          PRERENDER_EVENT_MERGE_RESULT_SWAPIN_FAILED);
@@ -1502,7 +1496,7 @@ PrerenderManager::FindPrerenderDataForTargetContents(
   for (ScopedVector<PrerenderData>::iterator it = active_prerenders_.begin();
        it != active_prerenders_.end(); ++it) {
     if ((*it)->pending_swap() &&
-        (*it)->pending_swap()->target_contents() == target_contents)
+        (*it)->pending_swap()->web_contents() == target_contents)
       return *it;
   }
   return NULL;
@@ -1861,8 +1855,6 @@ void PrerenderManager::RecordNetworkBytes(Origin origin,
 bool PrerenderManager::IsEnabled() const {
   DCHECK(CalledOnValidThread());
 
-  if (!enabled_)
-    return false;
   return chrome_browser_net::CanPrefetchAndPrerenderUI(profile_->GetPrefs());
 }
 

@@ -12,14 +12,14 @@
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/google_chrome_strings.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/user_agent.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "v8/include/v8.h"
 
@@ -44,6 +44,7 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
 
   // Localized and data strings.
   html_source->AddLocalizedString("title", IDS_ABOUT_VERSION_TITLE);
+  html_source->AddLocalizedString("application_label", IDS_PRODUCT_NAME);
   chrome::VersionInfo version_info;
   html_source->AddString("version", version_info.Version());
   html_source->AddString("version_modifier",
@@ -56,22 +57,11 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
   html_source->AddString("js_version", v8::V8::GetVersion());
 
 #if defined(OS_ANDROID)
-  html_source->AddLocalizedString("application_label",
-                                  IDS_ABOUT_VERSION_APPLICATION);
   html_source->AddString("os_version", AndroidAboutAppInfo::GetOsInfo());
-  base::android::BuildInfo* android_build_info =
-      base::android::BuildInfo::GetInstance();
-  html_source->AddString("application_name",
-                         android_build_info->package_label());
-  html_source->AddString("application_version_name",
-                         android_build_info->package_version_name());
-  html_source->AddString("application_version_code",
-                         android_build_info->package_version_code());
   html_source->AddLocalizedString("build_id_name",
                                   IDS_ABOUT_VERSION_BUILD_ID);
   html_source->AddString("build_id", CHROME_BUILD_ID);
 #else
-  html_source->AddLocalizedString("application_label", IDS_PRODUCT_NAME);
   html_source->AddString("os_version", std::string());
   html_source->AddString("flash_plugin", "Flash");
   // Note that the Flash version is retrieve asynchronously and returned in
@@ -86,6 +76,7 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
       "copyright",
       l10n_util::GetStringFUTF16(IDS_ABOUT_VERSION_COPYRIGHT,
                                  base::IntToString16(exploded_time.year)));
+  html_source->AddLocalizedString("revision", IDS_ABOUT_VERSION_REVISION);
   html_source->AddString("cl", version_info.LastChange());
   html_source->AddLocalizedString("official",
       version_info.IsOfficialBuild() ? IDS_ABOUT_VERSION_OFFICIAL :

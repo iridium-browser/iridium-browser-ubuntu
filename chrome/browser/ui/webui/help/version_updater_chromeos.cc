@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/ui/webui/help/help_utils_chromeos.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/network/network_handler.h"
@@ -20,8 +21,6 @@
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/user_manager/user_manager.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -73,19 +72,13 @@ bool IsAutoUpdateDisabled() {
   return update_disabled;
 }
 
-}  // namespace
-
-VersionUpdater* VersionUpdater::Create() {
-  return new VersionUpdaterCros;
-}
-
-void VersionUpdaterCros::CheckForUpdate(const StatusCallback& callback) {
-  callback_ = callback;
-
+// Returns whether an update is allowed. If not, it calls the callback with
+// the appropriate status.
+bool EnsureCanUpdate(const VersionUpdater::StatusCallback& callback) {
   if (IsAutoUpdateDisabled()) {
-    callback_.Run(FAILED, 0,
-                  l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY));
-    return;
+    callback.Run(VersionUpdater::FAILED, 0,
+                 l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY));
+    return false;
   }
 
   chromeos::NetworkStateHandler* network_state_handler =
@@ -93,32 +86,69 @@ void VersionUpdaterCros::CheckForUpdate(const StatusCallback& callback) {
   const chromeos::NetworkState* network =
       network_state_handler->DefaultNetwork();
 
-  // Don't proceed to update if we're currently offline or connected
+  // Don't allow an update if we're currently offline or connected
   // to a network for which updates are disallowed.
   NetworkStatus status = GetNetworkStatus(network);
   if (status == NETWORK_STATUS_OFFLINE) {
-    callback_.Run(FAILED_OFFLINE, 0,
+    callback.Run(VersionUpdater::FAILED_OFFLINE, 0,
                   l10n_util::GetStringUTF16(IDS_UPGRADE_OFFLINE));
-    return;
+    return false;
   } else if (status == NETWORK_STATUS_DISALLOWED) {
     base::string16 message =
         l10n_util::GetStringFUTF16(
             IDS_UPGRADE_DISALLOWED,
             help_utils_chromeos::GetConnectionTypeAsUTF16(network->type()));
-    callback_.Run(FAILED_CONNECTION_TYPE_DISALLOWED, 0, message);
-    return;
+    callback.Run(VersionUpdater::FAILED_CONNECTION_TYPE_DISALLOWED, 0, message);
+    return false;
   }
+
+  return true;
+}
+
+}  // namespace
+
+VersionUpdater* VersionUpdater::Create() {
+  return new VersionUpdaterCros;
+}
+
+void VersionUpdaterCros::GetUpdateStatus(const StatusCallback& callback) {
+  callback_ = callback;
+
+  if (!EnsureCanUpdate(callback))
+    return;
 
   UpdateEngineClient* update_engine_client =
       DBusThreadManager::Get()->GetUpdateEngineClient();
-  update_engine_client->AddObserver(this);
+  if (!update_engine_client->HasObserver(this))
+    update_engine_client->AddObserver(this);
+
+  this->UpdateStatusChanged(
+      DBusThreadManager::Get()->GetUpdateEngineClient()->GetLastStatus());
+}
+
+void VersionUpdaterCros::CheckForUpdate(const StatusCallback& callback) {
+  callback_ = callback;
+
+  if (!EnsureCanUpdate(callback))
+    return;
+
+  UpdateEngineClient* update_engine_client =
+      DBusThreadManager::Get()->GetUpdateEngineClient();
+  if (!update_engine_client->HasObserver(this))
+    update_engine_client->AddObserver(this);
+
+  if (update_engine_client->GetLastStatus().status !=
+      UpdateEngineClient::UPDATE_STATUS_IDLE) {
+    check_for_update_when_idle_ = true;
+    return;
+  }
+  check_for_update_when_idle_ = false;
 
   // Make sure that libcros is loaded and OOBE is complete.
   if (!WizardController::default_controller() ||
       chromeos::StartupUtils::IsDeviceRegistered()) {
-    update_engine_client->RequestUpdateCheck(
-        base::Bind(&VersionUpdaterCros::OnUpdateCheck,
-                   weak_ptr_factory_.GetWeakPtr()));
+    update_engine_client->RequestUpdateCheck(base::Bind(
+        &VersionUpdaterCros::OnUpdateCheck, weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -147,6 +177,7 @@ void VersionUpdaterCros::GetChannel(bool get_current_channel,
 
 VersionUpdaterCros::VersionUpdaterCros()
     : last_operation_(UpdateEngineClient::UPDATE_STATUS_IDLE),
+      check_for_update_when_idle_(false),
       weak_ptr_factory_(this) {
 }
 
@@ -206,6 +237,11 @@ void VersionUpdaterCros::UpdateStatusChanged(
 
   callback_.Run(my_status, progress, message);
   last_operation_ = status.status;
+
+  if (check_for_update_when_idle_ &&
+      status.status == UpdateEngineClient::UPDATE_STATUS_IDLE) {
+    CheckForUpdate(callback_);
+  }
 }
 
 void VersionUpdaterCros::OnUpdateCheck(

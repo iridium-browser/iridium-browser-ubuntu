@@ -25,12 +25,13 @@ class WebAudioMediaCodecBridge {
     // from a file in memory?
     static final long TIMEOUT_MICROSECONDS = 500;
     @CalledByNative
-    private static String CreateTempFile(Context ctx) throws java.io.IOException {
+    private static String createTempFile(Context ctx) throws java.io.IOException {
         File outputDirectory = ctx.getCacheDir();
         File outputFile = File.createTempFile("webaudio", ".dat", outputDirectory);
         return outputFile.getAbsolutePath();
     }
 
+    @SuppressWarnings("deprecation")
     @CalledByNative
     private static boolean decodeAudioFile(Context ctx,
                                            long nativeMediaCodecBridge,

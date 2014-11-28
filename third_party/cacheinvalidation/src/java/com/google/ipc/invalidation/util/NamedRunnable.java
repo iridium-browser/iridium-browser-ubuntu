@@ -16,8 +16,6 @@
 
 package com.google.ipc.invalidation.util;
 
-import com.google.common.base.Preconditions;
-
 /**
  * A wrapper around the {@link Runnable} interface that provides extra information (e.g., a name)
  * for logging, monitoring, debugging, etc.

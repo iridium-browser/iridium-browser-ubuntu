@@ -38,6 +38,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/session_length_limiter.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
 #include "chrome/browser/supervised_user/chromeos/supervised_user_password_service_factory.h"
 #include "chrome/common/chrome_constants.h"
@@ -799,6 +800,8 @@ void ChromeUserManagerImpl::RemoveNonCryptohomeData(
   supervised_user_manager_->RemoveNonCryptohomeData(user_id);
 
   multi_profile_user_controller_->RemoveCachedValues(user_id);
+
+  EasyUnlockService::ResetLocalStateForUser(user_id);
 }
 
 void
@@ -1005,8 +1008,14 @@ void ChromeUserManagerImpl::NotifyUserListChanged() {
 void ChromeUserManagerImpl::NotifyUserAddedToSession(
     const user_manager::User* added_user,
     bool user_switch_pending) {
-  if (user_switch_pending)
+  // Special case for user session restoration after browser crash.
+  // We don't switch to each user session that has been restored as once all
+  // session will be restored we'll switch to the session that has been used
+  // before the crash.
+  if (user_switch_pending &&
+      !UserSessionManager::GetInstance()->UserSessionsRestoreInProgress()) {
     SetPendingUserSwitchID(added_user->email());
+  }
 
   UpdateNumberOfUsers();
   ChromeUserManager::NotifyUserAddedToSession(added_user, user_switch_pending);

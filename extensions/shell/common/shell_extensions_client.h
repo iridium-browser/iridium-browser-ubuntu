@@ -22,6 +22,7 @@ class ShellExtensionsClient : public ExtensionsClient {
   virtual void Initialize() OVERRIDE;
   virtual const PermissionMessageProvider& GetPermissionMessageProvider()
       const OVERRIDE;
+  virtual const std::string GetProductName() OVERRIDE;
   virtual scoped_ptr<FeatureProvider> CreateFeatureProvider(
       const std::string& name) const OVERRIDE;
   virtual scoped_ptr<JSONFeatureProviderSource> CreateFeatureProviderSource(
@@ -43,6 +44,9 @@ class ShellExtensionsClient : public ExtensionsClient {
       const std::string& name) const OVERRIDE;
   virtual void RegisterAPISchemaResources(ExtensionAPI* api) const OVERRIDE;
   virtual bool ShouldSuppressFatalErrors() const OVERRIDE;
+  virtual std::string GetWebstoreBaseURL() const OVERRIDE;
+  virtual std::string GetWebstoreUpdateURL() const OVERRIDE;
+  virtual bool IsBlacklistUpdateURL(const GURL& url) const OVERRIDE;
 
  private:
   const ExtensionsAPIPermissions extensions_api_permissions_;

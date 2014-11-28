@@ -41,9 +41,9 @@ namespace blink {
 
 using namespace VectorMath;
 
-PassRefPtrWillBeRawPtr<OscillatorNode> OscillatorNode::create(AudioContext* context, float sampleRate)
+OscillatorNode* OscillatorNode::create(AudioContext* context, float sampleRate)
 {
-    return adoptRefWillBeNoop(new OscillatorNode(context, sampleRate));
+    return adoptRefCountedGarbageCollectedWillBeNoop(new OscillatorNode(context, sampleRate));
 }
 
 OscillatorNode::OscillatorNode(AudioContext* context, float sampleRate)
@@ -54,7 +54,6 @@ OscillatorNode::OscillatorNode(AudioContext* context, float sampleRate)
     , m_phaseIncrements(AudioNode::ProcessingSizeInFrames)
     , m_detuneValues(AudioNode::ProcessingSizeInFrames)
 {
-    ScriptWrappable::init(this);
     setNodeType(NodeTypeOscillator);
 
     // Use musical pitch standard A440 as a default.
@@ -120,22 +119,22 @@ bool OscillatorNode::setType(unsigned type)
 
     switch (type) {
     case SINE: {
-        DEFINE_STATIC_REF_WILL_BE_PERSISTENT(PeriodicWave, periodicWaveSine, (PeriodicWave::createSine(sampleRate)));
+        DEFINE_STATIC_LOCAL(Persistent<PeriodicWave>, periodicWaveSine, (PeriodicWave::createSine(sampleRate)));
         periodicWave = periodicWaveSine;
         break;
     }
     case SQUARE: {
-        DEFINE_STATIC_REF_WILL_BE_PERSISTENT(PeriodicWave, periodicWaveSquare, (PeriodicWave::createSquare(sampleRate)));
+        DEFINE_STATIC_LOCAL(Persistent<PeriodicWave>, periodicWaveSquare, (PeriodicWave::createSquare(sampleRate)));
         periodicWave = periodicWaveSquare;
         break;
     }
     case SAWTOOTH: {
-        DEFINE_STATIC_REF_WILL_BE_PERSISTENT(PeriodicWave, periodicWaveSawtooth, (PeriodicWave::createSawtooth(sampleRate)));
+        DEFINE_STATIC_LOCAL(Persistent<PeriodicWave>, periodicWaveSawtooth, (PeriodicWave::createSawtooth(sampleRate)));
         periodicWave = periodicWaveSawtooth;
         break;
     }
     case TRIANGLE: {
-        DEFINE_STATIC_REF_WILL_BE_PERSISTENT(PeriodicWave, periodicWaveTriangle, (PeriodicWave::createTriangle(sampleRate)));
+        DEFINE_STATIC_LOCAL(Persistent<PeriodicWave>, periodicWaveTriangle, (PeriodicWave::createTriangle(sampleRate)));
         periodicWave = periodicWaveTriangle;
         break;
     }

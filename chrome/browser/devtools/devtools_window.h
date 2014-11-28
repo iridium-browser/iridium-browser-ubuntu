@@ -33,7 +33,6 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
    public:
     explicit ObserverWithAccessor(content::WebContents* web_contents);
     virtual ~ObserverWithAccessor();
-    content::WebContents* GetWebContents();
 
    private:
     DISALLOW_COPY_AND_ASSIGN(ObserverWithAccessor);
@@ -82,12 +81,13 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   static void OpenExternalFrontend(
       Profile* profile,
       const std::string& frontend_uri,
-      content::DevToolsAgentHost* agent_host);
+      const scoped_refptr<content::DevToolsAgentHost>& agent_host,
+      bool isWorker);
 
   // Worker frontend is always undocked.
   static DevToolsWindow* OpenDevToolsWindowForWorker(
       Profile* profile,
-      content::DevToolsAgentHost* worker_agent);
+      const scoped_refptr<content::DevToolsAgentHost>& worker_agent);
 
   static void InspectElement(content::WebContents* inspected_web_contents,
                              int x,
@@ -224,8 +224,6 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
       bool force_open,
       const DevToolsToggleAction& action,
       const std::string& settings);
-
-  static std::string GetDevToolsWindowPlacementPrefKey();
 
   // content::WebContentsDelegate:
   virtual content::WebContents* OpenURLFromTab(

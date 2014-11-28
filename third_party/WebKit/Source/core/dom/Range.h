@@ -48,6 +48,7 @@ class NodeWithIndex;
 class Text;
 
 class Range FINAL : public RefCountedWillBeGarbageCollectedFinalized<Range>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<Range> create(Document&);
     static PassRefPtrWillBeRawPtr<Range> create(Document&, Node* startContainer, int startOffset, Node* endContainer, int endOffset);
@@ -72,11 +73,12 @@ public:
     enum CompareResults { NODE_BEFORE, NODE_AFTER, NODE_BEFORE_AND_AFTER, NODE_INSIDE };
     CompareResults compareNode(Node* refNode, ExceptionState&) const;
     enum CompareHow { START_TO_START, START_TO_END, END_TO_END, END_TO_START };
-    short compareBoundaryPoints(CompareHow, const Range* sourceRange, ExceptionState&) const;
+    short compareBoundaryPoints(unsigned how, const Range* sourceRange, ExceptionState&) const;
     static short compareBoundaryPoints(Node* containerA, int offsetA, Node* containerB, int offsetB, ExceptionState&);
     static short compareBoundaryPoints(const RangeBoundaryPoint& boundaryA, const RangeBoundaryPoint& boundaryB, ExceptionState&);
     bool boundaryPointsValid() const;
     bool intersectsNode(Node* refNode, ExceptionState&);
+    static bool intersectsNode(Node* refNode, const Position& start, const Position& end, ExceptionState&);
     void deleteContents(ExceptionState&);
     PassRefPtrWillBeRawPtr<DocumentFragment> extractContents(ExceptionState&);
     PassRefPtrWillBeRawPtr<DocumentFragment> cloneContents(ExceptionState&);
@@ -96,6 +98,7 @@ public:
     void setEndAfter(Node*, ExceptionState& = ASSERT_NO_EXCEPTION);
     void selectNode(Node*, ExceptionState& = ASSERT_NO_EXCEPTION);
     void selectNodeContents(Node*, ExceptionState&);
+    static bool selectNodeContents(Node*, Position&, Position&);
     void surroundContents(PassRefPtrWillBeRawPtr<Node>, ExceptionState&);
     void setStartBefore(Node*, ExceptionState& = ASSERT_NO_EXCEPTION);
 
@@ -181,4 +184,4 @@ bool areRangesEqual(const Range*, const Range*);
 void showTree(const blink::Range*);
 #endif
 
-#endif
+#endif // Range_h

@@ -67,24 +67,18 @@ base::LazyInstance<internal::RequestDrawGLTracker> g_request_draw_gl_tracker =
 
 }
 
-DrawGLInput::DrawGLInput() : width(0), height(0) {
-}
-
-DrawGLInput::~DrawGLInput() {
-}
-
 SharedRendererState::SharedRendererState(
     scoped_refptr<base::MessageLoopProxy> ui_loop,
     BrowserViewRendererClient* client)
     : ui_loop_(ui_loop),
       client_on_ui_(client),
-      weak_factory_on_ui_thread_(this),
-      ui_thread_weak_ptr_(weak_factory_on_ui_thread_.GetWeakPtr()),
+      force_commit_(false),
       inside_hardware_release_(false),
       needs_force_invalidate_on_next_draw_gl_(false),
-      share_context_(NULL) {
+      weak_factory_on_ui_thread_(this) {
   DCHECK(ui_loop_->BelongsToCurrentThread());
   DCHECK(client_on_ui_);
+  ui_thread_weak_ptr_ = weak_factory_on_ui_thread_.GetWeakPtr();
   ResetRequestDrawGLCallback();
 }
 
@@ -136,15 +130,37 @@ void SharedRendererState::UpdateParentDrawConstraintsOnUIThread() {
   client_on_ui_->UpdateParentDrawConstraints();
 }
 
-void SharedRendererState::SetDrawGLInput(scoped_ptr<DrawGLInput> input) {
+void SharedRendererState::SetScrollOffset(gfx::Vector2d scroll_offset) {
   base::AutoLock lock(lock_);
-  DCHECK(!draw_gl_input_.get());
-  draw_gl_input_ = input.Pass();
+  scroll_offset_ = scroll_offset;
 }
 
-scoped_ptr<DrawGLInput> SharedRendererState::PassDrawGLInput() {
+gfx::Vector2d SharedRendererState::GetScrollOffset() {
   base::AutoLock lock(lock_);
-  return draw_gl_input_.Pass();
+  return scroll_offset_;
+}
+
+bool SharedRendererState::HasCompositorFrame() const {
+  base::AutoLock lock(lock_);
+  return compositor_frame_.get();
+}
+
+void SharedRendererState::SetCompositorFrame(
+    scoped_ptr<cc::CompositorFrame> frame, bool force_commit) {
+  base::AutoLock lock(lock_);
+  DCHECK(!compositor_frame_.get());
+  compositor_frame_ = frame.Pass();
+  force_commit_ = force_commit;
+}
+
+scoped_ptr<cc::CompositorFrame> SharedRendererState::PassCompositorFrame() {
+  base::AutoLock lock(lock_);
+  return compositor_frame_.Pass();
+}
+
+bool SharedRendererState::ForceCommit() const {
+  base::AutoLock lock(lock_);
+  return force_commit_;
 }
 
 bool SharedRendererState::UpdateDrawConstraints(
@@ -168,6 +184,18 @@ void SharedRendererState::PostExternalDrawConstraintsToChildCompositor(
         base::Bind(&SharedRendererState::UpdateParentDrawConstraintsOnUIThread,
                    ui_thread_weak_ptr_));
   }
+}
+
+void SharedRendererState::DidSkipCommitFrame() {
+  ui_loop_->PostTask(
+      FROM_HERE,
+      base::Bind(&SharedRendererState::DidSkipCommitFrameOnUIThread,
+                 ui_thread_weak_ptr_));
+}
+
+void SharedRendererState::DidSkipCommitFrameOnUIThread() {
+  DCHECK(ui_loop_->BelongsToCurrentThread());
+  client_on_ui_->DidSkipCommitFrame();
 }
 
 const ParentCompositorDrawConstraints
@@ -196,18 +224,6 @@ void SharedRendererState::SetInsideHardwareRelease(bool inside) {
 bool SharedRendererState::IsInsideHardwareRelease() const {
   base::AutoLock lock(lock_);
   return inside_hardware_release_;
-}
-
-void SharedRendererState::SetSharedContext(gpu::GLInProcessContext* context) {
-  base::AutoLock lock(lock_);
-  DCHECK(!share_context_ || !context);
-  share_context_ = context;
-}
-
-gpu::GLInProcessContext* SharedRendererState::GetSharedContext() const {
-  base::AutoLock lock(lock_);
-  DCHECK(share_context_);
-  return share_context_;
 }
 
 void SharedRendererState::InsertReturnedResources(

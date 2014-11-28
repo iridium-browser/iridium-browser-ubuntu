@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
@@ -146,9 +146,6 @@ void FakeFileSystem::GetResourceEntry(
     const GetResourceEntryCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // Now, we only support files under my drive.
-  DCHECK(!util::IsUnderDriveMountPoint(file_path));
-
   if (file_path == util::GetDriveMyDriveRootPath()) {
     // Specialized for the root entry.
     drive_service_->GetAboutResource(
@@ -158,6 +155,8 @@ void FakeFileSystem::GetResourceEntry(
     return;
   }
 
+  // Now, we only support files under my drive.
+  DCHECK(util::GetDriveMyDriveRootPath().IsParent(file_path));
   GetResourceEntry(
       file_path.DirName(),
       base::Bind(

@@ -14,11 +14,17 @@
 #include "cc/output/compositor_frame_metadata.h"
 #include "content/browser/devtools/devtools_protocol.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/render_widget_host.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 class SkBitmap;
 
 namespace IPC {
 class Message;
+}
+
+namespace blink {
+class WebMouseEvent;
 }
 
 namespace content {
@@ -40,7 +46,8 @@ class CONTENT_EXPORT RendererOverridesHandler
   void OnVisibilityChanged(bool visible);
   void SetRenderViewHost(RenderViewHostImpl* host);
   void ClearRenderViewHost();
-  bool OnSetTouchEventEmulationEnabled();
+  void DidAttachInterstitialPage();
+  void DidDetachInterstitialPage();
 
  private:
   void InnerSwapCompositorFrame();
@@ -51,12 +58,16 @@ class CONTENT_EXPORT RendererOverridesHandler
           scoped_refptr<DevToolsProtocol::Command> command);
 
   // Network domain.
+  scoped_refptr<DevToolsProtocol::Response> CanEmulateNetworkConditions(
+      scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> ClearBrowserCache(
       scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> ClearBrowserCookies(
       scoped_refptr<DevToolsProtocol::Command> command);
 
   // Page domain.
+  scoped_refptr<DevToolsProtocol::Response> PageEnable(
+      scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> PageDisable(
       scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> PageHandleJavaScriptDialog(
@@ -69,7 +80,11 @@ class CONTENT_EXPORT RendererOverridesHandler
       scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> PageNavigateToHistoryEntry(
       scoped_refptr<DevToolsProtocol::Command> command);
+  scoped_refptr<DevToolsProtocol::Response> PageSetTouchEmulationEnabled(
+      scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> PageCaptureScreenshot(
+      scoped_refptr<DevToolsProtocol::Command> command);
+  scoped_refptr<DevToolsProtocol::Response> PageCanEmulate(
       scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> PageCanScreencast(
       scoped_refptr<DevToolsProtocol::Command> command);
@@ -78,6 +93,8 @@ class CONTENT_EXPORT RendererOverridesHandler
   scoped_refptr<DevToolsProtocol::Response> PageStopScreencast(
       scoped_refptr<DevToolsProtocol::Command> command);
   scoped_refptr<DevToolsProtocol::Response> PageQueryUsageAndQuota(
+      scoped_refptr<DevToolsProtocol::Command>);
+  scoped_refptr<DevToolsProtocol::Response> PageSetColorPickerEnabled(
       scoped_refptr<DevToolsProtocol::Command>);
 
   void ScreenshotCaptured(
@@ -97,17 +114,32 @@ class CONTENT_EXPORT RendererOverridesHandler
      scoped_ptr<base::DictionaryValue> response_data);
 
   void NotifyScreencastVisibility(bool visible);
+  void SetColorPickerEnabled(bool enabled);
+  void UpdateColorPickerFrame();
+  void ResetColorPickerFrame();
+  void ColorPickerFrameUpdated(bool succeeded, const SkBitmap& bitmap);
+  bool HandleMouseEvent(const blink::WebMouseEvent& event);
+  void UpdateColorPickerCursor();
 
   // Input domain.
   scoped_refptr<DevToolsProtocol::Response> InputEmulateTouchFromMouseEvent(
       scoped_refptr<DevToolsProtocol::Command> command);
 
+  void UpdateTouchEventEmulationState();
+
   RenderViewHostImpl* host_;
+  bool page_domain_enabled_;
   scoped_refptr<DevToolsProtocol::Command> screencast_command_;
   bool has_last_compositor_frame_metadata_;
   cc::CompositorFrameMetadata last_compositor_frame_metadata_;
   base::TimeTicks last_frame_time_;
   int capture_retry_count_;
+  bool touch_emulation_enabled_;
+  bool color_picker_enabled_;
+  SkBitmap color_picker_frame_;
+  int last_cursor_x_;
+  int last_cursor_y_;
+  RenderWidgetHost::MouseEventCallback mouse_event_callback_;
   base::WeakPtrFactory<RendererOverridesHandler> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(RendererOverridesHandler);
 };

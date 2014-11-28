@@ -125,6 +125,10 @@ void InputTypeView::handleBlurEvent()
 {
 }
 
+void InputTypeView::handleFocusInEvent(Element*, FocusType)
+{
+}
+
 void InputTypeView::startResourceLoading()
 {
 }
@@ -216,6 +220,11 @@ void InputTypeView::updateClearButtonVisibility()
 
 void InputTypeView::updatePlaceholderText()
 {
+}
+
+AXObject* InputTypeView::popupRootAXObject()
+{
+    return 0;
 }
 
 void ClickHandlingState::trace(Visitor* visitor)

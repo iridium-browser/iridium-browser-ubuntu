@@ -90,11 +90,13 @@ class Dispatcher : public content::RenderProcessObserver,
 
   bool IsExtensionActive(const std::string& extension_id) const;
 
-  // Finds the extension ID for the JavaScript context associated with the
+  // Finds the extension for the JavaScript context associated with the
   // specified |frame| and isolated world. If |world_id| is zero, finds the
   // extension ID associated with the main world's JavaScript context. If the
   // JavaScript context isn't from an extension, returns empty string.
-  std::string GetExtensionID(const blink::WebFrame* frame, int world_id);
+  const Extension* GetExtensionFromFrameAndWorld(const blink::WebFrame* frame,
+                                                 int world_id,
+                                                 bool use_effective_url);
 
   void DidCreateScriptContext(blink::WebFrame* frame,
                               const v8::Handle<v8::Context>& context,
@@ -145,6 +147,8 @@ class Dispatcher : public content::RenderProcessObserver,
                                      Dispatcher* dispatcher,
                                      RequestSender* request_sender,
                                      V8SchemaRegistry* v8_schema_registry);
+
+  bool WasWebRequestUsedBySomeExtensions() const { return webrequest_used_; }
 
  private:
   friend class ::ChromeRenderViewTest;
@@ -308,6 +312,9 @@ class Dispatcher : public content::RenderProcessObserver,
   // the observer is destroyed before the UserScriptSet.
   ScopedObserver<UserScriptSetManager, UserScriptSetManager::Observer>
       user_script_set_manager_observer_;
+
+  // Status of webrequest usage.
+  bool webrequest_used_;
 
   DISALLOW_COPY_AND_ASSIGN(Dispatcher);
 };

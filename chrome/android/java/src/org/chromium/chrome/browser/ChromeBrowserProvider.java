@@ -29,11 +29,10 @@ import android.provider.Browser.SearchColumns;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.CalledByNativeUnchecked;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.database.SQLiteCursor;
 import org.chromium.sync.notifier.SyncStatusHelper;
 
@@ -1043,6 +1042,11 @@ public class ChromeBrowserProvider extends ContentProvider {
     @CalledByNative
     private void onBookmarkChanged() {
         notifyChange(buildAPIContentUri(getContext(), BOOKMARKS_PATH));
+    }
+
+    @CalledByNative
+    private void onHistoryChanged() {
+        notifyChange(buildAPIContentUri(getContext(), HISTORY_PATH));
     }
 
     @CalledByNative

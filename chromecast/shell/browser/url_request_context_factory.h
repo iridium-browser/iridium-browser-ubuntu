@@ -11,6 +11,7 @@
 namespace net {
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
+class ProxyConfigService;
 class URLRequestJobFactory;
 }  // namespace net
 
@@ -83,11 +84,13 @@ class URLRequestContextFactory {
   scoped_ptr<net::CertVerifier> cert_verifier_;
   scoped_refptr<net::SSLConfigService> ssl_config_service_;
   scoped_ptr<net::TransportSecurityState> transport_security_state_;
+  scoped_ptr<net::ProxyConfigService> proxy_config_service_;
   scoped_ptr<net::ProxyService> proxy_service_;
   scoped_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory_;
   scoped_ptr<net::HttpServerProperties> http_server_properties_;
   scoped_ptr<net::HttpUserAgentSettings> http_user_agent_settings_;
   scoped_ptr<net::HttpTransactionFactory> system_transaction_factory_;
+  scoped_ptr<net::URLRequestJobFactory> system_job_factory_;
 
   bool main_dependencies_initialized_;
   scoped_ptr<net::HttpTransactionFactory> main_transaction_factory_;

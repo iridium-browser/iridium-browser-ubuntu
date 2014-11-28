@@ -5,13 +5,16 @@
 #include "chrome/browser/importer/in_process_importer_bridge.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
+#include "base/debug/dump_without_crashing.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/common/importer/imported_favicon_usage.h"
+#include "chrome/common/importer/importer_autofill_form_data_entry.h"
+#include "components/autofill/core/browser/webdata/autofill_entry.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_parser.h"
@@ -58,6 +61,15 @@ history::VisitSource ConvertImporterVisitSourceToHistoryVisitSource(
   }
   NOTREACHED();
   return history::SOURCE_SYNCED;
+}
+
+// http://crbug.com/404012. Let's see where the empty fields come from.
+void CheckForEmptyUsernameAndPassword(const autofill::PasswordForm& form) {
+  if (form.username_value.empty() &&
+      form.password_value.empty() &&
+      !form.blacklisted_by_user) {
+    base::debug::DumpWithoutCrashing();
+  }
 }
 
 }  // namespace
@@ -249,9 +261,27 @@ void InProcessImporterBridge::SetFirefoxSearchEnginesXMLData(
 
 void InProcessImporterBridge::SetPasswordForm(
     const autofill::PasswordForm& form) {
+  CheckForEmptyUsernameAndPassword(form);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ProfileWriter::AddPasswordForm, writer_, form));
+}
+
+void InProcessImporterBridge::SetAutofillFormData(
+    const std::vector<ImporterAutofillFormDataEntry>& entries) {
+  std::vector<autofill::AutofillEntry> autofill_entries;
+  for (size_t i = 0; i < entries.size(); ++i) {
+    autofill_entries.push_back(autofill::AutofillEntry(
+        autofill::AutofillKey(entries[i].name, entries[i].value),
+        entries[i].first_used,
+        entries[i].last_used));
+  }
+
+  BrowserThread::PostTask(BrowserThread::UI,
+                          FROM_HERE,
+                          base::Bind(&ProfileWriter::AddAutofillFormDataEntries,
+                                     writer_,
+                                     autofill_entries));
 }
 
 void InProcessImporterBridge::NotifyStarted() {

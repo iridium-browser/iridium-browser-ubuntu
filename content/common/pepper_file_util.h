@@ -6,11 +6,15 @@
 #define CONTENT_COMMON_PEPPER_FILE_UTIL_H_
 
 #include "ppapi/c/pp_file_info.h"
-#include "webkit/common/fileapi/file_system_types.h"
+#include "storage/common/fileapi/file_system_types.h"
+
+#if !defined(ENABLE_PLUGINS)
+#error "Plugins should be enabled"
+#endif
 
 namespace content {
 
-fileapi::FileSystemType PepperFileSystemTypeToFileSystemType(
+storage::FileSystemType PepperFileSystemTypeToFileSystemType(
     PP_FileSystemType type);
 
 }  // namespace content

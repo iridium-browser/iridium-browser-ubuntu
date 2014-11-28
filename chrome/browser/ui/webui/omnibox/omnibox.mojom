@@ -10,7 +10,7 @@ struct AutocompleteAdditionalInfo {
 };
 
 struct AutocompleteMatchMojo {
-  string provider_name;
+  string? provider_name;
   // Only meaningful if |provider_name| is valid.
   bool provider_done;
   int32 relevance;
@@ -24,7 +24,7 @@ struct AutocompleteMatchMojo {
   bool is_history_what_you_typed_match;
   bool allowed_to_be_default_match;
   string type;
-  string associated_keyword;
+  string? associated_keyword;
   string keyword;
   bool starred;
   int32 duplicates;

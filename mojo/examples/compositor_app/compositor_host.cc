@@ -6,6 +6,7 @@
 
 #include "cc/layers/layer.h"
 #include "cc/layers/solid_color_layer.h"
+#include "cc/output/begin_frame_args.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "cc/trees/layer_tree_host.h"
@@ -58,10 +59,10 @@ void CompositorHost::SetupScene() {
 void CompositorHost::WillBeginMainFrame(int frame_id) {}
 void CompositorHost::DidBeginMainFrame() {}
 
-void CompositorHost::Animate(base::TimeTicks frame_begin_time) {
+void CompositorHost::BeginMainFrame(const cc::BeginFrameArgs& args) {
   // TODO(jamesr): Should use cc's animation system.
   static const double kDegreesPerSecond = 70.0;
-  double time_in_seconds = (frame_begin_time - base::TimeTicks()).InSecondsF();
+  double time_in_seconds = (args.frame_time - base::TimeTicks()).InSecondsF();
   double child_rotation_degrees = kDegreesPerSecond * time_in_seconds;
   gfx::Transform child_transform;
   child_transform.Translate(200, 200);
@@ -71,14 +72,13 @@ void CompositorHost::Animate(base::TimeTicks frame_begin_time) {
 }
 
 void CompositorHost::Layout() {}
-void CompositorHost::ApplyScrollAndScale(const gfx::Vector2d& scroll_delta,
-                                         float page_scale) {}
+void CompositorHost::ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                                         float page_scale,
+                                         float top_controls_delta) {}
 
-scoped_ptr<cc::OutputSurface> CompositorHost::CreateOutputSurface(
-    bool fallback) {
-  return make_scoped_ptr(
-      new cc::OutputSurface(
-          new ContextProviderMojo(command_buffer_handle_.Pass())));
+void CompositorHost::RequestNewOutputSurface(bool fallback) {
+  tree_->SetOutputSurface(make_scoped_ptr(new cc::OutputSurface(
+      new ContextProviderMojo(command_buffer_handle_.Pass()))));
 }
 
 void CompositorHost::DidInitializeOutputSurface() {

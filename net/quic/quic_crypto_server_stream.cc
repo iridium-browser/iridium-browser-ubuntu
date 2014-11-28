@@ -9,6 +9,7 @@
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/crypto/crypto_utils.h"
 #include "net/quic/crypto/quic_crypto_server_config.h"
+#include "net/quic/crypto/source_address_token.h"
 #include "net/quic/quic_config.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_session.h"
@@ -152,11 +153,13 @@ void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
 
   // Now that the handshake is complete, send an updated server config and
   // source-address token to the client.
-  SendServerConfigUpdate();
+  SendServerConfigUpdate(NULL);
 }
 
-void QuicCryptoServerStream::SendServerConfigUpdate() {
-  if (session()->connection()->version() <= QUIC_VERSION_21) {
+void QuicCryptoServerStream::SendServerConfigUpdate(
+    const CachedNetworkParameters* cached_network_params) {
+  if (session()->connection()->version() <= QUIC_VERSION_21 ||
+      !handshake_confirmed_) {
     return;
   }
 
@@ -165,7 +168,9 @@ void QuicCryptoServerStream::SendServerConfigUpdate() {
           session()->connection()->peer_address(),
           session()->connection()->clock(),
           session()->connection()->random_generator(),
-          crypto_negotiated_params_, &server_config_update_message)) {
+          crypto_negotiated_params_,
+          cached_network_params,
+          &server_config_update_message)) {
     DVLOG(1) << "Server: Failed to build server config update (SCUP)!";
     return;
   }

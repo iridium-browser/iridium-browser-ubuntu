@@ -123,7 +123,6 @@ InspectorFrontendHost::InspectorFrontendHost(InspectorFrontendClient* client, Pa
     , m_frontendPage(frontendPage)
     , m_menuProvider(0)
 {
-    ScriptWrappable::init(this);
 }
 
 InspectorFrontendHost::~InspectorFrontendHost()
@@ -146,16 +145,25 @@ void InspectorFrontendHost::disconnectClient()
 
 void InspectorFrontendHost::setZoomFactor(float zoom)
 {
-    m_frontendPage->deprecatedLocalMainFrame()->setPageAndTextZoomFactors(zoom, 1);
+    if (!m_frontendPage)
+        return;
+    if (LocalFrame* frame = m_frontendPage->deprecatedLocalMainFrame())
+        frame->setPageAndTextZoomFactors(zoom, 1);
 }
 
 float InspectorFrontendHost::zoomFactor()
 {
-    return m_frontendPage->deprecatedLocalMainFrame()->pageZoomFactor();
+    if (!m_frontendPage)
+        return 1;
+    if (LocalFrame* frame = m_frontendPage->deprecatedLocalMainFrame())
+        return frame->pageZoomFactor();
+    return 1;
 }
 
 void InspectorFrontendHost::setInjectedScriptForOrigin(const String& origin, const String& script)
 {
+    if (!m_frontendPage)
+        return;
     m_frontendPage->inspectorController().setInjectedScriptForOrigin(origin, script);
 }
 

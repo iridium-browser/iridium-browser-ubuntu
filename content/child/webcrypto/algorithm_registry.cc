@@ -15,12 +15,14 @@ namespace webcrypto {
 
 namespace {
 
+// This class is used as a singleton. All methods must be threadsafe.
 class AlgorithmRegistry {
  public:
   AlgorithmRegistry()
       : sha_(CreatePlatformShaImplementation()),
         aes_gcm_(CreatePlatformAesGcmImplementation()),
         aes_cbc_(CreatePlatformAesCbcImplementation()),
+        aes_ctr_(CreatePlatformAesCtrImplementation()),
         aes_kw_(CreatePlatformAesKwImplementation()),
         hmac_(CreatePlatformHmacImplementation()),
         rsa_ssa_(CreatePlatformRsaSsaImplementation()),
@@ -40,6 +42,8 @@ class AlgorithmRegistry {
         return aes_gcm_.get();
       case blink::WebCryptoAlgorithmIdAesCbc:
         return aes_cbc_.get();
+      case blink::WebCryptoAlgorithmIdAesCtr:
+        return aes_ctr_.get();
       case blink::WebCryptoAlgorithmIdAesKw:
         return aes_kw_.get();
       case blink::WebCryptoAlgorithmIdHmac:
@@ -54,13 +58,14 @@ class AlgorithmRegistry {
   }
 
  private:
-  scoped_ptr<AlgorithmImplementation> sha_;
-  scoped_ptr<AlgorithmImplementation> aes_gcm_;
-  scoped_ptr<AlgorithmImplementation> aes_cbc_;
-  scoped_ptr<AlgorithmImplementation> aes_kw_;
-  scoped_ptr<AlgorithmImplementation> hmac_;
-  scoped_ptr<AlgorithmImplementation> rsa_ssa_;
-  scoped_ptr<AlgorithmImplementation> rsa_oaep_;
+  const scoped_ptr<AlgorithmImplementation> sha_;
+  const scoped_ptr<AlgorithmImplementation> aes_gcm_;
+  const scoped_ptr<AlgorithmImplementation> aes_cbc_;
+  const scoped_ptr<AlgorithmImplementation> aes_ctr_;
+  const scoped_ptr<AlgorithmImplementation> aes_kw_;
+  const scoped_ptr<AlgorithmImplementation> hmac_;
+  const scoped_ptr<AlgorithmImplementation> rsa_ssa_;
+  const scoped_ptr<AlgorithmImplementation> rsa_oaep_;
 };
 
 }  // namespace

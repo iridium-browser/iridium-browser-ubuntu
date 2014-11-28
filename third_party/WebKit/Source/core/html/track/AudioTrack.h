@@ -11,10 +11,11 @@
 namespace blink {
 
 class AudioTrack FINAL : public TrackBase, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<AudioTrack> create(const String& id, const AtomicString& kind, const AtomicString& label, const AtomicString& language, bool enabled)
     {
-        return adoptRefWillBeRefCountedGarbageCollected(new AudioTrack(id, kind, label, language, enabled));
+        return adoptRefWillBeNoop(new AudioTrack(id, kind, label, language, enabled));
     }
     virtual ~AudioTrack();
 
@@ -41,6 +42,6 @@ private:
 
 DEFINE_TRACK_TYPE_CASTS(AudioTrack, TrackBase::AudioTrack);
 
-}
+} // namespace blink
 
-#endif
+#endif // AudioTrack_h

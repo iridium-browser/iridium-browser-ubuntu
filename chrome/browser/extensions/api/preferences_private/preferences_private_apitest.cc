@@ -5,8 +5,8 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -15,7 +15,6 @@
 #include "chrome/browser/extensions/api/preferences_private/preferences_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
-#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -30,6 +29,7 @@
 #include "components/bookmarks/common/bookmark_constants.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/browser_context.h"
+#include "extensions/test/extension_test_message_listener.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
@@ -164,10 +164,7 @@ PreferencesPrivateApiTest::TestGetSyncCategoriesWithoutPassphraseFunction() {
       function(
           new PreferencesPrivateGetSyncCategoriesWithoutPassphraseFunction);
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
-      function,
-      "[]",
-      browser_,
-      extension_function_test_utils::NONE));
+      function.get(), "[]", browser_, extension_function_test_utils::NONE));
   EXPECT_FALSE(service_->initialized_state_violation());
 
   const base::ListValue* result = function->GetResultList();

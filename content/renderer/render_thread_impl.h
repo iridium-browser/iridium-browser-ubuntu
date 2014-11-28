@@ -36,7 +36,6 @@ struct WorkerProcessMsg_CreateWorker_Params;
 
 namespace blink {
 class WebGamepads;
-class WebGamepadListener;
 class WebGraphicsContext3D;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
@@ -44,6 +43,7 @@ class WebMediaStreamCenterClient;
 
 namespace base {
 class MessageLoopProxy;
+class SingleThreadTaskRunner;
 class Thread;
 }
 
@@ -84,7 +84,6 @@ class DBMessageFilter;
 class DevToolsAgentFilter;
 class DomStorageDispatcher;
 class EmbeddedWorkerDispatcher;
-class GamepadSharedMemoryReader;
 class GpuChannelHost;
 class IndexedDBDispatcher;
 class InputEventFilter;
@@ -200,6 +199,11 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
     return webkit_platform_support_.get();
   }
 
+  scoped_refptr<base::SingleThreadTaskRunner>
+  main_thread_compositor_task_runner() const {
+    return main_thread_compositor_task_runner_;
+  }
+
   IPC::ForwardingMessageFilter* compositor_output_surface_filter() const {
     return compositor_output_surface_filter_.get();
   }
@@ -224,8 +228,6 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   bool is_impl_side_painting_enabled() const {
     return is_impl_side_painting_enabled_;
   }
-
-  bool is_low_res_tiling_enabled() const { return is_low_res_tiling_enabled_; }
 
   bool is_lcd_text_enabled() const { return is_lcd_text_enabled_; }
 
@@ -290,10 +292,6 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
     return vc_manager_.get();
   }
 
-  GamepadSharedMemoryReader* gamepad_shared_memory_reader() const {
-    return gamepad_shared_memory_reader_.get();
-  }
-
   // Get the GPU channel. Returns NULL if the channel is not established or
   // has been lost.
   GpuChannelHost* GetGpuChannel();
@@ -303,10 +301,10 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   // on the renderer's main thread.
   scoped_refptr<base::MessageLoopProxy> GetFileThreadMessageLoopProxy();
 
-  // Returns a MessageLoopProxy instance corresponding to the message loop
+  // Returns a SingleThreadTaskRunner instance corresponding to the message loop
   // of the thread on which media operations should be run. Must be called
   // on the renderer's main thread.
-  scoped_refptr<base::MessageLoopProxy> GetMediaThreadMessageLoopProxy();
+  scoped_refptr<base::SingleThreadTaskRunner> GetMediaThreadTaskRunner();
 
   // Causes the idle handler to skip sending idle notifications
   // on the two next scheduled calls, so idle notifications are
@@ -385,15 +383,8 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
     return &histogram_customizer_;
   }
 
-  void SetFlingCurveParameters(const std::vector<float>& new_touchpad,
-                               const std::vector<float>& new_touchscreen);
-
   // Retrieve current gamepad data.
   void SampleGamepads(blink::WebGamepads* data);
-
-  // Set a listener for gamepad connected/disconnected events.
-  // A non-null listener must be set first before calling SampleGamepads.
-  void SetGamepadListener(blink::WebGamepadListener* listener);
 
   // Called by a RenderWidget when it is created or destroyed. This
   // allows the process to know when there are no visible widgets.
@@ -427,8 +418,6 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
       size_t height,
       unsigned internalformat,
       unsigned usage) OVERRIDE;
-  virtual void DeleteGpuMemoryBuffer(
-      scoped_ptr<gfx::GpuMemoryBuffer> buffer) OVERRIDE;
 
   void Init();
 
@@ -441,7 +430,9 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
                                    double zoom_level);
   void OnCreateNewView(const ViewMsg_New_Params& params);
   void OnTransferBitmap(const SkBitmap& bitmap, int resource_id);
+#if defined(ENABLE_PLUGINS)
   void OnPurgePluginListCache(bool reload_pages);
+#endif
   void OnNetworkTypeChanged(net::NetworkChangeNotifier::ConnectionType type);
   void OnGetAccessibilityTree();
   void OnTempCrashWithData(const GURL& data);
@@ -460,8 +451,6 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
 #endif
   void OnCreateNewSharedWorker(
       const WorkerProcessMsg_CreateWorker_Params& params);
-
-  void IdleHandlerInForegroundTab();
 
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateOffscreenContext3d();
 
@@ -570,8 +559,6 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   scoped_ptr<WebRTCIdentityService> webrtc_identity_service_;
 #endif
 
-  scoped_ptr<GamepadSharedMemoryReader> gamepad_shared_memory_reader_;
-
   // TODO(reveman): Allow AllocateGpuMemoryBuffer to be called from
   // multiple threads. Current allocation mechanism for IOSurface
   // backed GpuMemoryBuffers prevent this. crbug.com/325045
@@ -579,11 +566,13 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
 
   scoped_ptr<MemoryObserver> memory_observer_;
 
+  scoped_refptr<base::SingleThreadTaskRunner>
+      main_thread_compositor_task_runner_;
+
   // Compositor settings
   bool is_gpu_rasterization_enabled_;
   bool is_gpu_rasterization_forced_;
   bool is_impl_side_painting_enabled_;
-  bool is_low_res_tiling_enabled_;
   bool is_lcd_text_enabled_;
   bool is_distance_field_text_enabled_;
   bool is_zero_copy_enabled_;

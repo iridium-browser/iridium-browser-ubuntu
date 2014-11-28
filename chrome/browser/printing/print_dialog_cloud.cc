@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
@@ -731,7 +731,7 @@ void CreateCloudPrintSigninTab(Browser* browser,
                 url, g_browser_process->GetApplicationLocale()),
             content::Referrer(),
             NEW_FOREGROUND_TAB,
-            content::PAGE_TRANSITION_AUTO_BOOKMARK,
+            ui::PAGE_TRANSITION_AUTO_BOOKMARK,
             false));
     new SignInObserver(web_contents, cloud_devices::GetCloudPrintURL(),
                         callback);

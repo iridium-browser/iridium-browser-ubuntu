@@ -26,9 +26,10 @@ package com.google.protos.ipc.invalidation;
 
 option optimize_for = LITE_RUNTIME;
 
-option java_outer_classname = "Client";
 
 
+option java_outer_classname = "NanoClient";
+option java_package = "com.google.protos.ipc.invalidation";
 
 
 

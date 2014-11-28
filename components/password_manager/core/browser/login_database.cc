@@ -25,7 +25,7 @@ using autofill::PasswordForm;
 
 namespace password_manager {
 
-static const int kCurrentVersionNumber = 6;
+static const int kCurrentVersionNumber = 7;
 static const int kCompatibleVersionNumber = 1;
 
 Pickle SerializeVector(const std::vector<base::string16>& vec) {
@@ -69,7 +69,11 @@ enum LoginTableColumns {
   COLUMN_TIMES_USED,
   COLUMN_FORM_DATA,
   COLUMN_USE_ADDITIONAL_AUTH,
-  COLUMN_DATE_SYNCED
+  COLUMN_DATE_SYNCED,
+  COLUMN_DISPLAY_NAME,
+  COLUMN_AVATAR_URL,
+  COLUMN_FEDERATION_URL,
+  COLUMN_IS_ZERO_CLICK,
 };
 
 void BindAddStatement(const PasswordForm& form,
@@ -102,6 +106,10 @@ void BindAddStatement(const PasswordForm& form,
               form_data_pickle.size());
   s->BindInt(COLUMN_USE_ADDITIONAL_AUTH, form.use_additional_authentication);
   s->BindInt64(COLUMN_DATE_SYNCED, form.date_synced.ToInternalValue());
+  s->BindString16(COLUMN_DISPLAY_NAME, form.display_name);
+  s->BindString(COLUMN_AVATAR_URL, form.avatar_url.spec());
+  s->BindString(COLUMN_FEDERATION_URL, form.federation_url.spec());
+  s->BindInt(COLUMN_IS_ZERO_CLICK, form.is_zero_click);
 }
 
 void AddCallback(int err, sql::Statement* /*stmt*/) {
@@ -203,11 +211,20 @@ bool LoginDatabase::MigrateOldVersionsAsNeeded() {
       meta_table_.SetVersionNumber(5);
       // Fall through.
     case 5:
-      if (!db_.Execute(
-          "ALTER TABLE logins ADD COLUMN date_synced INTEGER")) {
+      if (!db_.Execute("ALTER TABLE logins ADD COLUMN date_synced INTEGER")) {
         return false;
       }
       meta_table_.SetVersionNumber(6);
+      // Fall through.
+    case 6:
+      if (!db_.Execute("ALTER TABLE logins ADD COLUMN display_name VARCHAR") ||
+          !db_.Execute("ALTER TABLE logins ADD COLUMN avatar_url VARCHAR") ||
+          !db_.Execute("ALTER TABLE logins "
+                       "ADD COLUMN federation_url VARCHAR") ||
+          !db_.Execute("ALTER TABLE logins ADD COLUMN is_zero_click INTEGER")) {
+        return false;
+      }
+      meta_table_.SetVersionNumber(7);
       // Fall through.
     case kCurrentVersionNumber:
       // Already up to date
@@ -240,6 +257,10 @@ bool LoginDatabase::InitLoginsTable() {
                      "form_data BLOB,"
                      "use_additional_auth INTEGER,"
                      "date_synced INTEGER,"
+                     "display_name VARCHAR,"
+                     "avatar_url VARCHAR,"
+                     "federation_url VARCHAR,"
+                     "is_zero_click INTEGER,"
                      "UNIQUE "
                      "(origin_url, username_element, "
                      "username_value, password_element, "
@@ -344,8 +365,9 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
       " password_element, password_value, submit_element, "
       " signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       " scheme, password_type, possible_usernames, times_used, form_data, "
-      " use_additional_auth, date_synced) VALUES "
-      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+      " use_additional_auth, date_synced, display_name, avatar_url,"
+      " federation_url, is_zero_click) VALUES "
+      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
   BindAddStatement(form, encrypted_password, &s);
   db_.set_error_callback(base::Bind(&AddCallback));
   const bool success = s.Run();
@@ -361,8 +383,9 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
       " password_element, password_value, submit_element, "
       " signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       " scheme, password_type, possible_usernames, times_used, form_data, "
-      " use_additional_auth, date_synced) VALUES "
-      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+      " use_additional_auth, date_synced, display_name, avatar_url,"
+      " federation_url, is_zero_click) VALUES "
+      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
   BindAddStatement(form, encrypted_password, &s);
   if (s.Run()) {
     list.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
@@ -392,7 +415,11 @@ PasswordStoreChangeList LoginDatabase::UpdateLogin(const PasswordForm& form) {
                                           "date_created = ?, "
                                           "blacklisted_by_user = ?, "
                                           "scheme = ?, "
-                                          "password_type = ? "
+                                          "password_type = ?, "
+                                          "display_name = ?, "
+                                          "avatar_url = ?, "
+                                          "federation_url = ?, "
+                                          "is_zero_click = ? "
                                           "WHERE origin_url = ? AND "
                                           "username_element = ? AND "
                                           "username_value = ? AND "
@@ -412,12 +439,17 @@ PasswordStoreChangeList LoginDatabase::UpdateLogin(const PasswordForm& form) {
   s.BindInt(9, form.blacklisted_by_user);
   s.BindInt(10, form.scheme);
   s.BindInt(11, form.type);
+  s.BindString16(12, form.display_name);
+  s.BindString(13, form.avatar_url.spec());
+  s.BindString(14, form.federation_url.spec());
+  s.BindInt(15, form.is_zero_click);
 
-  s.BindString(12, form.origin.spec());
-  s.BindString16(13, form.username_element);
-  s.BindString16(14, form.username_value);
-  s.BindString16(15, form.password_element);
-  s.BindString(16, form.signon_realm);
+  // WHERE starts here.
+  s.BindString(16, form.origin.spec());
+  s.BindString16(17, form.username_element);
+  s.BindString16(18, form.username_value);
+  s.BindString16(19, form.password_element);
+  s.BindString(20, form.signon_realm);
 
   if (!s.Run())
     return PasswordStoreChangeList();
@@ -525,6 +557,10 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
       (s.ColumnInt(COLUMN_USE_ADDITIONAL_AUTH) > 0);
   form->date_synced = base::Time::FromInternalValue(
       s.ColumnInt64(COLUMN_DATE_SYNCED));
+  form->display_name = s.ColumnString16(COLUMN_DISPLAY_NAME);
+  form->avatar_url = GURL(s.ColumnString(COLUMN_AVATAR_URL));
+  form->federation_url = GURL(s.ColumnString(COLUMN_FEDERATION_URL));
+  form->is_zero_click = (s.ColumnInt(COLUMN_IS_ZERO_CLICK) > 0);
   return ENCRYPTION_RESULT_SUCCESS;
 }
 
@@ -537,16 +573,16 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
       "password_element, password_value, submit_element, "
       "signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced FROM logins WHERE signon_realm == ? ";
+      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "federation_url, is_zero_click FROM logins WHERE signon_realm == ? ";
   sql::Statement s;
   const GURL signon_realm(form.signon_realm);
-  std::string registered_domain =
-      PSLMatchingHelper::GetRegistryControlledDomain(signon_realm);
-  PSLMatchingHelper::PSLDomainMatchMetric psl_domain_match_metric =
-      PSLMatchingHelper::PSL_DOMAIN_MATCH_NONE;
+  std::string registered_domain = GetRegistryControlledDomain(signon_realm);
+  PSLDomainMatchMetric psl_domain_match_metric = PSL_DOMAIN_MATCH_NONE;
+  const bool should_PSL_matching_apply =
+      ShouldPSLDomainMatchingApply(registered_domain);
   // PSL matching only applies to HTML forms.
-  if (form.scheme == PasswordForm::SCHEME_HTML &&
-      psl_helper_.ShouldPSLDomainMatchingApply(registered_domain)) {
+  if (form.scheme == PasswordForm::SCHEME_HTML && should_PSL_matching_apply) {
     // We are extending the original SQL query with one that includes more
     // possible matches based on public suffix domain matching. Using a regexp
     // here is just an optimization to not have to parse all the stored entries
@@ -576,7 +612,7 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
     s.BindString(0, form.signon_realm);
     s.BindString(1, regexp);
   } else {
-    psl_domain_match_metric = PSLMatchingHelper::PSL_DOMAIN_MATCH_DISABLED;
+    psl_domain_match_metric = PSL_DOMAIN_MATCH_NOT_USED;
     s.Assign(db_.GetCachedStatement(SQL_FROM_HERE, sql_query.c_str()));
     s.BindString(0, form.signon_realm);
   }
@@ -589,9 +625,9 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
     if (result == ENCRYPTION_RESULT_ITEM_FAILURE)
       continue;
     DCHECK(result == ENCRYPTION_RESULT_SUCCESS);
-    if (psl_helper_.IsMatchingEnabled()) {
-      if (!PSLMatchingHelper::IsPublicSuffixDomainMatch(new_form->signon_realm,
-                                                        form.signon_realm)) {
+    if (should_PSL_matching_apply) {
+      if (!IsPublicSuffixDomainMatch(new_form->signon_realm,
+                                     form.signon_realm)) {
         // The database returned results that should not match. Skipping result.
         continue;
       }
@@ -600,7 +636,7 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
         if (new_form->scheme != PasswordForm::SCHEME_HTML)
           continue;
 
-        psl_domain_match_metric = PSLMatchingHelper::PSL_DOMAIN_MATCH_FOUND;
+        psl_domain_match_metric = PSL_DOMAIN_MATCH_FOUND;
         // This is not a perfect match, so we need to create a new valid result.
         // We do this by copying over origin, signon realm and action from the
         // observed form and setting the original signon realm to what we found
@@ -617,7 +653,7 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
   }
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.PslDomainMatchTriggering",
                             psl_domain_match_metric,
-                            PSLMatchingHelper::PSL_DOMAIN_MATCH_COUNT);
+                            PSL_DOMAIN_MATCH_COUNT);
   return s.Succeeded();
 }
 
@@ -632,7 +668,8 @@ bool LoginDatabase::GetLoginsCreatedBetween(
       "password_element, password_value, submit_element, "
       "signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced FROM logins "
+      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "federation_url, is_zero_click FROM logins "
       "WHERE date_created >= ? AND date_created < ?"
       "ORDER BY origin_url"));
   s.BindInt64(0, begin.ToTimeT());
@@ -663,7 +700,8 @@ bool LoginDatabase::GetLoginsSyncedBetween(
       "password_element, password_value, submit_element, signon_realm, "
       "ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced FROM logins "
+      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "federation_url, is_zero_click FROM logins "
       "WHERE date_synced >= ? AND date_synced < ?"
       "ORDER BY origin_url"));
   s.BindInt64(0, begin.ToInternalValue());
@@ -704,7 +742,8 @@ bool LoginDatabase::GetAllLoginsWithBlacklistSetting(
       "password_element, password_value, submit_element, "
       "signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced FROM logins "
+      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "federation_url, is_zero_click FROM logins "
       "WHERE blacklisted_by_user == ? ORDER BY origin_url"));
   s.BindInt(0, blacklisted ? 1 : 0);
 

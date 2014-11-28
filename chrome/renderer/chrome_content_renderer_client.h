@@ -17,6 +17,9 @@
 
 class ChromeExtensionsDispatcherDelegate;
 class ChromeRenderProcessObserver;
+#if defined(ENABLE_FULL_PRINTING)
+class ChromePDFPrintClient;
+#endif
 class PrescientNetworkingDispatcher;
 class RendererNetPredictor;
 class SearchBouncer;
@@ -28,6 +31,7 @@ class SpellCheckProvider;
 struct ChromeViewHostMsg_GetPluginInfo_Output;
 
 namespace content {
+class BrowserPluginDelegate;
 struct WebPluginInfo;
 }
 
@@ -50,8 +54,16 @@ namespace visitedlink {
 class VisitedLinkSlave;
 }
 
+namespace web_cache {
+class WebCacheRenderProcessObserver;
+}
+
 namespace blink {
 class WebSecurityOrigin;
+}
+
+namespace password_manager {
+class CredentialManagerClient;
 }
 
 #if defined(ENABLE_WEBRTC)
@@ -100,7 +112,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                           bool is_server_redirect,
                           bool* send_referrer) OVERRIDE;
   virtual bool WillSendRequest(blink::WebFrame* frame,
-                               content::PageTransition transition_type,
+                               ui::PageTransition transition_type,
                                const GURL& url,
                                const GURL& first_party_for_cookies,
                                GURL* new_url) OVERRIDE;
@@ -132,11 +144,16 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual bool IsPluginAllowedToUseDevChannelAPIs() OVERRIDE;
   virtual bool IsPluginAllowedToUseCompositorAPI(const GURL& url) OVERRIDE;
   virtual bool IsPluginAllowedToUseVideoDecodeAPI(const GURL& url) OVERRIDE;
+  virtual content::BrowserPluginDelegate* CreateBrowserPluginDelegate(
+      content::RenderFrame* render_frame,
+      const std::string& mime_type) OVERRIDE;
 
+#if defined(ENABLE_EXTENSIONS)
   // Takes ownership.
   void SetExtensionDispatcherForTest(
       extensions::Dispatcher* extension_dispatcher);
   extensions::Dispatcher* GetExtensionDispatcherForTest();
+#endif
 
 #if defined(ENABLE_SPELLCHECK)
   // Sets a new |spellcheck|. Used for testing only.
@@ -150,8 +167,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const blink::WebPluginParams& params,
       const ChromeViewHostMsg_GetPluginInfo_Output& output);
 
+#if defined(ENABLE_PLUGINS) && defined(ENABLE_EXTENSIONS)
   static bool IsExtensionOrSharedModuleWhitelisted(
       const GURL& url, const std::set<std::string>& whitelist);
+#endif
 
   static bool WasWebRequestUsedBySomeExtensions();
 
@@ -160,6 +179,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   FRIEND_TEST_ALL_PREFIXES(ChromeContentRendererClientTest,
                            ShouldSuppressErrorPage);
 
+#if defined(ENABLE_EXTENSIONS)
   // Gets extension by the given origin, regardless of whether the extension
   // is active in the current process.
   const extensions::Extension* GetExtensionByOrigin(
@@ -172,6 +192,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                const extensions::ExtensionSet& extensions,
                                bool is_extension_url,
                                bool is_initial_navigation);
+#endif
 
   static GURL GetNaClContentHandlerURL(const std::string& actual_mime_type,
                                        const content::WebPluginInfo& plugin);
@@ -185,12 +206,21 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                             blink::WebPluginParams* params);
 
   scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;
+  scoped_ptr<web_cache::WebCacheRenderProcessObserver> web_cache_observer_;
+
+// TODO(thestig): Extract into a separate file if possible. Cleanup
+// ENABLE_EXTENSIONS ifdefs in the .cc file as well.
+#if defined(ENABLE_EXTENSIONS)
   scoped_ptr<ChromeExtensionsDispatcherDelegate> extension_dispatcher_delegate_;
   scoped_ptr<extensions::Dispatcher> extension_dispatcher_;
   scoped_ptr<extensions::RendererPermissionsPolicyDelegate>
       permissions_policy_delegate_;
+#endif
+
   scoped_ptr<PrescientNetworkingDispatcher> prescient_networking_dispatcher_;
   scoped_ptr<RendererNetPredictor> net_predictor_;
+  scoped_ptr<password_manager::CredentialManagerClient>
+      credential_manager_client_;
 #if defined(ENABLE_SPELLCHECK)
   scoped_ptr<SpellCheck> spellcheck_;
 #endif
@@ -201,6 +231,9 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   scoped_refptr<WebRtcLoggingMessageFilter> webrtc_logging_message_filter_;
 #endif
   scoped_ptr<SearchBouncer> search_bouncer_;
+#if defined(ENABLE_FULL_PRINTING)
+  scoped_ptr<ChromePDFPrintClient> pdf_print_client_;
+#endif
 #if defined(ENABLE_PLUGINS)
   std::set<std::string> allowed_compositor_origins_;
   std::set<std::string> allowed_video_decode_origins_;

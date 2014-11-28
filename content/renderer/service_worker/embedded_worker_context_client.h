@@ -66,6 +66,7 @@ class EmbeddedWorkerContextClient
   virtual blink::WebServiceWorkerCacheStorage* cacheStorage();
   virtual void didPauseAfterDownload();
   virtual void getClients(blink::WebServiceWorkerClientsCallbacks*);
+  virtual void workerReadyForInspection();
   virtual void workerContextFailedToStart();
   virtual void workerContextStarted(blink::WebServiceWorkerContextProxy* proxy);
   virtual void willDestroyWorkerContext();
@@ -101,9 +102,9 @@ class EmbeddedWorkerContextClient
 
   int embedded_worker_id() const { return embedded_worker_id_; }
   base::MessageLoopProxy* main_thread_proxy() const {
-    return main_thread_proxy_;
+    return main_thread_proxy_.get();
   }
-  ThreadSafeSender* thread_safe_sender() { return sender_; }
+  ThreadSafeSender* thread_safe_sender() { return sender_.get(); }
 
  private:
   void OnMessageToWorker(int thread_id,

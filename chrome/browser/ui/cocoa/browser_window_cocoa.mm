@@ -17,7 +17,6 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/fullscreen.h"
-#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/signin/signin_header_helper.h"
@@ -28,7 +27,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
-#import "chrome/browser/ui/cocoa/browser/password_generation_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
@@ -45,12 +43,12 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
 #import "chrome/browser/ui/cocoa/website_settings/website_settings_bubble_controller.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
@@ -353,24 +351,24 @@ void BrowserWindowCocoa::Restore() {
     [window() deminiaturize:controller_];
 }
 
-void BrowserWindowCocoa::EnterFullscreen(
-      const GURL& url, FullscreenExitBubbleType bubble_type) {
-  // When simplified fullscreen is enabled, always enter normal fullscreen.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableSimplifiedFullscreen)) {
-    if (url.is_empty())
-      [controller_ enterFullscreen];
-    else
-      [controller_ enterFullscreenForURL:url bubbleType:bubble_type];
+// See browser_window_controller.h for a detailed explanation of the logic in
+// this method.
+void BrowserWindowCocoa::EnterFullscreen(const GURL& url,
+                                         FullscreenExitBubbleType bubble_type) {
+  if (browser_->fullscreen_controller()->IsWindowFullscreenForTabOrPending()) {
+    [controller_ enterWebContentFullscreenForURL:url bubbleType:bubble_type];
     return;
   }
 
-  [controller_ enterPresentationModeForURL:url
-                                bubbleType:bubble_type];
+  if (url.is_empty()) {
+    [controller_ enterPresentationMode];
+  } else {
+    [controller_ enterExtensionFullscreenForURL:url bubbleType:bubble_type];
+  }
 }
 
 void BrowserWindowCocoa::ExitFullscreen() {
-  [controller_ exitFullscreen];
+  [controller_ exitAnyFullscreen];
 }
 
 void BrowserWindowCocoa::UpdateFullscreenExitBubbleContent(
@@ -385,9 +383,7 @@ bool BrowserWindowCocoa::ShouldHideUIForFullscreen() const {
 }
 
 bool BrowserWindowCocoa::IsFullscreen() const {
-  if ([controller_ inPresentationMode])
-    CHECK([controller_ isFullscreen]);  // Presentation mode must be fullscreen.
-  return [controller_ isFullscreen];
+  return [controller_ isInAnyFullscreenMode];
 }
 
 bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
@@ -446,7 +442,8 @@ void BrowserWindowCocoa::FocusInfobars() {
 }
 
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
-  return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
+  return browser_->profile()->GetPrefs()->GetBoolean(
+      bookmarks::prefs::kShowBookmarkBar);
 }
 
 bool BrowserWindowCocoa::IsBookmarkBarAnimating() const {
@@ -535,6 +532,7 @@ bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
 }
 
 DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
+  [controller_ createAndAddDownloadShelf];
   DownloadShelfController* shelfController = [controller_ downloadShelf];
   return [shelfController bridge];
 }
@@ -618,39 +616,26 @@ void BrowserWindowCocoa::Paste() {
 }
 
 void BrowserWindowCocoa::EnterFullscreenWithChrome() {
-  // This method cannot be called if simplified fullscreen is enabled.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  DCHECK(!command_line->HasSwitch(switches::kEnableSimplifiedFullscreen));
-
   CHECK(chrome::mac::SupportsSystemFullscreen());
-  if ([controller_ inPresentationMode])
-    [controller_ exitPresentationMode];
-  else
-    [controller_ enterFullscreen];
+  [controller_ enterFullscreenWithChrome];
+}
+
+void BrowserWindowCocoa::EnterFullscreenWithoutChrome() {
+  [controller_ enterPresentationMode];
 }
 
 bool BrowserWindowCocoa::IsFullscreenWithChrome() {
-  // The WithChrome mode does not exist when simplified fullscreen is enabled.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableSimplifiedFullscreen))
-    return false;
   return IsFullscreen() && ![controller_ inPresentationMode];
 }
 
 bool BrowserWindowCocoa::IsFullscreenWithoutChrome() {
-  // Presentation mode does not exist if simplified fullscreen is enabled.  The
-  // WithoutChrome mode simply maps to whether or not the window is fullscreen.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableSimplifiedFullscreen))
-    return IsFullscreen();
-
   return IsFullscreen() && [controller_ inPresentationMode];
 }
 
 WindowOpenDisposition BrowserWindowCocoa::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
   // When using Cocoa's System Fullscreen mode, convert popups into tabs.
-  if ([controller_ isInSystemFullscreen])
+  if ([controller_ isInAppKitFullscreen])
     return NEW_FOREGROUND_TAB;
   return NEW_POPUP;
 }
@@ -715,32 +700,9 @@ void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton(
   NSView* anchor = [controller buttonView];
   if ([anchor isHiddenOrHasHiddenAncestor])
     anchor = [[controller_ toolbarController] wrenchButton];
-  [controller showAvatarBubble:anchor
-                      withMode:mode
-               withServiceType:manage_accounts_params.service_type];
-}
-
-void BrowserWindowCocoa::ShowPasswordGenerationBubble(
-    const gfx::Rect& rect,
-    const autofill::PasswordForm& form,
-    autofill::PasswordGenerator* password_generator) {
-  WebContents* web_contents =
-      browser_->tab_strip_model()->GetActiveWebContents();
-  // We want to point to the middle of the rect instead of the right side.
-  NSPoint point = GetPointForBubble(web_contents,
-                                    rect.x() + rect.width()/2,
-                                    rect.bottom());
-
-  PasswordGenerationBubbleController* controller = [
-          [PasswordGenerationBubbleController alloc]
-       initWithWindow:browser_->window()->GetNativeWindow()
-           anchoredAt:point
-       renderViewHost:web_contents->GetRenderViewHost()
-      passwordManager:ChromePasswordManagerClient::GetManagerFromWebContents(
-                          web_contents)
-       usingGenerator:password_generator
-              forForm:form];
-  [controller showWindow:nil];
+  [controller showAvatarBubbleAnchoredAt:anchor
+                                withMode:mode
+                         withServiceType:manage_accounts_params.service_type];
 }
 
 int
@@ -754,14 +716,4 @@ void BrowserWindowCocoa::ExecuteExtensionCommand(
     const extensions::Extension* extension,
     const extensions::Command& command) {
   [cocoa_controller() executeExtensionCommand:extension->id() command:command];
-}
-
-void BrowserWindowCocoa::ShowPageActionPopup(
-    const extensions::Extension* extension) {
-  [cocoa_controller() activatePageAction:extension->id()];
-}
-
-void BrowserWindowCocoa::ShowBrowserActionPopup(
-    const extensions::Extension* extension) {
-  [cocoa_controller() activateBrowserAction:extension->id()];
 }

@@ -4,9 +4,6 @@
 
 #include "chrome/browser/ui/views/select_file_dialog_extension.h"
 
-#include "apps/app_window.h"
-#include "apps/app_window_registry.h"
-#include "apps/ui/native_app_window.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
@@ -15,6 +12,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/apps/app_window_registry_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/select_file_dialog_util.h"
@@ -26,7 +24,6 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -34,12 +31,18 @@
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/extension_system.h"
 #include "ui/base/base_window.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 #include "ui/views/widget/widget.h"
 
-using apps::AppWindow;
+#if defined(USE_ATHENA)
+#include "chrome/browser/ui/views/athena/athena_util.h"
+#endif  // USE_ATHENA
+
+using extensions::AppWindow;
 using content::BrowserThread;
 
 namespace {
@@ -93,18 +96,22 @@ scoped_refptr<SelectFileDialogExtension> PendingDialog::Find(
   return it->second;
 }
 
-
+#if defined(USE_ATHENA)
+void FindRuntimeContext(gfx::NativeWindow owner_window,
+                        ui::BaseWindow** base_window,
+                        content::WebContents** web_contents) {
+  *base_window = NULL;
+  *web_contents = GetWebContentsForWindow(owner_window);
+}
+#else   // USE_ATHENA
 // Given |owner_window| finds corresponding |base_window|, it's associated
 // |web_contents| and |profile|.
-void FindRuntimeContext(
-    gfx::NativeWindow owner_window,
-    ui::BaseWindow** base_window,
-    content::WebContents** web_contents,
-    Profile** profile) {
+void FindRuntimeContext(gfx::NativeWindow owner_window,
+                        ui::BaseWindow** base_window,
+                        content::WebContents** web_contents) {
   *base_window = NULL;
   *web_contents = NULL;
-  *profile = NULL;
-  // To get the base_window and profile, either a Browser or AppWindow is
+  // To get the base_window and web contents, either a Browser or AppWindow is
   // needed.
   Browser* owner_browser =  NULL;
   AppWindow* app_window = NULL;
@@ -116,7 +123,7 @@ void FindRuntimeContext(
       // If an owner_window was supplied but we couldn't find a browser, this
       // could be for a app window.
       app_window =
-          apps::AppWindowRegistry::GetAppWindowForNativeWindowAnyProfile(
+          AppWindowRegistryUtil::GetAppWindowForNativeWindowAnyProfile(
               owner_window);
     }
   }
@@ -145,8 +152,8 @@ void FindRuntimeContext(
     *web_contents = chromeos::LoginWebDialog::GetCurrentWebContents();
 
   CHECK(web_contents);
-  *profile = Profile::FromBrowserContext((*web_contents)->GetBrowserContext());
 }
+#endif  // USE_ATHENA
 
 }  // namespace
 
@@ -335,8 +342,9 @@ void SelectFileDialogExtension::SelectFileImpl(
 
   // The web contents to associate the dialog with.
   content::WebContents* web_contents = NULL;
-
-  FindRuntimeContext(owner_window, &base_window, &web_contents, &profile_);
+  FindRuntimeContext(owner_window, &base_window, &web_contents);
+  CHECK(web_contents);
+  profile_ = Profile::FromBrowserContext(web_contents->GetBrowserContext());
   CHECK(profile_);
 
   // Check if we have another dialog opened for the contents. It's unlikely, but

@@ -26,6 +26,7 @@ from pylib.gtest import gtest_config
 CHROME_SRC_DIR = bb_utils.CHROME_SRC
 DIR_BUILD_ROOT = os.path.dirname(CHROME_SRC_DIR)
 CHROME_OUT_DIR = bb_utils.CHROME_OUT_DIR
+BLINK_SCRIPTS_DIR = 'third_party/WebKit/Tools/Scripts'
 
 SLAVE_SCRIPTS_DIR = os.path.join(bb_utils.BB_BUILD_DIR, 'scripts', 'slave')
 LOGCAT_DIR = os.path.join(bb_utils.CHROME_OUT_DIR, 'logcat')
@@ -74,9 +75,9 @@ INSTRUMENTATION_TESTS = dict((suite.name, suite) for suite in [
       'webview:android_webview/test/data/device_files'),
     ])
 
-VALID_TESTS = set(['chromedriver', 'chrome_proxy', 'gpu', 'mojo',
+VALID_TESTS = set(['chromedriver', 'chrome_proxy', 'gpu', 'mojo', 'sync',
                    'telemetry_perf_unittests', 'ui', 'unit', 'webkit',
-                   'webkit_layout', 'webrtc_chromium', 'webrtc_native'])
+                   'webkit_layout'])
 
 RunCmd = bb_utils.RunCmd
 
@@ -180,6 +181,15 @@ def RunChromeProxyTests(options):
   bb_annotations.PrintNamedStep('chrome_proxy')
   RunCmd(['tools/chrome_proxy/run_tests'] + args)
 
+def RunChromeSyncShellTests(options):
+  """Run the chrome sync shell tests"""
+  test = I('ChromeSyncShell',
+           'ChromeSyncShell.apk',
+           'org.chromium.chrome.browser.sync',
+           'ChromeSyncShellTest.apk',
+           'chrome:chrome/test/data/android/device_files')
+  RunInstrumentationSuite(options, test)
+
 def RunTelemetryPerfUnitTests(options):
   """Runs the telemetry perf unit tests.
 
@@ -205,7 +215,7 @@ def RunMojoTests(options):
            None,
            'org.chromium.mojo.tests',
            'MojoTest',
-           None)
+           'bindings:mojo/public/interfaces/bindings/tests/data')
   RunInstrumentationSuite(options, test)
 
 
@@ -274,13 +284,10 @@ def RunInstrumentationSuite(options, test, flunk_on_failure=True,
          flunk_on_failure=flunk_on_failure)
 
 
-def RunWebkitLint(target):
+def RunWebkitLint():
   """Lint WebKit's TestExpectation files."""
   bb_annotations.PrintNamedStep('webkit_lint')
-  RunCmd([SrcPath('webkit/tools/layout_tests/run_webkit_tests.py'),
-          '--lint-test-files',
-          '--chromium',
-          '--target', target])
+  RunCmd([SrcPath(os.path.join(BLINK_SCRIPTS_DIR, 'lint-test-expectations'))])
 
 
 def RunWebkitLayoutTests(options):
@@ -317,8 +324,8 @@ def RunWebkitLayoutTests(options):
     cmd_args.extend(
         ['--additional-expectations=%s' % os.path.join(CHROME_SRC_DIR, *f)])
 
-  exit_code = RunCmd([SrcPath('webkit/tools/layout_tests/run_webkit_tests.py')]
-                     + cmd_args)
+  exit_code = RunCmd(
+      [SrcPath(os.path.join(BLINK_SCRIPTS_DIR, 'run-webkit-tests'))] + cmd_args)
   if exit_code == 255: # test_run_results.UNEXPECTED_ERROR_EXIT_STATUS
     bb_annotations.PrintMsg('?? (crashed or hung)')
   elif exit_code == 254: # test_run_results.NO_DEVICES_EXIT_STATUS
@@ -486,15 +493,7 @@ def RunInstrumentationTests(options):
 
 def RunWebkitTests(options):
   RunTestSuites(options, ['webkit_unit_tests', 'blink_heap_unittests'])
-  RunWebkitLint(options.target)
-
-
-def RunWebRTCChromiumTests(options):
-  RunTestSuites(options, gtest_config.WEBRTC_CHROMIUM_TEST_SUITES)
-
-
-def RunWebRTCNativeTests(options):
-  RunTestSuites(options, gtest_config.WEBRTC_NATIVE_TEST_SUITES)
+  RunWebkitLint()
 
 
 def RunGPUTests(options):
@@ -538,13 +537,12 @@ def GetTestStepCmds():
       ('chrome_proxy', RunChromeProxyTests),
       ('gpu', RunGPUTests),
       ('mojo', RunMojoTests),
+      ('sync', RunChromeSyncShellTests),
       ('telemetry_perf_unittests', RunTelemetryPerfUnitTests),
-      ('unit', RunUnitTests),
       ('ui', RunInstrumentationTests),
+      ('unit', RunUnitTests),
       ('webkit', RunWebkitTests),
       ('webkit_layout', RunWebkitLayoutTests),
-      ('webrtc_chromium', RunWebRTCChromiumTests),
-      ('webrtc_native', RunWebRTCNativeTests),
   ]
 
 

@@ -18,7 +18,7 @@
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_util.h"
 #include "net/url_request/url_request_context.h"
-#include "webkit/browser/quota/special_storage_policy.h"
+#include "storage/browser/quota/special_storage_policy.h"
 
 namespace {
 
@@ -29,7 +29,7 @@ void CookieDeleted(bool success) {
 class SessionDataDeleter
     : public base::RefCountedThreadSafe<SessionDataDeleter> {
  public:
-  SessionDataDeleter(quota::SpecialStoragePolicy* storage_policy,
+  SessionDataDeleter(storage::SpecialStoragePolicy* storage_policy,
                      bool delete_only_by_session_only_policy);
 
   void Run(content::StoragePartition* storage_partition,
@@ -59,21 +59,22 @@ class SessionDataDeleter
   void DeleteSessionOnlyOriginCookies(const net::CookieList& cookies);
 
   scoped_refptr<net::CookieMonster> cookie_monster_;
-  scoped_refptr<quota::SpecialStoragePolicy> storage_policy_;
+  scoped_refptr<storage::SpecialStoragePolicy> storage_policy_;
   const bool delete_only_by_session_only_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionDataDeleter);
 };
 
 SessionDataDeleter::SessionDataDeleter(
-    quota::SpecialStoragePolicy* storage_policy,
+    storage::SpecialStoragePolicy* storage_policy,
     bool delete_only_by_session_only_policy)
     : storage_policy_(storage_policy),
-      delete_only_by_session_only_policy_(delete_only_by_session_only_policy) {}
+      delete_only_by_session_only_policy_(delete_only_by_session_only_policy) {
+}
 
 void SessionDataDeleter::Run(content::StoragePartition* storage_partition,
                              ProfileIOData* profile_io_data) {
-  if (storage_policy_ && storage_policy_->HasSessionOnlyOrigins()) {
+  if (storage_policy_.get() && storage_policy_->HasSessionOnlyOrigins()) {
     storage_partition->GetDOMStorageContext()->GetLocalStorageUsage(
         base::Bind(&SessionDataDeleter::ClearSessionOnlyLocalStorage,
                    this,
@@ -92,7 +93,7 @@ SessionDataDeleter::~SessionDataDeleter() {}
 void SessionDataDeleter::ClearSessionOnlyLocalStorage(
     content::StoragePartition* storage_partition,
     const std::vector<content::LocalStorageUsageInfo>& usages) {
-  DCHECK(storage_policy_);
+  DCHECK(storage_policy_.get());
   DCHECK(storage_policy_->HasSessionOnlyOrigins());
   for (size_t i = 0; i < usages.size(); ++i) {
     const content::LocalStorageUsageInfo& usage = usages[i];
@@ -124,7 +125,7 @@ void SessionDataDeleter::DeleteSessionCookiesDone(int num_deleted) {
 
 void SessionDataDeleter::DeleteSessionOnlyOriginCookies(
     const net::CookieList& cookies) {
-  if (!storage_policy_ || !storage_policy_->HasSessionOnlyOrigins())
+  if (!storage_policy_.get() || !storage_policy_->HasSessionOnlyOrigins())
     return;
 
   for (net::CookieList::const_iterator it = cookies.begin();

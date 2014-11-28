@@ -8,8 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -24,9 +24,6 @@
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "components/bookmarks/browser/bookmark_model.h"
-#include "components/bookmarks/browser/bookmark_utils.h"
-#include "components/bookmarks/test/test_bookmark_client.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/history/core/test/history_client_fake_bookmarks.h"
 #include "content/public/test/test_browser_thread.h"
@@ -239,7 +236,7 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
   VisitRow visit_row3;
   visit_row3.url_id = url_ids[1];
   visit_row3.visit_time = visit_times[2];
-  visit_row3.transition = content::PAGE_TRANSITION_TYPED;
+  visit_row3.transition = ui::PAGE_TRANSITION_TYPED;
   main_db_->AddVisit(&visit_row3, SOURCE_BROWSED);
 
   VisitRow visit_row4;
@@ -262,19 +259,19 @@ void ExpireHistoryTest::AddExampleSourceData(const GURL& url, URLID* id) {
 
   // Four times for each visit.
   VisitRow visit_row1(url_id, last_visit_time - TimeDelta::FromDays(4), 0,
-                      content::PAGE_TRANSITION_TYPED, 0);
+                      ui::PAGE_TRANSITION_TYPED, 0);
   main_db_->AddVisit(&visit_row1, SOURCE_SYNCED);
 
   VisitRow visit_row2(url_id, last_visit_time - TimeDelta::FromDays(3), 0,
-                      content::PAGE_TRANSITION_TYPED, 0);
+                      ui::PAGE_TRANSITION_TYPED, 0);
   main_db_->AddVisit(&visit_row2, SOURCE_BROWSED);
 
   VisitRow visit_row3(url_id, last_visit_time - TimeDelta::FromDays(2), 0,
-                      content::PAGE_TRANSITION_TYPED, 0);
+                      ui::PAGE_TRANSITION_TYPED, 0);
   main_db_->AddVisit(&visit_row3, SOURCE_EXTENSION);
 
   VisitRow visit_row4(
-      url_id, last_visit_time, 0, content::PAGE_TRANSITION_TYPED, 0);
+      url_id, last_visit_time, 0, ui::PAGE_TRANSITION_TYPED, 0);
   main_db_->AddVisit(&visit_row4, SOURCE_FIREFOX_IMPORTED);
 }
 

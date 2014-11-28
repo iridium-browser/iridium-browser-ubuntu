@@ -5,6 +5,7 @@
 #include "content/browser/battery_status/battery_status_manager_linux.h"
 
 #include "base/macros.h"
+#include "base/metrics/histogram.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "content/browser/battery_status/battery_status_manager.h"
@@ -96,6 +97,11 @@ scoped_ptr<PathsVector> GetPowerSourcesPaths(dbus::ObjectProxy* proxy) {
   return paths.Pass();;
 }
 
+void UpdateNumberBatteriesHistogram(int count) {
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "BatteryStatus.NumberBatteriesLinux", count, 1, 5, 6);
+}
+
 // Class that represents a dedicated thread which communicates with DBus to
 // obtain battery information and receives battery change notifications.
 class BatteryStatusNotificationThread : public base::Thread {
@@ -123,7 +129,7 @@ class BatteryStatusNotificationThread : public base::Thread {
   void StartListening() {
     DCHECK(OnWatcherThread());
 
-    if (system_bus_)
+    if (system_bus_.get())
       return;
 
     InitDBus();
@@ -131,6 +137,7 @@ class BatteryStatusNotificationThread : public base::Thread {
         system_bus_->GetObjectProxy(kUPowerServiceName,
                                     dbus::ObjectPath(kUPowerPath));
     scoped_ptr<PathsVector> device_paths = GetPowerSourcesPaths(power_proxy);
+    int num_batteries = 0;
 
     for (size_t i = 0; i < device_paths->size(); ++i) {
       const dbus::ObjectPath& device_path = device_paths->at(i);
@@ -157,13 +164,15 @@ class BatteryStatusNotificationThread : public base::Thread {
         // TODO(timvolodine): add support for multiple batteries. Currently we
         // only collect information from the first battery we encounter
         // (crbug.com/400780).
-        // TODO(timvolodine): add UMA logging for this case.
         LOG(WARNING) << "multiple batteries found, "
                      << "using status data of the first battery only.";
       } else {
         battery_proxy_ = device_proxy;
       }
+      num_batteries++;
     }
+
+    UpdateNumberBatteriesHistogram(num_batteries);
 
     if (!battery_proxy_) {
       callback_.Run(blink::WebBatteryStatus());
@@ -201,7 +210,7 @@ class BatteryStatusNotificationThread : public base::Thread {
   void ShutdownDBusConnection() {
     DCHECK(OnWatcherThread());
 
-    if (!system_bus_)
+    if (!system_bus_.get())
       return;
 
     // Shutdown DBus connection later because there may be pending tasks on
@@ -223,7 +232,7 @@ class BatteryStatusNotificationThread : public base::Thread {
       return;
     }
 
-    if (!system_bus_)
+    if (!system_bus_.get())
       return;
 
     if (success) {
@@ -238,7 +247,7 @@ class BatteryStatusNotificationThread : public base::Thread {
   void BatteryChanged(dbus::Signal* signal /* unsused */) {
     DCHECK(OnWatcherThread());
 
-    if (!system_bus_)
+    if (!system_bus_.get())
       return;
 
     scoped_ptr<base::DictionaryValue> dictionary =

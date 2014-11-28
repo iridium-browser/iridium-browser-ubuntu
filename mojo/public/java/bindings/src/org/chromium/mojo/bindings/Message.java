@@ -11,19 +11,25 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 /**
- * A raw message to be sent/received from a {@link MessagePipeHandle}.
+ * A raw message to be sent/received from a {@link MessagePipeHandle}. Note that this can contain
+ * any data, not necessarily a Mojo message with a proper header. See also {@link ServiceMessage}.
  */
-public final class Message {
+public class Message {
 
     /**
      * The data of the message.
      */
-    public final ByteBuffer buffer;
+    private final ByteBuffer mBuffer;
 
     /**
      * The handles of the message.
      */
-    public final List<? extends Handle> handles;
+    private final List<? extends Handle> mHandle;
+
+    /**
+     * This message interpreted as a message for a mojo service with an appropriate header.
+     */
+    private ServiceMessage mWithHeader = null;
 
     /**
      * Constructor.
@@ -33,7 +39,31 @@ public final class Message {
      */
     public Message(ByteBuffer buffer, List<? extends Handle> handles) {
         assert buffer.isDirect();
-        this.buffer = buffer;
-        this.handles = handles;
+        mBuffer = buffer;
+        mHandle = handles;
+    }
+
+    /**
+     * The data of the message.
+     */
+    public ByteBuffer getData() {
+        return mBuffer;
+    }
+
+    /**
+     * The handles of the message.
+     */
+    public List<? extends Handle> getHandles() {
+        return mHandle;
+    }
+
+    /**
+     * Returns the message interpreted as a message for a mojo service.
+     */
+    public ServiceMessage asServiceMessage() {
+        if (mWithHeader == null) {
+            mWithHeader = new ServiceMessage(this);
+        }
+        return mWithHeader;
     }
 }

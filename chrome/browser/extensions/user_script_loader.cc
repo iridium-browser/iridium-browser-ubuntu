@@ -9,8 +9,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/version.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -84,7 +84,7 @@ bool LoadScriptContent(const ExtensionId& extension_id,
       LOG(WARNING) << "Failed to load user script file: " << path.value();
       return false;
     }
-    if (verifier) {
+    if (verifier.get()) {
       content::BrowserThread::PostTask(content::BrowserThread::IO,
                                        FROM_HERE,
                                        base::Bind(&VerifyContent,
@@ -128,7 +128,7 @@ SubstitutionMap* GetLocalizationMessages(const ExtensionsInfo& extensions_info,
 
 void LoadUserScripts(UserScriptList* user_scripts,
                      const ExtensionsInfo& extensions_info,
-                     const std::set<int64>& added_script_ids,
+                     const std::set<int>& added_script_ids,
                      ContentVerifier* verifier) {
   for (UserScriptList::iterator script = user_scripts->begin();
        script != user_scripts->end();
@@ -202,12 +202,12 @@ scoped_ptr<base::SharedMemory> Serialize(const UserScriptList& scripts) {
 
 void LoadScriptsOnFileThread(scoped_ptr<UserScriptList> user_scripts,
                              const ExtensionsInfo& extensions_info,
-                             const std::set<int64>& added_script_ids,
+                             const std::set<int>& added_script_ids,
                              scoped_refptr<ContentVerifier> verifier,
                              LoadScriptsCallback callback) {
   DCHECK(user_scripts.get());
   LoadUserScripts(
-      user_scripts.get(), extensions_info, added_script_ids, verifier);
+      user_scripts.get(), extensions_info, added_script_ids, verifier.get());
   scoped_ptr<base::SharedMemory> memory = Serialize(*user_scripts);
   BrowserThread::PostTask(
       BrowserThread::UI,
@@ -333,7 +333,7 @@ bool UserScriptLoader::ParseMetadataHeader(const base::StringPiece& script_text,
 // static
 void UserScriptLoader::LoadScriptsForTest(UserScriptList* user_scripts) {
   ExtensionsInfo info;
-  std::set<int64> added_script_ids;
+  std::set<int> added_script_ids;
   for (UserScriptList::iterator it = user_scripts->begin();
        it != user_scripts->end();
        ++it) {
@@ -347,12 +347,13 @@ UserScriptLoader::UserScriptLoader(Profile* profile,
                                    const ExtensionId& owner_extension_id,
                                    bool listen_for_extension_system_loaded)
     : user_scripts_(new UserScriptList()),
+      clear_scripts_(false),
       extension_system_ready_(false),
       pending_load_(false),
       profile_(profile),
       owner_extension_id_(owner_extension_id),
-      weak_factory_(this),
-      extension_registry_observer_(this) {
+      extension_registry_observer_(this),
+      weak_factory_(this) {
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile));
   if (listen_for_extension_system_loaded) {
     ExtensionSystem::Get(profile_)->ready().Post(
@@ -467,7 +468,7 @@ void UserScriptLoader::StartLoad() {
   user_scripts_->insert(
       user_scripts_->end(), added_scripts_.begin(), added_scripts_.end());
 
-  std::set<int64> added_script_ids;
+  std::set<int> added_script_ids;
   for (std::set<UserScript>::const_iterator it = added_scripts_.begin();
        it != added_scripts_.end();
        ++it) {
@@ -569,7 +570,7 @@ void UserScriptLoader::SendUpdate(
 
   if (base::SharedMemory::IsHandleValid(handle_for_process)) {
     process->Send(new ExtensionMsg_UpdateUserScripts(
-        handle_for_process, "" /* owner */, changed_extensions));
+        handle_for_process, owner_extension_id_, changed_extensions));
   }
 }
 

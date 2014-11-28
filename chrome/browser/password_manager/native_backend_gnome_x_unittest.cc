@@ -306,6 +306,10 @@ void CheckPasswordChanges(const PasswordStoreChangeList& expected_list,
     EXPECT_EQ(expected.times_used, actual.times_used);
     EXPECT_EQ(expected.scheme, actual.scheme);
     EXPECT_EQ(expected.date_synced, actual.date_synced);
+    EXPECT_EQ(expected.display_name, actual.display_name);
+    EXPECT_EQ(expected.avatar_url, actual.avatar_url);
+    EXPECT_EQ(expected.federation_url, actual.federation_url);
+    EXPECT_EQ(expected.is_zero_click, actual.is_zero_click);
   }
 }
 
@@ -350,6 +354,10 @@ class NativeBackendGnomeTest : public testing::Test {
     form_google_.type = PasswordForm::TYPE_GENERATED;
     form_google_.date_created = base::Time::Now();
     form_google_.date_synced = base::Time::Now();
+    form_google_.display_name = UTF8ToUTF16("Joe Schmoe");
+    form_google_.avatar_url = GURL("http://www.google.com/avatar");
+    form_google_.federation_url = GURL("http://www.google.com/federation_url");
+    form_google_.is_zero_click = true;
 
     form_facebook_.origin = GURL("http://www.facebook.com/");
     form_facebook_.action = GURL("http://www.facebook.com/login");
@@ -361,6 +369,10 @@ class NativeBackendGnomeTest : public testing::Test {
     form_facebook_.signon_realm = "http://www.facebook.com/";
     form_facebook_.date_created = base::Time::Now();
     form_facebook_.date_synced = base::Time::Now();
+    form_facebook_.display_name = UTF8ToUTF16("Joe Schmoe");
+    form_facebook_.avatar_url = GURL("http://www.facebook.com/avatar");
+    form_facebook_.federation_url = GURL("http://www.facebook.com/federation");
+    form_facebook_.is_zero_click = true;
 
     form_isc_.origin = GURL("http://www.isc.org/");
     form_isc_.action = GURL("http://www.isc.org/auth");
@@ -434,7 +446,7 @@ class NativeBackendGnomeTest : public testing::Test {
     EXPECT_EQ("login", item->keyring);
     EXPECT_EQ(form.origin.spec(), item->display_name);
     EXPECT_EQ(UTF16ToUTF8(form.password_value), item->password);
-    EXPECT_EQ(16u, item->attributes.size());
+    EXPECT_EQ(20u, item->attributes.size());
     CheckStringAttribute(item, "origin_url", form.origin.spec());
     CheckStringAttribute(item, "action_url", form.action.spec());
     CheckStringAttribute(item, "username_element",
@@ -453,9 +465,13 @@ class NativeBackendGnomeTest : public testing::Test {
     CheckUint32Attribute(item, "type", form.type);
     CheckUint32Attribute(item, "times_used", form.times_used);
     CheckUint32Attribute(item, "scheme", form.scheme);
-    CheckStringAttribute(item, "application", app_string);
     CheckStringAttribute(item, "date_synced", base::Int64ToString(
         form.date_synced.ToInternalValue()));
+    CheckStringAttribute(item, "display_name", UTF16ToUTF8(form.display_name));
+    CheckStringAttribute(item, "avatar_url", form.avatar_url.spec());
+    CheckStringAttribute(item, "federation_url", form.federation_url.spec());
+    CheckUint32Attribute(item, "is_zero_click", form.is_zero_click);
+    CheckStringAttribute(item, "application", app_string);
   }
 
   // Saves |credentials| and then gets logins matching |url| and |scheme|.
@@ -517,9 +533,6 @@ class NativeBackendGnomeTest : public testing::Test {
   // m.facebook.com password should not get updated. Depending on the argument,
   // the credential update is done via UpdateLogin or AddLogin.
   void CheckPSLUpdate(UpdateType update_type) {
-    password_manager::PSLMatchingHelper helper;
-    ASSERT_TRUE(helper.IsMatchingEnabled());
-
     NativeBackendGnome backend(321);
     backend.Init();
 
@@ -784,8 +797,6 @@ TEST_F(NativeBackendGnomeTest, BasicListLogins) {
 TEST_F(NativeBackendGnomeTest, PSLMatchingPositive) {
   PasswordForm result;
   const GURL kMobileURL("http://m.facebook.com/");
-  password_manager::PSLMatchingHelper helper;
-  ASSERT_TRUE(helper.IsMatchingEnabled());
   EXPECT_TRUE(CheckCredentialAvailability(
       form_facebook_, kMobileURL, PasswordForm::SCHEME_HTML, &result));
   EXPECT_EQ(kMobileURL, result.origin);
@@ -795,8 +806,6 @@ TEST_F(NativeBackendGnomeTest, PSLMatchingPositive) {
 // Save a password for www.facebook.com and see it not suggested for
 // m-facebook.com.
 TEST_F(NativeBackendGnomeTest, PSLMatchingNegativeDomainMismatch) {
-  password_manager::PSLMatchingHelper helper;
-  ASSERT_TRUE(helper.IsMatchingEnabled());
   EXPECT_FALSE(CheckCredentialAvailability(
       form_facebook_, GURL("http://m-facebook.com/"),
       PasswordForm::SCHEME_HTML, NULL));
@@ -804,8 +813,6 @@ TEST_F(NativeBackendGnomeTest, PSLMatchingNegativeDomainMismatch) {
 
 // Test PSL matching is off for domains excluded from it.
 TEST_F(NativeBackendGnomeTest, PSLMatchingDisabledDomains) {
-  password_manager::PSLMatchingHelper helper;
-  ASSERT_TRUE(helper.IsMatchingEnabled());
   EXPECT_FALSE(CheckCredentialAvailability(
       form_google_, GURL("http://one.google.com/"),
       PasswordForm::SCHEME_HTML, NULL));
@@ -813,9 +820,6 @@ TEST_F(NativeBackendGnomeTest, PSLMatchingDisabledDomains) {
 
 // Make sure PSL matches aren't available for non-HTML forms.
 TEST_F(NativeBackendGnomeTest, PSLMatchingDisabledForNonHTMLForms) {
-  password_manager::PSLMatchingHelper helper;
-  ASSERT_TRUE(helper.IsMatchingEnabled());
-
   CheckMatchingWithScheme(PasswordForm::SCHEME_BASIC);
   CheckMatchingWithScheme(PasswordForm::SCHEME_DIGEST);
   CheckMatchingWithScheme(PasswordForm::SCHEME_OTHER);
@@ -885,6 +889,35 @@ TEST_F(NativeBackendGnomeTest, BasicRemoveLogin) {
   EXPECT_EQ(1u, mock_keyring_items.size());
   if (mock_keyring_items.size() > 0)
     CheckMockKeyringItem(&mock_keyring_items[0], form_google_, "chrome-42");
+
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(base::IgnoreResult(&NativeBackendGnome::RemoveLogin),
+                 base::Unretained(&backend), form_google_));
+
+  RunBothThreads();
+
+  EXPECT_EQ(0u, mock_keyring_items.size());
+}
+
+// Verify fix for http://crbug.com/408783.
+TEST_F(NativeBackendGnomeTest, RemoveLoginActionMismatch) {
+  NativeBackendGnome backend(42);
+  backend.Init();
+
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(base::IgnoreResult(&NativeBackendGnome::AddLogin),
+                 base::Unretained(&backend), form_google_));
+
+  RunBothThreads();
+
+  EXPECT_EQ(1u, mock_keyring_items.size());
+  if (mock_keyring_items.size() > 0)
+    CheckMockKeyringItem(&mock_keyring_items[0], form_google_, "chrome-42");
+
+  // Action url match not required for removal.
+  form_google_.action = GURL("https://some.other.url.com/path");
 
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,

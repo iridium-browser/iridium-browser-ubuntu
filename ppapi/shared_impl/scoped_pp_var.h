@@ -47,7 +47,7 @@ class PPAPI_SHARED_EXPORT ScopedPPVar {
 
 // An array of PP_Vars which will be deallocated and have their references
 // decremented when they go out of scope.
-class ScopedPPVarArray {
+class PPAPI_SHARED_EXPORT ScopedPPVarArray {
  public:
   struct PassPPBMemoryAllocatedArray {};
 
@@ -63,13 +63,13 @@ class ScopedPPVarArray {
 
   // Passes ownership of the vars and the underlying array memory to the caller.
   // Note that the memory has been allocated with PPB_Memory_Dev.
-  PP_Var* Release(const PassPPBMemoryAllocatedArray&, size_t* size);
+  PP_Var* Release(const PassPPBMemoryAllocatedArray&);
 
   PP_Var* get() { return array_; }
   size_t size() { return size_; }
 
-  // Adds a ref to |var|. The refcount of the existing var will be decremented.
-  void Set(size_t index, PP_Var var);
+  // Takes a ref to |var|. The refcount of the existing var will be decremented.
+  void Set(size_t index, const ScopedPPVar& var);
   const PP_Var& operator[](size_t index) { return array_[index]; }
 
  private:

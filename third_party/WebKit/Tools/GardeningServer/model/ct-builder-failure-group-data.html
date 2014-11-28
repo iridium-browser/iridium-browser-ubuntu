@@ -1,0 +1,26 @@
+<!--
+Copyright 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="ct-builder-list.html">
+
+<script>
+function CTBuilderFailureGroupData(failure, bot, url) {
+  this.bot = bot;
+  this.failure = failure;
+  this.url = url;
+  this.builder = new CTBuilder(failure.masterUrl, failure.builder);
+  this.category = 'builder';
+};
+
+CTBuilderFailureGroupData.prototype.getAnnotations = function() {
+  // FIXME: Merge in annotations! crbug.com/413499
+  return [];
+};
+
+CTBuilderFailureGroupData.prototype.failureKeys = function() {
+  return [this.failure.key];
+};
+</script>

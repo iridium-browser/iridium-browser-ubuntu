@@ -18,16 +18,17 @@
  */
 
 #include "config.h"
-
 #include "core/svg/SVGFEConvolveMatrixElement.h"
 
 #include "core/SVGNames.h"
-#include "platform/graphics/filters/FilterEffect.h"
+#include "core/dom/Document.h"
+#include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGParserUtilities.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/geometry/IntSize.h"
+#include "platform/graphics/filters/FilterEffect.h"
 
 namespace blink {
 
@@ -55,8 +56,6 @@ inline SVGFEConvolveMatrixElement::SVGFEConvolveMatrixElement(Document& document
     , m_targetX(SVGAnimatedInteger::create(this, SVGNames::targetXAttr, SVGInteger::create()))
     , m_targetY(SVGAnimatedInteger::create(this, SVGNames::targetYAttr, SVGInteger::create()))
 {
-    ScriptWrappable::init(this);
-
     addToPropertyMap(m_preserveAlpha);
     addToPropertyMap(m_divisor);
     addToPropertyMap(m_bias);

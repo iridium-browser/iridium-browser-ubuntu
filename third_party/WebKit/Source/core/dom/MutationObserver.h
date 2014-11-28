@@ -46,6 +46,7 @@ class Dictionary;
 class ExceptionState;
 class MutationCallback;
 class MutationObserver;
+class MutationObserverInit;
 class MutationObserverRegistration;
 class MutationRecord;
 class Node;
@@ -59,6 +60,7 @@ typedef WillBeHeapVector<RefPtrWillBeMember<MutationObserver> > MutationObserver
 typedef WillBeHeapVector<RefPtrWillBeMember<MutationRecord> > MutationRecordVector;
 
 class MutationObserver FINAL : public RefCountedWillBeGarbageCollectedFinalized<MutationObserver>, public ScriptWrappable {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     enum MutationType {
         ChildList = 1 << 0,
@@ -84,7 +86,7 @@ public:
 
     ~MutationObserver();
 
-    void observe(Node*, const Dictionary&, ExceptionState&);
+    void observe(Node*, const MutationObserverInit&, ExceptionState&);
     WillBeHeapVector<RefPtrWillBeMember<MutationRecord> > takeRecords();
     void disconnect();
     void observationStarted(MutationObserverRegistration*);
@@ -109,6 +111,6 @@ private:
     unsigned m_priority;
 };
 
-}
+} // namespace blink
 
 #endif // MutationObserver_h

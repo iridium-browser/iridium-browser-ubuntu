@@ -6,8 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "ui/ozone/platform/test/test_cursor_factory.h"
-#include "ui/ozone/platform/test/test_event_factory.h"
+#include "ui/base/cursor/ozone/bitmap_cursor_factory_ozone.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "ui/ozone/platform/test/test_window.h"
 #include "ui/ozone/platform/test/test_window_manager.h"
 #include "ui/ozone/public/cursor_factory_ozone.h"
@@ -18,7 +18,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "ui/ozone/common/chromeos/native_display_delegate_ozone.h"
-#include "ui/ozone/common/chromeos/touchscreen_device_manager_ozone.h"
 #endif
 
 namespace ui {
@@ -36,9 +35,6 @@ class OzonePlatformTest : public OzonePlatform {
   // OzonePlatform:
   virtual ui::SurfaceFactoryOzone* GetSurfaceFactoryOzone() OVERRIDE {
     return window_manager_.get();
-  }
-  virtual EventFactoryOzone* GetEventFactoryOzone() OVERRIDE {
-    return event_factory_ozone_.get();
   }
   virtual CursorFactoryOzone* GetCursorFactoryOzone() OVERRIDE {
     return cursor_factory_ozone_.get();
@@ -61,18 +57,16 @@ class OzonePlatformTest : public OzonePlatform {
       OVERRIDE {
     return scoped_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateOzone());
   }
-  virtual scoped_ptr<TouchscreenDeviceManager>
-      CreateTouchscreenDeviceManager() OVERRIDE {
-    return scoped_ptr<TouchscreenDeviceManager>(
-        new TouchscreenDeviceManagerOzone());
-  }
 #endif
 
   virtual void InitializeUI() OVERRIDE {
     window_manager_.reset(new TestWindowManager(file_path_));
     window_manager_->Initialize();
-    event_factory_ozone_.reset(new TestEventFactory());
-    cursor_factory_ozone_.reset(new TestCursorFactory());
+    // This unbreaks tests that create their own.
+    if (!PlatformEventSource::GetInstance())
+      platform_event_source_ = PlatformEventSource::CreateDefault();
+
+    cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone);
     gpu_platform_support_host_.reset(CreateStubGpuPlatformSupportHost());
   }
 
@@ -82,7 +76,7 @@ class OzonePlatformTest : public OzonePlatform {
 
  private:
   scoped_ptr<TestWindowManager> window_manager_;
-  scoped_ptr<TestEventFactory> event_factory_ozone_;
+  scoped_ptr<PlatformEventSource> platform_event_source_;
   scoped_ptr<CursorFactoryOzone> cursor_factory_ozone_;
   scoped_ptr<GpuPlatformSupport> gpu_platform_support_;
   scoped_ptr<GpuPlatformSupportHost> gpu_platform_support_host_;

@@ -10,11 +10,13 @@ additional arguments, and use them to build.
 """
 
 import hashlib
+import json
 from optparse import OptionParser
 import os
 import re
 import Queue
 import shutil
+import StringIO
 import subprocess
 import sys
 import tempfile
@@ -225,6 +227,7 @@ class Builder(object):
     self.define_list = ArgToList(options.defines)
 
     self.name = options.name
+    self.cmd_file = options.cmd_file
     self.BuildCompileOptions(options.compile_flags, self.define_list)
     self.BuildLinkOptions(options.link_flags)
     self.BuildArchiveOptions()
@@ -241,7 +244,7 @@ class Builder(object):
     self.goma_threads = goma_config.get('threads', 1)
 
     # Define NDEBUG for Release builds.
-    if options.build_config == 'Release':
+    if options.build_config.startswith('Release'):
       self.compile_options.append('-DNDEBUG')
 
     # Use unoptimized native objects for debug IRT builds for faster compiles.
@@ -250,7 +253,7 @@ class Builder(object):
              or self.outtype == 'nexe')
         and self.arch != 'pnacl'):
       if (options.build_config is not None
-          and options.build_config == 'Debug'):
+          and options.build_config.startswith('Debug')):
         self.compile_options.extend(['--pnacl-allow-translate',
                                      '--pnacl-allow-native',
                                      '-arch', self.arch])
@@ -398,7 +401,7 @@ class Builder(object):
     if self.verbose:
       sys.stderr.write(str(msg) + '\n')
 
-  def Run(self, cmd_line, get_output=False, **kwargs):
+  def Run(self, cmd_line, get_output=False, possibly_batch=True, **kwargs):
     """Helper which runs a command line.
 
     Returns the error code if get_output is False.
@@ -420,7 +423,8 @@ class Builder(object):
       runner = subprocess.call
       if get_output:
         runner = subprocess.check_output
-      if self.is_pnacl_toolchain and pynacl.platform.IsWindows():
+      if (possibly_batch and self.is_pnacl_toolchain and
+          pynacl.platform.IsWindows()):
         # PNaCl toolchain executable is a script, not a binary, so it doesn't
         # want to run on Windows without a shell
         result = runner(' '.join(cmd_line), shell=True, **kwargs)
@@ -481,7 +485,8 @@ class Builder(object):
     default_no_nacl_goma = True if pynacl.platform.IsWindows() else False
     if (arch not in ['x86-32', 'x86-64', 'pnacl']
         or toolname not in ['newlib', 'glibc']
-        or IsEnvFlagTrue('NO_NACL_GOMA', default=default_no_nacl_goma)):
+        or IsEnvFlagTrue('NO_NACL_GOMA', default=default_no_nacl_goma)
+        or IsEnvFlagTrue('GOMA_DISABLED')):
       return {}
 
     goma_config = {}
@@ -529,6 +534,10 @@ class Builder(object):
       if rebuilt:
         raise Error('Could not find toolchain stamp file %s.' % self.toolstamp)
       return True
+    if not IsFile(self.cmd_file):
+      if rebuilt:
+        raise Error('Could not find cmd file %s.' % self.cmd_file)
+      return True
     if not IsFile(outd):
       if rebuilt:
         raise Error('Could not find dependency file %s.' % outd)
@@ -538,7 +547,7 @@ class Builder(object):
         raise Error('Could not find output file %s.' % out)
       return True
 
-    inputs = [__file__, self.toolstamp, src]
+    inputs = [__file__, self.toolstamp, src, self.cmd_file]
     outputs = [out, outd]
 
     # Find their timestamps if any.
@@ -605,6 +614,8 @@ class Builder(object):
         compile_options.append('-arch')
         compile_options.append(self.arch)
     elif ext in ['.cc', '.cpp']:
+      compile_options.append('-std=gnu++0x')
+      compile_options.append('-Wno-deprecated-register')
       bin_name = self.GetCXXCompiler()
     else:
       if ext != '.h':
@@ -765,7 +776,7 @@ class Builder(object):
 
     if self.tls_edit is not None:
       tls_edit_cmd = [FixPath(self.tls_edit), link_out, out]
-      tls_edit_err = self.Run(tls_edit_cmd, out)
+      tls_edit_err = self.Run(tls_edit_cmd, out, possibly_batch=False)
       if tls_edit_err:
         raise Error('FAILED with %d: %s' % (err, ' '.join(tls_edit_cmd)))
 
@@ -881,6 +892,23 @@ class Builder(object):
       raise Error('FAILED: Unknown outtype: %s' % (self.outtype))
 
 
+def UpdateBuildArgs(args, filename):
+  new_cmd = json.dumps(args)
+
+  try:
+    with open(filename, 'r') as fileobj:
+      old_cmd = fileobj.read()
+  except:
+    old_cmd = None
+
+  if old_cmd == new_cmd:
+    return False
+
+  with open(filename, 'w') as fileobj:
+    fileobj.write(new_cmd)
+  return True
+
+
 def Main(argv):
   parser = OptionParser()
   parser.add_option('--empty', dest='empty', default=False,
@@ -953,6 +981,11 @@ def Main(argv):
   if not argv:
     parser.print_help()
     return 1
+
+  # Compare command-line options to last run, and force a rebuild if they
+  # have changed.
+  options.cmd_file = options.name + '.cmd'
+  UpdateBuildArgs(argv, options.cmd_file)
 
   try:
     if options.source_list:

@@ -10,8 +10,28 @@
 #include "tools/gn/output_file.h"
 #include "tools/gn/settings.h"
 #include "tools/gn/source_file.h"
+#include "tools/gn/string_utils.h"
 #include "tools/gn/substitution_list.h"
 #include "tools/gn/substitution_pattern.h"
+#include "tools/gn/target.h"
+
+namespace {
+
+// Sets the given directory string to the destination, trimming any trailing
+// slash from the directory (SourceDirs and OutputFiles representing
+// directories will end in a trailing slash). If the directory is empty,
+// it will be replaced with a ".".
+void SetDirOrDotWithNoSlash(const std::string& dir, std::string* dest) {
+  if (!dir.empty() && dir[dir.size() - 1] == '/')
+    dest->assign(dir.data(), dir.size() - 1);
+  else
+    dest->assign(dir);
+
+  if (dest->empty())
+    dest->push_back('.');
+}
+
+}  // namespace
 
 const char kSourceExpansion_Help[] =
     "How Source Expansion Works\n"
@@ -118,15 +138,38 @@ const char kSourceExpansion_Help[] =
     "    //out/Debug/obj/mydirectory/input2.h\n"
     "    //out/Debug/obj/mydirectory/input2.cc\n";
 
-SubstitutionWriter::SubstitutionWriter() {
-}
+// static
+void SubstitutionWriter::WriteWithNinjaVariables(
+    const SubstitutionPattern& pattern,
+    const EscapeOptions& escape_options,
+    std::ostream& out) {
+  // The result needs to be quoted as if it was one string, but the $ for
+  // the inserted Ninja variables can't be escaped. So write to a buffer with
+  // no quoting, and then quote the whole thing if necessary.
+  EscapeOptions no_quoting(escape_options);
+  no_quoting.inhibit_quoting = true;
 
-SubstitutionWriter::~SubstitutionWriter() {
+  bool needs_quotes = false;
+  std::string result;
+  for (size_t i = 0; i < pattern.ranges().size(); i++) {
+    const SubstitutionPattern::Subrange range = pattern.ranges()[i];
+    if (range.type == SUBSTITUTION_LITERAL) {
+      result.append(EscapeString(range.literal, no_quoting, &needs_quotes));
+    } else {
+      result.append("${");
+      result.append(kSubstitutionNinjaNames[range.type]);
+      result.append("}");
+    }
+  }
+
+  if (needs_quotes && !escape_options.inhibit_quoting)
+    out << "\"" << result << "\"";
+  else
+    out << result;
 }
 
 // static
 void SubstitutionWriter::GetListAsSourceFiles(
-    const Settings* settings,
     const SubstitutionList& list,
     std::vector<SourceFile>* output) {
   for (size_t i = 0; i < list.list().size(); i++) {
@@ -145,16 +188,16 @@ void SubstitutionWriter::GetListAsSourceFiles(
   }
 }
 
+// static
 void SubstitutionWriter::GetListAsOutputFiles(
     const Settings* settings,
     const SubstitutionList& list,
     std::vector<OutputFile>* output) {
   std::vector<SourceFile> output_as_sources;
-  GetListAsSourceFiles(settings, list, &output_as_sources);
+  GetListAsSourceFiles(list, &output_as_sources);
   for (size_t i = 0; i < output_as_sources.size(); i++) {
-    output->push_back(OutputFile(
-        RebaseSourceAbsolutePath(output_as_sources[i].value(),
-                                 settings->build_settings()->build_dir())));
+    output->push_back(OutputFile(settings->build_settings(),
+                                 output_as_sources[i]));
   }
 }
 
@@ -201,9 +244,7 @@ OutputFile SubstitutionWriter::ApplyPatternToSourceAsOutputFile(
       << "The result of the pattern \""
       << pattern.AsString()
       << "\" was not an absolute path beginning in \"//\".";
-  return OutputFile(
-      RebaseSourceAbsolutePath(result_as_source.value(),
-                               settings->build_settings()->build_dir()));
+  return OutputFile(settings->build_settings(), result_as_source);
 }
 
 // static
@@ -298,36 +339,6 @@ void SubstitutionWriter::WriteNinjaVariablesForSource(
 }
 
 // static
-void SubstitutionWriter::WriteWithNinjaVariables(
-    const SubstitutionPattern& pattern,
-    const EscapeOptions& escape_options,
-    std::ostream& out) {
-  // The result needs to be quoted as if it was one string, but the $ for
-  // the inserted Ninja variables can't be escaped. So write to a buffer with
-  // no quoting, and then quote the whole thing if necessary.
-  EscapeOptions no_quoting(escape_options);
-  no_quoting.inhibit_quoting = true;
-
-  bool needs_quotes = false;
-  std::string result;
-  for (size_t i = 0; i < pattern.ranges().size(); i++) {
-    const SubstitutionPattern::Subrange range = pattern.ranges()[i];
-    if (range.type == SUBSTITUTION_LITERAL) {
-      result.append(EscapeString(range.literal, no_quoting, &needs_quotes));
-    } else {
-      result.append("${");
-      result.append(kSubstitutionNinjaNames[range.type]);
-      result.append("}");
-    }
-  }
-
-  if (needs_quotes && !escape_options.inhibit_quoting)
-    out << "\"" << result << "\"";
-  else
-    out << result;
-}
-
-// static
 std::string SubstitutionWriter::GetSourceSubstitution(
     const Settings* settings,
     const SourceFile& source,
@@ -371,7 +382,9 @@ std::string SubstitutionWriter::GetSourceSubstitution(
       break;
 
     default:
-      NOTREACHED();
+      NOTREACHED()
+          << "Unsupported substitution for this function: "
+          << kSubstitutionNames[type];
       return std::string();
   }
 
@@ -381,4 +394,185 @@ std::string SubstitutionWriter::GetSourceSubstitution(
   if (output_style == OUTPUT_ABSOLUTE)
     return to_rebase;
   return RebaseSourceAbsolutePath(to_rebase, relative_to);
+}
+
+// static
+OutputFile SubstitutionWriter::ApplyPatternToTargetAsOutputFile(
+    const Target* target,
+    const Tool* tool,
+    const SubstitutionPattern& pattern) {
+  std::string result_value;
+  for (size_t i = 0; i < pattern.ranges().size(); i++) {
+    const SubstitutionPattern::Subrange& subrange = pattern.ranges()[i];
+    if (subrange.type == SUBSTITUTION_LITERAL) {
+      result_value.append(subrange.literal);
+    } else {
+      std::string subst;
+      CHECK(GetTargetSubstitution(target, subrange.type, &subst));
+      result_value.append(subst);
+    }
+  }
+  return OutputFile(result_value);
+}
+
+// static
+void SubstitutionWriter::ApplyListToTargetAsOutputFile(
+    const Target* target,
+    const Tool* tool,
+    const SubstitutionList& list,
+    std::vector<OutputFile>* output) {
+  for (size_t i = 0; i < list.list().size(); i++) {
+    output->push_back(ApplyPatternToTargetAsOutputFile(
+        target, tool, list.list()[i]));
+  }
+}
+
+// static
+bool SubstitutionWriter::GetTargetSubstitution(
+    const Target* target,
+    SubstitutionType type,
+    std::string* result) {
+  switch (type) {
+    case SUBSTITUTION_LABEL:
+      // Only include the toolchain for non-default toolchains.
+      *result = target->label().GetUserVisibleName(
+          !target->settings()->is_default());
+      break;
+    case SUBSTITUTION_ROOT_GEN_DIR:
+      SetDirOrDotWithNoSlash(
+          GetToolchainGenDirAsOutputFile(target->settings()).value(),
+          result);
+      break;
+    case SUBSTITUTION_ROOT_OUT_DIR:
+      SetDirOrDotWithNoSlash(
+          target->settings()->toolchain_output_subdir().value(),
+          result);
+      break;
+    case SUBSTITUTION_TARGET_GEN_DIR:
+      SetDirOrDotWithNoSlash(
+          GetTargetGenDirAsOutputFile(target).value(),
+          result);
+      break;
+    case SUBSTITUTION_TARGET_OUT_DIR:
+      SetDirOrDotWithNoSlash(
+          GetTargetOutputDirAsOutputFile(target).value(),
+          result);
+      break;
+    case SUBSTITUTION_TARGET_OUTPUT_NAME:
+      *result = target->GetComputedOutputName(true);
+      break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+// static
+std::string SubstitutionWriter::GetTargetSubstitution(
+    const Target* target,
+    SubstitutionType type) {
+  std::string result;
+  GetTargetSubstitution(target, type, &result);
+  return result;
+}
+
+// static
+OutputFile SubstitutionWriter::ApplyPatternToCompilerAsOutputFile(
+    const Target* target,
+    const SourceFile& source,
+    const SubstitutionPattern& pattern) {
+  OutputFile result;
+  for (size_t i = 0; i < pattern.ranges().size(); i++) {
+    const SubstitutionPattern::Subrange& subrange = pattern.ranges()[i];
+    if (subrange.type == SUBSTITUTION_LITERAL) {
+      result.value().append(subrange.literal);
+    } else {
+      result.value().append(
+          GetCompilerSubstitution(target, source, subrange.type));
+    }
+  }
+  return result;
+}
+
+// static
+void SubstitutionWriter::ApplyListToCompilerAsOutputFile(
+    const Target* target,
+    const SourceFile& source,
+    const SubstitutionList& list,
+    std::vector<OutputFile>* output) {
+  for (size_t i = 0; i < list.list().size(); i++) {
+    output->push_back(ApplyPatternToCompilerAsOutputFile(
+        target, source, list.list()[i]));
+  }
+}
+
+// static
+std::string SubstitutionWriter::GetCompilerSubstitution(
+    const Target* target,
+    const SourceFile& source,
+    SubstitutionType type) {
+  // First try the common tool ones.
+  std::string result;
+  if (GetTargetSubstitution(target, type, &result))
+    return result;
+
+  // Fall-through to the source ones.
+  return GetSourceSubstitution(
+      target->settings(), source, type, OUTPUT_RELATIVE,
+      target->settings()->build_settings()->build_dir());
+}
+
+// static
+OutputFile SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
+    const Target* target,
+    const Tool* tool,
+    const SubstitutionPattern& pattern) {
+  OutputFile result;
+  for (size_t i = 0; i < pattern.ranges().size(); i++) {
+    const SubstitutionPattern::Subrange& subrange = pattern.ranges()[i];
+    if (subrange.type == SUBSTITUTION_LITERAL) {
+      result.value().append(subrange.literal);
+    } else {
+      result.value().append(GetLinkerSubstitution(target, tool, subrange.type));
+    }
+  }
+  return result;
+}
+
+// static
+void SubstitutionWriter::ApplyListToLinkerAsOutputFile(
+    const Target* target,
+    const Tool* tool,
+    const SubstitutionList& list,
+    std::vector<OutputFile>* output) {
+  for (size_t i = 0; i < list.list().size(); i++) {
+    output->push_back(ApplyPatternToLinkerAsOutputFile(
+        target, tool, list.list()[i]));
+  }
+}
+
+// static
+std::string SubstitutionWriter::GetLinkerSubstitution(
+    const Target* target,
+    const Tool* tool,
+    SubstitutionType type) {
+  // First try the common tool ones.
+  std::string result;
+  if (GetTargetSubstitution(target, type, &result))
+    return result;
+
+  // Fall-through to the linker-specific ones.
+  switch (type) {
+    case SUBSTITUTION_OUTPUT_EXTENSION:
+      // Use the extension provided on the target if nonempty, otherwise
+      // fall back on the default. Note that the target's output extension
+      // does not include the dot but the tool's does.
+      if (target->output_extension().empty())
+        return tool->default_output_extension();
+      return std::string(".") + target->output_extension();
+
+    default:
+      NOTREACHED();
+      return std::string();
+  }
 }

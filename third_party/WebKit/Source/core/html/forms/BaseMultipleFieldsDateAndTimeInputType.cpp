@@ -281,6 +281,11 @@ void BaseMultipleFieldsDateAndTimeInputType::pickerIndicatorChooseValue(double v
         element().setValueAsNumber(value, ASSERT_NO_EXCEPTION, DispatchInputAndChangeEvent);
 }
 
+Element& BaseMultipleFieldsDateAndTimeInputType::pickerOwnerElement() const
+{
+    return element();
+}
+
 bool BaseMultipleFieldsDateAndTimeInputType::setupDateTimeChooserParameters(DateTimeChooserParameters& parameters)
 {
     return element().setupDateTimeChooserParameters(parameters);
@@ -385,7 +390,7 @@ void BaseMultipleFieldsDateAndTimeInputType::destroyShadowSubtree()
     m_isDestroyingShadowSubtree = false;
 }
 
-void BaseMultipleFieldsDateAndTimeInputType::handleFocusEvent(Element* oldFocusedElement, FocusType type)
+void BaseMultipleFieldsDateAndTimeInputType::handleFocusInEvent(Element* oldFocusedElement, FocusType type)
 {
     DateTimeEditElement* edit = dateTimeEditElement();
     if (!edit || m_isDestroyingShadowSubtree)
@@ -619,6 +624,13 @@ void BaseMultipleFieldsDateAndTimeInputType::updateClearButtonVisibility()
 TextDirection BaseMultipleFieldsDateAndTimeInputType::computedTextDirection()
 {
     return element().locale().isRTL() ? RTL : LTR;
+}
+
+AXObject* BaseMultipleFieldsDateAndTimeInputType::popupRootAXObject()
+{
+    if (PickerIndicatorElement* picker = pickerIndicatorElement())
+        return picker->popupRootAXObject();
+    return 0;
 }
 
 } // namespace blink

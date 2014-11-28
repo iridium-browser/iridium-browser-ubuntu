@@ -66,6 +66,7 @@ class FontFaceSet FINAL : public RefCountedSupplement<Document, FontFaceSet>, pu
     DEFINE_EVENT_TARGET_REFCOUNTING(RefCounted<FontFaceSet>);
     typedef RefCountedSupplement<Document, FontFaceSet> SupplementType;
 #endif
+    DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~FontFaceSet();
 
@@ -80,8 +81,8 @@ public:
     void add(FontFace*, ExceptionState&);
     void clear();
     bool remove(FontFace*, ExceptionState&);
-    void forEach(PassOwnPtr<FontFaceSetForEachCallback>, ScriptValue& thisArg) const;
-    void forEach(PassOwnPtr<FontFaceSetForEachCallback>) const;
+    void forEach(FontFaceSetForEachCallback*, const ScriptValue& thisArg) const;
+    void forEach(FontFaceSetForEachCallback*) const;
     bool has(FontFace*, ExceptionState&) const;
 
     unsigned long size() const;
@@ -136,7 +137,7 @@ private:
     bool hasLoadedFonts() const { return !m_loadedFonts.isEmpty() || !m_failedFonts.isEmpty(); }
 
     bool inActiveDocumentContext() const;
-    void forEachInternal(PassOwnPtr<FontFaceSetForEachCallback>, ScriptValue* thisArg) const;
+    void forEachInternal(FontFaceSetForEachCallback*, const ScriptValue* thisArg) const;
     void addToLoadingFonts(PassRefPtrWillBeRawPtr<FontFace>);
     void removeFromLoadingFonts(PassRefPtrWillBeRawPtr<FontFace>);
     void fireLoadingEvent();

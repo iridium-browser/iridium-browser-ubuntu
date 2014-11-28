@@ -133,6 +133,8 @@ ifeq ($(CONFIG_VP9_DECODER),yes)
   CODEC_DOC_SECTIONS += vp9 vp9_decoder
 endif
 
+VP9_PREFIX=vp9/
+$(BUILD_PFX)$(VP9_PREFIX)%.c.o: CFLAGS += -Wextra
 
 ifeq ($(CONFIG_ENCODERS),yes)
   CODEC_DOC_SECTIONS += encoder
@@ -409,12 +411,16 @@ $(LIBVPX_TEST_DATA): $(SRC_PATH_BARE)/test/test-data.sha1
             curl -L -o $@ $(call libvpx_test_data_url,$(@F))
 
 testdata:: $(LIBVPX_TEST_DATA)
-	$(qexec)if [ -x "$$(which sha1sum)" ]; then\
+	$(qexec)[ -x "$$(which sha1sum)" ] && sha1sum=sha1sum;\
+          [ -x "$$(which shasum)" ] && sha1sum=shasum;\
+          [ -x "$$(which sha1)" ] && sha1sum=sha1;\
+          if [ -n "$${sha1sum}" ]; then\
+            set -e;\
             echo "Checking test data:";\
             if [ -n "$(LIBVPX_TEST_DATA)" ]; then\
                 for f in $(call enabled,LIBVPX_TEST_DATA); do\
                     grep $$f $(SRC_PATH_BARE)/test/test-data.sha1 |\
-                        (cd $(LIBVPX_TEST_DATA_PATH); sha1sum -c);\
+                        (cd $(LIBVPX_TEST_DATA_PATH); $${sha1sum} -c);\
                 done; \
             fi; \
         else\
@@ -525,7 +531,6 @@ libs.doxy: $(CODEC_DOC_SRCS)
 	@echo "    [CREATE] $@"
 	@rm -f $@
 	@echo "INPUT += $^" >> $@
-	@echo "PREDEFINED = VPX_CODEC_DISABLE_COMPAT" >> $@
 	@echo "INCLUDE_PATH += ." >> $@;
 	@echo "ENABLED_SECTIONS += $(sort $(CODEC_DOC_SECTIONS))" >> $@
 

@@ -36,7 +36,9 @@ import org.chromium.android_webview.AwDevToolsServer;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.AwTestContainerView;
 import org.chromium.android_webview.test.NullContentsClient;
-import org.chromium.content.browser.LoadUrlParams;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationController;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * This is a lightweight activity for tests that only require WebView functionality.
@@ -47,6 +49,8 @@ public class AwShellActivity extends Activity {
     private AwBrowserContext mBrowserContext;
     private AwDevToolsServer mDevToolsServer;
     private AwTestContainerView mAwTestContainerView;
+    private WebContents mWebContents;
+    private NavigationController mNavigationController;
     private EditText mUrlTextView;
     private ImageButton mPrevButton;
     private ImageButton mNextButton;
@@ -59,6 +63,8 @@ public class AwShellActivity extends Activity {
 
         mAwTestContainerView = createAwTestContainerView();
 
+        mWebContents = mAwTestContainerView.getContentViewCore().getWebContents();
+        mNavigationController = mWebContents.getNavigationController();
         LinearLayout contentContainer = (LinearLayout) findViewById(R.id.content_container);
         mAwTestContainerView.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1f));
@@ -80,7 +86,7 @@ public class AwShellActivity extends Activity {
 
     private AwTestContainerView createAwTestContainerView() {
         AwBrowserProcess.start(this);
-        AwTestContainerView testContainerView = new AwTestContainerView(this);
+        AwTestContainerView testContainerView = new AwTestContainerView(this, true);
         AwContentsClient awContentsClient = new NullContentsClient() {
             private View mCustomView;
 
@@ -129,6 +135,8 @@ public class AwShellActivity extends Activity {
         }
         final AwSettings awSettings = new AwSettings(this /*context*/,
                 false /*isAccessFromFileURLsGrantedByDefault*/, true /*supportsLegacyQuirks*/);
+        // Required for WebGL conformance tests.
+        awSettings.setMediaPlaybackRequiresUserGesture(false);
         testContainerView.initialize(new AwContents(mBrowserContext, testContainerView,
                 testContainerView.getContext(), testContainerView.getInternalAccessDelegate(),
                 testContainerView.getNativeGLDelegate(), awContentsClient, awSettings));
@@ -180,7 +188,7 @@ public class AwShellActivity extends Activity {
                 mNextButton.setVisibility(hasFocus ? View.GONE : View.VISIBLE);
                 mPrevButton.setVisibility(hasFocus ? View.GONE : View.VISIBLE);
                 if (!hasFocus) {
-                    mUrlTextView.setText(mAwTestContainerView.getContentViewCore().getUrl());
+                    mUrlTextView.setText(mWebContents.getUrl());
                 }
             }
         });
@@ -191,8 +199,8 @@ public class AwShellActivity extends Activity {
         mPrevButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (mAwTestContainerView.getContentViewCore().canGoBack()) {
-                    mAwTestContainerView.getContentViewCore().goBack();
+                if (mNavigationController.canGoBack()) {
+                    mNavigationController.goBack();
                 }
             }
         });
@@ -201,8 +209,8 @@ public class AwShellActivity extends Activity {
         mNextButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (mAwTestContainerView.getContentViewCore().canGoForward()) {
-                    mAwTestContainerView.getContentViewCore().goForward();
+                if (mNavigationController.canGoForward()) {
+                    mNavigationController.goForward();
                 }
             }
         });
@@ -211,8 +219,8 @@ public class AwShellActivity extends Activity {
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (mAwTestContainerView.getContentViewCore().canGoBack()) {
-                mAwTestContainerView.getContentViewCore().goBack();
+            if (mNavigationController.canGoBack()) {
+                mNavigationController.goBack();
                 return true;
             }
         }

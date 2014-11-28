@@ -32,6 +32,7 @@
 #include "core/page/PageSerializer.h"
 
 #include "core/HTMLNames.h"
+#include "core/InputTypeNames.h"
 #include "core/css/CSSFontFaceRule.h"
 #include "core/css/CSSFontFaceSrcValue.h"
 #include "core/css/CSSImageValue.h"
@@ -137,9 +138,9 @@ void SerializerMarkupAccumulator::appendElement(StringBuilder& out, Element& ele
         MarkupAccumulator::appendElement(out, element, namespaces);
 
     if (isHTMLHeadElement(element)) {
-        out.append("<meta charset=\"");
+        out.appendLiteral("<meta charset=\"");
         out.append(m_document.charset());
-        out.append("\">");
+        out.appendLiteral("\">");
     }
 
     // FIXME: For object (plugins) tags and video tag we could replace them by an image of their current contents.
@@ -231,7 +232,7 @@ void PageSerializer::serializeFrame(LocalFrame* frame)
             addImageToResources(cachedImage, imageElement.renderer(), url);
         } else if (isHTMLInputElement(element)) {
             HTMLInputElement& inputElement = toHTMLInputElement(element);
-            if (inputElement.isImageButton() && inputElement.hasImageLoader()) {
+            if (inputElement.type() == InputTypeNames::image && inputElement.hasImageLoader()) {
                 KURL url = inputElement.src();
                 ImageResource* cachedImage = inputElement.imageLoader()->image();
                 addImageToResources(cachedImage, inputElement.renderer(), url);
@@ -265,7 +266,7 @@ void PageSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet, const KUR
         if (!itemText.isEmpty()) {
             cssText.append(itemText);
             if (i < styleSheet.length() - 1)
-                cssText.append("\n\n");
+                cssText.appendLiteral("\n\n");
         }
         ASSERT(styleSheet.ownerDocument());
         Document& document = *styleSheet.ownerDocument();

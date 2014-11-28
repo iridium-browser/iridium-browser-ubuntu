@@ -12,7 +12,7 @@
 #include "cc/layers/layer_impl.h"
 
 namespace cc {
-class SingleReleaseCallback;
+class SingleReleaseCallbackImpl;
 class ScopedResource;
 
 class CC_EXPORT TextureLayerImpl : public LayerImpl {
@@ -31,7 +31,7 @@ class CC_EXPORT TextureLayerImpl : public LayerImpl {
   virtual void AppendQuads(RenderPass* render_pass,
                            const OcclusionTracker<LayerImpl>& occlusion_tracker,
                            AppendQuadsData* append_quads_data) OVERRIDE;
-  virtual Region VisibleContentOpaqueRegion() const OVERRIDE;
+  virtual SimpleEnclosedRegion VisibleContentOpaqueRegion() const OVERRIDE;
   virtual void ReleaseResources() OVERRIDE;
 
   // These setter methods don't cause any implicit damage, so the texture client
@@ -49,8 +49,9 @@ class CC_EXPORT TextureLayerImpl : public LayerImpl {
   // 0--3
   void SetVertexOpacity(const float vertex_opacity[4]);
 
-  void SetTextureMailbox(const TextureMailbox& mailbox,
-                         scoped_ptr<SingleReleaseCallback> release_callback);
+  void SetTextureMailbox(
+      const TextureMailbox& mailbox,
+      scoped_ptr<SingleReleaseCallbackImpl> release_callback);
 
  private:
   TextureLayerImpl(LayerTreeImpl* tree_impl, int id);
@@ -69,7 +70,7 @@ class CC_EXPORT TextureLayerImpl : public LayerImpl {
   scoped_ptr<ScopedResource> texture_copy_;
 
   TextureMailbox texture_mailbox_;
-  scoped_ptr<SingleReleaseCallback> release_callback_;
+  scoped_ptr<SingleReleaseCallbackImpl> release_callback_;
   bool own_mailbox_;
   bool valid_texture_copy_;
 

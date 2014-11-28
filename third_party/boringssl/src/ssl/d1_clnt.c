@@ -130,7 +130,7 @@ static int dtls1_get_hello_verify(SSL *s);
 
 static const SSL_METHOD *dtls1_get_client_method(int ver)
 	{
-	if (ver == DTLS1_VERSION || ver == DTLS1_BAD_VER)
+	if (ver == DTLS1_VERSION)
 		return(DTLSv1_client_method());
 	else if (ver == DTLS1_2_VERSION)
 		return(DTLSv1_2_client_method());
@@ -196,8 +196,7 @@ int dtls1_connect(SSL *s)
 			s->server=0;
 			if (cb != NULL) cb(s,SSL_CB_HANDSHAKE_START,1);
 
-			if ((s->version & 0xff00 ) != (DTLS1_VERSION & 0xff00) &&
-			    (s->version & 0xff00 ) != (DTLS1_BAD_VER & 0xff00))
+			if ((s->version & 0xff00 ) != (DTLS1_VERSION & 0xff00))
 				{
 				OPENSSL_PUT_ERROR(SSL, dtls1_connect, ERR_R_INTERNAL_ERROR);
 				ret = -1;
@@ -233,8 +232,6 @@ int dtls1_connect(SSL *s)
 			s->state=SSL3_ST_CW_CLNT_HELLO_A;
 			s->ctx->stats.sess_connect++;
 			s->init_num=0;
-			/* mark client_random uninitialized */
-			memset(s->s3->client_random,0,sizeof(s->s3->client_random));
 			s->d1->send_cookie = 0;
 			s->hit = 0;
 			break;
@@ -248,7 +245,7 @@ int dtls1_connect(SSL *s)
 			ssl3_init_finished_mac(s);
 
 			dtls1_start_timer(s);
-			ret=ssl3_client_hello(s);
+			ret=ssl3_send_client_hello(s);
 			if (ret <= 0) goto end;
 
 			if ( s->d1->send_cookie)
@@ -257,7 +254,7 @@ int dtls1_connect(SSL *s)
 				s->s3->tmp.next_state=SSL3_ST_CR_SRVR_HELLO_A;
 				}
 			else
-				s->state=SSL3_ST_CR_SRVR_HELLO_A;
+				s->state=DTLS1_ST_CR_HELLO_VERIFY_REQUEST_A;
 
 			s->init_num=0;
 				/* turn on buffering for the next lot of output */
@@ -266,45 +263,53 @@ int dtls1_connect(SSL *s)
 
 			break;
 
-		case SSL3_ST_CR_SRVR_HELLO_A:
-		case SSL3_ST_CR_SRVR_HELLO_B:
-			ret=ssl3_get_server_hello(s);
-			if (ret <= 0) goto end;
-			else
-				{
-				if (s->hit)
-					{
-					s->state=SSL3_ST_CR_FINISHED_A;
-					}
-				else
-					s->state=DTLS1_ST_CR_HELLO_VERIFY_REQUEST_A;
-				}
-			s->init_num=0;
-			break;
-
 		case DTLS1_ST_CR_HELLO_VERIFY_REQUEST_A:
 		case DTLS1_ST_CR_HELLO_VERIFY_REQUEST_B:
 
 			ret = dtls1_get_hello_verify(s);
 			if ( ret <= 0)
 				goto end;
-			dtls1_stop_timer(s);
-			if ( s->d1->send_cookie) /* start again, with a cookie */
-				s->state=SSL3_ST_CW_CLNT_HELLO_A;
+			if ( s->d1->send_cookie)
+				{
+				/* start again, with a cookie */
+				dtls1_stop_timer(s);
+				s->state = SSL3_ST_CW_CLNT_HELLO_A;
+				}
 			else
-				s->state = SSL3_ST_CR_CERT_A;
+				{
+				s->state = SSL3_ST_CR_SRVR_HELLO_A;
+				}
 			s->init_num = 0;
+			break;
+
+		case SSL3_ST_CR_SRVR_HELLO_A:
+		case SSL3_ST_CR_SRVR_HELLO_B:
+			ret=ssl3_get_server_hello(s);
+			if (ret <= 0) goto end;
+
+			if (s->hit)
+				{
+				s->state=SSL3_ST_CR_FINISHED_A;
+				if (s->tlsext_ticket_expected)
+					{
+					/* receive renewed session ticket */
+					s->state=SSL3_ST_CR_SESSION_TICKET_A;
+					}
+				}
+			else
+				{
+				s->state=SSL3_ST_CR_CERT_A;
+				}
+			s->init_num=0;
 			break;
 
 		case SSL3_ST_CR_CERT_A:
 		case SSL3_ST_CR_CERT_B:
-			/* Check if it is anon DH or PSK */
-			if (!(s->s3->tmp.new_cipher->algorithm_auth & SSL_aNULL) &&
-			    !(s->s3->tmp.new_cipher->algorithm_mkey & SSL_kPSK))
+			if (ssl_cipher_has_server_public_key(s->s3->tmp.new_cipher))
 				{
 				ret=ssl3_get_server_certificate(s);
 				if (ret <= 0) goto end;
-				if (s->tlsext_status_expected)
+				if (s->s3->tmp.certificate_status_expected)
 					s->state=SSL3_ST_CR_CERT_STATUS_A;
 				else
 					s->state=SSL3_ST_CR_KEY_EXCH_A;
@@ -370,9 +375,6 @@ int dtls1_connect(SSL *s)
 			dtls1_start_timer(s);
 			ret=ssl3_send_client_key_exchange(s);
 			if (ret <= 0) goto end;
-
-			/* EAY EAY EAY need to check for DH fix cert
-			 * sent back */
 			/* For TLS, cert_req is set to 2, so a cert chain
 			 * of nothing is sent, but no verify packet is sent */
 			if (s->s3->tmp.cert_req == 1)
@@ -391,7 +393,7 @@ int dtls1_connect(SSL *s)
 		case SSL3_ST_CW_CERT_VRFY_A:
 		case SSL3_ST_CW_CERT_VRFY_B:
 			dtls1_start_timer(s);
-			ret=ssl3_send_client_verify(s);
+			ret=ssl3_send_cert_verify(s);
 			if (ret <= 0) goto end;
 			s->state=SSL3_ST_CW_CHANGE_A;
 			s->init_num=0;
@@ -582,16 +584,19 @@ end:
 
 static int dtls1_get_hello_verify(SSL *s)
 	{
-	int n, al, ok = 0;
-	unsigned char *data;
-	unsigned int cookie_len;
+	long n;
+	int al, ok = 0;
+	CBS hello_verify_request, cookie;
+	uint16_t server_version;
 
 	s->first_packet = 1;
 	n=s->method->ssl_get_message(s,
 		DTLS1_ST_CR_HELLO_VERIFY_REQUEST_A,
 		DTLS1_ST_CR_HELLO_VERIFY_REQUEST_B,
 		-1,
-		s->max_cert_list,
+		/* Use the same maximum size as ssl3_get_server_hello. */
+		20000,
+		SSL_GET_MESSAGE_HASH_MESSAGE,
 		&ok);
 	s->first_packet = 0;
 
@@ -600,32 +605,29 @@ static int dtls1_get_hello_verify(SSL *s)
 	if (s->s3->tmp.message_type != DTLS1_MT_HELLO_VERIFY_REQUEST)
 		{
 		s->d1->send_cookie = 0;
-		s->s3->tmp.reuse_message=1;
+		s->s3->tmp.reuse_message = 1;
 		return(1);
 		}
 
-	data = s->init_msg;
-#if 0
-	if (s->method->version != DTLS_ANY_VERSION &&
-		((data[0] != (s->version>>8)) || (data[1] != (s->version&0xff))))
+	CBS_init(&hello_verify_request, s->init_msg, n);
+
+	if (!CBS_get_u16(&hello_verify_request, &server_version) ||
+		!CBS_get_u8_length_prefixed(&hello_verify_request, &cookie) ||
+		CBS_len(&hello_verify_request) != 0)
 		{
-		OPENSSL_PUT_ERROR(SSL, dtls1_get_hello_verify, SSL_R_WRONG_SSL_VERSION);
-		s->version=(s->version&0xff00)|data[1];
-		al = SSL_AD_PROTOCOL_VERSION;
+		al = SSL_AD_DECODE_ERROR;
+		OPENSSL_PUT_ERROR(SSL, ssl3_get_cert_status, SSL_R_DECODE_ERROR);
 		goto f_err;
 		}
-#endif
-	data+=2;
 
-	cookie_len = *(data++);
-	if ( cookie_len > sizeof(s->d1->cookie))
+	if (CBS_len(&cookie) > sizeof(s->d1->cookie))
 		{
 		al=SSL_AD_ILLEGAL_PARAMETER;
 		goto f_err;
 		}
 
-	memcpy(s->d1->cookie, data, cookie_len);
-	s->d1->cookie_len = cookie_len;
+	memcpy(s->d1->cookie, CBS_data(&cookie), CBS_len(&cookie));
+	s->d1->cookie_len = CBS_len(&cookie);
 
 	s->d1->send_cookie = 1;
 	return 1;

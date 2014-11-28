@@ -31,6 +31,7 @@ class ExceptionState;
 class RenderText;
 
 class Text : public CharacterData {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static const unsigned defaultLengthLimit = 1 << 16;
 
@@ -61,10 +62,7 @@ public:
 
 protected:
     Text(TreeScope& treeScope, const String& data, ConstructionType type)
-        : CharacterData(treeScope, data, type)
-    {
-        ScriptWrappable::init(this);
-    }
+        : CharacterData(treeScope, data, type) { }
 
 private:
     virtual String nodeName() const OVERRIDE;

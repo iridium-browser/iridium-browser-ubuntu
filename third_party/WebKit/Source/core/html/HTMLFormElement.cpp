@@ -79,7 +79,6 @@ HTMLFormElement::HTMLFormElement(Document& document)
     , m_wasDemoted(false)
     , m_pendingAutocompleteEventsQueue(GenericEventQueue::create(this))
 {
-    ScriptWrappable::init(this);
 }
 
 PassRefPtrWillBeRawPtr<HTMLFormElement> HTMLFormElement::create(Document& document)
@@ -221,7 +220,7 @@ unsigned HTMLFormElement::length() const
     return len;
 }
 
-Element* HTMLFormElement::item(unsigned index)
+HTMLElement* HTMLFormElement::item(unsigned index)
 {
     return elements()->item(index);
 }

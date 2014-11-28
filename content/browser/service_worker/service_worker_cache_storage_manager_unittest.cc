@@ -13,8 +13,8 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/blob/blob_storage_context.h"
 
 namespace content {
 
@@ -23,9 +23,9 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
   ServiceWorkerCacheStorageManagerTest()
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
         callback_bool_(false),
-        callback_cache_id_(0),
         callback_error_(
             ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NO_ERROR),
+        callback_cache_error_(ServiceWorkerCache::ErrorTypeOK),
         origin1_("http://example1.com"),
         origin2_("http://example2.com") {}
 
@@ -50,6 +50,10 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
         url_request_context, blob_storage_context->context()->AsWeakPtr());
   }
 
+  virtual void TearDown() OVERRIDE {
+    base::RunLoop().RunUntilIdle();
+  }
+
   virtual bool MemoryOnly() { return false; }
 
   void BoolAndErrorCallback(
@@ -63,9 +67,9 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
 
   void CacheAndErrorCallback(
       base::RunLoop* run_loop,
-      int cache_id,
+      const scoped_refptr<ServiceWorkerCache>& cache,
       ServiceWorkerCacheStorage::CacheStorageError error) {
-    callback_cache_id_ = cache_id;
+    callback_cache_ = cache;
     callback_error_ = error;
     run_loop->Quit();
   }
@@ -76,6 +80,23 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
       ServiceWorkerCacheStorage::CacheStorageError error) {
     callback_strings_ = strings;
     callback_error_ = error;
+    run_loop->Quit();
+  }
+
+  void CachePutCallback(base::RunLoop* run_loop,
+                        ServiceWorkerCache::ErrorType error) {
+    callback_cache_error_ = error;
+    run_loop->Quit();
+  }
+
+  void CacheMatchCallback(
+      base::RunLoop* run_loop,
+      ServiceWorkerCache::ErrorType error,
+      scoped_ptr<ServiceWorkerResponse> response,
+      scoped_ptr<storage::BlobDataHandle> blob_data_handle) {
+    callback_cache_error_ = error;
+    callback_cache_response_ = response.Pass();
+    // Deliberately drop the data handle as only the url is being tested.
     run_loop->Quit();
   }
 
@@ -92,9 +113,9 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
     bool error = callback_error_ !=
                  ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NO_ERROR;
     if (error)
-      EXPECT_EQ(0, callback_cache_id_);
+      EXPECT_TRUE(!callback_cache_.get());
     else
-      EXPECT_LT(0, callback_cache_id_);
+      EXPECT_TRUE(callback_cache_.get());
     return !error;
   }
 
@@ -111,9 +132,9 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
     bool error = callback_error_ !=
                  ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_NO_ERROR;
     if (error)
-      EXPECT_EQ(0, callback_cache_id_);
+      EXPECT_TRUE(!callback_cache_.get());
     else
-      EXPECT_LT(0, callback_cache_id_);
+      EXPECT_TRUE(callback_cache_.get());
     return !error;
   }
 
@@ -158,19 +179,41 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
     return !error;
   }
 
-  bool VerifyKeys(const std::vector<std::string>& expected_keys) {
-    if (expected_keys.size() != callback_strings_.size())
-      return false;
+  bool CachePut(const scoped_refptr<ServiceWorkerCache>& cache,
+                const std::string& url) {
+    scoped_ptr<ServiceWorkerFetchRequest> request(
+        new ServiceWorkerFetchRequest());
+    scoped_ptr<ServiceWorkerResponse> response(new ServiceWorkerResponse());
+    request->url = GURL("http://example.com/foo");
+    response->url = GURL("http://example.com/foo");
+    scoped_ptr<base::RunLoop> loop(new base::RunLoop());
+    cache->Put(
+        request.Pass(),
+        response.Pass(),
+        base::Bind(&ServiceWorkerCacheStorageManagerTest::CachePutCallback,
+                   base::Unretained(this),
+                   base::Unretained(loop.get())));
+    loop->Run();
 
-    std::set<std::string> found_set;
-    for (int i = 0, max = callback_strings_.size(); i < max; ++i)
-      found_set.insert(callback_strings_[i]);
+    bool error = callback_cache_error_ != ServiceWorkerCache::ErrorTypeOK;
+    return !error;
+  }
 
-    for (int i = 0, max = expected_keys.size(); i < max; ++i) {
-      if (found_set.find(expected_keys[i]) == found_set.end())
-        return false;
-    }
-    return true;
+  bool CacheMatch(const scoped_refptr<ServiceWorkerCache>& cache,
+                  const std::string& url) {
+    scoped_ptr<ServiceWorkerFetchRequest> request(
+        new ServiceWorkerFetchRequest());
+    request->url = GURL("http://example.com/foo");
+    scoped_ptr<base::RunLoop> loop(new base::RunLoop());
+    cache->Match(
+        request.Pass(),
+        base::Bind(&ServiceWorkerCacheStorageManagerTest::CacheMatchCallback,
+                   base::Unretained(this),
+                   base::Unretained(loop.get())));
+    loop->Run();
+
+    bool error = callback_cache_error_ != ServiceWorkerCache::ErrorTypeOK;
+    return !error;
   }
 
  protected:
@@ -180,9 +223,11 @@ class ServiceWorkerCacheStorageManagerTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   scoped_ptr<ServiceWorkerCacheStorageManager> cache_manager_;
 
+  scoped_refptr<ServiceWorkerCache> callback_cache_;
   int callback_bool_;
-  int callback_cache_id_;
   ServiceWorkerCacheStorage::CacheStorageError callback_error_;
+  ServiceWorkerCache::ErrorType callback_cache_error_;
+  scoped_ptr<ServiceWorkerResponse> callback_cache_response_;
   std::vector<std::string> callback_strings_;
 
   const GURL origin1_;
@@ -223,6 +268,13 @@ TEST_P(ServiceWorkerCacheStorageManagerTestP, CreateTwoCaches) {
   EXPECT_TRUE(CreateCache(origin1_, "bar"));
 }
 
+TEST_P(ServiceWorkerCacheStorageManagerTestP, CachePointersDiffer) {
+  EXPECT_TRUE(CreateCache(origin1_, "foo"));
+  scoped_refptr<ServiceWorkerCache> cache = callback_cache_;
+  EXPECT_TRUE(CreateCache(origin1_, "bar"));
+  EXPECT_TRUE(cache.get() != callback_cache_.get());
+}
+
 TEST_P(ServiceWorkerCacheStorageManagerTestP, Create2CachesSameNameDiffSWs) {
   EXPECT_TRUE(CreateCache(origin1_, "foo"));
   EXPECT_TRUE(CreateCache(origin2_, "foo"));
@@ -230,9 +282,9 @@ TEST_P(ServiceWorkerCacheStorageManagerTestP, Create2CachesSameNameDiffSWs) {
 
 TEST_P(ServiceWorkerCacheStorageManagerTestP, GetCache) {
   EXPECT_TRUE(CreateCache(origin1_, "foo"));
-  int cache_id = callback_cache_id_;
+  scoped_refptr<ServiceWorkerCache> cache = callback_cache_;
   EXPECT_TRUE(Get(origin1_, "foo"));
-  EXPECT_EQ(cache_id, callback_cache_id_);
+  EXPECT_TRUE(cache.get() == callback_cache_.get());
 }
 
 TEST_P(ServiceWorkerCacheStorageManagerTestP, GetNonExistent) {
@@ -281,7 +333,7 @@ TEST_P(ServiceWorkerCacheStorageManagerTestP, SomeKeys) {
   std::vector<std::string> expected_keys;
   expected_keys.push_back("foo");
   expected_keys.push_back("bar");
-  EXPECT_TRUE(VerifyKeys(expected_keys));
+  EXPECT_TRUE(expected_keys == callback_strings_);
   EXPECT_TRUE(Keys(origin2_));
   EXPECT_EQ(1u, callback_strings_.size());
   EXPECT_STREQ("baz", callback_strings_[0].c_str());
@@ -299,30 +351,26 @@ TEST_P(ServiceWorkerCacheStorageManagerTestP, DeletedKeysGone) {
 
 TEST_P(ServiceWorkerCacheStorageManagerTestP, Chinese) {
   EXPECT_TRUE(CreateCache(origin1_, "你好"));
-  int cache_id = callback_cache_id_;
+  scoped_refptr<ServiceWorkerCache> cache = callback_cache_;
   EXPECT_TRUE(Get(origin1_, "你好"));
-  EXPECT_EQ(cache_id, callback_cache_id_);
+  EXPECT_TRUE(cache.get() == callback_cache_.get());
   EXPECT_TRUE(Keys(origin1_));
   EXPECT_EQ(1u, callback_strings_.size());
   EXPECT_TRUE("你好" == callback_strings_[0]);
 }
 
 TEST_F(ServiceWorkerCacheStorageManagerTest, EmptyKey) {
-  EXPECT_FALSE(CreateCache(origin1_, ""));
-  EXPECT_EQ(ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_EMPTY_KEY,
-            callback_error_);
-
-  EXPECT_FALSE(Get(origin1_, ""));
-  EXPECT_EQ(ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_EMPTY_KEY,
-            callback_error_);
-
-  EXPECT_FALSE(Has(origin1_, ""));
-  EXPECT_EQ(ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_EMPTY_KEY,
-            callback_error_);
-
-  EXPECT_FALSE(Delete(origin1_, ""));
-  EXPECT_EQ(ServiceWorkerCacheStorage::CACHE_STORAGE_ERROR_EMPTY_KEY,
-            callback_error_);
+  EXPECT_TRUE(CreateCache(origin1_, ""));
+  scoped_refptr<ServiceWorkerCache> cache = callback_cache_;
+  EXPECT_TRUE(Get(origin1_, ""));
+  EXPECT_EQ(cache.get(), callback_cache_.get());
+  EXPECT_TRUE(Keys(origin1_));
+  EXPECT_EQ(1u, callback_strings_.size());
+  EXPECT_TRUE("" == callback_strings_[0]);
+  EXPECT_TRUE(Has(origin1_, ""));
+  EXPECT_TRUE(Delete(origin1_, ""));
+  EXPECT_TRUE(Keys(origin1_));
+  EXPECT_EQ(0u, callback_strings_.size());
 }
 
 TEST_F(ServiceWorkerCacheStorageManagerTest, DataPersists) {
@@ -338,7 +386,7 @@ TEST_F(ServiceWorkerCacheStorageManagerTest, DataPersists) {
   std::vector<std::string> expected_keys;
   expected_keys.push_back("foo");
   expected_keys.push_back("baz");
-  EXPECT_TRUE(VerifyKeys(expected_keys));
+  EXPECT_TRUE(expected_keys == callback_strings_);
 }
 
 TEST_F(ServiceWorkerCacheStorageManagerMemoryOnlyTest, DataLostWhenMemoryOnly) {
@@ -368,6 +416,42 @@ TEST_F(ServiceWorkerCacheStorageManagerTest, BadOriginName) {
   EXPECT_TRUE(Keys(bad_origin));
   EXPECT_EQ(1u, callback_strings_.size());
   EXPECT_STREQ("foo", callback_strings_[0].c_str());
+}
+
+// With a persistent cache if the client drops its reference to a
+// ServiceWorkerCache
+// it should be deleted.
+TEST_F(ServiceWorkerCacheStorageManagerTest, DropReference) {
+  EXPECT_TRUE(CreateCache(origin1_, "foo"));
+  base::WeakPtr<ServiceWorkerCache> cache = callback_cache_->AsWeakPtr();
+  callback_cache_ = NULL;
+  EXPECT_TRUE(!cache);
+}
+
+// With a memory cache the cache can't be freed from memory until the client
+// calls delete.
+TEST_F(ServiceWorkerCacheStorageManagerMemoryOnlyTest,
+       MemoryLosesReferenceOnlyAfterDelete) {
+  EXPECT_TRUE(CreateCache(origin1_, "foo"));
+  base::WeakPtr<ServiceWorkerCache> cache = callback_cache_->AsWeakPtr();
+  callback_cache_ = NULL;
+  EXPECT_TRUE(cache);
+  EXPECT_TRUE(Delete(origin1_, "foo"));
+  EXPECT_FALSE(cache);
+}
+
+TEST_P(ServiceWorkerCacheStorageManagerTestP, RecreateCacheOnDemand) {
+  EXPECT_TRUE(CreateCache(origin1_, "foo"));
+  EXPECT_TRUE(CachePut(callback_cache_, "bar"));
+  callback_cache_ = NULL;
+  EXPECT_TRUE(Get(origin1_, "foo"));
+  EXPECT_TRUE(CacheMatch(callback_cache_, "bar"));
+}
+
+TEST_P(ServiceWorkerCacheStorageManagerTestP, DeleteBeforeRelease) {
+  EXPECT_TRUE(CreateCache(origin1_, "foo"));
+  EXPECT_TRUE(Delete(origin1_, "foo"));
+  EXPECT_TRUE(callback_cache_->AsWeakPtr());
 }
 
 INSTANTIATE_TEST_CASE_P(ServiceWorkerCacheStorageManagerTests,

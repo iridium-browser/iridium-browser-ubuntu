@@ -243,7 +243,8 @@ static const MimeInfo secondary_mappings[] = {
   { "application/vnd.mozilla.xul+xml", "xul" },
   { "application/x-shockwave-flash", "swf,swl" },
   { "application/pkcs7-mime", "p7m,p7c,p7z" },
-  { "application/pkcs7-signature", "p7s" }
+  { "application/pkcs7-signature", "p7s" },
+  { "application/x-mpegurl", "m3u8" },
 };
 
 static const char* FindMimeType(const MimeInfo* mappings,
@@ -378,6 +379,11 @@ static const char* const proprietary_media_types[] = {
   "audio/mp3",
   "audio/x-mp3",
   "audio/mpeg",
+
+#if defined(ENABLE_MPEG2TS_STREAM_PARSER)
+  // MPEG-2 TS.
+  "video/mp2t",
+#endif
 };
 
 // Note:

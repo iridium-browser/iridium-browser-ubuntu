@@ -59,8 +59,8 @@ struct SameSizeAsWebGestureEvent : public SameSizeAsWebInputEvent {
 };
 
 struct SameSizeAsWebTouchEvent : public SameSizeAsWebInputEvent {
-    WebTouchPoint touchPoints[3 * WebTouchEvent::touchesLengthCap];
-    int touchData[4];
+    WebTouchPoint touchPoints[WebTouchEvent::touchesLengthCap];
+    int touchData[2];
 };
 
 COMPILE_ASSERT(sizeof(WebInputEvent) == sizeof(SameSizeAsWebInputEvent), WebInputEvent_has_gaps);

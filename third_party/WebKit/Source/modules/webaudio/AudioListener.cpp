@@ -47,7 +47,6 @@ AudioListener::AudioListener()
     , m_dopplerFactor(1)
     , m_speedOfSound(343.3)
 {
-    ScriptWrappable::init(this);
 }
 
 AudioListener::~AudioListener()
@@ -56,9 +55,8 @@ AudioListener::~AudioListener()
 
 void AudioListener::trace(Visitor* visitor)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_panners);
-#endif
+    visitor->trace(m_hrtfDatabaseLoader);
 }
 
 void AudioListener::addPanner(PannerNode* panner)

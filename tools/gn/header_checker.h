@@ -30,39 +30,75 @@ class MessageLoop;
 
 class HeaderChecker : public base::RefCountedThreadSafe<HeaderChecker> {
  public:
+  // Represents a dependency chain.
+  struct ChainLink {
+    ChainLink() : target(NULL), is_public(false) {}
+    ChainLink(const Target* t, bool p) : target(t), is_public(p) {}
+
+    const Target* target;
+
+    // True when the dependency on this target is public.
+    bool is_public;
+
+    // Used for testing.
+    bool operator==(const ChainLink& other) const {
+      return target == other.target && is_public == other.is_public;
+    }
+  };
+  typedef std::vector<ChainLink> Chain;
+
   HeaderChecker(const BuildSettings* build_settings,
                 const std::vector<const Target*>& targets);
 
-  // This assumes that the current thread already has a message loop.  On
-  // error, fills the given vector with the errors and returns false.  Returns
+  // Runs the check. The targets in to_check will be checked. If this list is
+  // empty, all targets will be checked.
+  //
+  // This assumes that the current thread already has a message loop. On
+  // error, fills the given vector with the errors and returns false. Returns
   // true on success.
-  bool Run(std::vector<Err>* errors);
+  //
+  // force_check, if true, will override targets opting out of header checking
+  // with "check_includes = false" and will check them anyway.
+  bool Run(const std::vector<const Target*>& to_check,
+           bool force_check,
+           std::vector<Err>* errors);
 
  private:
   friend class base::RefCountedThreadSafe<HeaderChecker>;
   FRIEND_TEST_ALL_PREFIXES(HeaderCheckerTest, IsDependencyOf);
-  FRIEND_TEST_ALL_PREFIXES(HeaderCheckerTest,
-                           IsDependencyOf_ForwardsDirectDependentConfigs);
   FRIEND_TEST_ALL_PREFIXES(HeaderCheckerTest, CheckInclude);
-  FRIEND_TEST_ALL_PREFIXES(HeaderCheckerTest,
-                           GetDependentConfigChainProblemIndex);
+  FRIEND_TEST_ALL_PREFIXES(HeaderCheckerTest, PublicFirst);
+  FRIEND_TEST_ALL_PREFIXES(HeaderCheckerTest, CheckIncludeAllowCircular);
   ~HeaderChecker();
 
   struct TargetInfo {
-    TargetInfo() : target(NULL), is_public(false) {}
-    TargetInfo(const Target* t, bool p) : target(t), is_public(p) {}
+    TargetInfo() : target(NULL), is_public(false), is_generated(false) {}
+    TargetInfo(const Target* t, bool is_pub, bool is_gen)
+        : target(t),
+          is_public(is_pub),
+          is_generated(is_gen) {
+    }
 
     const Target* target;
+
+    // True if the file is public in the given target.
     bool is_public;
+
+    // True if this file is generated and won't actually exist on disk.
+    bool is_generated;
   };
 
   typedef std::vector<TargetInfo> TargetVector;
+  typedef std::map<SourceFile, TargetVector> FileMap;
+
+  // Backend for Run() that takes the list of files to check. The errors_ list
+  // will be populate on failure.
+  void RunCheckOverFiles(const FileMap& flies, bool force_check);
 
   void DoWork(const Target* target, const SourceFile& file);
 
-  // Adds the sources and public files from the given target to the file_map_.
-  // Not threadsafe! Called only during init.
-  void AddTargetToFileMap(const Target* target);
+  // Adds the sources and public files from the given target to the given map.
+  static void AddTargetToFileMap(const Target* target, FileMap* dest);
 
   // Returns true if the given file is in the output directory.
   bool IsFileInOuputDir(const SourceFile& file) const;
@@ -93,34 +129,25 @@ class HeaderChecker : public base::RefCountedThreadSafe<HeaderChecker> {
   // dependency chain from the dest target (chain[0] = search_for) to the src
   // target (chain[chain.size() - 1] = search_from).
   //
-  // If prefer_direct_dependent_configs is true, chains which forward direct
-  // dependent configs will be considered first, and a chain which does not
-  // will be returned only if no such chain exists.
+  // Chains with permitted dependencies will be considered first. If a
+  // permitted match is found, *is_permitted will be set to true. A chain with
+  // indirect, non-public dependencies will only be considered if there are no
+  // public or direct chains. In this case, *is_permitted will be false.
   //
-  // If direct_dependent_configs_apply is non-null, it will be set to true
-  // if the chain was found during a search that requires forwarding direct
-  // dependent configs, and false if it was found during a search of the
-  // entire dependency graph.
+  // A permitted dependency is a sequence of public dependencies. The first
+  // one may be private, since a direct dependency always allows headers to be
+  // included.
   bool IsDependencyOf(const Target* search_for,
                       const Target* search_from,
-                      bool prefer_direct_dependent_configs,
-                      std::vector<const Target*>* chain,
-                      bool* direct_dependent_configs_apply) const;
+                      Chain* chain,
+                      bool* is_permitted) const;
 
-  // For internal use by the previous override of IsDependencyOf.
-  // If requires_dependent_configs is true, only chains which forward
-  // direct dependent configs are considered.
+  // For internal use by the previous override of IsDependencyOf.  If
+  // require_public is true, only public dependency chains are searched.
   bool IsDependencyOf(const Target* search_for,
                       const Target* search_from,
-                      bool requires_dependent_configs,
-                      std::vector<const Target*>* chain) const;
-
-  // Given a reverse dependency chain (chain[0] is the lower-level target,
-  // chain[end] is the higher-level target) which does not forward direct
-  // dependent configs, determines the index of the target that caused the
-  // config to not apply.
-  static size_t GetDependentConfigChainProblemIndex(
-      const std::vector<const Target*>& chain);
+                      bool require_permitted,
+                      Chain* chain) const;
 
   // Non-locked variables ------------------------------------------------------
   //
@@ -133,7 +160,6 @@ class HeaderChecker : public base::RefCountedThreadSafe<HeaderChecker> {
   const BuildSettings* build_settings_;
 
   // Maps source files to targets it appears in (usually just one target).
-  typedef std::map<SourceFile, TargetVector> FileMap;
   FileMap file_map_;
 
   // Locked variables ----------------------------------------------------------

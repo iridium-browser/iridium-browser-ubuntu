@@ -6,10 +6,10 @@
 
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/data_reduction_proxy/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/common/data_reduction_proxy_pref_names.h"
 #include "net/base/host_port_pair.h"
@@ -22,10 +22,8 @@ namespace data_reduction_proxy {
 
 namespace {
 
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
 // A bypass delay more than this is treated as a long delay.
 const int kLongBypassDelayInSeconds = 30 * 60;
-#endif
 
 // Increments an int64, stored as a string, in a ListPref at the specified
 // index.  The value must already exist and be a string representation of a
@@ -192,16 +190,15 @@ void MaintainContentLengthPrefsWindow(base::ListValue* list, size_t length) {
 // |kNumDaysInHistory| days.
 class DailyContentLengthUpdate {
  public:
-  DailyContentLengthUpdate(
-      const char* pref,
-      PrefService* pref_service)
-      : update_(pref_service, pref) {
+  DailyContentLengthUpdate(const char* pref,
+                           DataReductionProxyStatisticsPrefs* pref_service)
+      : update_(pref_service->GetList(pref)) {
   }
 
   void UpdateForDataChange(int days_since_last_update) {
     // New empty lists may have been created. Maintain the invariant that
     // there should be exactly |kNumDaysInHistory| days in the histories.
-    MaintainContentLengthPrefsWindow(update_.Get(), kNumDaysInHistory);
+    MaintainContentLengthPrefsWindow(update_, kNumDaysInHistory);
     if (days_since_last_update) {
       MaintainContentLengthPrefForDateChange(days_since_last_update);
     }
@@ -209,7 +206,7 @@ class DailyContentLengthUpdate {
 
   // Update the lengths for the current day.
   void Add(int content_length) {
-    AddInt64ToListPref(kNumDaysInHistory - 1, content_length, update_.Get());
+    AddInt64ToListPref(kNumDaysInHistory - 1, content_length, update_);
   }
 
   int64 GetListPrefValue(size_t index) {
@@ -248,10 +245,10 @@ class DailyContentLengthUpdate {
 
     // Entries for new days may have been appended. Maintain the invariant that
     // there should be exactly |kNumDaysInHistory| days in the histories.
-    MaintainContentLengthPrefsWindow(update_.Get(), kNumDaysInHistory);
+    MaintainContentLengthPrefsWindow(update_, kNumDaysInHistory);
   }
 
-  ListPrefUpdate update_;
+  base::ListValue* update_;
 };
 
 // DailyDataSavingUpdate maintains a pair of data saving prefs, original_update_
@@ -261,12 +258,11 @@ class DailyContentLengthUpdate {
 // content lengths.
 class DailyDataSavingUpdate {
  public:
-  DailyDataSavingUpdate(
-      const char* pref_original,
-      const char* pref_received,
-      PrefService* pref_service)
-      : original_(pref_original, pref_service),
-        received_(pref_received, pref_service) {
+  DailyDataSavingUpdate(const char* pref_original,
+                        const char* pref_received,
+                        DataReductionProxyStatisticsPrefs* prefs)
+      : original_(pref_original, prefs),
+        received_(pref_received, prefs) {
   }
 
   void UpdateForDataChange(int days_since_last_update) {
@@ -302,7 +298,6 @@ DataReductionProxyRequestType GetDataReductionProxyRequestType(
     NOTREACHED();
     return UNKNOWN_TYPE;
   }
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
   DataReductionProxyParams params(
         DataReductionProxyParams::kAllowed |
         DataReductionProxyParams::kFallbackAllowed |
@@ -313,9 +308,9 @@ DataReductionProxyRequestType GetDataReductionProxyRequestType(
       return LONG_BYPASS;
     return SHORT_BYPASS;
   }
-#endif
-  if (request->response_info().headers &&
-      HasDataReductionProxyViaHeader(request->response_info().headers, NULL)) {
+  if (request->response_info().headers.get() &&
+      HasDataReductionProxyViaHeader(request->response_info().headers.get(),
+                                     NULL)) {
     return VIA_DATA_REDUCTION_PROXY;
   }
   return UNKNOWN_TYPE;
@@ -339,7 +334,8 @@ void UpdateContentLengthPrefsForDataReductionProxy(
     int original_content_length,
     bool with_data_reduction_proxy_enabled,
     DataReductionProxyRequestType request_type,
-    base::Time now, PrefService* prefs) {
+    base::Time now,
+    DataReductionProxyStatisticsPrefs* prefs) {
   // TODO(bengr): Remove this check once the underlying cause of
   // http://crbug.com/287821 is fixed. For now, only continue if the current
   // year is reported as being between 1972 and 2970.
@@ -355,18 +351,14 @@ void UpdateContentLengthPrefsForDataReductionProxy(
   int64 then_internal = prefs->GetInt64(
       data_reduction_proxy::prefs::kDailyHttpContentLengthLastUpdateDate);
 
-#if defined(OS_WIN)
-  base::Time then_midnight = base::Time::FromInternalValue(then_internal);
-  base::Time midnight =
-      base::Time::FromInternalValue(
-          (now.ToInternalValue() / base::Time::kMicrosecondsPerDay) *
-              base::Time::kMicrosecondsPerDay);
-#else
   // Local midnight could have been shifted due to time zone change.
-  base::Time then_midnight =
-      base::Time::FromInternalValue(then_internal).LocalMidnight();
+  // If time is null then don't care if midnight will be wrong shifted due to
+  // time zone change because it's still too much time ago.
+  base::Time then_midnight = base::Time::FromInternalValue(then_internal);
+  if (!then_midnight.is_null()) {
+    then_midnight = then_midnight.LocalMidnight();
+  }
   base::Time midnight = now.LocalMidnight();
-#endif
 
   int days_since_last_update = (midnight - then_midnight).InDays();
 
@@ -473,23 +465,27 @@ void UpdateContentLengthPrefsForDataReductionProxy(
   }
 }
 
-void UpdateContentLengthPrefs(
-    int received_content_length,
-    int original_content_length,
-    bool with_data_reduction_proxy_enabled,
-    DataReductionProxyRequestType request_type,
-    PrefService* prefs) {
+void UpdateContentLengthPrefs(int received_content_length,
+                              int original_content_length,
+                              PrefService* profile_prefs,
+                              DataReductionProxyRequestType request_type,
+                              DataReductionProxyStatisticsPrefs* prefs) {
   int64 total_received = prefs->GetInt64(
       data_reduction_proxy::prefs::kHttpReceivedContentLength);
   int64 total_original = prefs->GetInt64(
       data_reduction_proxy::prefs::kHttpOriginalContentLength);
   total_received += received_content_length;
   total_original += original_content_length;
-  prefs->SetInt64(data_reduction_proxy::prefs::kHttpReceivedContentLength,
-                  total_received);
-  prefs->SetInt64(data_reduction_proxy::prefs::kHttpOriginalContentLength,
-                  total_original);
+  prefs->SetInt64(
+      data_reduction_proxy::prefs::kHttpReceivedContentLength,
+      total_received);
+  prefs->SetInt64(
+      data_reduction_proxy::prefs::kHttpOriginalContentLength,
+      total_original);
 
+  bool with_data_reduction_proxy_enabled =
+      profile_prefs->GetBoolean(
+          data_reduction_proxy::prefs::kDataReductionProxyEnabled);
   UpdateContentLengthPrefsForDataReductionProxy(
       received_content_length,
       original_content_length,

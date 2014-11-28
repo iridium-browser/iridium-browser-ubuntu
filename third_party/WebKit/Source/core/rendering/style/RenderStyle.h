@@ -100,6 +100,7 @@ class FilterOperations;
 
 class AppliedTextDecoration;
 class BorderData;
+struct BorderEdge;
 class CounterContent;
 class Font;
 class FontMetrics;
@@ -225,7 +226,6 @@ protected:
                 && pseudoBits == other.pseudoBits
                 && unicodeBidi == other.unicodeBidi
                 && explicitInheritance == other.explicitInheritance
-                && currentColor == other.currentColor
                 && unique == other.unique
                 && emptyState == other.emptyState
                 && firstChildState == other.firstChildState
@@ -259,7 +259,6 @@ protected:
         unsigned styleType : 6; // PseudoId
         unsigned pseudoBits : 8;
         unsigned explicitInheritance : 1; // Explicitly inherits a non-inherited property
-        unsigned currentColor : 1; // At least one color has the value 'currentColor'
         unsigned unique : 1; // Style can not be shared.
 
         unsigned emptyState : 1;
@@ -273,7 +272,7 @@ protected:
 
         unsigned isLink : 1;
         // If you add more style bits here, you will also need to update RenderStyle::copyNonInheritedFrom()
-        // 63 bits
+        // 62 bits
     } noninherited_flags;
 
 // !END SYNC!
@@ -315,7 +314,6 @@ protected:
         noninherited_flags.styleType = NOPSEUDO;
         noninherited_flags.pseudoBits = 0;
         noninherited_flags.explicitInheritance = false;
-        noninherited_flags.currentColor = false;
         noninherited_flags.unique = false;
         noninherited_flags.emptyState = false;
         noninherited_flags.firstChildState = false;
@@ -542,7 +540,7 @@ public:
     const Length& clipTop() const { return visual->clip.top(); }
     const Length& clipBottom() const { return visual->clip.bottom(); }
     const LengthBox& clip() const { return visual->clip; }
-    bool hasClip() const { return visual->hasClip; }
+    bool hasAutoClip() const { return visual->hasAutoClip; }
 
     EUnicodeBidi unicodeBidi() const { return static_cast<EUnicodeBidi>(noninherited_flags.unicodeBidi); }
 
@@ -1092,6 +1090,11 @@ public:
             return !hasOutline();
         return m_background->outline().visuallyEqual(otherStyle->m_background->outline());
     }
+    void setOutlineFromStyle(const RenderStyle& o)
+    {
+        ASSERT(!isOutlineEquivalent(&o));
+        m_background.access()->m_outline = o.m_background->m_outline;
+    }
 
     void setOverflowX(EOverflow v) { noninherited_flags.overflowX = v; }
     void setOverflowY(EOverflow v) { noninherited_flags.overflowY = v; }
@@ -1099,13 +1102,8 @@ public:
     void setVerticalAlign(EVerticalAlign v) { noninherited_flags.verticalAlign = v; }
     void setVerticalAlignLength(const Length& length) { setVerticalAlign(LENGTH); SET_VAR(m_box, m_verticalAlign, length); }
 
-    void setHasClip(bool b = true) { SET_VAR(visual, hasClip, b); }
-    void setClipLeft(const Length& v) { SET_VAR(visual, clip.m_left, v); }
-    void setClipRight(const Length& v) { SET_VAR(visual, clip.m_right, v); }
-    void setClipTop(const Length& v) { SET_VAR(visual, clip.m_top, v); }
-    void setClipBottom(const Length& v) { SET_VAR(visual, clip.m_bottom, v); }
-    void setClip(const Length& top, const Length& right, const Length& bottom, const Length& left);
-    void setClip(const LengthBox& box) { SET_VAR(visual, clip, box); }
+    void setHasAutoClip() { SET_VAR(visual, hasAutoClip, true); SET_VAR(visual, clip, RenderStyle::initialClip()); }
+    void setClip(const LengthBox& box) { SET_VAR(visual, hasAutoClip, false); SET_VAR(visual, clip, box); }
 
     void setUnicodeBidi(EUnicodeBidi b) { noninherited_flags.unicodeBidi = b; }
 
@@ -1537,10 +1535,10 @@ public:
     void setHasExplicitlyInheritedProperties() { noninherited_flags.explicitInheritance = true; }
     bool hasExplicitlyInheritedProperties() const { return noninherited_flags.explicitInheritance; }
 
-    void setHasCurrentColor() { noninherited_flags.currentColor = true; }
-    bool hasCurrentColor() const { return noninherited_flags.currentColor; }
-
     bool hasBoxDecorations() const { return hasBorder() || hasBorderRadius() || hasOutline() || hasAppearance() || boxShadow() || hasFilter(); }
+
+    bool borderObscuresBackground() const;
+    void getBorderEdgeInfo(BorderEdge edges[], bool includeLogicalLeftEdge = true, bool includeLogicalRightEdge = true) const;
 
     // Initial values for all the properties
     static EBorderCollapse initialBorderCollapse() { return BSEPARATE; }
@@ -1550,6 +1548,7 @@ public:
     static LengthSize initialBorderRadius() { return LengthSize(Length(0, Fixed), Length(0, Fixed)); }
     static ECaptionSide initialCaptionSide() { return CAPTOP; }
     static EClear initialClear() { return CNONE; }
+    static LengthBox initialClip() { return LengthBox(); }
     static TextDirection initialDirection() { return LTR; }
     static WritingMode initialWritingMode() { return TopToBottomWritingMode; }
     static TextCombine initialTextCombine() { return TextCombineNone; }
@@ -1581,7 +1580,7 @@ public:
     static float initialLetterWordSpacing() { return 0.0f; }
     static Length initialSize() { return Length(); }
     static Length initialMinSize() { return Length(Fixed); }
-    static Length initialMaxSize() { return Length(Undefined); }
+    static Length initialMaxSize() { return Length(MaxSizeNone); }
     static Length initialOffset() { return Length(); }
     static Length initialMargin() { return Length(Fixed); }
     static Length initialPadding() { return Length(Fixed); }
@@ -1816,7 +1815,6 @@ private:
     bool diffNeedsFullLayout(const RenderStyle& other) const;
     bool diffNeedsPaintInvalidationLayer(const RenderStyle& other) const;
     bool diffNeedsPaintInvalidationObject(const RenderStyle& other) const;
-    bool diffNeedsRecompositeLayer(const RenderStyle& other) const;
     void updatePropertySpecificDifferences(const RenderStyle& other, StyleDifference&) const;
 };
 
@@ -1856,6 +1854,22 @@ inline double adjustDoubleForAbsoluteZoom(double value, const RenderStyle& style
 inline LayoutUnit adjustLayoutUnitForAbsoluteZoom(LayoutUnit value, const RenderStyle& style)
 {
     return value / style.effectiveZoom();
+}
+
+// Since we don't currently persist fractional scroll offsets (crbug.com/414283),
+// we should round our return value to reflect the actual precision we have under
+// the range of typical zoom values. This avoids surprising issues with scroll
+// values not quite round-tripping exactly.
+inline double adjustScrollForAbsoluteZoom(int scrollOffset, float zoomFactor)
+{
+    double result = scrollOffset / zoomFactor;
+    const double kScale = 10000; // 4 decimal places of accuracy
+    return round(result * kScale) / kScale;
+}
+
+inline double adjustScrollForAbsoluteZoom(int scrollOffset, const RenderStyle& style)
+{
+    return adjustScrollForAbsoluteZoom(scrollOffset, style.effectiveZoom());
 }
 
 inline bool RenderStyle::setZoom(float f)

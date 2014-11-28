@@ -77,10 +77,10 @@ source_set("base") {
     "demuxer.h",
     "demuxer_stream.cc",
     "demuxer_stream.h",
+    "demuxer_stream_provider.cc",
+    "demuxer_stream_provider.h",
     "djb2.cc",
     "djb2.h",
-    "filter_collection.cc",
-    "filter_collection.h",
     "media.cc",
     "media.h",
     "media_keys.cc",
@@ -99,6 +99,8 @@ source_set("base") {
     "player_tracker.h",
     "ranges.cc",
     "ranges.h",
+    "renderer.cc",
+    "renderer.h",
     "sample_format.cc",
     "sample_format.h",
     "scoped_histogram_timer.h",
@@ -195,6 +197,10 @@ source_set("base") {
   #         "//build/config/linux:xtst",
     ]
     sources += [ "user_input_monitor_linux.cc" ]
+    deps += [
+      "//ui/events:events_base",
+      "//ui/gfx/x",
+    ]
   } else if (is_mac) {
     sources += [ "user_input_monitor_mac.cc" ]
   } else if (is_win) {
@@ -207,7 +213,6 @@ source_set("base") {
     sources += [ "simd/convert_yuv_to_rgb_x86.cc" ]
     deps += [
       ":media_yasm",
-      ":media_mmx",
       ":media_sse2",
     ]
   }
@@ -220,7 +225,22 @@ source_set("base") {
   }
 }
 
+# Minimal media component for media/cast on iOS.
+config("base_for_cast_ios_dependent_config") {
+  defines = [ "MEDIA_FOR_CAST_IOS" ]
+}
+
+source_set("base_for_cast_ios") {
+  sources = [
+    "video_frame.cc",
+    "video_frame.h",
+  ]
+  configs += [ "//media:media_config" ]
+  all_dependent_configs = [ ":base_for_cast_ios_dependent_config" ]
+}
+
 source_set("test_support") {
+  testonly = true
   sources = [
     "fake_audio_render_callback.cc",
     "fake_audio_render_callback.h",
@@ -245,6 +265,7 @@ source_set("test_support") {
 }
 
 source_set("unittests") {
+  testonly = true
   sources = [
     "audio_block_fifo_unittest.cc",
     "audio_buffer_converter_unittest.cc",
@@ -321,6 +342,7 @@ source_set("unittests") {
 }
 
 source_set("perftests") {
+  testonly = true
   sources = [
     "audio_bus_perftest.cc",
     "audio_converter_perftest.cc",
@@ -349,14 +371,6 @@ source_set("perftests") {
 }
 
 if (cpu_arch == "x86" || cpu_arch == "x64") {
-  source_set("media_mmx") {
-    sources = [ "simd/filter_yuv_mmx.cc" ]
-    configs += [ "//media:media_config" ]
-    if (!is_win) {
-      cflags = [ "-mmmx" ]
-    }
-  }
-
   source_set("media_sse2") {
     sources = [
       "simd/convert_rgb_to_yuv_sse2.cc",
@@ -373,7 +387,6 @@ if (cpu_arch == "x86" || cpu_arch == "x64") {
   yasm_assemble("media_yasm") {
     sources = [
       "simd/convert_rgb_to_yuv_ssse3.asm",
-      "simd/convert_yuv_to_rgb_mmx.asm",
       "simd/convert_yuv_to_rgb_sse.asm",
       "simd/convert_yuva_to_argb_mmx.asm",
       "simd/empty_register_state_mmx.asm",

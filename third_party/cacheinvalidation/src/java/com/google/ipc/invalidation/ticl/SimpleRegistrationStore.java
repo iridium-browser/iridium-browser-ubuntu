@@ -16,13 +16,12 @@
 
 package com.google.ipc.invalidation.ticl;
 
-import com.google.ipc.invalidation.common.CommonProtoStrings2;
 import com.google.ipc.invalidation.common.DigestFunction;
 import com.google.ipc.invalidation.common.ObjectIdDigestUtils;
+import com.google.ipc.invalidation.ticl.proto.ClientProtocol.ObjectIdP;
 import com.google.ipc.invalidation.util.Bytes;
 import com.google.ipc.invalidation.util.InternalBase;
 import com.google.ipc.invalidation.util.TextBuilder;
-import com.google.protos.ipc.invalidation.ClientProtocol.ObjectIdP;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -51,7 +50,8 @@ class SimpleRegistrationStore extends InternalBase implements DigestStore<Object
 
   @Override
   public boolean add(ObjectIdP oid) {
-    if (registrations.put(ObjectIdDigestUtils.getDigest(oid, digestFunction), oid) == null) {
+    if (registrations.put(ObjectIdDigestUtils.getDigest(oid.getSource(),
+        oid.getName().getByteArray(), digestFunction), oid) == null) {
       recomputeDigest();
       return true;
     }
@@ -62,7 +62,8 @@ class SimpleRegistrationStore extends InternalBase implements DigestStore<Object
   public Collection<ObjectIdP> add(Collection<ObjectIdP> oids) {
     Collection<ObjectIdP> addedOids = new ArrayList<ObjectIdP>();
     for (ObjectIdP oid : oids) {
-      if (registrations.put(ObjectIdDigestUtils.getDigest(oid, digestFunction), oid) == null) {
+      if (registrations.put(ObjectIdDigestUtils.getDigest(oid.getSource(),
+          oid.getName().getByteArray(), digestFunction), oid) == null) {
         // There was no previous value, so this is a new item.
         addedOids.add(oid);
       }
@@ -76,7 +77,8 @@ class SimpleRegistrationStore extends InternalBase implements DigestStore<Object
 
   @Override
   public boolean remove(ObjectIdP oid) {
-    if (registrations.remove(ObjectIdDigestUtils.getDigest(oid, digestFunction)) != null) {
+    if (registrations.remove(ObjectIdDigestUtils.getDigest(oid.getSource(),
+        oid.getName().getByteArray(), digestFunction)) != null) {
       recomputeDigest();
       return true;
     }
@@ -87,7 +89,8 @@ class SimpleRegistrationStore extends InternalBase implements DigestStore<Object
   public Collection<ObjectIdP> remove(Collection<ObjectIdP> oids) {
     Collection<ObjectIdP> removedOids = new ArrayList<ObjectIdP>();
     for (ObjectIdP oid : oids) {
-      if (registrations.remove(ObjectIdDigestUtils.getDigest(oid, digestFunction)) != null) {
+      if (registrations.remove(ObjectIdDigestUtils.getDigest(oid.getSource(),
+          oid.getName().getByteArray(), digestFunction)) != null) {
         removedOids.add(oid);
       }
     }
@@ -108,7 +111,8 @@ class SimpleRegistrationStore extends InternalBase implements DigestStore<Object
 
   @Override
   public boolean contains(ObjectIdP oid) {
-    return registrations.containsKey(ObjectIdDigestUtils.getDigest(oid, digestFunction));
+    return registrations.containsKey(ObjectIdDigestUtils.getDigest(oid.getSource(),
+        oid.getName().getByteArray(), digestFunction));
   }
 
   @Override
@@ -134,9 +138,11 @@ class SimpleRegistrationStore extends InternalBase implements DigestStore<Object
 
   @Override
   public void toCompactString(TextBuilder builder) {
-    builder.append("<SimpleRegistrationStore: registrations=");
-    CommonProtoStrings2.toCompactStringForObjectIds(builder, registrations.values());
-    builder.append(", digest=").append(digest)
+    builder
+        .append("<SimpleRegistrationStore: registrations=")
+        .append(registrations.values())
+        .append(", digest=")
+        .append(digest)
         .append(">");
   }
 }

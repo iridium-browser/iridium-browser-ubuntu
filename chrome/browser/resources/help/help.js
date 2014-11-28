@@ -15,7 +15,7 @@
   function load() {
     PageManager.register(HelpPage.getInstance());
 
-    if (cr.isChromeOS) {
+    if (help.ChannelChangePage) {
       PageManager.registerOverlay(help.ChannelChangePage.getInstance(),
                                   HelpPage.getInstance());
     }
@@ -47,6 +47,6 @@
    */
   window.onpopstate = function(e) {
     var pageName = PageManager.getPageNameFromPath();
-    PageManager.setState(pageName, e.state);
+    PageManager.setState(pageName, location.hash, e.state);
   };
 })();

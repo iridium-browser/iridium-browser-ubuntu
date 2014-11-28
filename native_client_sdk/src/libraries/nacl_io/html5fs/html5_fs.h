@@ -18,8 +18,8 @@ class Node;
 
 class Html5Fs : public Filesystem {
  public:
-  virtual Error Access(const Path& path, int a_mode);
-  virtual Error Open(const Path& path, int mode, ScopedNode* out_node);
+  virtual Error OpenWithMode(const Path& path, int open_flags, mode_t mode,
+                             ScopedNode* out_node);
   virtual Error Unlink(const Path& path);
   virtual Error Mkdir(const Path& path, int permissions);
   virtual Error Rmdir(const Path& path);
@@ -27,6 +27,12 @@ class Html5Fs : public Filesystem {
   virtual Error Rename(const Path& path, const Path& newpath);
 
   PP_Resource filesystem_resource() { return filesystem_resource_; }
+
+  virtual void OnNodeCreated(Node* node);
+  virtual void OnNodeDestroyed(Node* node);
+
+  static ino_t HashPathSegment(ino_t hash, const char *str, size_t len);
+  static ino_t HashPath(const Path& path);
 
  protected:
   static const int REMOVE_DIR = 1;

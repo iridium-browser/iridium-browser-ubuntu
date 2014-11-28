@@ -63,14 +63,12 @@
         # the switch-over to running tests on Swarm is completed.
         #'<@(isolate_dependency_tracked)',
       ],
-      'outputs': [
-        '<(PRODUCT_DIR)/<(RULE_INPUT_ROOT).isolated',
-      ],
+      'outputs': [],
       'action': [
         'python',
         '<(DEPTH)/tools/isolate_driver.py',
         '<(test_isolation_mode)',
-        '--isolated', '<@(_outputs)',
+        '--isolated', '<(PRODUCT_DIR)/<(RULE_INPUT_ROOT).isolated',
         '--isolate', '<(RULE_INPUT_PATH)',
 
         # Variables should use the -V FOO=<(FOO) form so frequent values,
@@ -91,6 +89,7 @@
 
         '--config-variable', 'OS=<(OS)',
         '--config-variable', 'CONFIGURATION_NAME=<(CONFIGURATION_NAME)',
+        '--config-variable', 'asan=<(asan)',
         '--config-variable', 'chromeos=<(chromeos)',
         '--config-variable', 'component=<(component)',
         '--config-variable', 'fastbuild=<(fastbuild)',
@@ -102,6 +101,7 @@
         '--config-variable', 'libpeer_target_type=<(libpeer_target_type)',
         '--config-variable', 'use_openssl=<(use_openssl)',
         '--config-variable', 'target_arch=<(target_arch)',
+        '--config-variable', 'use_ozone=<(use_ozone)',
       ],
       'conditions': [
         # Note: When gyp merges lists, it appends them to the old value.
@@ -117,6 +117,15 @@
         }],
         ['test_isolation_fail_on_missing == 0', {
           'action': ['--ignore_broken_items'],
+        }],
+        ["test_isolation_mode == 'prepare'", {
+          'outputs': [
+            '<(PRODUCT_DIR)/<(RULE_INPUT_ROOT).isolated.gen.json',
+          ],
+        }, {
+          'outputs': [
+            '<(PRODUCT_DIR)/<(RULE_INPUT_ROOT).isolated',
+          ],
         }],
       ],
     },

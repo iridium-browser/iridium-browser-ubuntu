@@ -12,6 +12,7 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -19,7 +20,6 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
-#include "extensions/common/id_util.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/user_script.h"
 #include "extensions/common/value_builder.h"
@@ -95,7 +95,7 @@ ActiveScriptControllerUnitTest::~ActiveScriptControllerUnitTest() {
 }
 
 const Extension* ActiveScriptControllerUnitTest::AddExtension() {
-  const std::string kId = id_util::GenerateId("all_hosts_extension");
+  const std::string kId = crx_file::id_util::GenerateId("all_hosts_extension");
   extension_ = ExtensionBuilder()
                    .SetManifest(
                        DictionaryBuilder()
@@ -110,8 +110,8 @@ const Extension* ActiveScriptControllerUnitTest::AddExtension() {
                    .Build();
 
   ExtensionRegistry::Get(profile())->AddEnabled(extension_);
-  PermissionsUpdater(profile()).InitializePermissions(extension_);
-  return extension_;
+  PermissionsUpdater(profile()).InitializePermissions(extension_.get());
+  return extension_.get();
 }
 
 const Extension* ActiveScriptControllerUnitTest::ReloadExtension() {
@@ -164,11 +164,9 @@ void ActiveScriptControllerUnitTest::SetUp() {
 
   TabHelper::CreateForWebContents(web_contents());
   TabHelper* tab_helper = TabHelper::FromWebContents(web_contents());
-  // None of these should ever be NULL.
+  // These should never be NULL.
   DCHECK(tab_helper);
-  DCHECK(tab_helper->location_bar_controller());
-  active_script_controller_ =
-      tab_helper->location_bar_controller()->active_script_controller();
+  active_script_controller_ = tab_helper->active_script_controller();
   DCHECK(active_script_controller_);
 }
 
@@ -182,37 +180,46 @@ TEST_F(ActiveScriptControllerUnitTest, RequestPermissionAndExecute) {
 
   // Ensure that there aren't any executions pending.
   ASSERT_EQ(0u, GetExecutionCountForExtension(extension->id()));
-  ASSERT_FALSE(controller()->GetActionForExtension(extension));
+  ASSERT_FALSE(controller()->WantsToRun(extension));
 
   // Since the extension requests all_hosts, we should require user consent.
   EXPECT_TRUE(RequiresUserConsent(extension));
 
-  // Request an injection. There should be an action visible, but no executions.
+  // Request an injection. The extension should want to run, but should not have
+  // executed.
   RequestInjection(extension);
-  EXPECT_TRUE(controller()->GetActionForExtension(extension));
+  EXPECT_TRUE(controller()->WantsToRun(extension));
   EXPECT_EQ(0u, GetExecutionCountForExtension(extension->id()));
 
   // Click to accept the extension executing.
   controller()->OnClicked(extension);
 
-  // The extension should execute, and the action should go away.
+  // The extension should execute, and the extension shouldn't want to run.
   EXPECT_EQ(1u, GetExecutionCountForExtension(extension->id()));
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
 
   // Since we already executed on the given page, we shouldn't need permission
   // for a second time.
   EXPECT_FALSE(RequiresUserConsent(extension));
 
-  // Reloading should clear those permissions, and we should again require user
-  // consent.
+  // Reloading and same-origin navigations shouldn't clear those permissions,
+  // and we shouldn't require user constent again.
   Reload();
+  EXPECT_FALSE(RequiresUserConsent(extension));
+  NavigateAndCommit(GURL("https://www.google.com/foo"));
+  EXPECT_FALSE(RequiresUserConsent(extension));
+  NavigateAndCommit(GURL("https://www.google.com/bar"));
+  EXPECT_FALSE(RequiresUserConsent(extension));
+
+  // Cross-origin navigations should clear permissions.
+  NavigateAndCommit(GURL("https://otherdomain.google.com"));
   EXPECT_TRUE(RequiresUserConsent(extension));
 
   // Grant access.
   RequestInjection(extension);
   controller()->OnClicked(extension);
   EXPECT_EQ(2u, GetExecutionCountForExtension(extension->id()));
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
 
   // Navigating to another site should also clear the permissions.
   NavigateAndCommit(GURL("https://www.foo.com"));
@@ -229,15 +236,15 @@ TEST_F(ActiveScriptControllerUnitTest, PendingInjectionsRemovedAtNavigation) {
 
   ASSERT_EQ(0u, GetExecutionCountForExtension(extension->id()));
 
-  // Request an injection. There should be an action visible, but no executions.
+  // Request an injection. The extension should want to run, but not execute.
   RequestInjection(extension);
-  EXPECT_TRUE(controller()->GetActionForExtension(extension));
+  EXPECT_TRUE(controller()->WantsToRun(extension));
   EXPECT_EQ(0u, GetExecutionCountForExtension(extension->id()));
 
   // Reload. This should remove the pending injection, and we should not
   // execute anything.
   Reload();
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
   EXPECT_EQ(0u, GetExecutionCountForExtension(extension->id()));
 
   // Request and accept a new injection.
@@ -247,7 +254,7 @@ TEST_F(ActiveScriptControllerUnitTest, PendingInjectionsRemovedAtNavigation) {
   // The extension should only have executed once, even though a grand total
   // of two executions were requested.
   EXPECT_EQ(1u, GetExecutionCountForExtension(extension->id()));
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
 }
 
 // Test that queueing multiple pending injections, and then accepting, triggers
@@ -270,7 +277,7 @@ TEST_F(ActiveScriptControllerUnitTest, MultiplePendingInjection) {
 
   // All pending injections should have executed.
   EXPECT_EQ(kNumInjections, GetExecutionCountForExtension(extension->id()));
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
 }
 
 TEST_F(ActiveScriptControllerUnitTest, ActiveScriptsUseActiveTabPermissions) {
@@ -289,13 +296,25 @@ TEST_F(ActiveScriptControllerUnitTest, ActiveScriptsUseActiveTabPermissions) {
   // anymore.
   EXPECT_FALSE(RequiresUserConsent(extension));
 
-  // Also test that granting active tab runs any pending tasks.
+  // Reloading and other same-origin navigations maintain the permission to
+  // execute.
   Reload();
-  // Navigating should mean we need permission again.
+  EXPECT_FALSE(RequiresUserConsent(extension));
+  NavigateAndCommit(GURL("https://www.google.com/foo"));
+  EXPECT_FALSE(RequiresUserConsent(extension));
+  NavigateAndCommit(GURL("https://www.google.com/bar"));
+  EXPECT_FALSE(RequiresUserConsent(extension));
+
+  // Navigating to a different origin will require user consent again.
+  NavigateAndCommit(GURL("https://yahoo.com"));
+  EXPECT_TRUE(RequiresUserConsent(extension));
+
+  // Back to the original origin should also re-require constent.
+  NavigateAndCommit(GURL("https://www.google.com"));
   EXPECT_TRUE(RequiresUserConsent(extension));
 
   RequestInjection(extension);
-  EXPECT_TRUE(controller()->GetActionForExtension(extension));
+  EXPECT_TRUE(controller()->WantsToRun(extension));
   EXPECT_EQ(0u, GetExecutionCountForExtension(extension->id()));
 
   // Grant active tab.
@@ -304,7 +323,7 @@ TEST_F(ActiveScriptControllerUnitTest, ActiveScriptsUseActiveTabPermissions) {
   // The pending injections should have run since active tab permission was
   // granted.
   EXPECT_EQ(1u, GetExecutionCountForExtension(extension->id()));
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
 }
 
 TEST_F(ActiveScriptControllerUnitTest, ActiveScriptsCanHaveAllUrlsPref) {
@@ -339,22 +358,22 @@ TEST_F(ActiveScriptControllerUnitTest, TestAlwaysRun) {
 
   // Ensure that there aren't any executions pending.
   ASSERT_EQ(0u, GetExecutionCountForExtension(extension->id()));
-  ASSERT_FALSE(controller()->GetActionForExtension(extension));
+  ASSERT_FALSE(controller()->WantsToRun(extension));
 
   // Since the extension requests all_hosts, we should require user consent.
   EXPECT_TRUE(RequiresUserConsent(extension));
 
-  // Request an injection. There should be an action visible, but no executions.
+  // Request an injection. The extension should want to run, but not execute.
   RequestInjection(extension);
-  EXPECT_TRUE(controller()->GetActionForExtension(extension));
+  EXPECT_TRUE(controller()->WantsToRun(extension));
   EXPECT_EQ(0u, GetExecutionCountForExtension(extension->id()));
 
   // Allow the extension to always run on this origin.
   controller()->AlwaysRunOnVisibleOrigin(extension);
 
-  // The extension should execute, and the action should go away.
+  // The extension should execute, and the extension shouldn't want to run.
   EXPECT_EQ(1u, GetExecutionCountForExtension(extension->id()));
-  EXPECT_FALSE(controller()->GetActionForExtension(extension));
+  EXPECT_FALSE(controller()->WantsToRun(extension));
 
   // Since we already executed on the given page, we shouldn't need permission
   // for a second time.

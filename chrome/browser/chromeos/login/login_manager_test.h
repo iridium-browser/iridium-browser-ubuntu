@@ -7,9 +7,9 @@
 
 #include <string>
 
+#include "chrome/browser/chromeos/login/mixin_based_browser_test.h"
 #include "chrome/browser/chromeos/login/mock_login_utils.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
-#include "chrome/test/base/in_process_browser_test.h"
 
 namespace content {
 class WebContents;
@@ -25,7 +25,7 @@ class UserContext;
 // out-of-box as completed.
 // Guarantees that WebUI has been initialized by waiting for
 // NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE notification.
-class LoginManagerTest : public InProcessBrowserTest {
+class LoginManagerTest : public MixinBasedBrowserTest {
  public:
   explicit LoginManagerTest(bool should_launch_browser);
 
@@ -66,6 +66,8 @@ class LoginManagerTest : public InProcessBrowserTest {
   MockLoginUtils& login_utils() { return *mock_login_utils_; }
 
   content::WebContents* web_contents() { return web_contents_; }
+
+  test::JSChecker& js_checker() { return js_checker_; }
 
  private:
   void InitializeWebContents();

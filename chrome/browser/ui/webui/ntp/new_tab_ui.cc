@@ -30,6 +30,7 @@
 #include "chrome/browser/ui/webui/ntp/suggestions_page_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -40,7 +41,6 @@
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_system.h"
 #include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(ENABLE_THEMES)
@@ -90,7 +90,7 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   // We count all link clicks as AUTO_BOOKMARK, so that site can be ranked more
   // highly. Note this means we're including clicks on not only most visited
   // thumbnails, but also clicks on recently bookmarked.
-  web_ui->SetLinkTransitionType(content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  web_ui->SetLinkTransitionType(ui::PAGE_TRANSITION_AUTO_BOOKMARK);
 
   Profile* profile = GetProfile();
   if (!profile->IsOffTheRecord()) {
@@ -137,7 +137,7 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   content::URLDataSource::Add(profile, html_source.release());
 
   pref_change_registrar_.Init(profile->GetPrefs());
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar,
+  pref_change_registrar_.Add(bookmarks::prefs::kShowBookmarkBar,
                              base::Bind(&NewTabUI::OnShowBookmarkBarChanged,
                                         base::Unretained(this)));
 }
@@ -216,7 +216,7 @@ void NewTabUI::EmitNtpStatistics() {
 
 void NewTabUI::OnShowBookmarkBarChanged() {
   base::StringValue attached(
-      GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
+      GetProfile()->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar) ?
           "true" : "false");
   web_ui()->CallJavascriptFunction("ntp.setBookmarkBarAttached", attached);
 }

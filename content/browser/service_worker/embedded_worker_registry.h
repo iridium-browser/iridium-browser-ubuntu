@@ -67,9 +67,12 @@ class CONTENT_EXPORT EmbeddedWorkerRegistry
 
   // Called back from EmbeddedWorker in the child process, relayed via
   // ServiceWorkerDispatcherHost.
-  void OnWorkerScriptLoaded(int process_id, int embedded_worker_id);
+  void OnWorkerReadyForInspection(int process_id, int embedded_worker_id);
+  void OnWorkerScriptLoaded(int process_id,
+                            int thread_id,
+                            int embedded_worker_id);
   void OnWorkerScriptLoadFailed(int process_id, int embedded_worker_id);
-  void OnWorkerStarted(int process_id, int thread_id, int embedded_worker_id);
+  void OnWorkerStarted(int process_id, int embedded_worker_id);
   void OnWorkerStopped(int process_id, int embedded_worker_id);
   void OnPausedAfterDownload(int process_id, int embedded_worker_id);
   void OnReportException(int embedded_worker_id,

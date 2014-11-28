@@ -24,10 +24,10 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/HTMLDialogElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/page/Page.h"
+#include "core/paint/ViewPainter.h"
 #include "core/rendering/ColumnInfo.h"
 #include "core/rendering/FlowThreadController.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
@@ -41,7 +41,6 @@
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "core/svg/SVGDocumentExtensions.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/TransformState.h"
@@ -102,7 +101,17 @@ bool RenderView::hitTest(const HitTestRequest& request, const HitTestLocation& l
     // Note that Document::updateLayout calls its parent's updateLayout.
     // FIXME: It should be the caller's responsibility to ensure an up-to-date layout.
     frameView()->updateLayoutAndStyleIfNeededRecursive();
-    return layer()->hitTest(request, location, result);
+
+    bool hitLayer = layer()->hitTest(request, location, result);
+
+    // ScrollView scrollbars are not the same as RenderLayer scrollbars tested by RenderLayer::hitTestOverflowControls,
+    // so we need to test ScrollView scrollbars separately here. Note that it's important we do this after
+    // the hit test above, because that may overwrite the entire HitTestResult when it finds a hit.
+    IntPoint viewPoint = location.roundedPoint() - frameView()->scrollOffset();
+    if (Scrollbar* frameScrollbar = frameView()->scrollbarAtViewPoint(viewPoint))
+        result.setScrollbar(frameScrollbar);
+
+    return hitLayer;
 }
 
 void RenderView::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit, LogicalExtentComputedValues& computedValues) const
@@ -129,57 +138,11 @@ bool RenderView::isChildAllowed(RenderObject* child, RenderStyle*) const
     return child->isBox();
 }
 
-static bool canCenterDialog(const RenderStyle* style)
-{
-    return (style->position() == AbsolutePosition || style->position() == FixedPosition) && style->hasAutoTopAndBottom();
-}
-
-void RenderView::positionDialog(RenderBox* box)
-{
-    HTMLDialogElement* dialog = toHTMLDialogElement(box->node());
-    if (dialog->centeringMode() == HTMLDialogElement::NotCentered)
-        return;
-    if (dialog->centeringMode() == HTMLDialogElement::Centered) {
-        if (canCenterDialog(box->style()))
-            box->setY(dialog->centeredPosition());
-        return;
-    }
-
-    ASSERT(dialog->centeringMode() == HTMLDialogElement::NeedsCentering);
-    if (!canCenterDialog(box->style())) {
-        dialog->setNotCentered();
-        return;
-    }
-    FrameView* frameView = document().view();
-    LayoutUnit top = (box->style()->position() == FixedPosition) ? 0 : frameView->scrollOffset().height();
-    int visibleHeight = frameView->visibleContentRect(IncludeScrollbars).height();
-    if (box->height() < visibleHeight)
-        top += (visibleHeight - box->height()) / 2;
-    box->setY(top);
-    dialog->setCentered(top);
-}
-
-void RenderView::positionDialogs()
-{
-    TrackedRendererListHashSet* positionedDescendants = positionedObjects();
-    if (!positionedDescendants)
-        return;
-    TrackedRendererListHashSet::iterator end = positionedDescendants->end();
-    for (TrackedRendererListHashSet::iterator it = positionedDescendants->begin(); it != end; ++it) {
-        RenderBox* box = *it;
-        if (isHTMLDialogElement(box->node()))
-            positionDialog(box);
-    }
-}
-
 void RenderView::layoutContent()
 {
     ASSERT(needsLayout());
 
     RenderBlockFlow::layout();
-
-    if (RuntimeEnabledFeatures::dialogElementEnabled())
-        positionDialogs();
 
 #if ENABLE(ASSERT)
     checkLayoutState();
@@ -216,7 +179,7 @@ bool RenderView::shouldDoFullPaintInvalidationForNextLayout() const
             if (!m_compositor || !m_compositor->needsFixedRootBackgroundLayer(layer())) {
                 if (backgroundRenderer->style()->hasFixedBackgroundImage()
                     && mustInvalidateFillLayersPaintOnHeightChange(backgroundRenderer->style()->backgroundLayers()))
-                return true;
+                    return true;
             }
         }
     }
@@ -269,11 +232,11 @@ void RenderView::layout()
     clearNeedsLayout();
 }
 
-void RenderView::mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState& transformState, MapCoordinatesFlags mode, bool* wasFixed, const PaintInvalidationState* paintInvalidationState) const
+void RenderView::mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState& transformState, MapCoordinatesFlags mode, bool* wasFixed, const PaintInvalidationState* paintInvalidationState) const
 {
     ASSERT_UNUSED(wasFixed, !wasFixed || *wasFixed == static_cast<bool>(mode & IsFixed));
 
-    if (!repaintContainer && mode & UseTransforms && shouldUseTransformFromContainer(0)) {
+    if (!paintInvalidationContainer && mode & UseTransforms && shouldUseTransformFromContainer(0)) {
         TransformationMatrix t;
         getTransformFromContainer(0, LayoutSize(), t);
         transformState.applyTransform(t);
@@ -282,7 +245,7 @@ void RenderView::mapLocalToContainer(const RenderLayerModelObject* repaintContai
     if (mode & IsFixed && m_frameView)
         transformState.move(m_frameView->scrollOffsetForFixedPosition());
 
-    if (repaintContainer == this)
+    if (paintInvalidationContainer == this)
         return;
 
     if (mode & TraverseDocumentBoundaries) {
@@ -290,14 +253,10 @@ void RenderView::mapLocalToContainer(const RenderLayerModelObject* repaintContai
             transformState.move(-frame()->view()->scrollOffset());
             if (parentDocRenderer->isBox())
                 transformState.move(toLayoutSize(toRenderBox(parentDocRenderer)->contentBoxRect().location()));
-            parentDocRenderer->mapLocalToContainer(repaintContainer, transformState, mode, wasFixed, paintInvalidationState);
+            parentDocRenderer->mapLocalToContainer(paintInvalidationContainer, transformState, mode, wasFixed, paintInvalidationState);
             return;
         }
     }
-
-    // If a container was specified, and was not 0 or the RenderView,
-    // then we should have found it by now.
-    ASSERT_ARG(repaintContainer, !repaintContainer);
 }
 
 const RenderObject* RenderView::pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap& geometryMap) const
@@ -354,93 +313,26 @@ void RenderView::computeSelfHitTestRects(Vector<LayoutRect>& rects, const Layout
 
 void RenderView::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    // If we ever require layout but receive a paint anyway, something has gone horribly wrong.
-    ASSERT(!needsLayout());
-    // RenderViews should never be called to paint with an offset not on device pixels.
-    ASSERT(LayoutPoint(IntPoint(paintOffset.x(), paintOffset.y())) == paintOffset);
-
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, this);
-
-    // This avoids painting garbage between columns if there is a column gap.
-    if (m_frameView && style()->isOverflowPaged())
-        paintInfo.context->fillRect(paintInfo.rect, m_frameView->baseBackgroundColor());
-
-    paintObject(paintInfo, paintOffset);
-}
-
-static inline bool rendererObscuresBackground(RenderBox* rootBox)
-{
-    ASSERT(rootBox);
-    RenderStyle* style = rootBox->style();
-    if (style->visibility() != VISIBLE
-        || style->opacity() != 1
-        || style->hasFilter()
-        || style->hasTransform())
-        return false;
-
-    if (rootBox->compositingState() == PaintsIntoOwnBacking)
-        return false;
-
-    const RenderObject* rootRenderer = rootBox->rendererForRootBackground();
-    if (rootRenderer->style()->backgroundClip() == TextFillBox)
-        return false;
-
-    return true;
-}
-
-bool RenderView::rootFillsViewportBackground(RenderBox* rootBox) const
-{
-    ASSERT(rootBox);
-    // CSS Boxes always fill the viewport background (see paintRootBoxFillLayers)
-    if (!rootBox->isSVG())
-        return true;
-
-    return rootBox->frameRect().contains(frameRect());
+    ViewPainter(*this).paint(paintInfo, paintOffset);
 }
 
 void RenderView::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint&)
 {
-    if (document().ownerElement() || !view())
-        return;
-
-    if (paintInfo.skipRootBackground())
-        return;
-
-    bool shouldPaintBackground = true;
-    Node* documentElement = document().documentElement();
-    if (RenderBox* rootBox = documentElement ? toRenderBox(documentElement->renderer()) : 0)
-        shouldPaintBackground = !rootFillsViewportBackground(rootBox) || !rendererObscuresBackground(rootBox);
-
-    // If painting will entirely fill the view, no need to fill the background.
-    if (!shouldPaintBackground)
-        return;
-
-    // This code typically only executes if the root element's visibility has been set to hidden,
-    // if there is a transform on the <html>, or if there is a page scale factor less than 1.
-    // Only fill with the base background color (typically white) if we're the root document,
-    // since iframes/frames with no background in the child document should show the parent's background.
-    if (!frameView()->isTransparent()) {
-        Color baseColor = frameView()->baseBackgroundColor();
-        if (baseColor.alpha()) {
-            CompositeOperator previousOperator = paintInfo.context->compositeOperation();
-            paintInfo.context->setCompositeOperation(CompositeCopy);
-            paintInfo.context->fillRect(paintInfo.rect, baseColor);
-            paintInfo.context->setCompositeOperation(previousOperator);
-        } else {
-            paintInfo.context->clearRect(paintInfo.rect);
-        }
-    }
+    ViewPainter(*this).paintBoxDecorationBackground(paintInfo);
 }
 
 void RenderView::invalidateTreeIfNeeded(const PaintInvalidationState& paintInvalidationState)
 {
     ASSERT(!needsLayout());
 
-    // We specifically need to repaint the viewRect since other renderers
-    // short-circuit on full-repaint.
-    if (doingFullPaintInvalidation() && !viewRect().isEmpty())
-        invalidatePaintForRectangle(viewRect());
-
+    // We specifically need to issue paint invalidations for the viewRect since other renderers
+    // short-circuit on full-paint invalidation.
+    LayoutRect dirtyRect = viewRect();
+    if (doingFullPaintInvalidation() && !dirtyRect.isEmpty()) {
+        const RenderLayerModelObject* paintInvalidationContainer = &paintInvalidationState.paintInvalidationContainer();
+        mapRectToPaintInvalidationBacking(paintInvalidationContainer, dirtyRect, &paintInvalidationState);
+        invalidatePaintUsingContainer(paintInvalidationContainer, dirtyRect, InvalidationFull);
+    }
     RenderBlock::invalidateTreeIfNeeded(paintInvalidationState);
 }
 
@@ -451,30 +343,18 @@ void RenderView::invalidatePaintForRectangle(const LayoutRect& paintInvalidation
     if (document().printing() || !m_frameView)
         return;
 
-    // We always just invalidate the root view, since we could be an iframe that is clipped out
-    // or even invisible.
-    Element* owner = document().ownerElement();
+    ASSERT(layer()->compositingState() == PaintsIntoOwnBacking || !frame()->ownerRenderer());
+
     if (layer()->compositingState() == PaintsIntoOwnBacking) {
-        layer()->paintInvalidator().setBackingNeedsRepaintInRect(paintInvalidationRect);
-    } else if (!owner) {
+        setBackingNeedsPaintInvalidationInRect(paintInvalidationRect);
+    } else {
         m_frameView->contentRectangleForPaintInvalidation(pixelSnappedIntRect(paintInvalidationRect));
-    } else if (RenderBox* obj = owner->renderBox()) {
-        // Intersect the viewport with the paint invalidation rect.
-        LayoutRect viewRectangle = viewRect();
-        LayoutRect rectToInvalidate = intersection(paintInvalidationRect, viewRectangle);
-
-        // Adjust for scroll offset of the view.
-        rectToInvalidate.moveBy(-viewRectangle.location());
-
-        // Adjust for frame border.
-        rectToInvalidate.moveBy(obj->contentBoxRect().location());
-        obj->invalidatePaintRectangle(rectToInvalidate);
     }
 }
 
 void RenderView::invalidatePaintForViewAndCompositedLayers()
 {
-    paintInvalidationForWholeRenderer();
+    setShouldDoFullPaintInvalidation(true);
 
     // The only way we know how to hit these ASSERTS below this point is via the Chromium OS login screen.
     DisableCompositingQueryAsserts disabler;
@@ -483,12 +363,13 @@ void RenderView::invalidatePaintForViewAndCompositedLayers()
         compositor()->fullyInvalidatePaint();
 }
 
-void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect& rect, ViewportConstrainedPosition viewportConstraint, const PaintInvalidationState*) const
+void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect& rect, const PaintInvalidationState* invalidationState) const
 {
-    // If a container was specified, and was not 0 or the RenderView,
-    // then we should have found it by now.
-    ASSERT_ARG(paintInvalidationContainer, !paintInvalidationContainer || paintInvalidationContainer == this);
+    mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, IsNotFixedPosition, invalidationState);
+}
 
+void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect& rect, ViewportConstrainedPosition viewportConstraint, const PaintInvalidationState* state) const
+{
     if (document().printing())
         return;
 
@@ -501,7 +382,6 @@ void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject*
             rect.setX(viewWidth() - rect.maxX());
     }
 
-    ASSERT(viewportConstraint != ViewportConstraintDoesNotMatter);
     if (viewportConstraint == IsFixedPosition && m_frameView) {
         rect.move(m_frameView->scrollOffsetForFixedPosition());
         // If we have a pending scroll, invalidate the previous scroll position.
@@ -513,7 +393,29 @@ void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject*
     // Apply our transform if we have one (because of full page zooming).
     if (!paintInvalidationContainer && layer() && layer()->transform())
         rect = layer()->transform()->mapRect(rect);
+
+    ASSERT(paintInvalidationContainer);
+    if (paintInvalidationContainer == this)
+        return;
+
+    Element* owner = document().ownerElement();
+    if (!owner)
+        return;
+
+    if (RenderBox* obj = owner->renderBox()) {
+        // Intersect the viewport with the paint invalidation rect.
+        LayoutRect viewRectangle = viewRect();
+        rect.intersect(viewRectangle);
+
+        // Adjust for scroll offset of the view.
+        rect.moveBy(-viewRectangle.location());
+
+        // Adjust for frame border.
+        rect.moveBy(obj->contentBoxRect().location());
+        obj->mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
+    }
 }
+
 
 void RenderView::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accumulatedOffset) const
 {
@@ -536,7 +438,7 @@ static RenderObject* rendererAfterPosition(RenderObject* object, unsigned offset
     return child ? child : object->nextInPreOrderAfterChildren();
 }
 
-IntRect RenderView::selectionBounds(bool clipToVisibleContent) const
+IntRect RenderView::selectionBounds() const
 {
     typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderObject>, OwnPtrWillBeMember<RenderSelectionInfo> > SelectionMap;
     SelectionMap selectedObjects;
@@ -546,13 +448,13 @@ IntRect RenderView::selectionBounds(bool clipToVisibleContent) const
     while (os && os != stop) {
         if ((os->canBeSelectionLeaf() || os == m_selectionStart || os == m_selectionEnd) && os->selectionState() != SelectionNone) {
             // Blocks are responsible for painting line gaps and margin gaps. They must be examined as well.
-            selectedObjects.set(os, adoptPtrWillBeNoop(new RenderSelectionInfo(os, clipToVisibleContent)));
+            selectedObjects.set(os, adoptPtrWillBeNoop(new RenderSelectionInfo(os)));
             RenderBlock* cb = os->containingBlock();
             while (cb && !cb->isRenderView()) {
                 OwnPtrWillBeMember<RenderSelectionInfo>& blockInfo = selectedObjects.add(cb, nullptr).storedValue->value;
                 if (blockInfo)
                     break;
-                blockInfo = adoptPtrWillBeNoop(new RenderSelectionInfo(cb, clipToVisibleContent));
+                blockInfo = adoptPtrWillBeNoop(new RenderSelectionInfo(cb));
                 cb = cb->containingBlock();
             }
         }
@@ -567,7 +469,7 @@ IntRect RenderView::selectionBounds(bool clipToVisibleContent) const
         RenderSelectionInfo* info = i->value.get();
         // RenderSelectionInfo::rect() is in the coordinates of the paintInvalidationContainer, so map to page coordinates.
         LayoutRect currRect = info->rect();
-        if (const RenderLayerModelObject* paintInvalidationContainer = info->repaintContainer()) {
+        if (const RenderLayerModelObject* paintInvalidationContainer = info->paintInvalidationContainer()) {
             FloatQuad absQuad = paintInvalidationContainer->localToAbsoluteQuad(FloatRect(currRect));
             currRect = absQuad.enclosingBoundingBox();
         }
@@ -580,6 +482,10 @@ void RenderView::invalidatePaintForSelection() const
 {
     HashSet<RenderBlock*> processedBlocks;
 
+    // For querying RenderLayer::compositingState()
+    // FIXME: this may be wrong. crbug.com/407416
+    DisableCompositingQueryAsserts disabler;
+
     RenderObject* end = rendererAfterPosition(m_selectionEnd, m_selectionEndPos);
     for (RenderObject* o = m_selectionStart; o && o != end; o = o->nextInPreOrder()) {
         if (!o->canBeSelectionLeaf() && o != m_selectionStart && o != m_selectionEnd)
@@ -587,13 +493,13 @@ void RenderView::invalidatePaintForSelection() const
         if (o->selectionState() == SelectionNone)
             continue;
 
-        RenderSelectionInfo(o, true).repaint();
+        RenderSelectionInfo(o).invalidatePaint();
 
         // Blocks are responsible for painting line gaps and margin gaps. They must be examined as well.
         for (RenderBlock* block = o->containingBlock(); block && !block->isRenderView(); block = block->containingBlock()) {
             if (!processedBlocks.add(block).isNewEntry)
                 break;
-            RenderSelectionInfo(block, true).repaint();
+            RenderSelectionInfo(block).invalidatePaint();
         }
     }
 }
@@ -619,7 +525,7 @@ static inline RenderObject* getNextOrPrevRenderObjectBasedOnDirection(const Rend
     return next;
 }
 
-void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* end, int endPos, SelectionRepaintMode blockRepaintMode)
+void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* end, int endPos, SelectionPaintInvalidationMode blockPaintInvalidationMode)
 {
     // This code makes no assumptions as to if the rendering tree is up to date or not
     // and will not try to update it. Currently clearSelection calls this
@@ -647,7 +553,7 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     SelectedObjectMap newSelectedObjects;
 
     // Blocks contain selected objects and fill gaps between them, either on the left, right, or in between lines and blocks.
-    // In order to get the repaint rect right, we have to examine left, middle, and right rects individually, since otherwise
+    // In order to get the paint invalidation rect right, we have to examine left, middle, and right rects individually, since otherwise
     // the union of those rects might remain the same even when changes have occurred.
     typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderBlock>, OwnPtrWillBeMember<RenderBlockSelectionInfo> > SelectedBlockMap;
     SelectedBlockMap oldSelectedBlocks;
@@ -660,8 +566,8 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     while (continueExploring) {
         if ((os->canBeSelectionLeaf() || os == m_selectionStart || os == m_selectionEnd) && os->selectionState() != SelectionNone) {
             // Blocks are responsible for painting line gaps and margin gaps.  They must be examined as well.
-            oldSelectedObjects.set(os, adoptPtrWillBeNoop(new RenderSelectionInfo(os, true)));
-            if (blockRepaintMode == RepaintNewXOROld) {
+            oldSelectedObjects.set(os, adoptPtrWillBeNoop(new RenderSelectionInfo(os)));
+            if (blockPaintInvalidationMode == PaintInvalidationNewXOROld) {
                 RenderBlock* cb = os->containingBlock();
                 while (cb && !cb->isRenderView()) {
                     OwnPtrWillBeMember<RenderBlockSelectionInfo>& blockInfo = oldSelectedBlocks.add(cb, nullptr).storedValue->value;
@@ -706,7 +612,7 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
         o = o->nextInPreOrder();
     }
 
-    if (blockRepaintMode != RepaintNothing)
+    if (blockPaintInvalidationMode != PaintInvalidationNothing)
         layer()->clearBlockSelectionGapsBounds();
 
     // Now that the selection state has been updated for the new objects, walk them again and
@@ -716,7 +622,7 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     continueExploring = o && (o != stop);
     while (continueExploring) {
         if ((o->canBeSelectionLeaf() || o == start || o == end) && o->selectionState() != SelectionNone) {
-            newSelectedObjects.set(o, adoptPtrWillBeNoop(new RenderSelectionInfo(o, true)));
+            newSelectedObjects.set(o, adoptPtrWillBeNoop(new RenderSelectionInfo(o)));
             RenderBlock* cb = o->containingBlock();
             while (cb && !cb->isRenderView()) {
                 OwnPtrWillBeMember<RenderBlockSelectionInfo>& blockInfo = newSelectedBlocks.add(cb, nullptr).storedValue->value;
@@ -730,8 +636,12 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
         o = getNextOrPrevRenderObjectBasedOnDirection(o, stop, continueExploring, exploringBackwards);
     }
 
-    if (!m_frameView || blockRepaintMode == RepaintNothing)
+    if (!m_frameView || blockPaintInvalidationMode == PaintInvalidationNothing)
         return;
+
+    // For querying RenderLayer::compositingState()
+    // FIXME: this is wrong, selection should not cause eager invalidation. crbug.com/407416
+    DisableCompositingQueryAsserts disabler;
 
     // Have any of the old selected objects changed compared to the new selection?
     for (SelectedObjectMap::iterator i = oldSelectedObjects.begin(); i != oldObjectsEnd; ++i) {
@@ -741,9 +651,9 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
         if (!newInfo || oldInfo->rect() != newInfo->rect() || oldInfo->state() != newInfo->state() ||
             (m_selectionStart == obj && oldStartPos != m_selectionStartPos) ||
             (m_selectionEnd == obj && oldEndPos != m_selectionEndPos)) {
-            oldInfo->repaint();
+            oldInfo->invalidatePaint();
             if (newInfo) {
-                newInfo->repaint();
+                newInfo->invalidatePaint();
                 newSelectedObjects.remove(obj);
             }
         }
@@ -752,7 +662,7 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     // Any new objects that remain were not found in the old objects dict, and so they need to be updated.
     SelectedObjectMap::iterator newObjectsEnd = newSelectedObjects.end();
     for (SelectedObjectMap::iterator i = newSelectedObjects.begin(); i != newObjectsEnd; ++i)
-        i->value->repaint();
+        i->value->invalidatePaint();
 
     // Have any of the old blocks changed?
     SelectedBlockMap::iterator oldBlocksEnd = oldSelectedBlocks.end();
@@ -761,9 +671,9 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
         RenderBlockSelectionInfo* newInfo = newSelectedBlocks.get(block);
         RenderBlockSelectionInfo* oldInfo = i->value.get();
         if (!newInfo || oldInfo->rects() != newInfo->rects() || oldInfo->state() != newInfo->state()) {
-            oldInfo->repaint();
+            oldInfo->invalidatePaint();
             if (newInfo) {
-                newInfo->repaint();
+                newInfo->invalidatePaint();
                 newSelectedBlocks.remove(block);
             }
         }
@@ -772,7 +682,7 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     // Any new blocks that remain were not found in the old blocks dict, and so they need to be updated.
     SelectedBlockMap::iterator newBlocksEnd = newSelectedBlocks.end();
     for (SelectedBlockMap::iterator i = newSelectedBlocks.begin(); i != newBlocksEnd; ++i)
-        i->value->repaint();
+        i->value->invalidatePaint();
 }
 
 void RenderView::getSelection(RenderObject*& startRenderer, int& startOffset, RenderObject*& endRenderer, int& endOffset) const
@@ -785,8 +695,12 @@ void RenderView::getSelection(RenderObject*& startRenderer, int& startOffset, Re
 
 void RenderView::clearSelection()
 {
+    // For querying RenderLayer::compositingState()
+    // This is correct, since destroying render objects needs to cause eager paint invalidations.
+    DisableCompositingQueryAsserts disabler;
+
     layer()->invalidatePaintForBlockSelectionGaps();
-    setSelection(0, -1, 0, -1, RepaintNewMinusOld);
+    setSelection(0, -1, 0, -1, PaintInvalidationNewMinusOld);
 }
 
 void RenderView::selectionStartEnd(int& startPos, int& endPos) const

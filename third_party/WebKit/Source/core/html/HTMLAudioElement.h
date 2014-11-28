@@ -34,14 +34,17 @@ namespace blink {
 class Document;
 
 class HTMLAudioElement FINAL : public HTMLMediaElement {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLAudioElement> create(Document&);
     static PassRefPtrWillBeRawPtr<HTMLAudioElement> createForJSConstructor(Document&, const AtomicString& src);
+
+    virtual bool isHTMLAudioElement() const OVERRIDE { return true; }
 
 private:
     HTMLAudioElement(Document&);
 };
 
-} //namespace
+} // namespace blink
 
-#endif
+#endif // HTMLAudioElement_h

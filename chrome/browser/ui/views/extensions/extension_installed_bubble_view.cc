@@ -30,14 +30,14 @@
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "extensions/common/extension.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/render_text.h"
 #include "ui/gfx/text_elider.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -260,13 +260,13 @@ class InstalledBubbleContent : public views::View,
   }
 
  private:
-   enum Flavors {
-     NONE            = 0,
-     HOW_TO_USE      = 1 << 0,
-     HOW_TO_MANAGE   = 1 << 1,
-     SHOW_KEYBINDING = 1 << 2,
-     SIGN_IN_PROMO   = 1 << 3,
-   };
+  enum Flavors {
+    NONE            = 0,
+    HOW_TO_USE      = 1 << 0,
+    HOW_TO_MANAGE   = 1 << 1,
+    SHOW_KEYBINDING = 1 << 2,
+    SIGN_IN_PROMO   = 1 << 3,
+  };
 
   bool GetKeybinding(extensions::Command* command) {
     extensions::CommandService* command_service =
@@ -512,8 +512,8 @@ class InstalledBubbleContent : public views::View,
 };
 
 void ExtensionInstalledBubbleView::Show(const Extension* extension,
-                                    Browser *browser,
-                                    const SkBitmap& icon) {
+                                        Browser* browser,
+                                        const SkBitmap& icon) {
   new ExtensionInstalledBubbleView(extension, browser, icon);
 }
 
@@ -527,8 +527,6 @@ ExtensionInstalledBubbleView::~ExtensionInstalledBubbleView() {}
 bool ExtensionInstalledBubbleView::MaybeShowNow() {
   BrowserView* browser_view =
       BrowserView::GetBrowserViewForBrowser(bubble_.browser());
-  extensions::ExtensionActionManager* extension_action_manager =
-      extensions::ExtensionActionManager::Get(bubble_.browser()->profile());
 
   views::View* reference_view = NULL;
   if (bubble_.type() == bubble_.BROWSER_ACTION) {
@@ -537,8 +535,7 @@ bool ExtensionInstalledBubbleView::MaybeShowNow() {
     if (container->animating())
       return false;
 
-    reference_view = container->GetBrowserActionView(
-        extension_action_manager->GetBrowserAction(*bubble_.extension()));
+    reference_view = container->GetViewForExtension(bubble_.extension());
     // If the view is not visible then it is in the chevron, so point the
     // install bubble to the chevron instead. If this is an incognito window,
     // both could be invisible.
@@ -550,7 +547,8 @@ bool ExtensionInstalledBubbleView::MaybeShowNow() {
   } else if (bubble_.type() == bubble_.PAGE_ACTION) {
     LocationBarView* location_bar_view = browser_view->GetLocationBarView();
     ExtensionAction* page_action =
-        extension_action_manager->GetPageAction(*bubble_.extension());
+        extensions::ExtensionActionManager::Get(bubble_.browser()->profile())->
+            GetPageAction(*bubble_.extension());
     location_bar_view->SetPreviewEnabledPageAction(page_action,
                                                    true);  // preview_enabled
     reference_view = location_bar_view->GetPageActionView(page_action);

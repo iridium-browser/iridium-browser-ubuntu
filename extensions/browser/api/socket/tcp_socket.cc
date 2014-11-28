@@ -4,6 +4,7 @@
 
 #include "extensions/browser/api/socket/tcp_socket.h"
 
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "extensions/browser/api/api_resource.h"
@@ -201,6 +202,7 @@ int TCPSocket::Listen(const std::string& address,
   if (!server_socket_.get()) {
     server_socket_.reset(new net::TCPServerSocket(NULL, net::NetLog::Source()));
   }
+
   int result = server_socket_->ListenWithAddressAndPort(address, port, backlog);
   if (result)
     *error_msg = kSocketListenError;

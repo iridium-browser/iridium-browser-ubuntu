@@ -24,6 +24,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/default_user_images.h"
@@ -34,8 +35,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/url_constants.h"
 #include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
 #include "net/base/data_url.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -216,13 +215,18 @@ void ChangePictureOptionsHandler::HandleChooseFile(
 void ChangePictureOptionsHandler::HandleTakePhoto(
     const base::ListValue* args) {
   DCHECK(args->empty());
+#if !defined(USE_ATHENA)
+  // crbug.com/408733
   ash::PlaySystemSoundIfSpokenFeedback(SOUND_CAMERA_SNAP);
+#endif
 }
 
 void ChangePictureOptionsHandler::HandleDiscardPhoto(
     const base::ListValue* args) {
   DCHECK(args->empty());
+#if !defined(USE_ATHENA)
   ash::PlaySystemSoundIfSpokenFeedback(SOUND_OBJECT_DELETE);
+#endif
 }
 
 void ChangePictureOptionsHandler::HandlePhotoTaken(

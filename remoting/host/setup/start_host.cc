@@ -1,9 +1,10 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// A simple command-line app that registers and starts a host.
 
 #include <stdio.h>
-#include <termios.h>
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
@@ -18,7 +19,9 @@
 #include "remoting/host/setup/oauth_helper.h"
 #include "remoting/host/setup/pin_validator.h"
 
-// A simple command-line app that registers and starts a host.
+#if !defined(OS_WIN)
+#include <termios.h>
+#endif  // !defined(OS_WIN)
 
 using remoting::HostStarter;
 
@@ -30,6 +33,16 @@ base::MessageLoop* g_message_loop = NULL;
 
 // Lets us hide the PIN that a user types.
 void SetEcho(bool echo) {
+#if defined(OS_WIN)
+  DWORD mode;
+  HANDLE console_handle = GetStdHandle(STD_INPUT_HANDLE);
+  if (!GetConsoleMode(console_handle, &mode)) {
+    LOG(ERROR) << "GetConsoleMode failed";
+    return;
+  }
+  SetConsoleMode(console_handle,
+                 (mode & ~ENABLE_ECHO_INPUT) | (echo ? ENABLE_ECHO_INPUT : 0));
+#else
   termios term;
   tcgetattr(STDIN_FILENO, &term);
   if (echo) {
@@ -38,6 +51,7 @@ void SetEcho(bool echo) {
     term.c_lflag &= ~ECHO;
   }
   tcsetattr(STDIN_FILENO, TCSANOW, &term);
+#endif  // !defined(OS_WIN)
 }
 
 // Reads a newline-terminated string from stdin.
@@ -145,12 +159,15 @@ int main(int argc, char** argv) {
   // Provide message loops and threads for the URLRequestContextGetter.
   base::MessageLoop message_loop;
   g_message_loop = &message_loop;
-  base::Thread io_thread("IO thread");
   base::Thread::Options io_thread_options(base::MessageLoop::TYPE_IO, 0);
+  base::Thread io_thread("IO thread");
   io_thread.StartWithOptions(io_thread_options);
+  base::Thread file_thread("file thread");
+  file_thread.StartWithOptions(io_thread_options);
 
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter(
-      new remoting::URLRequestContextGetter(io_thread.message_loop_proxy()));
+      new remoting::URLRequestContextGetter(io_thread.task_runner(),
+                                            file_thread.task_runner()));
 
   net::URLFetcher::SetIgnoreCertificateRequests(true);
 

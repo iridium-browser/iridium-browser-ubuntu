@@ -11,10 +11,10 @@
 #ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_ACM2_ACM_ISAC_H_
 #define WEBRTC_MODULES_AUDIO_CODING_MAIN_ACM2_ACM_ISAC_H_
 
+#include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_generic_codec.h"
 #include "webrtc/modules/audio_coding/neteq/interface/audio_decoder.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
-#include "webrtc/system_wrappers/interface/thread_annotations.h"
 
 namespace webrtc {
 
@@ -116,8 +116,6 @@ class ACMISAC : public ACMGenericCodec, AudioDecoder {
                             int16_t* payload_bytes) OVERRIDE;
 
   int16_t InternalCreateEncoder() OVERRIDE;
-
-  void InternalDestructEncoderInst(void* ptr_inst) OVERRIDE;
 
   void CurrentRate(int32_t* rate_bit_per_sec) OVERRIDE;
 

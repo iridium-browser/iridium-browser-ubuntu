@@ -85,12 +85,6 @@ Press any key to continue exploring.
   <message name="IDS_FLAGS_ENABLE_FILE_MANAGER_MTP_DESCRIPTION" desc="Description of the about:flag option to the enable MTP support in file manager.">
     Show MTP devices as a file storage in the file manager.
   </message>
-  <message name="IDS_FLAGS_FILE_MANAGER_ENABLE_NEW_GALLERY_NAME" desc="Name of the about:flag option to enable the new gallery app.">
-    Enable the new gallery
-  </message>
-  <message name="IDS_FLAGS_FILE_MANAGER_ENABLE_NEW_GALLERY_DESCRIPTION" desc="Description of the about:flag option to the enable new gallery app.">
-    Use the experimental new gallery instead of the stable one.
-  </message>
   <message name="IDS_FLAGS_ENABLE_VIDEO_PLAYER_CHROMECAST_SUPPORT_NAME" desc="Name of the about:flag option to enable the chromecast support for video app.">
     Experimental Chromecast support for Video Player
   </message>
@@ -506,6 +500,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_SYNC_FILE_NAME" desc="File Manager status message.">
     Syncing <ph name="FILE_NAME">$1<ex>movie.avi</ex></ph>...
   </message>
+  <message name="IDS_FILE_BROWSER_SYNC_FILE_NUMBER" desc="File Manager status message.">
+    Syncing <ph name="NUMBER_OF_FILES">$1<ex>7</ex></ph> items...
+  </message>
   <message name="IDS_FILE_BROWSER_SYNC_DELETE_WITHOUT_PERMISSION_ERROR" desc="File Manager status message shown when the drive sync is failed because a user try to remove shared files that the user does not own.">
     "<ph name="FILENAME">$1<ex>photo.jpg</ex></ph>" has been shared with you. You cannot delete it because you do not own it.
   </message>
@@ -852,6 +849,12 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_ERROR_VIEWING_FILE" desc="Error message when user attempts to open a non-supported file in the Files app via Downloads panel.">
     This file type is not supported. Please visit the Chrome Web Store to find an app that can open this type of file.
   </message>
+  <message name="IDS_FILE_BROWSER_ERROR_VIEWING_FILE_FOR_DMG" desc="Error message when user attempts to open a dmg file in the Files app via Downloads panel.">
+    This file is designed for a computer using Macintosh software. This is not compatible with your device which runs Chrome OS. Please search the Chrome Web Store for a suitable replacement app.
+  </message>
+  <message name="IDS_FILE_BROWSER_ERROR_VIEWING_FILE_FOR_EXECUTABLE" desc="Error message when user attempts to open a exe file in the Files app via Downloads panel.">
+    This file is designed for a PC using Windows software. This is not compatible with your device which runs Chrome OS. Please search the Chrome Web Store for a suitable replacement app.
+  </message>
   <message name="IDS_FILE_BROWSER_ERROR_UNRESOLVABLE_FILE" desc="Error message when the file attempted to open from Downloads panel was not found under paths managed by file manager.">
     This file has wandered off somewhere. Please check your download location setting and try again.
   </message>
@@ -947,6 +950,12 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_VIDEO_PLAYER_PLAYING_ON" desc="Message is shown ahead of the name of the current chromecast which plays the video now. For example, if this message is 'Playing on' and the Chromecast name is 'Foocast', 'Playing on Foocast' is shown.">
     Playing on
+  </message>
+  <message name="IDS_VIDEO_PLAYER_PLAY_ON" desc="Message is shown above the list of cast devices. The user will select one of them to play the current video on selected device.">
+    Play on
+  </message>
+  <message name="IDS_VIDEO_PLAYER_VIDEO_FILE_UNSUPPORTED_FOR_CAST" desc="Error message which is shown when the video which an user tried to play is not supported by the current cast device.">
+    Sorry, this video is not supported by your cast device.
   </message>
 
 <!-- Imageburn Strings -->
@@ -1080,6 +1089,12 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FLAGS_DISABLE_DISPLAY_COLOR_CALIBRATION_DESCRIPTION" desc="Description for the flag to disable the color calibration of the display.">
     Disable calibrating the color of the display even if the display supports the feature.
+  </message>
+  <message name="IDS_FLAGS_WAKE_ON_PACKETS_NAME" desc="Name for the flag to enable wake on packets.">
+    Wake On Packets
+  </message>
+  <message name="IDS_FLAGS_WAKE_ON_PACKETS_DESCRIPTION" desc="Description for the flag to enable wake on packets.">
+    Enables waking the device based on the receipt of some network packets.
   </message>
   <message name="IDS_OFFERS_CONSENT_INFOBAR_LABEL_LEARN_MORE" desc="Text of the Learn More link in the echo dialog.">
     Learn More
@@ -1741,9 +1756,6 @@ Press any key to continue exploring.
   <message name="IDS_CHROMEOS_NETWORK_STATE_CONNECTING" desc="Displayed state for a network when connecting">
     Not Connected
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_UNKNOWN" desc="Displayed state for a network when unknown">
-    Unknown
-  </message>
 
   <message name="IDS_OPTIONS_SETTINGS_NETWORK_DISABLED" desc="Message displayed when a type of network connection is disabled">
     Disabled
@@ -1814,8 +1826,11 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_LANGUAGE">
     Language
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_ACCESSIBILITY">
-    Accessibility
+  <message name="IDS_OPTIONS_SETTINGS_BATTERY_DESCRIPTION" desc="The 'Battery' button on the chrome://settings page.">
+    Battery...
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_STORAGE_DESCRIPTION" desc="The 'Storage' button on the chrome://settings page.">
+    Stored data...
   </message>
   <message name="IDS_OPTIONS_SETTINGS_TIME_SYNCED_EXPLANATION" desc="In the settings tab, the text indicating that the date and time are set automatically.">
     Date and time are set automatically.
@@ -2069,6 +2084,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_RESOLUTION_ANNOTATION_BEST" desc="The text shown for resolution options to annotate this is the best resolution.">
     (Best)
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_RESOLUTION_ANNOTATION_NATIVE" desc="The text shown for resolution options to annotate this is the native resolution.">
+    (Native)
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_STANDARD_ORIENTATION" desc="The default value of display orientation option item.">
     Standard
   </message>
@@ -2125,9 +2143,6 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_ACTIVATE" desc="In the settings tab, the text on the button to activate a cellular network.">
     Activate
-  </message>
-  <message name="IDS_OPTIONS_SETTINGS_BUY_PLAN" desc="In settings Internet options, the title for buy cellular data plan button.">
-    Buy plan
   </message>
   <message name="IDS_OPTIONS_SETTINGS_OPTIONS" desc="In the settings tab, the text on the button to display more options.">
     Options...
@@ -2690,11 +2705,11 @@ Press any key to continue exploring.
   <message name="IDS_RESET_SCREEN_WARNING_MSG" desc="Warning text shown on reset screen above the exclamation icon.">
     Reset this <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device
   </message>
-  <message name="IDS_RESET_SCREEN_CONFIRMATION_WARNING_POWERWASH_MSG" desc="Warning text shown on confirmation-form of reset screen above the exclamation icon.">
+  <message name="IDS_RESET_SCREEN_WARNING_POWERWASH_MSG" desc="Warning text shown on confirmation-form of reset screen above the exclamation icon.">
     Powerwash your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device
   </message>
-  <message name="IDS_RESET_SCREEN_CONFIRMATION_WARNING_POWERWASH_AND_ROLLBACK_MSG" desc="Warning text shown on confirmation-form of reset screen above the exclamation icon.">
-    Powerwash your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device and revert to a previous update
+  <message name="IDS_RESET_SCREEN_WARNING_POWERWASH_AND_ROLLBACK_MSG" desc="Warning text shown on confirmation-form of reset screen above the exclamation icon.">
+    Powerwash your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device and return to the previous version
   </message>
   <message name="IDS_RESET_SCREEN_WARNING_DETAILS" desc="Warning text shown on reset screen below the exclamation icon.">
     Powerwash to reset your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device to be just like new.
@@ -2703,19 +2718,22 @@ Press any key to continue exploring.
     A Powerwash resets your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device to be just like new.
   </message>
   <message name="IDS_RESET_SCREEN_CONFIRMATION_WARNING_ROLLBACK_DETAILS" desc="Warning text shown on confirmation-form of reset screen below the exclamation icon.">
-    A Powerwash resets your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device to be just like new. Additionally, your device will revert to a previous update of <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph>.
+    A Powerwash resets your <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device to be just like new. Your device will also be returned to the previously installed version of <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph>.
   </message>
   <message name="IDS_RESET_SCREEN_WARNING_DETAILS_DATA" desc="Additional warning text shown on reset screen below the main warning.">
     All user accounts and local data will be removed.
   </message>
   <message name="IDS_RESET_SCREEN_RESTART_MSG" desc="Text shown on reset screen below warning messages if device needs extra restart before powerwash.">
-    A restart is required before your device can be reset.
+    A restart is required to begin the Powerwash process. After restart you will be asked to confirm that you want to proceed.
   </message>
   <message name="IDS_RESET_SCREEN_ROLLBACK_OPTION" desc="Checkbox label for rollback option of powerwash process. Is shown on reset screen.">
-    Also revert to a previous <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> update.
+    Also return to the previously installed version of <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph>.
   </message>
   <message name="IDS_RESET_SCREEN_POWERWASH" desc="Powerwash button text">
     Powerwash
+  </message>
+  <message name="IDS_RESET_SCREEN_POWERWASH_AND_REVERT" desc="Powerwash+rollback button text">
+    Powerwash and Revert
   </message>
   <message name="IDS_RESET_SCREEN_RESET" desc="Reset button text. Button launches powerwash.">
     Reset
@@ -2724,13 +2742,13 @@ Press any key to continue exploring.
     <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> will restart and reset momentarily.
   </message>
   <message name="IDS_RESET_SCREEN_PREPARING_REVERT_SPINNER_MESSAGE" desc="Spinner message shown on reset screen after user initiates powerwash with version revert while revert is prepared until reboot.">
-    Reverting to previous <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> update.
+    Reverting to the previously installed version of <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph>
   </message>
   <message name="IDS_RESET_SCREEN_REVERT_ERROR" desc="Error message shown when revert was initiated but unavailable to be performed." meaning="Device reset screen revert option context.">
     Oops, something went wrong.
   </message>
   <message name="IDS_RESET_SCREEN_REVERT_ERROR_EXPLANATION" desc="Error description shown when revert was initiated but unavailable to be performed.">
-    <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> is unable to revert to the previous version. Please try Powerwash instead.
+    <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> is unable to revert to the previously installed version. Please try again to Powerwash your device.
   </message>
   <message name="IDS_RESET_SCREEN_REVERT_ERROR_BUTTON" desc="Reset device dialog, error page, revert error while initiating it, button title.">
     OK
@@ -3484,9 +3502,6 @@ Press any key to continue exploring.
   <message name="IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR" desc="Label for a cellular network device.">
     Mobile Data
   </message>
-  <message name="IDS_STATUSBAR_NETWORK_DEVICE_UNKNOWN" desc="Label for an unknown network device.">
-    Unknown
-  </message>
   <message name="IDS_NETWORK_TYPE_ETHERNET" desc="The ethernet network type.">
     Ethernet
   </message>
@@ -3500,7 +3515,7 @@ Press any key to continue exploring.
     Bluetooth
   </message>
   <message name="IDS_NETWORK_TYPE_CELLULAR" desc="The cellular network type.">
-    cellular
+    Cellular
   </message>
   <message name="IDS_NETWORK_TYPE_VPN" desc="The vpn network type.">
     VPN
@@ -3749,9 +3764,6 @@ Battery full
   <message name="IDS_REMOVABLE_DEVICE_DETECTION_TITLE" desc="Text of notification message which is shown when user inserts removable device (SD card, USB key...)">
     Removable device detected
   </message>
-  <message name="IDS_REMOVABLE_DEVICE_SCANNING_MESSAGE" desc="Text of notification message which is shown when user inserts removable device (SD card, USB key...)">
-    Scanning content...
-  </message>
   <message name="IDS_REMOVABLE_DEVICE_NAVIGATION_MESSAGE" desc="Text of notification message to navigate users to Files.app. If user clicks a button in the notification, Files.app opens.">
     Explore the device's content in the Files app.
   </message>
@@ -3769,6 +3781,9 @@ Battery full
   </message>
   <message name="IDS_DEVICE_UNKNOWN_MESSAGE" desc="Text of notification message which is shown when user inserts removable device (SD card, USB key...)">
    Sorry, the device <ph name="DEVICE_LABEL">$1<ex>My SD card</ex></ph> could not be recognized.
+  </message>
+  <message name="IDS_DEVICE_UNKNOWN_BUTTON_LABEL" desc="Text of a button label in a notification to format the device. If user clicks the button, Files.app opens and focus on unknown the device.">
+    Format this device
   </message>
   <message name="IDS_DEVICE_UNKNOWN_DEFAULT_MESSAGE" desc="Text of notification message which is shown when user inserts removable device (SD card, USB key...)">
    Sorry, your external storage device could not be recognized.
@@ -3847,9 +3862,6 @@ Battery full
   <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_PARTIALLY_ACTIVATED" desc="Description of state of partially activated cellular data plan state. Shown under details on chrome:stettings/internet page.">
     Partially activated
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_UNKNOWN" desc="Description of cellular data plan with unknown status. Shown under details on chrome:stettings/internet page.">
-    Unknown
-  </message>
 
   <!-- Cellular network roaming status description strings for ChromeOS -->
   <message name="IDS_CHROMEOS_NETWORK_ROAMING_STATE_HOME" desc="Description of cellular roaming status while connected to home network. Shown under details on chrome:stettings/internet page.">
@@ -3857,9 +3869,6 @@ Battery full
   </message>
   <message name="IDS_CHROMEOS_NETWORK_ROAMING_STATE_ROAMING" desc="Description of cellular roaming status while roaming. Shown under details on chrome:stettings/internet page.">
     Roaming
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ROAMING_STATE_UNKNOWN" desc="Description of unknown cellular roaming status. Shown under details on chrome:stettings/internet page.">
-    Unknown
   </message>
 
   <!-- Cellular network details -->
@@ -3948,65 +3957,65 @@ Battery full
     Type Ctrl+Alt+/ or Escape to hide
   </message>
   <!-- BEGIN GENERATED KEYBOARD OVERLAY STRINGS -->
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_LAUNCHER_ITEM" desc="The text in the keyboard overlay to explain the shortcut (Open the last launcher item).">
-    Activate last launcher item
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_SHELF_ITEM" desc="The text in the keyboard overlay to explain the shortcut (Open the last shelf item).">
+    Last shelf item
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_TAB" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate last tab
+    Last tab
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_1" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 1
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_1" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 1
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_2" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 2
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_2" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 2
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_3" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 3
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_3" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 3
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_4" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 4
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_4" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 4
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_5" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 5
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_5" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 5
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_6" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 6
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_6" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 6
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_7" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 7
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_7" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 7
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAUNCHER_ITEM_8" desc="The text in the keyboard overlay to explain the shortcut (Open the launcher item at the specified position).">
-    Activate launcher item 8
+  <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_SHELF_ITEM_8" desc="The text in the keyboard overlay to explain the shortcut (Open the shelf item at the specified position).">
+    Shelf item 8
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_NEXT_TAB" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate next tab
+    Next tab
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_PREVIOUS_TAB" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate previous tab
+    Previous tab
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_1" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 1
+    Tab 1
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_2" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 2
+    Tab 2
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_3" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 3
+    Tab 3
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_4" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 4
+    Tab 4
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_5" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 5
+    Tab 5
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_6" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 6
+    Tab 6
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_7" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 7
+    Tab 7
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_TAB_8" desc="The text in the keyboard overlay to explain the shortcut.">
-    Activate tab 8
+    Tab 8
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ADD_WWW_AND_COM_AND_OPEN_ADDRESS" desc="The text in the keyboard overlay to explain the shortcut.">
     Add www. and .com and open address
@@ -4015,7 +4024,7 @@ Battery full
     Bookmark all tabs
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_BOOKMARK_CURRENT_PAGE" desc="The text in the keyboard overlay to explain the shortcut.">
-    Bookmark current page
+    Add bookmark
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_BOOKMARK_MANAGER" desc="The text in the keyboard overlay to explain the shortcut (open the bookmark manager).">
     Bookmark manager
@@ -4039,7 +4048,7 @@ Battery full
     Cut
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_CYCLE_THROUGH_INPUT_METHODS" desc="The text in the keyboard overlay to explain the shortcut.">
-    Cycle through input methods
+    Next input method
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_DECREASE_KEY_BRIGHTNESS" desc="The text in the keyboard overlay to explain the shortcut (decrease the keyboard brightness).">
     Decrease key brightness
@@ -4111,25 +4120,25 @@ Battery full
     Find text
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FIND_TEXT_AGAIN" desc="The text in the keyboard overlay to explain the shortcut.">
-    Find text again
+    Find again
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FOCUS_ADDRESS_BAR" desc="The text in the keyboard overlay to explain the shortcut.">
     Focus address bar
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FOCUS_ADDRESS_BAR_IN_SEARCH_MODE" desc="The text in the keyboard overlay to explain the shortcut.">
-    Focus address bar in search mode
+    Focus address bar for search
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FOCUS_BOOKMARKS" desc="The text in the keyboard overlay to explain the shortcut.">
     Focus bookmarks
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_FOCUS_LAUNCHER" desc="The text in the keyboard overlay to explain the shortcut (focus the application launcher).">
-    Focus launcher
+  <message name="IDS_KEYBOARD_OVERLAY_FOCUS_SHELF" desc="The text in the keyboard overlay to explain the shortcut (focus the application shelf).">
+    Focus shelf
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FOCUS_NEXT_PANE" desc="The text in the keyboard overlay to explain the shortcut (switch focus to the next keyboard-accessible pane).">
-    Focus next pane
+    Next pane
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FOCUS_PREVIOUS_PANE" desc="The text in the keyboard overlay to explain the shortcut (switch focus to the previous keyboard-accessible pane).">
-    Focus previous pane
+    Previous pane
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_FOCUS_TOOLBAR" desc="The text in the keyboard overlay to explain the shortcut.">
     Focus toolbar
@@ -4165,19 +4174,19 @@ Battery full
     Lock screen
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_LOCK_SCREEN_OR_POWER_OFF" desc="The text in the keyboard overlay to explain the shortcut.">
-    Lock screen or power off
+    Lock / power
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_MAGNIFIER_DECREASE_ZOOM" desc="The text in the keyboard overlay to explain the shortcut.">
-    Magnifier decrease zoom
+    Demagnify
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_MAGNIFIER_INCREASE_ZOOM" desc="The text in the keyboard overlay to explain the shortcut.">
-    Magnifier increase zoom
+    Magnify
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_MAXIMIZE_WINDOW" desc="The text in the keyboard overlay to explain the shortcut (maximize or restore the window).">
-    Maximize window
+    Maximize
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_MINIMIZE_WINDOW" desc="The text in the keyboard overlay to explain the shortcut (minimize the window).">
-    Minimize window
+    Minimize
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_MIRROR_MONITORS" desc="The text in the keyboard overlay to explain the shortcut (Mirror the monitors).">
     Mirror monitors
@@ -4207,13 +4216,13 @@ Battery full
     Open
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_OPEN_ADDRESS_IN_NEW_TAB" desc="The text in the keyboard overlay to explain the shortcut.">
-    Open address in new tab
+    Open in new tab
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_OPEN_FILE_MANAGER" desc="The text in the keyboard overlay to explain the shortcut (Open the file manager).">
-    Open file manager
+    File manager
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_OPEN_GOOGLE_CLOUD_PRINT" desc="The text in the keyboard overlay to explain the shortcut (Opens the 'Google Cloud Print' dialog).">
-    Open Google Cloud Print
+    Google Cloud Print
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_PAGE_DOWN" desc="The text in the keyboard overlay to explain the shortcut (Page down).">
     Page down
@@ -4240,7 +4249,7 @@ Battery full
     Print
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_RELOAD_CURRENT_PAGE" desc="The text in the keyboard overlay to explain the shortcut.">
-    Reload current page
+    Reload
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_RELOAD_IGNORING_CACHE" desc="The text in the keyboard overlay to explain the shortcut.">
     Reload ignoring cache
@@ -4273,16 +4282,16 @@ Battery full
     Select all
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SELECT_PREVIOUS_INPUT_METHOD" desc="The text in the keyboard overlay to explain the shortcut.">
-    Select previous input method
+    Previous input method
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SELECT_WORD_AT_A_TIME" desc="The text in the keyboard overlay to explain the shortcut.">
     Select "word at a time"
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SHOW_MESSAGE_CENTER" desc="The text in the keyboard overlay to explain the shortcut (Show the message center).">
-    Show message center
+    Message center
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SHOW_STATUS_MENU" desc="The text in the keyboard overlay to explain the shortcut (show the status menu).">
-    Show status menu
+    Status menu
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SIGN_OUT" desc="The text in the keyboard overlay to explain the shortcut.">
     Sign out
@@ -4291,31 +4300,31 @@ Battery full
     Swap primary monitor
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TAKE_SCREENSHOT" desc="The text in the keyboard overlay to explain the shortcut.">
-    Take screenshot
+    Screenshot
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TASK_MANAGER" desc="The text in the keyboard overlay to explain the shortcut.">
     Task manager
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_BOOKMARK_BAR" desc="The text in the keyboard overlay to explain the shortcut.">
-    Toggle bookmark bar
+    Bookmark bar
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_CAPS_LOCK" desc="The text in the keyboard overlay to explain the shortcut (enable or disable caps lock).">
-    Toggle caps lock
+    Caps Lock
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_CHROMEVOX_SPOKEN_FEEDBACK" desc="The text in the keyboard overlay to explain the shortcut (enable or disable spoken feedback).">
-    Toggle ChromeVox (spoken feedback)
+    ChromeVox (spoken feedback)
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_PROJECTION_TOUCH_HUD" desc="The text in the keyboard overlay to explain the shortcut.">
-    Toggle projection touch HUD
+    Projection touch HUD
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_SPEECH_INPUT" desc="The text in the keyboard overlay to explain the shortcut (start or stop speech input).">
-    Toggle speech input
+    Speech input
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_UNDO" desc="The text in the keyboard overlay to explain the shortcut.">
     Undo
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_VIEW_KEYBOARD_OVERLAY" desc="The text in the keyboard overlay to explain the shortcut.">
-    View keyboard overlay
+    Keyboard overlay
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_VIEW_SOURCE" desc="The text in the keyboard overlay to explain the shortcut.">
     View source
@@ -5052,9 +5061,6 @@ Battery full
   <message name="IDS_LOGIN_CONNECTING_INDICATOR_TEXT" desc="A message to show telling the user that the device is attempting to re-connect to the network.">
     Connecting and verifying<ph name="ANIMATED_ELLIPSIS">$1<ex>...</ex></ph>
   </message>
-  <message name="IDS_LOGIN_CONSUMER_MANAGEMENT_ENROLLMENT" desc="A message to show at the signin page when consumer management enrollment is in progress.">
-    The owner must sign in to complete enrollment with Google Device Manager.
-  </message>
 
   <!-- Idle warning dialog -->
   <message name="IDS_IDLE_WARNING_TITLE" desc="Title of the warning dialog shown when the user becomes idle and is about to get logged out.">
@@ -5081,8 +5087,44 @@ Battery full
   <message name="IDS_KIOSK_APP_ERROR_USER_CANCEL" desc="Error message used when a kiosk app launch is canceled by user.">
     Kiosk application launch canceled.
   </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_IN_PROGRESS" desc="Message shown on screen when the system is updating kiosk apps from usb stick.">
+    Kiosk applications are being updated from usb stick, please wait. Do not remove the usb stick.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_NO_UPDATES" desc="Error message for no external extensions to update.">
+    No kiosk apps with newer version are found on the usb stick, nothing to update. Please remove the usb stick.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_INVALID_MANIFEST" desc="Error message for invalid external update manifest file from usb stick.">
+    Found invalid kiosk external update manifest file on the usb stick, failed to update kiosk apps. Please remove the usb stick.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_COMPLETE" desc="Message shown on screen when the system completes updating kiosk apps from usb stick.">
+    Kiosk app updating from usb stick is completed. Please remove the usb stick from the device.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_SUCCESSFUL_UPDATED_APPS" desc="Message shown for successfully updated kiosk apps.">
+    The following kiosk apps have been updated, please reboot the device to complete the update process: <ph name="updated_apps">$1<ex>PrintApp</ex></ph>.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_FAILED_UPDATED_APPS" desc="Message shown for failed updated kiosk apps.">
+    The following kiosk apps have been failed for updating:
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_BAD_CRX" desc="Error message for crx file unpacking failure.">
+    Bad crx file, unpacking failed.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_SAME_OR_LOWER_APP_VERSION" desc="Error message for external extension is the same or lower version comparing to the existing one.">
+    External extension is at the same or lower version comparing to the existing one.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_REQUIRE_HIGHER_BROWSER_VERSION" desc="Error message for external extension requires higher version of chrome to be installed.">
+    The external extension requires chrome version <ph name="MINIMUM_CHROME_VERSION">$1<ex>1.0.0</ex></ph> or greater to be installed.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_CANNOT_INSTALL_IN_LOCAL_CACHE" desc="Error message for not being able to install kiosk external crx file in local cache.">
+    Can't install <ph name="EXTERNAL_CRX_FILE">$1<ex>/media/usb/app_v2.crx</ex></ph> in local cache.
+  </message>
+  <message name="IDS_KIOSK_EXTERNAL_UPDATE_FAILED_COPY_CRX_TO_TEMP" desc="Error message for not being able to copy external crx file to a temp file.">
+    Can't copy external crx file to <ph name="TEMP_CRX_FILE">$1<ex>/tmp/kiosk_update/app.crx</ex></ph>.
+  </message>
 
   <!-- About Chrome page -->
+  <message name="IDS_UPGRADE_BUTTON" desc="The button label to check for updates and apply (download and install) if found">
+    Check for and apply updates
+  </message>
   <message name="IDS_UPGRADE_OFFLINE" desc="Status label: Currently offline">
     You are currently offline.
   </message>
@@ -5097,10 +5139,10 @@ Battery full
   </message>
 
   <!-- Genius App -->
-  <message name="IDS_GENIUS_APP_NAME" desc="Name of the genius app in the app launcher">
+  <message name="IDS_GENIUS_APP_NAME" desc="Name of the genius app in the app shelf">
     Get Help
   </message>
-  <message name="IDS_GENIUS_APP_DESCRIPTION" desc="Description of the genius app in the app launcher">
+  <message name="IDS_GENIUS_APP_DESCRIPTION" desc="Description of the genius app in the app shelf">
     Get help with your Chrome device.
   </message>
   <message name="IDS_FILEMANAGER_APP_NAME" desc="Name for the File Manager app.">
@@ -5444,7 +5486,7 @@ All users must sign out to continue.
     Offline
   </message>
 
-  <!-- Strings for the new-style OAuth-based enterprise enrollment page -->
+  <!-- Strings for the "Chromebox for meeting" OOBE UI. -->
   <message name="IDS_ENTERPRISE_DEVICE_REQUISITION_PROMPT_CANCEL" desc="Cancel button text in the device requisition poup.">
     Cancel
   </message>
@@ -5460,7 +5502,113 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_DEVICE_REQUISITION_SHARK_PROMPT_TEXT" desc="Prompt shown in the device requisition shark prompt popup.">
     Are you sure you want to set up this device as a "Shark"?
   </message>
+  <message name="IDS_PAIRING_CONTROLLER_WELCOME" desc="Message shown on 'Chromebox for meetings' controller in the beginning of the setup process.">
+    Welcome to Chromebox for meeting
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_SEARCHING" desc="Message shown on 'Chromebox for meetings' controller when it is searching for host devices.">
+    Searching for nearby Chromeboxes...
+  </message>
+  <message name="IDS_PAIRING_NEED_HELP" desc="Text on the button launching help article about the 'Chromebox for meetings' setup process.">
+    Need help?
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_TROUBLE_CONNECTING" desc="Title of the the dialog giving an advice on how to improve a connection between a host and a controller during the 'Chromebox for meeting' setup process.">
+    Trouble connecting?
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONNECTING_ADVICE" desc="Text in the dialog giving an advice on how to improve a connection between a host and a controller during the 'Chromebox for meeting' setup process.">
+    Please make sure that your Hotrod device is turned on and connected to a TV.
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_ADVICE_GOT_IT" desc="Text on the confirmation button of the dialog giving an advice on how to improve a connection between a host and a controller during the 'Chromebox for meeting' setup process.">
+    OK, got it
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_SELECT_TITLE" desc="Title of the list of nearby 'Chromebox for meeting' devices, that is shown on a controller device during a setup process.">
+    Select a Chromebox to connect to
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONNECT" desc="Text on the button initiating a connection to the choosen device. After a user pressed the button, text changes to 'Connecting...'.">
+    Connect
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONNECTING" desc="Text on the button initiating a connection to the choosen device, after a user pressed it. The initial text is 'Connect'.">
+    Connecting...
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONFIRMATION_TITLE" desc="Title of the page showing the confirmation code on a controller's screen during the 'Chromebox for meeting' setup process.">
+    Pair with Chromebox
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONFIRMATION_QUESTION" desc="Text that is shown near 6-digit confirmation code on a controller's screen during the 'Chromebox for meeting' setup process.">
+    Does this code appear on your Chromebox screen?
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_REJECT_CODE" desc="Text on button, pressing which user reports that he doesn't see confirmation code on host screen.">
+    No, I don't see it
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_ACCEPT_CODE" desc="Text on button, pressing which user reports that he sees confirmation code on host screen and code is correct.">
+    Yes, I see it
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_UPDATE_TITLE" desc="Title of the controller's update page of the 'Chromebox for meeting' setup process.">
+    Updating Chromebox
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_UPDATE_TEXT" desc="Text on the controller's update page of the 'Chromebox for meeting' setup process.">
+    In order to bring you the latest features, your Chromebox needs to update.
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONNECTION_LOST_TITLE" desc="Title of the controller page which says that connection with host was lost during the 'Chromebox for meeting' setup process.">
+    Connection to Chromebox lost
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONNECTION_LOST_TEXT" desc="Text on the controller page which says that connection with host was lost during the 'Chromebox for meeting' setup process.">
+    Lost connection to your Chromebox. Please move closer, or check your device while we try to reconnect.
+  </message>
+  <message name="IDS_PAIRING_ENROLL_TITLE" desc="Title of the enroll page of the 'Chromebox for meeting' setup process.">
+    Enroll in your organization
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_ENROLL_TEXT_1" desc="First paragraph of text shown on the controller's enroll page of the 'Chromebox for meeting' setup process. Second paragraph is: 'This will only happen once, and your credentials will not be stored.'">
+    Chromebox for meetings needs to know what domain it belongs to. This will require you to sign in to your account.
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_ENROLL_TEXT_2" desc="Second paragraph of text shown on the controller's enroll page of the 'Chromebox for meeting' setup process. First paragraph is: 'Chromebox for meetings needs to know what domain it belongs to. This will require you to sign in to your account.'">
+    This will only happen once, and your credentials will not be stored.
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONTINUE" desc="Text on buttons leading to the next step of the 'Chromebox for meeting' setup process.">
+    Continue
+  </message>
+  <message name="IDS_PAIRING_ENROLLMENT_IN_PROGRESS" desc="Message shown on enroll screens of the 'Chromebox for meeting' setup process.">
+    Enrolling in <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="DOMAIN_NAME">$1<ex>example.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph>...
+  </message>
+  <message name="IDS_PAIRING_ENROLLMENT_ERROR_TITLE" desc="Title of the page shown when enrollment attempt is failed during the 'Chromebox for meeting' setup process.">
+    Unable to enroll
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_ENROLLMENT_ERROR_HOST_RESTARTS" desc="Text on the controller's page shown when enrollment attempt is failed during the 'Chromebox for meeting' setup process.">
+    Please wait while your Chromebox restarts...
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_SUCCESS_TITLE" desc="Title of the final controller's page shown when the 'Chromebox for meeting' setup process is finished.">
+    Success!
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_SUCCESS_TEXT" desc="Text on the final controller's page shown when the 'Chromebox for meeting' setup process is finished.">
+    <ph name="DEVICE_NAME">$1<ex>Chromebox-01</ex></ph> will now appear in the Admin Console
+  </message>
+  <message name="IDS_PAIRING_CONTROLLER_CONTINUE_TO_HANGOUTS" desc="Text on the button, shown on the final controller's page, displayed when the 'Chromebox for meeting' setup process is finished.">
+    Continue to Hangouts
+  </message>
+  <message name="IDS_PAIRING_HOST_WELCOME_TITLE" desc="Title of the host's welcome page of the 'Chromebox for meeting' setup process.">
+    Welcome to Chromebox for meetings!
+  </message>
+  <message name="IDS_PAIRING_HOST_WELCOME_TEXT" desc="Text on the host's welcome page of the 'Chromebox for meeting' setup process.">
+    Turn on your touch controller to set me up
+  </message>
+  <message name="IDS_PAIRING_HOST_CONFIRMATION_TITLE" desc="Title of the host's confirmation page of the 'Chromebox for meeting' setup process. 6-digit confirmation code is displayed below.">
+    Pair with a controller
+  </message>
+  <message name="IDS_PAIRING_HOST_UPDATING_TITLE" desc="Title of the host's update page of the 'Chromebox for meeting' setup process.">
+    Updating Chromebox...
+  </message>
+  <message name="IDS_PAIRING_HOST_UPDATING_TEXT" desc="Update progress shown on the host's update page of the 'Chromebox for meeting' setup process.">
+    <ph name="DOWNLOADED_AMOUNT_MB">$1<ex>13.7</ex></ph> MB / <ph name="TOTAL_AMOUNT_MB">$2<ex>23</ex></ph> MB downloaded
+  </message>
+  <message name="IDS_PAIRING_HOST_DONE_TITLE" desc="Title of the final host's page shown when the 'Chromebox for meeting' setup process is finished.">
+    Congratulations
+  </message>
+  <message name="IDS_PAIRING_HOST_DONE_TEXT" desc="Title of the final host's page shown when the 'Chromebox for meeting' setup process is finished.">
+    You're all set to continue on to Hangouts
+  </message>
+  <message name="IDS_PAIRING_HOST_EROLLMENT_ERROR_NEEDS_RESTART" desc="Text on the host's page of the 'Chromebox for meeting' setup process shown when enrollment attempt is failed.">
+    Chromebox needs to restart...
+  </message>
 
+  <!-- Strings for the le OAuth-based enterprise enrollment page -->
   <message name="IDS_ENTERPRISE_ENROLLMENT_STATUS_REGISTRATION_FAILED" desc="Error message shown on the enrollment screen upon failed device registration.">
     Error when registering the device with the server: <ph name="CLIENT_ERROR">$1<ex>Failed to connect to the server</ex></ph>.
   </message>
@@ -5707,18 +5855,27 @@ All users must sign out to continue.
     Failed to submit NDEF:
   </message>
 
-  <!-- About the device control section in the settings page -->
+  <!-- About consumer management service -->
+  <message name="IDS_LOGIN_CONSUMER_MANAGEMENT_ENROLLMENT" desc="A message to show at the sign-in page when consumer management enrollment is in progress.">
+    The owner must sign in to complete enrollment with Google Device Manager.
+  </message>
   <message name="IDS_OPTIONS_DEVICE_CONTROL_SECTION_TITLE" desc="The title of the device control section in the settings page.">
     Device control
   </message>
-  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_DESCRIPTION" desc="Description of the consumer management enroll button in the settings page.">
+  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_DESCRIPTION" desc="Description of the consumer management service in the settings page.">
     Let Google help you remotely lock, erase, and locate your device.
   </message>
-  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_ENROLL_BUTTON" desc="The text of the consumer management enroll button in the settings page.">
+  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_ENROLL_BUTTON" desc="The text of the consumer management button in the settings page when the device is not enrolled.">
     Enroll
   </message>
-  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_UNENROLL_BUTTON" desc="The text of the consumer management unenroll button in the settings page.">
+  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_ENROLLING_BUTTON" desc="The text of the consumer management button in the settings page when enrollment is in progress.">
+    Enrolling...
+  </message>
+  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_UNENROLL_BUTTON" desc="The text of the consumer management button in the settings page when the device is enrolled.">
     Unenroll
+  </message>
+  <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_UNENROLLING_BUTTON" desc="The text of the consumer management button in the settings page when unenrollment is in progress.">
+    Unenrolling...
   </message>
   <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_OVERLAY" desc="The title of the consumer management overlay in the settings page used for both enrollment and unenrollment.">
     Consumer management
@@ -5740,6 +5897,24 @@ All users must sign out to continue.
   </message>
   <message name="IDS_OPTIONS_CONSUMER_MANAGEMENT_OVERLAY_UNENROLL" desc="The button text of the consumer management overlay in the settings page for unenrollment.">
     Unenroll and restart
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_ENROLLMENT_NOTIFICATION_TITLE" desc="The title of the desktop notification shown when consumer management enrollment is completed">
+    Enrolled
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_ENROLLMENT_NOTIFICATION_BODY" desc="The body of the desktop notification shown when consumer management enrollment is completed">
+    You can now lock this device remotely anytime on Chrome Manager.
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_ENROLLMENT_FAILURE_NOTIFICATION_TITLE" desc="The title of the desktop notification shown when consumer management enrollment fails">
+    Unable to enroll
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_ENROLLMENT_FAILURE_NOTIFICATION_BODY" desc="The body of the desktop notification shown when consumer management enrollment fails">
+    Enrollment in Google Device Manager was not successful.
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_NOTIFICATION_MODIFY_SETTINGS_BUTTON" desc="The label of the modify settings button on the desktop notification shown when consumer management enrollment or unenrollment is completed">
+    Modify settings
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_NOTIFICATION_TRY_AGAIN_BUTTON" desc="The label of the modify settings button on the desktop notification shown when consumer management enrollment or unenrollment fails">
+    Try again
   </message>
 
   <!-- Set time/date UI display strings -->

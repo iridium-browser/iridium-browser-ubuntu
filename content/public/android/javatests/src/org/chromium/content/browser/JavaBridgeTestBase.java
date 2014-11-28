@@ -6,6 +6,8 @@ package org.chromium.content.browser;
 
 import junit.framework.Assert;
 
+import org.chromium.content_public.browser.LoadUrlParams;
+
 /**
  * Common functionality for testing the Java Bridge.
  */
@@ -41,8 +43,8 @@ public class JavaBridgeTestBase extends ContentViewTestBase {
                 // converted to a string and used as the new document for the
                 // frame. We don't want this behaviour, so wrap the script in
                 // an anonymous function.
-                getContentViewCore().loadUrl(new LoadUrlParams(
-                        "javascript:(function() { " + script + " })()"));
+                getContentViewCore().getWebContents().getNavigationController().loadUrl(
+                        new LoadUrlParams("javascript:(function() { " + script + " })()"));
             }
         });
     }

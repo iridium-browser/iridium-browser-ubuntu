@@ -7,8 +7,6 @@
 #include "base/i18n/case_conversion.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "grit/ui_resources.h"
-#include "grit/ui_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
@@ -18,6 +16,8 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/native_theme/common_theme.h"
+#include "ui/resources/grit/ui_resources.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -408,6 +408,19 @@ gfx::Size MenuItemView::GetPreferredSize() const {
   const MenuItemDimensions& dimensions(GetDimensions());
   return gfx::Size(dimensions.standard_width + dimensions.children_width,
                    dimensions.height);
+}
+
+int MenuItemView::GetHeightForWidth(int width) const {
+  // If this isn't a container, we can just use the preferred size's height.
+  if (!IsContainer())
+    return GetPreferredSize().height();
+
+  int height = child_at(0)->GetHeightForWidth(width);
+  if (!icon_view_ && GetRootMenuItem()->has_icons())
+    height = std::max(height, GetMenuConfig().check_height);
+  height += GetBottomMargin() + GetTopMargin();
+
+  return height;
 }
 
 const MenuItemView::MenuItemDimensions& MenuItemView::GetDimensions() const {

@@ -6,7 +6,7 @@
 
 #include <cstddef>
 
-#include "base/file_util.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -15,14 +15,13 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
-#include "chrome/browser/sync/glue/device_info.h"
-#include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/invalidation/invalidator_state.h"
 #include "components/invalidation/invalidator_storage.h"
 #include "components/invalidation/profile_invalidation_provider.h"
+#include "components/sync_driver/device_info.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/notification_service.h"
@@ -630,16 +629,6 @@ TEST_F(SyncBackendHostTest, NewlySupportedTypesWithPartialTypes) {
       enabled_types_).Empty());
 }
 
-// Ensure the device info tracker is initialized properly on startup.
-TEST_F(SyncBackendHostTest, InitializeDeviceInfo) {
-  ASSERT_EQ(NULL, backend_->GetSyncedDeviceTracker());
-
-  InitializeBackend(true);
-  const SyncedDeviceTracker* device_tracker =
-      backend_->GetSyncedDeviceTracker();
-  ASSERT_TRUE(device_tracker->ReadLocalDeviceInfo());
-}
-
 // Verify that downloading control types only downloads those types that do
 // not have initial sync ended set.
 TEST_F(SyncBackendHostTest, DownloadControlTypes) {
@@ -647,7 +636,7 @@ TEST_F(SyncBackendHostTest, DownloadControlTypes) {
   // Set sync manager behavior before passing it down. Experiments and device
   // info are new types without progress markers or initial sync ended, while
   // all other types have been fully downloaded and applied.
-  syncer::ModelTypeSet new_types(syncer::EXPERIMENTS, syncer::DEVICE_INFO);
+  syncer::ModelTypeSet new_types(syncer::EXPERIMENTS, syncer::NIGORI);
   syncer::ModelTypeSet old_types =
       Difference(enabled_types_, new_types);
   fake_manager_factory_->set_progress_marker_types(old_types);

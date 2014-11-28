@@ -7,10 +7,11 @@
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/strings/stringprintf.h"
+#include "cloud_print/gcp20/prototype/gcp20_switches.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
-#include "net/socket/tcp_listen_socket.h"
+#include "net/socket/tcp_server_socket.h"
 #include "url/gurl.h"
 
 namespace {
@@ -105,10 +106,15 @@ bool PrivetHttpServer::Start(uint16 port) {
   if (server_)
     return true;
 
-  net::TCPListenSocketFactory factory("0.0.0.0", port);
-  server_ = new net::HttpServer(factory, this);
-  net::IPEndPoint address;
+  scoped_ptr<net::ServerSocket> server_socket(
+      new net::TCPServerSocket(NULL, net::NetLog::Source()));
+  std::string listen_address = "::";
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableIpv6))
+    listen_address = "0.0.0.0";
+  server_socket->ListenWithAddressAndPort(listen_address, port, 1);
+  server_.reset(new net::HttpServer(server_socket.Pass(), this));
 
+  net::IPEndPoint address;
   if (server_->GetLocalAddress(&address) != net::OK) {
     NOTREACHED() << "Cannot start HTTP server";
     return false;
@@ -122,7 +128,7 @@ void PrivetHttpServer::Shutdown() {
   if (!server_)
     return;
 
-  server_ = NULL;
+  server_.reset(NULL);
 }
 
 void PrivetHttpServer::OnHttpRequest(int connection_id,
@@ -133,7 +139,7 @@ void PrivetHttpServer::OnHttpRequest(int connection_id,
   if (!ValidateRequestMethod(connection_id, url.path(), info.method))
     return;
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch("disable-x-token")) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableXTocken)) {
     net::HttpServerRequestInfo::HeadersMap::const_iterator iter =
         info.headers.find("x-privet-token");
     if (iter == info.headers.end()) {

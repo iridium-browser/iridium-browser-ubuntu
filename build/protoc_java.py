@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Generate java source files from protobufs
+"""Generate java source files from protobuf files.
 
 Usage:
     protoc_java.py {protoc} {proto_path} {java_out} {stamp_file} {proto_files}
@@ -30,20 +30,24 @@ def main(argv):
   protoc_path, proto_path, java_out, stamp_file = argv[1:5]
   proto_files = argv[5:]
 
-  # Delete all old sources
+  # Delete all old sources.
   if os.path.exists(java_out):
     shutil.rmtree(java_out)
 
-  # Create source directory
+  # Create source directory.
   os.makedirs(java_out)
 
-  # Generate Java files using protoc
+  # Specify arguments to the generator.
+  generator_args = ['optional_field_style=reftypes',
+                    'store_unknown_fields=true']
+  out_arg = '--javanano_out=' + ','.join(generator_args) + ':' + java_out
+
+  # Generate Java files using protoc.
   ret = subprocess.call(
-      [protoc_path, '--proto_path', proto_path, '--java_out', java_out]
-      + proto_files)
+      [protoc_path, '--proto_path', proto_path, out_arg] + proto_files)
 
   if ret == 0:
-    # Create a new stamp file
+    # Create a new stamp file.
     with file(stamp_file, 'a'):
       os.utime(stamp_file, None)
 

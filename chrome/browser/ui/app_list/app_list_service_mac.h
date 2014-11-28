@@ -7,9 +7,9 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "apps/app_shim/app_shim_handler_mac.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/apps/app_shim/app_shim_handler_mac.h"
 #include "chrome/browser/ui/app_list/app_list_service_impl.h"
 
 class AppListControllerDelegateImpl;
@@ -21,6 +21,10 @@ template <typename T> struct DefaultSingletonTraits;
 namespace gfx {
 class Display;
 class Point;
+}
+
+namespace test {
+class AppListServiceMacTestApi;
 }
 
 // AppListServiceMac manages global resources needed for the app list to
@@ -64,6 +68,9 @@ class AppListServiceMac : public AppListServiceImpl,
   virtual Profile* GetCurrentAppListProfile() OVERRIDE;
   virtual void CreateShortcut() OVERRIDE;
 
+  // AppListServiceImpl overrides:
+  virtual void DestroyAppList() OVERRIDE;
+
   // AppShimHandler overrides:
   virtual void OnShimLaunch(apps::AppShimHandler::Host* host,
                             apps::AppShimLaunchType launch_type,
@@ -77,6 +84,7 @@ class AppListServiceMac : public AppListServiceImpl,
   virtual void OnShimQuit(apps::AppShimHandler::Host* host) OVERRIDE;
 
  private:
+  friend class test::AppListServiceMacTestApi;
   friend struct DefaultSingletonTraits<AppListServiceMac>;
 
   AppListServiceMac();

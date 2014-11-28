@@ -64,6 +64,7 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   enum BufferFormat {
     UNKNOWN,
     RGBA_8888,
+    RGBX_8888,
     RGB_888,
   };
 
@@ -88,6 +89,12 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // platform must support creation of SurfaceOzoneEGL from the GPU process
   // using only the handle contained in gfx::AcceleratedWidget.
   virtual scoped_ptr<SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
+      gfx::AcceleratedWidget widget);
+
+  // Create an EGL surface that isn't backed by any buffers, and is used
+  // for overlay-only displays. This will return NULL if this mode is
+  // not supported.
+  virtual scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
       gfx::AcceleratedWidget widget);
 
   // Create SurfaceOzoneCanvas for the specified gfx::AcceleratedWidget.

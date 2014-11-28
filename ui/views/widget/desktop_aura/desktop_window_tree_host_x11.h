@@ -146,6 +146,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   virtual void OnNativeWidgetBlur() OVERRIDE;
   virtual bool IsAnimatingClosed() const OVERRIDE;
   virtual bool IsTranslucentWindowOpacitySupported() const OVERRIDE;
+  virtual void SizeConstraintsChanged() OVERRIDE;
 
   // Overridden from aura::WindowTreeHost:
   virtual ui::EventSource* GetEventSource() OVERRIDE;
@@ -239,8 +240,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
 
   void DelayedResize(const gfx::Size& size);
 
-  base::WeakPtrFactory<DesktopWindowTreeHostX11> close_widget_factory_;
-
   // X11 things
   // The display and the native X window hosting the root window.
   XDisplay* xdisplay_;
@@ -285,6 +284,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
 
   // True if the window has title-bar / borders provided by the window manager.
   bool use_native_frame_;
+
+  // True if a Maximize() call should be done after mapping the window.
+  bool should_maximize_after_map_;
 
   // Whether we used an ARGB visual for our window.
   bool use_argb_visual_;
@@ -335,6 +337,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   bool urgency_hint_set_;
 
   base::CancelableCallback<void()> delayed_resize_task_;
+
+  base::WeakPtrFactory<DesktopWindowTreeHostX11> close_widget_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopWindowTreeHostX11);
 };

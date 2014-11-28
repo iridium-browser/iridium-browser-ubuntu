@@ -90,28 +90,40 @@ def TracerMain_(log, storage_path, backend_name, device_id, pid, interval,
     completion = 80 * i / count
     log.put((completion, 'Dumping trace %d of %d' % (i, count)))
     archive.StartNewSnapshot()
-    mmaps = process.DumpMemoryMaps()
-    log.put((completion, 'Dumped %d memory maps' % len(mmaps)))
-    archive.StoreMemMaps(mmaps)
-    if trace_native_heap:
-      nheap = process.DumpNativeHeap()
-      log.put((completion, 'Dumped %d native allocs' % len(nheap.allocations)))
-      archive.StoreNativeHeap(nheap)
-      heaps_to_symbolize += [nheap]
+    # Freeze the process, so that the mmaps and the heap dump are consistent.
+    process.Freeze()
+    try:
+      if trace_native_heap:
+        nheap = process.DumpNativeHeap()
+        log.put((completion,
+                 'Dumped %d native allocations' % len(nheap.allocations)))
+
+      # TODO(primiano): memdump has the bad habit of sending SIGCONT to the
+      # process. Fix that, so we are the only one in charge of controlling it.
+      mmaps = process.DumpMemoryMaps()
+      log.put((completion, 'Dumped %d memory maps' % len(mmaps)))
+      archive.StoreMemMaps(mmaps)
+
+      if trace_native_heap:
+        nheap.RelativizeStackFrames(mmaps)
+        nheap.CalculateResidentSize(mmaps)
+        archive.StoreNativeHeap(nheap)
+        heaps_to_symbolize += [nheap]
+    finally:
+      process.Unfreeze()
 
     if i < count:
       time.sleep(interval)
 
-  log.put((90, 'Symbolizing'))
-  symbols = backend.ExtractSymbols(heaps_to_symbolize,
-                                   device.settings['native_symbol_paths'] or '')
-
-  expected_symbols_count = len(set.union(
-      *[set(x.stack_frames.iterkeys()) for x in heaps_to_symbolize]))
-  log.put((99, 'Symbolization complete. Got %d symbols (%.1f%%).' % (
-      len(symbols), 100.0 * len(symbols) / expected_symbols_count)))
-
-  archive.StoreSymbols(symbols)
+  if heaps_to_symbolize:
+    log.put((90, 'Symbolizing'))
+    symbols = backend.ExtractSymbols(
+        heaps_to_symbolize, device.settings['native_symbol_paths'] or '')
+    expected_symbols_count = len(set.union(
+        *[set(x.stack_frames.iterkeys()) for x in heaps_to_symbolize]))
+    log.put((99, 'Symbolization complete. Got %d symbols (%.1f%%).' % (
+        len(symbols), 100.0 * len(symbols) / expected_symbols_count)))
+    archive.StoreSymbols(symbols)
 
   log.put((100, 'Trace complete.'))
   return 0

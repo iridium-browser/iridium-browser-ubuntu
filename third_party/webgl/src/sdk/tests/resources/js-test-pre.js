@@ -86,6 +86,19 @@ function notifyFinishedToHarness() {
   }
 }
 
+function _logToConsole(msg)
+{
+    if (window.console)
+      window.console.log(msg);
+}
+
+var _jsTestPreVerboseLogging = false;
+
+function enableJSTestPreVerboseLogging()
+{
+    _jsTestPreVerboseLogging = true;
+}
+
 function description(msg)
 {
     initTestingHarness();
@@ -100,13 +113,24 @@ function description(msg)
         description.replaceChild(span, description.firstChild);
     else
         description.appendChild(span);
+    if (_jsTestPreVerboseLogging) {
+        _logToConsole(msg);
+    }
+}
+
+function _addSpan(contents)
+{
+    var span = document.createElement("span");
+    document.getElementById("console").appendChild(span); // insert it first so XHTML knows the namespace
+    span.innerHTML = contents + '<br />';
 }
 
 function debug(msg)
 {
-    var span = document.createElement("span");
-    document.getElementById("console").appendChild(span); // insert it first so XHTML knows the namespace
-    span.innerHTML = msg + '<br />';
+    _addSpan(msg);
+    if (_jsTestPreVerboseLogging) {
+	_logToConsole(msg);
+    }
 }
 
 function escapeHTML(text)
@@ -117,13 +141,17 @@ function escapeHTML(text)
 function testPassed(msg)
 {
     reportTestResultsToHarness(true, msg);
-    debug('<span><span class="pass">PASS</span> ' + escapeHTML(msg) + '</span>');
+    _addSpan('<span><span class="pass">PASS</span> ' + escapeHTML(msg) + '</span>');
+    if (_jsTestPreVerboseLogging) {
+	_logToConsole('PASS ' + msg);
+    }
 }
 
 function testFailed(msg)
 {
     reportTestResultsToHarness(false, msg);
-    debug('<span><span class="fail">FAIL</span> ' + escapeHTML(msg) + '</span>');
+    _addSpan('<span><span class="fail">FAIL</span> ' + escapeHTML(msg) + '</span>');
+    _logToConsole('FAIL ' + msg);
 }
 
 function areArraysEqual(_a, _b)

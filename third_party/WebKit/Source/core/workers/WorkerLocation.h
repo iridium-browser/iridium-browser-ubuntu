@@ -39,6 +39,7 @@
 namespace blink {
 
 class WorkerLocation FINAL : public RefCountedWillBeGarbageCollectedFinalized<WorkerLocation>, public ScriptWrappable, public DOMURLUtilsReadOnly {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<WorkerLocation> create(const KURL& url)
     {
@@ -55,10 +56,8 @@ public:
     void trace(Visitor*) { }
 
 private:
-    explicit WorkerLocation(const KURL& url) : m_url(url)
-    {
-        ScriptWrappable::init(this);
-    }
+    explicit WorkerLocation(const KURL& url)
+        : m_url(url) { }
 
     KURL m_url;
 };

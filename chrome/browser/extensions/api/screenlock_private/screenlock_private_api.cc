@@ -4,41 +4,20 @@
 
 #include "chrome/browser/extensions/api/screenlock_private/screenlock_private_api.h"
 
-#include <vector>
-
 #include "base/lazy_instance.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/common/extensions/api/screenlock_private.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/image_loader.h"
-#include "ui/gfx/image/image.h"
 
 namespace screenlock = extensions::api::screenlock_private;
 
 namespace extensions {
 
 namespace {
-
-const char kNotLockedError[] = "Screen is not currently locked.";
-const char kInvalidIconError[] = "Invalid custom icon data.";
-
-ScreenlockBridge::LockHandler::AuthType ToLockHandlerAuthType(
-    screenlock::AuthType auth_type) {
-  switch (auth_type) {
-    case screenlock::AUTH_TYPE_OFFLINEPASSWORD:
-      return ScreenlockBridge::LockHandler::OFFLINE_PASSWORD;
-    case screenlock::AUTH_TYPE_NUMERICPIN:
-      return ScreenlockBridge::LockHandler::NUMERIC_PIN;
-    case screenlock::AUTH_TYPE_USERCLICK:
-      return ScreenlockBridge::LockHandler::USER_CLICK;
-    case screenlock::AUTH_TYPE_NONE:
-      break;
-  }
-  NOTREACHED();
-  return ScreenlockBridge::LockHandler::OFFLINE_PASSWORD;
-}
 
 screenlock::AuthType FromLockHandlerAuthType(
     ScreenlockBridge::LockHandler::AuthType auth_type) {
@@ -84,168 +63,21 @@ bool ScreenlockPrivateSetLockedFunction::RunAsync() {
   scoped_ptr<screenlock::SetLocked::Params> params(
       screenlock::SetLocked::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  if (params->locked)
-    ScreenlockBridge::Get()->Lock(GetProfile());
-  else
-    ScreenlockBridge::Get()->Unlock(GetProfile());
-  SendResponse(error_.empty());
-  return true;
-}
-
-ScreenlockPrivateShowMessageFunction::ScreenlockPrivateShowMessageFunction() {}
-
-ScreenlockPrivateShowMessageFunction::~ScreenlockPrivateShowMessageFunction() {}
-
-bool ScreenlockPrivateShowMessageFunction::RunAsync() {
-  scoped_ptr<screenlock::ShowMessage::Params> params(
-      screenlock::ShowMessage::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (locker)
-    locker->ShowBannerMessage(base::UTF8ToUTF16(params->message));
-  SendResponse(error_.empty());
-  return true;
-}
-
-ScreenlockPrivateShowCustomIconFunction::
-  ScreenlockPrivateShowCustomIconFunction() {}
-
-ScreenlockPrivateShowCustomIconFunction::
-  ~ScreenlockPrivateShowCustomIconFunction() {}
-
-bool ScreenlockPrivateShowCustomIconFunction::RunAsync() {
-  scoped_ptr<screenlock::ShowCustomIcon::Params> params(
-      screenlock::ShowCustomIcon::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (!locker) {
-    SetError(kNotLockedError);
-    return false;
-  }
-
-  const int kMaxButtonIconSize = 40;
-  bool has_scale_100P = false;
-  std::vector<extensions::ImageLoader::ImageRepresentation> icon_info;
-  for (size_t i = 0; i < params->icon.size(); ++i) {
-    ui::ScaleFactor scale_factor;
-    if (params->icon[i]->scale_factor == 1.) {
-      scale_factor = ui::SCALE_FACTOR_100P;
-    } else if (params->icon[i]->scale_factor == 2.) {
-      scale_factor = ui::SCALE_FACTOR_200P;
-    } else {
-      continue;
+  if (params->locked) {
+    if (extension()->id() == extension_misc::kEasyUnlockAppId &&
+        AppWindowRegistry::Get(browser_context())
+            ->GetAppWindowForAppAndKey(extension()->id(),
+                                       "easy_unlock_pairing")) {
+      // Mark the Easy Unlock behaviour on the lock screen as the one initiated
+      // by the Easy Unlock setup app as a trial one.
+      // TODO(tbarzic): Move this logic to a new easyUnlockPrivate function.
+      EasyUnlockService* service = EasyUnlockService::Get(GetProfile());
+      if (service)
+        service->SetTrialRun();
     }
-
-    ExtensionResource resource = extension()->GetResource(params->icon[i]->url);
-    if (resource.empty())
-      continue;
-
-    icon_info.push_back(
-        ImageLoader::ImageRepresentation(
-            resource,
-            ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
-            gfx::Size(kMaxButtonIconSize * params->icon[i]->scale_factor,
-                      kMaxButtonIconSize * params->icon[i]->scale_factor),
-            scale_factor));
-    if (scale_factor == ui::SCALE_FACTOR_100P)
-      has_scale_100P = true;
-  }
-
-  if (!has_scale_100P) {
-    SetError(kInvalidIconError);
-    return false;
-  }
-
-  extensions::ImageLoader* loader = extensions::ImageLoader::Get(GetProfile());
-  loader->LoadImagesAsync(
-      extension(),
-      icon_info,
-      base::Bind(&ScreenlockPrivateShowCustomIconFunction::OnImageLoaded,
-                 this));
-  return true;
-}
-
-void ScreenlockPrivateShowCustomIconFunction::OnImageLoaded(
-    const gfx::Image& image) {
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (!locker) {
-    SetError(kNotLockedError);
-    SendResponse(false);
-    return;
-  }
-
-  ScreenlockBridge::UserPodCustomIconOptions icon;
-  icon.SetIconAsImage(image);
-  locker->ShowUserPodCustomIcon(
-      ScreenlockBridge::GetAuthenticatedUserEmail(GetProfile()),
-      icon);
-  SendResponse(error_.empty());
-}
-
-ScreenlockPrivateHideCustomIconFunction::
-    ScreenlockPrivateHideCustomIconFunction() {
-}
-
-ScreenlockPrivateHideCustomIconFunction::
-    ~ScreenlockPrivateHideCustomIconFunction() {
-}
-
-bool ScreenlockPrivateHideCustomIconFunction::RunAsync() {
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (locker) {
-    locker->HideUserPodCustomIcon(
-        ScreenlockBridge::GetAuthenticatedUserEmail(GetProfile()));
+    ScreenlockBridge::Get()->Lock(GetProfile());
   } else {
-    SetError(kNotLockedError);
-  }
-  SendResponse(error_.empty());
-  return true;
-}
-
-ScreenlockPrivateSetAuthTypeFunction::ScreenlockPrivateSetAuthTypeFunction() {}
-
-ScreenlockPrivateSetAuthTypeFunction::~ScreenlockPrivateSetAuthTypeFunction() {}
-
-bool ScreenlockPrivateSetAuthTypeFunction::RunAsync() {
-  scoped_ptr<screenlock::SetAuthType::Params> params(
-      screenlock::SetAuthType::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (locker) {
-    std::string initial_value =
-        params->initial_value.get() ? *(params->initial_value.get()) : "";
-    locker->SetAuthType(
-        ScreenlockBridge::GetAuthenticatedUserEmail(GetProfile()),
-        ToLockHandlerAuthType(params->auth_type),
-        base::UTF8ToUTF16(initial_value));
-  } else {
-    SetError(kNotLockedError);
-  }
-  SendResponse(error_.empty());
-  return true;
-}
-
-ScreenlockPrivateGetAuthTypeFunction::ScreenlockPrivateGetAuthTypeFunction() {}
-
-ScreenlockPrivateGetAuthTypeFunction::~ScreenlockPrivateGetAuthTypeFunction() {}
-
-bool ScreenlockPrivateGetAuthTypeFunction::RunAsync() {
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (locker) {
-    ScreenlockBridge::LockHandler::AuthType auth_type = locker->GetAuthType(
-        ScreenlockBridge::GetAuthenticatedUserEmail(GetProfile()));
-    std::string auth_type_name =
-        screenlock::ToString(FromLockHandlerAuthType(auth_type));
-    SetResult(new base::StringValue(auth_type_name));
-  } else {
-    SetError(kNotLockedError);
+    ScreenlockBridge::Get()->Unlock(GetProfile());
   }
   SendResponse(error_.empty());
   return true;
@@ -257,23 +89,15 @@ ScreenlockPrivateAcceptAuthAttemptFunction::
 ScreenlockPrivateAcceptAuthAttemptFunction::
     ~ScreenlockPrivateAcceptAuthAttemptFunction() {}
 
-bool ScreenlockPrivateAcceptAuthAttemptFunction::RunAsync() {
+bool ScreenlockPrivateAcceptAuthAttemptFunction::RunSync() {
   scoped_ptr<screenlock::AcceptAuthAttempt::Params> params(
       screenlock::AcceptAuthAttempt::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  ScreenlockBridge::LockHandler* locker =
-      ScreenlockBridge::Get()->lock_handler();
-  if (locker) {
-    if (params->accept) {
-      locker->Unlock(ScreenlockBridge::GetAuthenticatedUserEmail(GetProfile()));
-    } else {
-      locker->EnableInput();
-    }
-  } else {
-    SetError(kNotLockedError);
-  }
-  SendResponse(error_.empty());
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  EasyUnlockService* service = EasyUnlockService::Get(profile);
+  if (service)
+    service->FinalizeUnlock(params->accept);
   return true;
 }
 
@@ -293,6 +117,10 @@ void ScreenlockPrivateEventRouter::OnScreenDidLock() {
 void ScreenlockPrivateEventRouter::OnScreenDidUnlock() {
   DispatchEvent(screenlock::OnChanged::kEventName,
       new base::FundamentalValue(false));
+}
+
+void ScreenlockPrivateEventRouter::OnFocusedUserChanged(
+    const std::string& user_id) {
 }
 
 void ScreenlockPrivateEventRouter::DispatchEvent(
@@ -319,16 +147,22 @@ void ScreenlockPrivateEventRouter::Shutdown() {
   ScreenlockBridge::Get()->RemoveObserver(this);
 }
 
-void ScreenlockPrivateEventRouter::OnAuthAttempted(
+bool ScreenlockPrivateEventRouter::OnAuthAttempted(
     ScreenlockBridge::LockHandler::AuthType auth_type,
     const std::string& value) {
+  extensions::EventRouter* router =
+      extensions::EventRouter::Get(browser_context_);
+  if (!router->HasEventListener(screenlock::OnAuthAttempted::kEventName))
+    return false;
+
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->AppendString(screenlock::ToString(FromLockHandlerAuthType(auth_type)));
   args->AppendString(value);
 
   scoped_ptr<extensions::Event> event(new extensions::Event(
       screenlock::OnAuthAttempted::kEventName, args.Pass()));
-  extensions::EventRouter::Get(browser_context_)->BroadcastEvent(event.Pass());
+  router->BroadcastEvent(event.Pass());
+  return true;
 }
 
 }  // namespace extensions
