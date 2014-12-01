@@ -21,10 +21,10 @@ index 4a6c475..6707923 100755
        # This allows crash dumping to a file without uploading the
        # dump, for testing purposes.  Breakpad does not recognise
 diff --git a/chrome/browser/background/background_mode_manager.cc b/chrome/browser/background/background_mode_manager.cc
-index d446626..6452a7c 100644
+index a6bb71b..3b06946 100644
 --- a/chrome/browser/background/background_mode_manager.cc
 +++ b/chrome/browser/background/background_mode_manager.cc
-@@ -278,7 +278,7 @@ void BackgroundModeManager::RegisterPrefs(PrefRegistrySimple* registry) {
+@@ -281,7 +281,7 @@ void BackgroundModeManager::RegisterPrefs(PrefRegistrySimple* registry) {
    registry->RegisterBooleanPref(prefs::kChromeCreatedLoginItem, false);
    registry->RegisterBooleanPref(prefs::kMigratedLoginItemPref, false);
  #endif
@@ -34,10 +34,10 @@ index d446626..6452a7c 100644
  
  
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 5890400..b188f46 100644
+index 3e15ef8..7e0b5dd 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -625,7 +625,7 @@ void ChromeContentBrowserClient::RegisterProfilePrefs(
+@@ -629,7 +629,7 @@ void ChromeContentBrowserClient::RegisterProfilePrefs(
        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
    registry->RegisterBooleanPref(
        prefs::kEnableHyperlinkAuditing,
@@ -47,7 +47,7 @@ index 5890400..b188f46 100644
    registry->RegisterListPref(
        prefs::kEnableDeprecatedWebPlatformFeatures,
 diff --git a/chrome/browser/chrome_process_finder_win.cc b/chrome/browser/chrome_process_finder_win.cc
-index 1599dac..792122d 100644
+index 5824824..c5e6ec0 100644
 --- a/chrome/browser/chrome_process_finder_win.cc
 +++ b/chrome/browser/chrome_process_finder_win.cc
 @@ -106,7 +106,7 @@ NotifyChromeResult AttemptToNotifyRunningChrome(HWND remote_window,
@@ -59,21 +59,21 @@ index 1599dac..792122d 100644
    DWORD process_id = 0;
    DWORD thread_id = GetWindowThreadProcessId(remote_window, &process_id);
    if (!thread_id || !process_id)
-diff --git a/chrome/browser/component_updater/component_updater_configurator.cc b/chrome/browser/component_updater/component_updater_configurator.cc
-index 3d403bb..3034ed0 100644
---- a/chrome/browser/component_updater/component_updater_configurator.cc
-+++ b/chrome/browser/component_updater/component_updater_configurator.cc
-@@ -44,7 +44,7 @@ extern const char kSwitchDisablePings[] = "disable-pings";
+diff --git a/chrome/browser/component_updater/chrome_component_updater_configurator.cc b/chrome/browser/component_updater/chrome_component_updater_configurator.cc
+index f2f6dae..ef64161 100644
+--- a/chrome/browser/component_updater/chrome_component_updater_configurator.cc
++++ b/chrome/browser/component_updater/chrome_component_updater_configurator.cc
+@@ -48,7 +48,7 @@ extern const char kSwitchDisablePings[] = "disable-pings";
  const char kSwitchUrlSource[] = "url-source";
  
  #define COMPONENT_UPDATER_SERVICE_ENDPOINT \
 -  "//clients2.google.com/service/update2"
 +  "//02.trk.iridiumbrowser.de/clients2.google.com/service/update2"
  
- // The default url for the v3 protocol service endpoint. Can be
- // overridden with --component-updater=url-source=someurl.
+ // The default URL for the v3 protocol service endpoint. In some cases, the
+ // component updater is allowed to fall back to and alternate URL source, if
 diff --git a/chrome/browser/content_settings/content_settings_default_provider.cc b/chrome/browser/content_settings/content_settings_default_provider.cc
-index 143b2c5..b17776a 100644
+index 7e80236..bebd8d4 100644
 --- a/chrome/browser/content_settings/content_settings_default_provider.cc
 +++ b/chrome/browser/content_settings/content_settings_default_provider.cc
 @@ -33,7 +33,7 @@ namespace {
@@ -86,7 +86,7 @@ index 143b2c5..b17776a 100644
    CONTENT_SETTING_ALLOW,    // CONTENT_SETTINGS_TYPE_JAVASCRIPT
    CONTENT_SETTING_ALLOW,    // CONTENT_SETTINGS_TYPE_PLUGINS
 diff --git a/chrome/browser/content_settings/cookie_settings.cc b/chrome/browser/content_settings/cookie_settings.cc
-index 2b162aa..cb98c4f 100644
+index 3bde74d..9dcbcca 100644
 --- a/chrome/browser/content_settings/cookie_settings.cc
 +++ b/chrome/browser/content_settings/cookie_settings.cc
 @@ -68,7 +68,7 @@ void CookieSettings::Factory::RegisterProfilePrefs(
@@ -112,10 +112,10 @@ index e2f42be..e0e27e1 100644
  // Mime type to create a directory.
  const char kFolderMimeType[] = "application/vnd.google-apps.folder";
 diff --git a/chrome/browser/extensions/extension_system_impl.cc b/chrome/browser/extensions/extension_system_impl.cc
-index 36f3894..2956270 100644
+index 0a91ca7..be83a99 100644
 --- a/chrome/browser/extensions/extension_system_impl.cc
 +++ b/chrome/browser/extensions/extension_system_impl.cc
-@@ -313,6 +313,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
+@@ -314,6 +314,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
    runtime_data_.reset(new RuntimeData(ExtensionRegistry::Get(profile_)));
  
    bool autoupdate_enabled = !profile_->IsGuestSession();
@@ -126,7 +126,7 @@ index 36f3894..2956270 100644
    if (!extensions_enabled)
      autoupdate_enabled = false;
 diff --git a/chrome/browser/first_run/first_run_internal_posix.cc b/chrome/browser/first_run/first_run_internal_posix.cc
-index 2cd4b61..3c26a91 100644
+index 683b937..d7ead91 100644
 --- a/chrome/browser/first_run/first_run_internal_posix.cc
 +++ b/chrome/browser/first_run/first_run_internal_posix.cc
 @@ -17,6 +17,7 @@
@@ -146,7 +146,7 @@ index 2cd4b61..3c26a91 100644
          prefs::kMetricsReportingEnabled, true);
    }
 diff --git a/chrome/browser/first_run/try_chrome_dialog_view.cc b/chrome/browser/first_run/try_chrome_dialog_view.cc
-index ff4bb0b..874a662 100644
+index d9d95b5..f00adae 100644
 --- a/chrome/browser/first_run/try_chrome_dialog_view.cc
 +++ b/chrome/browser/first_run/try_chrome_dialog_view.cc
 @@ -36,7 +36,7 @@
@@ -159,10 +159,10 @@ index ff4bb0b..874a662 100644
  enum ButtonTags {
    BT_NONE,
 diff --git a/chrome/browser/gpu/three_d_api_observer.cc b/chrome/browser/gpu/three_d_api_observer.cc
-index 4042257..8318b89 100644
+index 0f92631..a654db4 100644
 --- a/chrome/browser/gpu/three_d_api_observer.cc
 +++ b/chrome/browser/gpu/three_d_api_observer.cc
-@@ -146,7 +146,7 @@ base::string16 ThreeDAPIInfoBarDelegate::GetLinkText() const {
+@@ -147,7 +147,7 @@ base::string16 ThreeDAPIInfoBarDelegate::GetLinkText() const {
  bool ThreeDAPIInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
    InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
        content::OpenURLParams(
@@ -170,7 +170,7 @@ index 4042257..8318b89 100644
 +          GURL("https://137.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_webgl"),
            content::Referrer(),
            (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-           content::PAGE_TRANSITION_LINK, false));
+           ui::PAGE_TRANSITION_LINK, false));
 diff --git a/chrome/browser/history/web_history_service.cc b/chrome/browser/history/web_history_service.cc
 index 7f0a806..e68621d 100644
 --- a/chrome/browser/history/web_history_service.cc
@@ -193,10 +193,10 @@ index 7f0a806..e68621d 100644
  const char kPostDataMimeType[] = "text/plain";
  
 diff --git a/chrome/browser/infobars/insecure_content_infobar_delegate.cc b/chrome/browser/infobars/insecure_content_infobar_delegate.cc
-index b427c0c..198c180 100644
+index fa90ef46..7ef5c5c 100644
 --- a/chrome/browser/infobars/insecure_content_infobar_delegate.cc
 +++ b/chrome/browser/infobars/insecure_content_infobar_delegate.cc
-@@ -111,7 +111,7 @@ bool InsecureContentInfoBarDelegate::LinkClicked(
+@@ -112,7 +112,7 @@ bool InsecureContentInfoBarDelegate::LinkClicked(
      WindowOpenDisposition disposition) {
    InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
        content::OpenURLParams(
@@ -206,10 +206,10 @@ index b427c0c..198c180 100644
            content::Referrer(),
            (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
 diff --git a/chrome/browser/io_thread.cc b/chrome/browser/io_thread.cc
-index 3c462c7..7ce72ca 100644
+index ec04faf..d365c29 100644
 --- a/chrome/browser/io_thread.cc
 +++ b/chrome/browser/io_thread.cc
-@@ -208,10 +208,9 @@ scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
+@@ -209,10 +209,9 @@ scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
  #endif
  
    // Determine if we should disable IPv6 support.
@@ -223,7 +223,7 @@ index 3c462c7..7ce72ca 100644
      global_host_resolver->SetDefaultAddressFamily(net::ADDRESS_FAMILY_IPV4);
    }
 diff --git a/chrome/browser/media/webrtc_log_uploader.cc b/chrome/browser/media/webrtc_log_uploader.cc
-index 98b22c3..b2ae118 100644
+index 95dccc9..a132fa2 100644
 --- a/chrome/browser/media/webrtc_log_uploader.cc
 +++ b/chrome/browser/media/webrtc_log_uploader.cc
 @@ -29,7 +29,7 @@ const int kLogCountLimit = 5;
@@ -236,7 +236,7 @@ index 98b22c3..b2ae118 100644
  const char kMultipartBoundary[] =
      "----**--yradnuoBgoLtrapitluMklaTelgooG--**----";
 diff --git a/chrome/browser/metrics/variations/variations_service.cc b/chrome/browser/metrics/variations/variations_service.cc
-index 8a56747..e714c458 100644
+index 2bc0786..e57cce7 100644
 --- a/chrome/browser/metrics/variations/variations_service.cc
 +++ b/chrome/browser/metrics/variations/variations_service.cc
 @@ -54,7 +54,7 @@ namespace {
@@ -249,10 +249,10 @@ index 8a56747..e714c458 100644
  
  // TODO(mad): To be removed when we stop updating the NetworkTimeTracker.
 diff --git a/chrome/browser/nacl_host/nacl_infobar_delegate.cc b/chrome/browser/nacl_host/nacl_infobar_delegate.cc
-index e488865..783411f 100644
+index 2836dd3..bc8eec5 100644
 --- a/chrome/browser/nacl_host/nacl_infobar_delegate.cc
 +++ b/chrome/browser/nacl_host/nacl_infobar_delegate.cc
-@@ -52,7 +52,7 @@ base::string16 NaClInfoBarDelegate::GetLinkText() const {
+@@ -53,7 +53,7 @@ base::string16 NaClInfoBarDelegate::GetLinkText() const {
  bool NaClInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
    InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
        content::OpenURLParams(
@@ -260,9 +260,9 @@ index e488865..783411f 100644
 +          GURL("https://143.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_nacl"),
            content::Referrer(),
            (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-           content::PAGE_TRANSITION_LINK, false));
+           ui::PAGE_TRANSITION_LINK, false));
 diff --git a/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc b/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc
-index f666c87..001b5bf 100644
+index 5aef283..fca449c 100644
 --- a/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc
 +++ b/chrome/browser/net/chrome_fraudulent_certificate_reporter.cc
 @@ -24,7 +24,7 @@ namespace chrome_browser_net {
@@ -275,10 +275,10 @@ index f666c87..001b5bf 100644
  ChromeFraudulentCertificateReporter::ChromeFraudulentCertificateReporter(
      net::URLRequestContext* request_context)
 diff --git a/chrome/browser/net/net_pref_observer.cc b/chrome/browser/net/net_pref_observer.cc
-index ad14084..8fbc781 100644
+index 8046e4d..813b846 100644
 --- a/chrome/browser/net/net_pref_observer.cc
 +++ b/chrome/browser/net/net_pref_observer.cc
-@@ -51,7 +51,7 @@ void NetPrefObserver::RegisterProfilePrefs(
+@@ -41,7 +41,7 @@ void NetPrefObserver::RegisterProfilePrefs(
      user_prefs::PrefRegistrySyncable* registry) {
    registry->RegisterBooleanPref(
        prefs::kNetworkPredictionEnabled,
@@ -288,10 +288,10 @@ index ad14084..8fbc781 100644
    registry->RegisterBooleanPref(
        prefs::kDisableSpdy,
 diff --git a/chrome/browser/plugins/plugin_infobar_delegates.cc b/chrome/browser/plugins/plugin_infobar_delegates.cc
-index d9c99be..c86e5b9 100644
+index 947d077..9c6ef7d 100644
 --- a/chrome/browser/plugins/plugin_infobar_delegates.cc
 +++ b/chrome/browser/plugins/plugin_infobar_delegates.cc
-@@ -394,7 +394,7 @@ bool PluginInstallerInfoBarDelegate::LinkClicked(
+@@ -395,7 +395,7 @@ bool PluginInstallerInfoBarDelegate::LinkClicked(
    GURL url(plugin_metadata_->help_url());
    if (url.is_empty()) {
      url = GURL(
@@ -300,7 +300,7 @@ index d9c99be..c86e5b9 100644
    }
    InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
        content::OpenURLParams(
-@@ -523,8 +523,8 @@ bool PluginMetroModeInfoBarDelegate::LinkClicked(
+@@ -517,8 +517,8 @@ bool PluginMetroModeInfoBarDelegate::LinkClicked(
    InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
        content::OpenURLParams(
            GURL((mode_ == MISSING_PLUGIN) ?
@@ -310,12 +310,12 @@ index d9c99be..c86e5b9 100644
 +              "https://147.trk.iridiumbrowser.de/support.google.com/chrome/?p=ib_redirect_to_desktop"),
            content::Referrer(),
            (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-           content::PAGE_TRANSITION_LINK, false));
+           ui::PAGE_TRANSITION_LINK, false));
 diff --git a/chrome/browser/prerender/prerender_field_trial.cc b/chrome/browser/prerender/prerender_field_trial.cc
-index d89a31d..f6b5bea 100644
+index e47c767..9a3d64d 100644
 --- a/chrome/browser/prerender/prerender_field_trial.cc
 +++ b/chrome/browser/prerender/prerender_field_trial.cc
-@@ -69,7 +69,7 @@ const char kSkipDefaultNoPrerender[] = "SkipDefaultNoPrerender";
+@@ -74,7 +74,7 @@ const char kSkipDefaultNoPrerender[] = "SkipDefaultNoPrerender";
  const char kPrerenderServiceURLPrefixParameterName[] =
      "PrerenderServiceURLPrefix";
  const char kDefaultPrerenderServiceURLPrefix[] =
@@ -325,7 +325,7 @@ index d89a31d..f6b5bea 100644
  const int kMaxPrerenderServiceTimeoutMs = 10000;
  const int kDefaultPrerenderServiceTimeoutMs = 1000;
 diff --git a/chrome/browser/profiles/profile.cc b/chrome/browser/profiles/profile.cc
-index 5b6162d..1fec43e 100644
+index 86326aa..41b550a 100644
 --- a/chrome/browser/profiles/profile.cc
 +++ b/chrome/browser/profiles/profile.cc
 @@ -70,7 +70,7 @@ const char Profile::kProfileKey[] = "__PROFILE__";
@@ -356,23 +356,42 @@ index 52aa500..ddb9360 100644
  }
  
 diff --git a/chrome/browser/resources/options/reset_profile_settings_overlay.html b/chrome/browser/resources/options/reset_profile_settings_overlay.html
-index 98d5248..66bef84 100644
+index b92c9fd..dadaad0 100644
 --- a/chrome/browser/resources/options/reset_profile_settings_overlay.html
 +++ b/chrome/browser/resources/options/reset_profile_settings_overlay.html
-@@ -23,7 +23,7 @@
-   </div>
-   <div id="feedback-bar" class="gray-bottom-bar checkbox">
-     <span class="controlled-setting-with-label">
+@@ -24,7 +24,7 @@
+   <div id="feedback-bar"
+       class="gray-bottom-bar checkbox controlled-setting-with-label">
+     <label>
 -      <input id="send-settings" type="checkbox" checked>
 +      <input id="send-settings" type="checkbox">
        <span>
-         <label for="send-settings" i18n-content="resetProfileSettingsFeedback">
-         </label>
+         <span i18n-content="resetProfileSettingsFeedback"></span>
+         <span id="expand-feedback"></span>
+diff --git a/chrome/browser/safe_browsing/client_side_detection_service.cc b/chrome/browser/safe_browsing/client_side_detection_service.cc
+index 41e4ecc..d0d2f920 100644
+--- a/chrome/browser/safe_browsing/client_side_detection_service.cc
++++ b/chrome/browser/safe_browsing/client_side_detection_service.cc
+@@ -76,11 +76,11 @@ const int ClientSideDetectionService::kNegativeCacheIntervalDays = 1;
+ const int ClientSideDetectionService::kPositiveCacheIntervalMinutes = 30;
+ 
+ const char ClientSideDetectionService::kClientReportPhishingUrl[] =
+-    "https://sb-ssl.google.com/safebrowsing/clientreport/phishing";
++    "https://148.trk.iridiumbrowser.de/sb-ssl.google.com/safebrowsing/clientreport/phishing";
+ const char ClientSideDetectionService::kClientReportMalwareUrl[] =
+-    "https://sb-ssl.google.com/safebrowsing/clientreport/malware-check";
++    "https://149.trk.iridiumbrowser.de/sb-ssl.google.com/safebrowsing/clientreport/malware-check";
+ const char ClientSideDetectionService::kClientModelUrl[] =
+-    "https://ssl.gstatic.com/safebrowsing/csd/client_model_v5.pb";
++    "https://150.trk.iridiumbrowser.de/ssl.gstatic.com/safebrowsing/csd/client_model_v5.pb";
+ 
+ struct ClientSideDetectionService::ClientReportInfo {
+   ClientReportPhishingRequestCallback callback;
 diff --git a/chrome/browser/ui/browser_ui_prefs.cc b/chrome/browser/ui/browser_ui_prefs.cc
-index 447861e..357b00d 100644
+index a6b3491..8be45c3 100644
 --- a/chrome/browser/ui/browser_ui_prefs.cc
 +++ b/chrome/browser/ui/browser_ui_prefs.cc
-@@ -101,7 +101,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+@@ -102,7 +102,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
    registry->RegisterBooleanPref(
        prefs::kEnableTranslate,
@@ -381,7 +400,7 @@ index 447861e..357b00d 100644
        user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
    registry->RegisterStringPref(
        prefs::kCloudPrintEmail,
-@@ -113,7 +113,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+@@ -114,7 +114,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
    registry->RegisterBooleanPref(
        prefs::kCloudPrintSubmitEnabled,
@@ -390,7 +409,7 @@ index 447861e..357b00d 100644
        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
    registry->RegisterBooleanPref(
        prefs::kDevToolsDisabled,
-@@ -150,7 +150,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+@@ -155,7 +155,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
    registry->RegisterBooleanPref(
        prefs::kEnableDoNotTrack,
@@ -426,7 +445,7 @@ index 8999dd8..744b580 100644
  // The name of the preference that stores the promotion object.
  const char kPrefPromoObject[] = "promo";
 diff --git a/chrome/common/chrome_paths_linux.cc b/chrome/common/chrome_paths_linux.cc
-index 95dd086..51ed551 100644
+index 91348fe..6a9f02d 100644
 --- a/chrome/common/chrome_paths_linux.cc
 +++ b/chrome/common/chrome_paths_linux.cc
 @@ -64,11 +64,7 @@ bool GetDefaultUserDataDirectory(base::FilePath* result) {
@@ -456,27 +475,20 @@ index e197bd0..df1c1ba 100644
  
  #if defined(OS_WIN) || defined(OS_MACOSX)
 diff --git a/chrome/common/extensions/extension_constants.cc b/chrome/common/extensions/extension_constants.cc
-index c21de09..c959a85 100644
+index 9a5c3f5..5787e6b 100644
 --- a/chrome/common/extensions/extension_constants.cc
 +++ b/chrome/common/extensions/extension_constants.cc
-@@ -49,12 +49,12 @@ GURL GetWebstoreSearchPageUrl(const std::string& query) {
- }
+@@ -9,7 +9,7 @@ namespace extension_urls {
+ namespace {
  
  const char kGalleryUpdateHttpsUrl[] =
 -    "https://clients2.google.com/service/update2/crx";
 +    "https://05.trk.iridiumbrowser.de/clients2.google.com/service/update2/crx";
- // TODO(battre): Delete the HTTP URL once the blacklist is downloaded via HTTPS.
- const char kExtensionBlocklistUrlPrefix[] =
--    "http://www.gstatic.com/chrome/extensions/blacklist";
-+    "http://19.trk.iridiumbrowser.de/www.gstatic.com/chrome/extensions/blacklist";
- const char kExtensionBlocklistHttpsUrlPrefix[] =
--    "https://www.gstatic.com/chrome/extensions/blacklist";
-+    "https://20.trk.iridiumbrowser.de/www.gstatic.com/chrome/extensions/blacklist";
  
- GURL GetWebstoreUpdateUrl() {
-   CommandLine* cmdline = CommandLine::ForCurrentProcess();
+ }  // namespace
+ 
 diff --git a/components/autofill/core/browser/autofill_manager.cc b/components/autofill/core/browser/autofill_manager.cc
-index b8d824b..30480a8 100644
+index 48cd597..340bf1f 100644
 --- a/components/autofill/core/browser/autofill_manager.cc
 +++ b/components/autofill/core/browser/autofill_manager.cc
 @@ -192,7 +192,7 @@ void AutofillManager::RegisterProfilePrefs(
@@ -488,11 +500,11 @@ index b8d824b..30480a8 100644
        user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
  #if defined(OS_MACOSX)
    registry->RegisterBooleanPref(
-diff --git a/components/breakpad/app/breakpad_linux.cc b/components/breakpad/app/breakpad_linux.cc
-index df9d588..aa06d65 100644
---- a/components/breakpad/app/breakpad_linux.cc
-+++ b/components/breakpad/app/breakpad_linux.cc
-@@ -77,7 +77,7 @@ namespace breakpad {
+diff --git a/components/crash/app/breakpad_linux.cc b/components/crash/app/breakpad_linux.cc
+index 76f1d58..cc034df 100644
+--- a/components/crash/app/breakpad_linux.cc
++++ b/components/crash/app/breakpad_linux.cc
+@@ -78,7 +78,7 @@ namespace breakpad {
  namespace {
  
  #if !defined(OS_CHROMEOS)
@@ -501,10 +513,10 @@ index df9d588..aa06d65 100644
  #endif
  
  bool g_is_crash_reporter_enabled = false;
-diff --git a/components/breakpad/tools/crash_service.cc b/components/breakpad/tools/crash_service.cc
-index 425337f..4a88f69 100644
---- a/components/breakpad/tools/crash_service.cc
-+++ b/components/breakpad/tools/crash_service.cc
+diff --git a/components/crash/tools/crash_service.cc b/components/crash/tools/crash_service.cc
+index 48dcbc8..db8102d 100644
+--- a/components/crash/tools/crash_service.cc
++++ b/components/crash/tools/crash_service.cc
 @@ -24,7 +24,7 @@ namespace {
  
  const wchar_t kTestPipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
@@ -919,19 +931,6 @@ index 19f6ea5..c3aff1e 100644
      {
 -      "upload_url": "https://beacons.gvt2.com/domainreliability/upload"
 +      "upload_url": "https://68.trk.iridiumbrowser.de/beacons.gvt2.com/domainreliability/upload"
-     }
-   ],
-   "monitored_resources": [
-diff --git a/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json b/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json
-index 7881aab..dbb92f5 100644
---- a/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json
-+++ b/components/domain_reliability/baked_in_configs/redirector_gvt1_com.json
-@@ -4,7 +4,7 @@
-   "monitored_domain": "redirector.gvt1.com",
-   "collectors": [
-     {
--      "upload_url": "https://clients2.google.com/domainreliability/upload"
-+      "upload_url": "https://69.trk.iridiumbrowser.de/clients2.google.com/domainreliability/upload"
      }
    ],
    "monitored_resources": [
@@ -1514,10 +1513,10 @@ index fd70e91..cefe84b 100644
    ],
    "monitored_resources": [
 diff --git a/components/password_manager/core/browser/password_manager.cc b/components/password_manager/core/browser/password_manager.cc
-index e05dab3..7fb2903 100644
+index aa5744e..f1509c8 100644
 --- a/components/password_manager/core/browser/password_manager.cc
 +++ b/components/password_manager/core/browser/password_manager.cc
-@@ -79,7 +79,7 @@ void PasswordManager::RegisterProfilePrefs(
+@@ -95,7 +95,7 @@ void PasswordManager::RegisterProfilePrefs(
      user_prefs::PrefRegistrySyncable* registry) {
    registry->RegisterBooleanPref(
        prefs::kPasswordManagerSavingEnabled,
@@ -1527,7 +1526,7 @@ index e05dab3..7fb2903 100644
    registry->RegisterBooleanPref(
        prefs::kPasswordManagerAllowShowPasswords,
 diff --git a/components/policy/core/common/policy_loader_win.cc b/components/policy/core/common/policy_loader_win.cc
-index 2e2ddc8..31f6b97 100644
+index d26439d..a78cdb7 100644
 --- a/components/policy/core/common/policy_loader_win.cc
 +++ b/components/policy/core/common/policy_loader_win.cc
 @@ -69,7 +69,7 @@ const char kLegacyBrowserSupportExtensionId[] =
@@ -1540,10 +1539,10 @@ index 2e2ddc8..31f6b97 100644
  const char kBlockedExtensionPrefix[] = "[BLOCKED]";
  
 diff --git a/components/policy/resources/policy_templates.json b/components/policy/resources/policy_templates.json
-index 8e0945a..51e37ce 100644
+index acf1948..52357b2 100644
 --- a/components/policy/resources/policy_templates.json
 +++ b/components/policy/resources/policy_templates.json
-@@ -1648,7 +1648,7 @@
+@@ -1655,7 +1655,7 @@
              'dynamic_refresh': True,
              'per_profile': True,
            },
@@ -1552,7 +1551,7 @@ index 8e0945a..51e37ce 100644
            'id': 34,
            'caption': '''Configure the list of force-installed extensions''',
            'desc': '''Allows you to specify a list of extensions that will be installed silently, without user interaction.
-@@ -1657,7 +1657,7 @@
+@@ -1664,7 +1664,7 @@
  
            For each item, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retrieve the extension specified by the extension ID from the update service at the specified update URL and silently install it.
  
@@ -1561,7 +1560,7 @@ index 8e0945a..51e37ce 100644
  
            Users will be unable to uninstall extensions that are specified by this policy. If you remove an extension from this list, then it will be automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Extensions specified in this list are also automatically whitelisted for installation; the ExtensionsInstallBlacklist does not affect them.
  
-@@ -4192,7 +4192,7 @@
+@@ -4222,7 +4222,7 @@
        'features': {
          'dynamic_refresh': True,
        },
@@ -1571,7 +1570,7 @@ index 8e0945a..51e37ce 100644
        'caption': '''List of AppPack extensions''',
        'desc': '''This policy is active in retail mode only.
 diff --git a/components/search_engines/prepopulated_engines.json b/components/search_engines/prepopulated_engines.json
-index c4feb4b..4b8d65e 100644
+index bb99ad3..cb04124 100644
 --- a/components/search_engines/prepopulated_engines.json
 +++ b/components/search_engines/prepopulated_engines.json
 @@ -36,6 +36,17 @@
@@ -2173,7 +2172,7 @@ index 09704fd..d89497f 100644
  
    return true;
 diff --git a/content/browser/media/webrtc_identity_store.cc b/content/browser/media/webrtc_identity_store.cc
-index 4a02b71..3943b60 100644
+index 419cb96..4225acd 100644
 --- a/content/browser/media/webrtc_identity_store.cc
 +++ b/content/browser/media/webrtc_identity_store.cc
 @@ -192,13 +192,13 @@ base::Closure WebRTCIdentityStore::RequestIdentity(
@@ -2240,7 +2239,7 @@ index d74340e..7dd92b3 100644
  // Certificates made by CreateKeyAndSelfSignedCert and
  //  CreateKeyAndChannelIDEC will be signed using this digest algorithm.
 diff --git a/net/dns/host_resolver_impl.cc b/net/dns/host_resolver_impl.cc
-index 136941d..0f319d2 100644
+index 201bba4..23c1b81 100644
 --- a/net/dns/host_resolver_impl.cc
 +++ b/net/dns/host_resolver_impl.cc
 @@ -2158,8 +2158,8 @@ HostResolverImpl::Key HostResolverImpl::GetEffectiveKeyForRequest(
