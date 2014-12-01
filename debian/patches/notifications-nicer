@@ -1,6 +1,6 @@
 --- a/chrome/browser/background/background_mode_manager.cc
 +++ b/chrome/browser/background/background_mode_manager.cc
-@@ -278,7 +278,7 @@ void BackgroundModeManager::RegisterPref
+@@ -281,7 +281,7 @@ void BackgroundModeManager::RegisterPref
    registry->RegisterBooleanPref(prefs::kChromeCreatedLoginItem, false);
    registry->RegisterBooleanPref(prefs::kMigratedLoginItemPref, false);
  #endif

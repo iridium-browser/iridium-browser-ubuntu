@@ -3,11 +3,12 @@ Description: Never default to using the custom title bar. Chromium should
 
 --- a/ui/base/x/x11_util.cc
 +++ b/ui/base/x/x11_util.cc
-@@ -971,6 +971,7 @@ bool GetCustomFramePrefDefault() {
-   // Instead, we default to using system decorations for all WMs and
-   // special-case the ones where the custom frame should be used.
-   ui::WindowManagerName wm_type = GuessWindowManager();
+@@ -1015,6 +1015,8 @@ void SetWindowRole(XDisplay* display, XI
+ }
+ 
+ bool GetCustomFramePrefDefault() {
 +  return false;
-   return (wm_type == WM_BLACKBOX ||
-           wm_type == WM_COMPIZ ||
-           wm_type == WM_ENLIGHTENMENT ||
++
+   // If the window manager doesn't support enough of EWMH to tell us its name,
+   // assume that it doesn't want custom frames. For example, _NET_WM_MOVERESIZE
+   // is needed for frame-drag-initiated window movement.

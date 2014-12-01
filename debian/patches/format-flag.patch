@@ -4,7 +4,7 @@ Author: Chad Miller <chad.miller@canonical.com>
 
 --- a/build/common.gypi
 +++ b/build/common.gypi
-@@ -2953,9 +2953,6 @@
+@@ -3011,9 +3011,6 @@
                '-Wno-deprecated',
              ],
              'cflags': [

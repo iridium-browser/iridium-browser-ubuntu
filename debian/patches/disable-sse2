@@ -4,7 +4,7 @@ debian-bug: http://bugs.debian.org/750361
 
 --- a/build/common.gypi
 +++ b/build/common.gypi
-@@ -3654,8 +3654,6 @@
+@@ -3739,8 +3739,6 @@
                  # http://crbug.com/313032 for an example where this has "bit"
                  # us in the past.
                  'cflags': [
@@ -148,15 +148,6 @@ debian-bug: http://bugs.debian.org/750361
  #if defined(COMPILER_MSVC)
  #include <intrin.h>
  #else
-@@ -163,7 +163,7 @@ void InitializeCPUSpecificYUVConversions
-   g_empty_register_state_proc_ = EmptyRegisterStateStub;
- 
-   // Assembly code confuses MemorySanitizer.
--#if defined(ARCH_CPU_X86_FAMILY) && !defined(MEMORY_SANITIZER)
-+#if defined(__x86_64__) && !defined(MEMORY_SANITIZER)
-   base::CPU cpu;
-   if (cpu.has_mmx()) {
-     g_convert_yuv_to_rgb32_row_proc_ = ConvertYUVToRGB32Row_MMX;
 --- a/media/base/yuv_convert.h
 +++ b/media/base/yuv_convert.h
 @@ -15,7 +15,7 @@
@@ -170,7 +161,7 @@ debian-bug: http://bugs.debian.org/750361
  #endif
 --- a/media/base/yuv_convert_unittest.cc
 +++ b/media/base/yuv_convert_unittest.cc
-@@ -1037,6 +1037,6 @@ TEST(YUVConvertTest, LinearScaleYUVToRGB
+@@ -886,6 +886,6 @@ TEST(YUVConvertTest, LinearScaleYUVToRGB
  
  #endif  // defined(ARCH_CPU_X86_64)
  
@@ -218,7 +209,7 @@ debian-bug: http://bugs.debian.org/750361
  #include <emmintrin.h>
  #endif
  
-@@ -263,7 +263,7 @@ void SincResampler::process(AudioSourceP
+@@ -261,7 +261,7 @@ void SincResampler::process(AudioSourceP
              {
                  float input;
  

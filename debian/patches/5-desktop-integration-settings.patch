@@ -1,6 +1,6 @@
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -7706,6 +7706,35 @@ Keep your key file in a safe place. You
+@@ -7676,6 +7676,35 @@ Keep your key file in a safe place. You
          Reload
        </message>
  
@@ -36,7 +36,7 @@
        <!-- Mac and ChromeOS users do not close their browser. Mac users quit it and ChromeOS users log out. -->
        <if expr="not is_macosx and not chromeos">
          <message name="IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is closed.">
-@@ -11814,6 +11843,9 @@ Some features may be unavailable.  Pleas
+@@ -11835,6 +11864,9 @@ Some features may be unavailable.  Pleas
        <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT">
          Web content
        </message>
@@ -48,7 +48,7 @@
        </message>
 --- a/chrome/browser/resources/options/browser_options.html
 +++ b/chrome/browser/resources/options/browser_options.html
-@@ -483,6 +483,20 @@
+@@ -467,6 +467,20 @@
      </div>
    </section>
  </if>  <!-- chromeos -->
@@ -68,10 +68,10 @@
 +
    <section id="passwords-and-autofill-section">
      <h3 i18n-content="passwordsAndAutofillGroupName"></h3>
-     <div class="checkbox">
+     <div class="checkbox controlled-setting-with-label">
 --- a/chrome/browser/resources/options/browser_options.js
 +++ b/chrome/browser/resources/options/browser_options.js
-@@ -532,6 +532,23 @@ cr.define('options', function() {
+@@ -554,6 +554,23 @@ cr.define('options', function() {
              [String(event.target.options[event.target.selectedIndex].value)]);
        };
  
@@ -95,7 +95,7 @@
        // Languages section.
        var showLanguageOptions = function(event) {
          PageManager.showPageByName('languages');
-@@ -1521,6 +1538,24 @@ cr.define('options', function() {
+@@ -1552,6 +1569,24 @@ cr.define('options', function() {
      },
  
      /**
@@ -120,15 +120,15 @@
       * Set the checked state of the metrics reporting checkbox.
       * @private
       */
-@@ -1926,6 +1961,7 @@ cr.define('options', function() {
-   [
+@@ -1966,6 +2001,7 @@ cr.define('options', function() {
+   cr.makePublic(BrowserOptions, [
      'addBluetoothDevice',
      'deleteCurrentProfile',
 +    'disableDesktopIntegration',
      'enableCertificateButton',
+     'enableDisplayButton',
      'enableFactoryResetSection',
-     'getCurrentProfile',
-@@ -1943,6 +1979,7 @@ cr.define('options', function() {
+@@ -1984,6 +2020,7 @@ cr.define('options', function() {
      'setNativeThemeButtonEnabled',
      'setNetworkPredictionValue',
      'setHighContrastCheckboxState',
@@ -532,7 +532,7 @@
  <link rel="stylesheet" href="do_not_track_confirm_overlay.css">
  <link rel="stylesheet" href="easy_unlock_turn_off_overlay.css">
  <link rel="stylesheet" href="font_settings.css">
-@@ -119,6 +120,7 @@
+@@ -118,6 +119,7 @@
    <include src="home_page_overlay.html">
    <include src="hotword_confirm_overlay.html">
    <include src="import_data_overlay.html">
@@ -540,7 +540,7 @@
    <include src="language_options.html">
    <include src="manage_profile_overlay.html">
    <include src="password_manager.html">
-@@ -151,6 +153,7 @@
+@@ -149,6 +151,7 @@
    <include src="autofill_edit_creditcard_overlay.html">
    <include src="content_settings_exceptions_area.html">
    <include src="cookies_view.html">
@@ -559,7 +559,7 @@
  var CreateProfileOverlay = options.CreateProfileOverlay;
  var EditDictionaryOverlay = cr.IsMac ? null : options.EditDictionaryOverlay;
  var EasyUnlockTurnOffOverlay = options.EasyUnlockTurnOffOverlay;
-@@ -136,6 +138,17 @@ function load() {
+@@ -139,6 +141,17 @@ function load() {
    PageManager.registerOverlay(FontSettings.getInstance(),
                                BrowserOptions.getInstance(),
                                [$('fontSettingsCustomizeFontsButton')]);
@@ -590,7 +590,7 @@
  <include src="font_settings.js">
 --- a/chrome/browser/ui/webui/options/browser_options_handler.cc
 +++ b/chrome/browser/ui/webui/options/browser_options_handler.cc
-@@ -213,6 +213,8 @@ void BrowserOptionsHandler::GetLocalized
+@@ -207,6 +207,8 @@ void BrowserOptionsHandler::GetLocalized
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CERTIFICATES },
      { "advancedSectionTitleContent",
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT },
@@ -599,7 +599,7 @@
      { "advancedSectionTitleLanguages",
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_LANGUAGES },
      { "advancedSectionTitleNetwork",
-@@ -230,6 +232,10 @@ void BrowserOptionsHandler::GetLocalized
+@@ -224,6 +226,10 @@ void BrowserOptionsHandler::GetLocalized
      { "defaultFontSizeLabel", IDS_OPTIONS_DEFAULT_FONT_SIZE_LABEL },
      { "defaultSearchManageEngines", IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES },
      { "defaultZoomFactorLabel", IDS_OPTIONS_DEFAULT_ZOOM_LEVEL_LABEL },
@@ -610,7 +610,7 @@
  #if defined(OS_CHROMEOS)
      { "disableGData", IDS_OPTIONS_DISABLE_GDATA },
  #endif
-@@ -310,6 +316,8 @@ void BrowserOptionsHandler::GetLocalized
+@@ -300,6 +306,8 @@ void BrowserOptionsHandler::GetLocalized
      { "profilesManage", IDS_PROFILES_MANAGE_BUTTON_LABEL },
      { "profilesSupervisedDashboardTip",
        IDS_PROFILES_SUPERVISED_USER_DASHBOARD_TIP },
@@ -621,7 +621,7 @@
  #endif
 --- /dev/null
 +++ b/chrome/browser/ui/webui/options/desktop_integration_settings_handler.cc
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,273 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -642,7 +642,7 @@
 +#include "chrome/common/url_constants.h"
 +#include "content/public/browser/web_ui.h"
 +#include "grit/generated_resources.h"
-+#include "grit/webkit_resources.h"
++//#include "grit/webkit_resources.h"
 +#include "ui/base/l10n/l10n_util.h"
 +#include "ui/base/webui/web_ui_util.h"
 +
@@ -678,6 +678,7 @@
 +// OptionsPageUIHandler implementation:
 +void DesktopIntegrationSettingsHandler::GetLocalizedValues(
 +    base::DictionaryValue* localized_strings) {
++  LOG(INFO) << "GetLocalizedValues";
 +  DCHECK(localized_strings);
 +
 +  static OptionsStringResource resources[] = {
@@ -698,17 +699,20 @@
 +}
 +
 +void DesktopIntegrationSettingsHandler::InitializeHandler() {
++  LOG(INFO) << "InitializeHandler";
 +  if (!IsUnityWebappsInitialized()) {
 +    LoadUnityWebappsEntryPoint();
 +  }
 +}
 +
 +void DesktopIntegrationSettingsHandler::InitializePage() {
++  LOG(INFO) << "InitializePage";
 +  DCHECK(IsUnityWebappsInitialized());
 +  LoadIntegratedWebsitesData();
 +}
 +
 +void DesktopIntegrationSettingsHandler::RegisterMessages() {
++  LOG(INFO) << "RegisterMessages";
 +  web_ui()->RegisterMessageCallback(
 +      std::string("addIntegrationSite"),
 +      base::Bind(&DesktopIntegrationSettingsHandler::AddIntegrationSite,
@@ -728,6 +732,7 @@
 +}
 +
 +void DesktopIntegrationSettingsHandler::LoadUnityWebappsEntryPoint() {
++  LOG(INFO) << "LoadUnityWebappsEntryPoint";
 +  DCHECK(!IsUnityWebappsInitialized());
 +
 +  // TODO run on FILE thread
@@ -745,7 +750,8 @@
 +    if (handle) {
 +      LOG(INFO) << "Found libunitywebapps entry point:" << search_paths[i];
 +      break;
-+    }
++    } else
++      LOG(INFO) << "Found libunitywebapps entry point:" << search_paths[i];
 +  }
 +  if (!handle) {
 +    LOG(INFO) << "Could not load Unity Webapps entry point library";
@@ -792,6 +798,7 @@
 +}
 +
 +void DesktopIntegrationSettingsHandler::LoadIntegratedWebsitesData() {
++  LOG(INFO) << "LoadIntegratedWebsitesData";
 +  if (!IsUnityWebappsInitialized()) {
 +    web_ui()->CallJavascriptFunction(
 +        "BrowserOptions.disableDesktopIntegration");
@@ -809,6 +816,7 @@
 +
 +void DesktopIntegrationSettingsHandler::UpdateIntegratedWebsitesList(
 +    const base::ListValue* args) {
++  LOG(INFO) << "UpdateIntegratedWebsitesList";
 +  DCHECK(IsUnityWebappsInitialized());
 +
 +  // TODO move elsewhere
@@ -824,6 +832,7 @@
 +
 +void DesktopIntegrationSettingsHandler::SetDesktopIntegrationAllowed(
 +    const base::ListValue* args) {
++  LOG(INFO) << "SetDesktopIntegrationAllowed";
 +  DCHECK(IsUnityWebappsInitialized());
 +
 +  // TODO move elsewhere
@@ -843,6 +852,7 @@
 +
 +void DesktopIntegrationSettingsHandler::AddIntegrationSite(
 +    const base::ListValue* args) {
++  LOG(INFO) << "AddIntegrationSite";
 +  DCHECK(IsUnityWebappsInitialized());
 +
 +  // TODO move elsewhere
@@ -864,6 +874,7 @@
 +
 +void DesktopIntegrationSettingsHandler::RemoveIntegrationSite(
 +    const base::ListValue* args) {
++  LOG(INFO) << "RemoveIntegrationSite";
 +  DCHECK(IsUnityWebappsInitialized());
 +
 +  // TODO move elsewhere
@@ -965,7 +976,7 @@
 +#endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_DESKTOP_INTEGRATION_SETTINGS_HANDLER2_H_
 --- a/chrome/browser/ui/webui/options/options_ui.cc
 +++ b/chrome/browser/ui/webui/options/options_ui.cc
-@@ -101,6 +101,10 @@
+@@ -100,6 +100,10 @@
  #include "chrome/browser/ui/webui/options/geolocation_options_handler.h"
  #endif
  
@@ -976,7 +987,7 @@
  using content::RenderViewHost;
  
  namespace {
-@@ -275,6 +279,8 @@ OptionsUI::OptionsUI(content::WebUI* web
+@@ -274,6 +278,8 @@ OptionsUI::OptionsUI(content::WebUI* web
    AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
    AddOptionsPageUIHandler(localized_strings, new CreateProfileHandler());
    AddOptionsPageUIHandler(localized_strings, new EasyUnlockHandler());
@@ -987,7 +998,7 @@
    AddOptionsPageUIHandler(localized_strings, new GeolocationOptionsHandler());
 --- a/chrome/chrome_browser_ui.gypi
 +++ b/chrome/chrome_browser_ui.gypi
-@@ -1706,6 +1706,8 @@
+@@ -1707,6 +1707,8 @@
        'browser/ui/webui/options/core_options_handler.h',
        'browser/ui/webui/options/create_profile_handler.cc',
        'browser/ui/webui/options/create_profile_handler.h',
@@ -996,7 +1007,7 @@
        'browser/ui/webui/options/easy_unlock_handler.cc',
        'browser/ui/webui/options/easy_unlock_handler.h',
        'browser/ui/webui/options/font_settings_handler.cc',
-@@ -2730,6 +2732,7 @@
+@@ -2744,6 +2746,7 @@
            ],
          }],
          ['use_aura==1 and chromeos==0 and use_ozone==0 and OS=="linux"', {

@@ -34,7 +34,7 @@
    virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
-@@ -635,6 +635,7 @@ void BrowserView::Show() {
+@@ -632,6 +632,7 @@ void BrowserView::Show() {
    force_location_bar_focus_ = false;
  
    browser()->OnWindowDidShow();
@@ -114,7 +114,7 @@
    virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-@@ -600,6 +600,11 @@ void DesktopNativeWidgetAura::ViewRemove
+@@ -597,6 +597,11 @@ void DesktopNativeWidgetAura::ViewRemove
    drop_helper_->ResetTargetViewIfEquals(view);
  }
  
@@ -167,7 +167,7 @@
    "XdndActionAsk",
    "XdndActionCopy"
    "XdndActionLink",
-@@ -1328,6 +1331,22 @@ void DesktopWindowTreeHostX11::UpdateMin
+@@ -1348,6 +1351,22 @@ void DesktopWindowTreeHostX11::UpdateMin
    XSetWMNormalHints(xdisplay_, xwindow_, &hints);
  }
  
@@ -223,7 +223,7 @@
  namespace views {
  
  namespace {
-@@ -345,6 +347,11 @@ void NativeWidgetAura::CenterWindow(cons
+@@ -342,6 +344,11 @@ void NativeWidgetAura::CenterWindow(cons
    window_->SetBounds(window_bounds);
  }
  
