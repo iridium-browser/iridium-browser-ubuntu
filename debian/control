@@ -44,7 +44,7 @@ Package: iridium-browser
 Architecture: armhf armel i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${shlibs:Depends}, ${misc:Depends},
-	bash,
+	bash (>= 4),
 	libnss3,
 	xdg-utils,
 	iridium-codecs-ffmpeg-extra (>= 0.6) | iridium-codecs-ffmpeg (>= 0.6)
