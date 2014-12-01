@@ -34,4 +34,5 @@ macro-templates-not-match
 iridium-browser.diff
 include-glib-extern-c.diff
 disable_api_keys_warning.diff
+chromium-master-prefs-path.diff
 ### end: iridium-browser specific changes

@@ -514,6 +514,7 @@ PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/.\*/changelog.Debian.gz$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/bin/iridium-browser$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^etc/iridium-browser/default$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^etc/iridium-browser/customizations/00-example$$
+PACKAGED_NOT_FROM_TREE_MATCH += ^etc/iridium-browser/master_preferences$$
 
 # Expressions to map filenames in the comparison logic so that a rename in
 # packaging is correctly handled.  No expression contains a space.  Each should
