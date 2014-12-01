@@ -33,4 +33,5 @@ macro-templates-not-match
 ### start: iridium-browser specific changes
 iridium-browser.diff
 include-glib-extern-c.diff
+disable_api_keys_warning.diff
 ### end: iridium-browser specific changes
