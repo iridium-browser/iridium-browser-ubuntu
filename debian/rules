@@ -78,7 +78,7 @@ GYP_DEFINES += enable_webrtc=1
 
 # get resources for high dpi and touch
 GYP_DEFINES += use_aura=1
-GYP_DEFINES += enable_hidpi=1
+GYP_DEFINES += enable_hidpi=0
 GYP_DEFINES += enable_touch_ui=1
 
 # Prefer gcc/g++ over clang until clang is better tested in Ubuntu.
