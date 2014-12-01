@@ -1,3 +1,18 @@
+iridium-browser (39.0.2171.65-0iridium39.0+1) precise; urgency=low
+
+  * Changed wording to "Iridium" with an uppercase "I".
+  * Install "master_preferences" just like openSUSE does (fixes #2).
+  * Updated homepage to "https://www.iridiumbrowser.de".
+  * Imported Upstream version 39.0.2171.65
+  * Require "bash >= 4" just like upstream chromium-browser_39.0.2171.65-0ubuntu0.14.10.1.1106 does.
+  * Updated to latest iridium upstream version.
+  * Updated to patches from upstream chromium-browser_39.0.2171.65-0ubuntu0.14.10.1.1106
+  * Disable missing API key warning (already reported upstream).
+  * Install "master_prefs" to "/etc/iridium-browser".
+  * Disable hidpi support for now.
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 01 Dec 2014 17:32:45 +0100
+
 iridium-browser (38.0.2125.104-0iridium38.0+1) precise; urgency=low
 
   * Initial release, based on chromium 38.0.2125.104.
