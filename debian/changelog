@@ -1,8 +1,10 @@
 iridium-browser (39.0.2171.65-0iridium39.1+1) precise; urgency=low
 
-  * Updated to revision 15 from OBS.
+  * Started branding changes from "Chromium" to "Iridium".
+  * Updated tracker URL domains.
+  * Added certificate pinning for "iridiumbrowser.de" and enforce HTTPS.
 
- -- Joachim Bauch <bauch@struktur.de>  Mon, 15 Dec 2014 14:08:48 +0100
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 15 Dec 2014 14:33:18 +0100
 
 iridium-browser (39.0.2171.65-0iridium39.0+1) precise; urgency=low
 
