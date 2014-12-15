@@ -1,3 +1,9 @@
+iridium-browser (39.0.2171.65-0iridium39.1+1) precise; urgency=low
+
+  * Updated to revision 15 from OBS.
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 15 Dec 2014 14:08:48 +0100
+
 iridium-browser (39.0.2171.65-0iridium39.0+1) precise; urgency=low
 
   * Changed wording to "Iridium" with an uppercase "I".
