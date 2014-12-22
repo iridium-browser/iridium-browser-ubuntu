@@ -29,13 +29,15 @@
 #ifndef HRTFDatabaseLoader_h
 #define HRTFDatabaseLoader_h
 
+#include "platform/WebThreadSupportingGC.h"
 #include "platform/audio/HRTFDatabase.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebThread.h"
 #include "wtf/HashMap.h"
 #include "wtf/ThreadingPrimitives.h"
 
 namespace blink {
+
+class TaskSynchronizer;
 
 // HRTFDatabaseLoader will asynchronously load the default HRTFDatabase in a new thread.
 
@@ -51,7 +53,7 @@ public:
     ~HRTFDatabaseLoader();
 
     // Returns true once the default database has been completely loaded.
-    bool isLoaded() const;
+    bool isLoaded();
 
     // waitForLoaderThreadCompletion() may be called more than once and is thread-safe.
     void waitForLoaderThreadCompletion();
@@ -59,9 +61,6 @@ public:
     HRTFDatabase* database() { return m_hrtfDatabase.get(); }
 
     float databaseSampleRate() const { return m_databaseSampleRate; }
-
-    // Called in asynchronous loading thread.
-    void load();
 
     void trace(Visitor*) { }
 
@@ -73,11 +72,15 @@ private:
     // This must be called from the main thread.
     void loadAsynchronously();
 
+    // Called in asynchronous loading thread.
+    void loadTask();
+    void cleanupTask(TaskSynchronizer*);
+
+    // Holding a m_lock is required when accessing m_hrtfDatabase since we access it from multiple threads.
+    Mutex m_lock;
     OwnPtr<HRTFDatabase> m_hrtfDatabase;
 
-    // Holding a m_threadLock is required when accessing m_databaseLoaderThread since we access it from multiple threads.
-    Mutex m_threadLock;
-    OwnPtr<WebThread> m_databaseLoaderThread;
+    OwnPtr<WebThreadSupportingGC> m_thread;
 
     float m_databaseSampleRate;
 };

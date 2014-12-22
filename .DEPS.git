@@ -7,7 +7,7 @@ vars = {
     'eyes-free':
          'http://eyes-free.googlecode.com/svn',
     'webkit_rev':
-         '@84bb8e73ca39609b5f5a4a5c7e1263619f4f9bdd',
+         '@f292119a2cbac17743a4a8ffb4a130d00a3c92f6',
     'blink':
          'http://src.chromium.org/blink',
     'skia':
@@ -69,7 +69,7 @@ vars = {
     'jsr-305':
          'http://jsr-305.googlecode.com/svn',
     'angle_revision':
-         '5af475edef3fd24b9bbbcb43380825b02436ab2f',
+         '04ab0eb41f1bb02eb722ce662bd9e6f47cca83a3',
     'bidichecker':
          'http://bidichecker.googlecode.com/svn',
     'git_url':
@@ -250,7 +250,7 @@ deps = {
     'src/third_party/webpagereplay':
         Var('git_url') + '/external/web-page-replay.git@2f7b704b8b567983c040f555d3e46f9766db8e87',
     'src/third_party/webrtc':
-        Var('git_url') + '/external/webrtc/trunk/webrtc.git@1eccd97c866f9dc62776d1a261b877265b119e2e',
+        Var('git_url') + '/external/webrtc/trunk/webrtc.git@a4e1ca8d99067245f7e6354e53b589eff4ae2035',
     'src/third_party/yasm/source/patched-yasm':
         Var('git_url') + '/chromium/deps/yasm/patched-yasm.git@c960eb11ccda80b10ed50be39df4f0663b371d1d',
     'src/tools/deps2git':

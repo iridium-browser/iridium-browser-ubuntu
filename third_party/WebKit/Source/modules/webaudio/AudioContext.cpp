@@ -206,6 +206,9 @@ void AudioContext::uninitialize()
     derefUnfinishedSourceNodes();
 
     m_isInitialized = false;
+    ASSERT(m_listener);
+    m_listener->waitForHRTFDatabaseLoaderThreadCompletion();
+
     clear();
 }
 
